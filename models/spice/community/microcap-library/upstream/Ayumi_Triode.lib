@@ -1,0 +1,4492 @@
+*   
+* Generic triode model: 10   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:25 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 10_ayumi A G K
+.param GG {(V(G,K)+-0.99999237)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0096683582*EP)^-0.12233483)}
+.param M2 {((0.92459336*URAMP(GG+EP/7.7993226))^1.6223348)}
+.param P  {(0.00027480869*URAMP(GG+EP/8.4354085)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00020223856*M1*M2)}
+.param IG {(0.00013740434*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00018769219*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7p
+CGK G K 4p
+CAK A K 3p
+.ENDS   
+*   
+* Generic triode model: 12A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:27 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 12A_ayumi A G K
+.param GG {(V(G,K)+-0.99999998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.02099402*EP)^-0.30518364)}
+.param M2 {((0.83094039*URAMP(GG+EP/8.0527506))^1.8051836)}
+.param P  {(0.00060950916*URAMP(GG+EP/9.6911291)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00037491826*M1*M2)}
+.param IG {(0.00030475458*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00040148822*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 8.5p
+CGK G K 4p
+CAK A K 2p
+.ENDS   
+*   
+* Generic triode model: 12AT7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:07 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 12AT7_ayumi A G K
+.param GG {(V(G,K)+0.67585931)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.015420581*EP)^-1.768756)}
+.param M2 {((0.45889017*URAMP(GG+EP/35.090106))^3.268756)}
+.param P  {(0.0031809222*URAMP(GG+EP/76.46733)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0042575005*M1*M2)}
+.param IG {(0.0015904611*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0016530623*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.5p
+CGK G K 2.2p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: 12AU7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:08 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 12AU7_ayumi A G K
+.param GG {(V(G,K)+0.89005722)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.028826571*EP)^-0.90897681)}
+.param M2 {((0.622671*URAMP(GG+EP/13.089625))^2.4089768)}
+.param P  {(0.00087237591*URAMP(GG+EP/21.021735)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00055330711*M1*M2)}
+.param IG {(0.00043618795*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00049917061*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.5p
+CGK G K 1.6p
+CAK A K 0.4p
+.ENDS   
+*   
+* Generic triode model: 12AX7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:09 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 12AX7_ayumi A G K
+.param GG {(V(G,K)+0.59836683)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0017172334*EP)^-0.2685074)}
+.param M2 {((0.84817287*URAMP(GG+EP/88.413802))^1.7685074)}
+.param P  {(0.001130216*URAMP(GG+EP/104.24031)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00071211506*M1*M2)}
+.param IG {(0.000565108*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00058141055*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.7p
+CGK G K 1.6p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: 12AY7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:10 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 12AY7_ayumi A G K
+.param GG {(V(G,K)+0.71171435)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0094119714*EP)^-0.68363668)}
+.param M2 {((0.68692746*URAMP(GG+EP/33.263227))^2.1836367)}
+.param P  {(0.00092634255*URAMP(GG+EP/48.423202)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00054133951*M1*M2)}
+.param IG {(0.00046317128*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00049201413*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.3p
+CGK G K 1.3p
+CAK A K 0.6p
+.ENDS   
+*   
+* Generic triode model: 12B4A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:12 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 12B4A_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.087065329*EP)^-1.2036947)}
+.param M2 {((0.55479636*URAMP(GG+EP/5.1134435))^2.7036947)}
+.param P  {(0.0047680512*URAMP(GG+EP/9.2167935)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0036584566*M1*M2)}
+.param IG {(0.0023840256*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0031806909*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.8p
+CGK G K 5p
+CAK A K 1.5p
+.ENDS   
+*   
+* Generic triode model: 12BH7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:14 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 12BH7_ayumi A G K
+.param GG {(V(G,K)+0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.044635144*EP)^-1.6555735)}
+.param M2 {((0.47534942*URAMP(GG+EP/11.754204))^3.1555735)}
+.param P  {(0.0021126435*URAMP(GG+EP/24.727503)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0024875937*M1*M2)}
+.param IG {(0.00112*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00112*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.6p
+CGK G K 3.2p
+CAK A K 0.5p
+.ENDS   
+*   
+*   
+* Generic triode model: 12BY7AT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:15 2008   
+*               Plate   
+*               | Grid   
+*               | | Cathode   
+*               | | |
+.SUBCKT 12BY7AT_ayumi A G K
+.param GG {(V(G,K)+-0.02185341)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.014593712*EP)^-0.7027291)}
+.param M2 {((0.68097344*URAMP(GG+EP/21.860549))^2.2027291)}
+.param P  {(0.0061475247*URAMP(GG+EP/32.101912)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0036081888*M1*M2)}
+.param IG {(0.0030737623*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0033632383*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.1p
+CGK G K 6.1p
+CAK A K 3.4p
+.ENDS   
+*   
+*   
+* Generic triode model: 12GN7AT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:16 2008   
+*               Plate   
+*               | Grid   
+*               | | Cathode   
+*               | | |
+.SUBCKT 12GN7AT_ayumi A G K
+.param GG {(V(G,K)+-0.52499611)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0070794303*EP)^-0.51284817)}
+.param M2 {((0.74521269*URAMP(GG+EP/35.989804))^2.0128482)}
+.param P  {(0.032317671*URAMP(GG+EP/48.294674)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.018638041*M1*M2)}
+.param IG {(0.016158835*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.017167779*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.1p
+CGK G K 10.4p
+CAK A K 3.9p
+.ENDS   
+*   
+* Generic triode model: 14AF7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:46:24 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 14AF7_ayumi A G K
+.param GG {(V(G,K)+0.77793251)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0061210583*EP)^-0.15593519)}
+.param M2 {((0.90583256*URAMP(GG+EP/15.384177))^1.6559352)}
+.param P  {(0.0006681181*URAMP(GG+EP/16.983467)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00046940316*M1*M2)}
+.param IG {(0.00033405905*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00039392832*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.3p
+CGK G K 2.2p
+CAK A K 1.6p
+.ENDS   
+*   
+*   
+* Generic triode model: 1619T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:00 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 1619T_ayumi A G K
+.param GG {(V(G,K)+-0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.021726327*EP)^-0.34437983)}
+.param M2 {((0.8132815*URAMP(GG+EP/8.5941123))^1.8443798)}
+.param P  {(0.00095297512*URAMP(GG+EP/10.567205)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00057412229*M1*M2)}
+.param IG {(0.00047648756*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0006149126*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.4p
+CGK G K 6.1p
+CAK A K 12.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 20P1T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:18 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 20P1T_ayumi A G K
+.param GG {(V(G,K)+0.99999997)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.15450603*EP)^-1.2979847)}
+.param M2 {((0.53610015*URAMP(GG+EP/3.0024709))^2.7979847)}
+.param P  {(0.002051274*URAMP(GG+EP/5.6005784)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0017001298*M1*M2)}
+.param IG {(0.001025637*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0015988677*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.5p
+CGK G K 13.5p
+CAK A K 10.5p
+.ENDS   
+*   
+* Generic triode model: 211   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:51 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 211_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0021297199*EP)^-0.038461562)}
+.param M2 {((0.97499998*URAMP(GG+EP/11.73864))^1.5384616)}
+.param P  {(0.00045306372*URAMP(GG+EP/12.039631)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00039351788*M1*M2)}
+.param IG {(0.00011014965*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00041468102*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 14p
+CGK G K 5.4p
+CAK A K 4.8p
+.ENDS   
+*   
+*   
+
+*   
+*   
+* Generic triode model: 25E5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:19 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 25E5T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.081561717*EP)^-0.79980677)}
+.param M2 {((0.65222871*URAMP(GG+EP/4.2639035))^2.2998068)}
+.param P  {(0.0042185857*URAMP(GG+EP/6.5374361)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0025511424*M1*M2)}
+.param IG {(0.0021092928*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00311336*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.7p
+CGK G K 9.9p
+CAK A K 7p
+.ENDS   
+*   
+* Generic triode model: 27   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:29 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 27_ayumi A G K
+.param GG {(V(G,K)+0.99999994)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.041269212*EP)^-0.69845105)}
+.param M2 {((0.68229856*URAMP(GG+EP/7.6982676))^2.1984511)}
+.param P  {(0.00036339312*URAMP(GG+EP/11.282843)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00021306994*M1*M2)}
+.param IG {(0.00018169656*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00023106309*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.3p
+CGK G K 3.1p
+CAK A K 2.3p
+.ENDS   
+*   
+* Generic triode model: 2A3   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:38:56 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 2A3_ayumi A G K
+.param GG {(V(G,K)+-0.47258991)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.056835059*EP)^-0.4044593)}
+.param M2 {((0.78762513*URAMP(GG+EP/3.7366878))^1.9044593)}
+.param P  {(0.0012053852*URAMP(GG+EP/4.7442465)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.000709416*M1*M2)}
+.param IG {(0.00060269261*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0010032299*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 16.5p
+CGK G K 7.5p
+CAK A K 5.5p
+.ENDS   
+*   
+*   
+* Generic triode model: 300B   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:52 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 300B_ayumi A G K
+.param GG {(V(G,K)+0.99996017)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.038949013*EP)^-0.25159159)}
+.param M2 {((0.85636401*URAMP(GG+EP/3.6877954))^1.7515916)}
+.param P  {(0.0011156138*URAMP(GG+EP/4.3063409)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00071191966*M1*M2)}
+.param IG {(0.00055780691*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00096815606*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 15p
+CGK G K 8.5p
+CAK A K 4.1p
+.ENDS   
+*   
+*   
+* Generic triode model: 31LZ6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:20 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 31LZ6T_ayumi A G K
+.param GG {(V(G,K)+-0.11976616)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.21025804*EP)^-1.445676)}
+.param M2 {((0.50922098*URAMP(GG+EP/2.3341748))^2.945676)}
+.param P  {(0.0061264796*URAMP(GG+EP/4.5838151)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0058083241*M1*M2)}
+.param IG {(0.0030632398*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0051737191*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.2p
+CGK G K 12.9p
+CAK A K 10.4p
+.ENDS   
+*   
+*   
+* Generic triode model: 350BT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:53 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 350BT_ayumi A G K
+.param GG {(V(G,K)+0.99999998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.060793226*EP)^-0.90421858)}
+.param M2 {((0.62390334*URAMP(GG+EP/6.1864896))^2.4042186)}
+.param P  {(0.0019265247*URAMP(GG+EP/9.9157821)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0012190211*M1*M2)}
+.param IG {(0.00096326237*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0012619241*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.7p
+CGK G K 9.3p
+CAK A K 7.5p
+.ENDS   
+*   
+* Generic triode model: 354V   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:54 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 354V_ayumi A G K
+.param GG {(V(G,K)+0.65601816)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.006476558*EP)^-0.39630014)}
+.param M2 {((0.79101402*URAMP(GG+EP/32.268063))^1.8963001)}
+.param P  {(0.0016633526*URAMP(GG+EP/40.793288)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00098151348*M1*M2)}
+.param IG {(0.00083167629*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00089321233*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2p
+CGK G K 2p
+CAK A K 2p
+.ENDS   
+*   
+*   
+* Generic triode model: 35C5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:22 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 35C5T_ayumi A G K
+.param GG {(V(G,K)+0.99999998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.12544688*EP)^-1.6161868)}
+.param M2 {((0.48135753*URAMP(GG+EP/4.1343593))^3.1161868)}
+.param P  {(0.0021455369*URAMP(GG+EP/8.5889574)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0024204769*M1*M2)}
+.param IG {(0.0010727685*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0014581748*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.2p
+CGK G K 6.9p
+CAK A K 8.4p
+.ENDS   
+*   
+* Generic triode model: 3A167M   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:38:57 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 3A167M_ayumi A G K
+.param GG {(V(G,K)+0.41219892)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0067454169*EP)^-0.5944305)}
+.param M2 {((0.71618514*URAMP(GG+EP/42.075214))^2.0944305)}
+.param P  {(0.034181438*URAMP(GG+EP/58.749074)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.01971674*M1*M2)}
+.param IG {(0.017090719*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.017967154*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 11p
+CAK A K 2.5p
+.ENDS   
+*   
+* Generic triode model: 3C33   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:38:58 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 3C33_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.045418916*EP)^-0.95262383)}
+.param M2 {((0.61158991*URAMP(GG+EP/8.5517252))^2.4526238)}
+.param P  {(0.0048487914*URAMP(GG+EP/13.982777)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0031463341*M1*M2)}
+.param IG {(0.0024243957*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0029537409*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5p
+CGK G K 8.5p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: 41MXP   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:30 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 41MXP_ayumi A G K
+.param GG {(V(G,K)+0.99999047)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.24250237*EP)^-4.0569457)}
+.param M2 {((0.26993246*URAMP(GG+EP/3.0105584))^5.5569457)}
+.param P  {(0.0015885113*URAMP(GG+EP/11.153006)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.089955716*M1*M2)}
+.param IG {(0.00079425566*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0010126188*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: 45   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:31 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 45_ayumi A G K
+.param GG {(V(G,K)+-0.36938318)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.072484305*EP)^-0.45086063)}
+.param M2 {((0.76889142*URAMP(GG+EP/3.1883948))^1.9508606)}
+.param P  {(0.00046886056*URAMP(GG+EP/4.1467426)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00027269199*M1*M2)}
+.param IG {(0.00023443028*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00041387828*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7p
+CGK G K 4p
+CAK A K 3p
+.ENDS   
+*   
+* Generic triode model: 46   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:32 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 46_ayumi A G K
+.param GG {(V(G,K)+-0.6332578)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.012087887*EP)^-1.4892322)}
+.param M2 {((0.50180111*URAMP(GG+EP/41.214721))^2.9892322)}
+.param P  {(0.00056616214*URAMP(GG+EP/82.13358)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0005601202*M1*M2)}
+.param IG {(0.00016122035*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00033941125*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: 50   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:33 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 50_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.053592842*EP)^-0.32643301)}
+.param M2 {((0.82127294*URAMP(GG+EP/3.3349055))^1.826433)}
+.param P  {(0.00024452775*URAMP(GG+EP/4.0606543)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0001486389*M1*M2)}
+.param IG {(0.00012226387*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00021794382*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+*   
+* Generic triode model: 50HB26T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:23 2008   
+*               Plate   
+*               | Grid   
+*               | | Cathode   
+*               | | |
+.SUBCKT 50HB26T_ayumi A G K
+.param GG {(V(G,K)+0.99999978)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.092479665*EP)^-0.92218999)}
+.param M2 {((0.6192743*URAMP(GG+EP/4.1168586))^2.42219)}
+.param P  {(0.0043389918*URAMP(GG+EP/6.6478758)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0027704924*M1*M2)}
+.param IG {(0.0021694959*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0031844715*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.6p
+CGK G K 9.8p
+CAK A K 6.7p
+.ENDS   
+*   
+* Generic triode model: 53   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:36 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 53_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.00077005461*EP)^-0.038461586)}
+.param M2 {((0.97499997*URAMP(GG+EP/32.465269))^1.5384616)}
+.param P  {(0.00055508206*URAMP(GG+EP/33.297713)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00048212799*M1*M2)}
+.param IG {(0.00016903085*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00042499185*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: 5687   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:01 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 5687_ayumi A G K
+.param GG {(V(G,K)+0.35624804)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.022532918*EP)^-0.73087992)}
+.param M2 {((0.67238043*URAMP(GG+EP/14.539598))^2.2308799)}
+.param P  {(0.0048744976*URAMP(GG+EP/21.624065)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0028821468*M1*M2)}
+.param IG {(0.0024372488*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0027792585*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 0.6p
+.ENDS   
+*   
+* Generic triode model: 5751   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:03 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 5751_ayumi A G K
+.param GG {(V(G,K)+0.5559861)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0052861104*EP)^-0.6766372)}
+.param M2 {((0.68913644*URAMP(GG+EP/58.807619))^2.1766372)}
+.param P  {(0.0013669039*URAMP(GG+EP/85.335234)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00079762831*M1*M2)}
+.param IG {(0.00068345195*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00070754928*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.4p
+CGK G K 1.4p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: 5842   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:05 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 5842_ayumi A G K
+.param GG {(V(G,K)+-0.46951652)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0042897418*EP)^-0.30633316)}
+.param M2 {((0.8304116*URAMP(GG+EP/39.533476))^1.8063332)}
+.param P  {(0.017297881*URAMP(GG+EP/47.607086)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.010632968*M1*M2)}
+.param IG {(0.0086489406*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0091968129*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.8p
+CGK G K 9p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: 5965   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:06 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 5965_ayumi A G K
+.param GG {(V(G,K)+0.61035688)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.024336203*EP)^-2.1648233)}
+.param M2 {((0.40929668*URAMP(GG+EP/24.272617))^3.6648233)}
+.param P  {(0.0045273524*URAMP(GG+EP/59.303235)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.010017704*M1*M2)}
+.param IG {(0.0022636762*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0023786712*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3p
+CGK G K 4p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: 5998   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:08 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 5998_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.1360498*EP)^-1.7828871)}
+.param M2 {((0.4569149*URAMP(GG+EP/3.9918111))^3.2828871)}
+.param P  {(0.0069534109*URAMP(GG+EP/8.7364434)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0094617726*M1*M2)}
+.param IG {(0.0034767055*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0047041065*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 8.6p
+CGK G K 6p
+CAK A K 2.2p
+.ENDS   
+*   
+* Generic triode model: 59Th   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:43 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 59Th_ayumi A G K
+.param GG {(V(G,K)+0.99979071)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.073387615*EP)^-5.8658889)}
+.param M2 {((0.20364141*URAMP(GG+EP/10.851403))^7.3658889)}
+.param P  {(0.00056363412*URAMP(GG+EP/53.286819)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*1.6789061*M1*M2)}
+.param IG {(0.00021213204*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00038183766*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+*   
+* Generic triode model: 6072   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:09 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6072_ayumi A G K
+.param GG {(V(G,K)+0.75743218)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0057774859*EP)^-0.42611934)}
+.param M2 {((0.77876794*URAMP(GG+EP/38.292098))^1.9261193)}
+.param P  {(0.00098547839*URAMP(GG+EP/49.1701)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00057643098*M1*M2)}
+.param IG {(0.0004927392*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00052295488*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.4p
+CGK G K 1.4p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: 6080   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:10 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6080_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.37781455*EP)^-1.6383781)}
+.param M2 {((0.47795388*URAMP(GG+EP/1.3817523))^3.1383781)}
+.param P  {(0.0026607218*URAMP(GG+EP/2.8909741)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0030745874*M1*M2)}
+.param IG {(0.0013303609*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0028241574*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 8.6p
+CGK G K 6p
+CAK A K 2.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6146BT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:12 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6146BT_ayumi A G K
+.param GG {(V(G,K)+0.99999998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.058258554*EP)^-0.41427032)}
+.param M2 {((0.78358839*URAMP(GG+EP/3.7146753))^1.9142703)}
+.param P  {(0.001563206*URAMP(GG+EP/4.7405951)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0009173158*M1*M2)}
+.param IG {(0.000781603*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0013014595*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.3p
+CGK G K 7.7p
+CAK A K 8.3p
+.ENDS   
+*   
+*   
+* Generic triode model: 6197T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:13 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6197T_ayumi A G K
+.param GG {(V(G,K)+0.45955375)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.014421851*EP)^-0.5339196)}
+.param M2 {((0.73749228*URAMP(GG+EP/18.202083))^2.0339196)}
+.param P  {(0.0053217435*URAMP(GG+EP/24.681049)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0030656981*M1*M2)}
+.param IG {(0.0026608717*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.002987557*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.7p
+CGK G K 6.9p
+CAK A K 5p
+.ENDS   
+*   
+* Generic triode model: 6240G   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:15 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6240G_ayumi A G K
+.param GG {(V(G,K)+0.72455622)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.00866647*EP)^-0.48282918)}
+.param M2 {((0.75649482*URAMP(GG+EP/28.097389))^1.9828292)}
+.param P  {(0.0013034573*URAMP(GG+EP/37.141548)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00075405166*M1*M2)}
+.param IG {(0.00065172867*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0007047229*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.6p
+CGK G K 3.2p
+CAK A K 1.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6267T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:16 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6267T_ayumi A G K
+.param GG {(V(G,K)+0.59868749)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.010782364*EP)^-0.70765893)}
+.param M2 {((0.67945278*URAMP(GG+EP/29.728844))^2.2076589)}
+.param P  {(0.0013378994*URAMP(GG+EP/43.754099)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00078620809*M1*M2)}
+.param IG {(0.00066894969*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00071507731*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.6p
+CGK G K 2.3p
+CAK A K 5.3p
+.ENDS   
+*   
+*   
+* Generic triode model: 62BTT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:25 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 62BTT_ayumi A G K
+.param GG {(V(G,K)+0.99999993)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.10647561*EP)^-1.0560332)}
+.param M2 {((0.58684685*URAMP(GG+EP/3.8802609))^2.5560332)}
+.param P  {(0.002839063*URAMP(GG+EP/6.6120504)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0019598422*M1*M2)}
+.param IG {(0.0014195315*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0020873677*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.5p
+CGK G K 13.5p
+CAK A K 10.5p
+.ENDS   
+*   
+* Generic triode model: 6336   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:17 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6336_ayumi A G K
+.param GG {(V(G,K)+0.80124916)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.24089702*EP)^-1.5151382)}
+.param M2 {((0.49748964*URAMP(GG+EP/2.0859966))^3.0151382)}
+.param P  {(0.0055122338*URAMP(GG+EP/4.1930453)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0055967398*M1*M2)}
+.param IG {(0.0027561169*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0048413089*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 16p
+CGK G K 14p
+CAK A K 5p
+.ENDS   
+*   
+* Generic triode model: 6350   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:18 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6350_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.018707344*EP)^-0.6749557)}
+.param M2 {((0.68966922*URAMP(GG+EP/16.588714))^2.1749557)}
+.param P  {(0.0025107579*URAMP(GG+EP/24.053145)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0014646013*M1*M2)}
+.param IG {(0.001255379*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0014135709*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.2p
+CGK G K 3.6p
+CAK A K 0.6p
+.ENDS   
+*   
+* Generic triode model: 6414   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:20 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6414_ayumi A G K
+.param GG {(V(G,K)+-0.25147459)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.026968201*EP)^-2.4186148)}
+.param M2 {((0.38278833*URAMP(GG+EP/22.886646))^3.9186148)}
+.param P  {(0.0056897851*URAMP(GG+EP/59.789299)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.01806754*M1*M2)}
+.param IG {(0.0029092955*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0017392527*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.6p
+CGK G K 5p
+CAK A K 0.6p
+.ENDS   
+*   
+*   
+* Generic triode model: 6550AT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:21 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6550AT_ayumi A G K
+.param GG {(V(G,K)+0.1919366)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.064698506*EP)^-0.90961742)}
+.param M2 {((0.62250546*URAMP(GG+EP/5.8346717))^2.4096174)}
+.param P  {(0.0027588474*URAMP(GG+EP/9.3728844)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0017503674*M1*M2)}
+.param IG {(0.0013794237*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0018325138*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.5p
+CGK G K 8.6p
+CAK A K 9.2p
+.ENDS   
+*   
+* Generic triode model: 6900   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:22 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6900_ayumi A G K
+.param GG {(V(G,K)+0.77471006)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.027887036*EP)^-0.93085057)}
+.param M2 {((0.61706796*URAMP(GG+EP/13.731543))^2.4308506)}
+.param P  {(0.0043178017*URAMP(GG+EP/22.252886)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0027693634*M1*M2)}
+.param IG {(0.0021589009*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0024531966*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.2p
+CGK G K 8p
+CAK A K 1p
+.ENDS   
+*   
+* Generic triode model: 6AC5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:38:59 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6AC5_ayumi A G K
+.param GG {(V(G,K)+0.64401885)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0088089263*EP)^-1.3738592)}
+.param M2 {((0.52194624*URAMP(GG+EP/54.269243))^2.8738592)}
+.param P  {(0.0005490772*URAMP(GG+EP/103.97478)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00048665592*M1*M2)}
+.param IG {(0.00015454249*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00037669733*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: 6AF4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:00 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6AF4_ayumi A G K
+.param GG {(V(G,K)+0.77962386)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.090647641*EP)^-2.2226779)}
+.param M2 {((0.40293574*URAMP(GG+EP/6.5866497))^3.7226779)}
+.param P  {(0.0031145251*URAMP(GG+EP/16.34665)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0074643586*M1*M2)}
+.param IG {(0.00128701*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0012749818*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.9p
+CGK G K 2.2p
+CAK A K 1.4p
+.ENDS   
+*   
+* Generic triode model: 6AH4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:01 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6AH4_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.045930854*EP)^-0.72062066)}
+.param M2 {((0.67548683*URAMP(GG+EP/7.0652545))^2.2206207)}
+.param P  {(0.0021845366*URAMP(GG+EP/10.4595)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0012880266*M1*M2)}
+.param IG {(0.0010922683*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0014129261*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.4p
+CGK G K 7p
+CAK A K 1.7p
+.ENDS   
+*   
+*   
+* Generic triode model: 6AK6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:03 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6AK6T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.047037015*EP)^-0.80231696)}
+.param M2 {((0.65151759*URAMP(GG+EP/7.4086847))^2.302317)}
+.param P  {(0.00071109747*URAMP(GG+EP/11.371427)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00043043074*M1*M2)}
+.param IG {(0.00035554873*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00045138222*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.5p
+CGK G K 2.1p
+CAK A K 4.1p
+.ENDS   
+*   
+*   
+*   
+* Generic triode model: 6AN8PT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:07 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6AN8PT_ayumi A G K
+.param GG {(V(G,K)+-1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.024591513*EP)^-1.3002423)}
+.param M2 {((0.53566794*URAMP(GG+EP/18.881801))^2.8002423)}
+.param P  {(0.0063199577*URAMP(GG+EP/35.249078)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0052482203*M1*M2)}
+.param IG {(0.0031599788*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0034308188*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.8p
+CGK G K 4.2p
+CAK A K 2.4p
+.ENDS   
+*   
+* Generic triode model: 6AN8T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:05 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6AN8T_ayumi A G K
+.param GG {(V(G,K)+0.60043597)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.041145821*EP)^-1.4559246)}
+.param M2 {((0.50745543*URAMP(GG+EP/11.970707))^2.9559246)}
+.param P  {(0.0016328391*URAMP(GG+EP/23.589672)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0015634562*M1*M2)}
+.param IG {(0.00081641955*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00092133983*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.5p
+CGK G K 2p
+CAK A K 0.3p
+.ENDS   
+*   
+* Generic triode model: 6AQ8   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:09 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6AQ8_ayumi A G K
+.param GG {(V(G,K)+0.46274)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.016397559*EP)^-1.8244468)}
+.param M2 {((0.4512029*URAMP(GG+EP/33.468219))^3.3244468)}
+.param P  {(0.0053412983*URAMP(GG+EP/74.175541)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0076348*M1*M2)}
+.param IG {(0.0026706491*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0027790257*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.5p
+CGK G K 3.1p
+CAK A K 1.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6AU6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:10 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6AU6T_ayumi A G K
+.param GG {(V(G,K)+0.24107953)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.014176045*EP)^-0.93570358)}
+.param M2 {((0.61583848*URAMP(GG+EP/27.099343))^2.4357036)}
+.param P  {(0.0032162308*URAMP(GG+EP/44.003978)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0020681021*M1*M2)}
+.param IG {(0.0016081154*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0017183702*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.2p
+CGK G K 3.3p
+CAK A K 5p
+.ENDS   
+*   
+*   
+* Generic triode model: 6BL7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:11 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6BL7_ayumi A G K
+.param GG {(V(G,K)+0.46718638)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.026376965*EP)^-0.79394664)}
+.param M2 {((0.6538949*URAMP(GG+EP/13.121491))^2.2939466)}
+.param P  {(0.0029779531*URAMP(GG+EP/20.066667)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0017970098*M1*M2)}
+.param IG {(0.00086962635*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0013321095*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6p
+CGK G K 4.6p
+CAK A K 0.9p
+.ENDS   
+*   
+*   
+* Generic triode model: 6BL8PT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:14 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6BL8PT_ayumi A G K
+.param GG {(V(G,K)+0.57453871)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0091087169*EP)^-0.67124576)}
+.param M2 {((0.69084764*URAMP(GG+EP/33.940276))^2.1712458)}
+.param P  {(0.0040028722*URAMP(GG+EP/49.128454)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0023332764*M1*M2)}
+.param IG {(0.0020014361*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0021242724*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.1p
+CGK G K 3.1p
+CAK A K 3.4p
+.ENDS   
+*   
+* Generic triode model: 6BL8T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:13 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6BL8T_ayumi A G K
+.param GG {(V(G,K)+0.9999996)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.034840251*EP)^-1.1549542)}
+.param M2 {((0.5649815*URAMP(GG+EP/12.48609))^2.6549542)}
+.param P  {(0.002049189*URAMP(GG+EP/22.099998)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0015151796*M1*M2)}
+.param IG {(0.0010245945*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0011652414*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.5p
+CGK G K 2.5p
+CAK A K 1.8p
+.ENDS   
+*   
+*   
+* Generic triode model: 6BM8PT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:18 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6BM8PT_ayumi A G K
+.param GG {(V(G,K)+0.90753334)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.058205333*EP)^-0.96337515)}
+.param M2 {((0.60892065*URAMP(GG+EP/6.7189608))^2.4633752)}
+.param P  {(0.0032859022*URAMP(GG+EP/11.034214)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0021448732*M1*M2)}
+.param IG {(0.0016429511*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.002099612*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.9p
+CGK G K 5.4p
+CAK A K 7.7p
+.ENDS   
+*   
+* Generic triode model: 6BM8T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:16 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6BM8T_ayumi A G K
+.param GG {(V(G,K)+0.43636433)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0039399689*EP)^-0.44800866)}
+.param M2 {((0.77001711*URAMP(GG+EP/58.371753))^1.9480087)}
+.param P  {(0.0015179644*URAMP(GG+EP/75.805787)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00088337368*M1*M2)}
+.param IG {(0.00075898218*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0007891176*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 2.7p
+CAK A K 4p
+.ENDS   
+*   
+*   
+* Generic triode model: 6BQ5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:19 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6BQ5T_ayumi A G K
+.param GG {(V(G,K)+0.03372597)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.014266539*EP)^-0.43210132)}
+.param M2 {((0.7763568*URAMP(GG+EP/15.676066))^1.9321013)}
+.param P  {(0.0040800354*URAMP(GG+EP/20.191832)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0023829269*M1*M2)}
+.param IG {(0.0020400177*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0023468355*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.6p
+CGK G K 6.2p
+CAK A K 6p
+.ENDS   
+*   
+*   
+* Generic triode model: 6BQ6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:21 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6BQ6T_ayumi A G K
+.param GG {(V(G,K)+-0.12830687)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.15009144*EP)^-1.2848724)}
+.param M2 {((0.53862432*URAMP(GG+EP/3.0739639))^2.7848724)}
+.param P  {(0.0022372419*URAMP(GG+EP/5.7070648)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0018337045*M1*M2)}
+.param IG {(0.0011186209*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0017316916*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.4p
+CGK G K 8.7p
+CAK A K 6.4p
+.ENDS   
+*   
+* Generic triode model: 6BQ7A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:22 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6BQ7A_ayumi A G K
+.param GG {(V(G,K)+0.20509979)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.018083864*EP)^-1.3247636)}
+.param M2 {((0.53101788*URAMP(GG+EP/25.933734))^2.8247636)}
+.param P  {(0.004700912*URAMP(GG+EP/48.837779)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.003987561*M1*M2)}
+.param IG {(0.0024349538*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00085381496*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.2p
+CGK G K 2.6p
+CAK A K 1.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6BR7T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:24 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6BR7T_ayumi A G K
+.param GG {(V(G,K)+0.48180983)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.013959713*EP)^-0.49250535)}
+.param M2 {((0.75282106*URAMP(GG+EP/17.706591))^1.9925054)}
+.param P  {(0.00084041925*URAMP(GG+EP/23.520318)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00048560243*M1*M2)}
+.param IG {(0.00042020962*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00047437278*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.6p
+CGK G K 2.4p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: 6BX7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:25 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6BX7_ayumi A G K
+.param GG {(V(G,K)+0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.044756942*EP)^-0.87869992)}
+.param M2 {((0.63059657*URAMP(GG+EP/8.253545))^2.3786999)}
+.param P  {(0.0032697035*URAMP(GG+EP/13.088471)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0020437592*M1*M2)}
+.param IG {(0.0016348517*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0020166439*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.2p
+CGK G K 4.8p
+CAK A K 1.2p
+.ENDS   
+*   
+* Generic triode model: 6C19P   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:31 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6C19P_ayumi A G K
+.param GG {(V(G,K)+0.10684511)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.32782347*EP)^-1.8567866)}
+.param M2 {((0.44685593*URAMP(GG+EP/1.687323))^3.3567866)}
+.param P  {(0.0032573245*URAMP(GG+EP/3.7759889)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0048409525*M1*M2)}
+.param IG {(0.0016286622*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0030048458*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 8p
+CGK G K 6.5p
+CAK A K 2.5p
+.ENDS   
+*   
+* Generic triode model: 6C33CB   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:32 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6C33CB_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.31995431*EP)^-1.9846926)}
+.param M2 {((0.43045404*URAMP(GG+EP/1.7800853))^3.4846926)}
+.param P  {(0.015432878*URAMP(GG+EP/4.1353667)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.026902304*M1*M2)}
+.param IG {(0.0077164388*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.013640208*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 31p
+CGK G K 30p
+CAK A K 10.5p
+.ENDS   
+*   
+* Generic triode model: 6C4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:26 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 6C4_ayumi A G K
+.param GG {(V(G,K)+0.736372)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.038076967*EP)^-1.295136)}
+.param M2 {((0.53664652*URAMP(GG+EP/12.168865))^2.795136)}
+.param P  {(0.0010502869*URAMP(GG+EP/22.675755)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00086837935*M1*M2)}
+.param IG {(0.00055989418*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00049903612*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.6p
+CGK G K 1.8p
+CAK A K 1.3p
+.ENDS   
+*   
+* Generic triode model: 6C5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:28 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 6C5_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.02848961*EP)^-1.0152318)}
+.param M2 {((0.5963665*URAMP(GG+EP/14.167744))^2.5152318)}
+.param P  {(0.00080299639*URAMP(GG+EP/23.756774)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00054026317*M1*M2)}
+.param IG {(0.0004014982*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00045272916*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.8p
+CGK G K 4p
+CAK A K 13p
+.ENDS   
+*   
+* Generic triode model: 6C8   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:29 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 6C8_ayumi A G K
+.param GG {(V(G,K)+0.83697566)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0025120128*EP)^-0.14595588)}
+.param M2 {((0.91132455*URAMP(GG+EP/35.300556))^1.6459559)}
+.param P  {(0.00061711142*URAMP(GG+EP/38.735438)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00043921307*M1*M2)}
+.param IG {(0.00030855571*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00033260645*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.6p
+CGK G K 2.6p
+CAK A K 2.2p
+.ENDS   
+*   
+* Generic triode model: 6CA10   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:34 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6CA10_ayumi A G K
+.param GG {(V(G,K)+0.85922191)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.052995899*EP)^-0.89537568)}
+.param M2 {((0.62620658*URAMP(GG+EP/7.0532519))^2.3953757)}
+.param P  {(0.0063159843*URAMP(GG+EP/11.263459)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.003979238*M1*M2)}
+.param IG {(0.0031579921*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.004017519*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 16p
+CGK G K 24p
+CAK A K 16p
+.ENDS   
+*   
+*   
+*   
+* Generic triode model: 6CB5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:35 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6CB5T_ayumi A G K
+.param GG {(V(G,K)+0.12233722)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.099225459*EP)^-0.68051603)}
+.param M2 {((0.68791056*URAMP(GG+EP/3.1452557))^2.180516)}
+.param P  {(0.0027158296*URAMP(GG+EP/4.572187)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0015860374*M1*M2)}
+.param IG {(0.0013579148*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0022959718*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9p
+CGK G K 13p
+CAK A K 9.6p
+.ENDS   
+*   
+*   
+* Generic triode model: 6CB6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:37 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6CB6T_ayumi A G K
+.param GG {(V(G,K)+0.7350712)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.031445788*EP)^-2.20504)}
+.param M2 {((0.40485393*URAMP(GG+EP/18.926098))^3.70504)}
+.param P  {(0.0046867337*URAMP(GG+EP/46.747967)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.010960467*M1*M2)}
+.param IG {(0.0023433669*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0024945513*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.6p
+CGK G K 3.9p
+CAK A K 1.9p
+.ENDS   
+*   
+*   
+* Generic triode model: 6CD6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:38 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6CD6T_ayumi A G K
+.param GG {(V(G,K)+-0.11853336)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.13222789*EP)^-1.0472626)}
+.param M2 {((0.58886744*URAMP(GG+EP/3.1092727))^2.5472626)}
+.param P  {(0.0032013575*URAMP(GG+EP/5.2800894)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0021974746*M1*M2)}
+.param IG {(0.0016006788*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0025519299*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.5p
+CGK G K 12.6p
+CAK A K 7.5p
+.ENDS   
+*   
+* Generic triode model: 6CG7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:40 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6CG7_ayumi A G K
+.param GG {(V(G,K)+0.54900933)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.020494606*EP)^-0.76277031)}
+.param M2 {((0.66290422*URAMP(GG+EP/16.448024))^2.2627703)}
+.param P  {(0.0012465111*URAMP(GG+EP/24.812067)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00074417047*M1*M2)}
+.param IG {(0.0003834058*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0006816103*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 2.3p
+CAK A K 2.2p
+.ENDS   
+*   
+* Generic triode model: 6CK4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:42 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6CK4_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.065687609*EP)^-0.93132007)}
+.param M2 {((0.6169488*URAMP(GG+EP/5.8314073))^2.4313201)}
+.param P  {(0.0032983716*URAMP(GG+EP/9.4520117)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0021160382*M1*M2)}
+.param IG {(0.0014546477*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0020871033*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.5p
+CGK G K 8p
+CAK A K 1.8p
+.ENDS   
+*   
+*   
+* Generic triode model: 6CL6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:43 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6CL6T_ayumi A G K
+.param GG {(V(G,K)+0.23313833)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.023688975*EP)^-0.93652529)}
+.param M2 {((0.6156308*URAMP(GG+EP/16.225658))^2.4365253)}
+.param P  {(0.0060982027*URAMP(GG+EP/26.356151)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0039229723*M1*M2)}
+.param IG {(0.0030491014*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0033994382*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.5p
+CGK G K 6.5p
+CAK A K 5.4p
+.ENDS   
+*   
+*   
+* Generic triode model: 6CW5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:44 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6CW5T_ayumi A G K
+.param GG {(V(G,K)+0.38874904)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.09419804*EP)^-1.560546)}
+.param M2 {((0.49010862*URAMP(GG+EP/5.4129723))^3.060546)}
+.param P  {(0.0055371733*URAMP(GG+EP/11.044434)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0058898823*M1*M2)}
+.param IG {(0.0027685867*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0035373923*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.2p
+CGK G K 6.9p
+CAK A K 5.4p
+.ENDS   
+*   
+* Generic triode model: 6DE71   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:46 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6DE71_ayumi A G K
+.param GG {(V(G,K)+0.97660212)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.012940444*EP)^-0.39564264)}
+.param M2 {((0.79128838*URAMP(GG+EP/16.128628))^1.8956426)}
+.param P  {(0.00091559181*URAMP(GG+EP/20.382743)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00054039164*M1*M2)}
+.param IG {(0.00045779591*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00052599563*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 2.2p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: 6DE72   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:47 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6DE72_ayumi A G K
+.param GG {(V(G,K)+0.99984307)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.13594315*EP)^-2.0119972)}
+.param M2 {((0.4271074*URAMP(GG+EP/4.2142073))^3.5119972)}
+.param P  {(0.0042161959*URAMP(GG+EP/9.8668561)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0076124257*M1*M2)}
+.param IG {(0.0021080979*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0027650373*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 8.5p
+CGK G K 5.5p
+CAK A K 1p
+.ENDS   
+*   
+*   
+* Generic triode model: 6DQ5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:49 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6DQ5T_ayumi A G K
+.param GG {(V(G,K)+0.99999998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.097911417*EP)^-0.59116807)}
+.param M2 {((0.71730246*URAMP(GG+EP/2.8872786))^2.0911681)}
+.param P  {(0.0034387228*URAMP(GG+EP/4.0251899)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.001983081*M1*M2)}
+.param IG {(0.0017193614*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0030773802*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.5p
+CGK G K 13.5p
+CAK A K 10.5p
+.ENDS   
+*   
+*   
+* Generic triode model: 6DQ6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:50 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6DQ6T_ayumi A G K
+.param GG {(V(G,K)+-1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.17812317*EP)^-1.6443126)}
+.param M2 {((0.47705181*URAMP(GG+EP/2.9358797))^3.1443126)}
+.param P  {(0.0034562529*URAMP(GG+EP/6.1542156)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0040197798*M1*M2)}
+.param IG {(0.0017281264*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0026038839*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.3p
+CGK G K 8.7p
+CAK A K 6.5p
+.ENDS   
+*   
+* Generic triode model: 6DT8   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:52 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6DT8_ayumi A G K
+.param GG {(V(G,K)+0.65426696)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.023769959*EP)^-2.7472313)}
+.param M2 {((0.35317125*URAMP(GG+EP/27.212026))^4.2472313)}
+.param P  {(0.0033862784*URAMP(GG+EP/77.050513)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.017852785*M1*M2)}
+.param IG {(0.0016931392*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0017592759*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.6p
+CGK G K 2.7p
+CAK A K 1.6p
+.ENDS   
+*   
+*   
+* Generic triode model: 6EJ7T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:53 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6EJ7T_ayumi A G K
+.param GG {(V(G,K)+0.40321166)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0054275937*EP)^-0.61801526)}
+.param M2 {((0.7082102*URAMP(GG+EP/53.760436))^2.1180153)}
+.param P  {(0.019963362*URAMP(GG+EP/75.910283)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.011540933*M1*M2)}
+.param IG {(0.0099816812*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.010377457*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 6p
+CAK A K 3p
+.ENDS   
+*   
+* Generic triode model: 6EM71   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:56 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6EM71_ayumi A G K
+.param GG {(V(G,K)+0.75136004)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.00038946438*EP)^-0.038461538)}
+.param M2 {((0.975*URAMP(GG+EP/64.190723))^1.5384615)}
+.param P  {(0.00085260112*URAMP(GG+EP/65.836639)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00074054441*M1*M2)}
+.param IG {(0.00042630056*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00044579952*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.8p
+CGK G K 2.2p
+CAK A K 0.6p
+.ENDS   
+*   
+* Generic triode model: 6EM72   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:39:58 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6EM72_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.14621502*EP)^-1.6688267)}
+.param M2 {((0.47336133*URAMP(GG+EP/3.6018096))^3.1688267)}
+.param P  {(0.0036325945*URAMP(GG+EP/7.6090068)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0043402717*M1*M2)}
+.param IG {(0.0018162972*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0025554449*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 10p
+CGK G K 7p
+CAK A K 1.8p
+.ENDS   
+*   
+* Generic triode model: 6EW72   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:00 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6EW72_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.13863586*EP)^-1.9260987)}
+.param M2 {((0.43781576*URAMP(GG+EP/4.0551143))^3.4260987)}
+.param P  {(0.0052367933*URAMP(GG+EP/9.262148)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0084764746*M1*M2)}
+.param IG {(0.0026183967*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.003488988*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9p
+CGK G K 7p
+CAK A K 1.2p
+.ENDS   
+*   
+* Generic triode model: 6F5   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:02 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 6F5_ayumi A G K
+.param GG {(V(G,K)+0.58201919)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0023425283*EP)^-0.39892191)}
+.param M2 {((0.7899219*URAMP(GG+EP/89.68007))^1.8989219)}
+.param P  {(0.00094722724*URAMP(GG+EP/113.5303)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00055846113*M1*M2)}
+.param IG {(0.00047361362*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00048615622*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2p
+CGK G K 6p
+CAK A K 12p
+.ENDS   
+*   
+*   
+* Generic triode model: 6F6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:04 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6F6T_ayumi A G K
+.param GG {(V(G,K)+0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.043621772*EP)^-0.51782633)}
+.param M2 {((0.74337419*URAMP(GG+EP/5.8829755))^2.0178263)}
+.param P  {(0.00053269576*URAMP(GG+EP/7.9138819)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00030710831*M1*M2)}
+.param IG {(0.00019764236*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00037552047*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 5p
+CAK A K 6.9p
+.ENDS   
+*   
+* Generic triode model: 6FQ7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:05 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6FQ7_ayumi A G K
+.param GG {(V(G,K)+0.78479196)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.019086702*EP)^-0.69767797)}
+.param M2 {((0.68253858*URAMP(GG+EP/16.632597))^2.197678)}
+.param P  {(0.0010973242*URAMP(GG+EP/24.368728)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00064328217*M1*M2)}
+.param IG {(0.00054866211*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00061689541*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.8p
+CGK G K 2.4p
+CAK A K 0.3p
+.ENDS   
+*   
+* Generic triode model: 6GA4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:06 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6GA4_ayumi A G K
+.param GG {(V(G,K)+0.99999993)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.049332301*EP)^-1.0124121)}
+.param M2 {((0.59703582*URAMP(GG+EP/8.1683638))^2.5124121)}
+.param P  {(0.0045336089*URAMP(GG+EP/13.681531)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0030450256*M1*M2)}
+.param IG {(0.0022668045*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0027728299*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.5p
+CGK G K 5p
+CAK A K 1.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6GB5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:07 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6GB5T_ayumi A G K
+.param GG {(V(G,K)+0.84509256)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.074600608*EP)^-0.78902807)}
+.param M2 {((0.65529996*URAMP(GG+EP/4.6206063))^2.2890281)}
+.param P  {(0.0051497371*URAMP(GG+EP/7.0511317)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0031020384*M1*M2)}
+.param IG {(0.0025748686*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0037083507*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 10.4p
+CGK G K 12.9p
+CAK A K 9.4p
+.ENDS   
+*   
+*   
+* Generic triode model: 6GB8T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:09 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6GB8T_ayumi A G K
+.param GG {(V(G,K)+0.18361766)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.023367579*EP)^-0.5778846)}
+.param M2 {((0.72188802*URAMP(GG+EP/11.901617))^2.0778846)}
+.param P  {(0.0065222813*URAMP(GG+EP/16.486791)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0037584671*M1*M2)}
+.param IG {(0.0032611407*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0038634597*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 10.8p
+CGK G K 13.4p
+CAK A K 16.3p
+.ENDS   
+*   
+*   
+* Generic triode model: 6GW8PT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:12 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6GW8PT_ayumi A G K
+.param GG {(V(G,K)+0.84112562)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.01029284*EP)^-0.37211195)}
+.param M2 {((0.80123414*URAMP(GG+EP/19.311081))^1.872112)}
+.param P  {(0.0043151181*URAMP(GG+EP/24.10167)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0025686773*M1*M2)}
+.param IG {(0.0021575591*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.002428883*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.2p
+CGK G K 5.8p
+CAK A K 7.6p
+.ENDS   
+*   
+*   
+* Generic triode model: 6GY5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:13 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6GY5T_ayumi A G K
+.param GG {(V(G,K)+0.32801613)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.13136914*EP)^-1.2504039)}
+.param M2 {((0.54537444*URAMP(GG+EP/3.4606724))^2.7504039)}
+.param P  {(0.0046747506*URAMP(GG+EP/6.345498)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0037232771*M1*M2)}
+.param IG {(0.0023373753*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0034848868*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.1p
+CGK G K 12.9p
+CAK A K 8.5p
+.ENDS   
+*   
+*   
+*   
+* Generic triode model: 6J7T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:14 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6J7T_ayumi A G K
+.param GG {(V(G,K)+0.75953915)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0057490544*EP)^-0.20145614)}
+.param M2 {((0.8815978*URAMP(GG+EP/20.595073))^1.7014561)}
+.param P  {(0.00080605414*URAMP(GG+EP/23.361076)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00053791349*M1*M2)}
+.param IG {(0.00040302707*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00045533328*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.8p
+CGK G K 4.2p
+CAK A K 12p
+.ENDS   
+*   
+*   
+* Generic triode model: 6JB5T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:15 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6JB5T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.16129088*EP)^-2.7283665)}
+.param M2 {((0.35474692*URAMP(GG+EP/4.0005552))^4.2283665)}
+.param P  {(0.0020818822*URAMP(GG+EP/11.277209)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0106492*M1*M2)}
+.param IG {(0.0010409411*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0013239066*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.1p
+CGK G K 5.4p
+CAK A K 6p
+.ENDS   
+*   
+*   
+* Generic triode model: 6JE6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:16 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6JE6T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.15531724*EP)^-0.92957636)}
+.param M2 {((0.61739158*URAMP(GG+EP/2.4633995))^2.4295764)}
+.param P  {(0.0036485186*URAMP(GG+EP/3.9900115)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0023385402*M1*M2)}
+.param IG {(0.0018242593*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0032785303*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.1p
+CGK G K 12.9p
+CAK A K 10.5p
+.ENDS   
+*   
+*   
+* Generic triode model: 6JG6AT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:17 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6JG6AT_ayumi A G K
+.param GG {(V(G,K)+0.99372841)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.20443422*EP)^-2.1006356)}
+.param M2 {((0.41659311*URAMP(GG+EP/2.8537634))^3.6006356)}
+.param P  {(0.0069256204*URAMP(GG+EP/6.8502415)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.014050654*M1*M2)}
+.param IG {(0.0034628102*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0050333831*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.2p
+CGK G K 12.8p
+CAK A K 8.3p
+.ENDS   
+*   
+*   
+* Generic triode model: 6JR6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:20 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6JR6T_ayumi A G K
+.param GG {(V(G,K)+0.99994363)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.13323481*EP)^-1.5275541)}
+.param M2 {((0.49544944*URAMP(GG+EP/3.7869273))^3.0275541)}
+.param P  {(0.0072054321*URAMP(GG+EP/7.6434182)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0074085952*M1*M2)}
+.param IG {(0.003602716*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0050620509*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.2p
+CGK G K 12.8p
+CAK A K 8.3p
+.ENDS   
+*   
+*   
+* Generic triode model: 6JS6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:19 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6JS6T_ayumi A G K
+.param GG {(V(G,K)+0.9999936)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.21913245*EP)^-1.3747601)}
+.param M2 {((0.52178266*URAMP(GG+EP/2.1823209))^2.8747601)}
+.param P  {(0.0035536558*URAMP(GG+EP/4.1824327)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0031522524*M1*M2)}
+.param IG {(0.0017768279*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0031247106*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 10p
+CGK G K 14p
+CAK A K 9.3p
+.ENDS   
+*   
+*   
+* Generic triode model: 6K6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:22 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6K6T_ayumi A G K
+.param GG {(V(G,K)+0.99999995)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.055289504*EP)^-0.63369812)}
+.param M2 {((0.70300479*URAMP(GG+EP/5.3716382))^2.1336981)}
+.param P  {(0.00053448807*URAMP(GG+EP/7.6409696)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00030960116*M1*M2)}
+.param IG {(0.00022926513*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00032413346*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.5p
+CGK G K 3p
+CAK A K 5.5p
+.ENDS   
+*   
+*   
+* Generic triode model: 6K7T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Wed Jun 30 20:54:56 2010   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6K7T_ayumi A G K
+.param GG {(V(G,K)+-1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((2.3738651*EP)^-38.694622)}
+.param M2 {((0.037318425*URAMP(GG+EP/0.40553339))^40.194622)}
+.param P  {(0.00060436625*URAMP(GG+EP/10.866841)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*2.5180035e+51*M1*M2)}
+.param IG {(0.00030218313*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00038749733*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.8p
+CGK G K 4.2p
+CAK A K 12p
+.ENDS   
+*   
+*   
+* Generic triode model: 6KD6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:31 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6KD6T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.14076535*EP)^-1.0380568)}
+.param M2 {((0.59100333*URAMP(GG+EP/2.905521))^2.5380568)}
+.param P  {(0.0075955054*URAMP(GG+EP/4.9162515)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0051832527*M1*M2)}
+.param IG {(0.0037977527*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0062293504*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 16.5p
+CGK G K 23.5p
+CAK A K 15.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6KM6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:37 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6KM6T_ayumi A G K
+.param GG {(V(G,K)+0.57761874)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.52339318*EP)^-5.2554363)}
+.param M2 {((0.22204339*URAMP(GG+EP/1.4863713))^6.7554363)}
+.param P  {(0.006536245*URAMP(GG+EP/6.6940577)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*4.7534114*M1*M2)}
+.param IG {(0.0032681225*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0047861683*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.6p
+CGK G K 12.6p
+CAK A K 7.9p
+.ENDS   
+*   
+*   
+* Generic triode model: 6KV6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:25 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6KV6T_ayumi A G K
+.param GG {(V(G,K)+0.5805065)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.16898169*EP)^-1.508747)}
+.param M2 {((0.4985464*URAMP(GG+EP/2.9675026))^3.008747)}
+.param P  {(0.0050541434*URAMP(GG+EP/5.9523097)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0050986757*M1*M2)}
+.param IG {(0.0025270717*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0038528147*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.2p
+CGK G K 12.9p
+CAK A K 8.4p
+.ENDS   
+*   
+*   
+* Generic triode model: 6L6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:38 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6L6T_ayumi A G K
+.param GG {(V(G,K)+0.91804059)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.10751078*EP)^-1.743575)}
+.param M2 {((0.4624527*URAMP(GG+EP/4.9999386))^3.243575)}
+.param P  {(0.0016883841*URAMP(GG+EP/10.811784)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0021948901*M1*M2)}
+.param IG {(0.0022135943*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00056920996*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.4p
+CGK G K 5.7p
+CAK A K 5.9p
+.ENDS   
+*   
+*   
+* Generic triode model: 6LB6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:40 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6LB6T_ayumi A G K
+.param GG {(V(G,K)+0.99700414)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.23985722*EP)^-1.8495045)}
+.param M2 {((0.44782743*URAMP(GG+EP/2.3020886))^3.3495045)}
+.param P  {(0.0060056363*URAMP(GG+EP/5.1405708)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0088470322*M1*M2)}
+.param IG {(0.0030028181*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.004837887*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 13.5p
+CGK G K 19.5p
+CAK A K 17.6p
+.ENDS   
+*   
+*   
+* Generic triode model: 6LF6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:41 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6LF6T_ayumi A G K
+.param GG {(V(G,K)+0.95447628)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.32637983*EP)^-2.7688412)}
+.param M2 {((0.35138341*URAMP(GG+EP/1.987306))^4.2688412)}
+.param P  {(0.0091876684*URAMP(GG+EP/5.6556625)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.05015216*M1*M2)}
+.param IG {(0.0045938342*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0071353288*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 16.4p
+CGK G K 20.9p
+CAK A K 16.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6LG6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:42 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6LG6T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.11768156*EP)^-0.95241752)}
+.param M2 {((0.61164136*URAMP(GG+EP/3.3000807))^2.4524175)}
+.param P  {(0.0055353672*URAMP(GG+EP/5.3954505)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.003591442*M1*M2)}
+.param IG {(0.0027676836*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0043758251*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 10.5p
+CGK G K 14.5p
+CAK A K 12.2p
+.ENDS   
+*   
+* Generic triode model: 6RA2   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:44 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6RA2_ayumi A G K
+.param GG {(V(G,K)+0.99999998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.16011188*EP)^-0.98934882)}
+.param M2 {((0.60256722*URAMP(GG+EP/2.4822192))^2.4893488)}
+.param P  {(0.0023398311*URAMP(GG+EP/4.1194063)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0015501289*M1*M2)}
+.param IG {(0.0011699156*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0020717035*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.2p
+CGK G K 6.9p
+CAK A K 5.4p
+.ENDS   
+*   
+* Generic triode model: 6RA3   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:45 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6RA3_ayumi A G K
+.param GG {(V(G,K)+0.99999995)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.17083943*EP)^-1.0578391)}
+.param M2 {((0.5864325*URAMP(GG+EP/2.4207966))^2.5578391)}
+.param P  {(0.0037228747*URAMP(GG+EP/4.1280055)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0025729671*M1*M2)}
+.param IG {(0.0018614373*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0032931125*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.2p
+CGK G K 6.9p
+CAK A K 5.4p
+.ENDS   
+*   
+* Generic triode model: 6RA6   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:46 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6RA6_ayumi A G K
+.param GG {(V(G,K)+-0.45045978)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.022786797*EP)^-0.63709179)}
+.param M2 {((0.70188843*URAMP(GG+EP/13.082645))^2.1370918)}
+.param P  {(0.005552851*URAMP(GG+EP/18.639209)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0032180177*M1*M2)}
+.param IG {(0.0027764255*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0032292352*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.5p
+CGK G K 5p
+CAK A K 1.2p
+.ENDS   
+*   
+* Generic triode model: 6RA8   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:47 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6RA8_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.044109598*EP)^-0.88419381)}
+.param M2 {((0.62914349*URAMP(GG+EP/8.4076149))^2.3841938)}
+.param P  {(0.0062736966*URAMP(GG+EP/13.363589)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0039315365*M1*M2)}
+.param IG {(0.0031368483*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0038540551*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.2p
+CGK G K 6.9p
+CAK A K 5.4p
+.ENDS   
+*   
+*   
+* Generic triode model: 6RB11T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:50 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6RB11T_ayumi A G K
+.param GG {(V(G,K)+0.65537204)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.11100294*EP)^-2.2938121)}
+.param M2 {((0.39538068*URAMP(GG+EP/5.4468766))^3.7938121)}
+.param P  {(0.0034776823*URAMP(GG+EP/13.776284)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0092134348*M1*M2)}
+.param IG {(0.0017388412*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0021242915*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.4p
+CGK G K 5.6p
+CAK A K 6.3p
+.ENDS   
+*   
+*   
+* Generic triode model: 6RP15T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:50 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT 6RP15T_ayumi A G K
+.param GG {(V(G,K)+0.81734398)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.014236687*EP)^-0.37474407)}
+.param M2 {((0.80010921*URAMP(GG+EP/14.040541))^1.8747441)}
+.param P  {(0.0033159507*URAMP(GG+EP/17.548281)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0019718712*M1*M2)}
+.param IG {(0.0016579754*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0019454182*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.6p
+CGK G K 6.2p
+CAK A K 6p
+.ENDS   
+*   
+* Generic triode model: 6S4A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:51 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6S4A_ayumi A G K
+.param GG {(V(G,K)+0.32778768)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.034282937*EP)^-1.0247707)}
+.param M2 {((0.59411337*URAMP(GG+EP/11.839319))^2.5247707)}
+.param P  {(0.0017432762*URAMP(GG+EP/19.92771)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0011797852*M1*M2)}
+.param IG {(0.00087163808*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0010044908*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.4p
+CGK G K 4.2p
+CAK A K 0.6p
+.ENDS   
+*   
+* Generic triode model: 6SC7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:53 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6SC7_ayumi A G K
+.param GG {(V(G,K)+0.44106944)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0042907324*EP)^-0.48871674)}
+.param M2 {((0.75425523*URAMP(GG+EP/57.273385))^1.9887167)}
+.param P  {(0.00077042152*URAMP(GG+EP/75.933693)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00044535539*M1*M2)}
+.param IG {(0.00038521076*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00040047972*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2p
+CGK G K 2p
+CAK A K 3p
+.ENDS   
+*   
+*   
+* Generic triode model: 6SH7T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:54 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6SH7T_ayumi A G K
+.param GG {(V(G,K)+0.69566782)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0053973753*EP)^-0.3342013)}
+.param M2 {((0.81779465*URAMP(GG+EP/33.758141))^1.8342013)}
+.param P  {(0.0026548433*URAMP(GG+EP/41.279484)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0016073552*M1*M2)}
+.param IG {(0.0013274216*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0014244744*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.4p
+CGK G K 5.1p
+CAK A K 7p
+.ENDS   
+*   
+*   
+* Generic triode model: 6SJ7T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:55 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6SJ7T_ayumi A G K
+.param GG {(V(G,K)+0.40161932)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.02462593*EP)^-0.84287662)}
+.param M2 {((0.64023858*URAMP(GG+EP/14.609049))^2.3428766)}
+.param P  {(0.0011655656*URAMP(GG+EP/22.818133)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00071703729*M1*M2)}
+.param IG {(0.00068041382*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00044226898*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.4p
+CGK G K 3.6p
+CAK A K 7p
+.ENDS   
+*   
+* Generic triode model: 6SL7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:56 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6SL7_ayumi A G K
+.param GG {(V(G,K)+0.34892993)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.00093777395*EP)^-0.098159943)}
+.param M2 {((0.9385794*URAMP(GG+EP/65.496168))^1.5981599)}
+.param P  {(0.00080166786*URAMP(GG+EP/69.782235)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00061341966*M1*M2)}
+.param IG {(0.00040083393*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00041812772*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.8p
+CGK G K 3.4p
+CAK A K 3.8p
+.ENDS   
+*   
+* Generic triode model: 6SN7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:58 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6SN7_ayumi A G K
+.param GG {(V(G,K)+0.54900933)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.020494606*EP)^-0.76277031)}
+.param M2 {((0.66290422*URAMP(GG+EP/16.448024))^2.2627703)}
+.param P  {(0.0012465111*URAMP(GG+EP/24.812067)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00074417047*M1*M2)}
+.param IG {(0.0003834058*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0006816103*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 3p
+CAK A K 1.2p
+.ENDS   
+*   
+* Generic triode model: 6SQ7   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:40:59 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6SQ7_ayumi A G K
+.param GG {(V(G,K)+0.73774817)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0014361986*EP)^-0.21629832)}
+.param M2 {((0.87397394*URAMP(GG+EP/87.749749))^1.7162983)}
+.param P  {(0.00075255807*URAMP(GG+EP/100.40316)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00049502244*M1*M2)}
+.param IG {(0.00037627904*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00038755003*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.7p
+CGK G K 1.7p
+CAK A K 3.8p
+.ENDS   
+*   
+*   
+*   
+* Generic triode model: 6U8PT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:03 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 6U8PT_ayumi A G K
+.param GG {(V(G,K)+0.65071871)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.046006989*EP)^-2.7651713)}
+.param M2 {((0.35168575*URAMP(GG+EP/14.091647))^4.2651713)}
+.param P  {(0.003445744*URAMP(GG+EP/40.068859)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.018698107*M1*M2)}
+.param IG {(0.001722872*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0018526668*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2p
+CGK G K 3p
+CAK A K 3.5p
+.ENDS   
+*   
+* Generic triode model: 6U8T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:00 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6U8T_ayumi A G K
+.param GG {(V(G,K)+0.99995916)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.035181787*EP)^-2.5690962)}
+.param M2 {((0.36863223*URAMP(GG+EP/17.94587))^4.0690962)}
+.param P  {(0.0033085897*URAMP(GG+EP/48.682314)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.013182953*M1*M2)}
+.param IG {(0.0016542949*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0017567609*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.8p
+CGK G K 2.8p
+CAK A K 2p
+.ENDS   
+*   
+*   
+* Generic triode model: 6V6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:04 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6V6T_ayumi A G K
+.param GG {(V(G,K)+0.99999998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.048335289*EP)^-0.77023894)}
+.param M2 {((0.6607234*URAMP(GG+EP/7.0192317))^2.2702389)}
+.param P  {(0.0010053341*URAMP(GG+EP/10.623555)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00060166202*M1*M2)}
+.param IG {(0.00051429562*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00061491868*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 5p
+CAK A K 6.9p
+.ENDS   
+*   
+*   
+* Generic triode model: 6W6T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:06 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 6W6T_ayumi A G K
+.param GG {(V(G,K)+0.99999997)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.032441217*EP)^-0.3672418)}
+.param M2 {((0.80332392*URAMP(GG+EP/6.062537))^1.8672418)}
+.param P  {(0.0022625178*URAMP(GG+EP/7.546815)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.001349448*M1*M2)}
+.param IG {(0.0012737812*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0012049281*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.5p
+CGK G K 8.6p
+CAK A K 8.2p
+.ENDS   
+*   
+*   
+* Generic triode model: 71A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:45 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 71A_ayumi A G K
+.param GG {(V(G,K)+-0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.058225528*EP)^-0.29538374)}
+.param M2 {((0.83547598*URAMP(GG+EP/2.8256337))^1.7953837)}
+.param P  {(0.00034434696*URAMP(GG+EP/3.3820645)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00021307994*M1*M2)}
+.param IG {(0.00017217348*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00033568367*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.5p
+CGK G K 3.2p
+CAK A K 2.9p
+.ENDS   
+*   
+* Generic triode model: 75   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:46 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 75_ayumi A G K
+.param GG {(V(G,K)+0.62861222)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0015984063*EP)^-0.25776155)}
+.param M2 {((0.85335807*URAMP(GG+EP/91.742588))^1.7577615)}
+.param P  {(0.00073974709*URAMP(GG+EP/107.50773)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00046981663*M1*M2)}
+.param IG {(0.00036987355*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00038021882*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.7p
+CGK G K 1.7p
+CAK A K 3.8p
+.ENDS   
+*   
+*   
+* Generic triode model: 7591T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:23 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 7591T_ayumi A G K
+.param GG {(V(G,K)+0.99926889)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.013694604*EP)^-0.39656351)}
+.param M2 {((0.79090417*URAMP(GG+EP/15.268483))^1.8965635)}
+.param P  {(0.0034491916*URAMP(GG+EP/19.305098)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0020351267*M1*M2)}
+.param IG {(0.0017245958*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0019960381*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.2p
+CGK G K 5.9p
+CAK A K 4.8p
+.ENDS   
+*   
+* Generic triode model: 76   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:47 2008   
+*          Plate   
+*          | Grid   
+*          | | Cathode   
+*          | | |
+.SUBCKT 76_ayumi A G K
+.param GG {(V(G,K)+0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.021188923*EP)^-0.55369678)}
+.param M2 {((0.7303902*URAMP(GG+EP/12.724092))^2.0536968)}
+.param P  {(0.00075511262*URAMP(GG+EP/17.420951)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00043487165*M1*M2)}
+.param IG {(0.00037755631*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00044349824*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.8p
+CGK G K 3.5p
+CAK A K 2.5p
+.ENDS   
+*   
+*   
+* Generic triode model: 77T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:48 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 77T_ayumi A G K
+.param GG {(V(G,K)+-1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0016865419*EP)^-0.038461538)}
+.param M2 {((0.975*URAMP(GG+EP/14.823231))^1.5384615)}
+.param P  {(0.00049759802*URAMP(GG+EP/15.203314)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00043219909*M1*M2)}
+.param IG {(0.00024879901*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00029869203*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.9p
+CGK G K 2.8p
+CAK A K 11p
+.ENDS   
+*   
+*   
+* Generic triode model: 801   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:56 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 801_ayumi A G K
+.param GG {(V(G,K)+0.99999971)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0050075033*EP)^-0.062819059)}
+.param M2 {((0.95980401*URAMP(GG+EP/8.027152))^1.5628191)}
+.param P  {(0.00024894009*URAMP(GG+EP/8.3633241)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00020395304*M1*M2)}
+.param IG {(4.8000001e-05*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.000225*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6p
+CGK G K 4.5p
+CAK A K 1.5p
+.ENDS   
+*   
+* Generic triode model: 8045G   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:25 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 8045G_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.16254949*EP)^-1.8473377)}
+.param M2 {((0.44811732*URAMP(GG+EP/3.3951672))^3.3473377)}
+.param P  {(0.006744417*URAMP(GG+EP/7.5765141)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0099093555*M1*M2)}
+.param IG {(0.0033722085*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0047506048*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 16p
+CGK G K 24p
+CAK A K 16p
+.ENDS   
+*   
+*   
+*   
+* Generic triode model: 829BT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:56 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 829BT_ayumi A G K
+.param GG {(V(G,K)+-0.31275554)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.031067512*EP)^-0.44774132)}
+.param M2 {((0.7701228*URAMP(GG+EP/7.3992794))^1.9477413)}
+.param P  {(0.0023834096*URAMP(GG+EP/9.6079215)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0013870937*M1*M2)}
+.param IG {(0.0013863621*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0016211493*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.9p
+CGK G K 8.6p
+CAK A K 6.9p
+.ENDS   
+*   
+*   
+* Generic triode model: 8417T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:26 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT 8417T_ayumi A G K
+.param GG {(V(G,K)+0.63054378)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.036846957*EP)^-1.2260611)}
+.param M2 {((0.55024446*URAMP(GG+EP/12.206043))^2.7260611)}
+.param P  {(0.0099006053*URAMP(GG+EP/22.182946)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0077318666*M1*M2)}
+.param IG {(0.0049503027*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0056272659*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.4p
+CGK G K 12.7p
+CAK A K 8.1p
+.ENDS   
+*   
+* Generic triode model: 845   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:41:58 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT 845_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.097678365*EP)^-1.1468909)}
+.param M2 {((0.56670261*URAMP(GG+EP/4.4359607))^2.6468909)}
+.param P  {(0.00074300992*URAMP(GG+EP/7.8276694)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00054613816*M1*M2)}
+.param IG {(0.00037150496*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00051834132*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 13.5p
+CGK G K 6p
+CAK A K 6.5p
+.ENDS   
+*   
+*   
+* Generic triode model: 9002   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:28 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT 9002_ayumi A G K
+.param GG {(V(G,K)+0.90658712)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.01433184*EP)^-0.61356953)}
+.param M2 {((0.70969986*URAMP(GG+EP/20.255608))^2.1135695)}
+.param P  {(0.00098929697*URAMP(GG+EP/28.541091)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00057163937*M1*M2)}
+.param IG {(0.00049464849*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00054709459*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.4p
+CGK G K 1.2p
+CAK A K 1.1p
+.ENDS   
+*   
+* Generic triode model: AD1   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:28 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT AD1_ayumi A G K
+.param GG {(V(G,K)+0.99548209)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.033599669*EP)^-0.23303356)}
+.param M2 {((0.8655343*URAMP(GG+EP/4.0019946))^1.7330336)}
+.param P  {(0.0011960914*URAMP(GG+EP/4.6237273)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00077502632*M1*M2)}
+.param IG {(0.00059804568*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0010063534*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 23p
+CGK G K 7.5p
+CAK A K 5.5p
+.ENDS   
+*   
+* Generic triode model: DA30   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:30 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT DA30_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.07753701*EP)^-0.45364741)}
+.param M2 {((0.76779464*URAMP(GG+EP/2.9947681))^1.9536474)}
+.param P  {(0.00090166046*URAMP(GG+EP/3.9004806)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00052412019*M1*M2)}
+.param IG {(0.00045083023*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00081893623*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 13p
+CGK G K 10p
+CAK A K 6.5p
+.ENDS   
+*   
+* Generic triode model: E180CC   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:33 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT E180CC_ayumi A G K
+.param GG {(V(G,K)+0.56698133)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.01851887*EP)^-1.618055)}
+.param M2 {((0.48106912*URAMP(GG+EP/28.021736))^3.118055)}
+.param P  {(0.004697796*URAMP(GG+EP/58.248876)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0053104514*M1*M2)}
+.param IG {(0.002348898*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0024703913*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.3p
+CGK G K 3.5p
+CAK A K 0.5p
+.ENDS   
+*   
+* Generic triode model: E182CC   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:34 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT E182CC_ayumi A G K
+.param GG {(V(G,K)+0.56912497)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.020096637*EP)^-0.83371956)}
+.param M2 {((0.64275075*URAMP(GG+EP/17.776569))^2.3337196)}
+.param P  {(0.0068220515*URAMP(GG+EP/27.657018)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0041807778*M1*M2)}
+.param IG {(0.0034110257*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0037843497*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.1p
+CGK G K 6p
+CAK A K 1.1p
+.ENDS   
+*   
+*   
+* Generic triode model: E83FT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:32 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT E83FT_ayumi A G K
+.param GG {(V(G,K)+0.67775811)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.012440248*EP)^-0.83377528)}
+.param M2 {((0.6427354*URAMP(GG+EP/28.718446))^2.3337753)}
+.param P  {(0.0069226192*URAMP(GG+EP/44.6816)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0042425066*M1*M2)}
+.param IG {(0.0034613096*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0036950034*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.2p
+CGK G K 4.8p
+CAK A K 3.5p
+.ENDS   
+*   
+* Generic triode model: EC86   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:35 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT EC86_ayumi A G K
+.param GG {(V(G,K)+0.22760069)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0026112468*EP)^-0.29355976)}
+.param M2 {((0.83632563*URAMP(GG+EP/62.680543))^1.7935598)}
+.param P  {(0.0095464624*URAMP(GG+EP/74.947533)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0059140675*M1*M2)}
+.param IG {(0.0047732312*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00496493*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.2p
+CGK G K 3.5p
+CAK A K 0.2p
+.ENDS   
+*   
+* Generic triode model: ECC33   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:38 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT ECC33_ayumi A G K
+.param GG {(V(G,K)+0.39854224)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.00456874*EP)^-0.2251333)}
+.param M2 {((0.86949802*URAMP(GG+EP/28.564106))^1.7251333)}
+.param P  {(0.001087821*URAMP(GG+EP/32.85126)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00070978374*M1*M2)}
+.param IG {(0.00054391049*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00059395688*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.5p
+CGK G K 3.5p
+CAK A K 1.5p
+.ENDS   
+*   
+* Generic triode model: ECC35   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:39 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT ECC35_ayumi A G K
+.param GG {(V(G,K)+0.62544373)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0050202395*EP)^-0.5890158)}
+.param M2 {((0.71804148*URAMP(GG+EP/56.164356))^2.0890158)}
+.param P  {(0.001261268*URAMP(GG+EP/78.218818)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00072725712*M1*M2)}
+.param IG {(0.000630634*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00065489844*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3p
+CGK G K 3p
+CAK A K 1.3p
+.ENDS   
+*   
+* Generic triode model: ECC84   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:42 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT ECC84_ayumi A G K
+.param GG {(V(G,K)+0.84230976)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.028730107*EP)^-1.1882664)}
+.param M2 {((0.55798041*URAMP(GG+EP/15.38524))^2.6882664)}
+.param P  {(0.0027771882*URAMP(GG+EP/27.573083)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0021056179*M1*M2)}
+.param IG {(0.0013885941*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0015410372*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.3p
+CGK G K 4.7p
+CAK A K 0.4p
+.ENDS   
+*   
+* Generic triode model: ECC86   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:40 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT ECC86_ayumi A G K
+.param GG {(V(G,K)+0.38539466)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.057387275*EP)^-1.5833861)}
+.param M2 {((0.48647816*URAMP(GG+EP/8.9483573))^3.0833861)}
+.param P  {(0.0043259684*URAMP(GG+EP/18.394161)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.004712875*M1*M2)}
+.param IG {(0.0021629842*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0025205087*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.3p
+CGK G K 3p
+CAK A K 1.8p
+.ENDS   
+*   
+* Generic triode model: ECC88   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:43 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT ECC88_ayumi A G K
+.param GG {(V(G,K)+0.34001426)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.009343174*EP)^-0.49661195)}
+.param M2 {((0.75127268*URAMP(GG+EP/26.621288))^1.9966119)}
+.param P  {(0.007130155*URAMP(GG+EP/35.434921)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0041180199*M1*M2)}
+.param IG {(0.0035650775*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0038690245*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.4p
+CGK G K 3.3p
+CAK A K 1.8p
+.ENDS   
+*   
+*   
+* Generic triode model: ECL85PT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Wed Oct 22 16:34:56 2008   
+*               Plate   
+*               | Grid   
+*               | | Cathode   
+*               | | |
+.SUBCKT ECL85PT_ayumi A G K
+.param GG {(V(G,K)+0.61401316)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.075869075*EP)^-1.148877)}
+.param M2 {((0.56627772*URAMP(GG+EP/5.7167203))^2.648877)}
+.param P  {(0.0037731888*URAMP(GG+EP/10.095259)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0027774625*M1*M2)}
+.param IG {(0.0018865944*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0024608947*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.4p
+CGK G K 5.1p
+CAK A K 7.1p
+.ENDS   
+*   
+* Generic triode model: ECL85T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Wed Oct 22 16:34:55 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT ECL85T_ayumi A G K
+.param GG {(V(G,K)+0.53083873)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0093163171*EP)^-0.90408466)}
+.param M2 {((0.6239381*URAMP(GG+EP/40.365941))^2.4040847)}
+.param P  {(0.0035136299*URAMP(GG+EP/64.695426)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0022231252*M1*M2)}
+.param IG {(0.0017568149*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0018385944*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 2.7p
+CAK A K 4p
+.ENDS   
+*   
+*   
+* Generic triode model: EF39T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:46:08 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT EF39T_ayumi A G K
+.param GG {(V(G,K)+0.0036430998)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.43484193*EP)^-13.214995)}
+.param M2 {((0.10193683*URAMP(GG+EP/2.0652635))^14.714995)}
+.param P  {(0.0015911301*URAMP(GG+EP/20.260228)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*4892774400*M1*M2)}
+.param IG {(0.00079556505*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00091480891*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 16.5p
+CGK G K 23.5p
+CAK A K 15.2p
+.ENDS   
+*   
+*   
+* Generic triode model: EL12T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:44 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT EL12T_ayumi A G K
+.param GG {(V(G,K)+0.99999993)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.014506242*EP)^-0.43509457)}
+.param M2 {((0.77515592*URAMP(GG+EP/15.499816))^1.9350946)}
+.param P  {(0.0044414767*URAMP(GG+EP/19.99574)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0025921537*M1*M2)}
+.param IG {(0.0022207383*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0025580516*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.4p
+CGK G K 5.7p
+CAK A K 5.9p
+.ENDS   
+*   
+*   
+* Generic triode model: EL156T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:51 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT EL156T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.011748081*EP)^-0.24110473)}
+.param M2 {((0.86152198*URAMP(GG+EP/11.787288))^1.7411047)}
+.param P  {(0.0036416815*URAMP(GG+EP/13.681935)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0023436481*M1*M2)}
+.param IG {(0.0018208407*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0022273001*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.9p
+CGK G K 11.1p
+CAK A K 7p
+.ENDS   
+*   
+*   
+* Generic triode model: EL32T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:47 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT EL32T_ayumi A G K
+.param GG {(V(G,K)+0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.12471331*EP)^-1.9909547)}
+.param M2 {((0.42968188*URAMP(GG+EP/4.5730334))^3.4909547)}
+.param P  {(0.0011713028*URAMP(GG+EP/10.642835)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0020582453*M1*M2)}
+.param IG {(0.00058565141*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00075455382*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.6p
+CGK G K 2.4p
+CAK A K 4p
+.ENDS   
+*   
+*   
+* Generic triode model: EL34T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:48 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT EL34T_ayumi A G K
+.param GG {(V(G,K)+0.29360503)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.040003405*EP)^-0.73308055)}
+.param M2 {((0.67171782*URAMP(GG+EP/8.2063559))^2.2330806)}
+.param P  {(0.0033402929*URAMP(GG+EP/12.216969)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0019762451*M1*M2)}
+.param IG {(0.0016701465*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0020885491*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.2p
+CGK G K 9.1p
+CAK A K 8.4p
+.ENDS   
+*   
+*   
+* Generic triode model: EL95T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:50 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT EL95T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.012612458*EP)^-0.34815571)}
+.param M2 {((0.81161992*URAMP(GG+EP/14.936032))^1.8481557)}
+.param P  {(0.001923993*URAMP(GG+EP/18.402742)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0011570767*M1*M2)}
+.param IG {(0.00096199651*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0011209319*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.5p
+CGK G K 3.2p
+CAK A K 3.5p
+.ENDS   
+*   
+*   
+* Generic triode model: KT33CT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:52 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT KT33CT_ayumi A G K
+.param GG {(V(G,K)+0.96267547)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.055090322*EP)^-0.90062349)}
+.param M2 {((0.62483768*URAMP(GG+EP/6.8099498))^2.4006235)}
+.param P  {(0.0032650112*URAMP(GG+EP/10.89875)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0020623072*M1*M2)}
+.param IG {(0.0016325056*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0020920259*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 8.4p
+CGK G K 10.8p
+CAK A K 10.9p
+.ENDS   
+*   
+*   
+* Generic triode model: KT66T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:54 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT KT66T_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.051887963*EP)^-0.76669755)}
+.param M2 {((0.66175569*URAMP(GG+EP/6.5187433))^2.2666975)}
+.param P  {(0.0018223197*URAMP(GG+EP/9.8506796)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0010893248*M1*M2)}
+.param IG {(0.00091115984*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0011955789*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 6.5p
+CGK G K 8.1p
+CAK A K 9p
+.ENDS   
+*   
+*   
+* Generic triode model: KT88T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:55 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT KT88T_ayumi A G K
+.param GG {(V(G,K)+0.99999999)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.097534908*EP)^-1.4398564)}
+.param M2 {((0.51022901*URAMP(GG+EP/5.0214944))^2.9398564)}
+.param P  {(0.0031096914*URAMP(GG+EP/9.8416483)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0029317575*M1*M2)}
+.param IG {(0.0015548457*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0020406477*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.2p
+CGK G K 9p
+CAK A K 10.9p
+.ENDS   
+*   
+* Generic triode model: MH4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:57 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT MH4_ayumi A G K
+.param GG {(V(G,K)+0.58255619)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.0059036471*EP)^-0.42275823)}
+.param M2 {((0.78012928*URAMP(GG+EP/37.243201))^1.9227582)}
+.param P  {(0.017484357*URAMP(GG+EP/47.739781)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.010236064*M1*M2)}
+.param IG {(0.0087421787*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00929441*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 5.7p
+CGK G K 7p
+CAK A K 6.5p
+.ENDS   
+*   
+* Generic triode model: MH40   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:57 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT MH40_ayumi A G K
+.param GG {(V(G,K)+0.39906513)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.011821777*EP)^-0.91482169)}
+.param M2 {((0.62116387*URAMP(GG+EP/32.045617))^2.4148217)}
+.param P  {(0.0012108021*URAMP(GG+EP/51.589634)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00077021291*M1*M2)}
+.param IG {(0.00060540103*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00064077588*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 7.3p
+CGK G K 6p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: MH41   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:42:59 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT MH41_ayumi A G K
+.param GG {(V(G,K)+0.69037329)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.016743849*EP)^-2.3893886)}
+.param M2 {((0.38566473*URAMP(GG+EP/36.690206))^3.8893886)}
+.param P  {(0.0031372081*URAMP(GG+EP/95.134979)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0095426065*M1*M2)}
+.param IG {(0.0015686041*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0016181984*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.2p
+CGK G K 8.5p
+CAK A K 4.1p
+.ENDS   
+*   
+* Generic triode model: MHL4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:00 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT MHL4_ayumi A G K
+.param GG {(V(G,K)+0.4016137)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.017679176*EP)^-0.56606943)}
+.param M2 {((0.72601626*URAMP(GG+EP/15.49754))^2.0660694)}
+.param P  {(0.00078960956*URAMP(GG+EP/21.345996)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00045482006*M1*M2)}
+.param IG {(0.00039480478*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00045093613*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 3.9p
+CGK G K 5.4p
+CAK A K 4.5p
+.ENDS   
+*   
+* Generic triode model: ML4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:01 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT ML4_ayumi A G K
+.param GG {(V(G,K)+1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.09991405*EP)^-2.2677255)}
+.param M2 {((0.39811818*URAMP(GG+EP/6.0239958))^3.7677255)}
+.param P  {(0.0012796938*URAMP(GG+EP/15.131175)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0032670893*M1*M2)}
+.param IG {(0.0006398469*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00076878036*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+*   
+* Generic triode model: Pen45T   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:02 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT Pen45T_ayumi A G K
+.param GG {(V(G,K)+0.77688676)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.013260501*EP)^-0.37488998)}
+.param M2 {((0.80004694*URAMP(GG+EP/15.078846))^1.87489)}
+.param P  {(0.0032965978*URAMP(GG+EP/18.847452)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0019602521*M1*M2)}
+.param IG {(0.0016482989*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.001914113*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 9.6p
+CGK G K 13.2p
+CAK A K 11.9p
+.ENDS   
+*   
+* Generic triode model: PX25   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:05 2008   
+*            Plate   
+*            | Grid   
+*            | | Cathode   
+*            | | |
+.SUBCKT PX25_ayumi A G K
+.param GG {(V(G,K)+-1)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.042915161*EP)^-0.71624142)}
+.param M2 {((0.67682157*URAMP(GG+EP/7.5306353))^2.2162414)}
+.param P  {(0.0019818048*URAMP(GG+EP/11.126471)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0011671444*M1*M2)}
+.param IG {(0.00099090241*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0012639928*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 14.8p
+CGK G K 11.4p
+CAK A K 8.3p
+.ENDS   
+*   
+* Generic triode model: PX25A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:06 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT PX25A_ayumi A G K
+.param GG {(V(G,K)+-0.75925792)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.10259158*EP)^-0.6493098)}
+.param M2 {((0.69789846*URAMP(GG+EP/2.944701))^2.1493098)}
+.param P  {(0.0013209842*URAMP(GG+EP/4.2193831)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00076697829*M1*M2)}
+.param IG {(0.00066049212*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0011569181*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 14.8p
+CGK G K 11.4p
+CAK A K 8.3p
+.ENDS   
+*   
+* Generic triode model: PX4   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:04 2008   
+*           Plate   
+*           | Grid   
+*           | | Cathode   
+*           | | |
+.SUBCKT PX4_ayumi A G K
+.param GG {(V(G,K)+-0.81287548)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.047093515*EP)^-0.41642857)}
+.param M2 {((0.78270592*URAMP(GG+EP/4.6140976))^1.9164286)}
+.param P  {(0.0010767826*URAMP(GG+EP/5.895059)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.000631487*M1*M2)}
+.param IG {(0.00053839132*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00082368923*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 13.7p
+CGK G K 7.7p
+CAK A K 3.9p
+.ENDS   
+*   
+* Generic triode model: RE604   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:07 2008   
+*             Plate   
+*             | Grid   
+*             | | Cathode   
+*             | | |
+.SUBCKT RE604_ayumi A G K
+.param GG {(V(G,K)+0.99997938)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.030921607*EP)^-0.18515194)}
+.param M2 {((0.89012745*URAMP(GG+EP/3.5532613))^1.6851519)}
+.param P  {(0.00042470572*URAMP(GG+EP/3.9918568)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00028831412*M1*M2)}
+.param IG {(0.00021235286*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00038155471*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4p
+CGK G K 4p
+CAK A K 4p
+.ENDS   
+*   
+* Generic triode model: WE104D   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:08 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT WE104D_ayumi A G K
+.param GG {(V(G,K)+-0.56998685)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.125122*EP)^-0.50749668)}
+.param M2 {((0.74719924*URAMP(GG+EP/2.0204341))^2.0074967)}
+.param P  {(0.00015779238*URAMP(GG+EP/2.7040098)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*9.1039243e-05*M1*M2)}
+.param IG {(7.8896192e-05*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00017408127*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 4.9p
+CGK G K 4.1p
+CAK A K 3.4p
+.ENDS   
+*   
+* Generic triode model: WE262B   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:09 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT WE262B_ayumi A G K
+.param GG {(V(G,K)+0.88434569)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.017408503*EP)^-0.46076878)}
+.param M2 {((0.76500606*URAMP(GG+EP/13.498802))^1.9607688)}
+.param P  {(0.00032011417*URAMP(GG+EP/17.645353)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00018582795*M1*M2)}
+.param IG {(0.00016005708*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0001876514*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.9p
+CGK G K 2.4p
+CAK A K 3.8p
+.ENDS   
+*   
+*   
+* Generic triode model: WE310AT   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:11 2008   
+*               Plate   
+*               | Grid   
+*               | | Cathode   
+*               | | |
+.SUBCKT WE310AT_ayumi A G K
+.param GG {(V(G,K)+0.54054476)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.010235898*EP)^-0.32209043)}
+.param M2 {((0.82323027*URAMP(GG+EP/17.269587))^1.8220904)}
+.param P  {(0.00076747724*URAMP(GG+EP/20.977833)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.00046759791*M1*M2)}
+.param IG {(0.00038373862*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.00043926524*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 2.4p
+CGK G K 3.6p
+CAK A K 9p
+.ENDS   
+*   
+* Generic triode model: WE396A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:12 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT WE396A_ayumi A G K
+.param GG {(V(G,K)+0.052879817)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.014753653*EP)^-0.87734793)}
+.param M2 {((0.63095518*URAMP(GG+EP/25.013793))^2.3773479)}
+.param P  {(0.0026962883*URAMP(GG+EP/39.644326)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.0016842826*M1*M2)}
+.param IG {(0.0013481441*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0014508027*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 1.3p
+CGK G K 2.2p
+CAK A K 1p
+.ENDS   
+*   
+* Generic triode model: WE421A   
+* Copyright 2003--2008 by Ayumi Nakabayashi, All rights reserved.   
+* Thanks to Tooru Kuroda.   
+* Version 3.10, Generated on Sat Mar  8 22:43:13 2008   
+*              Plate   
+*              | Grid   
+*              | | Cathode   
+*              | | |
+.SUBCKT WE421A_ayumi A G K
+.param GG {(V(G,K)+0.99947463)}
+.param EP {URAMP(V(A,K))}
+.param EG {URAMP(V(G,K))}
+.param M1 {((0.16037928*EP)^-1.9202159)}
+.param M2 {((0.4385688*URAMP(GG+EP/3.5006467))^3.4202159)}
+.param P  {(0.0067402387*URAMP(GG+EP/7.9819784)^1.5)}
+.param IK {(U(GG)*P+(1-U(GG))*0.010830172*M1*M2)}
+.param IG {(0.0033701193*EG^1.5*(EG/(EP+EG)*1.2+0.4))}
+BIAK A K I=URAMP(IK-IG-URAMP(IK-IG-0.0046756479*EP^1.5))+1e-10*V(A,K)
+BIGK G K I=IG   
+* CAPS
+CGA G A 8.6p
+CGK G K 6p
+CAK A K 2.2p
+.ENDS
+
+
+
+;$SpiceType=SPICE3

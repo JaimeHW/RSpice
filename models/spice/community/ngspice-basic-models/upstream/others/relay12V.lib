@@ -1,0 +1,15 @@
+* relay Tianbo HJR-4102 L 12
+* http://tianbo-relay.com/en/products.php?tid=10
+* http://tianbo-relay.com/upload/2019062414532076.pdf datasheet
+
+.subckt HJR-4102L12 COM NO NC POS NEG
+R1 POS INT1 720   ; coil resistance
+Vmeasp INT1 INT2 0 ; to measure the coil current
+Vmeasn INT3 INT2 0 ; to measure the coil current (reverse polarity)
+L1 INT3 NEG 300m ; just a guess !
+W1 COM NO Vmeasp MYSW3
+W2 COM NC Vmeasn MYSW4
+* Ion=9/720=12.5m, Ioff=1.2/720=1.67m, It=(Ion+Ioff)/2=7.1m Ih=Ion-It=5.4m
+.model MYSW3 CSW(Ron=.05 Roff=500Meg Ih=5.4m It=7.1m)
+.model MYSW4 CSW(Ron=.05 Roff=500Meg Ih=5.4m It=-7.1m)
+.ends

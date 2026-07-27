@@ -1,0 +1,789 @@
+******************************************************************
+* 
+* EPCOS AG			EPCOS AG
+* Bereich Induktivitäten	Inductors Division
+* Entwicklung			Development Department
+* D-89520 Heidenheim		D-89520 Heidenheim
+* In den Seewiesen 26		In den Seewiesen 26
+*
+* Allgemeines			General
+*	Wolfgang Sammet
+*	Tel  +49 (0) 7321 326-220
+*	FAX  +49 (0) 7321 326-628
+*	Email wolfgang.sammet@epcos.com
+*
+*
+* Modellierung und Simulation	Modeling and simulation
+*	Stefan Schefler
+*	Tel  +49 (0) 7321 326-446
+*	FAX  +49 (0) 7321 326-628
+*	Email stefan.schefler@epcos.com
+*
+*
+******************************************************************
+* Bitte lesen Sie die Hinweise in der Datei "Liesmich.txt" .
+* Please read the hints in "Readme.txt" .
+******************************************************************
+*
+* 
+* Library B82472.lib 
+* Version 1.25 (Donnerstag, 22. Juli 2010 16:28 Uhr CEST)
+* 
+******************************************************************
+* SPICE-Simulationsdaten für SMT Power Induktivität B82472 7.3 x 7.3 x 3.3 (mm)
+* SPICE simulation data for SMT Power Inductor B82472 7.3 x 7.3 x 3.3 (mm)
+* 	B82472
+*
+******************************************************************
+*
+******************************************************************
+* Library für PSPICE
+* 
+* Libs für weitere Spice-Versionen sind verfügbar (HSPICE ..)
+*	
+******************************************************************
+*
+.subckt B82472_BASE1 A1 A2  PARAMS:  
++	ls11_a=952.4089n rs11_a=13.94m cp11_a=1.0858p rp11_a=2.7035k 
++	lwira1_a=42.5400n lwa1_a=664.3184n rwa1_a=798.6762m lwb1_a=178.5737n 
++	rwb1_a=134.6297 kw1a1_a=999.0000m 
+ls1_b	A1 31 	{ls11_a}  
+rs1_b	31 A2 	{rs11_a}  
+cp1_b	A1 A2 	{cp11_a}  
+rp1_b	A1 A2 	{rp11_a}  
+lwira_b	900 0 	{lwira1_a}  
+lwa_b	900 901 	{lwa1_a}  
+rwa_b	901 0 	{rwa1_a}  
+lwb_b	900 902 	{lwb1_a}  
+rwb_b	902 0 	{rwb1_a}  
+kw1a_b	ls1_b lwira_b	{kw1a1_a}
+.ENDS
+
+*
+* B82472G4102M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (1 uH +-20%)
+*
+.subckt B82472G4102M000 A1 A2   PARAMS:  
++	ls11=952.4089n rs11=13.94m cp11=1.0858p rp11=2.7035k 
++	lwira1=42.5400n lwa1=664.3184n rwa1=798.6762m lwb1=178.5737n 
++	rwb1=134.6297 kw1a1=999.0000m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4103M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (10 uH +-20%)
+*
+.subckt B82472G4103M000 A1 A2   PARAMS:  
++	ls11=9.6318u rs11=59.61m cp11=2.5987p rp11=19.4645k 
++	lwira1=42.5400n lwa1=560.4745n rwa1=1.5711 lwb1=236.1294n 
++	rwb1=90.1777 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4104M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (100 uH +-20%)
+*
+.subckt B82472G4104M000 A1 A2   PARAMS:  
++	ls11=99.4781u rs11=473m cp11=3.7235p rp11=83.8821k 
++	lwira1=42.5400n lwa1=1.8982u rwa1=875.4525m lwb1=623.1984n 
++	rwb1=3.5407 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4105M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (1 mH +-20%)
+*
+.subckt B82472G4105M000 A1 A2   PARAMS:  
++	ls11=1.0486m rs11=4.237 cp11=3.6820p rp11=360.3260k 
++	lwira1=42.5400n lwa1=1.9938u rwa1=169.0731m lwb1=1.1752u 
++	rwb1=2.2804 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4152M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (1.5 uH +-20%)
+*
+.subckt B82472G4152M000 A1 A2   PARAMS:  
++	ls11=1.3972u rs11=16.83m cp11=977.4141f rp11=4.1056k 
++	lwira1=42.5400n lwa1=622.3706n rwa1=1.0221 lwb1=166.3564n 
++	rwb1=90.2361 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4153M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (15 uH +-20%)
+*
+.subckt B82472G4153M000 A1 A2   PARAMS:  
++	ls11=15.6135u rs11=101.42m cp11=2.2956p rp11=21.3542k 
++	lwira1=42.5400n lwa1=881.3944n rwa1=317.2050m lwb1=792.7503n 
++	rwb1=3.3400 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4154M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (150 uH +-20%)
+*
+.subckt B82472G4154M000 A1 A2   PARAMS:  
++	ls11=146.5142u rs11=679.5m cp11=3.1079p rp11=103.2447k 
++	lwira1=42.5400n lwa1=799.7323n rwa1=285.6746m lwb1=692.9640n 
++	rwb1=4.1444 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4184M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (180 uH +-20%)
+*
+.subckt B82472G4184M000 A1 A2   PARAMS:  
++	ls11=185.3653u rs11=819.4m cp11=3.7014p rp11=128.0491k 
++	lwira1=42.5400n lwa1=767.7848n rwa1=218.9949m lwb1=1.0002u 
++	rwb1=5.1316 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4222M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (2.2 uH +-20%)
+*
+.subckt B82472G4222M000 A1 A2   PARAMS:  
++	ls11=2.0019u rs11=20m cp11=1.4281p rp11=5.3371k 
++	lwira1=42.5400n lwa1=551.7000n rwa1=852.9100m lwb1=154.6756n 
++	rwb1=74.7689 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4223M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (22 uH +-20%)
+*
+.subckt B82472G4223M000 A1 A2   PARAMS:  
++	ls11=23.7296u rs11=116m cp11=3.1753p rp11=28.2728k 
++	lwira1=42.5400n lwa1=2.0077u rwa1=720.7209m lwb1=565.1978n 
++	rwb1=2.3725 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4224M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (220 uH +-20%)
+*
+.subckt B82472G4224M000 A1 A2   PARAMS:  
++	ls11=211.4387u rs11=997m cp11=3.4461p rp11=127.4668k 
++	lwira1=42.5400n lwa1=1.5413u rwa1=528.3668m lwb1=618.1947n 
++	rwb1=2.9647 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4332M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (3.3 uH +-20%)
+*
+.subckt B82472G4332M000 A1 A2   PARAMS:  
++	ls11=3.3742u rs11=26.16m cp11=2.2015p rp11=6.2326k 
++	lwira1=42.5400n lwa1=521.8372n rwa1=727.3159m lwb1=504.1204n 
++	rwb1=64.3995 kw1a1=999.9990m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4333M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (33 uH +-20%)
+*
+.subckt B82472G4333M000 A1 A2   PARAMS:  
++	ls11=35.5195u rs11=208m cp11=3.0741p rp11=40.2661k 
++	lwira1=42.5400n lwa1=1.8568u rwa1=853.1919m lwb1=728.1919n 
++	rwb1=3.6681 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4472M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (4.7 uH +-20%)
+*
+.subckt B82472G4472M000 A1 A2   PARAMS:  
++	ls11=5.2240u rs11=33.35m cp11=2.2833p rp11=9.1228k 
++	lwira1=42.5400n lwa1=701.5910n rwa1=301.0734m lwb1=721.6918n 
++	rwb1=3.3144 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4474M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (470 uH +-20%)
+*
+.subckt B82472G4474M000 A1 A2   PARAMS:  
++	ls11=506.9968u rs11=2.324 cp11=3.2390p rp11=214.2391k 
++	lwira1=42.5400n lwa1=849.7607n rwa1=206.5115m lwb1=1.2232u 
++	rwb1=3.5381 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4563M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (56 uH +-20%)
+*
+.subckt B82472G4563M000 A1 A2   PARAMS:  
++	ls11=57.5871u rs11=291.7m cp11=2.9172p rp11=50.5089k 
++	lwira1=42.5400n lwa1=1.5587u rwa1=714.2718m lwb1=564.3357n 
++	rwb1=3.0140 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4682M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (6.8 uH +-20%)
+*
+.subckt B82472G4682M000 A1 A2   PARAMS:  
++	ls11=7.1587u rs11=41.28m cp11=2.2538p rp11=10.6131k 
++	lwira1=42.5400n lwa1=846.0761n rwa1=301.1798m lwb1=631.5719n 
++	rwb1=2.2982 kw1a1=999.9990m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G4683M000 SMT Power Inductor 7.3 x 7.3 x 3.3 (mm) Standard performance, magnetically shielded (68 uH +-20%)
+*
+.subckt B82472G4683M000 A1 A2   PARAMS:  
++	ls11=70.1617u rs11=0 cp11=2.7187p rp11=67.2275k 
++	lwira1=42.5400n lwa1=838.8897n rwa1=315.8209m lwb1=919.2677n 
++	rwb1=5.2978 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6102M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (1 uH +-20%)
+*
+.subckt B82472G6102M000 A1 A2   PARAMS:  
++	ls11=957.6481n rs11=13.36m cp11=967.8565f rp11=1.9223k 
++	lwira1=42.9400n lwa1=656.5917n rwa1=1.5023 lwb1=157.8682n 
++	rwb1=75.5319 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6103M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (10 uH +-20%)
+*
+.subckt B82472G6103M000 A1 A2   PARAMS:  
++	ls11=10.0316u rs11=41.86m cp11=3.1820p rp11=13.1272k 
++	lwira1=42.9400n lwa1=684.6118n rwa1=181.1301m lwb1=568.5346n 
++	rwb1=1.6905 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6104M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (100 uH +-20%)
+*
+.subckt B82472G6104M000 A1 A2   PARAMS:  
++	ls11=105.3530u rs11=363.1m cp11=4.6960p rp11=76.7381k 
++	lwira1=42.9400n lwa1=1.5888u rwa1=546.7661m lwb1=613.0610n 
++	rwb1=2.7618 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6105M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (1 mH +-20%)
+*
+.subckt B82472G6105M000 A1 A2   PARAMS:  
++	ls11=1.0966m rs11=3.402 cp11=4.4226p rp11=349.7736k 
++	lwira1=42.9400n lwa1=1.9674u rwa1=195.6249m lwb1=933.4592n 
++	rwb1=1.4663 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6152M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (1.5 uH +-20%)
+*
+.subckt B82472G6152M000 A1 A2   PARAMS:  
++	ls11=1.3709u rs11=12.39m cp11=1.1500p rp11=2.6413k 
++	lwira1=42.9400n lwa1=512.9283n rwa1=504.3933m lwb1=471.4495n 
++	rwb1=61.3795 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6153M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (15 uH +-20%)
+*
+.subckt B82472G6153M000 A1 A2   PARAMS:  
++	ls11=15.3377u rs11=58.97m cp11=3.3420p rp11=17.4604k 
++	lwira1=42.9400n lwa1=863.0433n rwa1=191.2052m lwb1=607.3027n 
++	rwb1=1.6750 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6154M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (150 uH +-20%)
+*
+.subckt B82472G6154M000 A1 A2   PARAMS:  
++	ls11=177.5648u rs11=548.4m cp11=5.4574p rp11=117.1119k 
++	lwira1=42.9400n lwa1=787.3247n rwa1=186.0684m lwb1=975.3627n 
++	rwb1=3.3402 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6222M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (2.2 uH +-20%)
+*
+.subckt B82472G6222M000 A1 A2   PARAMS:  
++	ls11=2.3605u rs11=17.08m cp11=1.2020p rp11=5.1528k 
++	lwira1=42.9400n lwa1=480.7191n rwa1=511.1100m lwb1=228.5956n 
++	rwb1=50.0801 kw1a1=999.0000m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6223M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (22 uH +-20%)
+*
+.subckt B82472G6223M000 A1 A2   PARAMS:  
++	ls11=21.1878u rs11=80.78m cp11=4.3094p rp11=20.1492k 
++	lwira1=42.9400n lwa1=1.5532u rwa1=642.2279m lwb1=472.6777n 
++	rwb1=1.6697 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6224M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (220 uH +-20%)
+*
+.subckt B82472G6224M000 A1 A2   PARAMS:  
++	ls11=238.3837u rs11=821.7m cp11=4.5815p rp11=151.6415k 
++	lwira1=42.9400n lwa1=1.9480u rwa1=545.8313m lwb1=895.3005n 
++	rwb1=3.1196 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6332M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (3.3 uH +-20%)
+*
+.subckt B82472G6332M000 A1 A2   PARAMS:  
++	ls11=3.2944u rs11=19.6m cp11=1.5902p rp11=5.4086k 
++	lwira1=42.9400n lwa1=488.7832n rwa1=418.8396m lwb1=411.9525n 
++	rwb1=35.9298 kw1a1=999.0000m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6333M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (33 uH +-20%)
+*
+.subckt B82472G6333M000 A1 A2   PARAMS:  
++	ls11=36.1752u rs11=126.35m cp11=4.3147p rp11=28.3969k 
++	lwira1=42.9400n lwa1=1.6121u rwa1=552.6085m lwb1=401.3463n 
++	rwb1=1.5785 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6334M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (330 uH +-20%)
+*
+.subckt B82472G6334M000 A1 A2   PARAMS:  
++	ls11=391.7065u rs11=1.582 cp11=5.7416p rp11=221.0489k 
++	lwira1=42.9400n lwa1=845.0963n rwa1=179.5348m lwb1=1.4956u 
++	rwb1=3.0489 kw1a1=999.0000m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6472M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (4.7 uH +-20%)
+*
+.subckt B82472G6472M000 A1 A2   PARAMS:  
++	ls11=4.6272u rs11=24.28m cp11=2.4204p rp11=7.1735k 
++	lwira1=42.9400n lwa1=614.3746n rwa1=243.6895m lwb1=682.1475n 
++	rwb1=2.5692 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6473M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (47 uH +-20%)
+*
+.subckt B82472G6473M000 A1 A2   PARAMS:  
++	ls11=46.8261u rs11=181.51m cp11=3.8554p rp11=48.6364k 
++	lwira1=42.9400n lwa1=1.4622u rwa1=572.2796m lwb1=474.7780n 
++	rwb1=2.0690 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6474M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (470 uH +-20%)
+*
+.subckt B82472G6474M000 A1 A2   PARAMS:  
++	ls11=509.3102u rs11=1.928 cp11=4.8902p rp11=234.6805k 
++	lwira1=42.9400n lwa1=1.8083u rwa1=216.9065m lwb1=834.8422n 
++	rwb1=1.6006 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6682M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (6.8 uH +-20%)
+*
+.subckt B82472G6682M000 A1 A2   PARAMS:  
++	ls11=7.2452u rs11=32.72m cp11=3.1479p rp11=8.7957k 
++	lwira1=42.9400n lwa1=772.5343n rwa1=227.6616m lwb1=595.7819n 
++	rwb1=1.8972 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6683M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (68 uH +-20%)
+*
+.subckt B82472G6683M000 A1 A2   PARAMS:  
++	ls11=68.5832u rs11=244.7m cp11=4.3274p rp11=61.2804k 
++	lwira1=42.9400n lwa1=806.0690n rwa1=217.6790m lwb1=552.1193n 
++	rwb1=2.6459 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472G6684M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, magnetically shielded (680 uH +-20%)
+*
+.subckt B82472G6684M000 A1 A2   PARAMS:  
++	ls11=732.7539u rs11=2.672 cp11=4.6668p rp11=273.4223k 
++	lwira1=42.9400n lwa1=1.9575u rwa1=250.7804m lwb1=851.1855n 
++	rwb1=1.5778 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6102M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (1 uH +-20%)
+*
+.subckt B82472P6102M000 A1 A2   PARAMS:  
++	ls11=957.6481n rs11=13.36m cp11=967.8565f rp11=1.9223k 
++	lwira1=42.9400n lwa1=656.5917n rwa1=1.5023 lwb1=157.8682n 
++	rwb1=75.5319 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6103M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (10 uH +-20%)
+*
+.subckt B82472P6103M000 A1 A2   PARAMS:  
++	ls11=10.0316u rs11=41.86m cp11=3.1820p rp11=13.1272k 
++	lwira1=42.9400n lwa1=684.6118n rwa1=181.1301m lwb1=568.5346n 
++	rwb1=1.6905 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6104M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (100 uH +-20%)
+*
+.subckt B82472P6104M000 A1 A2   PARAMS:  
++	ls11=105.3530u rs11=363.1m cp11=4.6960p rp11=76.7381k 
++	lwira1=42.9400n lwa1=1.5888u rwa1=546.7661m lwb1=613.0610n 
++	rwb1=2.7618 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6105M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (1 mH +-20%)
+*
+.subckt B82472P6105M000 A1 A2   PARAMS:  
++	ls11=1.0966m rs11=3.402 cp11=4.4226p rp11=349.7736k 
++	lwira1=42.9400n lwa1=1.9674u rwa1=195.6249m lwb1=933.4592n 
++	rwb1=1.4663 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6152M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (1.5 uH +-20%)
+*
+.subckt B82472P6152M000 A1 A2   PARAMS:  
++	ls11=1.3709u rs11=12.39m cp11=1.1500p rp11=2.6413k 
++	lwira1=42.9400n lwa1=512.9283n rwa1=504.3933m lwb1=471.4495n 
++	rwb1=61.3795 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6153M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (15 uH +-20%)
+*
+.subckt B82472P6153M000 A1 A2   PARAMS:  
++	ls11=15.3377u rs11=58.97m cp11=3.3420p rp11=17.4604k 
++	lwira1=42.9400n lwa1=863.0433n rwa1=191.2052m lwb1=607.3027n 
++	rwb1=1.6750 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6154M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (150 uH +-20%)
+*
+.subckt B82472P6154M000 A1 A2   PARAMS:  
++	ls11=177.5648u rs11=548.4m cp11=5.4574p rp11=117.1119k 
++	lwira1=42.9400n lwa1=787.3247n rwa1=186.0684m lwb1=975.3627n 
++	rwb1=3.3402 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6222M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (2.2 uH +-20%)
+*
+.subckt B82472P6222M000 A1 A2   PARAMS:  
++	ls11=2.3605u rs11=17.08m cp11=1.2020p rp11=5.1528k 
++	lwira1=42.9400n lwa1=480.7191n rwa1=511.1100m lwb1=228.5956n 
++	rwb1=50.0801 kw1a1=999.0000m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6223M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (22 uH +-20%)
+*
+.subckt B82472P6223M000 A1 A2   PARAMS:  
++	ls11=21.1878u rs11=80.78m cp11=4.3094p rp11=20.1492k 
++	lwira1=42.9400n lwa1=1.5532u rwa1=642.2279m lwb1=472.6777n 
++	rwb1=1.6697 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6224M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (220 uH +-20%)
+*
+.subckt B82472P6224M000 A1 A2   PARAMS:  
++	ls11=238.3837u rs11=821.7m cp11=4.5815p rp11=151.6415k 
++	lwira1=42.9400n lwa1=1.9480u rwa1=545.8313m lwb1=895.3005n 
++	rwb1=3.1196 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6332M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (3.3 uH +-20%)
+*
+.subckt B82472P6332M000 A1 A2   PARAMS:  
++	ls11=3.2944u rs11=19.6m cp11=1.5902p rp11=5.4086k 
++	lwira1=42.9400n lwa1=488.7832n rwa1=418.8396m lwb1=411.9525n 
++	rwb1=35.9298 kw1a1=999.0000m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6333M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (33 uH +-20%)
+*
+.subckt B82472P6333M000 A1 A2   PARAMS:  
++	ls11=36.1752u rs11=126.35m cp11=4.3147p rp11=28.3969k 
++	lwira1=42.9400n lwa1=1.6121u rwa1=552.6085m lwb1=401.3463n 
++	rwb1=1.5785 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6334M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (330 uH +-20%)
+*
+.subckt B82472P6334M000 A1 A2   PARAMS:  
++	ls11=391.7065u rs11=1.582 cp11=5.7416p rp11=221.0489k 
++	lwira1=42.9400n lwa1=845.0963n rwa1=179.5348m lwb1=1.4956u 
++	rwb1=3.0489 kw1a1=999.0000m 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6472M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (4.7 uH +-20%)
+*
+.subckt B82472P6472M000 A1 A2   PARAMS:  
++	ls11=4.6272u rs11=24.28m cp11=2.4204p rp11=7.1735k 
++	lwira1=42.9400n lwa1=614.3746n rwa1=243.6895m lwb1=682.1475n 
++	rwb1=2.5692 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6473M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (47 uH +-20%)
+*
+.subckt B82472P6473M000 A1 A2   PARAMS:  
++	ls11=46.8261u rs11=181.51m cp11=3.8554p rp11=48.6364k 
++	lwira1=42.9400n lwa1=1.4622u rwa1=572.2796m lwb1=474.7780n 
++	rwb1=2.0690 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6474M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (470 uH +-20%)
+*
+.subckt B82472P6474M000 A1 A2   PARAMS:  
++	ls11=509.3102u rs11=1.928 cp11=4.8902p rp11=234.6805k 
++	lwira1=42.9400n lwa1=1.8083u rwa1=216.9065m lwb1=834.8422n 
++	rwb1=1.6006 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6682M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (6.8 uH +-20%)
+*
+.subckt B82472P6682M000 A1 A2   PARAMS:  
++	ls11=7.2452u rs11=32.72m cp11=3.1479p rp11=8.7957k 
++	lwira1=42.9400n lwa1=772.5343n rwa1=227.6616m lwb1=595.7819n 
++	rwb1=1.8972 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6683M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (68 uH +-20%)
+*
+.subckt B82472P6683M000 A1 A2   PARAMS:  
++	ls11=68.5832u rs11=244.7m cp11=4.3274p rp11=61.2804k 
++	lwira1=42.9400n lwa1=806.0690n rwa1=217.6790m lwb1=552.1193n 
++	rwb1=2.6459 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82472P6684M000 SMT Power Inductor 7.3 x 7.3 x 4.5 (mm) High current, enhanced stability, magnetically shielded (680 uH +-20%)
+*
+.subckt B82472P6684M000 A1 A2   PARAMS:  
++	ls11=732.7539u rs11=2.672 cp11=4.6668p rp11=273.4223k 
++	lwira1=42.9400n lwa1=1.9575u rwa1=250.7804m lwb1=851.1855n 
++	rwb1=1.5778 kw1a1=0.9999 
+X1 A1 A2 B82472_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+

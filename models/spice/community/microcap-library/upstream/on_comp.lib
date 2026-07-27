@@ -1,0 +1,236 @@
+* OrCAD Model Editor - Version 9.2
+
+* |=======================================================
+* |                     NCS2200 SERIES        REV - 6/25/03
+* |                (PSPICE VERSION)
+* |                ON SEMICONDUCTOR
+* |        		LOW VOLTAGE COMPARATORS
+* |
+* | This model was developed by
+* | Magnetico
+* | 182 Morris Avenue
+* | Holtsville, NY 11742
+* |
+* | Copyright 2002 Magnetico
+* | All Rights Reserved
+* |
+* | The content of this model is subject to change
+* | without notice and may not be modified or altered
+* | without permission from ON Semiconductor. This model
+* | has been carefully checked and is believed to be
+* | accurate, however neither Magnetico nor ON Semiconductor
+* | assume liability for the use of this model or the
+* | results obtained from using it.
+* |
+* | For more information regarding modeling services,
+* | model libraries or simulation productors, please
+* | call Magnetico at (631) 654-0253 ext 116 or 106.
+* | email: Sales@Magnetico.com.
+* |=======================================================
+*$
+.SUBCKT NCS2200  4 3 11 2  5
+*Node assignments| | |  |  |
+*                | | |  |  negative supply
+*                | | |  positive supply
+*                | | output 
+*                | inverting input
+*                non-inverting input
+*Complementary, Low Voltage Comparator
+*by Kehinde Omolayo
+I1 2 6 DC=5u
+D1 6 2 NCS220DA
+M1 6 3 7 5 NCS220NM 
+M2 6 4 8 5 NCS220NM 
+V1 7 5
+V2 8 5
+V3 19 0 PULSE 0 2 35u     
+Q1 16 15 5 NCS220Q 
+M3 11 9 5 5 NCS220NMA 
+M4 11 12 2 2 NCS220PM 
+EB1 2 10 Value = {IF((V(9)-V(5))>0.28, 0, IF(V(16)<(0.4+V(5)), V(24), 0))}
+EB2 13 5 Value = {IF((V(2)-V(12))>0.28, 0, IF(V(16)<(0.4+V(5)), 0, V(24)))}
+R1 10 12 10
+R2 13 9 10
+F1 5 15 V2 100
+F2 15 5 V1 100
+D2 5 15 NCS220DB 
+I2 2 16 DC=6u
+D4 16 5 NCS220DB 
+EB5 24 0 Value = {IF(V(19)>1, V(2)-V(5), 0)}
+** Discrete models **
+.MODEL NCS220DA D CJO=2p IS=1.0e-14 N=0.5
+.MODEL NCS220NM NMOS Level=1 CBD=11.5P CBS=13.9P CGBO=28N
++ CGDO=10N CGSO=12N GAMMA=1.86 IS=25F KP=8.64M LAMBDA=11.8M
++ MJ=.46 PB=.8 PHI=.75 RD=1.2 RS=18 VTO=-0.28
+.MODEL NCS220Q NPN AF=1.0 BF=300 BR=7.5 CJC=3.5PF CJE=4.5PF
++ IKF=.025 IS=1.4E-14 ISE=3E-13 KF=9E-16 NE=1.5 RC=2.4
++ TF=4E-10 TR=21E-9 VAF=100 XTB=1.5
+.MODEL NCS220NMA NMOS CBD=10.6P CBS=12.7P CGBO=37.4N
++ CGDO=22.7N CGSO=27.3N GAMMA=0 KP=8.74E-3 LAMBDA=0.02 RD=5
++ RS=0.1 VTO=0.28
+.MODEL NCS220PM PMOS CBD=10.6P CBS=12.7P CGBO=37.4N
++ CGDO=22.7N CGSO=27.3N KP=8.74E-3 LAMBDA=0.02 RD=5 RS=0.1
++ VTO=-0.28
+.MODEL NCS220DB D CJO=2p IS=1.0e-14 N=1
+.ENDS
+*$
+
+.SUBCKT NCS2201  4 3 11 2  5 1
+*Node assignments| | |  |  | Enable Input
+*                | | |  |  negative supply
+*                | | |  positive supply
+*                | | output 
+*                | inverting input
+*                non-inverting input
+*Complementary, Enable, Low Voltage Comparator
+*by Kehinde Omolayo
+I1 2 6 DC=5u
+D1 6 2 NCS220DA
+M1 6 3 7 5 NCS220NM 
+M2 6 4 8 5 NCS220NM 
+V1 7 5
+V2 8 5
+V3 19 0 PULSE 0 2 35u     
+Q1 16 15 5 NCS220Q 
+M3 11 9 5 5 NCS220NMA 
+M4 11 12 2 2 NCS220PM 
+EB1 2 10 Value = {IF((V(9)-V(5))>0.28, 0, IF(V(16)<(0.4+V(5)), V(24), 0))}
+EB2 13 5 Value = {IF((V(2)-V(12))>0.28, 0, IF(V(16)<(0.4+V(5)), 0, V(24)))}
+R1 10 12 10
+R2 13 9 10
+F1 5 15 V2 100
+F2 15 5 V1 100
+D2 5 15 NCS220DB 
+I2 2 16 DC=6u
+D4 16 5 NCS220DB
+D3 1 2 NCS220DE 
+X1 18 17 21 22 RS1500
+EB3 17 0 Value = {IF(V(18)<1, 2, IF(V(1)>(0.503*V(2)+0.497*V(5)+0.182), 0, 2))}
+EB4 18 0 Value = {IF(V(19)<1, 0, IF(V(1)<(0.34*V(2)+0.66*V(5)+0.16), 0, 2))}
+R3 21 20 118k
+C2 20 0 1N IC=2
+D5 21 23 NCS220DA
+R4 23 20 726
+EB5 24 0 Value = {IF(V(20)<1, V(2)-V(5), 0)}
+** Discrete models **
+.MODEL NCS220DA D CJO=2p IS=1.0e-14 N=0.5
+.MODEL NCS220NM NMOS Level=1 CBD=11.5P CBS=13.9P CGBO=28N
++ CGDO=10N CGSO=12N GAMMA=1.86 IS=25F KP=8.64M LAMBDA=11.8M
++ MJ=.46 PB=.8 PHI=.75 RD=1.2 RS=18 VTO=-0.28
+.MODEL NCS220Q NPN AF=1.0 BF=300 BR=7.5 CJC=3.5PF CJE=4.5PF
++ IKF=.025 IS=1.4E-14 ISE=3E-13 KF=9E-16 NE=1.5 RC=2.4
++ TF=4E-10 TR=21E-9 VAF=100 XTB=1.5
+.MODEL NCS220NMA NMOS CBD=10.6P CBS=12.7P CGBO=37.4N
++ CGDO=22.7N CGSO=27.3N GAMMA=0 KP=8.74E-3 LAMBDA=0.02 RD=5
++ RS=0.1 VTO=0.28
+.MODEL NCS220PM PMOS CBD=10.6P CBS=12.7P CGBO=37.4N
++ CGDO=22.7N CGSO=27.3N KP=8.74E-3 LAMBDA=0.02 RD=5 RS=0.1
++ VTO=-0.28
+.MODEL NCS220DB D CJO=2p IS=1.0e-14 N=1
+.MODEL NCS220DE D CJO=2p IS=100n N=0.5
+.ENDS
+*$
+
+.SUBCKT NCS2202  4 3 11 2  5
+*Node assignments| | |  |  |
+*                | | |  |  negative supply
+*                | | |  positive supply
+*                | | output 
+*                | inverting input
+*                non-inverting input
+*Open Drain, Low Voltage Comparator
+*by Kehinde Omolayo
+I1 2 6 DC=5u
+D1 6 2 NCS220DA
+M1 6 3 7 5 NCS220NM 
+M2 6 4 8 5 NCS220NM 
+V1 7 5
+V2 8 5
+V3 19 0 PULSE 0 2 35u     
+Q1 16 15 5 NCS220Q 
+M3 11 9 5 5 NCS220NMA 
+EB2 13 5 Value = {IF(V(16)<(0.4+V(5)), 0, V(24))}
+R2 13 9 10
+F1 5 15 V2 100
+F2 15 5 V1 100
+D2 5 15 NCS220DB 
+I2 2 16 DC=6u
+D4 16 5 NCS220DB 
+EB5 24 0 Value = {IF(V(19)>1, V(2)-V(5), 0)}
+** Discrete models **
+.MODEL NCS220DA D CJO=2p IS=1.0e-14 N=0.5
+.MODEL NCS220NM NMOS Level=1 CBD=11.5P CBS=13.9P CGBO=28N
++ CGDO=10N CGSO=12N GAMMA=1.86 IS=25F KP=8.64M LAMBDA=11.8M
++ MJ=.46 PB=.8 PHI=.75 RD=1.2 RS=18 VTO=-0.28
+.MODEL NCS220Q NPN AF=1.0 BF=300 BR=7.5 CJC=3.5PF CJE=4.5PF
++ IKF=.025 IS=1.4E-14 ISE=3E-13 KF=9E-16 NE=1.5 RC=2.4
++ TF=4E-10 TR=21E-9 VAF=100 XTB=1.5
+.MODEL NCS220NMA NMOS CBD=10.6P CBS=12.7P CGBO=37.4N
++ CGDO=22.7N CGSO=27.3N GAMMA=0 KP=8.74E-3 LAMBDA=0.02 RD=5
++ RS=0.1 VTO=0.28
+.MODEL NCS220DB D CJO=2p IS=1.0e-14 N=1
+.ENDS
+*$
+
+.SUBCKT NCS2203  4 3 11 2  5 1
+*Node assignments| | |  |  | Enable Input
+*                | | |  |  negative supply
+*                | | |  positive supply
+*                | | output 
+*                | inverting input
+*                non-inverting input
+*Open Drain, Enable, Low Voltage Comparator
+*by Kehinde Omolayo
+I1 2 6 DC=5u
+D1 6 2 NCS220DA
+M1 6 3 7 5 NCS220NM 
+M2 6 4 8 5 NCS220NM 
+V1 7 5
+V2 8 5
+V3 19 0 PULSE 0 2 35u     
+Q1 16 15 5 NCS220Q 
+M3 11 9 5 5 NCS220NMA 
+EB2 13 5 Value = {IF(V(16)<(0.4+V(5)), 0, V(24))}
+R2 13 9 10
+F1 5 15 V2 100
+F2 15 5 V1 100
+D2 5 15 NCS220DB 
+I2 2 16 DC=6u
+D4 16 5 NCS220DB
+D3 1 2 NCS220DE 
+X1 18 17 21 22 RS1500
+EB3 17 0 Value = {IF(V(18)<1, 2, IF(V(1)>(0.503*V(2)+0.497*V(5)+0.182), 0, 2))}
+EB4 18 0 Value = {IF(V(19)<1, 0, IF(V(1)<(0.34*V(2)+0.66*V(5)+0.16), 0, 2))}
+R3 21 20 118k
+C2 20 0 1N IC=2
+D5 21 23 NCS220DA
+R4 23 20 726
+EB5 24 0 Value = {IF(V(20)<1, V(2)-V(5), 0)}
+** Discrete models **
+.MODEL NCS220DA D CJO=2p IS=1.0e-14 N=0.5
+.MODEL NCS220NM NMOS Level=1 CBD=11.5P CBS=13.9P CGBO=28N
++ CGDO=10N CGSO=12N GAMMA=1.86 IS=25F KP=8.64M LAMBDA=11.8M
++ MJ=.46 PB=.8 PHI=.75 RD=1.2 RS=18 VTO=-0.28
+.MODEL NCS220Q NPN AF=1.0 BF=300 BR=7.5 CJC=3.5PF CJE=4.5PF
++ IKF=.025 IS=1.4E-14 ISE=3E-13 KF=9E-16 NE=1.5 RC=2.4
++ TF=4E-10 TR=21E-9 VAF=100 XTB=1.5
+.MODEL NCS220NMA NMOS CBD=10.6P CBS=12.7P CGBO=37.4N
++ CGDO=22.7N CGSO=27.3N GAMMA=0 KP=8.74E-3 LAMBDA=0.02 RD=5
++ RS=0.1 VTO=0.28
+.MODEL NCS220DB D CJO=2p IS=1.0e-14 N=1
+.MODEL NCS220DE D CJO=2p IS=100n N=0.5
+.ENDS
+*$
+** Models subckt **
+.SUBCKT RS1500 2 3 4 5
+C1 11 0 10P
+R3 10 8 144.269
+C3 8 0 10P
+EB1 10 0 Value = { IF ( V(2)>1 & V(5)>1, 0, 2 ) }
+EB2 16 0 Value = { IF ( V(3)>1 & V(4)>1, 0, 2 ) }
+EB5 4 0 Value = { IF ( V(8)>1, 2, 0 ) }
+EB6 5 0 Value = { IF ( V(11)>1, 2, 0 ) }
+R1 16 11 144.269
+.ENDS
+
+*$

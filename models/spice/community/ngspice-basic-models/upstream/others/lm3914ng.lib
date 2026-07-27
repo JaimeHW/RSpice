@@ -1,0 +1,145 @@
+* LM3914 Bar/dot display driver
+* V3.0
+* Based on data sheet from https://www.ti.com/lit/ds/symlink/lm3914.pdf
+* Copyright: Holger Vogt
+* Modified BSD license
+* adapted for ngspice
+
+* Model development started by by Geoff Western.
+* (see https://www.electro-tech-online.com/threads/simulation-model-for-the-lm3915-logarithmic-bar-dot-display-driver.134305/)
+
+* D1 V- V+ Rlo Sig Rhi Ref Adj Mode D10 D9 D8 D7 D6 D5 D4 D3 D2
+.subckt lm3914  L1 V- V+ Rlo Sig Rhi Ref Adj Mode L10 L9 L8 L7 L6 L5 L4 L3 L2
+
+* see Fig. 14 of data sheet: B source drives base of bip devices, 50 Ohm series
+* resistance in emitter line (output see Fig. 13 of data sheet),
+* so to avoid any current source at an output terminal (may lead to totally unrealistic
+* results or errors if e.g. terminal is left open).
+* Comparator C1 (Fig. 14) is integrated into the B source.
+* Comparator C2 is extra.
+* -12u at source B1 are addding approx. 120u according to manual p. 10 last section.
+* This current will start only when D2 is switched on.
+* node Mode: reference against V+ − 100mV:
+* V+ for Bar mode.
+* 200mV below V+ (or open circuit) for dot mode.
+* Thermal modelling has been added
+
+* missing: true dynamic behaviour (not detailed in data sheet)
+* missing: smooth 1 mV overlap between LEDs
+
+B1 LB1 V- I=i(Vmref)*(V(dvin)>0)*((V(dvin)<(V(dv)+1m))||(V(Mode)+0.1>=V(v+))) - 12u * (V(dvin) > V(dv))
+Q1 L1 LB1 LE1 QP
+R1 LE1 V- 50
+B2 LB2 V- I=i(Vmref)*(V(dvin)>V(dv))*((V(dvin)<2*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q2 L2 LB2 LE2 QP
+R2 LE2 V- 50
+B3 LB3 V- I=i(Vmref)*(V(dvin)>2*V(dv))*((V(dvin)<3*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q3 L3 LB3 LE3 QP
+R3 LE3 V- 50
+B4 LB4 V- I=i(Vmref)*(V(dvin)>3*V(dv))*((V(dvin)<4*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q4 L4 LB4 LE4 QP
+R4 LE4 V- 50
+B5 LB5 V- I=i(Vmref)*(V(dvin)>4*V(dv))*((V(dvin)<5*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q5 L5 LB5 LE5 QP
+R5 LE5 V- 50
+B6 LB6 V- I=i(Vmref)*(V(dvin)>5*V(dv))*((V(dvin)<6*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q6 L6 LB6 LE6 QP
+R6 LE6 V- 50
+B7 LB7 V- I=i(Vmref)*(V(dvin)>6*V(dv))*((V(dvin)<7*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q7 L7 LB7 LE7 QP
+R7 LE7 V- 50
+B8 LB8 V- I=i(Vmref)*(V(dvin)>7*V(dv))*((V(dvin)<8*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q8 L8 LB8 LE8 QP
+R8 LE8 V- 50
+B9 LB9 V- I=i(Vmref)*(V(dvin)>8*V(dv))*((V(dvin)<9*V(dv)+1m)||(V(Mode)+0.1>=V(v+)))
+Q9 L9 LB9 LE9 QP
+R9 LE9 V- 50
+B10 LB10 V- I=i(Vmref)*(V(dvin)>9*V(dv))
+Q10 L10 LB10 LE10 QP
+R10 LE10 V- 50
+
+* input circuit, p. 8
+Rsig sig sigint 20k
+Dsig v- sigint D
+* additional clamping against positive overvoltage
+Dsi2 sigint vmax D
+VDsi2max vmax v- 35
+* Input resistor (100nA at 20 V)
+Rinp sigint 0 200Meg
+
+B12 dvin 0 V=v(sigint)-v(rlo)
+B13 dv 0 V=(v(rhi)-v(rlo))/10
+
+Rladder Rhi Rlo 12k
+
+* Comparator C2 (Fig. 14)
+BC2 C2 V- V = ternary_fcn(V(L9) - 0.9 > v(Mode), 0, V(v+,v-))
+DC2 LB10 C2 D
+
+* power consumption and die temperature rise tj
+* emulate standby supply current (5V 2.4mA, 20V 6.1mA typ)
+* use a pnp tansistor in saturation
+Qload Vp qld ve1 QAmod
+RLE1 ve1 v+ 50
+* base current for the transistor with gain 10, linear interpolation
+BLoad qld v+ I = (2.4m + 2.5e-4 * (V(v+,v-) - 5))/10
+
+* add supply current due to reference loading (p. 11, first section)
+* use a pnp tansistor in saturation
+Qload2 Vp qld2 ve2 QBmod
+RLE2 ve2 v+ 50
+* base current for the transistor with gain 40
+BAdj qld2 v+ I = -i(Vmref)/10
+Vpmeas vp v- 0
+
+* add all power dissipated
+* internal power
+BPint pges pd1 v = i(Vpmeas) * V(v+, v-)
+* power per diode driver
+BPD1 pd1 pd2 v = 0.91 * V(LE1, V-) / 50 * V(L1, v-)
+BPD2 pd2 pd3 v = 0.91 * V(LE2, V-) / 50 * V(L2, v-)
+BPD3 pd3 pd4 v = 0.91 * V(LE3, V-) / 50 * V(L3, v-)
+BPD4 pd4 pd5 v = 0.91 * V(LE4, V-) / 50 * V(L4, v-)
+BPD5 pd5 pd6 v = 0.91 * V(LE5, V-) / 50 * V(L5, v-)
+BPD6 pd6 pd7 v = 0.91 * V(LE6, V-) / 50 * V(L6, v-)
+BPD7 pd7 pd8 v = 0.91 * V(LE7, V-) / 50 * V(L7, v-)
+BPD8 pd8 pd9 v = 0.91 * V(LE8, V-) / 50 * V(L8, v-)
+BPD9 pd9 pd10 v = 0.91 * V(LE9, V-) / 50 * V(L9, v-)
+BPD10 pd10 0 v = 0.91 * V(LE10, V-) / 50 * V(L10, v-)
+
+* calculate die (junction) temperature (delta above ambient temperature) by electrothermal calculation:
+* resistance->thermal resistance, potential difference->temparature difference
+* electrical power->heat current flow, capacitance->thermal capacitance
+* total junction temperature the is tj+Ta, e.g. tj + 25°C
+BHeat 0 tj I = v(pges)
+Rja tj 0 55 $ thermal resistance junction to ambient for DIP package, given in page 3, (3)
+Cja tj 0 4.35m $ thermal cap. of Si die, estimated die size 2.6x2.6 mm2
+
+* reference voltage
+*Bref Ref Vint V = v(Adj) + 1.28 - i(Vmref) * 1.25 $ (output resistance due to 0.4% voltage deviation at 4mA)
+* time constant 1us (estimated)
+Rref1 Ref refc 1 $ (output resistance 2 Ohms due to 0.4% voltage deviation at 4mA)
+Rref2 refc Rrefint 1
+Crefint refc v- 1u
+Bref Ref Vint V = v(Adj) + 1.28
+
+* measure the current
+Vmref Vint V- 0
+* current source for Adj (75uA, see p. 9, IAdj)
+* use a pnp tansistor in saturation
+Qadj Adj qadjb v+ QAmod
+* base current for the transistor with gain 10
+IAdj qadjb v+ 7.5u
+
+* clamp mode pin
+RModel Mode V- 10meg
+RModeh Mode mint 350k
+Vmint v+ mint 0.2
+
+
+.model D D
+.model QP NPN(BF=10)
+.model QAmod PNP(BF=10)
+.model QBmod PNP(BF=40)
+
+.ends lm3914

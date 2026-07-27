@@ -1,0 +1,866 @@
+******************************************************************
+* 
+* EPCOS AG			EPCOS AG
+* Bereich Induktivitäten	Inductors Division
+* Entwicklung			Development Department
+* D-89520 Heidenheim		D-89520 Heidenheim
+* In den Seewiesen 26		In den Seewiesen 26
+*
+* Allgemeines			General
+*	Wolfgang Sammet
+*	Tel  +49 (0) 7321 326-220
+*	FAX  +49 (0) 7321 326-628
+*	Email wolfgang.sammet@epcos.com
+*
+*
+* Modellierung und Simulation	Modeling and simulation
+*	Stefan Schefler
+*	Tel  +49 (0) 7321 326-446
+*	FAX  +49 (0) 7321 326-628
+*	Email stefan.schefler@epcos.com
+*
+*
+******************************************************************
+* Bitte lesen Sie die Hinweise in der Datei "Liesmich.txt" .
+* Please read the hints in "Readme.txt" .
+******************************************************************
+*
+* 
+* Library B8272X.lib 
+* Version 1.16 (Dienstag, 27. Juli 2010 16:36 Uhr CEST)
+* 
+******************************************************************
+* SPICE-Simulationsdaten für Stromkompensierte Ringkern-Zweifachdrosseln
+* SPICE simulation data for Current compensated ring core dual chokes
+* 	B8272X
+*
+******************************************************************
+*
+******************************************************************
+* Library für PSPICE
+* 
+* Libs für weitere Spice-Versionen sind verfügbar (HSPICE ..)
+*	
+******************************************************************
+*
+.subckt B8272X_BASE1 A1 A2 A3 A4  PARAMS:  
++	ls11_a=10.6267m rs11_a=469.2195m cp11_a=5.7105p rp11_a=268.3264k 
++	ls21_a=10.6267m rs21_a=469.2195m cp21_a=5.7105p rp21_a=268.3264k 
++	ccopl11_a=3.6918p rcopl11_a=315.4051 ccopl21_a=3.6918p rcopl21_a=315.4051 
++	lwira1_a=2.6160u lwa1_a=163.5170u rwa1_a=405.2489m lwb1_a=475.8620u 
++	rwb1_a=1.3016 lwirs1_a=17.3199n lwsa1_a=290.8453u rwsa1_a=21.9254 
++	lwsb1_a=131.1218u rwsb1_a=600.2972 lwsc1_a=124.3857u rwsc1_a=5.2070k 
++	ksyn1_a=0 kw1s1_a=0.9999 kw2s1_a=-0.9999 kw1a1_a=0.9999 
++	kw2a1_a=0.9999 k1a1_a=993.3800m 
+ls1_b	A1 31 	{ls11_a}  
+rs1_b	31 A3 	{rs11_a}  
+cp1_b	A1 A3 	{cp11_a}  
+rp1_b	A1 A3 	{rp11_a}  
+ls2_b	A2 32 	{ls21_a}  
+rs2_b	32 A4 	{rs21_a}  
+cp2_b	A2 A4 	{cp21_a}  
+rp2_b	A2 A4 	{rp21_a}  
+ccopl1_b	A1 121 	{ccopl11_a}  
+rcopl1_b	121 A2 	{rcopl11_a}  
+ccopl2_b	A3 521 	{ccopl21_a}  
+rcopl2_b	521 A4 	{rcopl21_a}  
+lwira_b	900 0 	{lwira1_a}  
+lwa_b	900 901 	{lwa1_a}  
+rwa_b	901 0 	{rwa1_a}  
+lwb_b	900 902 	{lwb1_a}  
+rwb_b	902 0 	{rwb1_a}  
+lwirs_b	800 0 	{lwirs1_a}  
+lwsa_b	800 801 	{lwsa1_a}  
+rwsa_b	801 0 	{rwsa1_a}  
+lwsb_b	800 802 	{lwsb1_a}  
+rwsb_b	802 0 	{rwsb1_a}  
+lwsc_b	800 803 	{lwsc1_a}  
+rwsc_b	803 0 	{rwsc1_a}  
+ksyn_b	lwirs_b lwira_b	{ksyn1_a}
+kw1s_b	ls1_b lwirs_b	{kw1s1_a}
+kw2s_b	ls2_b lwirs_b	{kw2s1_a}
+kw1a_b	ls1_b lwira_b	{kw1a1_a}
+kw2a_b	ls2_b lwira_b	{kw2a1_a}
+k1a_b	ls1_b ls2_b	{k1a1_a}
+.ENDS
+
+.subckt B8272X_BASE2 A1 A2 A3 A4  PARAMS:  
++	ls11_a=3.4388m rs11_a=41.8930m cp11_a=8.2197p rp11_a=61.7844k 
++	ls21_a=3.4388m rs21_a=41.8930m cp21_a=8.2197p rp21_a=61.7844k 
++	ccopl11_a=9.0383p rcopl11_a=249.9321 ccopl21_a=9.0383p rcopl21_a=249.9321 
++	lwira1_a=4.8820u lwa1_a=167.7999u rwa1_a=93.1286m lwb1_a=631.9841u 
++	rwb1_a=1.9270 lwirs1_a=25.5707n lwsa1_a=191.3955u rwsa1_a=20.5177 
++	lwsb1_a=203.8961u rwsb1_a=490.3769 ksyn1_a=0 kw1s1_a=0.9999 
++	kw2s1_a=-0.9999 kw1a1_a=0.9999 kw2a1_a=0.9999 k1a1_a=994.7785m 
+ls1_b	A1 31 	{ls11_a}  
+rs1_b	31 A3 	{rs11_a}  
+cp1_b	A1 A3 	{cp11_a}  
+rp1_b	A1 A3 	{rp11_a}  
+ls2_b	A2 32 	{ls21_a}  
+rs2_b	32 A4 	{rs21_a}  
+cp2_b	A2 A4 	{cp21_a}  
+rp2_b	A2 A4 	{rp21_a}  
+ccopl1_b	A1 121 	{ccopl11_a}  
+rcopl1_b	121 A2 	{rcopl11_a}  
+ccopl2_b	A3 521 	{ccopl21_a}  
+rcopl2_b	521 A4 	{rcopl21_a}  
+lwira_b	900 0 	{lwira1_a}  
+lwa_b	900 901 	{lwa1_a}  
+rwa_b	901 0 	{rwa1_a}  
+lwb_b	900 902 	{lwb1_a}  
+rwb_b	902 0 	{rwb1_a}  
+lwirs_b	800 0 	{lwirs1_a}  
+lwsa_b	800 801 	{lwsa1_a}  
+rwsa_b	801 0 	{rwsa1_a}  
+lwsb_b	800 802 	{lwsb1_a}  
+rwsb_b	802 0 	{rwsb1_a}  
+ksyn_b	lwirs_b lwira_b	{ksyn1_a}
+kw1s_b	ls1_b lwirs_b	{kw1s1_a}
+kw2s_b	ls2_b lwirs_b	{kw2s1_a}
+kw1a_b	ls1_b lwira_b	{kw1a1_a}
+kw2a_b	ls2_b lwira_b	{kw2a1_a}
+k1a_b	ls1_b ls2_b	{k1a1_a}
+.ENDS
+
+*
+* B82722A2102N001 Current compensated power line ring core double chokes; horizontal version (1A)
+*
+.subckt B82722A2102N001 A1 A2 A3 A4   PARAMS:  
++	ls11=10.6267m rs11=469.2195m cp11=5.7105p rp11=268.3264k 
++	ls21=10.6267m rs21=469.2195m cp21=5.7105p rp21=268.3264k 
++	ccopl11=3.6918p rcopl11=315.4051 ccopl21=3.6918p rcopl21=315.4051 
++	lwira1=2.6160u lwa1=163.5170u rwa1=405.2489m lwb1=475.8620u 
++	rwb1=1.3016 lwirs1=17.3199n lwsa1=290.8453u rwsa1=21.9254 
++	lwsb1=131.1218u rwsb1=600.2972 lwsc1=124.3857u rwsc1=5.2070k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.3800m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2102N020 Current compensated power line ring core double chokes; horizontal version (1A)
+*
+.subckt B82722A2102N020 A1 A2 A3 A4   PARAMS:  
++	ls11=17.6312m rs11=555.3641m cp11=7.2640p rp11=166.7274k 
++	ls21=17.6312m rs21=555.3641m cp21=7.2640p rp21=166.7274k 
++	ccopl11=3.3210p rcopl11=366.2214 ccopl21=3.3210p rcopl21=366.2214 
++	lwira1=2.6160u lwa1=56.7865u rwa1=45.2065m lwb1=148.4310u 
++	rwb1=382.4484m lwirs1=13.2887n lwsa1=1.0204m rwsa1=472.7893 
++	lwsb1=135.8696u rwsb1=697.9189 lwsc1=87.1260u rwsc1=6.0564k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=995.2120m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2152N020 Current compensated power line ring core double chokes; horizontal version (1.5A)
+*
+.subckt B82722A2152N020 A1 A2 A3 A4   PARAMS:  
++	ls11=9.6169m rs11=248.7384m cp11=6.6661p rp11=87.4570k 
++	ls21=9.6169m rs21=248.7384m cp21=6.6661p rp21=87.4570k 
++	ccopl11=5.3797p rcopl11=202.6562 ccopl21=5.3797p rcopl21=202.6562 
++	lwira1=2.6160u lwa1=77.8094u rwa1=77.4274m lwb1=242.4418u 
++	rwb1=939.7247m lwirs1=13.1878n lwsa1=859.1279u rwsa1=285.1602 
++	lwsb1=86.8146u rwsb1=288.9352 lwsc1=152.8542u rwsc1=5.1355k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=995.0210m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2202N001 Current compensated power line ring core double chokes; horizontal version (2A)
+*
+.subckt B82722A2202N001 A1 A2 A3 A4   PARAMS:  
++	ls11=2.2383m rs11=95.2965m cp11=3.8373p rp11=30.8465k 
++	ls21=2.2383m rs21=95.2965m cp21=3.8373p rp21=30.8465k 
++	ccopl11=3.1515p rcopl11=132.0414 ccopl21=3.1515p rcopl21=132.0414 
++	lwira1=2.6160u lwa1=121.4473u rwa1=168.4424m lwb1=339.0488u 
++	rwb1=1.2732 lwirs1=17.4475n lwsa1=138.0138u rwsa1=18.0272 
++	lwsb1=134.4990u rwsb1=508.4492 lwsc1=270.5930u rwsc1=22.3963k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.3314m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2202N020 Current compensated power line ring core double chokes; horizontal version (2A)
+*
+.subckt B82722A2202N020 A1 A2 A3 A4   PARAMS:  
++	ls11=4.0405m rs11=137.5312m cp11=6.1362p rp11=36.8725k 
++	ls21=4.0405m rs21=137.5312m cp21=6.1362p rp21=36.8725k 
++	ccopl11=3.4081p rcopl11=274.3877 ccopl21=3.4081p rcopl21=274.3877 
++	lwira1=2.6160u lwa1=99.3341u rwa1=120.7106m lwb1=203.6738u 
++	rwb1=885.9559m lwirs1=14.9886n lwsa1=443.6450u rwsa1=346.7780 
++	lwsb1=108.0482u rwsb1=357.4816 lwsc1=306.3733u rwsc1=7.6477k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=994.3708m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2252N001 Current compensated power line ring core double chokes; horizontal version (2.5A)
+*
+.subckt B82722A2252N001 A1 A2 A3 A4   PARAMS:  
++	ls11=1.5164m rs11=52.6620m cp11=4.1951p rp11=29.9933k 
++	ls21=1.5164m rs21=52.6620m cp21=4.1951p rp21=29.9933k 
++	ccopl11=4.7729p rcopl11=92.7924 ccopl21=4.7729p rcopl21=92.7924 
++	lwira1=2.6160u lwa1=160.1602u rwa1=292.7653m lwb1=795.9151u 
++	rwb1=2.9277 lwirs1=19.3328n lwsa1=163.1061u rwsa1=22.5664 
++	lwsb1=111.6190u rwsb1=324.8590 lwsc1=190.2295u rwsc1=16.5383k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=992.6107m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2301N001 Current compensated power line ring core double chokes; horizontal version (0.3A)
+*
+.subckt B82722A2301N001 A1 A2 A3 A4   PARAMS:  
++	ls11=44.3204m rs11=2.1966 cp11=8.2617p rp11=2.0799meg 
++	ls21=44.3204m rs21=2.1966 cp21=8.2617p rp21=2.0799meg 
++	ccopl11=5.3818p rcopl11=510.7176 ccopl21=5.3818p rcopl21=510.7176 
++	lwira1=2.6160u lwa1=335.8382u rwa1=1.5632 lwb1=2.7095m 
++	rwb1=15.6320 lwirs1=18.8022n lwsa1=344.5286u rwsa1=28.0779 
++	lwsb1=488.8715u rwsb1=1.1193k lwsc1=25.7012u rwsc1=2.8078k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=992.8123m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2302N001 Current compensated power line ring core double chokes; horizontal version (3A)
+*
+.subckt B82722A2302N001 A1 A2 A3 A4   PARAMS:  
++	ls11=1.1819m rs11=39.7815m cp11=3.5186p rp11=17.3510k 
++	ls21=1.1819m rs21=39.7815m cp21=3.5186p rp21=17.3510k 
++	ccopl11=2.9838p rcopl11=108.5947 ccopl21=2.9838p rcopl21=108.5947 
++	lwira1=2.6160u lwa1=178.7855u rwa1=228.6065m lwb1=396.2456u 
++	rwb1=2.3307 lwirs1=18.3324n lwsa1=206.7251u rwsa1=81.3348 
++	lwsb1=120.3309u rwsb1=379.7242 lwsc1=350.7051u rwsc1=50.0377k 
++	ksyn1=0 kw1s1=999.0000m kw2s1=-999.0000m kw1a1=999.0000m 
++	kw2a1=999.0000m k1a1=993.0485m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2501N001 Current compensated power line ring core double chokes; horizontal version (0.5A)
+*
+.subckt B82722A2501N001 A1 A2 A3 A4   PARAMS:  
++	ls11=28.1179m rs11=1.2026 cp11=7.4369p rp11=1.0238meg 
++	ls21=28.1179m rs21=1.2026 cp21=7.4369p rp21=1.0238meg 
++	ccopl11=4.1639p rcopl11=445.6384 ccopl21=4.1639p rcopl21=445.6384 
++	lwira1=2.6160u lwa1=122.0375u rwa1=217.0064m lwb1=754.6843u 
++	rwb1=5.6933 lwirs1=17.3014n lwsa1=445.2228u rwsa1=30.8021 
++	lwsb1=229.3232u rwsb1=821.3385 lwsc1=47.9783u rwsc1=2.9516k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.3863m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2501N022 Current compensated power line ring core double chokes; horizontal version (0.5A)
+*
+.subckt B82722A2501N022 A1 A2 A3 A4   PARAMS:  
++	ls11=46.0135m rs11=1.5742 cp11=8.9998p rp11=552.1772k 
++	ls21=46.0135m rs21=1.5742 cp21=8.9998p rp21=552.1772k 
++	ccopl11=6.3866p rcopl11=463.1767 ccopl21=6.3866p rcopl21=463.1767 
++	lwira1=2.6160u lwa1=53.7591u rwa1=67.3989m lwb1=454.0013u 
++	rwb1=2.1515 lwirs1=15.9400n lwsa1=1.0344m rwsa1=180.8372 
++	lwsb1=201.2439u rwsb1=888.4560 lwsc1=43.3119u rwsc1=2.8099k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.9592m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722A2801N020 Current compensated power line ring core double chokes; horizontal version (0.8A)
+*
+.subckt B82722A2801N020 A1 A2 A3 A4   PARAMS:  
++	ls11=27.9422m rs11=599.0721m cp11=8.6005p rp11=348.3993k 
++	ls21=27.9422m rs21=599.0721m cp21=8.6005p rp21=348.3993k 
++	ccopl11=6.2623p rcopl11=303.1935 ccopl21=6.2623p rcopl21=303.1935 
++	lwira1=2.6160u lwa1=35.1914u rwa1=21.3235m lwb1=305.4127u 
++	rwb1=1.8098 lwirs1=12.9878n lwsa1=1.0049m rwsa1=126.6869 
++	lwsb1=83.4293u rwsb1=326.9372 lwsc1=94.5122u rwsc1=2.4609k 
++	ksyn1=0 kw1s1=999.0000m kw2s1=-999.0000m kw1a1=999.0000m 
++	kw2a1=999.0000m k1a1=995.1466m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2102N001 Current compensated power line ring core double chokes; vertical version (1A)
+*
+.subckt B82722J2102N001 A1 A2 A3 A4   PARAMS:  
++	ls11=10.6267m rs11=469.2195m cp11=5.7105p rp11=268.3264k 
++	ls21=10.6267m rs21=469.2195m cp21=5.7105p rp21=268.3264k 
++	ccopl11=3.6918p rcopl11=315.4051 ccopl21=3.6918p rcopl21=315.4051 
++	lwira1=2.6160u lwa1=163.5170u rwa1=405.2489m lwb1=475.8620u 
++	rwb1=1.3016 lwirs1=17.3199n lwsa1=290.8453u rwsa1=21.9254 
++	lwsb1=131.1218u rwsb1=600.2972 lwsc1=124.3857u rwsc1=5.2070k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.3800m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2132N001 Current compensated power line ring core double chokes; vertical version (1.3A)
+*
+.subckt B82722J2132N001 A1 A2 A3 A4   PARAMS:  
++	ls11=6.4588m rs11=226.5640m cp11=6.5281p rp11=167.6097k 
++	ls21=6.4588m rs21=226.5640m cp21=6.5281p rp21=167.6097k 
++	ccopl11=1.8540p rcopl11=868.3525 ccopl21=1.8540p rcopl21=868.3525 
++	lwira1=2.6160u lwa1=90.3489u rwa1=155.1842m lwb1=261.9431u 
++	rwb1=400.3428m lwirs1=17.6025n lwsa1=387.3095u rwsa1=524.5299 
++	lwsb1=110.2369u rwsb1=458.9282 lwsc1=145.0383u rwsc1=7.6051k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.2721m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2202N001 Current compensated power line ring core double chokes; vertical version (2A)
+*
+.subckt B82722J2202N001 A1 A2 A3 A4   PARAMS:  
++	ls11=2.2383m rs11=95.2965m cp11=3.8373p rp11=30.8465k 
++	ls21=2.2383m rs21=95.2965m cp21=3.8373p rp21=30.8465k 
++	ccopl11=3.1515p rcopl11=132.0414 ccopl21=3.1515p rcopl21=132.0414 
++	lwira1=2.6160u lwa1=121.4473u rwa1=168.4424m lwb1=339.0488u 
++	rwb1=1.2732 lwirs1=17.4475n lwsa1=138.0138u rwsa1=18.0272 
++	lwsb1=134.4990u rwsb1=508.4492 lwsc1=270.5930u rwsc1=22.3963k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.3314m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2202N020 Current compensated power line ring core double chokes; vertical version (2A)
+*
+.subckt B82722J2202N020 A1 A2 A3 A4   PARAMS:  
++	ls11=4.0405m rs11=137.5312m cp11=6.1362p rp11=36.8725k 
++	ls21=4.0405m rs21=137.5312m cp21=6.1362p rp21=36.8725k 
++	ccopl11=3.4081p rcopl11=274.3877 ccopl21=3.4081p rcopl21=274.3877 
++	lwira1=2.6160u lwa1=99.3341u rwa1=120.7106m lwb1=203.6738u 
++	rwb1=885.9559m lwirs1=14.9886n lwsa1=443.6450u rwsa1=346.7780 
++	lwsb1=108.0482u rwsb1=357.4816 lwsc1=306.3733u rwsc1=7.6477k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=994.3708m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2301N001 Current compensated power line ring core double chokes; vertical version (0.3A)
+*
+.subckt B82722J2301N001 A1 A2 A3 A4   PARAMS:  
++	ls11=44.3204m rs11=2.1966 cp11=8.2617p rp11=2.0799meg 
++	ls21=44.3204m rs21=2.1966 cp21=8.2617p rp21=2.0799meg 
++	ccopl11=5.3818p rcopl11=510.7176 ccopl21=5.3818p rcopl21=510.7176 
++	lwira1=2.6160u lwa1=335.8382u rwa1=1.5632 lwb1=2.7095m 
++	rwb1=15.6320 lwirs1=18.8022n lwsa1=344.5286u rwsa1=28.0779 
++	lwsb1=488.8715u rwsb1=1.1193k lwsc1=25.7012u rwsc1=2.8078k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=992.8123m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2301N002 Current compensated power line ring core double chokes; vertical version (0.3A)
+*
+.subckt B82722J2301N002 A1 A2 A3 A4   PARAMS:  
++	ls11=78.7715m rs11=2.6896 cp11=8.5910p rp11=1.1759meg 
++	ls21=78.7715m rs21=2.6896 cp21=8.5910p rp21=1.1759meg 
++	ccopl11=3.1335p rcopl11=1.7870k ccopl21=3.1335p rcopl21=1.7870k 
++	lwira1=2.6160u lwa1=80.0177u rwa1=233.6496m lwb1=434.6119u 
++	rwb1=2.3365 lwirs1=12.8233n lwsa1=450.6669u rwsa1=1.5325k 
++	lwsb1=43.5376u rwsb1=13.1528k lwsc1=43.6529u rwsc1=5.5172k 
++	ksyn1=0 kw1s1=999.0000m kw2s1=-999.0000m kw1a1=999.0000m 
++	kw2a1=999.0000m k1a1=995.0975m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2302N001 Current compensated power line ring core double chokes; vertical version (3A)
+*
+.subckt B82722J2302N001 A1 A2 A3 A4   PARAMS:  
++	ls11=1.1819m rs11=39.7815m cp11=3.5186p rp11=17.3510k 
++	ls21=1.1819m rs21=39.7815m cp21=3.5186p rp21=17.3510k 
++	ccopl11=2.9838p rcopl11=108.5947 ccopl21=2.9838p rcopl21=108.5947 
++	lwira1=2.6160u lwa1=178.7855u rwa1=228.6065m lwb1=396.2456u 
++	rwb1=2.3307 lwirs1=18.3324n lwsa1=206.7251u rwsa1=81.3348 
++	lwsb1=120.3309u rwsb1=379.7242 lwsc1=350.7051u rwsc1=50.0377k 
++	ksyn1=0 kw1s1=999.0000m kw2s1=-999.0000m kw1a1=999.0000m 
++	kw2a1=999.0000m k1a1=993.0485m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2501N001 Current compensated power line ring core double chokes; vertical version (0.5A)
+*
+.subckt B82722J2501N001 A1 A2 A3 A4   PARAMS:  
++	ls11=28.1179m rs11=1.2026 cp11=7.4369p rp11=1.0238meg 
++	ls21=28.1179m rs21=1.2026 cp21=7.4369p rp21=1.0238meg 
++	ccopl11=4.1639p rcopl11=445.6384 ccopl21=4.1639p rcopl21=445.6384 
++	lwira1=2.6160u lwa1=122.0375u rwa1=217.0064m lwb1=754.6843u 
++	rwb1=5.6933 lwirs1=17.3014n lwsa1=445.2228u rwsa1=30.8021 
++	lwsb1=229.3232u rwsb1=821.3385 lwsc1=47.9783u rwsc1=2.9516k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=993.3863m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2501N020 Current compensated power line ring core double chokes; vertical version (0.5A)
+*
+.subckt B82722J2501N020 A1 A2 A3 A4   PARAMS:  
++	ls11=77.9455m rs11=2.6212 cp11=6.7451p rp11=785.4778k 
++	ls21=77.9455m rs21=2.6212 cp21=6.7451p rp21=785.4778k 
++	ccopl11=6.8705p rcopl11=324.6553 ccopl21=6.8705p rcopl21=324.6553 
++	lwira1=2.6160u lwa1=48.2312u rwa1=105.8402m lwb1=247.4579u 
++	rwb1=1.0584 lwirs1=9.6992n lwsa1=41.4101u rwsa1=2.4981k 
++	lwsb1=52.0373u rwsb1=12.1000k lwsc1=220.3612u rwsc1=4.8727k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=996.2278m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2501N021 Current compensated power line ring core double chokes; vertical version (0.5A)
+*
+.subckt B82722J2501N021 A1 A2 A3 A4   PARAMS:  
++	ls11=52.5263m rs11=1.6546 cp11=8.0067p rp11=547.8381k 
++	ls21=52.5263m rs21=1.6546 cp21=8.0067p rp21=547.8381k 
++	ccopl11=7.2723p rcopl11=85.9029 ccopl21=7.2723p rcopl21=85.9029 
++	lwira1=2.6160u lwa1=32.1033u rwa1=46.4491m lwb1=175.1952u 
++	rwb1=464.4907m lwirs1=10.6656n lwsa1=37.5268u rwsa1=1.4704k 
++	lwsb1=37.5268u rwsb1=1.7557k lwsc1=3.7527m rwsc1=2.8302k 
++	ksyn1=0 kw1s1=0.9999 kw2s1=-0.9999 kw1a1=0.9999 
++	kw2a1=0.9999 k1a1=995.9220m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82722J2801N020 Current compensated power line ring core double chokes; vertical version (0.8A)
+*
+.subckt B82722J2801N020 A1 A2 A3 A4   PARAMS:  
++	ls11=27.9422m rs11=599.0721m cp11=8.6005p rp11=348.3993k 
++	ls21=27.9422m rs21=599.0721m cp21=8.6005p rp21=348.3993k 
++	ccopl11=6.2623p rcopl11=303.1935 ccopl21=6.2623p rcopl21=303.1935 
++	lwira1=2.6160u lwa1=35.1914u rwa1=21.3235m lwb1=305.4127u 
++	rwb1=1.8098 lwirs1=12.9878n lwsa1=1.0049m rwsa1=126.6869 
++	lwsb1=83.4293u rwsb1=326.9372 lwsc1=94.5122u rwsc1=2.4609k 
++	ksyn1=0 kw1s1=999.0000m kw2s1=-999.0000m kw1a1=999.0000m 
++	kw2a1=999.0000m k1a1=995.1466m 
+X1 A1 A2 A3 A4 B8272X_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} lwsc1_a={lwsc1} rwsc1_a={rwsc1} 
++	ksyn1_a={ksyn1} kw1s1_a={kw1s1} kw2s1_a={kw2s1} 
++	kw1a1_a={kw1a1} kw2a1_a={kw2a1} k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82724A2402N001 Current compensated power line ring core double chokes (4A)
+*
+.subckt B82724A2402N001 A1 A2 A3 A4   PARAMS:  
++	ls11=3.4388m rs11=41.8930m cp11=8.2197p rp11=61.7844k 
++	ls21=3.4388m rs21=41.8930m cp21=8.2197p rp21=61.7844k 
++	ccopl11=9.0383p rcopl11=249.9321 ccopl21=9.0383p rcopl21=249.9321 
++	lwira1=4.8820u lwa1=167.7999u rwa1=93.1286m lwb1=631.9841u 
++	rwb1=1.9270 lwirs1=25.5707n lwsa1=191.3955u rwsa1=20.5177 
++	lwsb1=203.8961u rwsb1=490.3769 ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=994.7785m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82725J2102N020 Current compensated power line ring core double chokes (1A)
+*
+.subckt B82725J2102N020 A1 A2 A3 A4   PARAMS:  
++	ls11=67.1749m rs11=1.0308 cp11=13.5328p rp11=1.1902meg 
++	ls21=67.1749m rs21=1.0308 cp21=13.5328p rp21=1.1902meg 
++	ccopl11=18.0131p rcopl11=52.1666 ccopl21=18.0131p rcopl21=52.1666 
++	lwira1=7.0000u lwa1=375.7650u rwa1=517.5185m lwb1=2.0139m 
++	rwb1=5.1752 lwirs1=34.4471n lwsa1=1.5420m rwsa1=2.2704k 
++	lwsb1=126.1789u rwsb1=3.9585k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=995.0790m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82725J2103N020 Current compensated power line ring core double chokes (10A)
+*
+.subckt B82725J2103N020 A1 A2 A3 A4   PARAMS:  
++	ls11=2.3756m rs11=15.0655m cp11=8.8875p rp11=13.8202k 
++	ls21=2.3756m rs21=15.0655m cp21=8.8875p rp21=13.8202k 
++	ccopl11=9.8305p rcopl11=256.8786 ccopl21=9.8305p rcopl21=256.8786 
++	lwira1=7.0000u lwa1=312.5191u rwa1=112.0954m lwb1=422.0527u 
++	rwb1=1.7177 lwirs1=28.3325n lwsa1=197.8030u rwsa1=61.5291 
++	lwsb1=559.7563u rwsb1=2.0554k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=995.9525m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82725J2103N022 Current compensated power line ring core double chokes (10A)
+*
+.subckt B82725J2103N022 A1 A2 A3 A4   PARAMS:  
++	ls11=2.0828m rs11=15.2574m cp11=8.3207p rp11=10.7471k 
++	ls21=2.0828m rs21=15.2574m cp21=8.3207p rp21=10.7471k 
++	ccopl11=9.7245p rcopl11=335.6420 ccopl21=9.7245p rcopl21=335.6420 
++	lwira1=7.0000u lwa1=305.8379u rwa1=148.4387m lwb1=370.5177u 
++	rwb1=1.8117 lwirs1=28.1783n lwsa1=207.0097u rwsa1=64.3353 
++	lwsb1=599.7576u rwsb1=2.0527k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=995.9745m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82725J2202N020 Current compensated power line ring core double chokes (2A)
+*
+.subckt B82725J2202N020 A1 A2 A3 A4   PARAMS:  
++	ls11=20.6787m rs11=277.1145m cp11=9.2513p rp11=212.7135k 
++	ls21=20.6787m rs21=277.1145m cp21=9.2513p rp21=212.7135k 
++	ccopl11=17.4968p rcopl11=15.4215 ccopl21=17.4968p rcopl21=15.4215 
++	lwira1=7.0000u lwa1=325.5351u rwa1=269.3046m lwb1=833.6612u 
++	rwb1=1.5253 lwirs1=26.2882n lwsa1=2.5099m rwsa1=390.1532 
++	lwsb1=377.7885u rwsb1=1.0378k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=996.2452m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82725J2402N020 Current compensated power line ring core double chokes (4A)
+*
+.subckt B82725J2402N020 A1 A2 A3 A4   PARAMS:  
++	ls11=5.9417m rs11=72.1800m cp11=8.7240p rp11=73.9040k 
++	ls21=5.9417m rs21=72.1800m cp21=8.7240p rp21=73.9040k 
++	ccopl11=10.9979p rcopl11=443.1272 ccopl21=10.9979p rcopl21=443.1272 
++	lwira1=7.0000u lwa1=439.6498u rwa1=243.2803m lwb1=1.1690m 
++	rwb1=2.5879 lwirs1=33.0744n lwsa1=450.3385u rwsa1=338.7179 
++	lwsb1=718.7998u rwsb1=3.1076k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=995.4589m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82725J2602N020 Current compensated power line ring core double chokes (6A)
+*
+.subckt B82725J2602N020 A1 A2 A3 A4   PARAMS:  
++	ls11=3.4204m rs11=35.5407m cp11=9.0261p rp11=22.0756k 
++	ls21=3.4204m rs21=35.5407m cp21=9.0261p rp21=22.0756k 
++	ccopl11=8.6851p rcopl11=712.3194 ccopl21=8.6851p rcopl21=712.3194 
++	lwira1=7.0000u lwa1=167.4272u rwa1=122.1371m lwb1=614.7591u 
++	rwb1=3.6766 lwirs1=29.8506n lwsa1=307.7807u rwsa1=164.5959 
++	lwsb1=758.0892u rwsb1=3.1862k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=995.7365m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82725J2802N020 Current compensated power line ring core double chokes (8A)
+*
+.subckt B82725J2802N020 A1 A2 A3 A4   PARAMS:  
++	ls11=2.8939m rs11=22.1793m cp11=9.3631p rp11=17.6346k 
++	ls21=2.8939m rs21=22.1793m cp21=9.3631p rp21=17.6346k 
++	ccopl11=9.4490p rcopl11=205.5981 ccopl21=9.4490p rcopl21=205.5981 
++	lwira1=7.0000u lwa1=273.8731u rwa1=96.7215m lwb1=371.8384u 
++	rwb1=1.5551 lwirs1=28.0978n lwsa1=230.9523u rwsa1=94.4210 
++	lwsb1=630.5896u rwsb1=2.8334k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=996.0446m 
+X1 A1 A2 A3 A4 B8272X_BASE2  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+

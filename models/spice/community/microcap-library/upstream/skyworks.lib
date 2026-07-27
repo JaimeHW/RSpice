@@ -1,0 +1,862 @@
+*Skyworks Solutions Discrete Library
+*These models were derived from the Skyworks application note
+*Varactor SPICE Models for RFVCO Applications
+*APN1004
+*or from the individual Skyworks Solutions data sheets
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1405 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .8
+D1 2 Cathode diodem
+CP 1 Cathode .05p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=2.92p VJ=.68 M=.41 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1408 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .6
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=3.7p VJ=.8 M=.48 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1411 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .4
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=7.57p VJ=.8 M=.45 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1413 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .35
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=9.2p VJ=.79 M=.45 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1417 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .22
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=19.2p VJ=.84 M=.48 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1419 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .2
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=23.4p VJ=.87 M=.54 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1493 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .5
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=29p VJ=.63 M=.47 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Abrupt Junction Tuning Varactor
+.SUBCKT SMV1494 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .45
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=58p VJ=.63 M=.47 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1127 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .5
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=23.9p VJ=2.2 M=1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1129 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .4
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=27.5p VJ=2.8 M=1.1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1139 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .6
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=8p VJ=1.2 M=.65 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1130 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .8
+D1 2 Cathode diodem
+CP 1 Cathode 1.8p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=25.8p VJ=10 M=3.7 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1135 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 1.2
+D1 2 Cathode diodem
+CP 1 Cathode .8p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=10.3p VJ=8.6 M=2.9 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1140 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .3
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=70.44p VJ=3.5 M=1.4 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1141 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .7
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=7.32p VJ=2.2 M=1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1142 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .7
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=13.38p VJ=2.2 M=1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1143 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .65
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=18.99p VJ=2.2 M=1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1144 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .65
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=24.01p VJ=2.2 M=1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1145 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .6
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=41.8p VJ=2.5 M=1.1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1146 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .6
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=61.13p VJ=2.5 M=1.1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1147 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .55
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=89.52p VJ=2.5 M=1.1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1148 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .5
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=104.7p VJ=2.25 M=1.1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1175 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 1
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=13.43p VJ=3 M=1.15 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1206 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .7
+D1 2 Cathode diodem
+CP 1 Cathode .3p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=26.11p VJ=4 M=1.45 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1207 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .4
+D1 2 Cathode diodem
+CP 1 Cathode 2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=59.4p VJ=6.5 M=2.3 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1211 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 .4
+D1 2 Cathode diodem
+CP 1 Cathode 9.5p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=163p VJ=200 M=130 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1212 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 .8
+D1 2 Cathode diodem
+CP 1 Cathode 4.5p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=72.47p VJ=110 M=67 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1213 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 1.4
+D1 2 Cathode diodem
+CP 1 Cathode 2.2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=28.90p VJ=190 M=105 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1214 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 1.7
+D1 2 Cathode diodem
+CP 1 Cathode 1.5p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=22.74p VJ=190 M=106 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1215 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 2.8
+D1 2 Cathode diodem
+CP 1 Cathode 1.1p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=14.36p VJ=190 M=115 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1223 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 1.5
+D1 2 Cathode diodem
+CP 1 Cathode 2.5p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=25.19p VJ=100 M=45 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1224 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 1.5
+D1 2 Cathode diodem
+CP 1 Cathode 2.5p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=25.19p VJ=100 M=45 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1225 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 1.8
+D1 2 Cathode diodem
+CP 1 Cathode 1.6p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=17.46p VJ=110 M=47 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1227 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .55
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=52.46p VJ=5 M=1.8 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1228 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .32
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=130.1p VJ=5 M=1.8 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1229 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .25
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=271.72p VJ=5 M=1.8 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1232 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.5
+D1 2 Cathode diodem
+*CP 1 Cathode 0.0p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=4.2p VJ=1.7 M=.9 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1233 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.2
+D1 2 Cathode diodem
+CP 1 Cathode .7p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=4.12p VJ=1.7 M=.9 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1234 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 .8
+D1 2 Cathode diodem
+CP 1 Cathode 1.2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=8.75p VJ=2.3 M=1.1 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1235 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 .6
+D1 2 Cathode diodem
+CP 1 Cathode 2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=16.13p VJ=8 M=4 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1236 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 .5
+D1 2 Cathode diodem
+CP 1 Cathode 3.2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=21.63p VJ=8 M=4.2 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1237 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 .25
+D1 2 Cathode diodem
+CP 1 Cathode 9p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=66.16p VJ=10 M=5.3 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1238 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 .75
+D1 2 Cathode diodem
+CP 1 Cathode 1.2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=56p VJ=6 M=2.4 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1245 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 2
+D1 2 Cathode diodem
+CP 1 Cathode .47p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=6.9p VJ=3.5 M=1.7 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1247 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 2
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=9.22p VJ=13 M=10.5 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1248 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.8
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=21.54p VJ=13 M=10.5 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1249 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.5
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=39p VJ=17 M=14 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1250 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.5
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=47p VJ=17 M=14 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1251 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.3
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=60p VJ=17 M=14 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1253 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.2
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=70p VJ=17 M=14 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1255 Anode Cathode
+LS Anode 1 .7n
+RS 1 2 1.0
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=82p VJ=17 M=13 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1263 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 1.2
+D1 2 Cathode diodem
+CP 1 Cathode .67p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=8.2p VJ=15 M=9.5 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1265 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 2.4
+D1 2 Cathode diodem
+CP 1 Cathode .71p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=22.5p VJ=30 M=13 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1269 Anode Cathode
+LS Anode 1 1.4n
+RS 1 2 .6
+D1 2 Cathode diodem
+CP 1 Cathode .5p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=28.5p VJ=6.3 M=4.2 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1270 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .7
+D1 2 Cathode diodem
+CP 1 Cathode 2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=30p VJ=12 M=8 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1281 Anode Cathode
+LS Anode 1 1.2n
+RS 1 2 1.7
+D1 2 Cathode diodem
+CP 1 Cathode .62p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=13p VJ=14 M=6 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1283 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 2.4
+D1 2 Cathode diodem
+CP 1 Cathode .58p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=19p VJ=3 M=2.6 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1299 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 2.5
+D1 2 Cathode diodem
+CP 1 Cathode 1.1p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=13.73p VJ=190 M=110 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1409 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .5
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=5.2p VJ=.8 M=.45 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1410 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .45
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=5.54p VJ=.8 M=.45 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1414 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .3
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=11.2p VJ=.78 M=.46 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1415 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .27
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=12.8p VJ=.78 M=.46 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1416 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .24
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=16.04p VJ=.84 M=.48 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1420 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .19
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=30.2p VJ=.8 M=.47 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Varactor
+.SUBCKT SMV1421 Anode Cathode
+LS Anode 1 1.7n
+RS 1 2 .18
+D1 2 Cathode diodem
+CP 1 Cathode .13p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=36.1p VJ=.8 M=.47 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1470 Anode Cathode
+LS Anode 1 1.4n
+RS 1 2 .5
+D1 2 Cathode diodem
+CP 1 Cathode 1p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=113p VJ=25 M=13 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1702 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 .5
+D1 2 Cathode diodem
+CP 1 Cathode .12p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=120p VJ=.89 M=.925 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=18 IBV=1e-5 ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1705 Anode Cathode
+LS Anode 1 .8n
+RS 1 2 .32
+D1 2 Cathode diodem
+CP 1 Cathode .5p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=31p VJ=3 M=2 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1763 Anode Cathode
+LS Anode 1 .8n
+RS 1 2 .5
+D1 2 Cathode diodem
+CP 1 Cathode .67p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=8.2p VJ=15 M=9.5 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1770 Anode Cathode
+LS Anode 1 .8n
+RS 1 2 .4
+D1 2 Cathode diodem
+CP 1 Cathode 2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=31p VJ=12 M=8 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV1771 Anode Cathode
+LS Anode 1 .8n
+RS 1 2 .4
+D1 2 Cathode diodem
+CP 1 Cathode 2p
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=31p VJ=12 M=8 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Varactor Diode Chip
+.SUBCKT SMV2019 Anode Cathode
+RS 1 2 4.8
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=2.3p VJ=3.5 M=1.4 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=22 IBV=1e-5 ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Varactor Diode Chip
+.SUBCKT SMV2020 Anode Cathode
+RS 1 2 4.1
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=3.3p VJ=3.6 M=1.3 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=22 IBV=1e-5 ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Varactor Diode Chip
+.SUBCKT SMV2021 Anode Cathode
+RS 1 2 2.8
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=4.5p VJ=3.9 M=1.34 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=22 IBV=1e-5 ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV2022 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 2.2
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=7.3p VJ=4 M=1.4 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Hyperabrupt Junction Tuning Varactor
+.SUBCKT SMV2023 Anode Cathode
+LS Anode 1 1.5n
+RS 1 2 1.6
+D1 2 Cathode diodem
+.model diodem d (IS=1e-14 RS=0 N=1 TT=0 CJO=12.23p VJ=4 M=1.4 EG=1.11 XTI=3
++ KF=0 AF=1 FC=.5 BV=0 IBV=1m ISR=0 NR=2 IKF=0 NBV=1 IBVL=0 NBVL=1 TBV1=0)
+.ENDS
+
+*Mixer and Detector Schottky Diode
+.model SMS1546 d (IS=3e-7 RS=4 N=1.04 TT=1e-11 CJO=.38p M=.36 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.51)
+
+*General Purpose Schottky Diode
+.model SMS3922 d (IS=3e-8 RS=9 N=1.08 TT=8e-11 CJO=.7p M=.26 EG=.69 XTI=2 FC=.5
++ BV=20 IBV=1e-5 VJ=.595)
+
+*General Purpose Schottky Diode
+.model SMS3923 d (IS=5e-9 RS=11 N=1.05 TT=8e-11 CJO=.9p M=.24 EG=.69 XTI=2 FC=.5
++ BV=46 IBV=1e-5 VJ=.64)
+
+*General Purpose Schottky Diode
+.model SMS3924 d (IS=2e-11 RS=11 N=1.08 TT=8e-11 CJO=1.5p M=.4 EG=.69 XTI=2 FC=.5
++ BV=100 IBV=1e-5 VJ=.84)
+
+*Low Capacitance High Voltage Schottky Diode
+.model SMS3925 d (IS=1.8e-9 RS=5.4 N=1.7 TT=8e-11 CJO=.36p M=.24 EG=.69 XTI=2 FC=.5
++ BV=58 IBV=1e-5 VJ=.8)
+
+*Surface Mount Schottky Quad Mixer Diode
+.model SMS3926 d (IS=2.5e-7 RS=4 N=1.04 TT=1e-11 CJO=.42p M=.32 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-5 VJ=.495)
+
+*Surface Mount Schottky Quad Mixer Diode
+.model SMS3929 d (IS=2.5e-7 RS=4 N=1.04 TT=1e-11 CJO=.42p M=.32 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-5 VJ=.495)
+
+*Surface Mount Schottky Quad Mixer Diode
+.model SMS3927 d (IS=1.3e-9 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.37 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.595)
+
+*Surface Mount Schottky Quad Mixer Diode
+.model SMS3930 d (IS=1.3e-9 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.37 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.595)
+
+*Surface Mount Schottky Quad Mixer Diode
+.model SMS3928 d (IS=9e-13 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.42 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.8)
+
+*Surface Mount Schottky Quad Mixer Diode
+.model SMS3931 d (IS=9e-13 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.42 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.8)
+
+*Surface Mount Schottky Quad Mixer Diode
+.model SMS3940 d (IS=9e-13 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.42 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.8)
+
+*Mixer and Detector Schottky Diode
+.model SMS7621 d (IS=4e-8 RS=12 N=1.05 TT=1e-11 CJO=.1p M=.35 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.51)
+
+*Mixer and Detector Schottky Diode
+.model SMS7630 d (IS=5e-6 RS=20 N=1.05 TT=1e-11 CJO=.14p M=.4 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-4 VJ=.34)
+
+*Chip On Board Mixer Quad Diode
+.model DMF3926 d (IS=2.5e-7 RS=4 N=1.04 TT=1e-11 CJO=.42p M=.32 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-5 VJ=.495)
+
+*Chip On Board Mixer Quad Diode
+.model DMF3929 d (IS=2.5e-7 RS=4 N=1.04 TT=1e-11 CJO=.42p M=.32 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-5 VJ=.495)
+
+*Chip On Board Mixer Quad Diode
+.model DMF3945 d (IS=2.5e-7 RS=4 N=1.04 TT=1e-11 CJO=.42p M=.32 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-5 VJ=.495)
+
+*Chip On Board Mixer Quad Diode
+.model DME3927 d (IS=1.3e-9 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.37 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.595)
+
+*Chip On Board Mixer Quad Diode
+.model DME3930 d (IS=1.3e-9 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.37 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.595)
+
+*Chip On Board Mixer Quad Diode
+.model DME3946 d (IS=1.3e-9 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.37 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.595)
+
+*Chip On Board Mixer Quad Diode
+.model DMJ3928 d (IS=9e-13 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.42 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.8)
+
+*Chip On Board Mixer Quad Diode
+.model DMJ3931 d (IS=9e-13 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.42 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.8)
+
+*Chip On Board Mixer Quad Diode
+.model DMJ3947 d (IS=9e-13 RS=4 N=1.04 TT=1e-11 CJO=.39p M=.42 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.8)
+
+*Chip On Board Mixer Quad Diode
+.model DMF3948 d (IS=4.4e-8 RS=9 N=1.04 TT=1e-11 CJO=.11p M=.32 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.495)
+
+*Chip On Board Mixer Quad Diode
+.model DME3949 d (IS=9.3e-10 RS=9 N=1.04 TT=1e-11 CJO=.10p M=.37 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.595)
+
+*Chip On Board Mixer Quad Diode
+.model DMJ3950 d (IS=3.3e-13 RS=9 N=1.04 TT=1e-11 CJO=.10p M=.42 EG=.69 XTI=2 FC=.5
++ BV=5 IBV=1e-5 VJ=.8)
+
+*Silicon Schottky Diode Chip
+.model CDB7619 d (IS=3.7e-8 RS=9 N=1.05 TT=1e-11 CJO=.08p M=.35 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-5 VJ=.495)
+
+*Silicon Schottky Diode Chip
+.model CDB7620 d (IS=5.4e-8 RS=14 N=1.12 TT=1e-11 CJO=.15p M=.35 EG=.69 XTI=2 FC=.5
++ BV=4 IBV=1e-5 VJ=.495)
+
+*Silicon Schottky Diode Chip
+.model CDF7621 d (IS=4e-8 RS=12 N=1.05 TT=1e-11 CJO=.10p M=.35 EG=.69 XTI=2 FC=.5
++ BV=3 IBV=1e-5 VJ=.495)
+
+*Silicon Schottky Diode Chip
+.model CDF7623 d (IS=1.1e-7 RS=6 N=1.04 TT=1e-11 CJO=.22p M=.32 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-5 VJ=.495)
+
+*Silicon Schottky Diode Chip
+.model CDC7630 d (IS=5e-6 RS=20 N=1.05 TT=1e-11 CJO=.14p M=.4 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-4 VJ=.34)
+
+*Silicon Schottky Diode Chip
+.model CDC7631 d (IS=3.8e-6 RS=51 N=1.05 TT=1e-11 CJO=.08p M=.4 EG=.69 XTI=2 FC=.5
++ BV=2 IBV=1e-4 VJ=.34)
+
+;$SpiceType=AMBIGUOUS

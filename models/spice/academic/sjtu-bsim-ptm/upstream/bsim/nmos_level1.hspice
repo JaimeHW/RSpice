@@ -1,0 +1,25 @@
+* HSPICE Level 1 MOSFET Model Card Example
+* Level 1 (LEVEL=1) - Basic SPICE MOSFET model
+*
+* This is the original SPICE MOSFET model with simple square-law characteristics.
+* Good for basic analog design and educational purposes.
+
+.MODEL nmos_level1 NMOS LEVEL=1
++ VTH0   = 0.7         ; Threshold voltage (V)
++ U0     = 600.0       ; Surface mobility (cm^2/V*s)
++ GAMMA  = 0.8         ; Bulk threshold parameter (V^0.5)
++ PHI    = 0.7         ; Surface potential (V)
++ LAMBDA = 0.02        ; Channel length modulation (1/V)
++ TOX    = 20.0e-9     ; Oxide thickness (m)
++ LD     = 0.1e-6      ; Lateral diffusion (m)
++ WD     = 0.0         ; Width reduction (m)
++ RSH    = 20.0        ; Sheet resistance (ohm/square)
++ CJ     = 4.0e-4      ; Zero-bias bulk junction capacitance (F/m^2)
++ CJSW   = 3.0e-10     ; Zero-bias sidewall bulk junction capacitance (F/m)
++ MJ     = 0.5         ; Bulk junction grading coefficient
++ MJSW   = 0.33        ; Sidewall bulk junction grading coefficient
++ PB     = 0.9         ; Bulk junction potential (V)
++ CGSO   = 2.0e-10     ; Gate-source overlap capacitance (F/m)
++ CGDO   = 2.0e-10     ; Gate-drain overlap capacitance (F/m)
++ CGBO   = 1.0e-10     ; Gate-bulk overlap capacitance (F/m)
++ AT     = 1.0e6       ; Flicker noise temperature coefficient

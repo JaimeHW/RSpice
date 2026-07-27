@@ -1,0 +1,178 @@
+******************************************************************
+* 
+* EPCOS AG			EPCOS AG
+* Bereich Induktivitäten	Inductors Division
+* Entwicklung			Development Department
+* D-89520 Heidenheim		D-89520 Heidenheim
+* In den Seewiesen 26		In den Seewiesen 26
+*
+* Allgemeines			General
+*	Wolfgang Sammet
+*	Tel  +49 (0) 7321 326-220
+*	FAX  +49 (0) 7321 326-628
+*	Email wolfgang.sammet@epcos.com
+*
+*
+* Modellierung und Simulation	Modeling and simulation
+*	Stefan Schefler
+*	Tel  +49 (0) 7321 326-446
+*	FAX  +49 (0) 7321 326-628
+*	Email stefan.schefler@epcos.com
+*
+*
+******************************************************************
+* Bitte lesen Sie die Hinweise in der Datei "Liesmich.txt" .
+* Please read the hints in "Readme.txt" .
+******************************************************************
+*
+* 
+* Library B82470.lib 
+* Version 1.05 (Dienstag,  3. Juli 2007, 16:43:42 Uhr CEST)
+* 
+******************************************************************
+* SPICE-Simulationsdaten für SMT Power Induktivität 4.8 x 4.8 x 1.2 (mm)
+* SPICE simulation data for SMT Power Inductors 4.8 x 4.8 x 1.2 (mm)
+* 	B82470
+*
+******************************************************************
+*
+******************************************************************
+* Library für PSPICE
+* 
+* Libs für weitere Spice-Versionen sind verfügbar (HSPICE ..)
+*	
+******************************************************************
+*
+.subckt B82470_BASE1 A1 A2  PARAMS:  
++	ls11_a=901.3979n rs11_a=22.4865m cp11_a=708.2597f rp11_a=2.9698k 
++	lwira1_a=33.5000n lwa1_a=250.4292n rwa1_a=1.3526 lwb1_a=286.5196n 
++	rwb1_a=22.4309 kw1a1_a=0.9999 
+ls1_b	A1 31 	{ls11_a}  
+rs1_b	31 A2 	{rs11_a}  
+cp1_b	A1 A2 	{cp11_a}  
+rp1_b	A1 A2 	{rp11_a}  
+lwira_b	900 0 	{lwira1_a}  
+lwa_b	900 901 	{lwa1_a}  
+rwa_b	901 0 	{rwa1_a}  
+lwb_b	900 902 	{lwb1_a}  
+rwb_b	902 0 	{rwb1_a}  
+kw1a_b	ls1_b lwira_b	{kw1a1_a}
+.ENDS
+
+*
+* B82470A1102M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (1 uH +-20%)
+*
+.subckt B82470A1102M000 A1 A2   PARAMS:  
++	ls11=901.3979n rs11=22.4865m cp11=708.2597f rp11=2.9698k 
++	lwira1=33.5000n lwa1=250.4292n rwa1=1.3526 lwb1=286.5196n 
++	rwb1=22.4309 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1103M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (10 uH +-20%)
+*
+.subckt B82470A1103M000 A1 A2   PARAMS:  
++	ls11=8.1761u rs11=253.7677m cp11=891.1428f rp11=20.5165k 
++	lwira1=33.5000n lwa1=679.2348n rwa1=898.0580m lwb1=229.6002n 
++	rwb1=5.3264 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1222M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (2.2 uH +-20%)
+*
+.subckt B82470A1222M000 A1 A2   PARAMS:  
++	ls11=2.2923u rs11=66.8017m cp11=841.7842f rp11=7.6336k 
++	lwira1=33.5000n lwa1=383.2094n rwa1=533.0366m lwb1=201.2069n 
++	rwb1=3.9669 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1223M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (22 uH +-20%)
+*
+.subckt B82470A1223M000 A1 A2   PARAMS:  
++	ls11=19.1160u rs11=592.1152m cp11=1.0705p rp11=36.6650k 
++	lwira1=33.5000n lwa1=624.3893n rwa1=1.0104 lwb1=270.6746n 
++	rwb1=10.4796 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1332M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (3.3 uH +-20%)
+*
+.subckt B82470A1332M000 A1 A2   PARAMS:  
++	ls11=2.7497u rs11=83.3313m cp11=880.4208f rp11=8.3568k 
++	lwira1=33.5000n lwa1=297.4692n rwa1=1.6628 lwb1=238.1567n 
++	rwb1=17.2475 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1333M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (33 uH +-20%)
+*
+.subckt B82470A1333M000 A1 A2   PARAMS:  
++	ls11=35.3944u rs11=987.5771m cp11=1.0295p rp11=54.8491k 
++	lwira1=33.5000n lwa1=503.3071n rwa1=474.2500m lwb1=299.8841n 
++	rwb1=8.1883 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1472M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (4.7 uH +-20%)
+*
+.subckt B82470A1472M000 A1 A2   PARAMS:  
++	ls11=4.9358u rs11=163.2460m cp11=884.7084f rp11=13.7087k 
++	lwira1=33.5000n lwa1=698.0088n rwa1=1.0887 lwb1=280.8337n 
++	rwb1=6.5911 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1473M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (47 uH +-20%)
+*
+.subckt B82470A1473M000 A1 A2   PARAMS:  
++	ls11=45.1593u rs11=1.3835 cp11=1.2118p rp11=59.6601k 
++	lwira1=33.5000n lwa1=696.0160n rwa1=873.4876m lwb1=557.6386n 
++	rwb1=15.8268 kw1a1=999.9990m 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B82470A1682M000 SMT Power Inductor 4.8 x 4.8 x 1.2 (mm) low profile (6.8 uH +-20%)
+*
+.subckt B82470A1682M000 A1 A2   PARAMS:  
++	ls11=6.5772u rs11=189.7218m cp11=850.2654f rp11=16.0675k 
++	lwira1=33.5000n lwa1=596.0065n rwa1=1.3252 lwb1=215.4938n 
++	rwb1=7.3439 kw1a1=0.9999 
+X1 A1 A2 B82470_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+

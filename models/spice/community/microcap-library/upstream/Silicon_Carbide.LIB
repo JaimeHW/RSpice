@@ -1,0 +1,2332 @@
+********************************************************************************
+* UnitedSiC G3 650V-80mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C065080K3S
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+*** UJ3C065080K3S ***
+.subckt UJ3C065080K3S nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_650V_Ron params: Ron=75m Rg=1.7
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 650V JFETs ***
+.subckt jfet_G3_650V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m/{Ron1}}
+X1 di gi s jfet_G3_650V params: ascale={a}
+XCgs gi s Cgs_650V params: acgs={a}
+XCgd gi di Cgd_650V params: acgd={a}
+Cgdex gi di {25p * {a} }						
+Rd d di Rtemp {50m/{a}}
+.MODEL Rtemp RES (TC1=2.112e-3, TC2=3.6244e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_650V_Ron
+
+*** Shared Subcircuit for 650V JFETs ***
+.subckt jfet_G3_650V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=400
+.param gos={0.0178*{ascale}}
+.param gfs={23.5*{ascale}}
+.param f=1.763
+.param vth=-10
+
+.param cgs1=0.375n
+.param cgd1=0.0404n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_650 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g  d 10Meg
+
+.MODEL jfet_650 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=850 IBV=1m IS=1e-20 ISR=1e-20 Eg=3.5 Rs={15.1m/{ascale}/1e30})
+.ends jfet_G3_650V
+
+* Cgs network	
+.subckt Cgs_650V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.25n*{acgs}}
+.param b1=1
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+.param a2={0.35n*{acgs}}
+.param b2=0.5
+.param c2=8.7
+				
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+				
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_650V
+
+* Cgd network
+.subckt Cgd_650V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.2n*{acgd}}
+.param b1=0.6
+.param c1=19
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_650V
+
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25								
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+						
+*** End of File ***
+ 
+********************************************************************************
+* UnitedSiC G3 650V-30mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C065030K3S
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+*** UJ3C065030K3S ***
+.subckt UJ3C065030K3S nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_650V_Ron params: Ron=21.23m Rg=1.5
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 650V JFETs ***
+.subckt jfet_G3_650V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m/{Ron1}}
+X1 di gi s jfet_G3_650V params: ascale={a}
+XCgs gi s Cgs_650V params: acgs={a}
+XCgd gi di Cgd_650V params: acgd={a}
+Cgdex gi di {25p * {a} }	
+Rd d di Rtemp {50m/{a}}
+.MODEL Rtemp RES (TC1=2.112e-3, TC2=3.6244e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_650V_Ron
+ 
+
+
+*** Shared Subcircuit for 650V JFETs ***
+.subckt jfet_G3_650V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=400
+.param gos={0.0178*{ascale}}
+.param gfs={23.5*{ascale}}
+.param f=1.763
+.param vth=-10
+
+.param cgs1=0.375n
+.param cgd1=0.0404n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_650 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g  d 10Meg
+*AAA
+.MODEL jfet_650 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=850 IBV=1m IS=1e-20 ISR=1e-20 Eg=3.5 Rs={15.1m/{ascale}/1e30})
+.ends jfet_G3_650V
+
+* Cgs network	
+.subckt Cgs_650V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.25n*{acgs}}
+.param b1=1
+
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+.param a2={0.35n*{acgs}}
+.param b2=0.5
+.param c2=8.7
+				
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+				
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_650V
+
+* Cgd network
+.subckt Cgd_650V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.2n*{acgd}}
+.param b1=0.6
+.param c1=19
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_650V
+
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25							
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+						
+
+
+*** End of File ***
+ 
+********************************************************************************
+* UnitedSiC G3 650V-80mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C065080B3
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+*** UJ3C065080B3 ***
+.subckt UJ3C065080B3 nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_650V_Ron params: Ron=75m Rg=1.7
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 650V JFETs ***
+.subckt jfet_G3_650V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m/{Ron1}}
+X1 di gi s jfet_G3_650V params: ascale={a}
+XCgs gi s Cgs_650V params: acgs={a}
+XCgd gi di Cgd_650V params: acgd={a}
+Cgdex gi di {25p * {a} }						
+Rd d di Rtemp {50m/{a}}
+.MODEL Rtemp RES (TC1=2.112e-3, TC2=3.6244e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_650V_Ron
+
+*** Shared Subcircuit for 650V JFETs ***
+.subckt jfet_G3_650V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=400
+.param gos={0.0178*{ascale}}
+.param gfs={23.5*{ascale}}
+.param f=1.763
+.param vth=-10
+
+.param cgs1=0.375n
+.param cgd1=0.0404n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_650 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g  d 10Meg
+
+.MODEL jfet_650 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=850 IBV=1m IS=1e-20 ISR=1e-20 Eg=3.5 Rs={15.1m/{ascale}/1e30})
+.ends jfet_G3_650V
+
+* Cgs network	
+.subckt Cgs_650V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.25n*{acgs}}
+.param b1=1
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+.param a2={0.35n*{acgs}}
+.param b2=0.5
+.param c2=8.7
+				
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+				
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_650V
+
+* Cgd network
+.subckt Cgd_650V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.2n*{acgd}}
+.param b1=0.6
+.param c1=19
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_650V
+
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25								
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+						
+*** End of File ***
+ 
+********************************************************************************
+* UnitedSiC G3 650V-30mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C065030B3
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+*** UJ3C065030B3 ***
+.subckt UJ3C065030B3 nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_650V_Ron params: Ron=21.23m Rg=1.5
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 650V JFETs ***
+.subckt jfet_G3_650V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m/{Ron1}}
+X1 di gi s jfet_G3_650V params: ascale={a}
+XCgs gi s Cgs_650V params: acgs={a}
+XCgd gi di Cgd_650V params: acgd={a}
+Cgdex gi di {25p * {a} }	
+Rd d di Rtemp {50m/{a}}
+.MODEL Rtemp RES (TC1=2.112e-3, TC2=3.6244e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_650V_Ron
+ 
+
+
+*** Shared Subcircuit for 650V JFETs ***
+.subckt jfet_G3_650V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=400
+.param gos={0.0178*{ascale}}
+.param gfs={23.5*{ascale}}
+.param f=1.763
+.param vth=-10
+
+.param cgs1=0.375n
+.param cgd1=0.0404n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_650 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g  d 10Meg
+*AAA
+.MODEL jfet_650 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=850 IBV=1m IS=1e-20 ISR=1e-20 Eg=3.5 Rs={15.1m/{ascale}/1e30})
+.ends jfet_G3_650V
+
+* Cgs network	
+.subckt Cgs_650V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.25n*{acgs}}
+.param b1=1
+
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+.param a2={0.35n*{acgs}}
+.param b2=0.5
+.param c2=8.7
+				
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+				
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_650V
+
+* Cgd network
+.subckt Cgd_650V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.2n*{acgd}}
+.param b1=0.6
+.param c1=19
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_650V
+
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25							
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+						
+
+
+*** End of File ***
+ 
+********************************************************************************
+* UnitedSiC G3 650V-80mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C065080T3S
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+*** UJ3C065080T3S ***
+.subckt UJ3C065080T3S nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_650V_Ron params: Ron=75m Rg=1.7
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 650V JFETs ***
+.subckt jfet_G3_650V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m/{Ron1}}
+X1 di gi s jfet_G3_650V params: ascale={a}
+XCgs gi s Cgs_650V params: acgs={a}
+XCgd gi di Cgd_650V params: acgd={a}
+Cgdex gi di {25p * {a} }						
+Rd d di Rtemp {50m/{a}}
+.MODEL Rtemp RES (TC1=2.112e-3, TC2=3.6244e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_650V_Ron
+
+*** Shared Subcircuit for 650V JFETs ***
+.subckt jfet_G3_650V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=400
+.param gos={0.0178*{ascale}}
+.param gfs={23.5*{ascale}}
+.param f=1.763
+.param vth=-10
+
+.param cgs1=0.375n
+.param cgd1=0.0404n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_650 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g  d 10Meg
+
+.MODEL jfet_650 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=850 IBV=1m IS=1e-20 ISR=1e-20 Eg=3.5 Rs={15.1m/{ascale}/1e30})
+.ends jfet_G3_650V
+
+* Cgs network	
+.subckt Cgs_650V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.25n*{acgs}}
+.param b1=1
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+.param a2={0.35n*{acgs}}
+.param b2=0.5
+.param c2=8.7
+				
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+				
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_650V
+
+* Cgd network
+.subckt Cgd_650V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.2n*{acgd}}
+.param b1=0.6
+.param c1=19
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_650V
+
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25								
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+						
+*** End of File ***
+ 
+********************************************************************************
+* UnitedSiC G3 650V-30mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C065030T3S
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+*** UJ3C065030T3S ***
+.subckt UJ3C065030T3S nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_650V_Ron params: Ron=21.23m Rg=1.5
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 650V JFETs ***
+.subckt jfet_G3_650V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m/{Ron1}}
+X1 di gi s jfet_G3_650V params: ascale={a}
+XCgs gi s Cgs_650V params: acgs={a}
+XCgd gi di Cgd_650V params: acgd={a}
+Cgdex gi di {25p * {a} }	
+Rd d di Rtemp {50m/{a}}
+.MODEL Rtemp RES (TC1=2.112e-3, TC2=3.6244e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_650V_Ron
+ 
+
+
+*** Shared Subcircuit for 650V JFETs ***
+.subckt jfet_G3_650V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=400
+.param gos={0.0178*{ascale}}
+.param gfs={23.5*{ascale}}
+.param f=1.763
+.param vth=-10
+
+.param cgs1=0.375n
+.param cgd1=0.0404n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_650 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g  d 10Meg
+
+.MODEL jfet_650 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=850 IBV=1m IS=1e-20 ISR=1e-20 Eg=3.5 Rs={15.1m/{ascale}/1e30})
+.ends jfet_G3_650V
+
+* Cgs network	
+.subckt Cgs_650V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.25n*{acgs}}
+.param b1=1
+
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+.param a2={0.35n*{acgs}}
+.param b2=0.5
+.param c2=8.7
+				
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+				
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_650V
+
+* Cgd network
+.subckt Cgd_650V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.2n*{acgd}}
+.param b1=0.6
+.param c1=19
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_650V
+
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25								
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+						
+
+
+*** End of File ***
+ 
+********************************************************************************
+* USCi UJC06505K SiC Cascode Spice Circuit Model v20170615r4.1
+* Model generated 06 2017 
+* Copyright 2016 United Silicon Carbide, Inc.
+* This is an empirical model of the device based on typical characteristics 
+* as shown in the datasheet and is not warranted by USCi as fully 
+* representing all of the specifications and operating characteristics of the device.
+* It's accuracy is best in the the linear region and for switching 
+* characteristics. The accuracy degrades when used in saturation. 
+* It includes temperature effects from 25 to 175 C Junction Temperature.
+*
+* The model does not include all possible conditions and effects,
+* in particular it doesn't include:
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+* Pin Order  Drain Gate Source
+**************************************************************************
+.subckt ujc06505k nd ng ns
+Ld	nd	nd1		2.0n
+Lmd	ns1	nd2		3.0n
+Ljg	ngj	ns3		0.5n
+Lms	ns2	ns3		4.0n
+Lg	ng	ngm		0.5n
+Ls	ns3	ns		0.5n
+cgdcas nd1 nd2 6p
+xj1	nd1	ngj	ns1	jfet_ujc06505k
+xm1	nd2	ngm	ns2	mfet_ujc06505k
+.ends
+**************************************************************************
+.SUBCKT  jfet_ujc06505k Drain Gate Source PARAMS:
++ is0=1.5000e-14 ngs=3.7100 xti=1.5000e+01 
++ cdso=3.9e-12 cds0=12.0e-12 cds_FC=0.94 cds_M=0.94 cds_VJ=2.7 is0g=1.5000e-14
++ cgda0=4000e-12 cgda_FC=0.94 cgda_M=0.99 cgda_VJ=1.1
++ cgdb0=25e-12 cgdb_FC=0.94 cgdb_M=0.005 cgdb_VJ=2.7
++ cgdc=20e-12
++ cgsa0=10e-12 cgs0=210e-12 cgs_FC=0.94 cgs_M=0.06 cgs_VJ=3.2
+* end of parameter section
+
+R_RD Drain Dint 0.00001
+R_RS Source Sint 0.00001
+
+R_RG	Gate Gint 0.7
+
+X_IDS	Gint Dint Sint IDJFET_ujc06505k 
+X_IGS	Gint Gint Sint  IGATETOSOURCE_ujc06505k
+*Current
+DBDD Gint Dint DDBRKDWN
+DBDS Gint Sint DSBRKDWN
+DDGI Gint Dint DGI
+DDGSI Gint Sint DGSI
+*Capacitance
+DGDA Gint Dint Diodecgda
+DGDB Gint Dint Diodecgdb
+CGDa Gint Dint {0.5*cgdc}
+DGD2 Gint Dint Diodecgda
+CGDb Gint Dint {0.5*cgdc}
+
+DGS Gint Sint Diodecgs
+CGSa Gint Sint {0.5*cgsa0}
+DGS2 Gint Sint Diodecgs
+CGSb Gint Sint {0.5*cgsa0}
+CDSint Dint Sint {cdso}
+DDSint Sint Dint Diodecds
+CGSint Gint Sint 1e-13
+
+.Model DGI D IS=5.6e-20 N=5.8 XTI=7 ISR=0 NR=2.9 VJ=12.7 CJO=0 Rs=.9
+.Model DGSI D EG=3.26 IS=1.500e-14 N=3.71 XTI=15 ISR=0 CJO=0 Rs=.1
+.MODEL DDBRKDWN D IS=1e-40 ISR=0 N=1000 IBV=1.133 NBV=4.004e2 BV=770 TBV1=1e-6 Rs=0.2
+.MODEL DSBRKDWN D EG=3.26 IS=1e-40 XTI=1 N=1000 ISR=0 IBV=1.823e-6 NBV=87.54 BV=45 Rs=0.2
+.MODEL Diodecds D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cds0} EG=3.26 FC={cds_FC} M={cds_M} VJ={cds_VJ} IKF=0 RS=0.2
+.MODEL Diodecgda D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cgda0} EG=3.26 FC={cgda_FC} M={cgda_M} VJ={cgda_VJ} IKF=0 RS=0.2
+.MODEL Diodecgdb D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cgdb0} EG=3.26 FC={cgdb_FC} M={cgdb_M} VJ={cgdb_VJ} IKF=0 RS=0.2
+.MODEL Diodecgs D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cgs0} EG=3.26 FC={cgs_FC} M={cgs_M} VJ={cgs_VJ} RS=0.2 
+.ENDS jfet_ujc06505k
+
+.SUBCKT IGATETOSOURCE_ujc06505k 1 2 3 PARAMS: is0g=1.5000e-14
+.param is0_tc=0.0000e+00
+.param ngs=3.7100 ngs_tc=0.0020
+.param xti=1.5e+01
+.param egap=3.2600
+.param egapt1=1.0000e+05
+.param egapt2=3.3000e-02
+.func ratio_t() {(TEMP+273.15)/(300)}
+.func vt() {1.38e-23*(TEMP+273.15)/1.602e-19}
+.func egap_t() {egap-(egapt2*((TEMP+273.15)*(TEMP+273.15)))/((TEMP+273.15)+egapt1)}
+.func is_t() {is0g*PWR(ratio_t(),(xti/ngs)) *EXP((ratio_t()-1)*(egap_t()/(ngs*vt())))}
+.func IGS(vgs) {is_t()*(1)}
+G_GS 1 3 VALUE = {IGS(V(2,3))}
+.ENDS IGATETOSOURCE_ujc06505k
+
+* JFET drain current
+.SUBCKT IDJFET_ujc06505k Gate Drain Source PARAMS: beta=15.8 beta_tce=-1.0 vth=-6.4000 vth_tc=1.0e-4
++ npow=1.25 npow_tc=-5.0000e-04 lambda0=9.000e-04 lambda1=0.0000e+00 
++ alpha=1.5000 alpha_tc=-1.5E-03
+* Calculate Temperature Dependent Parameters
+.func delta_t() {TEMP - 27}
+.func beta_t() {beta*PWR((temp+273.15)/300, beta_tce)}
+.func vth_t() {vth * (1 + vth_tc * delta_t())}
+.func npow_t() {npow * (1 + npow_tc * delta_t())}
+.func alpha_t() {alpha * (1 + alpha_tc * delta_t())}
+* Calculate the terms of the ID equation
+.func vod(vgs) {if((vgs-vth_t()>0), (vgs-vth_t()),(vgs-vth_t()-1e-15 ))}
+.func npow_term(vgs) {PWR(vod(vgs),npow_t())}
+**(1+lambda1*vod(vgs))}
+.func lambda_factor(vds,vgs,vds_term) {if((vds_term>0), 1+lambda0*abs(vds)*(1+lambda1*vod(vgs)*0), 1+lambda0*abs(vds))}
+.func tanh_term(vds,vgs) {tanh(alpha_t()*vds/vod(vgs))}
+.func IDSEQ(vds,vgs,vds_term) {if(vgs>vth_t(),(beta_t()*npow_term(vgs)*tanh_term(vds,vgs)*(lambda_factor(vds, vgs,vds_term))), 0)}
+.func IDS(vds,vgs,vgd) {IF((vds>0), (IDSEQ(vds,vgs,vds)+ vds/5e6), -0.8*(IDSEQ(-vds,vgd,vds)+ vds/5e6) )}
+G_DS Drain Source VALUE = {IDS(V(Drain,Source),V(Gate,Source),V(Gate,Drain))}
+.ENDS IDJFET_ujc06505k
+*
+
+; AVT Fixes
+;G_RG 1 2 VALUE = {IG(V(1,2))}
+
+;.ENDS DiffRG_ujc06505k
+
+************************************************************************************************************
+
+* Si MOSFET
+
+************************************************************************************************************
+
+.SUBCKT	mfet_ujc06505k d g s	
+*Gate-->g  Drain-->d  Src-->s								
+.param Ascale=		3.82							
+M1  3 5 9 9 NMOS W={ Ascale*	1.428571	}	L=	0.5E-6	
+M2  9 5 9 3 PMOS W={ Ascale*	1.428571	}	L=	0.4E-6	
+Ld d 3 0.1n									
+Ls 9 s 0.1n									
+Lg g 8 0.1n									
+RG 8 5 	1								
+CGS 5 9	1.15n			
+CGD0 5 3	150p
+DBD 9 3  DBD									
+
+.MODEL	NMOS		NMOS	(LEVEL  = 3
++ TOX	=	6.00E-08
++ NSUB	=	4E+17
++ VTO	=	{5.5-0.40/100*(temp-25)}
++ kp	=	{1.0E-05*PWR((temp+273.15)/300,-1.2)}
++ TPG	=	1
++ THETA	=	0
++ KAPPA	=	0.8
++ RD    =   {3e-4*PWR((temp+273.15)/300,-1.2)})
+
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		1E-07
++ NSUB   = 		6.2E+16		
++ TPG	=	-1)	
+
+******************************************************************************************************************									
+.MODEL DBD D (CJO= {Ascale*3e-10} EG= 1.1 FC= 2 M=0.0
++ VJ= 	0.7								
++ M= 	0.5								
++ RS= 	{0.007/	Ascale	}						
++ IS= {AScale*		4.018E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25								
++ IBV= 	0.00025	)							
+
+.ENDS	mfet_ujc06505k		
+
+********************************************************************************
+* UnitedSiC G3 1200V-80mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C120080K3S
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+
+*** UJ3C120080K3S ***
+.subckt UJ3C120080K3S nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_1200V_Ron params: Ron=75m Rg=1.7
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 1200V JFETs ***
+.subckt jfet_G3_1200V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m / {Ron}}
+X1 di gi s jfet_G3_1200V params: ascale={a}
+XCgs gi s Cgs_1200V params: acgs={a}
+XCgd gi di Cgd_1200V params: acgd={a}
+Cgdex gi di {25p * {a} }
+Rd d di Rtemp {58.2m/{a}}
+.MODEL Rtemp RES (TC1=3.93e-3, TC2=4.79e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_1200V_Ron
+
+*** Shared Subcircuit for 1200V JFETs ***
+.subckt jfet_G3_1200V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=800
+
+.param gos={0.0178*{ascale}}
+.param gfs={43*{ascale}}
+.param f=1.453
+.param vth=-11.5
+
+.param cgs1=0.594n
+.param cgd1=0.0318n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_1200 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g d 10Meg
+
+.MODEL jfet_1200 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=1500 IS=1e-20 ISR=1e-20 Eg=3.5 Rs={9.62m/{ascale}/1e30})
+.ends jfet_G3_1200V
+
+* Cgs network
+.subckt Cgs_1200V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.8n*{acgs}}
+.param b1=1
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+
+.param a2={0.7n*{acgs}}
+.param b2=0.75
+.param c2=9.5
+
+
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+
+
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_1200V
+
+* Cgd network
+.subckt Cgd_1200V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.3n*{acgd}}
+.param b1=0.9
+.param c1=20
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_1200V
+
+ 
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25								
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+
+*** End of File ***
+ 
+********************************************************************************
+* UnitedSiC G3 1200V-40mohm SiC Cascode Spice Circuit Model v1.0
+* Copyright 2018 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJ3C120040K3S
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+********************************************************************************
+
+*** UJ3C120040K3S ***
+.subckt UJ3C120040K3S nd ng ns
+*#ASSOC Category="N-Channel MOSFET" Symbol=nmos
+Ld	nd	nd1		5n
+Lmd	ns1	nd2		2n
+Ljg	ng1	ns3		4n
+Lmg ng ng2 		70n
+Lms	ns2	ns3		3n
+Ls	ns3	ns		2n
+xj1	nd1	ng1	ns1	jfet_G3_1200V_Ron params: Ron=35m Rg=1.5
+xm1	nd2	ng2	ns2	mfet180
+.ends
+ 
+*** 1200V JFETs ***
+.subckt jfet_G3_1200V_Ron d g s params: Ron=0 Rg=0
+*#ASSOC Category="N-Channel JFET" Symbol=njfet
+.param Ron1={Ron}
+.param Rg1={Rg}
+.param a= {75m / {Ron}}
+X1 di gi s jfet_G3_1200V params: ascale={a}
+XCgs gi s Cgs_1200V params: acgs={a}
+XCgd gi di Cgd_1200V params: acgd={a}
+Cgdex gi di {25p * {a} }
+Rd d di Rtemp {58.2m/{a}}
+.MODEL Rtemp RES (TC1=3.93e-3, TC2=4.79e-5)
+Rgate g gi {Rg} 
+.ends jfet_G3_1200V_Ron
+
+*** Shared Subcircuit for 1200V JFETs ***
+.subckt jfet_G3_1200V d g s Params: ascale=0
+.param Fc1=0.5
+.param Pb1=3.25
+.param M1=0.5
+.param Vd0=800
+
+.param gos={0.0178*{ascale}}
+.param gfs={43*{ascale}}
+.param f=1.453
+.param vth=-11.5
+
+.param cgs1=0.594n
+.param cgd1=0.0318n
+
+.param bt={({f}*{gfs}+2*{gos}*{Vd0}/{vth})/2/(-{vth})}
+.param lamd={1*{gos}/{bt}/{vth}/{vth}}
+.param cgs0={pwr((1+30/{Pb1}),{M1})*{cgs1}}
+.param cgd0={pwr((1+{Vd0}/{Pb1}),{M1})*{cgd1}}
+
+J1 d g s jfet_1200 1e-30
+Dgs g s Dgs_iv 1e-30
+Dgd g d Dgd_iv 1e-30
+Rgs  g s 1Meg
+Rgd  g d 10Meg
+
+.MODEL jfet_1200 NJF(
++ Beta={{bt}*1e30} BetaTce=0 Vto={vth} VtoTc=0  lambda={lamd}
++ Is=1e-30 
++ Cgs={{cgs0}*{ascale}*1e30} Cgd={{cgd0}*{ascale}*1e30} Fc={Fc1} Pb={Pb1}
++ M={M1})
+
+.MODEL Dgs_iv D (CJO=0 BV=40 IS=1e-20 ISR=1e-20 Eg=3.5 Rs=0)
+.MODEL Dgd_iv D (CJO=0 BV=1500 IS=1e-20 ISR=1e-20 Eg=3.5 Rs={9.62m/{ascale}/1e30})
+
+.ends jfet_G3_1200V
+
+
+* Cgs network
+.subckt Cgs_1200V g s params: acgs=0
+.param c0=1n
+.param vsgmin=-2
+.param vsgmax=15
+.param a1={0.8n*{acgs}}
+.param b1=1
+.func Qgs1(u) {- {a1} / {b1} *(exp(- {b1} *u)-1)}  
+
+
+.param a2={0.7n*{acgs}}
+.param b2=0.75
+.param c2=9.5
+
+.func Qgs2(u) 
++	{if(abs(u)<{vsgmax},
++	{a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})), 
++	{a2}*{vsgmax} + {a2}*(-{b2})*log(cosh(({vsgmax}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2})))} 
+
+E1 s m1 value={v(s,g)-Qgs1(v(s,g))/{c0}}
+C01 m1 g {c0}
+E2 s m2 value={v(s,g)-Qgs2(v(s,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgs_1200V
+
+* Cgd network
+.subckt Cgd_1200V g d params:acgd=0
+
+.param c0=1n
+
+.param a1={0.3n*{acgd}}
+.param b1=0.9
+.param c1=20
+.param vdgmax1=30
+
+.func Qgd1(u) 
++	{if(abs(u)<{vdgmax1},
++	{a1}*u + {a1}*(-{b1})*log(cosh((u-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})), 
++	{a1}*{vdgmax1} + {a1}*(-{b1})*log(cosh(({vdgmax1}-{c1})/-{b1}))
++	-{a1}*(-{b1})*log(cosh(-{c1}/-{b1})))} 
+
+.param a2={0*{acgd}}
+.param b2=0.5
+.param c2=9.5
+.param vdgmax2=15
+
+.func Qgd2(u) 
++	{if(abs(u)<{vdgmax2},
++	(-1)*({a2}*u + {a2}*(-{b2})*log(cosh((u-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))), 
++	(-1)*({a2}*{vdgmax2} + {a2}*(-{b2})*log(cosh(({vdgmax2}-{c2})/-{b2}))
++	-{a2}*(-{b2})*log(cosh(-{c2}/-{b2}))))}
+
+E1 d m1 value={v(d,g)-Qgd1(v(d,g))/{c0}}
+C01 m1 g {c0}
+E2 d m2 value={v(d,g)-Qgd2(v(d,g))/{c0}}
+C02 m2 g {c0}
+
+.ends Cgd_1200V
+ 
+*** Si MOS Model ***
+.SUBCKT	mfet180	 4 1 2	
+*Gate-->1  Drain-->4  Src-->2									
+.param Ascale=	1.79	
+Cgdadd 1 4 {0.4n/1.79*{Ascale}}					
+***Ascale used to scale the active area of the mosfet.It could be any positive data									
+M1  3 5 9 9 NMOS W={			{Ascale}*	2	}	L=	0.00000019
+M2  9 5 9 3 PMOS W={			{Ascale}*	2	}	L=	0.0000001	
+
+Ld 4 7 0.1p
+				
+Ls 9 2 0.1p					
+					
+Lg 1 8 0.1p				
+		
+R1 7 3 RTEMP {		0.0008	/	{Ascale}	}		
+	
+RG 8 5 	3.5			
+	
+CGS 5 9	{	6.6E-10	*	{Ascale}	}	
+	
+DBD 9 3     DBD									
+**************************************************************************************************************									
+.MODEL  NMOS       NMOS  (LEVEL  = 3 									
++ TOX    = 		2.50E-08							
++ NSUB   = 		3E+17							
++ VTO=		5.8					
++ THETA  = 		0							
+
++ kp = 0.8e-5					
++ TPG=1 )									
+**************************************************************************************************************									
+.MODEL  PMOS       PMOS  (LEVEL  = 3 									
++ TOX    = 		2.5E-08						
++ NSUB   = 		6E+16							
++ TPG= -1  )						
+
+
+				
+**************************************************************************************************************									
+.MODEL  PMOS2       PMOS  (LEVEL  = 3 									
++ TOX    = 		0.0000001							
++ NSUB   = 		6E+16							
++TPG=-1  )									
+**************************************************************************************************************									
+.MODEL DBD D (CJO={			{Ascale}	*	2.8E-10	}		
++ VJ= 	0.7							
+
++ M= 	0.5							
++ RS= 	{0.007/	{Ascale}	}						
++ IS= {{AScale}*		8.575E-13	}						
++ TT= 	8.00E-09								
++ BV= 	25								
++ IBV= 	0.00025	)							
+**************************************************************************************************************										
+.MODEL RTEMP RES (TC1=20E-3)									
+.Ends	mfet180					
+						
+*** End of File ***
+ 
+********************************************************************************
+
+* USCi 1200V-60mohm SiC Cascode Spice Circuit Model v1.1
+* Copyright 2015 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJC1206K.
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+* ujn series  Drain Gate Source
+
+**************************************************************************
+
+.subckt UJC1206K nd ng ns
+
+Ld	nd	nd1		5n
+
+Lmd	ns1	nd2		3n
+
+Ljg	ng1	ns3		3n
+
+Lms	ns2	ns3		3n
+
+Ls	ns3	ns		3n
+
+xj1	nd1	ng1	ns1	jfeta_z
+
+xm1	nd2	ng	ns2	mfeta
+
+.ends
+
+**************************************************************************
+
+.SUBCKT  jfeta_z Drain Gate Source PARAMS: 
+
++ beta=5.28 beta_tce=-30 vth=-7.892 vth_tc=4.0e-4
+
++ npow=1.4480 npow_tc=-5.000e-04 lambda0=0.05 lambda1=-1.100e-01
+
++ alpha=1.800 alpha_tc=-3.000e-03 
+
++ cdsa0=7e-12 cds0=8.82e-12 is0g=1.5000e-14
+
++ cgda0=40e-12 cgd0=900e-12 cgd_FC=0.94 cgd_M=0.70 cgd_VJ=2.7
+
++ cgsa0=150e-12 cgs0=1125e-12 cgs_FC=0.94 cgs_M=0.53 cgs_VJ=2.7
+
+*Parasitics
+
+LD Drain D 0.01n
+
+R_RD D Dint 0.001
+
+LS Source S 0.01n
+
+R_RS S Sint 0.001
+
+LG Gate G 0.01n
+
+R_RG G Gint 0.5
+
+R_RGAC1	Gint Gjd 1.5
+
+R_RGAC2	Gjd Gjs 2.75
+
+X_IDS	Gjd Dint Sint IDJFET PARAMS: beta={beta} lambda0={lambda0} lambda1={lambda1}
+
+X_IGS	Gint Gjd Sint  IGATETOSOURCE
+
+*Current
+
+DBDD Gjd Dint DDBRKDWN
+
+DBDS Gjd Sint DSBRKDWN
+
+DDGI Gjd Dint DGI
+
+DDGSI Gjd Sint DGSI
+
+*Capacitance
+
+DGD Gjd Dint Diodecgd
+
+CGDa Gjd Dint {0.5*cgda0}
+
+DGD2 Gjs Dint Diodecgd
+
+CGDb Gjs Dint {0.5*cgda0}
+
+DGS Gjs Sint Diodecgs
+
+CGSa Gjs Sint {0.5*cgsa0}
+
+DGS2 Gjd Sint Diodecgs
+
+CGSb Gjd Sint {0.5*cgsa0}
+
+CDSint Dint Sint {cdsa0}
+
+CGSint Gint Sint 1e-13
+
+CDS D S	1e-13
+
+CGD	G D 1e-13
+
+CGS G S 1e-13
+
+
+
+.Model DGI D IS=5.6e-20 N=5.8 XTI=7 ISR=0 NR=2.9 VJ=12.7 CJO=0 Rs=.9
+
+.Model DGSI D EG=3.26 IS=1.500e-14 N=3.71 XTI=15 ISR=0 CJO=0 Rs=.1
+
+.MODEL DDBRKDWN D IS=1e-40 ISR=0 N=1000 IBV=1.133 NBV=4.004e2 BV=1600 TBV1=1e-6 Rs=0.2
+
+.MODEL DSBRKDWN D EG=3.26 IS=1e-40 XTI=1 N=1000 ISR=0 IBV=1.823e-6 NBV=87.54 BV=45 Rs=0.2
+
+.MODEL Diodecgd D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cgd0} EG=3.26 FC={cgd_FC} M={cgd_M} VJ={cgd_VJ} IKF=0 RS=0.2
+
+.MODEL Diodecgs D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cgs0} EG=3.26 FC={cgs_FC} M={cgs_M} VJ={cgs_VJ} RS=0.2 
+
+.ENDS jfeta_z
+
+
+
+.SUBCKT IGATETOSOURCE 1 2 3 PARAMS: is0g=1.5000e-14
+
+.param is0_tc=0.0000e+00 
+
+.param ngs=3.7100 ngs_tc=0.0020
+
+.param xti=1.5e+01
+
+.param egap=3.2600
+
+.param egapt1=1.0000e+05
+
+.param egapt2=3.3000e-02
+
+.func ratio_t() {(TEMP+273.15)/(300)}
+
+.func vt() {1.38e-23*(TEMP+273.15)/1.602e-19}
+
+.func egap_t() {egap-(egapt2*((TEMP+273.15)*(TEMP+273.15)))/((TEMP+273.15)+egapt1)}
+
+.func is_t() {is0g*PWR(ratio_t(),(xti/ngs)) *EXP((ratio_t()-1)*(egap_t()/(ngs*vt())))}
+
+*.func IGS(vgs) {if(vgs<0, 0,is_t()*(EXP(vgs/(ngs*vt())) - 1))}
+
+.func IGS(vgs) {is_t()*(1)}
+
+G_GS 1 3 VALUE = {IGS(V(2,3))}
+
+.ENDS IGATETOSOURCE
+
+
+* JFET drain current
+.SUBCKT IDJFET Gate Drain Source PARAMS: beta=5.28 beta_tce=-30 vth=-7.892 vth_tc=4.0e-4
++ npow=1.4480 npow_tc=-5.0000e-04 lambda0=0.05 lambda1=-1.1000e-01
++ alpha=1.8000 alpha_tc=-3.0000e-03
+* Calculate Temperature Dependent Parameters
+.func delta_t() {TEMP - 27}
+.func beta_t() {beta*PWR(1.0001, beta_tce*delta_t())}
+.func vth_t() {vth * (1 + vth_tc * delta_t())} 
+.func npow_t() {npow * (1 + npow_tc * delta_t())}
+.func alpha_t() {alpha * (1 + alpha_tc * delta_t())}
+* Calculate the terms of the ID equation
+.func vod(vgs) {if((vgs-vth_t()>0), (vgs-vth_t()),(vgs-vth_t()-1e-15 ))}
+.func npow_term(vgs) {PWR(vod(vgs),npow_t())}
+
+**(1+lambda1*vod(vgs))}
+
+.func lambda_factor(vds,vgs,vds_term) {if((vds_term>0), 1+lambda0*abs(vds)*(1+lambda1*vod(vgs)*0), 1+lambda0*abs(vds))}
+.func tanh_term(vds,vgs) {tanh(alpha_t()*vds/vod(vgs))}
+.func IDSEQ(vds,vgs,vds_term) {if(vgs>vth_t(),(beta_t()*npow_term(vgs)*tanh_term(vds,vgs)*(lambda_factor(vds, vgs,vds_term))), 0)}
+
+.func IDS(vds,vgs,vgd) {IF((vds>0), (IDSEQ(vds,vgs,vds)+ vds/5e6), -0.8*(IDSEQ(-vds,vgd,vds)+ vds/5e6) )}
+
+G_DS Drain Source VALUE = {IDS(V(Drain,Source),V(Gate,Source),V(Gate,Drain))}
+
+.ENDS IDJFET
+
+*
+
+
+
+************************************************************************************************************
+
+* Si MOSFET
+
+************************************************************************************************************
+
+.SUBCKT	mfeta	4 1 2	
+
+									
+
+.param Ascale=		3.82							
+
+		
+
+M1  3 5 9 9 NMOS W={			Ascale*	1.428571	}	L=	0.0000005		
+
+M2  9 5 9 3 PMOS W={			Ascale*	1.428571	}	L=	0.0000004		
+
+Ld 4 7 0.1n									
+
+Ls 9 2 0.1n									
+
+Lg 1 8 2n									
+
+R1 7 3 RTEMP {		0.01140337	/	Ascale	}		
+
+RG 8 5 	0.9								
+
+CGS 5 9	{	1.55e-10	*	Ascale	}				
+
+DBD 9 3     DBD									
+
+******************************************************************************************************************
+
+.MODEL  NMOS       NMOS  (LEVEL  = 3 
+
++ TOX    = 		6.00E-08			
+
++ NSUB   = 		3E+17				
+
++ VTO=		3.8						
+
++ THETA  = 		0					
+
++ kp= 		1.45688E-05				
+
++ TPG=1  )							
+
+******************************************************************************************************************
+
+.MODEL  PMOS       PMOS  (LEVEL  = 3 		
+
++ TOX    = 		6E-08						
+
++ NSUB   = 		4.2E+16						
+
+ +TPG=-1  )									
+
+******************************************************************************************************************
+
+.MODEL DBD D (CJO={			Ascale	*	3e-10	}	
+
++ VJ= 	0.7								
+
++ M= 	0.5								
+
++ RS= 	{0.007/	Ascale	}				
+
++ IS= {AScale*		9.741E-13	}		
+
++ TT= 	8.00E-09						
+
++ BV= 	30								
+
++ IBV= 	0.00025	)					
+
+****for HV TC1=10E-3					
+
+.MODEL RTEMP RES (TC1=3E-3)				
+
+******************************************************************************************************************
+
+.ENDS									
+
+********************************************************************************
+
+* USCi 1200V-100mohm SiC Cascode Spice Circuit Model v1.1
+* Copyright 2015 United Silicon Carbide, Inc.
+* This is a PRELIMINARY Spice Model of UJC1210K.
+*
+*
+* The model does not include all possible conditions and effects, 
+* in particular it doesn't include: 
+*	Self heating
+*	leakage current in blocking state
+*	Drain to source breakdown is notional only
+*
+
+* ujn series  Drain Gate Source
+
+**************************************************************************
+
+.subckt UJC1210K nd ng ns
+
+Ld	nd	nd1		5n
+
+Lmd	ns1	nd2		3n
+
+Ljg	ng1	ns3		3n
+
+Lms	ns2	ns3		3n
+
+Ls	ns3	ns		3n
+
+xj1	nd1	ng1	ns1	jfetb_z
+
+xm1	nd2	ng	ns2	mfetb
+
+.ends
+
+**************************************************************************
+
+.SUBCKT  jfetb_z Drain Gate Source PARAMS: 
+
++ beta=3.16 beta_tce=-30 vth=-7.892 vth_tc=4.0e-4
+
++ npow=1.4480 npow_tc=-0.800e-04 lambda0=0.045 lambda1=-9.500e-02
+
++ alpha=1.800 alpha_tc=-3.000e-03 
+
++ cdsa0=4e-12 cds0=4.1e-12 is0g=0.7000e-14 
+
++ cgda0=19e-12 cgd0=500e-12 cgd_FC=0.94 cgd_M=0.70 cgd_VJ=2.7
+
++ cgsa0=14e-12 cgs0=550e-12 cgs_FC=0.94 cgs_M=0.53 cgs_VJ=2.7
+
+*Parasitics
+
+LD Drain D 0.01n
+
+R_RD D Dint 0.001
+
+LS Source S 0.01n
+
+R_RS S Sint 0.001
+
+LG Gate G 0.01n
+
+R_RG G Gint 0.5
+
+R_RGAC1	Gint Gjd 1.5
+
+R_RGAC2	Gjd Gjs 2.75
+
+X_IDS	Gjd Dint Sint IDJFET PARAMS: beta={beta} lambda0={lambda0} lambda1={lambda1}
+
+X_IGS	Gint Gjd Sint  IGATETOSOURCE
+
+*Current
+
+DBDD Gjd Dint DDBRKDWN
+
+DBDS Gjd Sint DSBRKDWN
+
+DDGI Gjd Dint DGI
+
+DDGSI Gjd Sint DGSI
+
+*Capacitance
+
+DGD Gjd Dint Diodecgd
+
+CGDa Gjd Dint {0.5*cgda0}
+
+DGD2 Gjs Dint Diodecgd
+
+CGDb Gjs Dint {0.5*cgda0}
+
+DGS Gjs Sint Diodecgs
+
+CGSa Gjs Sint {0.5*cgsa0}
+
+DGS2 Gjd Sint Diodecgs
+
+CGSb Gjd Sint {0.5*cgsa0}
+
+CDSint Dint Sint {cdsa0}
+
+CGSint Gint Sint 1e-13
+
+CDS D S	1e-13
+
+CGD	G D 1e-13
+
+CGS G S 1e-13
+
+
+
+.Model DGI D IS=5.6e-20 N=5.8 XTI=7 ISR=0 NR=2.9 VJ=12.7 CJO=0 Rs=.9
+
+.Model DGSI D EG=3.26 IS=0.700e-14 N=3.71 XTI=15 ISR=0 CJO=0 Rs=.1
+
+.MODEL DDBRKDWN D IS=1e-40 ISR=0 N=1000 IBV=1.133 NBV=4.004e2 BV=1600 TBV1=1e-6 Rs=0.2
+
+.MODEL DSBRKDWN D EG=3.26 IS=1e-40 XTI=1 N=1000 ISR=0 IBV=1.823e-6 NBV=87.54 BV=45 Rs=0.2
+
+.MODEL Diodecgd D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cgd0} EG=3.26 FC={cgd_FC} M={cgd_M} VJ={cgd_VJ} IKF=0 RS=0.2
+
+.MODEL Diodecgs D IS=1e-40 XTI=1 N=1000 ISR=0 CJO={cgs0} EG=3.26 FC={cgs_FC} M={cgs_M} VJ={cgs_VJ} RS=0.2 
+
+.ENDS jfetb_z
+
+
+
+.SUBCKT IGATETOSOURCE 1 2 3 PARAMS: is0g=1.5000e-14
+
+.param is0_tc=0.0000e+00 
+
+.param ngs=3.7100 ngs_tc=0.0020
+
+.param xti=1.5e+01
+
+.param egap=3.2600
+
+.param egapt1=1.0000e+05
+
+.param egapt2=3.3000e-02
+
+.func ratio_t() {(TEMP+273.15)/(300)}
+
+.func vt() {1.38e-23*(TEMP+273.15)/1.602e-19}
+
+.func egap_t() {egap-(egapt2*((TEMP+273.15)*(TEMP+273.15)))/((TEMP+273.15)+egapt1)}
+
+.func is_t() {is0g*PWR(ratio_t(),(xti/ngs)) *EXP((ratio_t()-1)*(egap_t()/(ngs*vt())))}
+
+*.func IGS(vgs) {is_t()*(EXP(vgs/(ngs*vt())) - 1)}
+
+.func IGS(vgs) {is_t()*(1)}
+
+G_GS 1 3 VALUE = {IGS(V(2,3))}
+
+.ENDS IGATETOSOURCE
+
+
+
+* JFET drain current
+
+.SUBCKT IDJFET Gate Drain Source PARAMS: beta=5.28 beta_tce=-30 vth=-7.892 vth_tc=4.0e-4
+
++ npow=1.4480 npow_tc=-5.0000e-04 lambda0=0.05 lambda1=-1.1000e-01
+
++ alpha=1.8000 alpha_tc=-3.0000e-03
+
+* Calculate Temperature Dependent Parameters
+
+.func delta_t() {TEMP - 27}
+
+.func beta_t() {beta*PWR(1.0001, beta_tce*delta_t())}
+
+.func vth_t() {vth * (1 + vth_tc * delta_t())} 
+
+.func npow_t() {npow * (1 + npow_tc * delta_t())}
+
+.func alpha_t() {alpha * (1 + alpha_tc * delta_t())}
+
+* Calculate the terms of the ID equation
+
+.func vod(vgs) {if((vgs-vth_t()>0), (vgs-vth_t()),(vgs-vth_t()-1e-15 ))}
+
+.func npow_term(vgs) {PWR(vod(vgs),npow_t())}
+
+**(1+lambda1*vod(vgs))}
+
+.func lambda_factor(vds,vgs,vds_term) {if((vds_term>0), 1+lambda0*abs(vds)*(1+lambda1*vod(vgs)*0), 1+lambda0*abs(vds))}
+
+.func tanh_term(vds,vgs) {tanh(alpha_t()*vds/vod(vgs))}
+
+.func IDSEQ(vds,vgs,vds_term) {if(vgs>vth_t(),(beta_t()*npow_term(vgs)*tanh_term(vds,vgs)*(lambda_factor(vds, vgs,vds_term))), 0)}
+
+.func IDS(vds,vgs,vgd) {IF((vds>0), (IDSEQ(vds,vgs,vds)+ vds/5e6), -0.8*(IDSEQ(-vds,vgd,vds)+ vds/5e6) )}
+
+G_DS Drain Source VALUE = {IDS(V(Drain,Source),V(Gate,Source),V(Gate,Drain))}
+
+.ENDS IDJFET
+
+*
+
+
+
+.SUBCKT	mfetb	4 1 2	
+
+					
+
+.param Ascale=		3.82							
+
+M1  3 5 9 9 NMOS W={			Ascale*	1.428571	}	L=	0.0000005		
+
+M2  9 5 9 3 PMOS W={			Ascale*	1.428571	}	L=	0.0000004		
+
+Ld 4 7 0.1n									
+
+Ls 9 2 0.1n									
+
+Lg 1 8 2n									
+
+R1 7 3 RTEMP {		0.01140337	/	Ascale	}		
+
+RG 8 5 	0.9								
+
+CGS 5 9	{	1.55e-10	*	Ascale	}				
+
+DBD 9 3     DBD									
+
+									
+
+******************************************************************************************************************		
+
+.MODEL  NMOS       NMOS  (LEVEL  = 3 		
+
++ TOX    = 		6.00E-08					
+
++ NSUB   = 		3E+17						
+
++ VTO=		3.8							
+
++ THETA  = 		0							
+
++ kp= 		1.45688E-05						
+
++ TPG=1  )									
+
+******************************************************************************************************************		
+
+.MODEL  PMOS       PMOS  (LEVEL  = 3 			
+
++ TOX    = 		6E-08							
+
++ NSUB   = 		4.2E+16							
+
+ +TPG=-1  )									
+
+******************************************************************************************************************		
+
+.MODEL DBD D (CJO={			Ascale	*	3e-10	}	
+
++ VJ= 	0.7								
+
++ M= 	0.5								
+
++ RS= 	{0.007/	Ascale	}				
+
++ IS= {AScale*		9.741E-13	}		
+
++ TT= 	8.00E-09				
+
++ BV= 	30							
+
++ IBV= 	0.00025	)						
+
+****for HV TC1=10E-3					
+
+.MODEL RTEMP RES (TC1=3E-3)				
+
+******************************************************************************************************************		
+
+.ENDS									
+;$SpiceType=AMBIGUOUS

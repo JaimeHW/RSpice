@@ -1,0 +1,9 @@
+* 7805 simple behavioral
+* Source: https://github.com/kafana/ltspice-misc/blob/master/models/regulators.lib
+.subckt 7805 In Aj Out
+F1 In 0 Vc 1
+Rcon In 0 1e6
+B1 4 Aj V= Table (V(In,Aj), 0,0, 1,0, 7,5, 35,5, 36,0)
+Vc 4 Out 0
+F2 In Aj Vc 4m
+.ends

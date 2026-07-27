@@ -1,0 +1,1257 @@
+*These parts are from Protek Devices.
+*They were taken from PDF file versions of the SPICE Models
+
+*Ultra Low Capacitance Steering Diode Array
+.subckt ET721 IO VCC GND
+D1 GND IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends ET721
+
+*High Speed TVS Diode Array
+.subckt LCA05C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=893p IS=10e-12 VJ=.6 M=.33 N=1 RS=.09 TT=.1u EG=1.11)
+.ends LCA05C
+
+*High Speed TVS Diode Array
+.subckt LCA08C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=481p IS=10e-14 VJ=.6 M=.33 N=1 RS=.18 TT=.1u EG=1.11)
+.ends LCA08C
+
+*High Speed TVS Diode Array
+.subckt LCA12C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=319p IS=10e-14 VJ=.6 M=.33 N=1 RS=.22 TT=.1u EG=1.11)
+.ends LCA12C
+
+*High Speed TVS Diode Array
+.subckt LCA15C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=238p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=.1u EG=1.11)
+.ends LCA15C
+
+*High Speed TVS Diode Array
+.subckt LCA24C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=210p IS=10e-14 VJ=.6 M=.33 N=1 RS=.93 TT=.1u EG=1.11)
+.ends LCA24C
+
+*High Speed TVS Diode Array
+.subckt LCD05C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=880p IS=10e-12 VJ=.6 M=.33 N=1 RS=.09 TT=.1u EG=1.11)
+.ends LCD05C
+
+*High Speed TVS Diode Array
+.subckt LCD08C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=481p IS=10e-14 VJ=.6 M=.33 N=1 RS=.18 TT=.1u EG=1.11)
+.ends LCD08C
+
+*High Speed TVS Diode Array
+.subckt LCD12C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=319p IS=10e-14 VJ=.6 M=.33 N=1 RS=.22 TT=.1u EG=1.11)
+.ends LCD12C
+
+*High Speed TVS Diode Array
+.subckt LCD15C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=238p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=.1u EG=1.11)
+.ends LCD15C
+
+*High Speed TVS Diode Array
+.subckt LCD24C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=210p IS=10e-14 VJ=.6 M=.33 N=1 RS=.93 TT=.1u EG=1.11)
+.ends LCD24C
+
+*Bidirectional Flip Chip
+.subckt P0402FC3_3C IO GND
+D1 GND 1 ABD
+D2 IO 1 ABD
+.model ABD d (BV=4 IBV=1u CJO=150p IS=10e-12 VJ=.6 M=.33 N=1 RS=.2 TT=.1u EG=1.11)
+.ends P0402FC3_3C
+
+*Bidirectional Flip Chip
+.subckt P0402FC05C IO GND
+D1 GND 1 ABD
+D2 IO 1 ABD
+.model ABD d (BV=6 IBV=1u CJO=100p IS=10e-12 VJ=.6 M=.33 N=1 RS=.16 TT=.1u EG=1.11)
+.ends P0402FC05C
+
+*Bidirectional Flip Chip
+.subckt P0402FC08C IO GND
+D1 GND 1 ABD
+D2 IO 1 ABD
+.model ABD d (BV=8.5 IBV=1u CJO=75p IS=10e-14 VJ=.6 M=.33 N=1 RS=.33 TT=.1u EG=1.11)
+.ends P0402FC08C
+
+*Bidirectional Flip Chip
+.subckt P0402FC12C IO GND
+D1 GND 1 ABD
+D2 IO 1 ABD
+.model ABD d (BV=13.3 IBV=1u CJO=50p IS=10e-14 VJ=.6 M=.33 N=1 RS=.51 TT=.1u EG=1.11)
+.ends P0402FC12C
+
+*Bidirectional Flip Chip
+.subckt P0402FC15C IO GND
+D1 GND 1 ABD
+D2 IO 1 ABD
+.model ABD d (BV=16.7 IBV=1u CJO=40p IS=10e-14 VJ=.6 M=.33 N=1 RS=.53 TT=.1u EG=1.11)
+.ends P0402FC15C
+
+*Bidirectional Flip Chip
+.subckt P0402FC24C IO GND
+D1 GND 1 ABD
+D2 IO 1 ABD
+.model ABD d (BV=26.7 IBV=1u CJO=20p IS=10e-14 VJ=.6 M=.33 N=1 RS=.63 TT=.1u EG=1.11)
+.ends P0402FC24C
+
+*Bidirectional Flip Chip
+.subckt P0402FC36C IO GND
+D1 GND 1 ABD
+D2 IO 1 ABD
+.model ABD d (BV=40.2 IBV=1u CJO=15p IS=10e-14 VJ=.6 M=.33 N=1 RS=.73 TT=.1u EG=1.11)
+.ends P0402FC36C
+
+*High Power High-Speed TVS Array
+.subckt PLC01-6 IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=50p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8 IBV=1u CJO=9000p IS=10e-12 VJ=.6 M=.33 N=1 RS=.005 TT=.1u EG=1.11)
+.ends PLC01-6
+
+*Telecom Diode Bridge / TVS Array
+.subckt PLC03-6 IO GND
+L1 GND 1 .7n
+D1 0 1 LCRD
+D2 0 IO LCRD
+D3 1 2 LCRD
+D4 2 IO LCRD
+D5 0 2 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=7p IS=10e-14 VJ=.6 M=.33 N=1 RS=.32 TT=1u EG=1.11)
+.model ABD d (BV=6.8 IBV=1u CJO=3000p IS=10e-12 VJ=.6 M=.33 N=1 RS=.075 TT=.1u EG=1.11)
+.ends PLC03-6
+
+*Ultra Low Capacitance Array
+.subckt PLC496 IO GND
+L1 GND 1 .7n
+L2 GND 5 .7n
+D1 1 2 LCRD
+D2 2 3 LCRD
+D3 3 4 LCRD
+D4 4 IO LCRD
+D5 IO 8 LCRD
+D6 8 7 LCRD
+D7 7 6 LCRD
+D8 6 5 LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PLC496
+
+*Ultra Low Capacitance Array
+.subckt PLC497 IO GND
+L1 GND 1 .6n
+D1 1 2 LCRD
+D2 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PLC497
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA03C IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PLCDA03C
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA05C IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PLCDA05C
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA08C IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=146p IS=10e-14 VJ=.6 M=.33 N=1 RS=.275 TT=.1u EG=1.11)
+.ends PLCDA08C
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA12C IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends PLCDA12C
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA15C IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends PLCDA15C
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA24C IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=61p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends PLCDA24C
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA03C-6 IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PLCDA03C-6
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA05C-6 IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PLCDA05C-6
+
+*Bidirectional Low Capacitance TVS Array
+.subckt PLCDA15C-6 IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends PLCDA15C-6
+
+*Low Capacitance Steering Diode Array
+.subckt PMAD130 IO VCC GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMAD130
+
+*Low Capacitance Steering Diode Array
+.subckt PMAD1103 IO VCC GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMAD1103
+
+*Low Capacitance Steering Diode Array
+.subckt PMAD1105 IO GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMAD1105
+
+*Low Capacitance Steering Diode Array
+.subckt PMAD1106 IO GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMAD1106
+
+*Low Capacitance Steering Diode Array
+.subckt PMAD1107 IO VCC GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMAD1107
+
+*Low Capacitance Steering Diode Array
+.subckt PMAD1109 IO GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMAD1109
+
+*Low Capacitance Steering Diode Array
+.subckt PMMAD130 IO VCC GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMMAD130
+
+*Low Capacitance Steering Diode Array
+.subckt PMMAD1103 IO VCC GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMMAD1103
+
+*Low Capacitance Steering Diode Array
+.subckt PMMAD1105 IO GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMMAD1105
+
+*Low Capacitance Steering Diode Array
+.subckt PMMAD1106 IO GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMMAD1106
+
+*Low Capacitance Steering Diode Array
+.subckt PMMAD1107 IO VCC GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMMAD1107
+
+*Low Capacitance Steering Diode Array
+.subckt PMMAD1109 IO GND
+L1 GND 1 .6n
+D1 1 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PMMAD1109
+
+*Standard TVS Component
+.subckt PSD03 IO GND
+L1 GND 1 .55n
+D1 1 IO ABD
+.model ABD d (BV=4 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PSD03
+
+*Standard TVS Component
+.subckt PSD05 IO GND
+L1 GND 1 .55n
+D1 1 IO ABD
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PSD05
+
+*Standard TVS Component
+.subckt PSD12 IO GND
+L1 GND 1 .55n
+D1 1 IO ABD
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends PSD12
+
+*Low Capacitance TVS Array
+.subckt PSLC03 IO GND
+L1 GND 1 .65n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=200p IS=10e-12 VJ=.6 M=.33 N=1 RS=.22 TT=.1u EG=1.11)
+.ends PSLC03
+
+*Low Capacitance TVS Array
+.subckt PSLC05 IO GND
+L1 GND 1 .65n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=140p IS=10e-12 VJ=.6 M=.33 N=1 RS=.18 TT=.1u EG=1.11)
+.ends PSLC05
+
+*Low Capacitance TVS Array
+.subckt PSLC08 IO GND
+L1 GND 1 .65n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=67p IS=10e-12 VJ=.6 M=.33 N=1 RS=.12 TT=.1u EG=1.11)
+.ends PSLC08
+
+*Low Capacitance TVS Array
+.subckt PSLC12 IO GND
+L1 GND 1 .65n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=55p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.1 TT=.1u EG=1.11)
+.ends PSLC12
+
+*Low Capacitance TVS Array
+.subckt PSLC15 IO GND
+L1 GND 1 .65n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=47p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.43 TT=.1u EG=1.11)
+.ends PSLC15
+
+*Low Capacitance TVS Array
+.subckt PSLC24 IO GND
+L1 GND 1 .65n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=28p IS=10e-14 VJ=.6 M=.33 N=1 RS=4.24 TT=.1u EG=1.11)
+.ends PSLC24
+
+*Low Capacitance TVS Array
+.subckt PSLC03C IO GND
+L1 GND 1 .65n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=200p IS=10e-12 VJ=.6 M=.33 N=1 RS=.22 TT=.1u EG=1.11)
+.ends PSLC03C
+
+*Low Capacitance TVS Array
+.subckt PSLC05C IO GND
+L1 GND 1 .65n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=140p IS=10e-12 VJ=.6 M=.33 N=1 RS=.18 TT=.1u EG=1.11)
+.ends PSLC05C
+
+*Low Capacitance TVS Array
+.subckt PSLC08C IO GND
+L1 GND 1 .65n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=67p IS=10e-12 VJ=.6 M=.33 N=1 RS=.12 TT=.1u EG=1.11)
+.ends PSLC08C
+
+*Low Capacitance TVS Array
+.subckt PSLC12C IO GND
+L1 GND 1 .65n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=55p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.1 TT=.1u EG=1.11)
+.ends PSLC12C
+
+*Low Capacitance TVS Array
+.subckt PSLC15C IO GND
+L1 GND 1 .65n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=47p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.43 TT=.1u EG=1.11)
+.ends PSLC15C
+
+*Low Capacitance TVS Array
+.subckt PSLC24C IO GND
+L1 GND 1 .65n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=28p IS=10e-14 VJ=.6 M=.33 N=1 RS=4.24 TT=.1u EG=1.11)
+.ends PSLC24C
+
+*Standard Subminature TVS Array
+.subckt PSOT03 IO GND
+L1 GND 1 .6n
+D1 1 IO ABD
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PSOT03
+
+*Standard Subminature TVS Array
+.subckt PSOT05 IO GND
+L1 GND 1 .6n
+D1 1 IO ABD
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PSOT05
+
+*Standard Subminature TVS Array
+.subckt PSOT08 IO GND
+L1 GND 1 .6n
+D1 1 IO ABD
+.model ABD d (BV=8.5 IBV=1u CJO=146p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends PSOT08
+
+*Standard Subminature TVS Array
+.subckt PSOT12 IO GND
+L1 GND 1 .6n
+D1 1 IO ABD
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends PSOT12
+
+*Standard Subminature TVS Array
+.subckt PSOT15 IO GND
+L1 GND 1 .6n
+D1 1 IO ABD
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends PSOT15
+
+*Standard Subminature TVS Array
+.subckt PSOT24 IO GND
+L1 GND 1 .6n
+D1 1 IO ABD
+.model ABD d (BV=26.7 IBV=1u CJO=61p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends PSOT24
+
+*Standard Subminature TVS Array
+.subckt PSOT03C IO VCC GND
+L1 GND 1 .6n
+D1 IO 1 ABD
+D2 IO VCC ABD
+.model ABD d (BV=4.5 IBV=1u CJO=219p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PSOT03C
+
+*Standard Subminature TVS Array
+.subckt PSOT05C IO VCC GND
+L1 GND 1 .6n
+D1 IO 1 ABD
+D2 IO VCC ABD
+.model ABD d (BV=6 IBV=1u CJO=142p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PSOT05C
+
+*Standard Subminature TVS Array
+.subckt PSOT08C IO VCC GND
+L1 GND 1 .6n
+D1 IO 1 ABD
+D2 IO VCC ABD
+.model ABD d (BV=8.5 IBV=1u CJO=73p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends PSOT08C
+
+*Standard Subminature TVS Array
+.subckt PSOT12C IO VCC GND
+L1 GND 1 .6n
+D1 IO 1 ABD
+D2 IO VCC ABD
+.model ABD d (BV=13.3 IBV=1u CJO=62p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends PSOT12C
+
+*Standard Subminature TVS Array
+.subckt PSOT15C IO VCC GND
+L1 GND 1 .6n
+D1 IO 1 ABD
+D2 IO VCC ABD
+.model ABD d (BV=16.7 IBV=1u CJO=51p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends PSOT15C
+
+*Standard Subminature TVS Array
+.subckt PSOT24C IO VCC GND
+L1 GND 1 .6n
+D1 IO 1 ABD
+D2 IO VCC ABD
+.model ABD d (BV=26.7 IBV=1u CJO=30p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends PSOT24C
+
+*Low Capacitance Subminature TVS Array
+.subckt PSOT03LC IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PSOT03LC
+
+*Low Capacitance Subminature TVS Array
+.subckt PSOT05LC IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PSOT05LC
+
+*Low Capacitance Subminature TVS Array
+.subckt PSOT08LC IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=146p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends PSOT08LC
+
+*Low Capacitance Subminature TVS Array
+.subckt PSOT12LC IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends PSOT12LC
+
+*Low Capacitance Subminature TVS Array
+.subckt PSOT15LC IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends PSOT15LC
+
+*Low Capacitance Subminature TVS Array
+.subckt PSOT24LC IO GND
+L1 GND 1 .6n
+D1 2 1 LCRD
+D2 2 IO ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=61p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends PSOT24LC
+
+*Low Capacitance Steering Diode Array/TVS Combo
+.subckt PSR05 IO1 IO2 VCC GND
+L1 GND 1 .65n
+D1 1 IO1 LCRD
+D2 IO1 VCC LCRD
+D3 1 IO2 LCRD
+D4 IO2 VCC LCRD
+D5 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=6p IS=10e-14 VJ=.6 M=.33 N=1 RS=.75 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=230p IS=10e-12 VJ=.6 M=.33 N=1 RS=.014 TT=.1u EG=1.11)
+.ends PSR05
+
+*Low Capacitance Steering Diode And TVS Array
+.subckt PSRDA3_3-4 IO VCC GND
+L1 GND 1 .8n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+D3 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PSRDA3_3-4
+
+*Low Capacitance Steering Diode And TVS Array
+.subckt PSRDA05-4 IO VCC GND
+L1 GND 1 .8n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+D3 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PSRDA05-4
+
+*Low Capacitance Steering Diode And TVS Array
+.subckt PSRDA12-4 IO VCC GND
+L1 GND 1 .8n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+D3 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends PSRDA12-4
+
+*Low Capacitance Steering Diode And TVS Array
+.subckt PSRDA15-4 IO VCC GND
+L1 GND 1 .8n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+D3 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends PSRDA15-4
+
+*Low Capacitance Steering Diode And TVS Array
+.subckt PSRDA3_3-6 IO VCC GND
+L1 GND 1 .7n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+D3 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends PSRDA3_3-6
+
+*Low Capacitance Steering Diode And TVS Array
+.subckt PSRDA05-6 IO VCC GND
+L1 GND 1 .7n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+D3 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends PSRDA05-6
+
+*Low Capacitance Steering Diode Array
+.subckt PSRDA70-4 IO VCC GND
+L1 GND 1 .7n
+D1 1 IO LCRD
+D2 IO VCC LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends PSRDA70-4
+
+*Quad Flip Chip TVS Array
+.subckt SFC05-4 IO GND
+D1 GND IO ABD
+.model ABD d (BV=6 IBV=1u CJO=20p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends SFC05-4
+
+*Penta Flip Chip TVS Array
+.subckt SFC05-5 IO GND
+D1 GND IO ABD
+.model ABD d (BV=6 IBV=1u CJO=20p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends SFC05-5
+
+*High Speed TVS Diode Array
+.subckt SM8LC05 IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=893p IS=10e-12 VJ=.6 M=.33 N=1 RS=.09 TT=.1u EG=1.11)
+.ends SM8LC05
+
+*High Speed TVS Diode Array
+.subckt SM8LC08 IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=481p IS=10e-14 VJ=.6 M=.33 N=1 RS=.18 TT=.1u EG=1.11)
+.ends SM8LC08
+
+*High Speed TVS Diode Array
+.subckt SM8LC12 IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=319p IS=10e-14 VJ=.6 M=.33 N=1 RS=.22 TT=.1u EG=1.11)
+.ends SM8LC12
+
+*High Speed TVS Diode Array
+.subckt SM8LC15 IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=238p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=.1u EG=1.11)
+.ends SM8LC15
+
+*High Speed TVS Diode Array
+.subckt SM8LC24 IO GND
+L1 GND 1 .7n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=210p IS=10e-14 VJ=.6 M=.33 N=1 RS=.93 TT=.1u EG=1.11)
+.ends SM8LC24
+
+*Low Capacitance TVS Array
+.subckt SM16LC03 IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends SM16LC03
+
+*Low Capacitance TVS Array
+.subckt SM16LC05 IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends SM16LC05
+
+*Low Capacitance TVS Array
+.subckt SM16LC08 IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=146p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends SM16LC08
+
+*Low Capacitance TVS Array
+.subckt SM16LC12 IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends SM16LC12
+
+*Low Capacitance TVS Array
+.subckt SM16LC15 IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends SM16LC15
+
+*Low Capacitance TVS Array
+.subckt SM16LC24 IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=61p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends SM16LC24
+
+*Low Capacitance TVS Array
+.subckt SM16LC03C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends SM16LC03C
+
+*Low Capacitance TVS Array
+.subckt SM16LC05C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends SM16LC05C
+
+*Low Capacitance TVS Array
+.subckt SM16LC08C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=146p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends SM16LC08C
+
+*Low Capacitance TVS Array
+.subckt SM16LC12C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends SM16LC12C
+
+*Low Capacitance TVS Array
+.subckt SM16LC15C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends SM16LC15C
+
+*Low Capacitance TVS Array
+.subckt SM16LC24C IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 1 ABD
+D4 3 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=61p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends SM16LC24C
+
+*Low Capacitance TVS Array
+.subckt SMDA03LC IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends SMDA03LC
+
+*Low Capacitance TVS Array
+.subckt SMDA05LC IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends SMDA05LC
+
+*Low Capacitance TVS Array
+.subckt SMDA08LC IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=146p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends SMDA08LC
+
+*Low Capacitance TVS Array
+.subckt SMDA12LC IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends SMDA12LC
+
+*Low Capacitance TVS Array
+.subckt SMDA15LC IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends SMDA15LC
+
+*Low Capacitance TVS Array
+.subckt SMDA24LC IO GND
+L1 GND 1 .8n
+D1 IO 1 LCRD
+D2 2 1 ABD
+D3 2 IO LCRD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=61p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends SMDA24LC
+
+*Low Capacitance TVS Array
+.subckt SMDA03LCC IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=4.5 IBV=1u CJO=438p IS=10e-12 VJ=.6 M=.33 N=1 RS=.21 TT=.1u EG=1.11)
+.ends SMDA03LCC
+
+*Low Capacitance TVS Array
+.subckt SMDA05LCC IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=284p IS=10e-12 VJ=.6 M=.33 N=1 RS=.14 TT=.1u EG=1.11)
+.ends SMDA05LCC
+
+*Low Capacitance TVS Array
+.subckt SMDA08LCC IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=8.5 IBV=1u CJO=146p IS=10e-12 VJ=.6 M=.33 N=1 RS=.28 TT=.1u EG=1.11)
+.ends SMDA08LCC
+
+*Low Capacitance TVS Array
+.subckt SMDA12LCC IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=123p IS=10e-14 VJ=.6 M=.33 N=1 RS=.4 TT=.1u EG=1.11)
+.ends SMDA12LCC
+
+*Low Capacitance TVS Array
+.subckt SMDA15LCC IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=16.7 IBV=1u CJO=102p IS=10e-14 VJ=.6 M=.33 N=1 RS=.52 TT=.1u EG=1.11)
+.ends SMDA15LCC
+
+*Low Capacitance TVS Array
+.subckt SMDA24LCC IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=26.7 IBV=1u CJO=61p IS=10e-14 VJ=.6 M=.33 N=1 RS=1.54 TT=.1u EG=1.11)
+.ends SMDA24LCC
+
+*Low Capacitance TVS Array
+.subckt SMLC6_5C-2 IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=7.2 IBV=1u CJO=2600p IS=10e-12 VJ=.6 M=.33 N=1 RS=.075 TT=.1u EG=1.11)
+.ends SMLC6_5C-2
+
+*Low Capacitance TVS Array
+.subckt SMLC12C-2 IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=1150p IS=10e-14 VJ=.6 M=.33 N=1 RS=.08 TT=.1u EG=1.11)
+.ends SMLC12C-2
+
+*Low Capacitance TVS Array
+.subckt SMP6LC05-2P IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=3000p IS=10e-12 VJ=.6 M=.33 N=1 RS=.075 TT=.1u EG=1.11)
+.ends SMP6LC05-2P
+
+*Low Capacitance TVS Array
+.subckt SMP6LC6_5-2P IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=7.2 IBV=1u CJO=2600p IS=10e-12 VJ=.6 M=.33 N=1 RS=.075 TT=.1u EG=1.11)
+.ends SMP6LC6_5-2P
+
+*Low Capacitance TVS Array
+.subckt SMP6LC12-2P IO GND
+L1 GND 1 .8n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=1150p IS=10e-14 VJ=.6 M=.33 N=1 RS=.08 TT=.1u EG=1.11)
+.ends SMP6LC12-2P
+
+*Low Capacitance Steering Diode Array
+.subckt USB208 IO VCC GND
+D1 GND IO LCRD
+D2 IO 1 LCRD
+L1 1 VCC .7n
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.ends USB208
+
+*Low Capacitance Isolated VSIP TVS Diode Array
+.subckt VSB06P05LCI IO GND
+L1 GND 1 .4n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=3000p IS=10e-12 VJ=.6 M=.33 N=1 RS=.075 TT=.1u EG=1.11)
+.ends VSB06P05LCI
+
+*Low Capacitance Isolated VSIP TVS Diode Array
+.subckt VSB06P6_5LCI IO GND
+L1 GND 1 .4n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=7.2 IBV=1u CJO=2600p IS=10e-12 VJ=.6 M=.33 N=1 RS=.075 TT=.1u EG=1.11)
+.ends VSB06P6_5LCI
+
+*Low Capacitance Isolated VSIP TVS Diode Array
+.subckt VSB06P12LCI IO GND
+L1 GND 1 .4n
+D1 2 1 LCRD
+D2 2 IO ABD
+D3 3 IO LCRD
+D4 3 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=10e-14 VJ=.6 M=.33 N=1 RS=.31 TT=1u EG=1.11)
+.model ABD d (BV=13.3 IBV=1u CJO=1150p IS=10e-14 VJ=.6 M=.33 N=1 RS=.08 TT=.1u EG=1.11)
+.ends VSB06P12LCI
+
+*Ultra Low Capacitance TVS Array
+.subckt SLVU2_8 1 2 3
+L1 1 N1 .6n
+D1 N1 3 LCABD
+D2 2 3 LCRD
+.model LCABD d (BV=3.3 IBV=1u CJO=20p IS=1e-11 M=.33 N=1 RS=.28 TT=10n EG=1.11)
+.model LCRD d (BV=200 IBV=.01u CJO=5p IS=1e-13 VJ=.6 M=.33 N=1 RS=.31 TT=1n EG=1.11)
+.ends SLVU2_8
+
+*Unidirectional
+.subckt GBLC05 IO GND
+L1 GND 1 .6n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=200 IBV=.01u CJO=6p IS=1e-11 VJ=.6 M=.33 N=1 RS=.75 TT=1n EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=230p IS=1e-11 VJ=.6 M=.33 N=1 RS=.014 TT=1e-8 EG=1.11)
+.ends GBLC05
+
+*Unidirectional
+.subckt GBLC05C IO GND
+L1 GND 1 .6n
+D1 3 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+D4 3 IO ABD
+.model LCRD d (BV=200 IBV=.01u CJO=6p IS=1e-11 VJ=.6 M=.33 N=1 RS=.75 TT=1n EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=230p IS=1e-11 VJ=.6 M=.33 N=1 RS=.014 TT=1e-8 EG=1.11)
+.ends GBLC05C
+
+*Unidirectional
+.subckt GBLC03I IO GND
+L1 GND 1 .6n
+D1 IO 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+.model LCRD d (BV=100 IBV=.5u CJO=.3p IS=1e-11 VJ=.6 M=.33 N=1 RS=.75 TT=1n EG=1.11)
+.model ABD d (BV=3.5 IBV=1u CJO=10p IS=1e-11 VJ=.6 M=.33 N=1 RS=.014 TT=1e-8 EG=1.11)
+.ends GBLCI03
+
+*Unidirectional
+.subckt GBLC03CI IO GND
+L1 GND 1 .6n
+D1 3 1 LCRD
+D2 2 IO LCRD
+D3 2 1 ABD
+D4 3 IO ABD
+.model LCRD d (BV=100 IBV=.5u CJO=.3p IS=1e-11 VJ=.6 M=.33 N=1 RS=.75 TT=1n EG=1.11)
+.model ABD d (BV=3.5 IBV=1u CJO=10p IS=1e-11 VJ=.6 M=.33 N=1 RS=.014 TT=1e-8 EG=1.11)
+.ends GBLCI03C
+
+*Steering Diode/TVS Array Combo
+.subckt SRV05-4 IO1 IO2 IO3 IO4 VCC GND
+L1 GND 1 .7n
+D1 1 IO1 LCRD
+D2 1 IO2 LCRD
+D3 1 IO3 LCRD
+D4 1 IO4 LCRD
+D5 IO1 VCC LCRD
+D6 IO2 VCC LCRD
+D7 IO3 VCC LCRD
+D8 IO4 VCC LCRD
+D9 1 VCC ABD
+.model LCRD d (BV=200 IBV=.01u CJO=3p IS=1e-13 VJ=.6 M=.33 N=1 RS=.31 TT=1n EG=1.11)
+.model ABD d (BV=6 IBV=1u CJO=230p IS=1e-11 VJ=.6 M=.33 N=1 RS=.014 TT=1e-9 EG=1.11)
+.ends SRV05-4
+

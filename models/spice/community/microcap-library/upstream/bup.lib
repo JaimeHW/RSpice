@@ -1,0 +1,162 @@
+*****************************************************************
+* INFINEON TECHNOLOGIES AG      		BUP3XX_L2.LIB	*
+*								*
+* Model library for second generation IGBT  (V1.5)     	03/01  	*
+*                                                               *
+*****************************************************************
+* Simulation support: simulate@infineon.com                     *
+*****************************************************************
+*								*
+* Models provided by INFINEON are not warranted by INFINEON as  *
+* fully representing all of the specifications and operating    *
+* characteristics of the semiconductor product to which the     *
+* model relates. The model describe the characteristics of a    * 
+* typical device.                                               * 
+* In all cases, the current data sheet information for a given  *
+* device is the final design guideline and the only actual      *
+* performance specification.                                    *
+* Altough models can be a useful tool in evaluating device      *
+* performance, they cannot model exact device performance under *
+* all conditions, nor are they intended to replace bread-       *
+* boarding for final verification. INFINEON therefore does not  *
+* assume any liability arising from their use.                  *
+* INFINEON reserves the right to change models without prior    * 
+* notice.                                                       *
+*                                                               *
+* This library contains Level 2 models for the following	* 
+* INFINEON 1200 V second generation-IGBT's			*
+* included: devices/chip-models and lead inductances		* 
+* 25A/1200V	-> BUP314					*
+* 15A/1200V	-> BUP313					*
+* 8A/1200V	-> BUP311D/BUP212				*
+* 								*
+* the model is based on the publication:			*
+* 								*
+* R.Kraus, P.Türkes, J.Sigg					*
+* Physics-based Models Of Power Semiconductor Devices 		*
+* For The Circuit Simulator Spice				*
+* 								*
+* Power Electronics Specialists Conference, 1998.		* 
+* PESC 98 Record. 29th Annual IEEE				*
+*								*
+* 								*
+* version 1.5 of march 2001					*
+* typical model call in PSPICE:					* 
+* XBUP anode gate cathode BUP212_L2 PARAMS: TJ ={my junction temperature} *
+****************************************************************
+.SUBCKT BUP314_L2 ano gate kat PARAMS: TJ= 27
+LANO ano  anol	5n
+XBUP anol gate katl  L7xxxM_L2 PARAMS: TJ= {TJ}  A_total = 0.428	A_aktiv=0.335
+LKAT katl kat	7n
+.ENDS
+****************************************************************
+****************************************************************
+.SUBCKT BUP313_L2 ano gate kat PARAMS: TJ= 27  
+LANO ano  anol	5n
+XBUP anol gate katl  L7xxxM_L2 PARAMS: TJ= {TJ}  A_total = 0.259	A_aktiv=0.187
+LKAT katl kat	7n
+.ENDS
+****************************************************************
+****************************************************************
+.SUBCKT BUP212_L2 ano gate kat PARAMS: TJ= 27 
+LANO ano  anol	5n
+XBUP anol gate katl  L7xxxM_L2 PARAMS: TJ= {TJ}  A_total = 0.162	A_aktiv=0.104
+LKAT katl kat	7n
+.ENDS
+****************************************************************
+.SUBCKT L7xxxM_L2 ano gate kat PARAMS: TJ=27 A_total = 0.1	A_aktiv=0.1
+.PARAM 
++k=1.380622e-23		q = 1.6E-19	t0=273		ni0=1.45e10
++eps0 = 8.85E-14	epsi =11.8	eox= 2.8
++un = 1350		up = 450	u_surf=600
++vlimit= 1.5e7		vsw= -0.5
+.PARAM tox = 120e-7	ttox = 1.5e-4 lchann = 2.5e-4 taub = 100u
++wb = 170E-4 Nsource= 1.5e17 BV_FW=1200	BV_RW=28 Rs = 0.5m Rg = 5
+.PARAM nc = {A_aktiv*.1189meg}
+.PARAM wc = {nc*52e-4}
+.PARAM Agd  = {nc*6.72e-6}
+.PARAM Cox  = {Agd*eps0*eox/tox}
+.PARAM Cgs  = {nc*eps0*eox*(1.05e-6/tox + 7.77e-6/ttox) }
+.PARAM Cjs  = {A_aktiv*3.092n}
+.PARAM Cje  = {(A_total/A_aktiv)*Cjs}	
+.PARAM Ise0 = {A_total*26.11p}
+.PARAM Ise_g  = {A_total*2.22e-14}
+.PARAM Ise_k  = {A_total*15.67p}
+.PARAM 	Q0 = {A_aktiv*217.9n}
+.PARAM	VPT= 1800
+.PARAM	VN = {Agd*Agd/Cox/Cox*1.34e-17}
+.PARAM	XF = 0.4m
+MFET	d g s s 	MOS W={wc/100} L={lchann/100} IC=OFF
+GMFET_T d1x	s	VALUE = {I(VINC0)*((TJ+t0)/300)**-1.5 }
+GDE	ano	e1	VALUE = {((ISE(TJ)**((t0 + TJ)/(t0 + 27)))/ISE(27))**((t0 + 27)/(t0 + TJ)) 
++ * I(VDE)**((t0 + 27)/(t0 + TJ)) - I(VDE)}
+VDE	ano	anx	0
+DE	anx	e1	D1
+DS	kat	d1	D2
+.MODEL  MOS     NMOS    (LEVEL=3,nsub={Nsource},tox={tox/100},vmax={vlimit},uo={u_surf},CGSO=1p)
+.MODEL 	D1	D	(IS={ISE0},N = 1.5)
+.MODEL	D2	D	(IS={Ise_k},CJO={CJS},BV= {BV_FW})
+ETHERM  g_t	g	VALUE = {DVt(TJ)}
+RG	gate g_t	{Rg}
+RS	s kat		{Rs}
+EVGCOX 	vgcox 0 VALUE { V(ox,s)-{vsw} }
+EVCOX   vcox  0         VALUE = {Cox/100  + 99*Cox*(1+tanh(10*(V(vgcox))))/200}
+EVCGS   vcgs  0         VALUE = {Cgs + 99*Cox*(1+tanh(-10*(V(vgcox))))/200}
+
+GICOX   g ox            VALUE = {if (time> 25n,DDT(V(vcox)*V(g,ox)),0)}
+GICGS   g s             VALUE = {if (time> 25n,DDT(V(vcgs)*V(g,s)),0)}
+
+EDEP	d1 ox	VALUE = {Vdep(V(d1,g))}
+GIA	e d1	VALUE = {V(e,d1)/Rb(V(b),TJ)}
+GIC	d1  kat	VALUE = {IPC(I(VINC),V(b,0),V(d1,kat),I(VDXJ),TJ)}
+CQB	b 0	1u
+RHELP	b 0	1meg
+GRQB	b 0	VALUE = {1u*V(b,0)/(Taub*((TJ + t0)/300)**2) }
+GINC	0 b	VALUE	{I(VINC)}
+GINE	b 0	VALUE	{INE(I(VINC),V(b,0),V(d1,kat),I(VDXJ),TJ)}
+
+EXJ	xj1 0	VALUE	{if(time> 25n,xj(V(d1,kat)),0)}
+
+
+CXJ	xj  0	1
+VDXJ	xj1 xj	0
+VIA	e1 e	0
+EAUX1	d12 s	VALUE = {V(d1,s)}
+VINC0	d12 d	0
+VINC	d1 d1x	0
+
+; AVT...EG is a reserved Micro-Cap function name for Energy Generated....EG(V1)
+; Changed from EG() to EG1()
+.FUNC   EG1(Tx) {1.16 - 7.02e-4*(Tx+t0)**2/(Tx+t0 + 1108)}
+.FUNC   ni(Tx) {ni0*((Tx+t0)/300)**1.5*exp(1/(2*8.61e-5)*(-300*EG1(Tx)+(t0+Tx)*EG1(300))/(Tx+t0)/300)}
+
+; AVT... LOG() is the natural log for PSpice but is base 10 log for Micro-Cap and SPICE3
+; Changed LOG() (PSpice natural log) to LN() (Micro-Cap / SPICE3 natural log)
+.FUNC psi2(Tx) {2*k/q*(Tx + t0)*LN(Nsource/ni(Tx))}
+
+.FUNC	DVt(Tx)		{psi2(Tx) - psi2(27) + tox*(sqrt(2*eps0*epsi*q*Nsource*psi2(Tx)) 
++ - sqrt(2*eps0*epsi*q*Nsource*psi2(27)))/eps0/eox}
+.FUNC	DA(Tx)	{2*k*un*up/q/(un + up)*(Tx + t0)*(((Tx + t0)/300)**-1.5)}
+.FUNC	LA(Tx)	{sqrt(DA(Tx) * Taub*((Tx+t0)/300)**2) }
+.FUNC   ISE(Tx)  {ise_g*k*(Tx +t0)*(un*((Tx+t0)/300)**-1.5)*ni(Tx)*ni(Tx)}
+.FUNC	Vdep(X)	{if(X > -VN/2,X + VN*(1-SQRT(1+2*X/VN)),VN/2)}
+
+; AVT... LOG() is the natural log for PSpice but is base 10 log for Micro-Cap and SPICE3
+; Changed LOG() (PSpice natural log) to LN() (Micro-Cap / SPICE3 natural log)
+.FUNC Rb(X,Tx) {wb*wb*LN(1+2E-6*(1+up/un)*MAX(X,1m*Q0)/Q0)/(2E-6*(un+up)*(((Tx+t0)/300)**-1.5)*MAX(X,1m*Q0))}
+
+.FUNC	xj(V)		{XF*SQRT(1+LIMIT(V,0,VPT))}
+.FUNC	FDX(V,X,Tx)	{TANH((wb-xj(V))*X/(24*DA(Tx)))}
+.FUNC	Td(V,X,Tx)	{(0.1/DA(Tx))*(wb-xj(V))*(wb-xj(V))*(1-FDX(V,X,Tx))}
+.FUNC	F1(V,Tx)		{Taub*((Tx+t0)/300)**2*COSH((wb-xj(V))/LA(Tx))-1}
+.FUNC	F2(V,X,Tx)	{0.5*(1+2*FDX(V,X,Tx)/(1+FDX(V,X,Tx)*FDX(V,X,Tx)))}
+.FUNC	F3(V,X,Tx)	{1+Td(V,X,Tx)/(Taub*((Tx+t0)/300)**2)}
+.FUNC	QS0(V,Tx)	{q*A_aktiv*LA(Tx)*ni(Tx)*TANH(0.5*(wb-xj(V))/LA(Tx))}
+.FUNC Qbx(Y,Z,V,X,Tx) {Z*1e-6+Td(V,X,Tx)*Y}
+.FUNC Qb0(Y,Z,V,X,Tx) {2*Qbx(Y,Z,V,X,Tx)/(F3(V,X,Tx)+SQRT(F3(V,X,Tx)*F3(V,X,Tx)
++ + Td(V,X,Tx)*3*ISE(Tx)*Qbx(Y,Z,V,X,Tx)/(QS0(V,Tx) * QS0(V,Tx))))}
+.FUNC	INE(Y,Z,V,X,Tx)	{0.75*ISE(Tx)*(Qb0(Y,Z,V,X,Tx)/QS0(V,Tx))*(Qb0(Y,Z,V,X,Tx)/QS0(V,Tx))}
+.FUNC	IPC(Y,Z,V,X,Tx)	
++{(1/3)*Y+(4/3)*(Qb0(Y,Z,V,X,Tx)/F1(V,Tx)+MAX(Qb0(Y,Z,V,X,Tx)/Taub/((Tx+t0)/300)**2+INE(Y,Z,V,X,Tx)- Y,0)*F2(V,X,Tx))}
+.ENDS
+;$SpiceType=AMBIGUOUS

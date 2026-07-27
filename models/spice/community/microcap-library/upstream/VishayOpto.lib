@@ -1,0 +1,129 @@
+* Library of Phototransistor VO615A
+* Copyright VISHAY, Inc. 2010 All Rights Reserved.
+*
+* ==== VO615A-3 ====
+* A = diode anode
+* K = diode cathode
+* C = BJT collector
+* E = BJT emitter
+*$
+.SUBCKT VO615A A K C E PARAMS: REL_CTR=1
+D1 A D D9508	;IRED
+Vsense D K 0 ;IF Current sense
+Hd R 0 Vsense 1	;I-V
+Rd R T1 10K
+Cd T1 0 0.2n
+Rdummy B 0 4G
+Q1 C B E E QT1090 ;phototransistor
+* V-I
+Gpcg C B TABLE  ;Photodetector {(IC vs IF) / Q1 BF}
++ {0.8*(V(T1)^1.658*exp(limit(4.36-60*V(T1),-50,50))*REL_CTR/100)}=
++ (0,0) (10,10)
+.model D9508 D IS=1P N=1.948621 RS=1.560495 BV=6 IBV=10U
++ CJO=18.8P VJ=0.532794 M=0.27985 EG=1.424 TT=500N 
+.model QT1090 NPN IS=3.64P BF=100 NF=1.193293 BR=10 TF=13N TR=350n
++ CJE=5.16P VJE=0.99 MJE=0.2411274 CJC=18P VJC=0.597478 MJC=0.431978
++ ISC=0.207N VAF=65 IKF=0.09 ISS=0 CJS=7.74p VJS=0.61 MJS=0.31
+.ends
+*$
+
+** Spice3 of Vishay 1 Mbd high speed optocouplers **
+** for parts: 6N136, 6N1136, SFH6136, SFH6316T, SFH6343T **
+** Copyright VISHAY, Inc. 2010 All Rights Reserved.
+* Symbol Pin -> Model Node
+*    A           1
+*    K           2
+*    E           3
+*    C           4
+*    B           5 
+*    VCC         6 
+.SUBCKT 6N136 DA DK QE QC QB  VCC
+DIN DA 9 DT8811VB
+VT 9 DK 0
+CIO DA QC 0.6e-12
+QOUT QC QB QE QF290D
+RFX QB QE 1e6
+Hd T1 0 VT 800	;I-V
+Rdly1 T1 T2 0.1
+Cdly1 T2 0 1P
+Gdly1 VCC QB VALUE = {-2E-7 + 5e-6*V(T2) -1.7e-8*V(T2)*V(T2)}
+
+.MODEL DT8811VB D 
++ IS=4.5E-18 N=1.40 RS=3.8
++ BV=3.000e+000 IBV=0.5e-006  XTI=4
++ EG=1.52436 CJO=18E-12 VJ=0.75 M=0.5 FC=0.5
+.MODEL QF290D NPN 
++ IS=2.691e-016 NF=1.000e+000 ISE=6.586e-018
++ NE = 1.082e+000 BF = 176 BR = 1.000e+000
++ IKF = 7.300e-003 VAF = 1.000e+002 VAR = 2.800e+002
++ EG = 1.110e+000 XTI = 1.068e+000 XTB = 0.000e+000
++ RC = -1e+000 RB = 2.500e+001 RE = 40
++ CJE = 2.500e-012 MJE = 1.740e-001 VJE = 1.250e-001
++ CJC = 7.24e-012 MJC = 2.573e-001 VJC = 1.100e-001
+.ENDS 6N136
+
+** Spice3 of Vishay 1 Mbd high speed optocouplers **
+* for parts VOM452T, VOM453T (w/o base connection)
+* Copyright VISHAY, Inc. 2010 All Rights Reserved.
+* Symbol Pin -> Model Node
+*    A           1
+*    K           2
+*    E           3
+*    C           4
+*    VCC         5 
+.SUBCKT VOM452 DA DK QE QC VCC
+DIN DA 9 DT8511VB
+VT 9 DK 0
+CIO DA QC 0.6E-12
+QOUT QC QB QE QF290D
+RFX QB QE 1E6
+HD T1 0 VT 800	;I-V
+RDLY1 T1 T2 0.1
+CDLY1 T2 0 1P
+GDLY1 VCC QB VALUE = {-2E-7 + 5E-6*V(T2) -1.7E-8*V(T2)*V(T2)}
+
+.MODEL DT8511VB D 
++ IS=4.5E-19 N=1.36 RS=2.7
++ BV=3.000E+000 IBV=0.5E-006  XTI=4
++ EG=1.52436 CJO=18E-12 VJ=0.75 M=0.5 FC=0.5
+.MODEL QF290D NPN
++ IS=2.691E-016 NF=1.000E+000 ISE=6.586E-018
++ NE = 1.082E+000 BF = 176 BR = 1.000E+000
++ IKF = 7.300E-003 VAF = 1.000E+002 VAR = 2.800E+002
++ EG = 1.110E+000 XTI = 1.068E+000 XTB = 0.000E+000
++ RC = -1E+000 RB = 2.500E+001 RE = 40
++ CJE = 2.500E-012 MJE = 1.740E-001 VJE = 1.250E-001
++ CJC = 7.24E-012 MJC = 2.573E-001 VJC = 1.100E-001
+.ENDS VOM452
+
+* PSpice Model of AC-input Phototransistor
+* TCET1600, TCMT1600
+* Emitter: T9508, Detector: T1090P 
+* Copyright VISHAY, Inc. 2011 All Rights Reserved.
+*
+* 1 = diodes A/C
+* 2 = diodes C/A
+* C = BJT collector
+* E = BJT emitter
+*$
+.SUBCKT TCET1600 1 2 C E PARAMS: REL_CTR=1
+D1 1 6 D9508	;IRED
+D2 6 1 D9508	;IRED
+Vsense 6 2 0 ;IF Current sense
+Hd R 0 Vsense 1	;I-V
+Rd R T1 10K
+Cd T1 0 0.2n
+Rdummy B 0 4G
+Q1 C B E E QT1090 ;phototransistor
+* V-I
+Gpcg C B TABLE  ;Photodetector {(IC vs IF) / Q1 BF}
++ {0.8*(abs(V(T1))^1.658*exp(limit(4.36-60*abs(V(T1)),-50,50))*REL_CTR/100)} = 
++ (0,0) (10,10)
+.model D9508 D IS=1P N=1.948621 RS=1.560495 BV=6 IBV=10U
++ CJO=18.8P VJ=0.532794 M=0.27985 EG=1.424 TT=500N 
+.model QT1090 NPN IS=3.64P BF=100 NF=1.193293 BR=10 TF=13N TR=350n
++ CJE=5.16P VJE=0.99 MJE=0.2411274 CJC=18P VJC=0.597478 MJC=0.431978
++ ISC=0.207N VAF=65 IKF=0.09 ISS=0 CJS=7.74p VJS=0.61 MJS=0.31
+.ends
+*$
+

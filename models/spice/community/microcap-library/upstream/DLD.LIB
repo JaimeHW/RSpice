@@ -1,0 +1,757 @@
+******************************************************************
+* 
+* EPCOS AG			EPCOS AG
+* Bereich Induktivitäten	Inductors Division
+* Entwicklung			Development Department
+* D-89520 Heidenheim		D-89520 Heidenheim
+* In den Seewiesen 26		In den Seewiesen 26
+*
+* Allgemeines			General
+*	Wolfgang Sammet
+*	Tel  +49 (0) 7321 326-220
+*	FAX  +49 (0) 7321 326-628
+*	Email wolfgang.sammet@epcos.com
+*
+*
+* Modellierung und Simulation	Modeling and simulation
+*	Stefan Schefler
+*	Tel  +49 (0) 7321 326-446
+*	FAX  +49 (0) 7321 326-628
+*	Email stefan.schefler@epcos.com
+*
+*
+******************************************************************
+* Bitte lesen Sie die Hinweise in der Datei "Liesmich.txt" .
+* Please read the hints in "Readme.txt" .
+******************************************************************
+*
+* 
+* Library DLD.lib 
+* Version 1.46 (Donnerstag, 22. Juli 2010 16:43 Uhr CEST)
+* 
+******************************************************************
+* SPICE-Simulationsdaten für SMD Datenleitungsdrossel
+* SPICE simulation data for SMD data line choke
+* 	DLD
+*
+******************************************************************
+*
+******************************************************************
+* Library für PSPICE
+* 
+* Libs für weitere Spice-Versionen sind verfügbar (HSPICE ..)
+*	
+******************************************************************
+*
+.subckt DLD_BASE1 A1 A2 A3 A4  PARAMS:  
++	ls11_a=1.2992m rs11_a=112.9455m cp11_a=674.0358f rp11_a=11.6967k 
++	ls21_a=1.2992m rs21_a=112.9455m cp21_a=674.0358f rp21_a=11.6967k 
++	ccopl11_a=6.3664p rcopl11_a=10.7512 ccopl21_a=6.3664p rcopl21_a=10.7512 
++	lwira1_a=752.0000n lwa1_a=26.4782u rwa1_a=59.1128m lwb1_a=45.4812u 
++	rwb1_a=543.0882m lwirs1_a=28.8324p lwsa1_a=5.0033u rwsa1_a=80.6467 
++	lwsb1_a=12.6390u rwsb1_a=1.9862k ksyn1_a=0 kw1s1_a=0.9999 
++	kw2s1_a=-0.9999 kw1a1_a=0.9999 kw2a1_a=0.9999 k1a1_a=999.9607m 
+ls1_b	A1 31 	{ls11_a}  
+rs1_b	31 A3 	{rs11_a}  
+cp1_b	A1 A3 	{cp11_a}  
+rp1_b	A1 A3 	{rp11_a}  
+ls2_b	A2 32 	{ls21_a}  
+rs2_b	32 A4 	{rs21_a}  
+cp2_b	A2 A4 	{cp21_a}  
+rp2_b	A2 A4 	{rp21_a}  
+ccopl1_b	A1 121 	{ccopl11_a}  
+rcopl1_b	121 A2 	{rcopl11_a}  
+ccopl2_b	A3 521 	{ccopl21_a}  
+rcopl2_b	521 A4 	{rcopl21_a}  
+lwira_b	900 0 	{lwira1_a}  
+lwa_b	900 901 	{lwa1_a}  
+rwa_b	901 0 	{rwa1_a}  
+lwb_b	900 902 	{lwb1_a}  
+rwb_b	902 0 	{rwb1_a}  
+lwirs_b	800 0 	{lwirs1_a}  
+lwsa_b	800 801 	{lwsa1_a}  
+rwsa_b	801 0 	{rwsa1_a}  
+lwsb_b	800 802 	{lwsb1_a}  
+rwsb_b	802 0 	{rwsb1_a}  
+ksyn_b	lwirs_b lwira_b	{ksyn1_a}
+kw1s_b	ls1_b lwirs_b	{kw1s1_a}
+kw2s_b	ls2_b lwirs_b	{kw2s1_a}
+kw1a_b	ls1_b lwira_b	{kw1a1_a}
+kw2a_b	ls2_b lwira_b	{kw2a1_a}
+k1a_b	ls1_b ls2_b	{k1a1_a}
+.ENDS
+
+.subckt DLD_BASE2 A1 A2 A3 A4  PARAMS:  
++	rs1a1_a=0.85 lst1a1_a=0.225u rst1a1_a=1500 cst1a1_a=65p 
++	lwir1a1_a=0.9u rwir1a1_a=40 ls1a1_a=14.4m ls1b1_a=9.6m 
++	cpb11_a=1.4p rp11_a=115k rwira1a1_a=1000 lwira1a1_a=200m 
++	rwira1c1_a=50k cwira1c1_a=30p lst1b1_a=0.225u rst1b1_a=1500 
++	lwir1b1_a=0.9u rwir1b1_a=40 cst1b1_a=65p rs1b1_a=0.85 
++	rs2a1_a=0.85 lst2a1_a=0.225u cst2a1_a=65p rst2a1_a=1500 
++	lwir2a1_a=0.9u rwir2a1_a=40 ls2a1_a=14.4m ls2b1_a=9.6m 
++	cpb21_a=1.4p rp21_a=115k rwira2a1_a=1000 lwira2a1_a=200m 
++	rwira2c1_a=50k cwira2c1_a=30p lst2b1_a=0.225u rst2b1_a=1500 
++	cst2b1_a=65p lwir2b1_a=0.9u rwir2b1_a=40 rs2b1_a=0.85 
++	ccopl11_a=17p rpopp11_a=3000 ccopl21_a=17p rpopp21_a=3000 
++	k1a1_a=0.99999999 k1b1_a=0.99999999 
+rs1a_b	A1 21 	{rs1a1_a}  
+lst1a_b	21 31 	{lst1a1_a}  
+rst1a_b	21 31 	{rst1a1_a}  
+cst1a_b	21 31 	{cst1a1_a}  
+lwir1a_b	21 91 	{lwir1a1_a}  
+rwir1a_b	91 31 	{rwir1a1_a}  
+ls1a_b	31 lsp1 	{ls1a1_a}  
+ls1b_b	lsp1 41 	{ls1b1_a}  
+cpb1_b	31 41 	{cpb11_a}  
+rp1_b	31 41 	{rp11_a}  
+rwira1a_b	lsp1 71 	{rwira1a1_a}  
+lwira1a_b	71 41 	{lwira1a1_a}  
+rwira1c_b	lsp1 131 	{rwira1c1_a}  
+cwira1c_b	131 41 	{cwira1c1_a}  
+lst1b_b	41 51 	{lst1b1_a}  
+rst1b_b	41 51 	{rst1b1_a}  
+lwir1b_b	41 81 	{lwir1b1_a}  
+rwir1b_b	81 51 	{rwir1b1_a}  
+cst1b_b	41 51 	{cst1b1_a}  
+rs1b_b	51 A3 	{rs1b1_a}  
+rs2a_b	A2 22 	{rs2a1_a}  
+lst2a_b	22 32 	{lst2a1_a}  
+cst2a_b	22 32 	{cst2a1_a}  
+rst2a_b	22 32 	{rst2a1_a}  
+lwir2a_b	22 82 	{lwir2a1_a}  
+rwir2a_b	82 32 	{rwir2a1_a}  
+ls2a_b	32 lsp2 	{ls2a1_a}  
+ls2b_b	lsp2 42 	{ls2b1_a}  
+cpb2_b	32 42 	{cpb21_a}  
+rp2_b	32 42 	{rp21_a}  
+rwira2a_b	lsp2 72 	{rwira2a1_a}  
+lwira2a_b	72 42 	{lwira2a1_a}  
+rwira2c_b	lsp2 132 	{rwira2c1_a}  
+cwira2c_b	132 42 	{cwira2c1_a}  
+lst2b_b	42 52 	{lst2b1_a}  
+rst2b_b	42 52 	{rst2b1_a}  
+cst2b_b	42 52 	{cst2b1_a}  
+lwir2b_b	42 92 	{lwir2b1_a}  
+rwir2b_b	92 52 	{rwir2b1_a}  
+rs2b_b	52 A4 	{rs2b1_a}  
+ccopl1_b	21 22 	{ccopl11_a}  
+rpopp1_b	21 22 	{rpopp11_a}  
+ccopl2_b	51 52 	{ccopl21_a}  
+rpopp2_b	51 52 	{rpopp21_a}  
+k1a_b	ls1a_b ls2a_b	{k1a1_a}
+k1b_b	ls1b_b ls2b_b	{k1b1_a}
+.ENDS
+
+*
+* B82790C0105N240 Automotive and telecom, closed housing (2x1 mH)
+*
+.subckt B82790C0105N240 A1 A2 A3 A4   PARAMS:  
++	ls11=1.2992m rs11=112.9455m cp11=674.0358f rp11=11.6967k 
++	ls21=1.2992m rs21=112.9455m cp21=674.0358f rp21=11.6967k 
++	ccopl11=6.3664p rcopl11=10.7512 ccopl21=6.3664p rcopl21=10.7512 
++	lwira1=752.0000n lwa1=26.4782u rwa1=59.1128m lwb1=45.4812u 
++	rwb1=543.0882m lwirs1=28.8324p lwsa1=5.0033u rwsa1=80.6467 
++	lwsb1=12.6390u rwsb1=1.9862k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.9607m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790C0113N201 Automotive and telecom, closed housing (2x11 uH)
+*
+.subckt B82790C0113N201 A1 A2 A3 A4   PARAMS:  
++	ls11=9.9307u rs11=32.7975m cp11=113.1327f rp11=1.6659k 
++	ls21=9.9307u rs21=32.7975m cp21=113.1327f rp21=1.6659k 
++	ccopl11=1.7173p rcopl11=4.0662 ccopl21=1.7173p rcopl21=4.0662 
++	lwira1=752.0000n lwa1=67.2533u rwa1=5.0208 lwb1=655.6307u 
++	rwb1=50.2076 lwirs1=1.5059n lwsa1=3.7500u rwsa1=68.3653 
++	lwsb1=16.5934u rwsb1=5.6727k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=997.6764m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790C0225N265 Automotive and telecom, closed housing (2x2.2 mH)
+*
+.subckt B82790C0225N265 A1 A2 A3 A4   PARAMS:  
++	ls11=3.1881m rs11=389.1135m cp11=257.9836f rp11=12.2704k 
++	ls21=3.1881m rs21=389.1135m cp21=257.9836f rp21=12.2704k 
++	ccopl11=4.7537p rcopl11=3.9103 ccopl21=4.7537p rcopl21=3.9103 
++	lwira1=752.0000n lwa1=5.2690u rwa1=17.3899m lwb1=5.6564u 
++	rwb1=308.7178m lwirs1=13.7032p lwsa1=10.6294u rwsa1=491.5971 
++	lwsb1=14.4635u rwsb1=3.4494k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.9818m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790C0253N201 Automotive and telecom, closed housing (2x25 uH)
+*
+.subckt B82790C0253N201 A1 A2 A3 A4   PARAMS:  
++	ls11=19.7189u rs11=77.9700m cp11=92.0894f rp11=2.9601k 
++	ls21=19.7189u rs21=77.9700m cp21=92.0894f rp21=2.9601k 
++	ccopl11=2.3073p rcopl11=6.1929 ccopl21=2.3073p rcopl21=6.1929 
++	lwira1=752.0000n lwa1=67.0757u rwa1=5.6757 lwb1=747.8517u 
++	rwb1=56.7566 lwirs1=884.9242p lwsa1=5.9515u rwsa1=162.5347 
++	lwsb1=14.6622u rwsb1=4.3496k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=998.6834m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790C0474N215 Automotive and telecom, closed housing (2x470 uH)
+*
+.subckt B82790C0474N215 A1 A2 A3 A4   PARAMS:  
++	ls11=469.2299u rs11=157.7m cp11=545.2882f rp11=10.7483k 
++	ls21=469.2299u rs21=119.7180m cp21=545.2882f rp21=10.7483k 
++	ccopl11=5.3200p rcopl11=8.4988 ccopl21=5.3200p rcopl21=8.4988 
++	lwira1=752.0000n lwa1=36.2092u rwa1=512.8156m lwb1=142.9907u 
++	rwb1=1.2529 lwirs1=80.3998p lwsa1=5.6020u rwsa1=89.6550 
++	lwsb1=12.8915u rwsb1=2.0697k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.8938m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790C0475N265 Automotive and telecom, closed housing (2x4.7 mH)
+*
+.subckt B82790C0475N265 A1 A2 A3 A4   PARAMS:  
++	ls11=6.1325m rs11=557.3m cp11=321.0036f rp11=30.2745k 
++	ls21=6.1325m rs21=565.4295m cp21=321.0036f rp21=30.2745k 
++	ccopl11=7.3219p rcopl11=26.3160 ccopl21=7.3219p rcopl21=26.3160 
++	lwira1=752.0000n lwa1=7.4390u rwa1=11.8865m lwb1=25.8534u 
++	rwb1=293.6097m lwirs1=14.5435p lwsa1=13.1360u rwsa1=124.7718 
++	lwsb1=7.6683u rwsb1=598.1383 ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.9812m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790C0513N201 Automotive and telecom, closed housing (2x51 uH)
+*
+.subckt B82790C0513N201 A1 A2 A3 A4   PARAMS:  
++	ls11=48.7794u rs11=139.6950m cp11=226.4288f rp11=6.4584k 
++	ls21=48.7794u rs21=139.6950m cp21=226.4288f rp21=6.4584k 
++	ccopl11=3.8528p rcopl11=2.7484 ccopl21=3.8528p rcopl21=2.7484 
++	lwira1=752.0000n lwa1=66.0331u rwa1=4.4599 lwb1=488.1904u 
++	rwb1=44.5988 lwirs1=566.9239p lwsa1=7.8564u rwsa1=235.4468 
++	lwsb1=16.2798u rwsb1=3.8828k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.2861m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790S0253N201 Automotive and telecom, closed housing (2x25 uH)
+*
+.subckt B82790S0253N201 A1 A2 A3 A4   PARAMS:  
++	ls11=24.1353u rs11=54.5385m cp11=75.2847f rp11=3.0285k 
++	ls21=24.1353u rs21=54.5385m cp21=75.2847f rp21=3.0285k 
++	ccopl11=418.6335f rcopl11=50.1529 ccopl21=418.6335f rcopl21=50.1529 
++	lwira1=752.0000n lwa1=28.9077u rwa1=1.5816 lwb1=292.7574u 
++	rwb1=15.8156 lwirs1=21.3723n lwsa1=10.7374u rwsa1=20.4035 
++	lwsb1=14.0058u rwsb1=2.0182k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=972.3084m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82790S0513N201 Automotive and telecom, closed housing (2x51 uH)
+*
+.subckt B82790S0513N201 A1 A2 A3 A4   PARAMS:  
++	ls11=41.6269u rs11=110.5350m cp11=91.5737f rp11=6.0443k 
++	ls21=41.6269u rs21=110.5350m cp21=91.5737f rp21=6.0443k 
++	ccopl11=424.7228f rcopl11=37.0598 ccopl21=424.7228f rcopl21=37.0598 
++	lwira1=752.0000n lwa1=67.8615u rwa1=5.2629 lwb1=633.9835u 
++	rwb1=52.6288 lwirs1=19.5623n lwsa1=15.7150u rwsa1=85.8579 
++	lwsb1=15.2239u rwsb1=1.2214k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=973.7437m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82792C0226N365 Telecom ISDN ADSL, open housing (2x22 mH)
+*
+.subckt B82792C0226N365 A1 A2 A3 A4   PARAMS:  
++	rs1a1=0.85 lst1a1=0.225u rst1a1=1500 cst1a1=65p 
++	lwir1a1=0.9u rwir1a1=40 ls1a1=14.4m ls1b1=9.6m 
++	cpb11=1.4p rp11=115k rwira1a1=1000 lwira1a1=200m 
++	rwira1c1=50k cwira1c1=30p lst1b1=0.225u rst1b1=1500 
++	lwir1b1=0.9u rwir1b1=40 cst1b1=65p rs1b1=0.85 
++	rs2a1=0.85 lst2a1=0.225u cst2a1=65p rst2a1=1500 
++	lwir2a1=0.9u rwir2a1=40 ls2a1=14.4m ls2b1=9.6m 
++	cpb21=1.4p rp21=115k rwira2a1=1000 lwira2a1=200m 
++	rwira2c1=50k cwira2c1=30p lst2b1=0.225u rst2b1=1500 
++	cst2b1=65p lwir2b1=0.9u rwir2b1=40 rs2b1=0.85 
++	ccopl11=17p rpopp11=3000 ccopl21=17p rpopp21=3000 
++	k1a1=0.99999999 k1b1=0.99999999 
+X1 A1 A2 A3 A4 DLD_BASE2  PARAMS:  
++	rs1a1_a={rs1a1} lst1a1_a={lst1a1} rst1a1_a={rst1a1} 
++	cst1a1_a={cst1a1} lwir1a1_a={lwir1a1} rwir1a1_a={rwir1a1} 
++	ls1a1_a={ls1a1} ls1b1_a={ls1b1} cpb11_a={cpb11} 
++	rp11_a={rp11} rwira1a1_a={rwira1a1} 
++	lwira1a1_a={lwira1a1} rwira1c1_a={rwira1c1} 
++	cwira1c1_a={cwira1c1} lst1b1_a={lst1b1} rst1b1_a={rst1b1} 
++	lwir1b1_a={lwir1b1} rwir1b1_a={rwir1b1} cst1b1_a={cst1b1} 
++	rs1b1_a={rs1b1} rs2a1_a={rs2a1} lst2a1_a={lst2a1} 
++	cst2a1_a={cst2a1} rst2a1_a={rst2a1} lwir2a1_a={lwir2a1} 
++	rwir2a1_a={rwir2a1} ls2a1_a={ls2a1} ls2b1_a={ls2b1} 
++	cpb21_a={cpb21} rp21_a={rp21} rwira2a1_a={rwira2a1} 
++	lwira2a1_a={lwira2a1} rwira2c1_a={rwira2c1} 
++	cwira2c1_a={cwira2c1} lst2b1_a={lst2b1} rst2b1_a={rst2b1} 
++	cst2b1_a={cst2b1} lwir2b1_a={lwir2b1} rwir2b1_a={rwir2b1} 
++	rs2b1_a={rs2b1} ccopl11_a={ccopl11} rpopp11_a={rpopp11} 
++	ccopl21_a={ccopl21} rpopp21_a={rpopp21} k1a1_a={k1a1} 
++	k1b1_a={k1b1} 
+.ENDS
+
+*
+* B82793C0105N265 Automotive and telecom; high currents; reduced height (2x1 mH)
+*
+.subckt B82793C0105N265 A1 A2 A3 A4   PARAMS:  
++	ls11=1.0836m rs11=99.8400m cp11=477.7264f rp11=6.7231k 
++	ls21=1.0836m rs21=99.8400m cp21=477.7264f rp21=6.7231k 
++	ccopl11=5.8268p rcopl11=3.7215 ccopl21=5.8268p rcopl21=3.7215 
++	lwira1=752.0000n lwa1=8.9271u rwa1=13.1568m lwb1=13.0617u 
++	rwb1=452.1414m lwirs1=26.3431p lwsa1=6.0597u rwsa1=123.5703 
++	lwsb1=14.1056u rwsb1=2.7902k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.9649m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82793C0113N201 Automotive and telecom; high currents; reduced height (2x11 uH)
+*
+.subckt B82793C0113N201 A1 A2 A3 A4   PARAMS:  
++	ls11=8.5511u rs11=31.9515m cp11=95.1643f rp11=3.2652k 
++	ls21=8.5511u rs21=31.9515m cp21=95.1643f rp21=3.2652k 
++	ccopl11=2.5816p rcopl11=3.7209 ccopl21=2.5816p rcopl21=3.7209 
++	lwira1=752.0000n lwa1=48.0755u rwa1=5.0143 lwb1=156.7689u 
++	rwb1=50.1428 lwirs1=1.6679n lwsa1=4.5545u rwsa1=79.1551 
++	lwsb1=17.5908u rwsb1=5.6030k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=997.5484m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82793C0225N265 Automotive and telecom; high currents; reduced height (2x2.2 mH)
+*
+.subckt B82793C0225N265 A1 A2 A3 A4   PARAMS:  
++	ls11=2.7683m rs11=358.5m cp11=460.5023f rp11=12.8870k 
++	ls21=2.7683m rs21=317.9010m cp21=460.5023f rp21=12.8870k 
++	ccopl11=5.6374p rcopl11=9.8391 ccopl21=5.6374p rcopl21=9.8391 
++	lwira1=752.0000n lwa1=6.6735u rwa1=10.3996m lwb1=8.3344u 
++	rwb1=188.1524m lwirs1=17.6462p lwsa1=9.3488u rwsa1=123.2449 
++	lwsb1=10.7119u rwsb1=1.2940k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.9765m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82793C0474N215 Automotive and telecom; high currents; reduced height (2x470 uH)
+*
+.subckt B82793C0474N215 A1 A2 A3 A4   PARAMS:  
++	ls11=419.6590u rs11=133.9665m cp11=860.1319f rp11=12.6760k 
++	ls21=419.6590u rs21=133.9665m cp21=860.1319f rp21=12.6760k 
++	ccopl11=9.1904p rcopl11=7.8768 ccopl21=9.1904p rcopl21=7.8768 
++	lwira1=752.0000n lwa1=118.7178u rwa1=895.4914m lwb1=1.0052m 
++	rwb1=8.9549 lwirs1=83.6404p lwsa1=5.8767u rwsa1=154.9323 
++	lwsb1=13.8025u rwsb1=3.0123k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.8879m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82793C0475N265 Automotive and telecom; high currents; reduced height (2x4.7 mH)
+*
+.subckt B82793C0475N265 A1 A2 A3 A4   PARAMS:  
++	ls11=5.5146m rs11=515.5800m cp11=666.7900f rp11=24.3818k 
++	ls21=5.5146m rs21=515.5800m cp21=666.7900f rp21=24.3818k 
++	ccopl11=8.1910p rcopl11=56.8988 ccopl21=8.1910p rcopl21=56.8988 
++	lwira1=752.0000n lwa1=7.3828u rwa1=8.8439m lwb1=21.0119u 
++	rwb1=234.7903m lwirs1=12.3639p lwsa1=6.6023u rwsa1=205.9909 
++	lwsb1=5.5910u rwsb1=3.5004k ksyn1=0 kw1s1=999.9990m 
++	kw2s1=-999.9990m kw1a1=999.9990m kw2a1=999.9990m k1a1=999.9836m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82793D0225N265 Automotive and telecom; high currents; reduced height (2x2.2 mH)
+*
+.subckt B82793D0225N265 A1 A2 A3 A4   PARAMS:  
++	ls11=3.5124m rs11=365.3m cp11=348.2557f rp11=12.7750k 
++	ls21=3.5124m rs21=359.0595m cp21=348.2557f rp21=12.7750k 
++	ccopl11=8.8412p rcopl11=5.2250 ccopl21=8.8412p rcopl21=5.2250 
++	lwira1=752.0000n lwa1=5.8612u rwa1=9.3100m lwb1=6.1278u 
++	rwb1=160.8111m lwirs1=12.7348p lwsa1=10.0644u rwsa1=68.0167 
++	lwsb1=10.5496u rwsb1=1.1315k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.9832m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82793S0253N201 Automotive and telecom; high currents; reduced height (2x25 uH)
+*
+.subckt B82793S0253N201 A1 A2 A3 A4   PARAMS:  
++	ls11=21.4663u rs11=47.0535m cp11=68.7614f rp11=3.2729k 
++	ls21=21.4663u rs21=47.0535m cp21=68.7614f rp21=3.2729k 
++	ccopl11=317.2459f rcopl11=61.1105 ccopl21=317.2459f rcopl21=61.1105 
++	lwira1=752.0000n lwa1=50.6496u rwa1=3.2553 lwb1=779.3303u 
++	rwb1=32.5530 lwirs1=27.1236n lwsa1=15.0162u rwsa1=29.2130 
++	lwsb1=13.0689u rwsb1=2.6106k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=964.8966m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82793S0513N201 Automotive and telecom; high currents; reduced height (2x51 uH)
+*
+.subckt B82793S0513N201 A1 A2 A3 A4   PARAMS:  
++	ls11=49.1838u rs11=88.4100m cp11=87.5935f rp11=5.5820k 
++	ls21=49.1838u rs21=88.4100m cp21=87.5935f rp21=5.5820k 
++	ccopl11=645.6428f rcopl11=23.8402 ccopl21=645.6428f rcopl21=23.8402 
++	lwira1=752.0000n lwa1=28.1774u rwa1=1.4062 lwb1=304.7764u 
++	rwb1=14.0618 lwirs1=15.0075n lwsa1=14.2237u rwsa1=138.7848 
++	lwsb1=18.1287u rwsb1=1.6492k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=980.3161m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82799C0104N001 EIA 1812; high performance; can be used up to 150C (2x100 uH)
+*
+.subckt B82799C0104N001 A1 A2 A3 A4   PARAMS:  
++	ls11=167.5513u rs11=149.7754m cp11=317.1841f rp11=2.3379k 
++	ls21=167.5513u rs21=149.7754m cp21=317.1841f rp21=2.3379k 
++	ccopl11=2.4475p rcopl11=3.3553 ccopl21=2.4475p rcopl21=3.3553 
++	lwira1=606.0000n lwa1=1.7065u rwa1=8.8504m lwb1=841.6465n 
++	rwb1=112.1201m lwirs1=66.1684p lwsa1=8.2641u rwsa1=574.3784 
++	lwsb1=16.9716u rwsb1=7.8856k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.8909m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82799C0113N001 EIA 1812; high performance; can be used up to 150C (2x11 uH)
+*
+.subckt B82799C0113N001 A1 A2 A3 A4   PARAMS:  
++	ls11=13.9578u rs11=115.8895m cp11=120.3136f rp11=1.6607k 
++	ls21=13.9578u rs21=115.8895m cp21=120.3136f rp21=1.6607k 
++	ccopl11=2.0596p rcopl11=2.9401 ccopl21=2.0596p rcopl21=2.9401 
++	lwira1=91.1500n lwa1=382.3881n rwa1=28.7883m lwb1=473.7307n 
++	rwb1=1.1620 lwirs1=122.2458p lwsa1=800.5351n rwsa1=29.2472 
++	lwsb1=1.8922u rwsb1=697.9540 ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=998.7330m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82799C0474N001 EIA 1812; high performance; can be used up to 150C (2x470 uH)
+*
+.subckt B82799C0474N001 A1 A2 A3 A4   PARAMS:  
++	ls11=767.2423u rs11=346.5533m cp11=366.5945f rp11=5.7985k 
++	ls21=767.2423u rs21=346.5533m cp21=366.5945f rp21=5.7985k 
++	ccopl11=7.4538p rcopl11=5.9657 ccopl21=7.4538p rcopl21=5.9657 
++	lwira1=606.0000n lwa1=1.6618u rwa1=3.1390m lwb1=1.0536u 
++	rwb1=34.6638m lwirs1=40.6965p lwsa1=5.1047u rwsa1=198.8854 
++	lwsb1=10.5443u rwsb1=2.6587k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=999.9328m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82799C0513N001 EIA 1812; high performance; can be used up to 150C (2x51 uH)
+*
+.subckt B82799C0513N001 A1 A2 A3 A4   PARAMS:  
++	ls11=42.2869u rs11=222.1m cp11=250.7290f rp11=6.2868k 
++	ls21=42.2869u rs21=222.1m cp21=250.7290f rp21=6.2868k 
++	ccopl11=4.5782p rcopl11=9.1381 ccopl21=4.5782p rcopl21=9.1381 
++	lwira1=606.0000n lwa1=27.6406u rwa1=2.4781 lwb1=659.3807u 
++	rwb1=41.3953 lwirs1=552.4322p lwsa1=3.8107u rwsa1=86.9161 
++	lwsb1=7.9316u rwsb1=1.7319k ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=998.8802m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82799S0223N001 EIA 1812; high performance; can be used up to 150C (2x22 uH)
+*
+.subckt B82799S0223N001 A1 A2 A3 A4   PARAMS:  
++	ls11=29.7998u rs11=161.7289m cp11=9.7259f rp11=901.6800 
++	ls21=29.7998u rs21=161.7289m cp21=9.7259f rp21=901.6800 
++	ccopl11=570.5794f rcopl11=38.5861 ccopl21=570.5794f rcopl21=38.5861 
++	lwira1=91.1500n lwa1=194.6529n rwa1=10.3000m lwb1=288.3740n 
++	rwb1=111.8781m lwirs1=1.7831n lwsa1=2.4163u rwsa1=1.7940 
++	lwsb1=2.3623u rwsb1=50.2464 ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=981.2072m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82799S0333N001 EIA 1812; high performance; can be used up to 150C (2x33 uH)
+*
+.subckt B82799S0333N001 A1 A2 A3 A4   PARAMS:  
++	ls11=41.1042u rs11=186.0580m cp11=114.8517f rp11=4.9779k 
++	ls21=41.1042u rs21=186.0580m cp21=114.8517f rp21=4.9779k 
++	ccopl11=463.2548f rcopl11=77.4189 ccopl21=463.2548f rcopl21=77.4189 
++	lwira1=91.1500n lwa1=364.5600n rwa1=10.4825m lwb1=480.4819n 
++	rwb1=336.4475m lwirs1=1.8297n lwsa1=1.8114u rwsa1=48.4689 
++	lwsb1=2.5081u rwsb1=755.5700 ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=981.0290m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+*
+* B82799S0513N001 EIA 1812; high performance; can be used up to 150C (2x51 uH)
+*
+.subckt B82799S0513N001 A1 A2 A3 A4   PARAMS:  
++	ls11=75.3764u rs11=245.2847m cp11=122.2010f rp11=7.3804k 
++	ls21=75.3764u rs21=245.2847m cp21=122.2010f rp21=7.3804k 
++	ccopl11=577.7362f rcopl11=35.8018 ccopl21=577.7362f rcopl21=35.8018 
++	lwira1=91.1500n lwa1=309.8434n rwa1=4.6237m lwb1=294.9900n 
++	rwb1=102.5777m lwirs1=1.4500n lwsa1=1.5168u rwsa1=37.4185 
++	lwsb1=2.3893u rwsb1=419.7611 ksyn1=0 kw1s1=0.9999 
++	kw2s1=-0.9999 kw1a1=0.9999 kw2a1=0.9999 k1a1=984.2659m 
+X1 A1 A2 A3 A4 DLD_BASE1  PARAMS:  
++	ls11_a={ls11} rs11_a={rs11} cp11_a={cp11} 
++	rp11_a={rp11} ls21_a={ls21} rs21_a={rs21} 
++	cp21_a={cp21} rp21_a={rp21} ccopl11_a={ccopl11} 
++	rcopl11_a={rcopl11} ccopl21_a={ccopl21} rcopl21_a={rcopl21} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} lwirs1_a={lwirs1} 
++	lwsa1_a={lwsa1} rwsa1_a={rwsa1} lwsb1_a={lwsb1} 
++	rwsb1_a={rwsb1} ksyn1_a={ksyn1} kw1s1_a={kw1s1} 
++	kw2s1_a={kw2s1} kw1a1_a={kw1a1} kw2a1_a={kw2a1} 
++	k1a1_a={k1a1} 
+.ENDS
+
+;$SpiceType=AMBIGUOUS

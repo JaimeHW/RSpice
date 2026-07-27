@@ -1,0 +1,301 @@
+* ------------------------------------------------------------ *
+*
+* PSpice implementation of the PWM Switch
+* CCMVM and CCMCM Switch Models originally derived by Vatche Vorperian
+* DCMVM, DCMCM and BCM models originally derived by Christophe Basso
+* Auto-toggling versions by Christophe Basso, Toulouse (FRANCE)
+* Please report bugs to CBASSO@WANADOO.FR
+* OrCAD PSpice compatible
+* Last modified: February 22nd 2005
+*
+* ------------------------------------------------------------ *
+*******
+.SUBCKT PWMCCMVM a c p d params: re=1m
+* RE=Parasitic resistance in Ohms
+* CCM only, voltage mode
+Xd d dc limit params: clampH=0.99 clampL=16m
+EVcp 6 p Value = { V(dc)*V(a,p) }
+GIap a p Value = { V(dc)*I(VM) }
+XRS 7 c 100 Rseries
+Edum 100 0 Value = { V(dc)*(1-V(dc))*{re} }
+VM 6 7
+*
+.model dclamp d n=0.01 rs=100m
+*
+.ENDS
+********
+.SUBCKT PWMDCMVM a c p d params: L=75u Fs=100k
+* DCM only, voltage mode
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+Xd d dc limit params: clampH=0.99 clampL=16m
+EVcp 6 p Value = { (V(dc)/(V(dc)+V(d2)))*V(a,p) }
+GIap a p Value = { (V(dc)/(V(dc)+V(d2)))*I(VM) }
+Ed2 d2X 0 value = { (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,c)+1u)) - V(dc) }
+Xd2 d2X dc d2 limit2
+RS 7 c 1u
+VM 6 7 
+*
+.ENDS
+********
+.SUBCKT PWMVM_Avg a c p d params: L=75u Fs=100k
+*
+* auto toggling between DCM and CCM, voltage-mode
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+*
+Xd d dc limit params: clampH=0.99 clampL=16m
+EVcp 6 p Value = { (V(dc)/(V(dc)+V(d2)))*V(a,p) }
+GIap a p Value = { (V(dc)/(V(dc)+V(d2)))*I(VM) }
+Ed2 d2X 0 value = { (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,c)+1u)) - V(dc) }
+Xd2 d2X dc d2 limit2
+VM 6 c
+*
+.ENDS
+********
+.SUBCKT PWMDCMCM a c p vc dc params: L=75u Fs=100k Ri=1 Se=100m
+*
+* This subckt is a current-mode DCM model
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+* RI=Current Sense Element
+* SE=External ramp in V/s
+*
+Edc dcx 0 Value = { V(vc)*{Fs}/({Se}+(abs(v(a,c))*{Ri})/{L}+1u) }
+Xdc dcx dc limit params: clampH=0.99 clampL=16m
+EVcp 6 p Value = { (V(dc)/(V(dc)+V(d2)+1u))*V(a,p) }
+GIap a p Value = { (V(dc)/(V(dc)+V(d2)+1u))*I(VM) }
+Ed2 d2X 0 Value = { (2*I(VM)*{L}-v(a,c)*V(dc)^2*{1/Fs}) / ( v(a,c)*V(dc)*{1/Fs}+1u ) }
+Xd2 d2X dc d2 limit2
+Rdum1 dc 0 1Meg
+Rdum2 vc 0 1Meg
+RS 7 c 1u
+VM 6 7 
+*
+.ENDS
+********
+.SUBCKT PWMCM_Avg a c p vc dc params: L=35u Fs=200k Ri=1 Se=100m
+*
+* auto toggling between DCM and CCM, current-mode
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+* RI=Current Sense Element
+* SE=External ramp in V/s
+*
+Edc dcx 0 value = { v(d2)*v(cx,p)/(v(a,p)-v(cx,p)+1u) }
+Xdc dcx dc limit params: clampH=0.99 clampL=7m
+Ed2 d2X 0 value = { (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u)) - V(dc) }
+Xd2 d2X dc d2 limit2
+GIap a p value = { (V(dc)/(V(dc)+V(d2)+1u))*I(VM) }
+GIpc p cx value = { V(vc)/{Ri} }
+GImju cx p value = { {Se}*V(dc)/({Ri}*{Fs}) + (v(cx,p)/{L})*V(d2)*{1/Fs}*(1-(V(dc)+V(d2))/2) }
+Rdum1 dc 0 1Meg
+Rdum2 vc 0 1Meg
+VM cx c 
+XC1 c p mode varicap
+Emode mode 0 Value = { IF (  (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u))
++ < 1, 1p , {4/((L)*(6.28*Fs)^2)}	) } ; connect or disconnects the resonating capacitor
+*
+.ENDS
+*********
+.SUBCKT PWMBCMVM a c p vc dc fsw ip params: L=1.2m
+* Borderline Conduction Mode, voltage-mode
+* --> 1V for vc = 1us for ton
+* L=Primary inductance in Henries
+EBdc dcx 0 Value = { V(vc)*1u/(V(vc)*1u + V(toff)) }
+Xd dcx dc limit params: clampH=0.99 clampL=16m
+EBVcp 6 p Value = { V(dc)*V(a,p) }
+GBIap a p Value = { V(dc)*I(VM) }
+EBtoff toff 0 Value = { IF ( 2*I(VM)*{L}/V(c,p) < 0, 0,
++ 2*I(VM)*{L}/(V(c,p)+10n) ) }
+EBfsw fsw 0 Value = { (1/(V(vc)*1u + V(toff)))/1k }
+EBip ip 0 Value = { abs(V(a,c)*V(vc)*1u)/{L} }
+VM 6 c
+*
+.ENDS
+*********
+.SUBCKT PWMCMX a c p vc dc params: L=35u Fs=200k Ri=1 Se=100m
+*
+* auto toggling between DCM and CCM, current-mode
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+* RI=Current Sense Element
+* SE=External ramp in V/s
+*
+Edc dcx 0 value = { v(d2)*v(cx,p)/(v(a,p)-v(cx,p)+1u) }
+Xdc dcx dc limit params: clampH=0.99 clampL=7m
+Ed2 d2X 0 value = { (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u)) - V(dc) }
+Xd2 d2X dc d2 limit2
+GIap a p value = { (V(dc)/(V(dc)+V(d2)+1u))*I(VM) }
+GIpc p cx value = { V(vc)/{Ri} }
+GImju cx p value = { {Se}*V(dc)/({Ri}*{Fs}) + (v(cx,p)/{L})*V(d2)*{1/Fs}*(1-(V(dc)+V(d2))/2) }
+Rdum1 dc 0 1Meg
+Rdum2 vc 0 1Meg
+VM cx c 
+* XC1 c p mode varicap
+* Rmode mode 0 100k
+* Emode mode 0 Value = { IF (  (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u))
+* + < 1, 1p , {4/((L)*(6.28*Fs)^2)}	) } ; connect or disconnects the resonating capacitor
+*
+.ENDS
+*********
+.SUBCKT PWMBCMCM a c p vc dc fsw ip params: L=1.2m Ri=0.5
+*
+* This subckt is a current-mode BCM model, version 1
+* L=Primary inductance in Henries
+* RI=Current Sense Element
+*
+
+EBtsw tsw 0 Value = { ( ( (V(vc)*{L}/{Ri}) * ( 1/(v(a,cx)+10n)  + 1/(v(cx,p)+10n) ) ) *1Meg ) }
+EBdc dcx 0 Value = { V(vc)*{L}/({Ri}*V(a,cx)*(V(tsw)/1Meg)+10n) }
+Xdc dcx dc limit params: clampH=0.99 clampL=7m
+GBIap a p Value = { V(dc)*I(VM) }
+GBIpc p cx Value = { V(vc)/{Ri} }
+GBImju cx p Value = { v(cx,p)*(1-V(dc))*v(tsw)/(2*{L}*1Meg) }
+EBton ton 0 Value = { V(dc)*v(tsw) }
+EBfsw fsw 0 Value = { (1/(V(tsw)/1Meg))/1k }
+EBip ip 0 Value = { abs(V(a,c)*V(ton)*1u)/{L} }
+Rdum1 vc 0 1Meg
+VM cx c 
+*
+.ENDS
+*********
+.SUBCKT PWMBCMCM2 a c p vc dc fsw ip params: L=1.2m Ri=0.5
+*
+* Borderline Conduction Mode, current-mode, version 2
+* This model is actually built on PWMBCMVM to which ton calculation
+* is externally computed and clamped down to 2us
+* Its convergence ability is better than PWMBCMCM
+* L=Primary inductance in Henries
+* RI=Current Sense Element
+*
+EBton ton 0 Value = { ((V(vc)*{L}/({Ri}*abs(v(a,c))))*1Meg) + 2 } ; min Ton = 2us
+EBdc dcx 0 Value = { V(ton)*1u/(V(ton)*1u + V(toff)) }
+Xd dcx dc limit params: clampH=0.99 clampL=16m
+EBVcp 6 p Value = { V(dc)*V(a,p) }
+GBIap a p Value = { V(dc)*I(VM) }
+EBtoff toff 0 Value = { IF ( 2*I(VM)*{L}/V(c,p) < 0, 0,
++ 2*I(VM)*{L}/V(c,p) ) }
+EBfsw fsw 0 Value = { (1/(V(ton)*1u + V(toff)))/1k }
+EBip ip 0 Value = { abs(V(a,c)*V(ton)*1u)/{L} }
+VM 6 c
+*
+.ENDS
+********
+.SUBCKT PWMCM_L a c p vc dc SW DIO params: L=35u Fs=200k Ri=1 Se=100m
+*
+* This subckt is a current-mode DCM-CCM model including saturation voltages
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+* RI=Current Sense Element
+* SE=External ramp in V/s
+*
+Edc dcx 0 value = { v(d2)*v(cx,p)/(v(a,p)-v(cx,p)+1u) }
+Xdc dcx dc limit params: clampH=0.99 clampL=7m
+Ed2 d2X 0 value = { (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u)) - V(dc) }
+Xd2 d2X dc d2 limit2
+GIap a p value = { (V(dc)/(V(dc)+V(d2)+1u))*I(VM) }
+GIpc p cx value = { V(vc)/{Ri} }
+GImju cx p value = { {Se}*V(dc)/({Ri}*{Fs}) + (v(cx,p)/{L})*V(d2)*{1/Fs}*(1-(V(dc)+V(d2))/2) }
+Rdum1 dc 0 1Meg
+Rdum2 vc 0 1Meg
+Eloss cx cxx Value = { V(SW)*V(dc)+V(DIO)*V(d2) }
+VM cxx c 
+XC1 c p mode varicap
+Emode mode 0 Value = { IF (  (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u))
++ < 1, 1p , {4/((L)*(6.28*Fs)^2)}	) } ; connect or disconnects the resonating capacitor
+*
+**** Loss generator ****
+GSW 0 SW value = { I(VM) }
+GID 0 DIO value = { I(VM) }
+.ENDS
+********
+.SUBCKT PWMCM_LX a c p vc dc SW DIO params: L=35u Fs=200k Ri=1 Se=100m
+*
+* This subckt is a current-mode DCM-CCM model including saturation voltages
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+* RI=Current Sense Element
+* SE=External ramp in V/s
+*
+Edc dcx 0 value = { v(d2)*v(cx,p)/(v(a,p)-v(cx,p)+1u) }
+Xdc dcx dc limit params: clampH=0.99 clampL=7m
+Ed2 d2X 0 value = { (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u)) - V(dc) }
+Xd2 d2X dc d2 limit2
+GIap a p value = { (V(dc)/(V(dc)+V(d2)+1u))*I(VM) }
+GIpc p cx value = { V(vc)/{Ri} }
+GImju cx p value = { {Se}*V(dc)/({Ri}*{Fs}) + (v(cx,p)/{L})*V(d2)*{1/Fs}*(1-(V(dc)+V(d2))/2) }
+Rdum1 dc 0 1Meg
+Rdum2 vc 0 1Meg
+Eloss cx cxx Value = { V(SW)*V(dc)+V(DIO)*V(d2) }
+VM cxx c 
+* XC1 c p mode varicap
+* Emode mode 0 Value = { IF (  (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,cx)+1u))
+* + < 1, 1p , {4/((L)*(6.28*Fs)^2)}	) } ; connect or disconnects the resonating capacitor
+*
+**** Loss generator ****
+GSW 0 SW value = { I(VM) }
+GID 0 DIO value = { I(VM) }
+.ENDS
+********
+.SUBCKT PWMVM_L a c p d SW DIO params: L=75u Fs=100k
+*
+* This subckt is a voltage-mode DCM-CCM model including saturation voltages
+* L=Primary inductance in Henries
+* FS=Switching frequency in Hz
+*
+Xd d dc limit params: clampH=0.99 clampL=16m
+EVcp 6 p Value = { (V(dc)/(V(dc)+V(d2)))*V(a,p) }
+GIap a p Value = { (V(dc)/(V(dc)+V(d2)))*I(VM) }
+Ed2 d2X 0 value = { (2*{L}*{Fs}*I(VM)/(V(dc)*V(a,c)+1u)) - V(dc) }
+Xd2 d2X dc d2 limit2
+VM 6 7
+Eloss 7 c Value = { V(SW)*V(dc)+V(DIO)*V(d2) }
+*
+**** Loss generator ****
+GSW 0 SW value = { I(VM) }
+GID 0 DIO value = { I(VM) }
+.ENDS
+******** subcircuits used in the above models *******
+********
+.subckt Rseries 1 2 3
+R1 1 2 1E10
+GB1 1 2 Value = { V(1,2)/(V(3)+1u) }
+.ENDS
+********
+.subckt limit d dc params: clampH=0.99 clampL=16m
+* clampH = High clamp voltage
+* clampL = Low clamp voltage
+Gd 0 dcx VALUE = { V(d)*100u }
+Rdc dcx 0 10k
+V1 clpn 0 {clampL}
+V2 clpp 0 {clampH}
+D1 clpn dcx dclamp
+D2 dcx clpp dclamp
+Edc dc 0 value={ V(dcx) }
+.model dclamp d n=0.01 rs=100m T_ABS=27
+.ENDS
+********
+.subckt limit2 d2nc d d2c
+*
+Gd 0 d2cx d2nc 0 100u
+Rdc d2cx 0 10k
+V1 clpn 0 7m
+E2 clpp 0 Value = { 1-V(d)-6.687m }
+D1 clpn d2cx dclamp
+D2 d2cx clpp dclamp
+Edc d2c 0 value={ V(d2cx) }
+.model dclamp d n=0.001 rs=100m T_ABS=27
+.ENDS
+********
+.SUBCKT VARICAP 1 2 CTRL
+R1 1 3 1u
+VC 3 4
+EBC 4 2 Value = { (1/v(ctrl))*v(int) }
+GINT 0 INT Value = { I(VC) }
+CINT INT 0 1
+Rdum INT 0 10E10
+.ENDS
+*******
+
+

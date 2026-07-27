@@ -1,0 +1,22 @@
+* ngspice KiCad multi-device 74xx model
+* quad NOR subcircuit, alternate pin assignment
+
+.subckt 74HC36m 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+*
+.SUBCKT 74HC36  1A 1B 1Y
++     optional: DPWR=$G_DPWR DGND=$G_DGND
++     params: MNTYMXDLY=0 IO_LEVEL=0
+U1 nor(2) DPWR DGND
++     1A 1B 1Y
++     DLY_HC36 IO_HC MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+.model DLY_HC36 ugate (tplhTY=10ns tplhMX=20ns tphlTY=10ns tphlMX=20ns)
+.ENDS  74HC36
+*
+Xor1 1 2 3 74HC36
+Xor2 4 5 6 74HC36
+Xor3 9 10 8 74HC36
+Xor4 12 13 11 74HC36
+.ends
+
+
+

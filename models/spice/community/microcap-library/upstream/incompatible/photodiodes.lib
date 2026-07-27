@@ -1,0 +1,104 @@
+******************************************************************************************
+* Photo diode IDark macro default parameters and format - PHOTODIODE.MAC                 * 
+* .PARAMETERS  (RESPONSIVITY=50m, IDARK=1n, CJO=60P, BV=60, RSERIES=10m, N=1.35)         *
+*														     *														  *
+* Photo diode RShunt macro default parameters and format - PHOTODIODE_R.MAC              * 
+* .PARAMETERS  (RESPONSIVITY=50m, RSHUNT=1E12, CJO=60P, BV=60, RSERIES=10m, N=1.35)      *
+******************************************************************************************
+
+* Good general reference to URLs of manufacturers of photo diodes
+* http://www.inter-change-search.net/directory/Business/ElectronicsandElectrical/Optoelectronics/
+
+* Advanced Photonics 
+* http://www.advancedphotonix.com/products_frameset.htm
+
+* Photonic Detectors Inc.
+* http://www.photonicdetectors.com
+
+* Taunuslicht
+* http://www.taunuslicht.com/pages_e/optoelectronic5.htm
+
+* Quantum Devices
+* http://www.quantumdev.com/products/photodiodes/standard.html
+
+* Vishay
+* http://www.vishay.com/photo-detectors/
+
+* Advanced Photonics 
+* http://www.advancedphotonix.com/products_frameset.htm
+* Advanced Photonics ULTRA LOW NOISE PIN PHOTODIODE
+.macro SD057-14-21-011 PHOTODIODE(.62,.1n,28p,50) ; @900nm
+.macro SD076-14-21-011 PHOTODIODE(.62,.2n,50p,50) ; @900nm
+.macro SD100-14-21-021 PHOTODIODE(.62,.3n,87p,50) ; @900nm
+.macro SD172-14-21-021 PHOTODIODE(.62,1n,255p,50) ; @900nm
+.macro SD200-14-21-041 PHOTODIODE(.62,1.3n,345p,50) ; @900nm
+.macro SD290-14-21-041 PHOTODIODE(.62,2.5n,725p,50) ; @900nm
+.macro SD445-14-21-305 PHOTODIODE(.62,6n,1.7n,50) ; @900nm
+
+* Advanced Photonics BLUE ENHANCED PIN PHOTODIODE
+.macro SD041-12-22-011 PHOTODIODE(.23,.3n,14p,50) ; @450nm
+.macro SD076-12-22-011 PHOTODIODE(.23,.9n,50p,50) ; @450nm
+.macro SD100-12-22-021 PHOTODIODE(.23,1.6n,87p,50) ; @450nm
+.macro SD172-12-22-021 PHOTODIODE(.23,5n,255p,50) ; @450nm
+.macro SD200-12-22-041 PHOTODIODE(.23,6.5n,345p,50) ; @450nm
+.macro SD290-12-22-041 PHOTODIODE(.23,13n,725p,50) ; @450nm
+.macro SD445-12-22-305 PHOTODIODE(.23,30n,1700p,50) ; @450nm
+
+* Advanced Photonics UV ENHANCED PIN PHOTODIODE
+.macro SD172-13-23-222 PHOTODIODE(.18,4.4n,255p,10) ; @365nm
+.macro SD200-13-23-242 PHOTODIODE(.18,6n,345p,10) ; @365nm
+.macro SD290-13-23-242 PHOTODIODE(.18,12.5n,723p,10) ; @365nm
+.macro SD445-13-23-305 PHOTODIODE(.18,30n,1700p,10) ; @365nm
+
+* Advanced Photonics High Speed PIN PHOTODIODE
+.macro SD020-11-33-211 PHOTODIODE(.62,.5n,2.1p,75) ; @900nm
+.macro SD041-11-33-211 PHOTODIODE(.62,2n,5.6p,75) ; @900nm
+.macro SD076-11-31-211 PHOTODIODE(.62,8n,17p,75) ; @900nm
+.macro SD100-11-31-221 PHOTODIODE(.62,12n,28p,75) ; @900nm
+.macro SD172-11-31-221 PHOTODIODE(.62,35n,82p,75) ; @900nm
+.macro SD200-11-31-241 PHOTODIODE(.62,50n,110p,75) ; @900nm
+.macro SD290-11-31-241 PHOTODIODE(.62,110n,235p,75) ; @900nm
+
+* Advanced Photonics General Purpose PIN Photodiode
+.macro SD057-11-21-015 PHOTODIODE(.62,.5n,28p,50) ; @900nm
+.macro SD076-11-21-011 PHOTODIODE(.62,.9n,50p,50) ; @900nm
+.macro SD100-11-21-021 PHOTODIODE(.62,1.6n,87p,50) ; @900nm
+.macro SD125-11-21-021 PHOTODIODE(.62,2.5n,135p,50) ; @900nm
+.macro SD172-11-21-021 PHOTODIODE(.62,5n,255p,50) ; @900nm
+.macro SD200-11-21-041 PHOTODIODE(.62,6.5n,345p,50) ; @900nm
+.macro SD290-11-21-041 PHOTODIODE(.62,13n,725p,50) ; @900nm
+.macro SD445-11-21-305 PHOTODIODE(.62,30n,1700p,50) ; @900nm
+
+* Quantum Devices Inc Planar Silicon Photodiode for Photovoltaic applications
+.macro 2045A001 PHOTODIODE_R(.55,25Meg,20.4n) ; @880nm
+.macro 2045A002 PHOTODIODE_R(.55,50Meg,10.1n) ; @880nm
+.macro 2045A003 PHOTODIODE_R(.55,100Meg,4.9n) ; @880nm
+.macro 2045A004 PHOTODIODE_R(.55,50Meg,9.9n) ; @880nm
+.macro 2045A005 PHOTODIODE_R(.55,100Meg,4.9n) ; @880nm
+.macro 2045A006 PHOTODIODE_R(.55,200Meg,2.4n) ; @880nm
+.macro 2045A007 PHOTODIODE_R(.55,400Meg,1.13n) ; @880nm
+.macro 2045A008 PHOTODIODE_R(.55,100Meg,4.7n) ; @880nm
+.macro 2045A009 PHOTODIODE_R(.55,200Meg,2.3n) ; @880nm
+.macro 2045A010 PHOTODIODE_R(.55,400Meg,1.13n) ; @880nm
+.macro 2045A011 PHOTODIODE_R(.55,800Meg,530p) ; @880nm
+.macro 2045A012 PHOTODIODE_R(.55,1600Meg,235p) ; @880nm
+
+* Quantum Devices Inc Planar Silicon Photodiode for Photoconductive applications
+.macro 2046A001 PHOTODIODE(.55,200n,2.5n) ; @880nm
+.macro 2046A002 PHOTODIODE(.55,100n,1.24n) ; @880nm
+.macro 2046A003 PHOTODIODE(.55,50n,600p) ; @880nm
+.macro 2046A004 PHOTODIODE(.55,100n,1.22n) ; @880nm
+.macro 2046A005 PHOTODIODE(.55,50n,600p) ; @880nm
+.macro 2046A006 PHOTODIODE(.55,25n,290p) ; @880nm
+.macro 2046A007 PHOTODIODE(.55,12.5n,140p) ; @880nm
+.macro 2046A008 PHOTODIODE(.55,50n,575p) ; @880nm
+.macro 2046A009 PHOTODIODE(.55,25n,280p) ; @880nm
+.macro 2046A010 PHOTODIODE(.55,12.5n,140p) ; @880nm
+.macro 2046A011 PHOTODIODE(.55,6.25n,65p) ; @880nm
+.macro 2046A012 PHOTODIODE(.55,3.1n,29p) ; @880nm
+
+* Vishay Silicon PIN Photodiode
+.macro BP104 PHOTODIODE(.55,2n,70p,60) ; @950nm
+.macro BPV10 PHOTODIODE(.55,1n,11p,60) ; @950nm
+.macro BPV21F PHOTODIODE(.6,2n,48p,60) ; @950nm
+.macro BPW34 PHOTODIODE(.55,2n,70p,60) ; @900nm

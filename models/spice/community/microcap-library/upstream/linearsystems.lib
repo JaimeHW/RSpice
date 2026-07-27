@@ -1,0 +1,1426 @@
+****************************************
+*  For samples, data sheets, pricing, 
+*  sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*  
+*  Revision B
+*  Released on March 27, 2003
+*  Craig Greenlaw
+*  Linear Integrated Systems
+*
+*  Revision A
+*  released on 01/17/2003
+*  by Gregorio La Rosa
+*  Silvaco International
+*  4701 Patrick Henry Dr.
+*  Santa Clara, CA 95054   USA
+*  phone: +1 408-654-4337
+*  e-mail: gregorio.larosa@silvaco.com
+*  web site:  www.silvaco.com
+****************************************
+*  PSPICE Version 9.2 JFET model library
+*  All models are single devices.
+*  
+*  Device characteristics and models are
+*  subject to change without notice.
+*  
+*  The models contained within are the
+*  property of Linear Integrated Systems.
+*  March 27, 2003
+****************************************
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS5911 Vp=1.8V 
+* Device Geometry: 2003
+* Released: March 25, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: 2003                  WAF: -                                             
+* DIE: 1                     DEV: 2003_1                                        
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+* 
+.MODEL LS5911_1 NJF (
++ BETA   = 2.797522E-3
++ VTO    = -1.6413349
++ LAMBDA = 0.0120615
++ IS     = 2.711796E-15
++ RD     = 7.2168401
++ RS     = 8.5982161
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS5911 Vp=2.5V
+* Device Geometry: 2003
+* Released: March 25, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: 2003                  WAF: -                                             
+* DIE: 3                     DEV: 2003_3                                        
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+*
+.MODEL LS5911_3 NJF (
++ BETA   = 2.038198E-3
++ VTO    = -2.3712471
++ LAMBDA = 0.0102568
++ IS     = 3.988666E-15
++ RD     = 6.9540316
++ RS     = 8.3749789
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS5911 Vp=4.1V
+* Device Geometry: 2003
+* Released: March 25, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: 2003                  WAF: -                                             
+* DIE: 5                     DEV: 2003_5                                        
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0                                                           
+*
+.MODEL LS5911_5 NJF (
++ BETA   = 1.493904E-3
++ VTO    = -4.0303898
++ LAMBDA = 0.0192017
++ IS     = 3.387163E-15
++ RD     = 7.3317042
++ RS     = 8.8143658
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+****************************************
+*  For samples, data sheets, pricing, 
+*  sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*  
+*  Revision B
+*  Released on March 27, 2003
+*  Craig Greenlaw
+*  Linear Integrated Systems
+*
+*  Revision A
+*  released on 01/17/2003
+*  by Gregorio La Rosa
+*  Silvaco International
+*  4701 Patrick Henry Dr.
+*  Santa Clara, CA 95054   USA
+*  phone: +1 408-654-4337
+*  e-mail: gregorio.larosa@silvaco.com
+*  web site:  www.silvaco.com
+****************************************
+*  PSPICE Version 9.2 JFET model library
+*  All models are single devices.
+*  
+*  Device characteristics and models are
+*  subject to change without notice.
+*  
+*  The models contained within are the
+*  property of Linear Integrated Systems.
+*  March 27, 2003
+****************************************
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS840 Vp=1.1V
+* Device Geometry: 840
+* Released: March 27, 2003
+*
+* DATE: Jan 14/03                                                               
+* LOT: 840                   WAF: -                                             
+* DIE: 1                     DEV: 840_1                                   
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0 
+*  
+.MODEL LS840_1 NJF (
++ BETA   = 1.071053E-3
++ VTO    = -0.9280436
++ LAMBDA = 6.748067E-3
++ IS     = 1.716981E-15
++ RD     = 10.4393412
++ RS     = 12.0949318
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS840 Vp=2.0V
+* Device Geometry: 840
+* Released: March 27, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: 840                   WAF: -                                             
+* DIE: 3                     DEV: 840_3                                         
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+*
+.MODEL LS840_3 NJF (
++ BETA   = 8.789965E-4
++ VTO    = -1.8133466
++ LAMBDA = 8.468685E-3
++ IS     = 2.560781E-15
++ RD     = 10.7808126
++ RS     = 12.5251223
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS840 Vp=2.9V
+* Device Geometry: 840
+* Released: March 27, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: 840                   WAF: -                                             
+* DIE: 5                     DEV: 840_5                                         
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+*  
+.MODEL LS840_5 NJF (
++ BETA   = 8.07995E-4
++ VTO    = -2.6031687
++ LAMBDA = 0.0140798
++ IS     = 2.497086E-15
++ RD     = 10.3501868
++ RS     = 11.9632107
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+****************************************
+*  For samples, data sheets, pricing, 
+*  sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*  
+*  Revision B
+*  Released on March 27, 2003
+*  Craig Greenlaw
+*  Linear Integrated Systems
+*
+*  Revision A
+*  released on 01/17/2003
+*  by Gregorio La Rosa
+*  Silvaco International
+*  4701 Patrick Henry Dr.
+*  Santa Clara, CA 95054   USA
+*  phone: +1 408-654-4337
+*  e-mail: gregorio.larosa@silvaco.com
+*  web site:  www.silvaco.com
+****************************************
+*  PSPICE Version 9.2 JFET model library
+*  All models are single devices.
+*  
+*  Device characteristics and models are
+*  subject to change without notice.
+*  
+*  The models contained within are the
+*  property of Linear Integrated Systems.
+*  March 27, 2003
+****************************************
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS843 Vp=1.2V 
+* Device Geometry: JF201
+* Released: March 27, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: JF201                 WAF: -                                             
+* DIE: 1                     DEV: JF201_1                                       
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+* 
+.MODEL LS843_1 NJF (
++ BETA   = 2.381513E-3
++ VTO    = -0.9901181
++ LAMBDA = 4.131294E-3
++ IS     = 1.191834E-14
++ RD     = 12.7185108
++ RS     = 14.1167733
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS843 Vp=2.5V
+* Device Geometry: JF201
+* Released: March 27, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: JF201                 WAF: -                                             
+* DIE: 3                     DEV: JF201_3                                       
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+* 
+.MODEL LS843_3 NJF (
++ BETA   = 1.605032E-3
++ VTO    = -2.3415746
++ LAMBDA = 7.151837E-3
++ IS     = 1.647462E-15
++ RD     = 10.8743787
++ RS     = 12.5231483
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS843 Vp=3.4V
+* Device Geometry: JF201
+* Released: March 27, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: JF201                 WAF: -                                             
+* DIE: 5                     DEV: JF201_5                                       
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+* 
+.MODEL LS843_5 NJF (
++ BETA   = 1.469459E-3
++ VTO    = -3.2465415
++ LAMBDA = 9.118295E-3
++ IS     = 1.773497E-15
++ RD     = 10.5679799
++ RS     = 12.3960601
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+****************************************
+*  For samples, data sheets, pricing, 
+*  sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*  
+*  Revision B
+*  Released on March 27, 2003
+*  Craig Greenlaw
+*  Linear Integrated Systems
+*
+*  Revision A
+*  released on 01/17/2003
+*  by Gregorio La Rosa
+*  Silvaco International
+*  4701 Patrick Henry Dr.
+*  Santa Clara, CA 95054   USA
+*  phone: +1 408-654-4337
+*  e-mail: gregorio.larosa@silvaco.com
+*  web site:  www.silvaco.com
+****************************************
+*  PSPICE Version 9.2 JFET model library
+*  All models are single devices.
+*  
+*  Device characteristics and models are
+*  subject to change without notice.
+*  
+*  The models contained within are the
+*  property of Linear Integrated Systems.
+*  March 27, 2003
+****************************************
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS830 Vp=0.79V
+* Device Geometry: JF202
+* Released: March 27, 2003
+*                                                                      
+* DATE: Jan 15/03                                                               
+* LOT: JF202                 WAF: -                                             
+* DIE: 1                     DEV: JF202_1                                    
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+*
+.MODEL LS830_1 NJF (
++ BETA   = 2.294987E-4
++ VTO    = -0.6408293
++ LAMBDA = 3.839961E-3
++ IS     = 1.79404E-16
++ RD     = 24.7453319
++ RS     = 31.8719039
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS830 Vp=1.5V
+* Device Geometry: JF202
+* Released: March 27, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: JF202                 WAF: -                                             
+* DIE: 3                     DEV: JF202_3                                       
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+*  
+.MODEL LS830_3 NJF (
++ BETA   = 1.512079E-4
++ VTO    = -1.4211748
++ LAMBDA = 4.167531E-3
++ IS     = 1.243658E-15
++ RD     = 16.7331739
++ RS     = 20.9372354
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+* LINEAR INTEGRATED SYSTEMS
+*
+* Modeled Device: LS830 Vp=2.0V
+* Device Geometry: JF202
+* Released: March 27, 2003
+*
+* DATE: Jan 15/03                                                               
+* LOT: JF202                 WAF: -                                             
+* DIE: 5                     DEV: JF202_5                                       
+* Temp= 27                                                                      
+* W=    1.0 L=    1.0
+*
+.MODEL LS830_5 NJF (
++ BETA   = 1.044695E-4
++ VTO    = -1.9999225
++ LAMBDA = 4.141585E-3
++ IS     = 1.135356E-15
++ RD     = 16.0486935
++ RS     = 20.0836081
++ CGD    = 1E-12
++ CGS    = 1E-12
++ PB     = 0.8
++ M      = 0.5
++ FC     = 0.5
++ KF     = 0
++ AF     = 1
++ XTI    = 0
++)
+*$
+****************************************************************************
+*****  LINEAR INTEGRATED SYSTEMS DMOS MODELS REV A. OCTOBER 10, 2002.  *****
+*****                                                                  *****
+*****  For samples, data sheets, pricing, sales and technical support,
+*****  please contact us at:
+*****
+*****  Linear Integrated Systems 	
+*****  4042 Clipper Court
+*****  Fremont, CA 94538 USA
+*****  phone: 510-490-9160 
+*****  fax: 510-353-0261
+*****  email: sales@linearsystems.com
+*****  web: www.linearsystems.com
+*****
+*****                                                                  *****
+*****  MODEL NAMES:                                                    *****
+*****            SD210DE: DMOS device model W=889um L=0.5um T=27C.     ***** 
+*****            BIAS RANGE: VDSmax=20V VGSmax=2.5V VBSmax=-2V         *****
+*****                                                                  *****
+*****            SD214DE: DMOS device model W=889um L=0.5um T=27C.     ***** 
+*****            BIAS RANGE: VDSmax=12V VGSmax=2.5V VBSmax=-2V         *****
+*****                                                                  *****
+*****            SD5400: DMOS device model W=889um L=0.5um T=27C.      ***** 
+*****            BIAS RANGE: VDSmax=20V VGSmax=3.5V VBSmax=-2V         *****
+*****                                                                  *****
+*****            SD5400CY: DMOS device model W=889um L=0.5um T=27C.    ***** 
+*****            BIAS RANGE: VDSmax=12V VGSmax=3.5V VBSmax=-2V         *****
+*****                                                                  *****
+*****            SST211: DMOS device model W=889um L=0.5um T=27C.      ***** 
+*****            BIAS RANGE: VDSmax=30V VGSmax=2.5V VBSmax=-2V         *****
+*****                                                                  *****
+*****            SST213: DMOS device model W=889um L=0.5um T=27C.      ***** 
+*****            BIAS RANGE: VDSmax=10V VGSmax=3.5V VBSmax=-2V         *****
+*****                                                                  *****
+*****            SST215: DMOS device model W=889um L=0.5um T=27C.      ***** 
+*****            BIAS RANGE: VDSmax=20V VGSmax=3.5V VBSmax=-2V         *****
+*****                                                                  *****
+*****                                                                  *****
+***** GEOMETRY RANGE: All devices have the same W=889um and L=0.5um.   *****
+*****                                                                  *****
+***** !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!  *****
+***** CONTENTS: PSPICE COMPATIBLE BSIM3v3.1 CMOS MODELS                *****
+***** PREPARED BY: M. TANER, /SILVACO INTERNATIONAL                    *****
+****************************************************************************
+*
+* W=  889.0um L=    0.5um                                                           
+.MODEL SD210DE NMOS (W=  889.0um L=    0.5um       LEVEL   = 7                  
++VERSION = 3.1            TNOM    = 27             TOX     = 1E-7               
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 0.8385079          
++K1      = 2.2042635      K2      = -2.32613E-4    K3      = 80                 
++K3B     = 0              W0      = 2.5E-6         NLX     = 1.74E-7            
++DVT0W   = 0              DVT1W   = 0              DVT2W   = -0.032             
++DVT0    = 2.2            DVT1    = 0.53           DVT2    = -0.032             
++U0      = 387.0815953    UA      = 8.9561E-10     UB      = 9.794738E-20       
++UC      = -1E-10         VSAT    = 8.5E4          A0      = 0.89               
++AGS     = 0              B0      = 0              B1      = 0                  
++KETA    = -0.047         A1      = 0              A2      = 1                  
++RDSW    = 3.5E3          PRWG    = 0              PRWB    = 0                  
++WR      = 1              WINT    = 0              LINT    = 0                  
++XL      = 0              XW      = 0              DWG     = 0                  
++DWB     = 0              VOFF    = -0.1408106     NFACTOR = 0.1035439          
++CIT     = 0              CDSC    = 1.9E-4         CDSCD   = 0                  
++CDSCB   = 0              ETA0    = 1E-5           ETAB    = -0.07              
++DSUB    = 0.56           PCLM    = 0.134          PDIBLC1 = 5.934E-5           
++PDIBLC2 = 1.013829E-4    PDIBLCB = 0              DROUT   = 1.309213           
++PSCBE1  = 6.014E8        PSCBE2  = 5E-6           PVAG    = 0.5405676          
++DELTA   = 0.2156691      MOBMOD  = 1              PRT     = 0                  
++UTE     = -1.5           KT1     = 0              KT1L    = 0                  
++KT2     = 0              UA1     = 4.31E-9        UB1     = -7.61E-18          
++UC1     = -5.6E-11       AT      = 3.3E4          PHI     = 0.7582363          
++NQSMOD  = 0              WL      = 0              WLN     = 1                  
++WW      = 0              WWN     = 1              WWL     = 0                  
++LL      = 0              LLN     = 1              LW      = 0                  
++LWN     = 1              LWL     = 0              CAPMOD  = 2                  
++XPART   = 0              CGDO    = 2.229944E-9    CGSO    = 3.689494E-9        
++DLC     = 0              DWC     = 0               )                           
+*                                                                               
+* W=  889.0um L=    0.5um                                                           
+.MODEL SD214DE NMOS (W=  889.0um L=    0.5um       LEVEL   = 7                  
++VERSION = 3.1            TNOM    = 27             TOX     = 1E-7               
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 0.8927416          
++K1      = 2.273242       K2      = -3.738831E-5   K3      = 80                 
++K3B     = 0              W0      = 2.5E-6         NLX     = 1.74E-7            
++DVT0W   = 0              DVT1W   = 0              DVT2W   = -0.032             
++DVT0    = 2.2            DVT1    = 0.53           DVT2    = -0.032             
++U0      = 448.8214468    UA      = 8.37645E-10    UB      = 8.292732E-20       
++UC      = -1E-10         VSAT    = 8.5E4          A0      = 0.91               
++AGS     = 0              B0      = 0              B1      = 0                  
++KETA    = -0.047         A1      = 0              A2      = 1                  
++RDSW    = 3.5E3          PRWG    = 0              PRWB    = 0                  
++WR      = 1              WINT    = 0              LINT    = 0                  
++XL      = 0              XW      = 0              DWG     = 0                  
++DWB     = 0              VOFF    = -0.1149302     NFACTOR = 0.1106101          
++CIT     = 0              CDSC    = 1.5E-4         CDSCD   = 0                  
++CDSCB   = 0              ETA0    = 1E-5           ETAB    = -0.07              
++DSUB    = 0.56           PCLM    = 0.134          PDIBLC1 = 5.934E-5           
++PDIBLC2 = 1.013829E-5    PDIBLCB = 0              DROUT   = 1.309213           
++PSCBE1  = 5.04E8         PSCBE2  = 5E-6           PVAG    = 0.1405676          
++DELTA   = 0.1615669      MOBMOD  = 1              PRT     = 0                  
++UTE     = -1.5           KT1     = 0              KT1L    = 0                  
++KT2     = 0              UA1     = 4.31E-9        UB1     = -7.61E-18          
++UC1     = -5.6E-11       AT      = 3.3E4          PHI     = 0.7582363          
++NQSMOD  = 0              WL      = 0              WLN     = 1                  
++WW      = 0              WWN     = 1              WWL     = 0                  
++LL      = 0              LLN     = 1              LW      = 0                  
++LWN     = 1              LWL     = 0              CAPMOD  = 2                  
++XPART   = 0              CGDO    = 4.1282E-9      CGSO    = 3.83036E-9         
++DLC     = 0              DWC     = 0               )                           
+*                                                                               
+* W=  889.0um L=    0.5um                                                           
+.MODEL SD5400 NMOS (W=  889.0um L=    0.5um        LEVEL   = 7                  
++VERSION = 3.1            TNOM    = 27             TOX     = 1E-7               
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 1.2267984          
++K1      = 2.4398213      K2      = -6.082649E-3   K3      = 80                 
++K3B     = 0              W0      = 2.5E-6         NLX     = 1.74E-7            
++DVT0W   = 0              DVT1W   = 0              DVT2W   = -0.032             
++DVT0    = 2.2            DVT1    = 0.53           DVT2    = -0.032             
++U0      = 592.8835244    UA      = 9.9665E-9      UB      = 1.120368E-18       
++UC      = 2.639614E-9    VSAT    = 8.8E4          A0      = 0.91               
++AGS     = 0              B0      = 0              B1      = 0                  
++KETA    = -0.047         A1      = 0              A2      = 1                  
++RDSW    = 6.5E3          PRWG    = 0              PRWB    = 0                  
++WR      = 1              WINT    = 0              LINT    = 0                  
++XL      = 0              XW      = 0              DWG     = 0                  
++DWB     = 0              VOFF    = -0.0860159     NFACTOR = 0.252821           
++CIT     = 0              CDSC    = 1.5E-4         CDSCD   = 0                  
++CDSCB   = 0              ETA0    = 1E-7           ETAB    = -0.07              
++DSUB    = 0.56           PCLM    = 0.134          PDIBLC1 = 5.934E-5           
++PDIBLC2 = 1.013829E-5    PDIBLCB = 0              DROUT   = 0.176              
++PSCBE1  = 6.7357E8       PSCBE2  = 5E-6           PVAG    = 0.1405676          
++DELTA   = 0.1615669      MOBMOD  = 1              PRT     = 0                  
++UTE     = -1.5           KT1     = 0              KT1L    = 0                  
++KT2     = 0              UA1     = 4.31E-9        UB1     = -7.61E-18          
++UC1     = -5.6E-11       AT      = 3.3E4          PHI     = 0.7582363          
++NQSMOD  = 0              WL      = 0              WLN     = 1                  
++WW      = 0              WWN     = 1              WWL     = 0                  
++LL      = 0              LLN     = 1              LW      = 0                  
++LWN     = 1              LWL     = 0              CAPMOD  = 2                  
++XPART   = 0              CGDO    = 2.028043E-9    CGSO    = 3.513386E-9        
++DLC     = 0              DWC     = 0               )                           
+*                                                                               
+* W=  889.0um L=    0.5um                                                           
+.MODEL SD5400CY NMOS (W=  889.0um L=    0.5um      LEVEL   = 7                  
++VERSION = 3.1            TNOM    = 27             TOX     = 1E-7               
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 1.2233643          
++K1      = 2.4775913      K2      = -0.0339811     K3      = 80                 
++K3B     = 0              W0      = 2.5E-6         NLX     = 1.74E-7            
++DVT0W   = 0              DVT1W   = 0              DVT2W   = -0.032             
++DVT0    = 2.2            DVT1    = 0.53           DVT2    = -0.032             
++U0      = 542.6517258    UA      = 1E-8           UB      = 2E-18              
++UC      = 1.814396E-9    VSAT    = 8.8E4          A0      = 0.91               
++AGS     = 0              B0      = 0              B1      = 0                  
++KETA    = -0.047         A1      = 0              A2      = 1                  
++RDSW    = 6.5E3          PRWG    = 0              PRWB    = 0                  
++WR      = 1              WINT    = 0              LINT    = 0                  
++XL      = 0              XW      = 0              DWG     = 0                  
++DWB     = 0              VOFF    = -0.084672      NFACTOR = 0.2580035          
++CIT     = 0              CDSC    = 1.5E-4         CDSCD   = 0                  
++CDSCB   = 0              ETA0    = 1E-7           ETAB    = -0.07              
++DSUB    = 0.56           PCLM    = 0.134          PDIBLC1 = 5.934E-5           
++PDIBLC2 = 1.013829E-5    PDIBLCB = 0              DROUT   = 0.0106             
++PSCBE1  = 6.0357E8       PSCBE2  = 5E-6           PVAG    = 0.1405676          
++DELTA   = 0.159          MOBMOD  = 1              PRT     = 0                  
++UTE     = -1.5           KT1     = 0              KT1L    = 0                  
++KT2     = 0              UA1     = 4.31E-9        UB1     = -7.61E-18          
++UC1     = -5.6E-11       AT      = 3.3E4          PHI     = 0.7582363          
++NQSMOD  = 0              WL      = 0              WLN     = 1                  
++WW      = 0              WWN     = 1              WWL     = 0                  
++LL      = 0              LLN     = 1              LW      = 0                  
++LWN     = 1              LWL     = 0              CAPMOD  = 2                  
++XPART   = 0              CGDO    = 1.518931E-9    CGSO    = 3.115343E-9        
++DLC     = 0              DWC     = 0               )                           
+*
+* W=  889.0um L=    0.5um                                                           
+.MODEL SST211 NMOS (W=  889.0um L=    0.5um        LEVEL   = 7                  
++VERSION = 3.1            TNOM    = 27             TOX     = 1E-7               
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 1.0941063          
++K1      = 2.4541877      K2      = -0.05          K3      = 80                 
++K3B     = 0              W0      = 2.5E-6         NLX     = 1.74E-7            
++DVT0W   = 0              DVT1W   = 0              DVT2W   = -0.032             
++DVT0    = 2.2            DVT1    = 0.53           DVT2    = -0.032             
++U0      = 537.6815365    UA      = 1E-8           UB      = 1.998E-18          
++UC      = 1.31205E-9     VSAT    = 8.8E4          A0      = 0.93               
++AGS     = 0              B0      = 0              B1      = 0                  
++KETA    = -0.047         A1      = 0              A2      = 1                  
++RDSW    = 4E3            PRWG    = 0              PRWB    = 0                  
++WR      = 1              WINT    = 0              LINT    = 0                  
++XL      = 0              XW      = 0              DWG     = 0                  
++DWB     = 0              VOFF    = -0.0593033     NFACTOR = 0.2282159          
++CIT     = 0              CDSC    = 1.5E-4         CDSCD   = 0                  
++CDSCB   = 0              ETA0    = 1E-7           ETAB    = -0.07              
++DSUB    = 0.56           PCLM    = 0.134          PDIBLC1 = 9.934E-5           
++PDIBLC2 = 1.013829E-3    PDIBLCB = 0              DROUT   = 0.01               
++PSCBE1  = 8.456E8        PSCBE2  = 3E-6           PVAG    = 0.1405676          
++DELTA   = 0.13           MOBMOD  = 1              PRT     = 0                  
++UTE     = -1.5           KT1     = 0              KT1L    = 0                  
++KT2     = 0              UA1     = 4.31E-9        UB1     = -7.61E-18          
++UC1     = -5.6E-11       AT      = 3.3E4          PHI     = 0.7582363          
++NQSMOD  = 0              WL      = 0              WLN     = 1                  
++WW      = 0              WWN     = 1              WWL     = 0                  
++LL      = 0              LLN     = 1              LW      = 0                  
++LWN     = 1              LWL     = 0              CAPMOD  = 2                  
++XPART   = 0              CGDO    = 1.91225E-9     CGSO    = 3.146805E-9        
++DLC     = 0              DWC     = 0               )                           
+*                                                                               
+* W=  889.0um L=    0.5um                                                           
+.MODEL SST213 NMOS (W=  889.0um L=    0.5um        LEVEL   = 7                  
++VERSION = 3.1            TNOM    = 27             TOX     = 1E-7               
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 1.597067           
++K1      = 2.9972732      K2      = -0.05          K3      = 80                 
++K3B     = 0              W0      = 2.5E-6         NLX     = 1.74E-7            
++DVT0W   = 0              DVT1W   = 0              DVT2W   = -0.032             
++DVT0    = 2.2            DVT1    = 0.53           DVT2    = -0.032             
++U0      = 400.0382405    UA      = 7.155215E-9    UB      = 2E-18              
++UC      = -9.98582E-11   VSAT    = 8E4            A0      = 0.9                
++AGS     = 0              B0      = 0              B1      = 0                  
++KETA    = -0.047         A1      = 0              A2      = 1                  
++RDSW    = 4E3            PRWG    = 0              PRWB    = 0                  
++WR      = 1              WINT    = 0              LINT    = 0                  
++XL      = 0              XW      = 0              DWG     = 0                  
++DWB     = 0              VOFF    = -0.1619637     NFACTOR = 0.297              
++CIT     = 0              CDSC    = 1.5E-4         CDSCD   = 0                  
++CDSCB   = 0              ETA0    = 1E-7           ETAB    = -0.07              
++DSUB    = 0.56           PCLM    = 0.1534         PDIBLC1 = 9.934E-6           
++PDIBLC2 = 1.013829E-5    PDIBLCB = 0              DROUT   = 0.013              
++PSCBE1  = 3.835E8        PSCBE2  = 3E-6           PVAG    = 0.1405676          
++DELTA   = 0.1            MOBMOD  = 1              PRT     = 0                  
++UTE     = -1.5           KT1     = 0              KT1L    = 0                  
++KT2     = 0              UA1     = 4.31E-9        UB1     = -7.61E-18          
++UC1     = -5.6E-11       AT      = 3.3E4          PHI     = 0.7582363          
++NQSMOD  = 0              WL      = 0              WLN     = 1                  
++WW      = 0              WWN     = 1              WWL     = 0                  
++LL      = 0              LLN     = 1              LW      = 0                  
++LWN     = 1              LWL     = 0              CAPMOD  = 2                  
++XPART   = 0              CGDO    = 1.91225E-9     CGSO    = 3.146805E-9        
++DLC     = 0              DWC     = 0               )                           
+*                                                                               
+* W=  889.0um L=    0.5um                                                           
+.MODEL SST215 NMOS (W=  889.0um L=    0.5um        LEVEL   = 7                  
++VERSION = 3.1            TNOM    = 27             TOX     = 1E-7               
++XJ      = 1.5E-7         NCH     = 1.7E17         VTH0    = 1.2174217          
++K1      = 2.4401368      K2      = -4.972937E-5   K3      = 80                 
++K3B     = 0              W0      = 2.5E-6         NLX     = 1.74E-7            
++DVT0W   = 0              DVT1W   = 0              DVT2W   = -0.032             
++DVT0    = 2.2            DVT1    = 0.53           DVT2    = -0.032             
++U0      = 529.2893565    UA      = 1E-8           UB      = 1.998523E-18       
++UC      = 2.957032E-9    VSAT    = 8.4E4          A0      = 0.9                
++AGS     = 0              B0      = 0              B1      = 0                  
++KETA    = -0.047         A1      = 0              A2      = 1                  
++RDSW    = 4E3            PRWG    = 0              PRWB    = 0                  
++WR      = 1              WINT    = 0              LINT    = 0                  
++XL      = 0              XW      = 0              DWG     = 0                  
++DWB     = 0              VOFF    = -0.0727002     NFACTOR = 0.2550633          
++CIT     = 0              CDSC    = 1.5E-4         CDSCD   = 0                  
++CDSCB   = 0              ETA0    = 1E-7           ETAB    = -0.07              
++DSUB    = 0.56           PCLM    = 0.1345         PDIBLC1 = 9.240478E-5        
++PDIBLC2 = 2.2345E-4      PDIBLCB = 0              DROUT   = 0.01               
++PSCBE1  = 6.835E8        PSCBE2  = 3E-6           PVAG    = 0                  
++DELTA   = 0.180049       MOBMOD  = 1              PRT     = 0                  
++UTE     = -1.5           KT1     = 0              KT1L    = 0                  
++KT2     = 0              UA1     = 4.31E-9        UB1     = -7.61E-18          
++UC1     = -5.6E-11       AT      = 3.3E4          PHI     = 0.7582363          
++NQSMOD  = 0              WL      = 0              WLN     = 1                  
++WW      = 0              WWN     = 1              WWL     = 0                  
++LL      = 0              LLN     = 1              LW      = 0                  
++LWN     = 1              LWL     = 0              CAPMOD  = 2                  
++XPART   = 0              CGDO    = 1.714927E-9    CGSO    = 3.390787E-9        
++DLC     = 0              DWC     = 0               )                           
+*********************************************************************************************************************
+*  LS301 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS301
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS301 NPN (         IS       = 1.17174e-13    BF       = 9371.91        
++NF       = 1.05           BR       = 5.8988         NR       = 1              
++ISE      = 5.4014e-18     NE       = 1              ISC      = 1e-18          
++NC       = 1.71667        VAF      = 12             VAR      = 8.35           
++IKF      = 0.00400974     IKR      = 0.0262983      RB       = 1242.1         
++RBM      = 13.42          IRB      = 1e-05          RE       = 11.462         
++RC       = 203.333        CJE      = 2.1385e-12     VJE      = 0.580589       
++MJE      = 0.213793       FC       = 0.9            CJC      = 2.1981e-12     
++VJC      = 0.4            MJC      = 0.120536       TF       = 1.85473e-10    
++XTF      = 1.76614        ITF      = 0.00548994     VTF      = 5              
++PTF      = 20             TR       = 1e-08          XTB      = 0.74           
++EG       = 1.17           XTI      = 2              TRC1     = 0.0167667       )
+*********************************************************************************************************************
+*  LS302 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS302
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS302 NPN (         IS       = 1.80442e-14    BF       = 1495.07        
++NF       = 1              BR       = 5.8988         NR       = 1              
++ISE      = 6.60309e-16    NE       = 1.34352        ISC      = 1e-18          
++NC       = 1.71667        VAF      = 23.6296        VAR      = 8.35           
++IKF      = 0.0167486      IKR      = 0.0262983      RB       = 1194           
++RBM      = 11.57          IRB      = 1e-05          RE       = 0.943333       
++RC       = 203.333        CJE      = 2.3615e-12     VJE      = 0.648504       
++MJE      = 0.219379       FC       = 0.9            CJC      = 2.4637e-12     
++VJC      = 0.4            MJC      = 0.135824       TF       = 2.370381E-10    
++XTF      = 1              ITF      = 0.05           VTF      = 5              
++PTF      = 20             TR       = 1e-08          XTB      = 1.56275        
++EG       = 1.17           XTI      = 3.7004         TRC1     = 0.00336032      )
+
+*********************************************************************************************************************
+*  LS310 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS310
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS310 NPN (         IS       = 1.8318e-15     BF       = 250            
++NF       = 1              BR       = 0.5            NR       = 1              
++ISE      = 8.74e-16       NE       = 1.56024        ISC      = 2e-16          
++NC       = 2              VAF      = 214.75         VAR      = 8.35           
++IKF      = 0.0630957      IKR      = 0.01           RB       = 100            
++RBM      = 10             IRB      = 1e-05          RE       = 0.36           
++RC       = 44             CJE      = 2.73e-12       VJE      = 0.668606       
++MJE      = 0.235085       FC       = 0.95           CJC      = 2.29e-12       
++VJC      = 0.40663        MJC      = 0.12794        TF       = 3.52821e-10    
++XTF      = 1              ITF      = 0.01           VTF      = 5              
++PTF      = 20             TR       = 1e-08          XTB      = 1.32           
++EG       = 1.17           XTI      = 3.63366        )
+
+
+
+*********************************************************************************************************************
+*  LS311 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS311
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS311 NPN (         IS     = 5.78186E-15     BF     = 466.145         
++ NF     = 1                  
++ BR     = 1.36667         NR     = 1               ISE    = 8.74E-16           
++ NE     = 1.44074         ISC    = 2E-16           NC     = 2                  
++ VAF    = 145             VAR    = 8.35            IKF    = 0.06448            
++ IKR    = 0.01            RB     = 100             RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.36            RC     = 9.76744            
++ CJE    = 3.1625E-12      VJE    = 0.665626        MJE    = 0.235725           
++ FC     = 0.97902         CJC    = 2.2053E-12      VJC    = 0.4                
++ MJC    = 0.128573        TF     = 3.083117E-10    XTF    = 9                  
++ ITF    = 0.048472        VTF    = 13.8204497      PTF    = 20                 
++ TR     = 1E-8            XTB    = 1.35814         EG     = 1.17               
++ XTI    = 3.63366         )
+
+
+
+*********************************************************************************************************************
+*  LS312 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS312
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS312 NPN (         IS     = 2.30707E-15     BF     = 400.789     NF     = 1                  
++ BR     = 1.50465         NR     = 1               ISE    = 9.99853E-16        
++ NE     = 1.63927         ISC    = 7.90698E-12     NC     = 1.8                
++ VAF    = 244.767         VAR    = 8.35            IKF    = 0.0650369          
++ IKR    = 0.01            RB     = 100             RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.44            RC     = 43                 
++ CJE    = 2.0247E-12      VJE    = 0.665626        MJE    = 0.212833           
++ FC     = 0.96            CJC    = 1.8311E-12      VJC    = 0.4                
++ MJC    = 0.128573        TF     = 5.29E-10        XTF    = 17                 
++ ITF    = 0.0256763       VTF    = 5               PTF    = 20                 
++ TR     = 1E-8            XTB    = 1.35165         EG     = 1.17               
++ XTI    = 3.90927         )                                                  
+*********************************************************************************************************************
+*  LS313 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS313
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS313 NPN (         IS       = 9.58683e-15    BF       = 849.587        
++NF       = 1              BR       = 4.42355        NR       = 1              
++ISE      = 9.92638e-16    NE       = 1.66149        ISC      = 1e-18          
++NC       = 1.8            VAF      = 78.9256        VAR      = 8.35           
++IKF      = 0.0294095      IKR      = 0.01           RB       = 100            
++RBM      = 10             IRB      = 1e-05          RE       = 0.357025       
++RC       = 99.1736        CJE      = 2.4043e-12     VJE      = 0.757503       
++MJE      = 0.273197       FC       = 0.98           CJC      = 2.0612e-12     
++VJC      = 0.432015       MJC      = 0.159335       XTF      = 1              
++ITF      = 0.03           VTF      = 5              TR       = 1e-08          
++XTB      = 1.27273        EG       = 1.17           XTI      = 3.56198        
++TF       = 2.65097e-10    )
+*********************************************************************************************************************
+*  LS318 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS318
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS318 NPN (         IS     = 2.10752E-15     BF     = 209.671         NF     = 1                  
++ BR     = 2.88428         NR     = 1               ISE    = 1.60468E-16        
++ NE     = 1.27199         ISC    = 7.86027E-13     NC     = 1.8                
++ VAF    = 189.773         VAR    = 8.35            IKF    = 0.131663           
++ IKR    = 0.0262983       RB     = 66.9008         RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.22355         RC     = 24                 
++ CJE    = 2.9043E-12      VJE    = 0.683222        MJE    = 0.235615           
++ FC     = 0.98            CJC    = 2.6782E-12      VJC    = 0.42551            
++ MJC    = 0.14401         TF     = 2.038294E-10    XTF    = 1                  
++ ITF    = 0.07            VTF    = 5               PTF    = 20                 
++ TR     = 1E-8            XTB    = 1.35165         EG     = 1.17               
++ XTI    = 3.74793         )
+*********************************************************************************************************************
+*  LS3250A PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS3250A
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS3250A NPN (       IS       = 1e-14          BF       = 457.778        
++NF       = 1              BR       = 5.89876        NR       = 1              
++ISE      = 1.58165e-16    NE       = 1.17635        ISC      = 4.38017e-12    
++NC       = 1.47107        VAF      = 251.136        VAR      = 8.35           
++IKF      = 0.183315       IKR      = 0.0262983      RB       = 100            
++RBM      = 12.3148        IRB      = 1e-05          RE       = 6.49782        
++RC       = 21             CJE      = 6.4153e-12     VJE      = 0.685914       
++MJE      = 0.304422       FC       = 0.98           CJC      = 3.6239e-12     
++VJC      = 0.413923       MJC      = 0.200034       TF       = 2.03829e-10    
++XTF      = 1              ITF      = 0.07           VTF      = 5              
++PTF      = 20             TR       = 1e-08          XTB      = 1.41322        
++EG       = 1.17           XTI      = 4.52893        )
+*********************************************************************************************************************
+*  LS3250B PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS3250B
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS3250B NPN (       IS       = 5.43338e-15    BF       = 263.932        
++NF       = 1              BR       = 5.89876        NR       = 1              
++ISE      = 5.65103e-17    NE       = 1.10616        ISC      = 4.38017e-12    
++NC       = 1.47107        VAF      = 272.5          VAR      = 8.35           
++IKF      = 0.287073       IKR      = 0.0262983      RB       = 100            
++RBM      = 12.3148        IRB      = 1e-05          RE       = 6.49782        
++RC       = 21             CJE      = 6.63e-12       VJE      = 0.679451       
++MJE      = 0.300824       FC       = 0.98           CJC      = 3.5599e-12     
++VJC      = 0.412836       MJC      = 0.197619       TF       = 2.397138E-10    
++XTF      = 1              ITF      = 0.046          VTF      = 5              
++PTF      = 20             TR       = 1e-08          XTB      = 1.42           
++EG       = 1.17           XTI      = 4.4            )
+*********************************************************************************************************************
+*  LS350 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS350
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS350 PNP (         IS       = 3.82645e-15    BF       = 676.367        
++NF       = 1              BR       = 0.637555       NR       = 1              
++ISE      = 1.4506e-15     NE       = 1.45387        ISC      = 1e-18          
++NC       = 1.9            VAF      = 37.2934        VAR      = 20             
++IKF      = 0.00681626     IKR      = 0.000489083    RB       = 200            
++RBM      = 10             IRB      = 1e-05          RE       = 0.909091       
++RC       = 231.405        CJE      = 1.9932e-12     VJE      = 0.6034061            
++MJE      = 0.2174719      FC       = 0.5            CJC      = 2.5286e-12     
++VJC      = 0.4            MJC      = 0.1795208      TF       = 7.255581E-10          
++XTF      = 2.04           ITF      = 0.018          VTF      = 5              
++PTF      = 20             TR       = 1e-08          XTB      = 1.5            
++EG       = 1.17           XTI      = 3               )
+
+*********************************************************************************************************************
+*  LS351 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS351
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS351 PNP (         IS     = 1.95421E-15     BF     = 274.101         NF     = 1                  
++ BR     = 0.44876         NR     = 1               ISE    = 1.22276E-15        
++ NE     = 1.35996         ISC    = 1.21488E-11     NC     = 1.9                
++ VAF    = 66.9421         VAR    = 20              IKF    = 0.0141267          
++ IKR    = 4.20661E-4      RB     = 200             RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.909091        RC     = 231.405            
++ CJE    = 2.16E-12        VJE    = 0.5623776       MJE    = 0.1942967          
++ FC     = 0.97            CJC    = 2.79E-12        VJC    = 0.7628732          
++ MJC    = 0.2524394       TF     = 8.081233E-10    XTF    = 1.4937726          
++ ITF    = 0.0106351       VTF    = 5               PTF    = 20                 
++ TR     = 1E-8            XTB    = 1.71074         EG     = 1.17               
++ XTI    = 3.41322         )
+*********************************************************************************************************************
+*  LS352 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS352 
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS352 PNP (         IS     = 2.30762E-15     BF     = 432.884         NF     = 1                  
++ BR     = 0.869008        NR     = 1               ISE    = 1.79905E-18        
++ NE     = 1               ISC    = 1E-18           NC     = 1.83884            
++ VAF    = 58.9876         VAR    = 20              IKF    = 8.24091E-3         
++ IKR    = 2.09091E-4      RB     = 200             RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.20909         RC     = 231.405            
++ CJE    = 1.696012E-12    VJE    = 0.6342689       MJE    = 0.2217207          
++ FC     = 0.9             CJC    = 1.878493E-12    VJC    = 0.4                
++ MJC    = 0.1314508       TF     = 3.916761E-10    XTF    = 1.2                
++ ITF    = 0.01            VTF    = 5               PTF    = 20                 
++ TR     = 1E-8            XTB    = 1.80165         EG     = 1.17               
++ XTI    = 3.52479         )
+*********************************************************************************************************************
+*  LS3550A PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS3550A 
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS3550A PNP (       IS     = 9.04319E-15     BF     = 202.3           NF     = 1                  
++ BR     = 6.8657          NR     = 1               ISE    = 3.11695E-18        
++ NE     = 2               ISC    = 4.13224E-13     NC     = 1.8                
++ VAF    = 28.1818         VAR    = 20              IKF    = 0.0451999          
++ IKR    = 5E-4            RB     = 100             RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.06            RC     = 30                 
++ CJE    = 5.484922E-12    VJE    = 0.6215082       MJE    = 0.2854805          
++ FC     = 0.97            CJC    = 6.022044E-12    VJC    = 0.5375221          
++ MJC    = 0.2804123       TF     = 2.582597E-10    XTF    = 0.1                
++ ITF    = 0.04            VTF    = 5               PTF    = 20                 
++ TR     = 1E-8            XTB    = 2.29339         EG     = 1.17               
++ XTI    = 3.64876         )
+*********************************************************************************************************************
+*  LS3550C PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS3550C 
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS3550C PNP (       IS     = 1.03548E-14     BF     = 213.785         NF     = 1                  
++ BR     = 6.30165         NR     = 1               ISE    = 6.22636E-14        
++ NE     = 1.98358         ISC    = 1.65289E-12     NC     = 1.8                
++ VAF    = 43.8017         VAR    = 20              IKF    = 0.0341162          
++ IKR    = 4.20661E-4      RB     = 100             RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.06            RC     = 30                 
++ CJE    = 5.567752E-12    VJE    = 0.7168763       MJE    = 0.3211501          
++ FC     = 0.97            CJC    = 4.466747E-12    VJC    = 0.4226025          
++ MJC    = 0.1893288       TF     = 4.772173E-10    XTF    = 1                  
++ ITF    = 0.04            VTF    = 5               PTF    = 20                 
++ TR     = 1E-8            XTB    = 2.08264         EG     = 1.17               
++ XTI    = 3.5124          )
+*********************************************************************************************************************
+*  LS358 PSPICE model library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 03/23/2007
+*  by Gregorio La Rosa
+*
+*  phone: +1 408-348-5666
+*  e-mail: gregorio64@yahoo.com
+*
+*  model included: LS358 
+*
+**********************************************************************************************************************                                                                                                                                          
+.MODEL LS358 PNP (         IS     = 2.30493E-15     BF     = 350.019         NF     = 1                  
++ BR     = 1.54339         NR     = 1               ISE    = 5.83966E-16        
++ NE     = 1.34832         ISC    = 1E-18           NC     = 1.83884            
++ VAF    = 23.3471         VAR    = 20              IKF    = 0.0166273          
++ IKR    = 3E-4            RB     = 200             RBM    = 10                 
++ IRB    = 1E-5            RE     = 0.0826447       RC     = 128.099            
++ CJE    = 2.273523E-12    VJE    = 0.6599448       MJE    = 0.2229193          
++ FC     = 0.98            CJC    = 3.404775E-12    VJC    = 0.4                
++ MJC    = 0.2271908       TF     = 4.966036E-10    XTF    = 2                  
++ ITF    = 0.035           VTF    = 5               PTF    = 20                 
++ TR     = 1E-8            XTB    = 1.75207         EG     = 1.17               
++ XTI    = 3.67355         )
+*******************************************************************
+*  PSPICE JFETs models library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 05/25/2006
+*  by Gregorio La Rosa
+*
+*  Silvaco International
+*  4701 Patrick Henry Dr.
+*  Santa Clara, CA 95054   USA
+*
+*  phone: +1 408-654-4337
+*  e-mail: gregorio.larosa@silvaco.com
+*  web site:  www.silvaco.com
+*
+*  models included:
+*  LSK170A, LSK170B, LSK170C
+*
+*******************************************************************
+.MODEL LSK170A NJF
++ BETA   = 0.0378643       VTO    = -0.4025156      LAMBDA = 4.783719E-3        
++ IS     = 3.55773E-14     N      = 1                                
++ RD     = 10.6565         RS     = 6.8790487                    
++ CGD    = 3.99E-11        CGS    = 4.06518E-11        
++ PB     = 0.981382        MJ     = 0.794653        FC     = 0.5                
++ KF     = 0               AF     = 1                                               
+*
+.MODEL LSK170B NJF
++ BETA   = 0.0350699       VTO    = -0.5375582      LAMBDA = 4.951E-3           
++ IS     = 2.76212E-14     N      = 1               
++ RD     = 7.82168         RS     = 6.9525888
++ CGD    = 4.36E-11        CGS    = 4.36E-11           
++ PB     = 1.2             MJ     = 0.8892205       FC     = 0.5                
++ KF     = 0               AF     = 1
+*
+.MODEL LSK170C NJF          
++ BETA   = 0.0278541       VTO    = -0.800434       LAMBDA = 0.0122435          
++ IS     = 2.45217E-14     N      = 1                          
++ RD     = 12              RS     = 5.8             CGD    = 4.22E-11           
++ CGS    = 4.23E-11        PB     = 0.9265487       MJ     = 0.6098477          
++ FC     = 0.5             KF     = 0               AF     = 1                        
+*******************************************************************
+*  PSPICE JFETs models library
+*
+*  For samples, data sheets, pricing, sales and technical support,
+*  please contact us at:
+*
+*  Linear Integrated Systems 	
+*  4042 Clipper Court
+*  Fremont, CA 94538 USA
+*  phone: 510-490-9160 
+*  fax: 510-353-0261
+*  email: sales@linearsystems.com
+*  web: www.linearsystems.com
+*
+*
+*  released on 05/25/2006
+*  by Gregorio La Rosa
+*
+*  Silvaco International
+*  4701 Patrick Henry Dr.
+*  Santa Clara, CA 95054   USA
+*
+*  phone: +1 408-654-4337
+*  e-mail: gregorio.larosa@silvaco.com
+*  web site:  www.silvaco.com
+*
+*  models included:
+*  LSK389A, LSK389B, LSK389C
+*
+*******************************************************************
+.MODEL LSK389A NJF
++ BETA   = 0.0378643       VTO    = -0.4025156      LAMBDA = 4.783719E-3        
++ IS     = 3.55773E-14     N      = 1                                
++ RD     = 10.6565         RS     = 6.8790487                    
++ CGD    = 3.99E-11        CGS    = 4.06518E-11        
++ PB     = 0.981382        MJ     = 0.794653        FC     = 0.5                
++ KF     = 0               AF     = 1                                               
+*
+.MODEL LSK389B NJF
++ BETA   = 0.0350699       VTO    = -0.5375582      LAMBDA = 4.951E-3           
++ IS     = 2.76212E-14     N      = 1               
++ RD     = 7.82168         RS     = 6.9525888
++ CGD    = 4.36E-11        CGS    = 4.36E-11           
++ PB     = 1.2             MJ     = 0.8892205       FC     = 0.5                
++ KF     = 0               AF     = 1
+*
+.MODEL LSK389C NJF          
++ BETA   = 0.0278541       VTO    = -0.800434       LAMBDA = 0.0122435          
++ IS     = 2.45217E-14     N      = 1                          
++ RD     = 12              RS     = 5.8             CGD    = 4.22E-11           
++ CGS    = 4.23E-11        PB     = 0.9265487       MJ     = 0.6098477          
++ FC     = 0.5             KF     = 0               AF     = 1                    
+

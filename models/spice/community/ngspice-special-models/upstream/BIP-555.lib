@@ -1,0 +1,51 @@
+* bipolar 555
+.subckt 555bip Vcc GND Threas Reset Vctrl Dis Out Trig
+* Generic bipolar models
+.model NP NPN (BF=125 Cje=1p Cjc=0.5p Rb=500)
+.model PN LPNP (BF=25 Cje=1p Cjc=0.5p Rb=250)
+
+Q20 Net-_Q15-B_ Net-_Q15-B_ Vcc PN
+R2 Vcc Net-_Q15-E_ 1k
+R3 Vcc Vctrl 5k
+Q11 Net-_Q10-C_ Net-_Q10-C_ Vcc PN
+Q12 Net-_Q10-C_ Vctrl Net-_Q10-B_ NP
+Q15 Net-_Q15-C_ Net-_Q15-B_ Net-_Q15-E_ PN
+R10 Net-_Q28-E_ GND 3.3k
+R11 Net-_Q32-B_ Net-_Q28-E_ 120
+Q32 Out Net-_Q32-B_ GND NP
+Q31 Vcc Net-_Q29-E_ Out NP
+Q18 Net-_Q18-B_ Net-_Q18-B_ GND NP
+Q17 GND Net-_Q17-B_ Net-_Q16-B_ PN
+Q9 Net-_Q13-C_ Net-_Q7-E_ Net-_Q15-C_ PN
+R5 Net-_Q17-B_ GND 5k
+Q16 Net-_Q13-B_ Net-_Q16-B_ Net-_Q15-C_ PN
+R4 Vctrl Net-_Q17-B_ 5k
+Q14 Net-_Q13-B_ Net-_Q13-B_ GND NP
+R8 Vcc Net-_Q28-C_ 6.2k
+Q29 Vcc Net-_Q28-C_ Net-_Q29-E_ NP
+R6 Net-_Q15-B_ Net-_Q21-C_ 7.5k
+Q23 Net-_Q15-B_ Net-_Q15-B_ Vcc PN
+Q25 Net-_Q25-C_ Net-_Q15-B_ Vcc PN
+Q30 GND Net-_Q28-C_ Out PN
+R12 Net-_Q29-E_ Out 3.9k
+Q24 Net-_Q24-C_ Net-_Q21-E_ GND NP
+Q26 Net-_Q25-C_ Net-_Q24-C_ GND NP
+Q28 Net-_Q28-C_ Net-_Q25-C_ Net-_Q28-E_ NP
+R9 Net-_Q28-E_ Net-_Q3-C_ 100
+R7 Net-_Q25-C_ Net-_Q21-E_ 4.7k
+Q22 Net-_Q21-E_ Net-_Q13-C_ GND NP
+Q21 Net-_Q21-C_ Net-_Q19-C_ Net-_Q21-E_ NP
+Q27 Net-_Q21-C_ Net-_Q21-C_ Net-_Q24-C_ NP
+Q19 Net-_Q19-C_ Net-_Q18-B_ GND NP
+Q8 Net-_Q18-B_ Net-_Q10-C_ Vcc PN
+Q5 Net-_Q19-C_ Net-_Q1-B_ Vcc PN
+Q6 Net-_Q1-B_ Net-_Q2-E_ Net-_Q10-E_ NP
+Q10 Net-_Q10-C_ Net-_Q10-B_ Net-_Q10-E_ NP
+Q1 Net-_Q1-B_ Net-_Q1-B_ Vcc PN
+Q2 Net-_Q1-B_ Threas Net-_Q2-E_ NP
+Q4 Dis Net-_Q3-C_ GND NP
+R1 Net-_Q10-E_ GND 10k
+Q13 Net-_Q13-C_ Net-_Q13-B_ GND NP
+Q7 GND Trig Net-_Q7-E_ PN
+Q3 Net-_Q3-C_ Reset Net-_Q21-C_ PN
+.ends

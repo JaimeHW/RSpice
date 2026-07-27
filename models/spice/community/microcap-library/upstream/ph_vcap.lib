@@ -1,0 +1,135 @@
+*Philips Varactor Diodes
+
+.model BB141 D
++ RS=.4
++ CJO=6.79E-12
++ M=0.65
++ VJ=1.03
++ BV=6
+
+.model BB142 D
++ RS=.55
++ CJO=8.05E-12
++ M=1.10
++ VJ=1.60
++ BV=6
+
+.model BB143 D
++ RS=.55
++ CJO=9.1E-12
++ M=1.46
++ VJ=2.5
++ BV=6
+
+.model BB145 D
++ RS=.5
++ CJO=10.65E-12
++ M=1.41
++ VJ=2.52
++ BV=6
+
+.model BB145B D
++ RS=.53
++ CJO=10.95E-12
++ M=1.82
++ VJ=3.55
++ BV=6
+
+.model BB149 D
++ RS=0.65
++ CJO=27.481E-12
++ M=1.0891
++ VJ=2.6162
++ BV=30
+
+.model BB149A D
++ RS=0.65
++ CJO=27.270E-12
++ M=1.1432
++ VJ=2.8956
++ BV=30
+
+.model BB151 D
++ RS=.35
++ CJO=23.72E-12
++ M=0.68
++ VJ=1.32
++ BV=10
+
+.model BB156 D
++ RS=.3
++ CJO=24.75E-12
++ M=0.86
++ VJ=1.74
++ BV=10
+
+.model BB179 D
++ RS=.6
++ CJO=27.69E-12
++ M=0.70
++ VJ=1.38
++ BV=30
+
+.model BB179B D
++ RS=.6
++ CJO=27.75E-12
++ M=0.69
++ VJ=1.36
++ BV=32
+
+.model BB190 D
++ RS=.3
++ CJO=28.50E-12
++ M=0.71
++ VJ=1.4
++ BV=10
+
+.model BB200 D
++ RS=.5
++ CJO=119.31E-12
++ M=6.2286
++ VJ=10
++ BV=18
+
+.model BB201 D
++ RS=.23
++ CJO=133.21E-12
++ M=1.3251
++ VJ=3.4103
++ BV=15
+
+.model BB202 D
++ RS=0.35
++ CJO=35.5E-12
++ M=6.8
++ VJ=11
++ BV=6
+
+.model BB207 D
++ RS=.3
++ CJO=122.50E-12
++ M=.81153
++ VJ=1.4881
++ BV=15
+
+.model BB208-02 D
++ RS=0.25
++ CJO=30.186E-12
++ M=2.2125
++ VJ=5.7502
++ BV=10
+
+.model BB208-03 D
++ RS=0.25
++ CJO=30.186E-12
++ M=2.2125
++ VJ=5.7502
++ BV=10
+
+.model BBY39 D
++ RS=.9
++ CJO=23.033E-12
++ M=1.1383
++ VJ=3.0709
++ BV=30
+;$SpiceType=AMBIGUOUS

@@ -1,0 +1,2117 @@
+* The timing parameters for all of these models were taken from the specifications for a 
+* 3.3V power supply and a 50pF capacitive load.
+
+* ----------------------------------------------------------- 74LV00A ------
+*  Quad 2-Input Positive-Nand Gates
+*
+*  TI PDF File
+*  bss    2/18/03
+*
+.SUBCKT 74LV00A  1A 1B 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nand(2) DPWR_3V DGND_3V
++     1A 1B 1Y
++     DLY_LV00 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV00 ugate (tplhTY=6.9ns tplhMX=11.4ns tphlTY=6.9ns tphlMX=11.4ns)
+
+.ENDS  74LV00A
+*
+*
+* ----------------------------------------------------------- 74LV02A ------
+*  Quad 2-Input Nor Gates
+*
+*  TI PDF File
+*  bss    2/18/03
+*
+.SUBCKT 74LV02A  1A 1B 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nor(2) DPWR_3V DGND_3V
++     1A 1B 1Y
++     DLY_LV02 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV02 ugate (tplhTY=7.6ns tplhMX=11.4ns tphlTY=7.6ns tphlMX=11.4ns)
+
+.ENDS  74LV02A
+*
+*
+* ----------------------------------------------------------- 74LV04A ------
+*  Hex Inverters
+*
+*  TI PDF File
+*  bss    1/2/03
+*
+.SUBCKT 74LV04A  1A  1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inv DPWR_3V DGND_3V
++     1A 1Y
++     DLY_LV04 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV04 ugate (tplhTY=7.3ns tplhMX=10.6ns tphlTY=7.3ns tphlMX=10.6ns)
+
+.ENDS  74LV04A
+*
+*
+* ----------------------------------------------------------- 74LV05A ------
+*  Hex Inverters With Open Drain Outputs
+*
+*  TI PDF File
+*  bss    2/20/03
+*
+.SUBCKT 74LV05A  1A  1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inv DPWR_3V DGND_3V
++     1A 1Y
++     DLY_LV05 IO_LV-A_OD MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV05 ugate (tplhTY=4.7ns tplhMX=10.6ns tphlTY=5.8ns tphlMX=10.6ns)
+
+.ENDS  74LV05A
+*
+*
+* ----------------------------------------------------------- 74LV06A ------
+*  Hex Inverter Buffer/Driver With Open Drain Output
+*
+*  TI PDF File
+*  bss    2/21/03
+*
+.SUBCKT 74LV06A  1A  1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inv DPWR_3V DGND_3V
++     1A 1Y
++     DLY_LV06 IO_LV-A_OD MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV06 ugate (tplhTY=7.1ns tplhMX=10.6ns tphlTY=6.4ns tphlMX=10.6ns)
+
+.ENDS  74LV06A
+*
+*
+* ----------------------------------------------------------- 74LV07A ------
+*  Hex Buffer/Driver With Open Drain Output
+*
+*  TI PDF File
+*  bss    2/21/03
+*
+.SUBCKT 74LV07A  1A  1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 buf DPWR_3V DGND_3V
++     1A 1Y
++     DLY_LV07 IO_LV-A_OD MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV07 ugate (tplhTY=8.2ns tplhMX=10.6ns tphlTY=6.6ns tphlMX=10.6ns)
+
+.ENDS  74LV07A
+*
+*
+* ----------------------------------------------------------- 74LV08A ------
+*  Quad 2-Input And Gate
+*
+*  TI PDF File
+*  bss    2/21/03
+*
+.SUBCKT 74LV08A  1A 1B 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 and(2) DPWR_3V DGND_3V
++     1A 1B 1Y
++     DLY_LV08 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV08 ugate (tplhTY=7.5ns tplhMX=12.3ns tphlTY=7.5ns tphlMX=12.3ns)
+
+.ENDS  74LV08A
+*
+*
+* ----------------------------------------------------------- 74LV10A ------
+*  Triple 3-Input Nand Gate
+*
+*  TI PDF File
+*  bss    2/21/03
+*
+.SUBCKT 74LV10A  1A 1B 1C 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nand(3) DPWR_3V DGND_3V
++     1A 1B 1C 1Y
++     DLY_LV10 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV10 ugate (tplhTY=7.4ns tplhMX=11.9ns tphlTY=7.4ns tphlMX=11.9ns)
+
+.ENDS  74LV10A
+*
+*
+* ----------------------------------------------------------- 74LV11A ------
+*  Triple 3-Input And Gate
+*
+*  TI PDF File
+*  bss    2/21/03
+*
+.SUBCKT 74LV11A  1A 1B 1C 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 and(3) DPWR_3V DGND_3V
++     1A 1B 1C 1Y
++     DLY_LV11 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV11 ugate (tplhTY=7.2ns tplhMX=12.3ns tphlTY=7.2ns tphlMX=12.3ns)
+
+.ENDS  74LV11A
+*
+*
+* ----------------------------------------------------------- 74LV14A ------
+*  Hex Schmitt-Trigger Inverter
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV14A  1A  1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inv DPWR_3V DGND_3V
++     1A 1Y
++     DLY_LV14 IO_LV-A_ST MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV14 ugate (tplhTY=9.6ns tplhMX=16.3ns tphlTY=9.6ns tphlMX=16.3ns)
+
+.ENDS  74LV14A
+*
+*
+* ----------------------------------------------------------- 74LV20A ------
+*  Dual 4-Input Nand Gate 
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV20A  1A 1B 1C 1D 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nand(4) DPWR_3V DGND_3V
++     1A 1B 1C 1D 1Y
++     DLY_LV20 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV20 ugate (tplhTY=6.5ns tplhMX=10.1ns tphlTY=6.5ns tphlMX=10.1ns)
+
+.ENDS  74LV20A
+*
+*
+* ----------------------------------------------------------- 74LV21A ------
+*  Dual 4-Input And Gate 
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV21A  1A 1B 1C 1D 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 and(4) DPWR_3V DGND_3V
++     1A 1B 1C 1D 1Y
++     DLY_LV21 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV21 ugate (tplhTY=6.6ns tplhMX=10.5ns tphlTY=6.6ns tphlMX=10.5ns)
+
+.ENDS  74LV21A
+*
+*
+* ----------------------------------------------------------- 74LV27A ------
+*  Triple 3-Input Nor Gate
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV27A  1A 1B 1C 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nor(3) DPWR_3V DGND_3V
++     1A 1B 1C 1Y
++     DLY_LV27 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV27 ugate (tplhTY=6.9ns tplhMX=12.3ns tphlTY=6.9ns tphlMX=12.3ns)
+
+.ENDS  74LV27A
+*
+*
+* ----------------------------------------------------------- 74LV32A ------
+*  Quad 2-Input Or Gate
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV32A  1A 1B 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 or(2) DPWR_3V DGND_3V
++     1A 1B 1Y
++     DLY_LV32 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV32 ugate (tplhTY=6.9ns tplhMX=11.4ns tphlTY=6.9ns tphlMX=11.4ns)
+
+.ENDS  74LV32A
+*
+*
+* ----------------------------------------------------------- 74LV74A ------
+*  Dual Positive Edge Triggered D-Type Flip-Flop
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV74A 1PREBAR 1CLRBAR 1CLK 1D 1Q 1QBAR
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 DFF(1) DPWR_3V DGND_3V
++     1PREBAR 1CLRBAR 1CLK 1D 1Q 1QBAR
++     DLY_LV74 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV74 ueff(tppcqlhty=9.2ns tppcqlhmx=15.8ns tppcqhlty=9.2ns tppcqhlmx=15.8ns
++							tpclkqlhty=10.2ns tpclkqlhmx=15.4ns tpclkqhlty=10.2ns tpclkqhlmx=15.4ns
++							twpclmn=6ns twclklmn=6ns twclkhmn=6ns tsudclkmn=6n tsupcclkhmn=5ns
++							thdclkmn=.5n)
+
+.ENDS 74LV74A
+*
+*
+* ----------------------------------------------------------- 74LV86A ------
+*  Quad 2-Input Exclusive-Or Gate
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV86A  1A 1B 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 xor DPWR_3V DGND_3V
++     1A 1B 1Y
++     DLY_LV86 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV86 ugate (tplhTY=7.4ns tplhMX=14.5ns tphlTY=7.4ns tphlMX=14.5ns)
+
+.ENDS  74LV86A
+*
+*
+* ----------------------------------------------------------- 74LV125A ------
+*  Quad Bus Buffer Gate With 3-State Output
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV125A 1A 1OEBAR 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inv DPWR_3V DGND_3V
++     1OEBAR 1OE
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 buf3 DPWR_3V DGND_3V
++     1A 1OE 1Y
++     DLY_LV125 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV125 utgate (tplhTY=6.1ns tplhMX=11.5ns tphlTY=6.1ns tphlMX=11.5ns
++                               tplzTY=5.5ns tplzMX=13.2ns tphzTY=5.5ns tphzMX=13.2ns
++                               tpzlTY=6.2ns tpzlMX=11.5ns tpzhTY=6.2ns tpzhMX=11.5ns)
+
+.ENDS 74LV125A
+*
+*
+* ----------------------------------------------------------- 74LV126A ------
+*  Quad Bus Buffer Gate With 3-State Output
+*
+*  TI PDF File
+*  bss    2/24/03
+*
+.SUBCKT 74LV126A 1A 1OE 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 buf3 DPWR_3V DGND_3V
++     1A 1OE 1Y
++     DLY_LV126 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV126 utgate (tplhTY=6.4ns tplhMX=11.5ns tphlTY=6.4ns tphlMX=11.5ns
++                               tplzTY=6.1ns tplzMX=13.2ns tphzTY=6.1ns tphzMX=13.2ns
++                               tpzlTY=6.6ns tpzlMX=11.5ns tpzhTY=6.6ns tpzhMX=11.5ns)
+
+.ENDS 74LV126A
+*
+*
+* ----------------------------------------------------------- 74LV132A ------
+*  Quad 2-Input Nand Gate With Schmitt Trigger Inputs
+*
+*  TI PDF File
+*  bss    2/25/03
+*
+.SUBCKT 74LV132A  1A 1B 1Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nand(2) DPWR_3V DGND_3V
++     1A 1B 1Y
++     DLY_LV132 IO_LV-A_ST MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV132 ugate (tplhTY=7.6ns tplhMX=15.4ns tphlTY=7.6ns tphlMX=15.4ns)
+
+.ENDS  74LV132A
+*
+*
+*-----------------------------------------------------------74LV138A-----
+* 3-Line To 8-Line Decoder/Demultiplexer
+*
+*  TI PDF File
+*  bss    2/25/03
+
+.SUBCKT 74LV138A A B C G1 G2ABAR G2BBAR Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 LOGICEXP(6,8) DPWR_3V DGND_3V
++ A B C G1 G2ABAR G2BBAR
++ Y0O Y1O Y2O Y3O Y4O Y5O Y6O Y7O
++ D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++ LOGIC:
++   ENAB = {G1 & ~G2ABAR & ~G2BBAR}
++   Y0O = {~(~A & ~B & ~C & ENAB)}
++   Y1O = {~(A & ~B & ~C & ENAB)}
++   Y2O = {~(~A & B & ~C & ENAB)}
++   Y3O = {~(A & B & ~C & ENAB)}
++   Y4O = {~(~A & ~B & C & ENAB)}
++   Y5O = {~(A & ~B & C & ENAB)}
++   Y6O = {~(~A & B & C & ENAB)}
++   Y7O = {~(A & B & C & ENAB)}
+
+U2 PINDLY(8,0,6) DPWR_3V DGND_3V
++ Y0O Y1O Y2O Y3O Y4O Y5O Y6O Y7O
++ A B C G1 G2ABAR G2BBAR
++ Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7
++ IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++ BOOLEAN:
++     IN = {CHANGED(A,0) | CHANGED(B,0) | CHANGED(C,0)}
++     ENBAR = {CHANGED(G2ABAR,0) | CHANGED(G2BBAR,0)}
++     EN = {CHANGED(G1,0)}
++  PINDLY:
++     Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7 = {
++       CASE(
++          EN & TRN_LH, DELAY(-1,10.6ns,16.3ns),
++          EN & TRN_HL, DELAY(-1,10.6ns,16.3ns),
++          ENBAR & TRN_LH, DELAY(-1,10ns,14.9ns),
++          ENBAR & TRN_HL, DELAY(-1,10ns,14.9ns),
++          IN & TRN_LH, DELAY(-1,10.3ns,15.8ns),
++          IN & TRN_HL, DELAY(-1,10.3ns,15.8ns),
++          DELAY(-1,11ns,17ns))}
+
+.ENDS 74LV138A
+*
+*
+*-----------------------------------------------------------74LV139A-----
+* Dual 2-Line To 4-Line Decoder/Demultiplexer
+*
+*  TI PDF File
+*  bss    2/25/03
+
+.SUBCKT 74LV139A 1A 1B 1GB 1Y0 1Y1 1Y2 1Y3
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 LOGICEXP(3,4) DPWR_3V DGND_3V
++ 1A 1B 1GB
++ 1Y0O 1Y1O 1Y2O 1Y3O
++ D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++ LOGIC:
++   1Y0O = {~(~1A & ~1B & ~1GB)}
++   1Y1O = {~(1A & ~1B & ~1GB)}
++   1Y2O = {~(~1A & 1B & ~1GB)}
++   1Y3O = {~(1A & 1B & ~1GB)}
+
+U2 PINDLY(4,0,3) DPWR_3V DGND_3V
++ 1Y0O 1Y1O 1Y2O 1Y3O
++ 1A 1B 1GB
++ 1Y0 1Y1 1Y2 1Y3
++ IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++ BOOLEAN:
++     IN = {CHANGED(1A,0) | CHANGED(1B,0)}
++     ENABLE = {CHANGED(1GB,0)}
++  PINDLY:
++     1Y0 1Y1 1Y2 1Y3 = {
++       CASE(
++          ENABLE & TRN_LH, DELAY(-1,7ns,12.7ns),
++          ENABLE & TRN_HL, DELAY(-1,7ns,12.7ns),
++          IN & TRN_LH, DELAY(-1,7.3ns,14.5ns),
++          IN & TRN_HL, DELAY(-1,7.3ns,14.5ns),
++          DELAY(-1,8ns,15ns))}
+
+.ENDS 74LV139A
+*
+*
+* ----------------------------------------------------------- 74LV157A ------
+*  Quad 2-Line to 1-Line Data Selector/Multiplexer
+*
+*  TI PDF File
+*  bss    2/25/03
+*
+.SUBCKT 74LV157A   1A 1B 2A 2B 3A 3B 4A 4B ABAR/B GBAR
++               1Y 2Y 3Y 4Y
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U74157 LOGICEXP (10,4) DPWR_3V DGND_3V
++      1A 1B 2A 2B 3A 3B 4A 4B ABAR/B GBAR
++      1Y_O 2Y_O 3Y_O 4Y_O
++      D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++    LOGIC:
++      g = {(~GBAR)}
++      a/bbar = {(~ABAR/B)}
++      i1a = { (1A & a/bbar & g) }
++      i1b = { (1B & ABAR/B & g) }
++      i2a = { (2A & a/bbar & g) }
++      i2b = { (2B & ABAR/B & g) }
++      i3a = { (3A & a/bbar & g) }
++      i3b = { (3B & ABAR/B & g) }
++      i4a = { (4A & a/bbar & g) }
++      i4b = { (4B & ABAR/B & g) }
++      1Y_O = { (i1a | i1b) }
++      2Y_O = { (i2a | i2b) }
++      3Y_O = { (i3a | i3b) }
++      4Y_O = { (i4a | i4b) }
+
+Udly PINDLY (4,0,10) DPWR_3V DGND_3V
++      1Y_O 2Y_O 3Y_O 4Y_O
++      1A 1B 2A 2B 3A 3B 4A 4B ABAR/B GBAR
++      1Y 2Y 3Y 4Y
++      IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++    BOOLEAN:
++      DATA= { CHANGED(1A,0) | CHANGED(1B,0) | CHANGED(2A,0) | CHANGED(2B,0) |
++              CHANGED(3A,0) | CHANGED(3B,0) | CHANGED(4A,0) | CHANGED(4B,0) }
++      STROBE= { CHANGED(GBAR,0) }
++      SELECT= { CHANGED(ABAR/B,0) }
++
++    PINDLY:
++      1Y 2Y 3Y 4Y= {
++            CASE(
++                 STROBE, DELAY(-1,7ns,17.1ns),
++                 SELECT, DELAY(-1,7.6ns,16.7ns),
++                 DATA, DELAY(-1,6.7ns,13.2ns),
++                 DELAY(-1,8ns,18ns)
++                )
++            }
+
+.ENDS 74LV157A
+*
+*
+* ----------------------------------------------------------- 74LV161A ------
+*  4-Bit Synchronous Binary Counter
+*
+*  TI PDF File
+*  bss    2/25/03
+*
+.SUBCKT 74LV161A A B C D CLRBAR CLK ENP ENT RCO LOADBAR QA QB QC QD
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U74161 LOGICEXP (12, 10) DPWR_3V DGND_3V
++        A B C D CLK ENP ENT LOADBAR QA_O QB_O QC_O QD_O
++        RCO_O ja jb jc jd ka kb kc kd clkbar
++        D0_GATE IO_LV-A IO_LEVEL={IO_LEVEL}
++
++    LOGIC:
++      clkbar = { (~CLK) }
++      pnt = { ( ENP & ENT) }
++      load = { (~LOADBAR) }
++      RCO_O = { ( ENT & QA_O & QB_O & QC_O & QD_O) }
++      ia2 = { (~(load & A)) }
++      ia1 = { (~(load & ia2)) }
++      ia3 = { (pnt | load) }
++      ib2 = { (~(load & B )) }
++      ib1 = { (~(ib2 & load)) }
++      ib3 = { (load | (QA_O & pnt)) }
++      ic2 = { (~(load & C)) }
++      ic1 = { (~(ic2 & load)) }
++      ic3 = { (load | (pnt & QA_O & QB_O)) }
++      id2 = { (~(load & D)) }
++      id1 = { (~(load & id2)) }
++      id3 = { ( load | (pnt & QA_O & QB_O & QC_O)) }
++      ja  = { (ia1 & ia3) }
++      jb  = { (ib1 & ib3) }
++      jc  = { (ic1 & ic3) }
++      jd  = { (id1 & id3) }
++      ka  = { (ia2 & ia3) }
++      kb  = { (ib2 & ib3) }
++      kc  = { (ic2 & ic3) }
++      kd  = { (id2 & id3) }
+
+
+uf0  JKff(4)  DPWR_3V DGND_3V
++    $D_HI CLRBAR clkbar
++    ja jb jc jd ka kb kc kd
++    QA_O QB_O QC_O QD_O qabar qbbar qcbar qdbar
++    D0_EFF IO_LV-A
+
+Udly PINDLY (5,0,4) DPWR_3V DGND_3V
++    QA_O QB_O QC_O QD_O RCO_O
++    CLRBAR CLK ENT LOADBAR
++    QA QB QC QD RCO
++    IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++    BOOLEAN:
++       CLOCK = { CHANGED_LH(CLK,0) }
++       CLEAR = { CHANGED_HL(CLRBAR,0) }
++       ENABLET = { CHANGED(ENT,0) }
++       LOADHIGH = { (LOADBAR == '1)}
++       LOADLO = { (LOADBAR == '0)}
++
++    PINDLY:
++       RCO = {
++              CASE(
++						  CLEAR & TRN_HL, DELAY(-1,9.2ns,16.7ns),
++                   ENABLET, DELAY(-1,8.3ns,15.8ns),
++                   CLOCK & LOADHIGH, DELAY(-1,8.7ns,17.1ns),
++                   CLOCK & LOADLO, DELAY(-1,10.6ns,20.7ns),
++                   DELAY(-1,11ns,21ns)
++                   )
++             }
++       QA QB QC QD = {
++                   CASE(
++                       CLEAR & TRN_HL, DELAY(-1,8.4ns,17.1ns),
++                       CLOCK, DELAY(-1,7.8ns,16.3ns),
++                       DELAY(-1,9ns,18ns)
++                       )
++                     }
+
+Ucnstr CONSTRAINT(9) DPWR_3V DGND_3V
++          CLRBAR LOADBAR CLK ENP ENT A B C D
++          IO_LV-A
++
++      FREQ:
++        NODE = CLK
++        MAXFREQ = 125MEG
++      WIDTH:
++        NODE = CLK
++        MIN_HI = 5ns
++			MIN_LO = 5ns
++      WIDTH:
++        NODE = CLRBAR
++        MIN_LO = 5ns
++		 SETUP_HOLD:
++			CLOCK LH = CLK
++			DATA(1) = CLRBAR
++			SETUPTIME = 2.5ns
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(4) = A B C D
++        SETUPTIME = 5.5ns
++			HOLDTIME = 1ns
++        WHEN = { (CLRBAR != '0) }
++      SETUP_HOLD:
++        DATA(1) = LOADBAR
++        CLOCK LH = CLK
++        SETUPTIME_LO = 8ns
++			HOLDTIME_LO = 1ns
++        WHEN = { (CLRBAR != '0) }
++		 SETUP_HOLD:
++			CLOCK LH = CLK
++			DATA(2) = ENP ENT
++			SETUPTIME = 7.5ns
++			HOLDTIME = 1ns
++        WHEN = { (CLRBAR != '0) }
+
+.ENDS 74LV161A
+*
+*
+* ----------------------------------------------------------- 74LV163A ------
+*  4-Bit Synchronous Binary Counter
+*
+*  TI PDF File
+*  bss    2/25/03
+*
+.SUBCKT 74LV163A A B C D CLRBAR CLK ENP ENT RCO LOADBAR QA QB QC QD
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U74163 LOGICEXP (13, 10) DPWR_3V DGND_3V
++        A B C D CLK ENP ENT LOADBAR CLRBAR QA_O QB_O QC_O QD_O
++        RCO_O ja jb jc jd ka kb kc kd clkbar
++        D0_GATE IO_LV-A IO_LEVEL={IO_LEVEL}
++
++    LOGIC:
++      clkbar = { (~CLK) }
++      pnt = { ( ENP & ENT) }
++      load = { (~(LOADBAR & CLRBAR)) }
++      RCO_O = { ( ENT & QA_O & QB_O & QC_O & QD_O ) }
++      ia2 = { (~(load & A & CLRBAR)) }
++      ia1 = { (~(load & ia2)) }
++      ia3 = { (pnt | load) }
++      ib2 = { (~(load & B & CLRBAR)) }
++      ib1 = { (~(ib2 & load)) }
++      ib3 = { (load | (QA_O & pnt)) }
++      ic2 = { (~(load & C & CLRBAR)) }
++      ic1 = { (~(ic2 & load)) }
++      ic3 = { (load | (pnt & QA_O & QB_O)) }
++      id2 = { (~(load & D & CLRBAR)) }
++      id1 = { (~(load & id2)) }
++      id3 = { ( load | (QA_O & QB_O & QC_O & pnt) ) }
++      ja  = { (ia1 & ia3) }
++      jb  = { (ib1 & ib3) }
++      jc  = { (ic1 & ic3) }
++      jd  = { (id1 & id3) }
++      ka  = { (ia2 & ia3) }
++      kb  = { (ib2 & ib3) }
++      kc  = { (ic2 & ic3) }
++      kd  = { (id2 & id3) }
+
+
+uf0  JKff(4)  DPWR_3V DGND_3V
++    $D_HI $D_HI clkbar
++    ja jb jc jd ka kb kc kd
++    QA_O QB_O QC_O QD_O qabar qbbar qcbar qdbar
++    D0_EFF IO_LV-A
+
+Udly PINDLY (5,0,4) DPWR_3V DGND_3V
++    QA_O QB_O QC_O QD_O RCO_O
++    CLRBAR CLK ENT LOADBAR
++    QA QB QC QD RCO
++    IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++    BOOLEAN:
++       CLOCK = { CHANGED_LH(CLK,0) }
++       CLEAR = { CHANGED_HL(CLRBAR,0) }
++       ENABLET = { CHANGED(ENT,0) }
++       LOADHIGH = { (LOADBAR == '1)}
++       LOADLO = { (LOADBAR == '0)}
++
++    PINDLY:
++       RCO = {
++              CASE(
++                   ENABLET, DELAY(-1,8.2ns,15.8ns),
++                   CLOCK & LOADHIGH, DELAY(-1,8.8ns,17.1ns),
++                   CLOCK & LOADLO, DELAY(-1,10.7ns,20.7ns),
++                   DELAY(-1,11ns,21ns)
++                   )
++             }
++       QA QB QC QD = {
++                   CASE(
++                       CLOCK, DELAY(-1,8ns,16.3ns),
++                       DELAY(-1,9ns,17ns)
++                       )
++                     }
+
+Ucnstr CONSTRAINT(9) DPWR_3V DGND_3V
++          CLRBAR LOADBAR CLK ENP ENT A B C D
++          IO_LV-A
++
++      FREQ:
++        NODE = CLK
++        MAXFREQ = 125MEG
++      WIDTH:
++        NODE = CLK
++        MIN_HI = 5ns
++			MIN_LO = 5ns
++		 SETUP_HOLD:
++			CLOCK LH = CLK
++			DATA(1) = CLRBAR
++			SETUPTIME = 4ns
++			HOLDTIME = 1ns
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(4) = A B C D
++        SETUPTIME = 5.5ns
++			HOLDTIME = 1ns
++        WHEN = { (CLRBAR != '0) }
++      SETUP_HOLD:
++        DATA(1) = LOADBAR
++        CLOCK LH = CLK
++        SETUPTIME_LO = 8ns
++			HOLDTIME_LO = 1ns
++        WHEN = { (CLRBAR != '0) }
++		 SETUP_HOLD:
++			DATA(2) = ENT ENP
++			CLOCK LH = CLK
++			SETUPTIME = 7.5ns
++			HOLDTIME = 1ns
++			WHEN = { (CLRBAR != '0) }
+
+.ENDS 74LV163A
+*
+*
+* ----------------------------------------------------------- 74LV164A ------
+*  8-Bit Parallel-Out Serial Shift Register
+*
+*  TI PDF File
+*  bss    2/26/03
+*
+.SUBCKT 74LV164A A B CLRBAR CLK QA QB QC QD QE QF QG QH
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U74164 LOGICEXP (3,3) DPWR_3V DGND_3V
++        CLK A B
++        r0 s0 clkbar
++        D0_GATE IO_LV-A IO_LEVEL={IO_LEVEL}
++
++    LOGIC:
++      r0 = { (~(A & B)) }
++      s0 = { (~r0) }
++      clkbar = { (~CLK) }
+
+uf0  JKff(8)  DPWR_3V DGND_3V
++    $D_HI CLRBAR clkbar
++    s0 QA_O QB_O QC_O QD_O QE_O QF_O QG_O
++    r0 qabar qbbar qcbar qdbar qebar qfbar qgbar
++    QA_O QB_O QC_O QD_O QE_O QF_O QG_O QH_O
++    qabar qbbar qcbar qdbar qebar qfbar qgbar qhbar
++    D0_EFF IO_LV-A
+
+Udly PINDLY (8,0,2) DPWR_3V DGND_3V
++    QA_O QB_O QC_O QD_O QE_O QF_O QG_O QH_O
++    CLRBAR CLK
++    QA QB QC QD QE QF QG QH
++    IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++    BOOLEAN:
++       CLOCK= { CHANGED(CLK,0) }
++       CLEAR= { CHANGED_HL(CLRBAR,0) }
++
++    PINDLY:
++       QA QB QC QD QE QF QG QH  = {
++                   CASE(
++                       CLEAR & TRN_HL, DELAY(-1,7.9ns,16.3ns),
++                       CLOCK, DELAY(-1,8.3ns,16.3ns),
++                       DELAY(-1,9ns,17ns)
++                       )
++                     }
+
+Ucnstr CONSTRAINT(4) DPWR_3V DGND_3V
++          CLRBAR CLK A B
++          IO_LV-A
++
++      FREQ:
++        NODE = CLK
++        MAXFREQ = 120MEG
++      WIDTH:
++        NODE = CLK
++        MIN_HI = 5ns
++			MIN_LO = 5ns
++      WIDTH:
++        NODE = CLRBAR
++        MIN_LO = 5ns
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(2) = A B
++        SETUPTIME = 5ns
++        WHEN = { CLRBAR != '0 }
++      SETUP_HOLD:
++        DATA(1) = CLRBAR
++        CLOCK LH = CLK
++        SETUPTIME_HI = 2.5ns
+
+.ENDS 74LV164A
+*
+*
+* ----------------------------------------------------------- 74LV165A ------
+*  Parallel-Load 8-Bit Shift Register
+*
+*  TI PDF File
+*  bss    2/26/03
+*
+.SUBCKT 74LV165A SH/LDBAR CLK_INH CLK SER A B C D E F G H QH QHBAR
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U74165 LOGICEXP (11,17) DPWR_3V DGND_3V
++        SH/LDBAR CLK_INH CLK A B C D E F G H
++        r0 s0 r1 s1 r2 s2 r3 s3 r4 s4 r5 s5 r6 s6 r7 s7 clock
++        D0_GATE IO_LV-A IO_LEVEL={IO_LEVEL}
++
++    LOGIC:
++      clock = { (CLK_INH | CLK) }
++      shbar/ld = { (~(SH/LDBAR)) }
++      s0 = { (~(shbar/ld & A)) }
++      r0 = { (~(s0 & shbar/ld)) }
++      s1 = { (~(shbar/ld & B)) }
++      r1 = { (~(s1 & shbar/ld)) }
++      s2 = { (~(shbar/ld & C)) }
++      r2 = { (~(s2 & shbar/ld)) }
++      s3 = { (~(shbar/ld & D)) }
++      r3 = { (~(s3 & shbar/ld)) }
++      s4 = { (~(shbar/ld & E)) }
++      r4 = { (~(s4 & shbar/ld)) }
++      s5 = { (~(shbar/ld & F)) }
++      r5 = { (~(s5 & shbar/ld)) }
++      s6 = { (~(shbar/ld & G)) }
++      r6 = { (~(s6 & shbar/ld)) }
++      s7 = { (~(shbar/ld & H)) }
++      r7 = { (~(s7 & shbar/ld)) }     
+
+uf0  Dff(1)  DPWR_3V DGND_3V
++    s0 r0  clock
++    SER  QA qabar 
++    D0_EFF IO_LV-A
+
+uf1  Dff(1)  DPWR_3V DGND_3V
++    s1 r1 clock
++    QA QB qbbar 
++    D0_EFF IO_LV-A
+
+uf2  Dff(1)  DPWR_3V DGND_3V
++    s2 r2  clock
++    QB QC qcbar 
++    D0_EFF IO_LV-A
+
+uf3  Dff(1)  DPWR_3V DGND_3V
++    s3 r3  clock
++    QC QD qdbar 
++    D0_EFF IO_LV-A
+
+uf4  Dff(1)  DPWR_3V DGND_3V
++    s4 r4  clock
++    QD QE qebar 
++    D0_EFF IO_LV-A
+
+uf5  Dff(1)  DPWR_3V DGND_3V
++    s5 r5  clock
++    QE QF qfbar 
++    D0_EFF IO_LV-A
+
+uf6  Dff(1)  DPWR_3V DGND_3V
++    s6 r6  clock
++    QF QG qgbar 
++    D0_EFF IO_LV-A
+
+uf7  Dff(1)  DPWR_3V DGND_3V
++    s7 r7  clock
++    QG QH_O QHBAR_O 
++    D0_EFF IO_LV-A
+
+Udly PINDLY (2,0,4) DPWR_3V DGND_3V
++    QH_O QHBAR_O
++    CLK SH/LDBAR H CLK_INH
++    QH QHBAR
++    IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++    BOOLEAN:
++       DATA=  { CHANGED(H,0) }
++       CLKS= { (CHANGED(CLK,0) | CHANGED(CLK_INH,0)) }
++       LOAD= { CHANGED(SH/LDBAR,0) }
++
++    PINDLY:
++       QH QHBAR  = {
++                   CASE(
++                       LOAD, DELAY(-1,11.3ns,19.3ns),
++                       CLKS, DELAY(-1,10.9ns,14.9ns),
++                       DATA, DELAY(-1,11.1ns,17.6ns),
++                       DELAY(-1,12ns,20ns)
++                       )
++                     }
+
+Ucnstr CONSTRAINT(12) DPWR_3V DGND_3V
++          CLK SH/LDBAR SER CLK_INH A B C D E F G H
++          IO_LV-A
++
++      FREQ:
++        NODE = CLK
++        MAXFREQ = 90MEG
++      WIDTH:
++        NODE = CLK
++        MIN_HI = 6ns
++			MIN_LO = 6ns
++      WIDTH:
++        NODE = SH/LDBAR
++        MIN_LO = 7.5ns
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(1) = CLK_INH
++        SETUPTIME = 5ns
++      SETUP_HOLD:
++        CLOCK LH = SH/LDBAR
++        DATA(8) = A B C D E F G H
++        SETUPTIME = 7.5ns
++			HOLDTIME = 0.5ns
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(1) = SER
++        SETUPTIME = 5ns
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(1) = SH/LDBAR
++        SETUPTIME_HI = 5ns
+
+.ENDS 74LV165A
+*
+*
+* ----------------------------------------------------------- 74LV166A ------
+*  8-Bit Parallel Load Shift Register
+*
+*  TI PDF File
+*  bss    2/26/03
+*
+.SUBCKT 74LV166A CLK CLK_INH SH/LDBAR SER CLRBAR A B C D E F G H QH
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U74166 LOGICEXP (20,17) DPWR_3V DGND_3V
++        CLK  CLK_INH A B C D E F G H CLRBAR SER SH/LDBAR qa qb qc qd qe qf qg
++        j0 k0 j1 k1 j2 k2 j3 k3 j4 k4 j5 k5 j6 k6 j7 k7 clkbar
++        D0_GATE IO_LV-A IO_LEVEL={IO_LEVEL}
++
++    LOGIC:
++      u0 = { (SER & SH/LDBAR) }
++      v0 = {  (~SH/LDBAR & A) }
++      k0 = { ~(v0 | u0) }
++      j0 = {(~k0)}
++      u1 = { (qa & SH/LDBAR) }
++      v1 = {  (~SH/LDBAR & B) }
++      k1 = { ~(v1 | u1) }
++      j1 = {(~k1)}
++      u2 = { (qb & SH/LDBAR) }
++      v2 = {  (~SH/LDBAR & C) }
++      k2 = { ~(v2 | u2) }
++      j2 = {(~k2)}
++      u3 = { (qc & SH/LDBAR) }
++      v3 = {  (~SH/LDBAR & D) }
++      k3 = { ~(v3 | u3) }
++      j3 = {(~k3)}
++      u4 = { (qd & SH/LDBAR) }
++      v4 = {  (~SH/LDBAR & E) }
++      k4 = { ~(v4 | u4) }
++      j4 = {(~k4)}
++      u5 = { (qe & SH/LDBAR) }
++      v5 = {  (~SH/LDBAR & F) }
++      k5 = { ~(v5 | u5) }
++      j5 = {(~k5)}
++      u6 = { (qf & SH/LDBAR) }
++      v6 = {  (~SH/LDBAR & G) }
++      k6 = { ~(v6 | u6) }
++      j6 = {(~k6)}
++      u7 = { (qg & SH/LDBAR) }
++      v7 = {  (~SH/LDBAR & H) }
++      k7 = { ~(v7 | u7) }
++      j7 = {(~k7)}
++      clkbar = { ~(CLK | CLK_INH) }
+
+
+uf0  JKff(8)  DPWR_3V DGND_3V
++    $D_HI CLRBAR clkbar
++    j0 j1 j2 j3 j4 j5 j6 j7  k0 k1 k2 k3 k4 k5 k6 k7
++    qa qb qc qd qe qf qg QH_O
++    qabar qbbar qcbar qdbar qebar qfbar qgbar qhbar
++    D0_EFF IO_LV-A
+
+Udly PINDLY (1,0,2) DPWR_3V DGND_3V
++    QH_O
++    CLRBAR CLK
++    QH
++    IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++    BOOLEAN:
++       CLOCK= { CHANGED(CLK,0) }
++       CLEAR= { CHANGED(CLRBAR,0) }
++
++    PINDLY:
++       QH  = {
++                   CASE(
++                       CLEAR, DELAY(-1,7.9ns,16.3ns),
++                       CLOCK, DELAY(-1,8.3ns,18.9ns),
++                       DELAY(-1,9ns,19ns)
++                       )
++                     }
+
+Ucnstr CONSTRAINT(13) DPWR_3V DGND_3V
++          CLRBAR CLK  A B C D E F G H SER CLK_INH SH/LDBAR 
++          IO_LV-A
++
++      FREQ:
++        NODE = CLK
++        MAXFREQ = 160MEG
++      WIDTH:
++        NODE = CLK
++        MIN_HI = 6ns
++			MIN_LO = 6ns
++      WIDTH:
++        NODE = CLRBAR
++        MIN_LO = 6ns
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(2) = SH/LDBAR CLK_INH
++        SETUPTIME = 5ns
++        WHEN = { CLRBAR != '0 }
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(8) = A B C D E F G H
++        SETUPTIME = 5ns
++        WHEN={SH/LDBAR != '1}
++      SETUP_HOLD:
++        CLOCK LH = CLK
++        DATA(1) = SER
++        SETUPTIME = 5ns
++		 SETUP_HOLD:
++			CLOCK LH = CLK
++			DATA(1) = CLRBAR
++			SETUPTIME_HI = 4ns
+
+.ENDS 74LV166A
+*
+*
+* ----------------------------------------------------------- 74LV174A ------
+*  Hex D-Type Flip-Flops with Clear
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV174A CLK CLRBAR 1D 2D 3D 4D 5D 6D 1Q 2Q 3Q 4Q 5Q 6Q
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+
+uf0 dFF(6) DPWR_3V DGND_3V
++ $D_HI CLRBAR CLK 1D 2D 3D 4D 5D 6D
++ 1Q 2Q 3Q 4Q 5Q 6Q 1Qbar 2Qbar 3Qbar 4Qbar 5Qbar 6Qbar
++ DFFLV174 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DFFLV174 ueff(TPPCQLHTY=6ns     TPPCQLHMX=14.9ns
++                  TPPCQHLTY=6ns   TPPCQHLMX=14.9ns
++                  TWPCLMN=5ns
++                  TPCLKQLHTY=7.5ns  TPCLKQLHMX=14.5ns
++                  TPCLKQHLTY=7.5ns  TPCLKQHLMX=14.5ns
++                  TWCLKLMN=5ns TWCLKHMN=5ns
++                  TSUDCLKMN=5ns TSUPCCLKHMN=3ns)
+
+.ENDS 74LV174A
+*
+*
+* ----------------------------------------------------------- 74LV175A ------
+*  Quad D-Type Flip-Flops with Clear
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV175A CLK CLRBAR 1D 2D 3D 4D 1Q 2Q 3Q 4Q 1QBAR 2QBAR 3QBAR 4QBAR
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+uf0 dFF(4) DPWR_3V DGND_3V
++ $D_HI CLRBAR CLK 1D 2D 3D 4D
++ 1Q 2Q 3Q 4Q 1QBAR 2QBAR 3QBAR 4QBAR
++ DFFLV175 IO_LV-A
+
+.model DFFLV175 ueff(TPPCQLHTY=7.4ns   TPPCQLHMX=13.6ns
++                  TPPCQHLTY=7.4ns   TPPCQHLMX=13.6ns
++                  TWPCLMN=5ns
++                  TPCLKQLHTY=8.4ns  TPCLKQLHMX=15ns
++                  TPCLKQHLTY=8.4ns  TPCLKQHLMX=15ns
++                  TWCLKLMN=5ns TWCLKHMN=5ns
++                  TSUDCLKMN=5ns TSUPCCLKHMN=5ns THDCLKMN=1ns)
+
+.ENDS 74LV175A
+*
+*
+* ----------------------------------------------------------- 74LV221A ------
+*  Dual Monostable Multivibrators With Schmitt-Trigger Inputs
+*
+*  TI PDF File
+*  bss    3/4/03
+*
+.SUBCKT 74LV221A  ABAR B CLRBAR Q QBAR
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: PWIDTH=40ns MNTYMXDLY=0 IO_LEVEL=0
+*This subcircuit models the digital portion of the
+*multivibrator.  To understand the limitations, read the
+*following:
+*
+*1) Set the pulse width with the Pwidth parameter.  
+*When you place the part in a schematic, in the Attribute 
+*dialog box, define the PARAMS:= attribute as:
+*
+*Pwidth=<value>
+*
+*where <value> is the value of the pulse width in seconds 
+*and it stays fixed throughout a simulation.
+*
+*2) The pulse width cannot be set smaller than the value
+*of the parts specified propagation delay time.
+*
+U1 inv DPWR_3V DGND_3V
++ ABAR AIN
++ D0_GATE IO_LV-A_ST MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 bufa(2) DPWR_3V DGND_3V
++ B CLRBAR BIN CLRIN
++D0_GATE IO_LV-A_ST MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 and(3) DPWR_3V DGND_3V
++ AIN BIN CLRIN CLKEN
++ D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U4 OR(3) DPWR_3V DGND_3V
++ CLKEN DQ Q CLK
++ D0_GATE IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U5 DFF(1) DPWR_3V DGND_3V
++ $D_HI CLR CLK $D_HI DQ DQB
++ D0_EFF IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U6 AND(2) DPWR_3V DGND_3V
++ DQ DQBDEL Q_O
++ D0_GATE IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U7 dltch(1) DPWR_3V DGND_3V
++ CLRBAR $D_HI $D_HI DQB DQBDEL $D_NC
++ DLY221 IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U8 dltch(1) DPWR_3V DGND_3V
++ $D_HI CLRBAR $D_HI DQ DQDEL $D_NC
++ DLY221 IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U9 DLYLINE DPWR_3V DGND_3V
++ Q_O QODEL
++ DLYCLR IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U10 NAND(2) DPWR_3V DGND_3V
++ QODEL DQDEL CLR1
++ D0_GATE IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U11 AND(2) DPWR_3V DGND_3V
++ CLRIN CLR1 CLR
++ D0_GATE IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U12 STIM(1,1) DPWR_3V DGND_3V
++ CLR
++ IO_STM IO_LEVEL=0
++ 0 0 5N Z 
+
+U13 DLYLINE DPWR_3V DGND_3V
++ ABAR ABARO
++ DLYPUL IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U14 DLYLINE DPWR_3V DGND_3V
++ B BO
++ DLYPUL IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+U15 DLYLINE DPWR_3V DGND_3V
++ CLRBAR CLRBARO
++ DLYPUL IO_LV-A IO_LEVEL=0 MNTYMXDLY=0
+
+Udly PINDLY (2,0,6) DPWR_3V DGND_3V
++ DQ DQB
++ CLRBAR ABAR B CLRBARO ABARO BO
++ Q QBAR
++ IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++ BOOLEAN:
++	ABTRIG = {CHANGED_HL(ABAR,0) | CHANGED_LH(B,0)}
++  ABCHK = {CHANGED_HL(ABARO,0) | CHANGED_LH(BO,0)}
++  CLEAR = {CHANGED_HL(CLRBAR,0)}
++  CLRTRIG = {CHANGED_LH(CLRBAR,0)}
++  CLRCHK = {CHANGED_LH(CLRBARO,0)}
++
++ PINDLY:
++  Q = {
++      CASE(
++		     ABTRIG & TRN_LH, DELAY(-1,11.8ns,24.1ns),
++			  ABCHK & TRN_HL, DELAY(-1,11.8ns,24.1ns),
++			  CLEAR & TRN_HL, DELAY(-1,10.6ns,19.3ns),
++			  CLRTRIG & TRN_LH, DELAY(-1,12.3ns,25.9ns),
++			  CLRCHK & TRN_HL, DELAY(-1,12.3ns,25.9ns),
++          DELAY(-1,12.3ns,38ns)
++          )
++      }
++
++  QBAR = {
++      	 CASE(
++		       ABTRIG & TRN_HL, DELAY(-1,11.8ns,24.1ns),
++			    ABCHK & TRN_LH, DELAY(-1,11.8ns,24.1ns),
++			    CLEAR & TRN_LH, DELAY(-1,10.6ns,19.3ns),
++			    CLRTRIG & TRN_HL, DELAY(-1,12.3ns,25.9ns),
++			    CLRCHK & TRN_LH, DELAY(-1,12.3ns,25.9ns),
++            DELAY(-1,12.3ns,25.9ns)
++             )
++         }
+
+Ucon CONSTRAINT(3) DPWR_3V DGND_3V
++ CLRBAR ABAR B
++ IO_LV-A IO_LEVEL={IO_LEVEL}
++
++ WIDTH:
++	 NODE=CLRBAR
++	 MIN_HI=5ns
++	 MIN_LO=5ns
++
++ WIDTH:
++   NODE=ABAR
++	 MIN_HI=5ns
++	 MIN_LO=5ns
++
++ WIDTH:
++   NODE=B
++	 MIN_HI=5ns
++	 MIN_LO=5ns
+
+.MODEL DLY221 UGFF (TPDQLHMN={pwidth} TPDQLHTY={pwidth} TPDQLHMX={pwidth}
++	TPDQHLMN={pwidth} TPDQHLTY={pwidth} TPDQHLMX={pwidth})
+.MODEL DLYPUL UDLY (DLYMN={pwidth} DLYTY={pwidth} DLYMX={pwidth})
+.MODEL DLYCLR UDLY (DLYMN=5ns DLYTY=5ns DLYMX=5ns)
+.ENDS  74LV221A
+*
+*
+* ----------------------------------------------------------- 74LV240A ------
+*  Octal Buffers/Drivers With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV240A 1OEBAR 1A1 1A2 1A3 1A4 1Y1 1Y2 1Y3 1Y4
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+uf0 inv DPWR_3V DGND_3V
++     1OEBAR GEN
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+uf1 inv3a(4) DPWR_3V DGND_3V
++     1A1 1A2 1A3 1A4
++     GEN
++     1Y1 1Y2 1Y3 1Y4
++     DLY_MOD IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_MOD utgate (TPLHTY=5.9ns TPLHMX=11ns TPHLTY=5.9ns TPHLMX=11ns
++                      TPZLTY=7.5ns  TPZLMX=14.1ns TPZHTY=7.5ns  TPZHMX=14.1ns
++                      TPLZTY=11.8ns TPLZMX=15ns TPHZTY=11.8ns TPHZMX=15ns)
+
+.ENDS 74LV240A
+*
+*
+* ----------------------------------------------------------- 74LV244A ------
+*  Octal Buffers/Drivers With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV244A 1OEBAR 1A1 1A2 1A3 1A4 1Y1 1Y2 1Y3 1Y4
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+uf0 inv DPWR_3V DGND_3V
++     1OEBAR GEN
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+uf1 buf3a(4) DPWR_3V DGND_3V
++     1A1 1A2 1A3 1A4
++     GEN
++     1Y1 1Y2 1Y3 1Y4
++     DLY_MOD IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_MOD utgate (TPLHTY=6.8ns TPLHMX=11.9ns TPHLTY=6.8ns TPHLMX=11.9ns
++                      TPZLTY=7.8ns  TPZLMX=14.1ns TPZHTY=7.8ns  TPZHMX=14.1ns
++                      TPLZTY=11ns TPLZMX=16ns TPHZTY=11ns TPHZMX=16ns)
+
+.ENDS 74LV244A
+*
+*
+* ----------------------------------------------------------- 74LV245A ------
+*  Octal Bus Transceivers With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV245A OEBAR DIR A1 A2 A3 A4 A5 A6 A7 A8 B1 B2 B3 B4 B5 B6 B7 B8
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U74LV245A LOGICEXP(2,2) DPWR_3V DGND_3V
++     OEBAR DIR
++     GAB GBA
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++  LOGIC:
++     gen = {~OEBAR}
++     GAB = {gen & DIR}
++     GBA = {~(OEBAR | DIR)}
+
+uf0 buf3a(8) DPWR_3V DGND_3V
++     A1 A2 A3 A4 A5 A6 A7 A8
++     GAB
++     B1 B2 B3 B4 B5 B6 B7 B8
++     DLY_MOD IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+uf1 buf3a(8) DPWR_3V DGND_3V
++     B1 B2 B3 B4 B5 B6 B7 B8
++     GBA
++     A1 A2 A3 A4 A5 A6 A7 A8
++     DLY_MOD IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_MOD utgate (TPLHTY=7.9ns TPLHMX=11.9ns TPHLTY=7.9ns TPHLMX=11.9ns
++                      TPZLTY=9.9ns  TPZLMX=16.7ns TPZHTY=9.9ns  TPZHMX=16.7ns
++                      TPLZTY=13.9ns TPLZMX=19.8ns TPHZTY=13.9ns TPHZMX=19.8ns)
+
+.ENDS 74LV245A
+*
+*
+* ----------------------------------------------------------- 74LV273A ------
+*  Octal D-Type Flip-Flops With Clear
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV273A  CLRBAR CLK 1D 2D 3D 4D 5D 6D 7D 8D 1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 dff(8) DPWR_3V DGND_3V
++     $D_HI CLRBAR CLK 1D 2D 3D 4D 5D 6D 7D 8D
++     1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC
++     DLY_LV273 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV273 ueff (tppcqhlTY=8.7ns tppcqhlMX=17.1ns twpclMN=5ns
++            tpclkqlhTY=9.1ns tpclkqlhMX=17.1ns tpclkqhlTY=9.1ns
++            tpclkqhlMX=17.1ns twclklMN=5ns twclkhMN=5ns
++            tsudclkMN=5.5ns tsupcclkhMN=2.5ns thdclkMN=1ns)
+
+.ENDS 74LV273A
+*
+*
+* ----------------------------------------------------------- 74LV367A ------
+*  Hex Buffers And Line Drivers With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV367A 1OEBAR 2OEBAR 1A1 1A2 1A3 1A4 2A1 2A2 1Y1 1Y2 1Y3 1Y4 2Y1 2Y2
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inva(2) DPWR_3V DGND_3V
++     1OEBAR 2OEBAR 1G 2G
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 buf3a(4) DPWR_3V DGND_3V
++     1A1 1A2 1A3 1A4
++     1G
++     1Y1 1Y2 1Y3 1Y4
++     DLY_LV367 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 buf3a(2) DPWR_3V DGND_3V
++     2A1 2A2
++     2G
++     2Y1 2Y2
++     DLY_LV367 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV367 utgate (tplhTY=6.2ns tplhMX=11.8ns tphlTY=6.2ns tphlMX=11.8ns
++								 tpzhTY=6.8ns tpzhMX=14ns tpzlTY=6.8ns tpzlMX=14ns
++                        tphzTY=7.3ns tphzMX=13.6ns tplzTY=7.3ns tplzMX=13.6ns)
+
+.ENDS 74LV367A
+*
+*
+* ----------------------------------------------------------- 74LV373A ------
+*  Octal Transparent D-Type Latches With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/27/03
+*
+.SUBCKT 74LV373A OEBAR LE 1D 2D 3D 4D 5D 6D 7D 8D 1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 dltch(8) DPWR_3V DGND_3V
++     $D_HI $D_HI LE
++     1D 2D 3D 4D 5D 6D 7D 8D
++     $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC
++     1QB 2QB 3QB 4QB 5QB 6QB 7QB 8QB
++     DLY1_LV373 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 inv DPWR_3V DGND_3V
++     OEBAR OE
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 inv3a(8) DPWR_3V DGND_3V
++     1QB 2QB 3QB 4QB 5QB 6QB 7QB 8QB
++     OE
++     1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     DLY2_LV373 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY1_LV373 ugff(tpgqhlTY=7.8ns tpgqhlMX=14.5ns tpgqlhTY=7.8ns tpgqlhMX=14.5ns
++							  tpdqhlTY=7.3ns tpdqhlMX=14.9ns tpdqlhTY=7.3ns tpdqlhMX=14.9ns
++                      twghMN=5ns tsudgMN=4ns thdgMN=1ns)
+
+.model DLY2_LV373 utgate (tplzTY=6ns tplzMX=13.2ns tphzTY=6ns tphzMX=13.2ns
++                         tpzlTY=7.7ns tpzlMX=14.9ns tpzhTY=7.7ns tpzhMX=14.9ns)
+                                 
+.ENDS 74LV373A
+*
+*
+* ----------------------------------------------------------- 74LV374A ------
+*  Octal Edge-Triggered D-Type Flip-Flops With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV374A OEBAR CLK 1D 2D 3D 4D 5D 6D 7D 8D 1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 dff(8) DPWR_3V DGND_3V
++     $D_HI $D_HI CLK
++     1D 2D 3D 4D 5D 6D 7D 8D
++     $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC
++     1QB 2QB 3QB 4QB 5QB 6QB 7QB 8QB
++     DLY1_LV374 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 inv DPWR_3V DGND_3V
++     OEBAR OE
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 inv3a(8) DPWR_3V DGND_3V
++     1QB 2QB 3QB 4QB 5QB 6QB 7QB 8QB
++     OE
++     1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     DLY2_LV374 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY1_LV374 ueff(tpclkqhlTY=8.3ns tpclkqhlMX=16.2ns tpclkqlhTY=8.3ns tpclkqlhMX=16.2ns
++                      twclklMN=5ns twclkhMN=5ns tsudclkMN=4.5ns thdclkMN=2ns)
+
+.model DLY2_LV374 utgate (tplzTY=5.9ns tplzMX=14ns tphzTY=5.9ns tphzMX=14ns
++                         tpzlTY=7.7ns tpzlMX=14.5ns tpzhTY=7.7ns tpzhMX=14.5ns)
+                                 
+.ENDS 74LV374A
+*
+*
+* ----------------------------------------------------------- 74LV393A ------
+*  Dual 4-Bit Binary Counters
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV393A 1CLK 1CLR 1QA 1QB 1QC 1QD
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 jkff(1) DPWR_3V DGND_3V
++     $D_HI CLEAR 1CLK $D_HI $D_HI 1QA_O $D_NC
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 jkff(1) DPWR_3V DGND_3V
++     $D_HI CLEAR 1QA_O $D_HI $D_HI 1QB_O $D_NC
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 jkff(1) DPWR_3V DGND_3V
++     $D_HI CLEAR 1QB_O $D_HI $D_HI 1QC_O $D_NC
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U4 jkff(1) DPWR_3V DGND_3V
++     $D_HI CLEAR 1QC_O $D_HI $D_HI 1QD_O $D_NC
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U5 inv DPWR_3V DGND_3V
++     1CLR CLEAR
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U6DLY PINDLY(4,0,2) DPWR_3V DGND_3V
++     1QA_O 1QB_O 1QC_O 1QD_O
++     1CLR 1CLK
++     1QA 1QB 1QC 1QD
++     IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++  BOOLEAN:
++     BLANK = {CHANGED_LH(1CLR,0)}
++     CLOCKA = {CHANGED_HL(1CLK,0)}
++
++  PINDLY:
++     1QA = {
++       CASE(
++         BLANK & TRN_HL, DELAY(-1,6.8ns,15.8ns),
++         CLOCKA, DELAY(-1,6.7ns,16.7ns),
++         DELAY(-1,7ns,17ns))}
++
++     1QB = {
++       CASE(
++         BLANK & TRN_HL, DELAY(-1,6.8ns,15.8ns),
++         CLOCKA, DELAY(-1,7.8ns,19.3ns),
++         DELAY(-1,8ns,20ns))}
++
++     1QC = {
++       CASE(
++         BLANK & TRN_HL, DELAY(-1,6.8ns,15.8ns),
++         CLOCKA, DELAY(-1,8.7ns,21.5ns),
++         DELAY(-1,9ns,22ns))}
++
++     1QD = {
++       CASE(
++         BLANK & TRN_HL, DELAY(-1,6.8ns,15.8ns),
++         CLOCKA, DELAY(-1,9.5ns,23.2ns),
++         DELAY(-1,10ns,24ns))}
+
+U7CON CONSTRAINT(2) DPWR_3V DGND_3V
++     1CLK 1CLR
++     IO_LV-A IO_LEVEL={IO_LEVEL}
++
++  FREQ:
++     NODE=1CLK
++     MAXFREQ=105MEG
++
++  WIDTH:
++     NODE=1CLK
++     MIN_HI=5ns
++     MIN_LO=5ns
++
++  WIDTH:
++     NODE=1CLR
++     MIN_HI=5ns
++
++  SETUP_HOLD:
++     CLOCK HL=1CLK
++     DATA(1)=1CLR
++     SETUPTIME_LO=5ns
+
+.ENDS 74LV393A
+*
+*
+* ----------------------------------------------------------- 74LV540A ------
+*  Octal Buffers/Drivers With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV540A OE1BAR OE2BAR A1 A2 A3 A4 A5 A6 A7 A8 Y1 Y2 Y3 Y4 Y5 Y6 Y7 Y8
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nor(2) DPWR_3V DGND_3V
++     OE1BAR OE2BAR ENAB
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 inv3a(8) DPWR_3V DGND_3V
++     A1 A2 A3 A4 A5 A6 A7 A8
++     ENAB
++     Y1 Y2 Y3 Y4 Y5 Y6 Y7 Y8
++     DLY_LV540 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV540 utgate (tplhTY=5.8ns tplhMX=10.5ns tphlTY=5.8ns tphlMX=10.5ns
++                        tpzhTY=7.3ns tpzhMX=14ns tpzlTY=7.3ns tpzlMX=14ns
++                        tphzTY=5.8ns tphzMX=15.4ns tplzTY=5.8ns tplzMX=15.4ns)
+
+.ENDS 74LV540A
+*
+*
+* ----------------------------------------------------------- 74LV541A ------
+*  Octal Buffers/Drivers With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV541A OE1BAR OE2BAR A1 A2 A3 A4 A5 A6 A7 A8 Y1 Y2 Y3 Y4 Y5 Y6 Y7 Y8
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 nor(2) DPWR_3V DGND_3V
++     OE1BAR OE2BAR ENAB
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 buf3a(8) DPWR_3V DGND_3V
++     A1 A2 A3 A4 A5 A6 A7 A8
++     ENAB
++     Y1 Y2 Y3 Y4 Y5 Y6 Y7 Y8
++     DLY_LV541 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV541 utgate (tplhTY=6.1ns tplhMX=10.5ns tphlTY=6.1ns tphlMX=10.5ns
++                        tpzhTY=7.4ns tpzhMX=14ns tpzlTY=7.4ns tpzlMX=14ns
++                        tphzTY=8.8ns tphzMX=15.4ns tplzTY=8.8ns tplzMX=15.4ns)
+
+.ENDS 74LV541A
+*
+*
+* ----------------------------------------------------------- 74LV573A ------
+*  Octal Transparent D-Type Latches With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV573A OEBAR LE 1D 2D 3D 4D 5D 6D 7D 8D 
++     1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inv DPWR_3V DGND_3V
++     OEBAR OE
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 dltch(8) DPWR_3V DGND_3V
++     $D_HI $D_HI LE
++     1D 2D 3D 4D 5D 6D 7D 8D
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8
++     $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC
++     DLY_LV573 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 buf3a(8) DPWR_3V DGND_3V
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8
++     OE
++     1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q 
++     DLY_LV573Z IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV573 ugff (tpgqlhTY=8.2ns tpgqlhMX=15.4ns tpgqhlTY=8.2ns tpgqhlMX=15.4ns
++                      tpdqlhTY=7.7ns tpdqlhMX=14.5ns tpdqhlTY=7.7ns tpdqhlMX=14.5ns
++                      twghMN=5ns tsudgMN=3.5ns thdgMN=1.5ns)
+
+.model DLY_LV573Z utgate (tpzhTY=8ns tpzhMX=15ns tpzlTY=8ns tpzlMX=15ns
++                         tphzTY=6.2ns tphzMX=14.5ns tplzTY=6.2ns tplzMX=14.5ns)
+
+.ENDS 74LV573A
+*
+*
+* ----------------------------------------------------------- 74LV574A ------
+*  Octal Edge-Triggered D-Type Flip-Flops With 3-State Outputs
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV574A OEBAR CLK 1D 2D 3D 4D 5D 6D 7D 8D 
++     1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 inv DPWR_3V DGND_3V
++     OEBAR OE
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 dff(8) DPWR_3V DGND_3V
++     $D_HI $D_HI CLK
++     1D 2D 3D 4D 5D 6D 7D 8D
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8
++     $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC
++     DLY_LV574 IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 buf3a(8) DPWR_3V DGND_3V
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8
++     OE
++     1Q 2Q 3Q 4Q 5Q 6Q 7Q 8Q 
++     DLY_LV574Z IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+.model DLY_LV574 ueff(tpclkqhlTY=8.1ns tpclkqhlMX=16.7ns tpclkqlhTY=8.1ns tpclkqlhMX=16.7ns
++                      twclklMN=5ns twclkhMN=5ns tsudclkMN=3.5ns thdclkMN=1.5ns)
+
+.model DLY_LV574Z utgate (tpzhTY=7.7ns tpzhMX=16.3ns tpzlTY=7.7ns tpzlMX=16.3ns
++                         tphzTY=6.1ns tphzMX=15ns tplzTY=6.1ns tplzMX=15ns)
+
+.ENDS 74LV574A
+*
+*
+* ----------------------------------------------------------- 74LV594A ------
+*  8-Bit Shift Registers With Output Registers
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV594A RCLRBAR RCLK SRCLRBAR SRCLK SER 
++     QA QB QC QD QE QF QG QH QHS
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 dff(1) DPWR_3V DGND_3V
++     $D_HI SRCLRBAR SRCLK SER Q1 Q1BAR
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 jkff(7) DPWR_3V DGND_3V
++     $D_HI SRCLRBAR SRCKBAR
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q1BAR Q2BAR Q3BAR Q4BAR Q5BAR Q6BAR Q7BAR
++     Q2 Q3 Q4 Q5 Q6 Q7 QHS_O Q2BAR Q3BAR Q4BAR Q5BAR Q6BAR Q7BAR Q8BAR
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 jkff(8) DPWR_3V DGND_3V
++     $D_HI RCLRBAR RCKBAR
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 QHS_O 
++     Q1BAR Q2BAR Q3BAR Q4BAR Q5BAR Q6BAR Q7BAR Q8BAR
++     QA_O QB_O QC_O QD_O QE_O QF_O QG_O QH_O
++     $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U4 inva(2) DPWR_3V DGND_3V
++     RCLK SRCLK RCKBAR SRCKBAR
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U5DLY PINDLY(9,0,4) DPWR_3V DGND_3V
++     QA_O QB_O QC_O QD_O QE_O QF_O QG_O QH_O QHS_O
++     RCLK SRCLK SRCLRBAR RCLRBAR
++     QA QB QC QD QE QF QG QH QHS
++     IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++  BOOLEAN:
++     CLOCKR = {CHANGED_LH(RCLK,0)}
++     CLOCKS = {CHANGED_LH(SRCLK,0)}
++     CLEARR = {CHANGED_HL(RCLRBAR,0)}
++     CLEARS = {CHANGED_HL(SRCLRBAR,0)}
++
++  PINDLY:
++     QA QB QC QD QE QF QG QH = {
++       CASE(
++         CLEARR, DELAY(-1,9.1ns,13.1ns),
++         CLOCKR & TRN_LH, DELAY(-1,6.9ns,10.5ns),
++         CLOCKR & TRN_HL, DELAY(-1,8.1ns,11.9ns),
++         DELAY(-1,10ns,14ns))}
++
++     QHS = {
++       CASE(
++         CLEARS, DELAY(-1,8.5ns,12.4ns),
++         CLOCKS & TRN_LH, DELAY(-1,7.7ns,11.7ns),
++         CLOCKS & TRN_HL, DELAY(-1,8.4ns,12.5ns),
++         DELAY(-1,9ns,13ns))}
+
+U6CON CONSTRAINT(5) DPWR_3V DGND_3V
++     SRCLK RCLK SRCLRBAR RCLRBAR SER
++     IO_LV-A IO_LEVEL={IO_LEVEL}
++
++  FREQ:
++     NODE=SRCLK
++     MAXFREQ=105MEG
++
++  FREQ:
++     NODE=RCLK
++     MAXFREQ=105MEG
++
++  WIDTH:
++     NODE=SRCLK
++     MIN_HI=5.5ns
++     MIN_LO=5.5ns
++
++  WIDTH:
++     NODE=RCLK
++     MIN_HI=5.5ns
++     MIN_LO=5.5ns
++
++  WIDTH:
++     NODE=SRCLRBAR
++     MIN_LO=5ns
++
++  WIDTH:
++     NODE=RCLRBAR
++     MIN_LO=5ns
++
++  SETUP_HOLD:
++     CLOCK LH=SRCLK
++     DATA(1)=SER
++     SETUPTIME=3.5ns
++     HOLDTIME=1.5ns
++
++  SETUP_HOLD:
++     CLOCK LH=RCLK
++     DATA(1)=SRCLK
++     SETUPTIME_HI=8ns
++
++  SETUP_HOLD:
++     CLOCK LH=RCLK
++     DATA(1)=SRCLRBAR
++     SETUPTIME_LO=8ns
++
++  SETUP_HOLD:
++     CLOCK LH=SRCLK
++     DATA(1)=SRCLRBAR
++     SETUPTIME_HI=4.2ns
++
++  SETUP_HOLD:
++     CLOCK LH=RCLK
++     DATA(1)=RCLRBAR
++     SETUPTIME_HI=4.6ns
+
+.ENDS 74LV594A
+*
+*
+* ----------------------------------------------------------- 74LV595A ------
+*  8-Bit Shift Registers With 3-State Output Registers
+*
+*  TI PDF File
+*  bss    2/28/03
+*
+.SUBCKT 74LV595A OEBAR RCLK SRCLRBAR SRCLK SER 
++     QA QB QC QD QE QF QG QH QHS
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 dff(1) DPWR_3V DGND_3V
++     $D_HI SRCLRBAR SRCLK SER Q1 Q1BAR
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U2 jkff(7) DPWR_3V DGND_3V
++     $D_HI SRCLRBAR SRCKBAR
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q1BAR Q2BAR Q3BAR Q4BAR Q5BAR Q6BAR Q7BAR
++     Q2 Q3 Q4 Q5 Q6 Q7 QHS_O Q2BAR Q3BAR Q4BAR Q5BAR Q6BAR Q7BAR Q8BAR
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 jkff(8) DPWR_3V DGND_3V
++     $D_HI $D_HI RCKBAR
++     Q1 Q2 Q3 Q4 Q5 Q6 Q7 QHS_O 
++     Q1BAR Q2BAR Q3BAR Q4BAR Q5BAR Q6BAR Q7BAR Q8BAR
++     QA_O QB_O QC_O QD_O QE_O QF_O QG_O QH_O
++     $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC $D_NC
++     D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U4 inva(2) DPWR_3V DGND_3V
++     RCLK SRCLK RCKBAR SRCKBAR
++     D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U5DLY PINDLY(9,1,3) DPWR_3V DGND_3V
++     QA_O QB_O QC_O QD_O QE_O QF_O QG_O QH_O QHS_O
++     OEBAR
++     RCLK SRCLK SRCLRBAR
++     QA QB QC QD QE QF QG QH QHS
++     IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++
++  BOOLEAN:
++     CLOCKR = {CHANGED_LH(RCLK,0)}
++     CLOCKS = {CHANGED_LH(SRCLK,0)}
++     CLEARS = {CHANGED_HL(SRCLRBAR,0)}
++
++  TRISTATE:
++     ENABLE LO=OEBAR
++     QA QB QC QD QE QF QG QH = {
++       CASE(
++         CLOCKR & TRN_LH, DELAY(-1,7.9ns,15.4ns),
++         CLOCKR & TRN_HL, DELAY(-1,7.9ns,15.4ns),
++         TRN_ZH, DELAY(-1,7.8ns,15ns),
++			 TRN_ZL, DELAY(-1,9.6ns,15ns),
++         TRN_HZ, DELAY(-1,8.1ns,15.7ns),
++			 TRN_LZ, DELAY(-1,9.3ns,15.7ns),
++         DELAY(-1,10ns,16ns))}
++
++  PINDLY:
++     QHS = {
++       CASE(
++         CLEARS & TRN_HL, DELAY(-1,9ns,16.3ns),
++         CLOCKS, DELAY(-1,9.2ns,16.5ns),
++         DELAY(-1,10ns,17ns))}
+
+U6CON CONSTRAINT(5) DPWR_3V DGND_3V
++     SRCLK RCLK SRCLRBAR RCLRBAR SER
++     IO_LV-A IO_LEVEL={IO_LEVEL}
++
++  FREQ:
++     NODE=SRCLK
++     MAXFREQ=105MEG
++
++  FREQ:
++     NODE=RCLK
++     MAXFREQ=105MEG
++
++  WIDTH:
++     NODE=SRCLK
++     MIN_HI=5.5ns
++     MIN_LO=5.5ns
++
++  WIDTH:
++     NODE=RCLK
++     MIN_HI=5.5ns
++     MIN_LO=5.5ns
++
++  WIDTH:
++     NODE=SRCLRBAR
++     MIN_LO=5ns
++
++  SETUP_HOLD:
++     CLOCK LH=SRCLK
++     DATA(1)=SER
++     SETUPTIME=3.5ns
++		HOLDTIME=1.5ns
++
++  SETUP_HOLD:
++     CLOCK LH=RCLK
++     DATA(1)=SRCLK
++     SETUPTIME_HI=8ns
++
++  SETUP_HOLD:
++     CLOCK LH=RCLK
++     DATA(1)=SRCLRBAR
++     SETUPTIME_LO=8ns
++
++  SETUP_HOLD:
++     CLOCK LH=SRCLK
++     DATA(1)=SRCLRBAR
++     SETUPTIME_HI=3ns
+
+.ENDS 74LV595A
+*
+*
+*---------------------------------------------------------74LV4040A-------
+* 12-Bit Asynchronous Binary Counter
+*
+*  TI PDF File
+*  bss    2/28/03
+
+.SUBCKT 74LV4040A CLR CLK QA QB QC QD QE QF QG QH QI QJ QK QL
++     optional: DPWR_3V=$G_DPWR_3V DGND_3V=$G_DGND_3V
++     params: MNTYMXDLY=0 IO_LEVEL=0
+
+U1 LOGICEXP(1,1) DPWR_3V DGND_3V
++ CLR
++ RESETBAR
++ D0_GATE IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++ LOGIC:
++        RESETBAR = {~CLR}
+
+U2 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR CLK
++ $D_HI $D_HI Q_A $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U3 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_A
++ $D_HI $D_HI Q_B $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U4 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_B
++ $D_HI $D_HI Q_C $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U5 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_C
++ $D_HI $D_HI Q_D $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U6 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_D
++ $D_HI $D_HI Q_E $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U7 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_E
++ $D_HI $D_HI Q_F $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U8 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_F
++ $D_HI $D_HI Q_G $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U9 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_G
++ $D_HI $D_HI Q_H $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U10 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_H
++ $D_HI $D_HI Q_I $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U11 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_I
++ $D_HI $D_HI Q_J $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U12 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_J
++ $D_HI $D_HI Q_K $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U13 JKFF(1) DPWR_3V DGND_3V
++ $D_HI RESETBAR Q_K
++ $D_HI $D_HI Q_L $D_NC
++ D0_EFF IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
+
+U14 PINDLY(12,0,2) DPWR_3V DGND_3V
++ Q_A Q_B Q_C Q_D Q_E Q_F Q_G Q_H Q_I Q_J Q_K Q_L
++ CLR CLK
++ QA QB QC QD QE QF QG QH QI QJ QK QL
++ IO_LV-A MNTYMXDLY={MNTYMXDLY} IO_LEVEL={IO_LEVEL}
++ BOOLEAN:
++          CLEAR = {CHANGED_LH(CLR,0)}
++          ACLK = {CHANGED_HL(CLK,0)}
++ PINDLY:
++          QA = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,7.5ns,15.4ns),
++              DELAY(-1,10ns,17ns))}
++          QB = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,8.7ns,19.8ns),
++              DELAY(-1,10ns,20ns))}
++          QC = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,9.9ns,24.2ns),
++              DELAY(-1,10ns,25ns))}
++          QD = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,11.1ns,28.6ns),
++              DELAY(-1,12ns,29ns))}
++          QE = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,12.3ns,33ns),
++              DELAY(-1,13ns,34ns))}
++          QF = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,13.5ns,37.4ns),
++              DELAY(-1,14ns,38ns))}
++          QG = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,14.7ns,41.8ns),
++              DELAY(-1,15ns,42ns))}
++          QH = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,15.9ns,46.2ns),
++              DELAY(-1,16ns,47ns))}
++          QI = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,17.1ns,50.6ns),
++              DELAY(-1,18ns,51ns))}
++          QJ = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,18.3ns,55ns),
++              DELAY(-1,19ns,56ns))}
++          QK = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,19.5ns,59.4ns),
++              DELAY(-1,20ns,60ns))}
++          QL = {
++            CASE(
++              CLEAR & TRN_HL, DELAY(-1,9ns,16.3ns),
++              ACLK, DELAY(-1,20.7ns,63.8ns),
++              DELAY(-1,21ns,64ns))}
+
+U15 CONSTRAINT(2) DPWR_3V DGND_3V
++ CLK CLR
++ IO_LV-A IO_LEVEL={IO_LEVEL}
++ SETUP_HOLD:
++             CLOCK HL = CLK
++             DATA(1) = CLR
++             SETUPTIME_LO = 5NS
++ WIDTH:
++             NODE = CLK
++             MIN_HI = 5NS
++             MIN_LO = 5NS
++ WIDTH:
++             NODE = CLR
++             MIN_HI = 5NS
++ FREQ:
++             NODE = CLK
++             MAXFREQ = 130MEG
+
+.ENDS 74LV4040A
+*
+*
+;$SpiceType=AMBIGUOUS

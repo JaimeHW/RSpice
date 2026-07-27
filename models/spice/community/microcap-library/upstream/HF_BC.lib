@@ -1,0 +1,1231 @@
+******************************************************************
+* 
+* EPCOS AG			EPCOS AG
+* Bereich Induktivitäten	Inductors Division
+* Entwicklung			Development Department
+* D-89520 Heidenheim		D-89520 Heidenheim
+* In den Seewiesen 26		In den Seewiesen 26
+*
+* Allgemeines			General
+*	Wolfgang Sammet
+*	Tel  +49 (0) 7321 326-220
+*	FAX  +49 (0) 7321 326-628
+*	Email wolfgang.sammet@epcos.com
+*
+*
+* Modellierung und Simulation	Modeling and simulation
+*	Stefan Schefler
+*	Tel  +49 (0) 7321 326-446
+*	FAX  +49 (0) 7321 326-628
+*	Email stefan.schefler@epcos.com
+*
+*
+******************************************************************
+* Bitte lesen Sie die Hinweise in der Datei "Liesmich.txt" .
+* Please read the hints in "Readme.txt" .
+******************************************************************
+*
+* 
+* Library HF_BC.lib 
+* Version 1.21 (Dienstag, 27. Juli 2010 15:42 Uhr CEST)
+* 
+******************************************************************
+* SPICE-Simulationsdaten für HF Drosseln (BC) Bobbin Core
+* SPICE simulation data for RF chokes (BC) Bobbin Core
+* 	HF_BC
+*
+******************************************************************
+*
+******************************************************************
+* Library für PSPICE
+* 
+* Libs für weitere Spice-Versionen sind verfügbar (HSPICE ..)
+*	
+******************************************************************
+*
+.subckt HF_BC_BASE1 A1 A2  PARAMS:  
++	ls11_a=1.0195u rs11_a=121.21m cp11_a=337.3774f rp11_a=5.6360k 
++	lwira1_a=12.3400n lwa1_a=929.5892n rwa1_a=2.6384 lwb1_a=3.1055u 
++	rwb1_a=26.3839 kw1a1_a=0.9999 
+ls1_b	A1 31 	{ls11_a}  
+rs1_b	31 A2 	{rs11_a}  
+cp1_b	A1 A2 	{cp11_a}  
+rp1_b	A1 A2 	{rp11_a}  
+lwira_b	900 0 	{lwira1_a}  
+lwa_b	900 901 	{lwa1_a}  
+rwa_b	901 0 	{rwa1_a}  
+lwb_b	900 902 	{lwb1_a}  
+rwb_b	902 0 	{rwb1_a}  
+kw1a_b	ls1_b lwira_b	{kw1a1_a}
+.ENDS
+
+*
+* B78108S1102K000 RF Chokes (BC) drum core (1 uH)
+*
+.subckt B78108S1102K000 A1 A2   PARAMS:  
++	ls11=1.0195u rs11=121.21m cp11=337.3774f rp11=5.6360k 
++	lwira1=12.3400n lwa1=929.5892n rwa1=2.6384 lwb1=3.1055u 
++	rwb1=26.3839 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1103J000 RF Chokes (BC) drum core (10 uH)
+*
+.subckt B78108S1103J000 A1 A2   PARAMS:  
++	ls11=10.2674u rs11=415.9m cp11=1.2452p rp11=86.3907k 
++	lwira1=12.3400n lwa1=1.8148u rwa1=2.3644 lwb1=723.3073n 
++	rwb1=15.9684 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1104J000 RF Chokes (BC) drum core (100 uH)
+*
+.subckt B78108S1104J000 A1 A2   PARAMS:  
++	ls11=101.7949u rs11=1.384 cp11=5.6648p rp11=105.2814k 
++	lwira1=12.3400n lwa1=3.4773u rwa1=2.8015 lwb1=834.3293n 
++	rwb1=12.4024 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1105J000 RF Chokes (BC) drum core (1 mH)
+*
+.subckt B78108S1105J000 A1 A2   PARAMS:  
++	ls11=1.0142m rs11=11.301 cp11=5.6833p rp11=548.3855k 
++	lwira1=12.3400n lwa1=5.6410u rwa1=1.2951 lwb1=25.6346u 
++	rwb1=633.0705 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1122K000 RF Chokes (BC) drum core (1.2 uH)
+*
+.subckt B78108S1122K000 A1 A2   PARAMS:  
++	ls11=1.1674u rs11=128.31m cp11=336.9393f rp11=6.2736k 
++	lwira1=12.3400n lwa1=987.3972n rwa1=3.2391 lwb1=9.5445u 
++	rwb1=32.3909 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1123K000 RF Chokes (BC) drum core (12 uH)
+*
+.subckt B78108S1123K000 A1 A2   PARAMS:  
++	ls11=12.3253u rs11=467.7m cp11=2.0027p rp11=83.8879k 
++	lwira1=12.3400n lwa1=2.5648u rwa1=3.7008 lwb1=628.6426n 
++	rwb1=15.0818 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1124J000 RF Chokes (BC) drum core (120 uH)
+*
+.subckt B78108S1124J000 A1 A2   PARAMS:  
++	ls11=118.1805u rs11=1.815 cp11=6.2984p rp11=119.5476k 
++	lwira1=12.3400n lwa1=3.8772u rwa1=3.3591 lwb1=3.4829u 
++	rwb1=33.3166 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1125J000 RF Chokes (BC) drum core (1.2 mH)
+*
+.subckt B78108S1125J000 A1 A2   PARAMS:  
++	ls11=1.2199m rs11=15.891 cp11=5.5974p rp11=886.3287k 
++	lwira1=12.3400n lwa1=3.1771u rwa1=629.1890m lwb1=3.8538u 
++	rwb1=6.3160 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1152K000 RF Chokes (BC) drum core (1.5 uH)
+*
+.subckt B78108S1152K000 A1 A2   PARAMS:  
++	ls11=1.5041u rs11=143.76m cp11=317.7691f rp11=8.6643k 
++	lwira1=12.3400n lwa1=736.6832n rwa1=2.3689 lwb1=8.8198u 
++	rwb1=23.6886 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1153K000 RF Chokes (BC) drum core (15 uH)
+*
+.subckt B78108S1153K000 A1 A2   PARAMS:  
++	ls11=15.1009u rs11=513.5m cp11=2.3835p rp11=85.7526k 
++	lwira1=12.3400n lwa1=2.6540u rwa1=3.1074 lwb1=615.1319n 
++	rwb1=14.6622 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1154J000 RF Chokes (BC) drum core (150 uH)
+*
+.subckt B78108S1154J000 A1 A2   PARAMS:  
++	ls11=147.5840u rs11=2.174 cp11=6.4804p rp11=157.2664k 
++	lwira1=12.3400n lwa1=2.3007u rwa1=1.7053 lwb1=1.6084u 
++	rwb1=20.6036 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1155J000 RF Chokes (BC) drum core (1.5 mH)
+*
+.subckt B78108S1155J000 A1 A2   PARAMS:  
++	ls11=1.4864m rs11=19.73 cp11=5.4876p rp11=797.8768k 
++	lwira1=12.3400n lwa1=3.7898u rwa1=1.1704 lwb1=21.8355u 
++	rwb1=609.1768 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1182K000 RF Chokes (BC) drum core (1.8 uH)
+*
+.subckt B78108S1182K000 A1 A2   PARAMS:  
++	ls11=1.7575u rs11=155.35m cp11=326.4309f rp11=12.1621k 
++	lwira1=12.3400n lwa1=678.1777n rwa1=2.1054 lwb1=4.3509u 
++	rwb1=21.0539 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1183K000 RF Chokes (BC) drum core (18 uH)
+*
+.subckt B78108S1183K000 A1 A2   PARAMS:  
++	ls11=18.0622u rs11=576.5m cp11=3.3933p rp11=73.1127k 
++	lwira1=12.3400n lwa1=2.4493u rwa1=2.8680 lwb1=689.4482n 
++	rwb1=14.9391 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1184J000 RF Chokes (BC) drum core (180 uH)
+*
+.subckt B78108S1184J000 A1 A2   PARAMS:  
++	ls11=181.4373u rs11=2.272 cp11=7.1319p rp11=140.7110k 
++	lwira1=12.3400n lwa1=3.8303u rwa1=2.6254 lwb1=3.9967u 
++	rwb1=28.9052 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1185J000 RF Chokes (BC) drum core (1.8 mH)
+*
+.subckt B78108S1185J000 A1 A2   PARAMS:  
++	ls11=1.7980m rs11=21.71 cp11=6.0775p rp11=1.2960meg 
++	lwira1=12.3400n lwa1=3.6302u rwa1=4.8458 lwb1=341.0821n 
++	rwb1=49.3100 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1222K000 RF Chokes (BC) drum core (2.2 uH)
+*
+.subckt B78108S1222K000 A1 A2   PARAMS:  
++	ls11=2.1420u rs11=167.77m cp11=353.0528f rp11=16.3653k 
++	lwira1=12.3400n lwa1=1.4002u rwa1=11.7674 lwb1=3.3422u 
++	rwb1=24.4155 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1223J000 RF Chokes (BC) drum core (22 uH)
+*
+.subckt B78108S1223J000 A1 A2   PARAMS:  
++	ls11=22.3542u rs11=622m cp11=4.0610p rp11=93.8109k 
++	lwira1=12.3400n lwa1=3.0352u rwa1=5.2215 lwb1=635.9187n 
++	rwb1=15.8215 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1224J000 RF Chokes (BC) drum core (220 uH)
+*
+.subckt B78108S1224J000 A1 A2   PARAMS:  
++	ls11=222.7400u rs11=2.869 cp11=5.0423p rp11=179.3155k 
++	lwira1=12.3400n lwa1=3.6242u rwa1=2.7597 lwb1=8.8624u 
++	rwb1=86.2897 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1225J000 RF Chokes (BC) drum core (2.2 mH)
+*
+.subckt B78108S1225J000 A1 A2   PARAMS:  
++	ls11=2.1917m rs11=30.08 cp11=5.8206p rp11=1.2164meg 
++	lwira1=12.3400n lwa1=2.7312u rwa1=666.3847m lwb1=21.5392u 
++	rwb1=573.8767 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1272J000 RF Chokes (BC) drum core (2.7 uH)
+*
+.subckt B78108S1272J000 A1 A2   PARAMS:  
++	ls11=2.7795u rs11=192.2m cp11=326.8887f rp11=20.7132k 
++	lwira1=12.3400n lwa1=1.4424u rwa1=10.2293 lwb1=3.2270u 
++	rwb1=22.2430 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1273K000 RF Chokes (BC) drum core (27 uH)
+*
+.subckt B78108S1273K000 A1 A2   PARAMS:  
++	ls11=27.8646u rs11=699.5m cp11=4.9952p rp11=274.5556k 
++	lwira1=12.3400n lwa1=2.4225u rwa1=2.8012 lwb1=442.8597n 
++	rwb1=12.7977 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1274J000 RF Chokes (BC) drum core (270 uH)
+*
+.subckt B78108S1274J000 A1 A2   PARAMS:  
++	ls11=271.4702u rs11=4.993 cp11=5.7509p rp11=276.7927k 
++	lwira1=12.3400n lwa1=2.7272u rwa1=1.5926 lwb1=251.8136n 
++	rwb1=1.0449k kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1275J000 RF Chokes (BC) drum core (2.7 mH)
+*
+.subckt B78108S1275J000 A1 A2   PARAMS:  
++	ls11=2.7152m rs11=34.54 cp11=6.8021p rp11=1.0441meg 
++	lwira1=12.3400n lwa1=5.3225u rwa1=620.5884m lwb1=187.2243n 
++	rwb1=429.3306 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1332K000 RF Chokes (BC) drum core (3.3 uH)
+*
+.subckt B78108S1332K000 A1 A2   PARAMS:  
++	ls11=3.4547u rs11=215.6m cp11=331.4511f rp11=36.4617k 
++	lwira1=12.3400n lwa1=1.3209u rwa1=16.4402 lwb1=2.4022u 
++	rwb1=30.1002 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1333J000 RF Chokes (BC) drum core (33 uH)
+*
+.subckt B78108S1333J000 A1 A2   PARAMS:  
++	ls11=27.8615u rs11=715.2m cp11=7.1139p rp11=88.3157k 
++	lwira1=12.3400n lwa1=2.6192u rwa1=3.6485 lwb1=197.9138n 
++	rwb1=18.2223 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1334J000 RF Chokes (BC) drum core (330 uH)
+*
+.subckt B78108S1334J000 A1 A2   PARAMS:  
++	ls11=332.1117u rs11=5.491 cp11=6.0212p rp11=280.9112k 
++	lwira1=12.3400n lwa1=4.7526u rwa1=1.1496 lwb1=24.5498u 
++	rwb1=1.0227k kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1335J000 RF Chokes (BC) drum core (3.3 mH)
+*
+.subckt B78108S1335J000 A1 A2   PARAMS:  
++	ls11=3.2649m rs11=46.26 cp11=5.6428p rp11=1.3738meg 
++	lwira1=12.3400n lwa1=2.6274u rwa1=521.2618m lwb1=184.1348n 
++	rwb1=454.7389 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1392K000 RF Chokes (BC) drum core (3.9 uH)
+*
+.subckt B78108S1392K000 A1 A2   PARAMS:  
++	ls11=4.0551u rs11=234.3m cp11=324.9355f rp11=25.3645k 
++	lwira1=12.3400n lwa1=1.7637u rwa1=12.5853 lwb1=4.9091u 
++	rwb1=28.9621 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1393K000 RF Chokes (BC) drum core (39 uH)
+*
+.subckt B78108S1393K000 A1 A2   PARAMS:  
++	ls11=39.4500u rs11=872m cp11=6.2614p rp11=166.3131k 
++	lwira1=12.3400n lwa1=2.4159u rwa1=3.3855 lwb1=328.2997n 
++	rwb1=12.6266 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1394J000 RF Chokes (BC) drum core (390 uH)
+*
+.subckt B78108S1394J000 A1 A2   PARAMS:  
++	ls11=393.3063u rs11=5.801 cp11=5.3804p rp11=555.9025k 
++	lwira1=12.3400n lwa1=4.2753u rwa1=3.7383 lwb1=382.1179n 
++	rwb1=26.3123 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1395J000 RF Chokes (BC) drum core (3.9 mH)
+*
+.subckt B78108S1395J000 A1 A2   PARAMS:  
++	ls11=3.9040m rs11=50.16 cp11=6.0579p rp11=1.4650meg 
++	lwira1=12.3400n lwa1=4.8691u rwa1=1.2235 lwb1=16.8735u 
++	rwb1=4.1173 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1472K000 RF Chokes (BC) drum core (4.7 uH)
+*
+.subckt B78108S1472K000 A1 A2   PARAMS:  
++	ls11=4.6448u rs11=254.3m cp11=281.9982f rp11=27.9624k 
++	lwira1=12.3400n lwa1=1.5699u rwa1=12.1813 lwb1=3.8507u 
++	rwb1=16.2771 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1473J000 RF Chokes (BC) drum core (47 uH)
+*
+.subckt B78108S1473J000 A1 A2   PARAMS:  
++	ls11=46.3306u rs11=888m cp11=6.8102p rp11=143.5006k 
++	lwira1=12.3400n lwa1=3.0046u rwa1=4.9423 lwb1=214.3481n 
++	rwb1=16.5083 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1474J000 RF Chokes (BC) drum core (470 uH)
+*
+.subckt B78108S1474J000 A1 A2   PARAMS:  
++	ls11=474.8462u rs11=6.486 cp11=6.0093p rp11=324.9440k 
++	lwira1=12.3400n lwa1=5.1508u rwa1=1.6914 lwb1=933.2813n 
++	rwb1=869.3845 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1475J000 RF Chokes (BC) drum core (4.7 mH)
+*
+.subckt B78108S1475J000 A1 A2   PARAMS:  
++	ls11=4.6535m rs11=69.74 cp11=7.7530p rp11=1.6947meg 
++	lwira1=12.3400n lwa1=2.6159u rwa1=1.6097 lwb1=1.4256u 
++	rwb1=20.2102 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1562K000 RF Chokes (BC) drum core (5.6 uH)
+*
+.subckt B78108S1562K000 A1 A2   PARAMS:  
++	ls11=5.7581u rs11=319.6m cp11=301.8280f rp11=47.8471k 
++	lwira1=12.3400n lwa1=1.2439u rwa1=14.8798 lwb1=3.0362u 
++	rwb1=36.2879 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1563J000 RF Chokes (BC) drum core (56 uH)
+*
+.subckt B78108S1563J000 A1 A2   PARAMS:  
++	ls11=56.3820u rs11=1.058 cp11=6.1291p rp11=140.7860k 
++	lwira1=12.3400n lwa1=2.7436u rwa1=4.3244 lwb1=316.4031n 
++	rwb1=16.9187 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1564J000 RF Chokes (BC) drum core (560 uH)
+*
+.subckt B78108S1564J000 A1 A2   PARAMS:  
++	ls11=556.1835u rs11=7.108 cp11=6.0714p rp11=463.7482k 
++	lwira1=12.3400n lwa1=1.4499u rwa1=7.6959 lwb1=10.2386u 
++	rwb1=8.2635 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1682K000 RF Chokes (BC) drum core (6.8 uH)
+*
+.subckt B78108S1682K000 A1 A2   PARAMS:  
++	ls11=6.8678u rs11=431m cp11=315.1659f rp11=57.0928k 
++	lwira1=12.3400n lwa1=1.5011u rwa1=24.1925 lwb1=5.4253u 
++	rwb1=35.5503 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1683J000 RF Chokes (BC) drum core (68 uH)
+*
+.subckt B78108S1683J000 A1 A2   PARAMS:  
++	ls11=69.6726u rs11=1.129 cp11=5.3656p rp11=94.4944k 
++	lwira1=12.3400n lwa1=3.0606u rwa1=3.9277 lwb1=625.5672n 
++	rwb1=14.4104 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1684J000 RF Chokes (BC) drum core (680 uH)
+*
+.subckt B78108S1684J000 A1 A2   PARAMS:  
++	ls11=682.2484u rs11=8.867 cp11=5.9468p rp11=580.4783k 
++	lwira1=12.3400n lwa1=3.9277u rwa1=2.5776 lwb1=1.7468u 
++	rwb1=15.3453 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1822K000 RF Chokes (BC) drum core (8.2 uH)
+*
+.subckt B78108S1822K000 A1 A2   PARAMS:  
++	ls11=8.1803u rs11=391.9m cp11=289.7480f rp11=54.5193k 
++	lwira1=12.3400n lwa1=1.4124u rwa1=9.9046 lwb1=7.9645u 
++	rwb1=26.7078 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1823J000 RF Chokes (BC) drum core (82 uH)
+*
+.subckt B78108S1823J000 A1 A2   PARAMS:  
++	ls11=80.4122u rs11=1.228 cp11=5.0248p rp11=101.6275k 
++	lwira1=12.3400n lwa1=3.1323u rwa1=3.1766 lwb1=724.5413n 
++	rwb1=12.1268 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78108S1824J000 RF Chokes (BC) drum core (820 uH)
+*
+.subckt B78108S1824J000 A1 A2   PARAMS:  
++	ls11=825.3803u rs11=10.717 cp11=5.4041p rp11=529.0884k 
++	lwira1=12.4100n lwa1=2.2641u rwa1=840.1605m lwb1=3.1341u 
++	rwb1=656.2654 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1102K000 RF Chokes (BC) drum core (1 uH)
+*
+.subckt B78148S1102K000 A1 A2   PARAMS:  
++	ls11=1.0195u rs11=121.21m cp11=337.3774f rp11=5.6360k 
++	lwira1=12.3400n lwa1=929.5892n rwa1=2.6384 lwb1=3.1055u 
++	rwb1=26.3839 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1103J000 RF Chokes (BC) drum core (10 uH)
+*
+.subckt B78148S1103J000 A1 A2   PARAMS:  
++	ls11=10.2674u rs11=415.9m cp11=1.2452p rp11=86.3907k 
++	lwira1=12.3400n lwa1=1.8148u rwa1=2.3644 lwb1=723.3073n 
++	rwb1=15.9684 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1104J000 RF Chokes (BC) drum core (100 uH)
+*
+.subckt B78148S1104J000 A1 A2   PARAMS:  
++	ls11=101.7949u rs11=1.384 cp11=5.6648p rp11=105.2814k 
++	lwira1=12.3400n lwa1=3.4773u rwa1=2.8015 lwb1=834.3293n 
++	rwb1=12.4024 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1105J000 RF Chokes (BC) drum core (1 mH)
+*
+.subckt B78148S1105J000 A1 A2   PARAMS:  
++	ls11=1.0142m rs11=11.301 cp11=5.6833p rp11=548.3855k 
++	lwira1=12.3400n lwa1=5.6410u rwa1=1.2951 lwb1=25.6346u 
++	rwb1=633.0705 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1122K000 RF Chokes (BC) drum core (1.2 uH)
+*
+.subckt B78148S1122K000 A1 A2   PARAMS:  
++	ls11=1.1674u rs11=128.31m cp11=336.9393f rp11=6.2736k 
++	lwira1=12.3400n lwa1=987.3972n rwa1=3.2391 lwb1=9.5445u 
++	rwb1=32.3909 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1123K000 RF Chokes (BC) drum core (12 uH)
+*
+.subckt B78148S1123K000 A1 A2   PARAMS:  
++	ls11=12.3253u rs11=467.7m cp11=2.0027p rp11=83.8879k 
++	lwira1=12.3400n lwa1=2.5648u rwa1=3.7008 lwb1=628.6426n 
++	rwb1=15.0818 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1124J000 RF Chokes (BC) drum core (120 uH)
+*
+.subckt B78148S1124J000 A1 A2   PARAMS:  
++	ls11=118.1805u rs11=1.815 cp11=6.2984p rp11=119.5476k 
++	lwira1=12.3400n lwa1=3.8772u rwa1=3.3591 lwb1=3.4829u 
++	rwb1=33.3166 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1125J000 RF Chokes (BC) drum core (1.2 mH)
+*
+.subckt B78148S1125J000 A1 A2   PARAMS:  
++	ls11=1.2199m rs11=15.891 cp11=5.5974p rp11=886.3287k 
++	lwira1=12.3400n lwa1=3.1771u rwa1=629.1890m lwb1=3.8538u 
++	rwb1=6.3160 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1152K000 RF Chokes (BC) drum core (1.5 uH)
+*
+.subckt B78148S1152K000 A1 A2   PARAMS:  
++	ls11=1.5041u rs11=143.76m cp11=317.7691f rp11=8.6643k 
++	lwira1=12.3400n lwa1=736.6832n rwa1=2.3689 lwb1=8.8198u 
++	rwb1=23.6886 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1153K000 RF Chokes (BC) drum core (15 uH)
+*
+.subckt B78148S1153K000 A1 A2   PARAMS:  
++	ls11=15.1009u rs11=513.5m cp11=2.3835p rp11=85.7526k 
++	lwira1=12.3400n lwa1=2.6540u rwa1=3.1074 lwb1=615.1319n 
++	rwb1=14.6622 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1154J000 RF Chokes (BC) drum core (150 uH)
+*
+.subckt B78148S1154J000 A1 A2   PARAMS:  
++	ls11=147.5840u rs11=2.174 cp11=6.4804p rp11=157.2664k 
++	lwira1=12.3400n lwa1=2.3007u rwa1=1.7053 lwb1=1.6084u 
++	rwb1=20.6036 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1155J000 RF Chokes (BC) drum core (1.5 mH)
+*
+.subckt B78148S1155J000 A1 A2   PARAMS:  
++	ls11=1.4864m rs11=19.73 cp11=5.4876p rp11=797.8768k 
++	lwira1=12.3400n lwa1=3.7898u rwa1=1.1704 lwb1=21.8355u 
++	rwb1=609.1768 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1182K000 RF Chokes (BC) drum core (1.8 uH)
+*
+.subckt B78148S1182K000 A1 A2   PARAMS:  
++	ls11=1.7575u rs11=155.35m cp11=326.4309f rp11=12.1621k 
++	lwira1=12.3400n lwa1=678.1777n rwa1=2.1054 lwb1=4.3509u 
++	rwb1=21.0539 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1183K000 RF Chokes (BC) drum core (18 uH)
+*
+.subckt B78148S1183K000 A1 A2   PARAMS:  
++	ls11=18.0622u rs11=576.5m cp11=3.3933p rp11=73.1127k 
++	lwira1=12.3400n lwa1=2.4493u rwa1=2.8680 lwb1=689.4482n 
++	rwb1=14.9391 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1184J000 RF Chokes (BC) drum core (180 uH)
+*
+.subckt B78148S1184J000 A1 A2   PARAMS:  
++	ls11=181.4373u rs11=2.272 cp11=7.1319p rp11=140.7110k 
++	lwira1=12.3400n lwa1=3.8303u rwa1=2.6254 lwb1=3.9967u 
++	rwb1=28.9052 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1185J000 RF Chokes (BC) drum core (1.8 mH)
+*
+.subckt B78148S1185J000 A1 A2   PARAMS:  
++	ls11=1.7980m rs11=21.71 cp11=6.0775p rp11=1.2960meg 
++	lwira1=12.3400n lwa1=3.6302u rwa1=4.8458 lwb1=341.0821n 
++	rwb1=49.3100 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1222K000 RF Chokes (BC) drum core (2.2 uH)
+*
+.subckt B78148S1222K000 A1 A2   PARAMS:  
++	ls11=2.1420u rs11=167.77m cp11=353.0528f rp11=16.3653k 
++	lwira1=12.3400n lwa1=1.4002u rwa1=11.7674 lwb1=3.3422u 
++	rwb1=24.4155 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1223J000 RF Chokes (BC) drum core (22 uH)
+*
+.subckt B78148S1223J000 A1 A2   PARAMS:  
++	ls11=22.3542u rs11=622m cp11=4.0610p rp11=93.8109k 
++	lwira1=12.3400n lwa1=3.0352u rwa1=5.2215 lwb1=635.9187n 
++	rwb1=15.8215 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1224J000 RF Chokes (BC) drum core (220 uH)
+*
+.subckt B78148S1224J000 A1 A2   PARAMS:  
++	ls11=222.7400u rs11=2.869 cp11=5.0423p rp11=179.3155k 
++	lwira1=12.3400n lwa1=3.6242u rwa1=2.7597 lwb1=8.8624u 
++	rwb1=86.2897 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1225J000 RF Chokes (BC) drum core (2.2 mH)
+*
+.subckt B78148S1225J000 A1 A2   PARAMS:  
++	ls11=2.1917m rs11=30.08 cp11=5.8206p rp11=1.2164meg 
++	lwira1=12.3400n lwa1=2.7312u rwa1=666.3847m lwb1=21.5392u 
++	rwb1=573.8767 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1272J000 RF Chokes (BC) drum core (2.7 uH)
+*
+.subckt B78148S1272J000 A1 A2   PARAMS:  
++	ls11=2.7795u rs11=192.2m cp11=326.8887f rp11=20.7132k 
++	lwira1=12.3400n lwa1=1.4424u rwa1=10.2293 lwb1=3.2270u 
++	rwb1=22.2430 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1273K000 RF Chokes (BC) drum core (27 uH)
+*
+.subckt B78148S1273K000 A1 A2   PARAMS:  
++	ls11=27.8646u rs11=699.5m cp11=4.9952p rp11=274.5556k 
++	lwira1=12.3400n lwa1=2.4225u rwa1=2.8012 lwb1=442.8597n 
++	rwb1=12.7977 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1274J000 RF Chokes (BC) drum core (270 uH)
+*
+.subckt B78148S1274J000 A1 A2   PARAMS:  
++	ls11=271.4702u rs11=4.993 cp11=5.7509p rp11=276.7927k 
++	lwira1=12.3400n lwa1=2.7272u rwa1=1.5926 lwb1=251.8136n 
++	rwb1=1.0449k kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1275J000 RF Chokes (BC) drum core (2.7 mH)
+*
+.subckt B78148S1275J000 A1 A2   PARAMS:  
++	ls11=2.7152m rs11=34.54 cp11=6.8021p rp11=1.0441meg 
++	lwira1=12.3400n lwa1=5.3225u rwa1=620.5884m lwb1=187.2243n 
++	rwb1=429.3306 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1332K000 RF Chokes (BC) drum core (3.3 uH)
+*
+.subckt B78148S1332K000 A1 A2   PARAMS:  
++	ls11=3.4547u rs11=215.6m cp11=331.4511f rp11=36.4617k 
++	lwira1=12.3400n lwa1=1.3209u rwa1=16.4402 lwb1=2.4022u 
++	rwb1=30.1002 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1333J000 RF Chokes (BC) drum core (33 uH)
+*
+.subckt B78148S1333J000 A1 A2   PARAMS:  
++	ls11=27.8615u rs11=715.2m cp11=7.1139p rp11=88.3157k 
++	lwira1=12.3400n lwa1=2.6192u rwa1=3.6485 lwb1=197.9138n 
++	rwb1=18.2223 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1334J000 RF Chokes (BC) drum core (330 uH)
+*
+.subckt B78148S1334J000 A1 A2   PARAMS:  
++	ls11=332.1117u rs11=5.491 cp11=6.0212p rp11=280.9112k 
++	lwira1=12.3400n lwa1=4.7526u rwa1=1.1496 lwb1=24.5498u 
++	rwb1=1.0227k kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1335J000 RF Chokes (BC) drum core (3.3 mH)
+*
+.subckt B78148S1335J000 A1 A2   PARAMS:  
++	ls11=3.2649m rs11=46.26 cp11=5.6428p rp11=1.3738meg 
++	lwira1=12.3400n lwa1=2.6274u rwa1=521.2618m lwb1=184.1348n 
++	rwb1=454.7389 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1392K000 RF Chokes (BC) drum core (3.9 uH)
+*
+.subckt B78148S1392K000 A1 A2   PARAMS:  
++	ls11=4.0551u rs11=234.3m cp11=324.9355f rp11=25.3645k 
++	lwira1=12.3400n lwa1=1.7637u rwa1=12.5853 lwb1=4.9091u 
++	rwb1=28.9621 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1393K000 RF Chokes (BC) drum core (39 uH)
+*
+.subckt B78148S1393K000 A1 A2   PARAMS:  
++	ls11=39.4500u rs11=872m cp11=6.2614p rp11=166.3131k 
++	lwira1=12.3400n lwa1=2.4159u rwa1=3.3855 lwb1=328.2997n 
++	rwb1=12.6266 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1394J000 RF Chokes (BC) drum core (390 uH)
+*
+.subckt B78148S1394J000 A1 A2   PARAMS:  
++	ls11=393.3063u rs11=5.801 cp11=5.3804p rp11=555.9025k 
++	lwira1=12.3400n lwa1=4.2753u rwa1=3.7383 lwb1=382.1179n 
++	rwb1=26.3123 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1395J000 RF Chokes (BC) drum core (3.9 mH)
+*
+.subckt B78148S1395J000 A1 A2   PARAMS:  
++	ls11=3.9040m rs11=50.16 cp11=6.0579p rp11=1.4650meg 
++	lwira1=12.3400n lwa1=4.8691u rwa1=1.2235 lwb1=16.8735u 
++	rwb1=4.1173 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1472K000 RF Chokes (BC) drum core (4.7 uH)
+*
+.subckt B78148S1472K000 A1 A2   PARAMS:  
++	ls11=4.6448u rs11=254.3m cp11=281.9982f rp11=27.9624k 
++	lwira1=12.3400n lwa1=1.5699u rwa1=12.1813 lwb1=3.8507u 
++	rwb1=16.2771 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1473J000 RF Chokes (BC) drum core (47 uH)
+*
+.subckt B78148S1473J000 A1 A2   PARAMS:  
++	ls11=46.3306u rs11=888m cp11=6.8102p rp11=143.5006k 
++	lwira1=12.3400n lwa1=3.0046u rwa1=4.9423 lwb1=214.3481n 
++	rwb1=16.5083 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1474J000 RF Chokes (BC) drum core (470 uH)
+*
+.subckt B78148S1474J000 A1 A2   PARAMS:  
++	ls11=474.8462u rs11=6.486 cp11=6.0093p rp11=324.9440k 
++	lwira1=12.3400n lwa1=5.1508u rwa1=1.6914 lwb1=933.2813n 
++	rwb1=869.3845 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1475J000 RF Chokes (BC) drum core (4.7 mH)
+*
+.subckt B78148S1475J000 A1 A2   PARAMS:  
++	ls11=4.6535m rs11=69.74 cp11=7.7530p rp11=1.6947meg 
++	lwira1=12.3400n lwa1=2.6159u rwa1=1.6097 lwb1=1.4256u 
++	rwb1=20.2102 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1562K000 RF Chokes (BC) drum core (5.6 uH)
+*
+.subckt B78148S1562K000 A1 A2   PARAMS:  
++	ls11=5.7581u rs11=319.6m cp11=301.8280f rp11=47.8471k 
++	lwira1=12.3400n lwa1=1.2439u rwa1=14.8798 lwb1=3.0362u 
++	rwb1=36.2879 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1563J000 RF Chokes (BC) drum core (56 uH)
+*
+.subckt B78148S1563J000 A1 A2   PARAMS:  
++	ls11=56.3820u rs11=1.058 cp11=6.1291p rp11=140.7860k 
++	lwira1=12.3400n lwa1=2.7436u rwa1=4.3244 lwb1=316.4031n 
++	rwb1=16.9187 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1564J000 RF Chokes (BC) drum core (560 uH)
+*
+.subckt B78148S1564J000 A1 A2   PARAMS:  
++	ls11=556.1835u rs11=7.108 cp11=6.0714p rp11=463.7482k 
++	lwira1=12.3400n lwa1=1.4499u rwa1=7.6959 lwb1=10.2386u 
++	rwb1=8.2635 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1682K000 RF Chokes (BC) drum core (6.8 uH)
+*
+.subckt B78148S1682K000 A1 A2   PARAMS:  
++	ls11=6.8678u rs11=431m cp11=315.1659f rp11=57.0928k 
++	lwira1=12.3400n lwa1=1.5011u rwa1=24.1925 lwb1=5.4253u 
++	rwb1=35.5503 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1683J000 RF Chokes (BC) drum core (68 uH)
+*
+.subckt B78148S1683J000 A1 A2   PARAMS:  
++	ls11=69.6726u rs11=1.129 cp11=5.3656p rp11=94.4944k 
++	lwira1=12.3400n lwa1=3.0606u rwa1=3.9277 lwb1=625.5672n 
++	rwb1=14.4104 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1684J000 RF Chokes (BC) drum core (680 uH)
+*
+.subckt B78148S1684J000 A1 A2   PARAMS:  
++	ls11=682.2484u rs11=8.867 cp11=5.9468p rp11=580.4783k 
++	lwira1=12.3400n lwa1=3.9277u rwa1=2.5776 lwb1=1.7468u 
++	rwb1=15.3453 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1822K000 RF Chokes (BC) drum core (8.2 uH)
+*
+.subckt B78148S1822K000 A1 A2   PARAMS:  
++	ls11=8.1803u rs11=391.9m cp11=289.7480f rp11=54.5193k 
++	lwira1=12.3400n lwa1=1.4124u rwa1=9.9046 lwb1=7.9645u 
++	rwb1=26.7078 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1823J000 RF Chokes (BC) drum core (82 uH)
+*
+.subckt B78148S1823J000 A1 A2   PARAMS:  
++	ls11=80.4122u rs11=1.228 cp11=5.0248p rp11=101.6275k 
++	lwira1=12.3400n lwa1=3.1323u rwa1=3.1766 lwb1=724.5413n 
++	rwb1=12.1268 kw1a1=0.9999 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
+*
+* B78148S1824J000 RF Chokes (BC) drum core (820 uH)
+*
+.subckt B78148S1824J000 A1 A2   PARAMS:  
++	ls11=825.3803u rs11=10.717 cp11=5.4041p rp11=529.0884k 
++	lwira1=12.4100n lwa1=2.2641u rwa1=840.1605m lwb1=3.1341u 
++	rwb1=656.2654 kw1a1=999.0000m 
+X1 A1 A2 HF_BC_BASE1  PARAMS:  ls11_a={ls11} 
++	rs11_a={rs11} cp11_a={cp11} rp11_a={rp11} 
++	lwira1_a={lwira1} lwa1_a={lwa1} rwa1_a={rwa1} 
++	lwb1_a={lwb1} rwb1_a={rwb1} kw1a1_a={kw1a1} 
+.ENDS
+
