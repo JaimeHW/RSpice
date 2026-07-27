@@ -35,6 +35,7 @@ mod error;
 mod expr;
 mod files;
 mod kernel_ir;
+mod lanes;
 mod manifest;
 mod names;
 mod noise;
