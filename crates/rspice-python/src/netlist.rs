@@ -30,8 +30,15 @@ use crate::config::PyResourceLimits;
 /// The Netlist class represents a parsed circuit description that can be
 /// passed to an Engine for simulation.
 ///
+/// The constructors differ in how they treat the first line. `parse` reads
+/// circuit statements, so no element is consumed as a title; `parse_spice`
+/// and `parse_file` apply raw SPICE deck semantics, where the first line is
+/// always the title.
+///
 /// Example:
 ///     >>> netlist = Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
+///     >>> netlist.num_elements  # V1 survives; a raw SPICE deck would give 1
+///     2
 ///     >>> netlist = Netlist.parse_file("circuit.sp")
 #[pyclass(name = "Netlist", module = "rspice")]
 pub struct PyNetlist {

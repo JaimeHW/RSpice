@@ -196,6 +196,7 @@ import pathlib
 import numpy as np
 import rspice
 
+# Statements only: no title line, so V1 stays a source (netlist.num_elements == 2)
 netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
 
 # Raw SPICE deck: first line is always the title

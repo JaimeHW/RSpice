@@ -20,11 +20,15 @@
 //! ```python
 //! import rspice
 //!
+//! # Netlist.parse takes statements only — no title line, so nothing is swallowed.
 //! netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
 //! engine = rspice.Engine()
 //! result = engine.run_dc_op(netlist)
-//! print(f"V(1) = {result.voltage(1)} V")
+//! print(f"V(1) = {result.voltage(1)} V")  # V(1) = 10.0 V
 //! ```
+//!
+//! Use `Netlist.parse_spice` for raw SPICE decks, where the first line is
+//! always the title.
 
 mod abort;
 mod config;
