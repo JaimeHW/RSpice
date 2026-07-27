@@ -548,7 +548,7 @@ fn tuning_delta(
     else {
         return "unavailable".to_owned();
     };
-    let formatted = crate::properties::format_engineering_value(delta);
+    let formatted = crate::quantity::format_engineering_value(delta);
     let sign = if delta > 0.0 { "+" } else { "" };
     let unit = match variable.quantity {
         crate::state::DesignVariableQuantity::Resistance => "Ω",

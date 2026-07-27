@@ -1,4 +1,4 @@
-use crate::properties::{format_engineering_value, parse_engineering_value};
+use crate::quantity::{format_engineering_value, parse_engineering_value};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 #[cfg(test)]
-use crate::properties::engineering::parse_engineering_value;
+use crate::quantity::engineering::parse_engineering_value;
 #[cfg(test)]
 use std::collections::HashMap;
 

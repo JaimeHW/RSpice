@@ -61,7 +61,7 @@ pub fn component_value_label_cached(component: &Component) -> Rc<str> {
 }
 
 fn format_source_label(component: &Component) -> String {
-    let params = crate::properties::parse_params_string(&component.params);
+    let params = crate::state::parse_params_string(&component.params);
     let primary = primary_or_default(component.value.as_str(), "0");
 
     match component.kind {
@@ -408,7 +408,7 @@ fn is_default_value(value: &str, default: &str) -> bool {
 }
 
 fn parse_numeric(value: &str) -> Option<f64> {
-    crate::properties::parse_engineering_value(value)
+    crate::quantity::parse_engineering_value(value)
         .ok()
         .or_else(|| value.parse::<f64>().ok())
 }

@@ -137,7 +137,7 @@ impl<'a> NetlistGenerator<'a> {
         let model_name = format!("isw_{}", component.name);
 
         if !self.models.contains_key(&model_name) {
-            let params = crate::properties::parse_params_string(&component.params);
+            let params = crate::state::parse_params_string(&component.params);
             let it = Self::get_param_owned(&params, "it", "", "1m");
             let ih = Self::get_param_owned(&params, "ih", "", "0");
             let ron = Self::get_param_owned(&params, "ron", "", "1");
@@ -165,7 +165,7 @@ impl<'a> NetlistGenerator<'a> {
             return model_name.to_string();
         }
 
-        let params = crate::properties::parse_params_string(&component.params);
+        let params = crate::state::parse_params_string(&component.params);
         let txl = params.get("kind").is_some_and(|kind| kind == "txl");
         let model_name = format!("{}_{}", if txl { "txl" } else { "ltra" }, component.name);
 
@@ -207,7 +207,7 @@ impl<'a> NetlistGenerator<'a> {
         let model_name = format!("cpl_{}", component.name);
 
         if !self.models.contains_key(&model_name) {
-            let params = crate::properties::parse_params_string(&component.params);
+            let params = crate::state::parse_params_string(&component.params);
             let entry = |key: &str, default: &str| Self::get_param_owned(&params, key, "", default);
             // The CPL card body is re-read from raw source text by a
             // line-oriented parser: one matrix key per `+` continuation.
@@ -249,7 +249,7 @@ impl<'a> NetlistGenerator<'a> {
         let model_name = format!("mem_{}", component.name);
 
         if !self.models.contains_key(&model_name) {
-            let params = crate::properties::parse_params_string(&component.params);
+            let params = crate::state::parse_params_string(&component.params);
             let ron = Self::get_param_owned(&params, "ron", "", "50");
             let roff = Self::get_param_owned(&params, "roff", "", "1k");
             self.models.insert(
@@ -371,7 +371,7 @@ impl<'a> NetlistGenerator<'a> {
     /// from the component's property values. An explicit `model=` override
     /// binds a library core model instead.
     pub(super) fn get_saturable_core_model(&mut self, component: &Component) -> String {
-        let mut params = crate::properties::parse_params_string(&component.params);
+        let mut params = crate::state::parse_params_string(&component.params);
         if let Some(model_name) = params
             .remove("model")
             .map(|m| m.trim().to_string())
@@ -419,7 +419,7 @@ impl<'a> NetlistGenerator<'a> {
 
         // Add default model if not already present
         if !self.models.contains_key(&model_name) {
-            let params = crate::properties::parse_params_string(&component.params);
+            let params = crate::state::parse_params_string(&component.params);
             let vt = Self::get_param_owned(&params, "vt", "", "0");
             let vh = Self::get_param_owned(&params, "vh", "", "0");
             let ron = Self::get_param_owned(&params, "ron", "", "1");

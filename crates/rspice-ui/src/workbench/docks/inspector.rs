@@ -546,7 +546,7 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
 }
 
 fn explicit_component_model(component: &Component) -> Option<String> {
-    let params = crate::properties::parse_params_string(&component.params);
+    let params = crate::state::parse_params_string(&component.params);
     let param_model = params
         .get("model")
         .map(|model| model.trim())
@@ -605,7 +605,7 @@ fn generated_inline_model(component: &Component) -> Option<String> {
         ComponentType::Memristor => "mem",
         ComponentType::CoupledTransmissionLine => "cpl",
         ComponentType::LossyTransmissionLine => {
-            let params = crate::properties::parse_params_string(&component.params);
+            let params = crate::state::parse_params_string(&component.params);
             let kind = if params.get("kind").is_some_and(|kind| kind == "txl") {
                 "txl"
             } else {

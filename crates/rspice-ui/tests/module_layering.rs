@@ -109,7 +109,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("io", "workbench", 12),
     // The persisted model reaching up into orchestration and editors.
     ("state", "simulation", 26),
-    ("state", "properties", 10),
     ("state", "services", 7),
     ("state", "io", 5),
     ("state", "schematic", 2),
@@ -118,7 +117,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("analysis", "simulation", 1),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
-    ("simulation", "properties", 31),
     ("io", "simulation", 22),
     ("services", "simulation", 11),
     ("simulation", "schematic", 3),

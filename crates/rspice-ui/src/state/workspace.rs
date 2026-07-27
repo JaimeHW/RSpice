@@ -5167,10 +5167,10 @@ impl ProjectWorkspace {
                         }
                         if let Some(section) = &replacement.model_section {
                             let mut params =
-                                crate::properties::parse_params_string(&component.params);
+                                crate::state::parse_params_string(&component.params);
                             params.insert("model_section".to_owned(), section.clone());
                             component.params =
-                                crate::properties::property_bridge::format_params_string(&params);
+                                crate::state::format_params_string(&params);
                         }
                     }
                 }

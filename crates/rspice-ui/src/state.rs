@@ -6,6 +6,7 @@
 mod configuration_set;
 mod connectivity_contract;
 mod design_management;
+pub mod params_string;
 pub mod engineering_table;
 pub mod library_browser;
 mod model_bound_symbol;
@@ -38,6 +39,7 @@ pub use connectivity_contract::{
     TechnologyGlobalNetCatalog,
 };
 pub use design_management::*;
+pub use params_string::{format_params_string, parse_params_string};
 pub use engineering_table::{
     EngineeringColumnView, EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule,
     EngineeringTableView, EngineeringTableViewStore, EngineeringViewScope,

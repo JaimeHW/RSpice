@@ -175,7 +175,7 @@ pub struct PortContract {
 
 impl PortContract {
     fn from_component(component: &Component, name: &str) -> Self {
-        let params = crate::properties::parse_params_string(&component.params);
+        let params = crate::state::parse_params_string(&component.params);
         let direction = params
             .get("dir")
             .map(|raw| PortDirection::parse(raw))
@@ -230,7 +230,7 @@ impl PortContract {
         if let Some(order) = self.netlist_order {
             values.insert("interface_order".to_owned(), order.to_string());
         }
-        crate::properties::property_bridge::format_params_string(&values)
+        crate::state::format_params_string(&values)
     }
 }
 
@@ -523,7 +523,7 @@ impl SchematicState {
             ));
         }
         self.validate_edited_port_name(component_id, candidate.value.trim())?;
-        let encoded = crate::properties::parse_params_string(&candidate.params);
+        let encoded = crate::state::parse_params_string(&candidate.params);
         if encoded
             .get("documentation")
             .is_none_or(|documentation| documentation.trim().is_empty())
@@ -825,9 +825,9 @@ mod tests {
 
         let rewrite = |component: &Component, key: &str, value: String| {
             let mut candidate = component.clone();
-            let mut params = crate::properties::parse_params_string(&candidate.params);
+            let mut params = crate::state::parse_params_string(&candidate.params);
             params.insert(key.to_owned(), value);
-            candidate.params = crate::properties::property_bridge::format_params_string(&params);
+            candidate.params = crate::state::format_params_string(&params);
             candidate
         };
         let invalid_pair = rewrite(&baseline, "signal_type", "logic".to_owned());

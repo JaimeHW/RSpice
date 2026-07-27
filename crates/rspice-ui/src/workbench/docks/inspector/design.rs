@@ -550,7 +550,7 @@ fn field_value(component: &Component, field: &InlineEditField) -> String {
         InlineEditField::Value => component.value.clone(),
         InlineEditField::Parameters => component.params.clone(),
         InlineEditField::Parameter(key) => {
-            crate::properties::parse_params_string(&component.params)
+            crate::state::parse_params_string(&component.params)
                 .get(key)
                 .cloned()
                 .unwrap_or_default()
@@ -1714,7 +1714,7 @@ fn parameters_section(
 
     // Instance temperature is the `temp` parameter. Left empty it inherits
     // the reference PVT point, which the row reports as its placeholder.
-    let declared = crate::properties::parse_params_string(&component.params);
+    let declared = crate::state::parse_params_string(&component.params);
     let inherited = format!(
         "inherit · {} °C",
         app.state.sim_setup.reference_pvt.temperature_celsius
@@ -2414,7 +2414,7 @@ fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[DesignNet]) {
                 "Node voltage",
                 &format!(
                     "{} {}",
-                    crate::properties::format_engineering_value(annotation.voltage),
+                    crate::quantity::format_engineering_value(annotation.voltage),
                     annotation.unit
                 ),
             );
@@ -3564,14 +3564,14 @@ mod tests {
         commit_edit(&mut app, &edit_description(&field));
 
         assert_eq!(
-            crate::properties::parse_params_string(&app.state.schematic.components[0].params)
+            crate::state::parse_params_string(&app.state.schematic.components[0].params)
                 .get(TEMPERATURE_PARAM)
                 .map(String::as_str),
             Some("85")
         );
         assert!(app.state.schematic.undo());
         assert!(
-            !crate::properties::parse_params_string(&app.state.schematic.components[0].params)
+            !crate::state::parse_params_string(&app.state.schematic.components[0].params)
                 .contains_key(TEMPERATURE_PARAM)
         );
         assert!(!app.state.schematic.can_undo());

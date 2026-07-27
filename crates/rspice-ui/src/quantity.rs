@@ -4,12 +4,14 @@
 //! PDK/layout database units. It converts immutable SI values at the UI edge;
 //! it never changes stored engineering data.
 
+pub mod engineering;
 mod format;
 mod layout;
 mod locale;
 mod parse;
 mod preferences;
 
+pub use engineering::{format_engineering_value, parse_engineering_value};
 pub use layout::{LayoutDatabaseUnit, LayoutDatabaseUnitError};
 pub use locale::platform_number_locale;
 pub use parse::{QuantityInputError, QuantityInputKind, UiNumberLocale, parse_ui_quantity};

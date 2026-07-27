@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use egui::Ui;
 
 use crate::workbench::AppState;
-use crate::properties::engineering::parse_engineering_value;
+use crate::quantity::engineering::parse_engineering_value;
 use crate::state::{SimulationRun, SpecEntry};
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};

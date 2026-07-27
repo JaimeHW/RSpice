@@ -620,11 +620,11 @@ mod tests {
         let displayed = format_engineering(3.3e6);
         assert_eq!(displayed, "3.300Meg");
         assert_eq!(
-            crate::properties::parse_engineering_value(&displayed).unwrap(),
+            crate::quantity::parse_engineering_value(&displayed).unwrap(),
             3.3e6
         );
         assert_eq!(
-            crate::properties::parse_engineering_value("3.3M").unwrap(),
+            crate::quantity::parse_engineering_value("3.3M").unwrap(),
             3.3e-3
         );
     }

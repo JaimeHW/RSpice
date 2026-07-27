@@ -48,7 +48,7 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
 
-        let params = crate::properties::parse_params_string(&component.params);
+        let params = crate::state::parse_params_string(&component.params);
         let ratio = params
             .get("turns_ratio")
             .map(|value| value.trim())
@@ -148,9 +148,9 @@ impl<'a> NetlistGenerator<'a> {
         let primary_nodes = self.format_nodes(&node_names[0..2], 2);
         let secondary_nodes = self.format_nodes(&node_names[2..4], 2);
         let primary_suffix =
-            crate::properties::property_bridge::format_params_string(&primary_params);
+            crate::state::format_params_string(&primary_params);
         let secondary_suffix =
-            crate::properties::property_bridge::format_params_string(&secondary_params);
+            crate::state::format_params_string(&secondary_params);
         let primary_line = if primary_suffix.is_empty() {
             format!("{} {} {}", primary_name, primary_nodes, primary_inductance)
         } else {
@@ -275,7 +275,7 @@ impl<'a> NetlistGenerator<'a> {
         component: &Component,
         inductor_lookup: &HashMap<String, String>,
     ) -> Option<(String, String, String, String)> {
-        let params = crate::properties::parse_params_string(&component.params);
+        let params = crate::state::parse_params_string(&component.params);
         let raw_windings = params.get("inductors").cloned().unwrap_or_else(|| {
             ["l1", "l2", "l3", "l4"]
                 .iter()
@@ -337,7 +337,7 @@ impl<'a> NetlistGenerator<'a> {
         component: &Component,
         inductor_lookup: &HashMap<String, String>,
     ) -> Option<(String, String, String, String)> {
-        let params = crate::properties::parse_params_string(&component.params);
+        let params = crate::state::parse_params_string(&component.params);
         let coupled_to = params
             .get("coupled_to")
             .map(|value| value.trim())

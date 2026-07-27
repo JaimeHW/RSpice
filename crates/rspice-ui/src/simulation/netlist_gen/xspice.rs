@@ -199,7 +199,7 @@ impl<'a> NetlistGenerator<'a> {
         let model_name = format!("{}_model", instance_name.to_lowercase());
 
         if !self.models.contains_key(&model_name) {
-            let user_params = crate::properties::parse_params_string(&component.params);
+            let user_params = crate::state::parse_params_string(&component.params);
             let card_params = spec
                 .defaults
                 .iter()

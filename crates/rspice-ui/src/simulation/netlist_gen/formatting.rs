@@ -44,11 +44,11 @@ impl<'a> NetlistGenerator<'a> {
             return String::new();
         }
 
-        let mut params_map = crate::properties::parse_params_string(params);
+        let mut params_map = crate::state::parse_params_string(params);
         for key in excluded {
             params_map.remove(&key.to_ascii_lowercase());
         }
-        crate::properties::property_bridge::format_params_string(&params_map)
+        crate::state::format_params_string(&params_map)
     }
 
     pub(super) fn format_nodes(&self, nodes: &[String], expected: usize) -> String {
@@ -122,7 +122,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourcePulse => {
                 // PULSE(V1 V2 TD TR TF PW PER)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "PULSE")
                 {
@@ -139,7 +139,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::CurrentSourcePulse => {
                 // PULSE(I1 I2 TD TR TF PW PER)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "PULSE")
                 {
@@ -156,7 +156,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourceSin => {
                 // SIN(VO VA FREQ TD THETA PHASE)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "SIN")
                 {
@@ -172,7 +172,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::CurrentSourceSin => {
                 // SIN(IO IA FREQ TD THETA PHASE)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "SIN")
                 {
@@ -188,7 +188,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
                 // PWL(T1 V1 T2 V2 ...)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "PWL")
                 {
@@ -199,7 +199,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourceExp => {
                 // EXP(V1 V2 TD1 TAU1 TD2 TAU2)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "EXP")
                 {
@@ -215,7 +215,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::CurrentSourceExp => {
                 // EXP(I1 I2 TD1 TAU1 TD2 TAU2)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "EXP")
                 {
@@ -234,7 +234,7 @@ impl<'a> NetlistGenerator<'a> {
                 // NA/NT, optional 1/f via NALPHA/NAMP. The core requires
                 // NT > 0 whenever NA or NAMP is nonzero, and 0 < NALPHA < 2
                 // when NAMP is nonzero.
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "TRNOISE")
                 {
@@ -249,7 +249,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourceSffm => {
                 // SFFM(VO VA FC MDI FS)
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 if params.is_empty()
                     && let Some(literal) = Self::legacy_waveform_literal(value, "SFFM")
                 {
@@ -331,13 +331,13 @@ impl<'a> NetlistGenerator<'a> {
     /// Users can provide model either in the primary value field (e.g. "2N2222")
     /// or as `model=<name>` in params. When both are present, params wins.
     pub(super) fn extract_model_override(component: &Component) -> (Option<String>, String) {
-        let mut params_map = crate::properties::parse_params_string(&component.params);
+        let mut params_map = crate::state::parse_params_string(&component.params);
         let explicit_from_params = params_map
             .remove("model")
             .map(|m| m.trim().to_string())
             .filter(|m| !m.is_empty());
         let params_without_model =
-            crate::properties::property_bridge::format_params_string(&params_map);
+            crate::state::format_params_string(&params_map);
 
         let explicit_model = explicit_from_params.or_else(|| {
             let value_model = component.value.trim();

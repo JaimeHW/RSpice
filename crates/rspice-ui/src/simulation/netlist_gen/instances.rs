@@ -224,7 +224,7 @@ impl<'a> NetlistGenerator<'a> {
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
                 let model = self.get_soi_mosfet_model(component, explicit_model.as_deref());
-                let mut params_map = crate::properties::parse_params_string(&params_without_model);
+                let mut params_map = crate::state::parse_params_string(&params_without_model);
                 params_map
                     .entry("w".to_owned())
                     .or_insert_with(|| "1u".to_owned());
@@ -232,7 +232,7 @@ impl<'a> NetlistGenerator<'a> {
                     .entry("l".to_owned())
                     .or_insert_with(|| "180n".to_owned());
                 let params = self.format_params(
-                    &crate::properties::property_bridge::format_params_string(&params_map),
+                    &crate::state::format_params_string(&params_map),
                 );
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
@@ -324,7 +324,7 @@ impl<'a> NetlistGenerator<'a> {
                 ));
                 let (explicit_model, _) = Self::extract_model_override(component);
                 let model = self.get_iswitch_model(component, explicit_model.as_deref());
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 let state = match params.get("state").map(String::as_str) {
                     Some("on") => " ON",
                     Some("off") => " OFF",
@@ -340,7 +340,7 @@ impl<'a> NetlistGenerator<'a> {
             // T name a+ a- b+ b- Z0=<z0> TD=<td>
             ComponentType::TransmissionLine => {
                 let nodes = self.format_nodes(&node_names, 4);
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 let z0 = Self::get_param_owned(&params, "z0", "", "50");
                 let td = Self::get_param_owned(&params, "td", "", "1n");
                 Some(format!("{} {} Z0={} TD={}", instance_name, nodes, z0, td))
@@ -379,7 +379,7 @@ impl<'a> NetlistGenerator<'a> {
             // it becomes a Thevenin source behind Z0.
             ComponentType::RfPort => {
                 let nodes = self.format_nodes(&node_names, 2);
-                let params = crate::properties::parse_params_string(&component.params);
+                let params = crate::state::parse_params_string(&component.params);
                 let port = Self::get_param_owned(&params, "port", "", "1");
                 let z0 = Self::get_param_owned(&params, "z0", "", "50");
                 let mut line = format!("{} {} PORT={} Z0={}", instance_name, nodes, port, z0);

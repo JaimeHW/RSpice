@@ -877,7 +877,7 @@ impl SimulationController {
                 if raw.starts_with('{') {
                     continue;
                 }
-                if let Ok(value) = crate::properties::engineering::parse_engineering_value(raw) {
+                if let Ok(value) = crate::quantity::engineering::parse_engineering_value(raw) {
                     out.insert(name.to_ascii_lowercase(), value);
                 }
             }
