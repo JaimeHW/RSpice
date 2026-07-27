@@ -123,9 +123,20 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // belong further down, and no amount of narrowing would have moved them.
     // They are retired by relocating what is misplaced, not by rewriting
     // signatures: the armed-tool lifecycle moved to `state::schematic`
-    // (124 -> 102), since it only ever read and wrote `SchematicState`.
-    ("schematic", "workbench", 102),
-    ("simulation", "workbench", 87),
+    // (124 -> 102), since it only ever read and wrote `SchematicState`, and
+    // the console/log models moved to `crate::diagnostics` (schematic
+    // 102 -> 98, simulation 87 -> 60).
+    //
+    // What is left in `simulation -> workbench` is one entangled type, not a
+    // misfiled one. `PreparedVerilogARuntime` is engine state, but its only
+    // constructors validate against `VerilogACompileReceipt`, which also
+    // carries `CodeEditorDiagnostic` — an egui type. Moving the runtime down
+    // means first narrowing those constructors to the three fields they
+    // actually read (`token`, `module_name`, `report`) so the receipt can
+    // stay in the editor where it belongs. That is a design change, not a
+    // relocation, so it is not folded in here.
+    ("schematic", "workbench", 98),
+    ("simulation", "workbench", 60),
     ("io", "workbench", 12),
     // The persisted model reaching up into orchestration and editors.
     ("state", "simulation", 26),
