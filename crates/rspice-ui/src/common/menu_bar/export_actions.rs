@@ -1242,7 +1242,7 @@ mod tests {
     #[test]
     fn generated_bundle_rewrites_and_embeds_sealed_dependency_and_source_map() {
         use crate::product::ObjectRevision;
-        use crate::workbench::code_workspace::{
+        use crate::state::{
             DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry,
             GenerationInput, SourceLocator, content_digest,
         };
@@ -1306,7 +1306,7 @@ mod tests {
     #[test]
     fn generated_bundle_rewrites_transitive_edges_relative_to_the_parent_directory() {
         use crate::product::ObjectRevision;
-        use crate::workbench::code_workspace::{
+        use crate::state::{
             DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
             SourceLocator, content_digest,
         };
@@ -1384,7 +1384,7 @@ mod tests {
     #[test]
     fn translated_bundle_rejects_generated_source_map() {
         use crate::product::ObjectRevision;
-        use crate::workbench::code_workspace::{
+        use crate::state::{
             GeneratedArtifact, GeneratedProvenance, GenerationInput, content_digest,
         };
         let artifact = GeneratedArtifact::try_from_utf8(
@@ -1406,7 +1406,7 @@ mod tests {
     #[test]
     fn generated_bundle_fails_closed_for_unresolved_dependencies() {
         use crate::product::ObjectRevision;
-        use crate::workbench::code_workspace::{
+        use crate::state::{
             DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
             SourceLocator, content_digest,
         };

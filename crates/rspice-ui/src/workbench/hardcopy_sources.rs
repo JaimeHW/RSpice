@@ -6981,7 +6981,7 @@ mod tests {
         ));
 
         let mut tampered = source_set.clone();
-        tampered.members.reverse();
+        tampered.reverse_members_for_test();
         assert!(matches!(
             tampered.validate(),
             Err(HardcopySourceError::SourceSetDigestMismatch { .. })

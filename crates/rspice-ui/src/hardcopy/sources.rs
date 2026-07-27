@@ -458,3 +458,13 @@ pub enum HardcopySourceError {
     #[error("hardcopy contract rejected the source: {0}")]
     HardcopyContract(String),
 }
+
+#[cfg(test)]
+impl HardcopySourceSet {
+    /// Reorder members without recomputing the definition digest, so a test
+    /// can prove that validation rejects a tampered set. The field stays
+    /// private: order is part of what the digest authenticates.
+    pub(crate) fn reverse_members_for_test(&mut self) {
+        self.members.reverse();
+    }
+}

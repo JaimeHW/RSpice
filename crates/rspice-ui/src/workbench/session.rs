@@ -933,7 +933,11 @@ impl From<UiSessionStateSer> for UiSessionState {
 #[cfg(test)]
 mod symbol_selection_tests {
     use super::*;
-    use crate::state::{Point, PortDirection, SymbolDocument, SymbolPin, SymbolShape};
+    use crate::state::{
+        Point, PortDirection, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
+        SchematicHierarchyVisibility, SchematicNetHighlighting, SchematicParameterLabelVisibility,
+        SchematicReviewMarkerVisibility, SymbolDocument, SymbolPin, SymbolShape,
+    };
 
     #[test]
     fn select_all_symbol_items_selects_pins_and_shapes() {

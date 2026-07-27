@@ -488,7 +488,7 @@ mod tests {
         AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
         PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRun, WaveformData,
     };
-    use crate::workbench::code_workspace::{GeneratedProvenance, GenerationInput};
+    use crate::state::{GeneratedProvenance, GenerationInput};
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])

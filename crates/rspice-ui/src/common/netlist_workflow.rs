@@ -1021,7 +1021,7 @@ mod tests {
         strategy: crate::state::OwnedNetlistEditStrategy,
     ) -> AppState {
         use crate::product::ObjectRevision;
-        use crate::workbench::code_workspace::{
+        use crate::state::{
             GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
             NetlistDocumentId, content_digest,
         };

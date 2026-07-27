@@ -6714,9 +6714,8 @@ mod tests {
         PrintObjectIdentity, PrinterJobSettings, PrinterMediaSource, RenderSetup, ScaleMode,
         StandardPaper, TilingMode, TilingSetup,
     };
-    use crate::workbench::hardcopy_sources::{
-        HardcopySourceIdentity, SymbolHardcopySource, resolve_symbol_source,
-    };
+    use crate::hardcopy::sources::HardcopySourceIdentity;
+    use crate::workbench::hardcopy_sources::{SymbolHardcopySource, resolve_symbol_source};
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])
