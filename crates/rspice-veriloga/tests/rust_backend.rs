@@ -3631,11 +3631,23 @@ fn rust_backend_compacts_generated_scratch_storage_field_names() {
         "{support}"
     );
     assert!(
-        support.contains("pub(crate) dn: [[f64; NODE_COUNT]; VARIABLE_COUNT],"),
+        support.contains(
+            "pub(crate) dn: DerivativeMatrix<{ VARIABLE_COUNT }, { NODE_COUNT }>,"
+        ),
         "{support}"
     );
     assert!(
-        support.contains("pub(crate) db: [[f64; BRANCH_COUNT]; VARIABLE_COUNT],"),
+        support.contains(
+            "pub(crate) db: DerivativeMatrix<{ VARIABLE_COUNT }, { BRANCH_COUNT }>,"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("row_slots: Box<[u32; ROW_COUNT]>,"),
+        "{support}"
+    );
+    assert!(
+        support.contains("rows: Box<[[f64; AXIS_COUNT]]>,"),
         "{support}"
     );
     assert!(stamp.contains("s.v["), "{stamp}");
@@ -11747,7 +11759,10 @@ fn rust_backend_lowers_ddt_current_into_stateful_stamp_and_reactive_stamp() {
         .as_str();
 
     assert!(state.contains("DDT_STATE_COUNT: usize = 1"), "{state}");
-    assert!(state.contains("ddt_state_current"), "{state}");
+    assert!(
+        state.contains("self.stamp_state.ddt_current[slot] = value;"),
+        "{state}"
+    );
     assert!(state.contains("set_timepoint"), "{state}");
     assert!(state.contains("accept_timestep"), "{state}");
     assert!(stamp.contains("eval_ddt"), "{stamp}");
@@ -15262,6 +15277,7 @@ pub mod generated_device;
     let mut command =
         std::process::Command::new(std::env::var("RUSTC").unwrap_or("rustc".to_string()));
     command.arg("--edition=2024");
+    command.args(["--cfg", "feature=\"veriloga-builtins-noise\""]);
     if tests.is_empty() {
         command.arg("--crate-type=lib");
     } else {
