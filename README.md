@@ -183,37 +183,10 @@ result = engine.run_dc_op(netlist)
 print(result.voltage(1))
 ```
 
-Transient and AC results come back as NumPy arrays. Full API reference: [crates/rspice-python/README.md](crates/rspice-python/README.md).
-
-For local checks, keep the fast Rust workspace pass separate from the PyO3
-extension and wasm target:
-
-```bash
-cargo check --workspace --exclude rspice-python --exclude rspice-wasm
-cargo check -p rspice-python
-```
-
-On Windows, if `python` or `python3` resolves to the Microsoft Store alias,
-PyO3 may fail while checking `rspice-python`. Point it at a real interpreter
-explicitly:
-
-```powershell
-py -3 -m venv .venv
-$env:PYO3_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
-cargo check -p rspice-python
-```
-
-For binding tests, prefer the maturin/pytest workflow used by CI:
-
-```bash
-cd crates/rspice-python
-python -m pip install maturin numpy pytest
-maturin develop --release
-python -m pytest tests/ -v
-```
-
-`cargo test -p rspice-python --lib` is useful only for Rust-side library
-coverage; it is not a substitute for importing the extension in pytest.
+Transient and AC results come back as NumPy arrays. The crate README carries the
+full API reference, the maturin/pytest workflow CI uses, and the Windows
+`PYO3_PYTHON` workaround for Microsoft Store interpreter aliases:
+[crates/rspice-python/README.md](crates/rspice-python/README.md).
 
 ### WebAssembly
 
