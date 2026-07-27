@@ -4346,7 +4346,23 @@ impl Engine {
         // the winding's L-card (`Kname L1 1 CoreModel`).  Pre-index those
         // relationships before construction so the winding is dispatched to
         // the native hysteretic runtime regardless of source order.
-        let mut xyce_core_by_winding: HashMap<String, (String, String)> = HashMap::new();
+        #[derive(Clone, Debug)]
+        struct XyceCoreGroupPlan {
+            core_name: String,
+            model: String,
+            coefficient: f64,
+            windings: Vec<String>,
+        }
+
+        #[derive(Clone, Debug)]
+        struct XyceCoreWindingPlan {
+            group_index: usize,
+            core_name: String,
+            model: String,
+        }
+
+        let mut xyce_core_groups: Vec<XyceCoreGroupPlan> = Vec::new();
+        let mut xyce_core_by_winding: HashMap<String, XyceCoreWindingPlan> = HashMap::new();
         for element in &flat_elements {
             let ElementKind::Coupling {
                 inductors,
@@ -4356,16 +4372,10 @@ impl Engine {
             else {
                 continue;
             };
-            if inductors.len() != 1 {
+            if inductors.is_empty() {
                 return Err(SimulationError::Circuit(format!(
-                    "Nonlinear magnetic coupling '{}' with model '{}' requires exactly one winding; multi-winding Core cards are not supported by this runtime",
+                    "Nonlinear magnetic coupling '{}' with model '{}' has no windings",
                     element.name, model
-                )));
-            }
-            if (*coefficient - 1.0).abs() > 1.0e-12 {
-                return Err(SimulationError::Circuit(format!(
-                    "Nonlinear magnetic coupling '{}' has coefficient {}; Xyce Core winding cards require COUPLING=1",
-                    element.name, coefficient
                 )));
             }
             if find_model_def(netlist, model)
@@ -4376,15 +4386,31 @@ impl Engine {
                     element.name, model
                 )));
             }
-            let winding_key = inductors[0].to_ascii_uppercase();
-            if xyce_core_by_winding
-                .insert(winding_key, (element.name.clone(), model.clone()))
-                .is_some()
-            {
-                return Err(SimulationError::Circuit(format!(
-                    "Winding '{}' is referenced by more than one nonlinear magnetic coupling",
-                    inductors[0]
-                )));
+            let group_index = xyce_core_groups.len();
+            xyce_core_groups.push(XyceCoreGroupPlan {
+                core_name: element.name.clone(),
+                model: model.clone(),
+                coefficient: *coefficient,
+                windings: inductors.clone(),
+            });
+            for winding in inductors {
+                let winding_key = winding.to_ascii_uppercase();
+                if xyce_core_by_winding
+                    .insert(
+                        winding_key,
+                        XyceCoreWindingPlan {
+                            group_index,
+                            core_name: element.name.clone(),
+                            model: model.clone(),
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "Winding '{}' is referenced by more than one nonlinear magnetic coupling",
+                        winding
+                    )));
+                }
             }
         }
 
@@ -4714,18 +4740,30 @@ impl Engine {
                     instance_params,
                     ..
                 } => {
-                    if let Some((core_name, core_model)) =
+                    if let Some(core_plan) =
                         xyce_core_by_winding.get(&element.name.to_ascii_uppercase())
                     {
-                        add_xyce_core_inductor_element(
-                            &mut circuit,
-                            netlist,
-                            element,
-                            *value,
-                            core_model,
-                            format!("YMIN!{core_name}"),
-                            *initial_current,
-                        )?;
+                        let group = &xyce_core_groups[core_plan.group_index];
+                        if group.windings.len() == 1 {
+                            add_xyce_core_inductor_element(
+                                &mut circuit,
+                                netlist,
+                                element,
+                                *value,
+                                &core_plan.model,
+                                format!("YMIN!{}", core_plan.core_name),
+                                *initial_current,
+                            )?;
+                        } else {
+                            add_xyce_core_winding_element(
+                                &mut circuit,
+                                netlist,
+                                element,
+                                *value,
+                                &core_plan.model,
+                                *initial_current,
+                            )?;
+                        }
                         continue;
                     }
 
@@ -7099,10 +7137,13 @@ impl Engine {
                     model,
                 } => {
                     if let Some(model) = model {
-                        // Single-winding nonlinear Core cards are consumed by
-                        // the winding dispatch above; they do not create a
-                        // separate linear mutual overlay.
-                        if inductors.len() == 1 {
+                        // Nonlinear CORE cards (single or multi-winding) are
+                        // consumed by the Core dispatch/group registration
+                        // above; they do not create a separate linear mutual
+                        // overlay.
+                        if find_model_def(netlist, model).is_some_and(|definition| {
+                            definition.model_type.eq_ignore_ascii_case("CORE")
+                        }) {
                             continue;
                         }
                         return Err(SimulationError::Circuit(format!(
@@ -7416,6 +7457,92 @@ impl Engine {
             } else {
                 reject_disabled_xspice_auto_bridge(&circuit, &auto_bridges)?;
             }
+        }
+
+        // Register each multi-winding Core as one shared constitutive device
+        // after all component L-card branches have been allocated.  The
+        // component branches remain ordinary MNA storage; magnetic.rs owns
+        // their coupled Q/F rows during transient assembly.
+        for group in xyce_core_groups
+            .iter()
+            .filter(|group| group.windings.len() >= 2)
+        {
+            let model_def = find_model_def(netlist, &group.model).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Xyce Core group '{}' references unknown model '{}'",
+                    group.core_name, group.model
+                ))
+            })?;
+            let mut winding_bindings = Vec::with_capacity(group.windings.len());
+            let mut aggregate_initial_current = 0.0;
+            let mut first_turns = None;
+            let mut first_index = None;
+            for winding_name in &group.windings {
+                let index = circuit
+                    .inductors
+                    .names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(winding_name))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Xyce Core group '{}' references unknown winding '{}'",
+                            group.core_name, winding_name
+                        ))
+                    })?;
+                let element = flat_elements
+                    .iter()
+                    .find(|element| element.name.eq_ignore_ascii_case(winding_name))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Xyce Core group '{}' has no source L-card for winding '{}'",
+                            group.core_name, winding_name
+                        ))
+                    })?;
+                let ElementKind::Inductor { value, .. } = &element.kind else {
+                    return Err(SimulationError::Circuit(format!(
+                        "Xyce Core group '{}' winding '{}' is not an L-card",
+                        group.core_name, winding_name
+                    )));
+                };
+                if !value.is_finite() || *value <= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "Xyce Core group '{}' winding '{}' has invalid turns {}",
+                        group.core_name, winding_name, value
+                    )));
+                }
+                first_turns.get_or_insert(*value);
+                first_index.get_or_insert(index);
+                aggregate_initial_current +=
+                    *value * circuit.inductors.i_prev.get(index).copied().unwrap_or(0.0);
+                winding_bindings.push(crate::circuit::XyceCoreWindingBinding {
+                    inductor_index: index,
+                    turns: *value,
+                });
+            }
+            let first_turns = first_turns.expect("multi-winding Core has at least two windings");
+            let first_index = first_index.expect("multi-winding Core has at least two windings");
+            let params = resolve_xyce_core_model_params(model_def, first_turns)?;
+            let first_node_pos = circuit.inductors.node_pos[first_index];
+            let first_node_neg = circuit.inductors.node_neg[first_index];
+            let mut core = crate::device::passive::JilesAthertonInductor::new(
+                group.core_name.clone(),
+                first_node_pos,
+                first_node_neg,
+            )
+            .with_params(params);
+            let representative_current = aggregate_initial_current / first_turns;
+            if representative_current.is_finite() && representative_current.abs() > 0.0 {
+                core.set_initial_current(representative_current);
+            }
+            let core_bh_si_units =
+                model_param(&model_def.params, &["BHSIUNITS"]).is_some_and(|value| value != 0.0);
+            circuit.add_xyce_core_group(
+                core,
+                format!("YMIN!{}", group.core_name),
+                winding_bindings,
+                group.coefficient,
+                core_bh_si_units,
+            );
         }
 
         check_build_abort(abort)?;

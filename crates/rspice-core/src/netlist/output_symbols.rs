@@ -364,7 +364,7 @@ pub fn validate_output_symbols_with_abort(
             inductors,
             ..
         } = &element.kind
-            && inductors.len() == 1
+            && !inductors.is_empty()
         {
             // Xyce's nonlinear Core device owns internal vectors under the
             // generated YMIN!KNAME namespace (for example

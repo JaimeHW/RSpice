@@ -16,6 +16,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 
+/// Xyce MutIndNonLin hidden-state normalization factors.
+pub(crate) const XYCE_CORE_M_VAR_SCALING: Value = 1.0e3;
+pub(crate) const XYCE_CORE_M_EQ_SCALING: Value = 1.0e-3;
+pub(crate) const XYCE_CORE_R_VAR_SCALING: Value = 1.0e3;
+pub(crate) const XYCE_CORE_R_EQ_SCALING: Value = 1.0e-3;
+
 mod storage;
 pub use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Capacitors, CurrentSources, Diodes,
@@ -253,6 +259,12 @@ pub struct JilesAthertonBinding {
     pub inductor_index: usize,
     /// Branch ordinal (1-indexed) allocated for this inductor.
     pub branch_ordinal: NodeId,
+    /// Optional hidden state slot carrying Xyce LEVEL=1 magnetization.  The
+    /// slot is appended after the public MNA block so branch ordinals and all
+    /// external current/probe mappings remain stable.
+    pub hidden_m_slot: Option<usize>,
+    /// Optional hidden LEVEL=1 rate slot carrying Xyce's R state.
+    pub hidden_r_slot: Option<usize>,
     /// Stateful Jiles-Atherton model used to update effective inductance.
     pub device: crate::device::passive::JilesAthertonInductor,
     /// Xyce nonlinear-core output namespace (`YMIN!<K-name>`), when this
@@ -260,6 +272,44 @@ pub struct JilesAthertonBinding {
     pub core_output_name: Option<String>,
     /// Whether the Core model requested SI rather than Xyce's default CGS
     /// B/H output units.
+    pub core_bh_si_units: bool,
+}
+
+/// One winding in a shared Xyce nonlinear magnetic-core DAE.  The numeric
+/// value on an Xyce Core winding is its turn count; the shared device uses
+/// these values both for the aggregate ampere-turn field and for the
+/// constant mutual charge matrix.
+#[derive(Debug, Clone)]
+pub struct XyceCoreWindingBinding {
+    /// Index into the circuit's inductor SoA storage.
+    pub inductor_index: usize,
+    /// Physical winding turns as authored on the L-card.
+    pub turns: Value,
+}
+
+/// Runtime state for one canonical Xyce `K ... 1 CORE` device.  All windings
+/// share one magnetization state and one nonlinear `mid(P)` factor; their
+/// branch rows are coupled through the vacuum mutual-inductance matrix.
+#[derive(Debug, Clone)]
+pub struct XyceCoreGroupBinding {
+    /// Canonical internal output namespace (`YMIN!KNAME`).
+    pub core_output_name: String,
+    /// Shared nonlinear constitutive state.
+    pub device: crate::device::passive::JilesAthertonInductor,
+    /// Hidden state slot carrying the shared LEVEL=1 magnetization state.
+    /// Hidden slots are appended after the public MNA block.
+    pub hidden_m_slot: Option<usize>,
+    /// Hidden LEVEL=1 rate slot carrying Xyce's shared R state.
+    pub hidden_r_slot: Option<usize>,
+    /// Winding branches participating in the shared DAE.
+    pub windings: Vec<XyceCoreWindingBinding>,
+    /// Scalar coupling value authored on the K-card.  Xyce's level-2
+    /// MutIndNonLin2 path treats this as metadata and uses the canonical
+    /// unity mutual matrix; retaining it here keeps the parsed topology
+    /// available for future model levels without losing source information.
+    pub coupling: Value,
+    /// Whether Xyce should report B/H in SI rather than its default CGS
+    /// output units.
     pub core_bh_si_units: bool,
 }
 
@@ -321,6 +371,9 @@ pub struct CircuitData {
     num_nodes: usize,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,
+    /// Number of private scalar DAE state variables appended after the public
+    /// node/branch MNA block.  These are intentionally not branch ordinals.
+    hidden_state_count: usize,
 
     // Linear device storage (SoA for cache efficiency)
     pub(crate) resistors: Resistors,
@@ -378,6 +431,14 @@ pub struct CircuitData {
     pub(crate) coupled_inductor_pairs: Vec<CoupledInductorPairBinding>,
     pub(crate) multi_winding_transformers: Vec<MultiWindingTransformerBinding>,
     pub(crate) jiles_atherton_inductors: Vec<JilesAthertonBinding>,
+    /// Shared nonlinear Xyce Core devices with two or more windings.
+    pub(crate) xyce_core_groups: Vec<XyceCoreGroupBinding>,
+    /// Whether the most recent transient Newton assembly encountered an
+    /// unsolved Xyce Core constitutive endpoint.  A Core trial that cannot
+    /// solve its hidden magnetic equation must reject the candidate step;
+    /// falling back to the ordinary linear companion would silently solve a
+    /// different circuit equation.
+    pub(crate) xyce_core_trial_invalid: bool,
     /// Circuit-level transient step-size hint for synthesized distributed
     /// structures that need finer temporal resolution than the user-level
     /// `.tran` print/max-step request to preserve propagation fidelity.

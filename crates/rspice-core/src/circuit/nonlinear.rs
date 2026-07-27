@@ -15,6 +15,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     capacitors: Capacitors,
     inductors: Inductors,
     jiles_atherton_inductors: Vec<JilesAthertonBinding>,
+    xyce_core_groups: Vec<XyceCoreGroupBinding>,
     diodes: Vec<crate::device::semiconductor::DiodeNonlinearState>,
     bjts: Bjts,
     mosfets: Vec<crate::device::mosfet::MosfetNonlinearState>,
@@ -204,6 +205,10 @@ impl CircuitData {
             || !self.generic_switches.is_empty()
             || self
                 .jiles_atherton_inductors
+                .iter()
+                .any(|binding| binding.device.is_xyce_core())
+            || self
+                .xyce_core_groups
                 .iter()
                 .any(|binding| binding.device.is_xyce_core())
             || self.behavioral_sources.has_solution_dependent_sources()
@@ -408,6 +413,10 @@ impl CircuitData {
                 .iter()
                 .any(|binding| binding.device.is_xyce_core())
             || self
+                .xyce_core_groups
+                .iter()
+                .any(|binding| binding.device.is_xyce_core())
+            || self
                 .xspice_instances
                 .iter()
                 .any(|instance| instance.requires_conservative_newton_damping())
@@ -561,6 +570,7 @@ impl CircuitData {
             capacitors: self.capacitors.clone(),
             inductors: self.inductors.clone(),
             jiles_atherton_inductors: self.jiles_atherton_inductors.clone(),
+            xyce_core_groups: self.xyce_core_groups.clone(),
             diodes: self.diodes.nonlinear_state_snapshot(),
             bjts: self.bjts.clone(),
             mosfets: self.mosfets.nonlinear_state_snapshot(),
@@ -598,6 +608,7 @@ impl CircuitData {
         self.capacitors = snapshot.capacitors;
         self.inductors = snapshot.inductors;
         self.jiles_atherton_inductors = snapshot.jiles_atherton_inductors;
+        self.xyce_core_groups = snapshot.xyce_core_groups;
         self.diodes.restore_nonlinear_state(snapshot.diodes);
         self.bjts = snapshot.bjts;
         self.mosfets.restore_nonlinear_state(snapshot.mosfets);
@@ -1123,6 +1134,15 @@ impl CircuitData {
             && self.xspice_converged(criteria.voltage_tolerance())
             && dynamic_veriloga_converged
             && generated_veriloga_converged
+            && !self.xyce_core_trial_invalid
+    }
+
+    /// Return whether the current transient assembly could not evaluate a
+    /// physically valid Xyce Core constitutive endpoint.  This is an
+    /// assembly-local status, not a persistent device convergence flag.
+    #[inline]
+    pub(crate) fn xyce_core_trial_invalid(&self) -> bool {
+        self.xyce_core_trial_invalid
     }
 
     pub fn behavioral_linearizations_converged(

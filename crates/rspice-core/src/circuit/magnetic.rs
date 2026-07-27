@@ -7,6 +7,21 @@
 
 use super::*;
 
+#[inline]
+fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value {
+    let pos = if node_pos == 0 {
+        0.0
+    } else {
+        solution.get(node_pos - 1).copied().unwrap_or(0.0)
+    };
+    let neg = if node_neg == 0 {
+        0.0
+    } else {
+        solution.get(node_neg - 1).copied().unwrap_or(0.0)
+    };
+    pos - neg
+}
+
 impl CircuitData {
     /// Stamp ordinary transient inductor companions while leaving Xyce Core
     /// branches to their complete nonlinear DAE stamp.
@@ -19,6 +34,11 @@ impl CircuitData {
         num_nodes: usize,
     ) {
         let core_bindings = &self.jiles_atherton_inductors;
+        let grouped_indices = self
+            .xyce_core_groups
+            .iter()
+            .flat_map(|group| group.windings.iter().map(|winding| winding.inductor_index))
+            .collect::<std::collections::HashSet<_>>();
         self.inductors.stamp_transient_companion_where(
             matrix,
             rhs,
@@ -29,6 +49,7 @@ impl CircuitData {
                 core_bindings
                     .iter()
                     .any(|binding| binding.inductor_index == index && binding.device.is_xyce_core())
+                    || grouped_indices.contains(&index)
             },
         );
     }
@@ -40,6 +61,21 @@ impl CircuitData {
         self.jiles_atherton_inductors
             .iter()
             .any(|binding| binding.device.is_xyce_core())
+            || !self.xyce_core_groups.is_empty()
+    }
+
+    /// Whether every current Xyce Core Newton endpoint, including the
+    /// eliminated LEVEL=1 hidden M equation, satisfies its scaled residual.
+    pub(crate) fn xyce_core_trial_converged(&self) -> bool {
+        self.jiles_atherton_inductors
+            .iter()
+            .filter(|binding| binding.device.is_xyce_core())
+            .all(|binding| binding.device.xyce_core_trial_converged())
+            && self
+                .xyce_core_groups
+                .iter()
+                .filter(|group| group.device.is_xyce_core())
+                .all(|group| group.device.xyce_core_trial_converged())
     }
 
     /// Whether every standalone inductor in the circuit is represented by a
@@ -47,12 +83,22 @@ impl CircuitData {
     /// Core `F` and constant-charge `Q` terms; ordinary and mutually coupled
     /// inductors still require their native history mapping.
     pub fn has_only_xyce_core_inductors(&self) -> bool {
+        let grouped_winding_count: usize = self
+            .xyce_core_groups
+            .iter()
+            .map(|group| group.windings.len())
+            .sum();
         !self.inductors.names.is_empty()
-            && self.inductors.names.len() == self.jiles_atherton_inductors.len()
+            && self.inductors.names.len()
+                == self.jiles_atherton_inductors.len() + grouped_winding_count
             && self
                 .jiles_atherton_inductors
                 .iter()
                 .all(|binding| binding.device.is_xyce_core())
+            && self
+                .xyce_core_groups
+                .iter()
+                .all(|group| group.device.is_xyce_core())
     }
 
     /// Restamp the single-winding Xyce Core branch equations with the pure
@@ -73,6 +119,18 @@ impl CircuitData {
         coeff: &CompanionCoefficients,
         one_step_order2: bool,
     ) {
+        // This status belongs to the current Newton assembly only.  Any
+        // constitutive failure below must make the candidate non-converged;
+        // do not leave the generic inductor companion as an accidental
+        // substitute for the Xyce Core DAE.
+        self.xyce_core_trial_invalid = false;
+        let hidden_base = self.num_nodes + self.num_branches;
+        // The hidden-M residual is assembled in integrated form,
+        // `M-M_old-(dt/Path)P*R`.  Scale that row by Xyce's m-equation
+        // coefficient directly.  Multiplying the equivalent DAE row by `dt`
+        // leaves the Newton solution unchanged while avoiding catastrophic
+        // cancellation in the raw residual norm at very small timesteps.
+        let hidden_m_eq_scale = XYCE_CORE_M_EQ_SCALING;
         for binding in &mut self.jiles_atherton_inductors {
             if !binding.device.is_xyce_core() {
                 continue;
@@ -92,6 +150,8 @@ impl CircuitData {
                 .unwrap_or(i_prev);
             let v_prev = self.inductors.v_prev.get(index).copied().unwrap_or(0.0);
             let branch = self.num_nodes + self.inductors.branch_indices[index];
+            let hidden_branch = binding.hidden_m_slot.map(|slot| hidden_base + slot + 1);
+            let hidden_rate_branch = binding.hidden_r_slot.map(|slot| hidden_base + slot + 1);
             let current = solution.get(branch - 1).copied().unwrap_or(i_prev);
             let voltage = if self.inductors.node_pos[index] == 0 {
                 0.0
@@ -126,17 +186,50 @@ impl CircuitData {
             };
             let static_scale = if one_step_order2 { 0.5 } else { 1.0 };
             let carried_mag_update = binding.device.xyce_core_mag_update();
+            let hidden_m = binding
+                .hidden_m_slot
+                .and_then(|slot| solution.get(hidden_base + slot).copied())
+                .map(|value| value * XYCE_CORE_M_VAR_SCALING)
+                .filter(|value| value.is_finite())
+                .unwrap_or_else(|| binding.device.magnetization());
+            let hidden_rate = binding
+                .hidden_r_slot
+                .and_then(|slot| solution.get(hidden_base + slot).copied())
+                .map(|value| value * XYCE_CORE_R_VAR_SCALING)
+                .filter(|value| value.is_finite())
+                .unwrap_or_else(|| binding.device.xyce_core_level1_rate_debug());
             // OneStep uses the physical DAE charge difference directly:
             // `(Q_{n+1}-Q_n)/dt`. The ordinary trapezoidal companion has a
             // `2/dt` conductance, so its coefficient must not leak into the
             // Core's order-2 DAE row.
             let charge_coeff = if one_step_order2 { 1.0 } else { coeff.coeff_g };
             let residual = |trial_current: Value, trial_voltage: Value| {
-                let trial = binding.device.xyce_core_trial_with_update(
-                    trial_current,
-                    trial_voltage,
-                    carried_mag_update,
-                )?;
+                let trial = if !binding.device.is_xyce_core_level2() {
+                    let trial_happ = trial_current
+                        * binding
+                            .device
+                            .xyce_core_happ_slope_for_turns(binding.device.n_turns_for_xyce_core());
+                    let old_happ = binding
+                        .device
+                        .xyce_core_happ_from_current(binding.device.current_value());
+                    binding
+                        .device
+                        .xyce_core_level1_trial_at_magnetization_and_rate(
+                            trial_happ,
+                            trial_happ - old_happ,
+                            trial_voltage,
+                            dt,
+                            one_step_order2,
+                            hidden_m,
+                            hidden_rate,
+                        )?
+                } else {
+                    binding.device.xyce_core_trial_with_update(
+                        trial_current,
+                        trial_voltage,
+                        carried_mag_update,
+                    )?
+                };
                 let mut charge_derivative = charge_coeff * (trial_current - i_prev);
                 if !one_step_order2 && coeff.needs_two_history {
                     charge_derivative += coeff.coeff_v_n_minus_1 * (i_prev - i_prev_prev);
@@ -148,7 +241,13 @@ impl CircuitData {
                     } else {
                         0.0
                     };
-                let history = if coeff.needs_current_history && !one_step_order2 {
+                let history = if one_step_order2 {
+                    // The transient assembler supplies +1/2(F_n-B_n) from
+                    // its accepted static-history snapshot.  Keep the Core
+                    // branch's local history empty so that term is not
+                    // counted twice.
+                    0.0
+                } else if coeff.needs_current_history {
                     previous_static_voltage
                 } else {
                     0.0
@@ -175,59 +274,110 @@ impl CircuitData {
                 Some((f0, trial))
             };
             let Some((f0, trial)) = residual(current, voltage) else {
+                self.xyce_core_trial_invalid = true;
                 continue;
             };
             if !f0.is_finite() {
+                self.xyce_core_trial_invalid = true;
                 continue;
             }
-            binding
-                .device
-                .set_xyce_core_mag_update(trial.magnetization_update);
             binding
                 .device
                 .cache_xyce_core_trial(current, voltage, trial);
             let jacobian_magnetization = trial.latest_magnetization;
-            let d_mid_d_current =
+            let current_happ_slope = binding
+                .device
+                .xyce_core_happ_slope_for_turns(binding.device.n_turns_for_xyce_core());
+            let hidden_partials = if !binding.device.is_xyce_core_level2() {
                 binding
                     .device
-                    .xyce_core_dmid_d_current(current, voltage, jacobian_magnetization);
-            let Some(d_mid_d_current) = d_mid_d_current else {
-                continue;
-            };
-            let mid = trial.mid;
-            let (d_current, d_voltage) = if one_step_order2 {
-                (
-                    static_scale * voltage * d_mid_d_current / (mid * mid)
-                        + charge_coeff * nominal / dt,
-                    -static_scale / mid,
-                )
+                    .xyce_core_level1_hidden_partials(trial, voltage, dt, one_step_order2)
             } else {
-                (
-                    -static_scale * voltage * d_mid_d_current / (mid * mid)
-                        - charge_coeff * nominal / dt,
-                    static_scale / mid,
-                )
+                None
             };
+            let d_mid_d_current = if binding.device.is_xyce_core_level2() {
+                binding
+                    .device
+                    .xyce_core_dmid_d_current(current, voltage, jacobian_magnetization)
+                    .unwrap_or(Value::NAN)
+            } else {
+                // With LEVEL=1 the hidden magnetization is an independent
+                // Newton unknown.  The electrical branch row therefore uses
+                // the constitutive derivative at fixed hidden M; the hidden
+                // row carries the separate M/Happ coupling.
+                binding
+                    .device
+                    .xyce_core_dmid_d_happ(
+                        trial.applied_field,
+                        voltage,
+                        jacobian_magnetization,
+                        current_happ_slope,
+                    )
+                    .unwrap_or(Value::NAN)
+            };
+            if !d_mid_d_current.is_finite()
+                || (!binding.device.is_xyce_core_level2() && hidden_partials.is_none())
+            {
+                self.xyce_core_trial_invalid = true;
+                continue;
+            }
+            let mid = trial.mid;
+            // MutIndNonLin (CORE LEVEL=1) also linearizes the adaptive
+            // voltage-direction factor tanh(DELVSCALING*V/maxVoltageDrop).
+            // LEVEL=2 intentionally returns None here because Xyce's
+            // MutIndNonLin2 loadDAEdFdx omits dP/dV.  Keep the voltage term
+            // in the same residual orientation as the current derivative so
+            // the Newton matrix remains the exact derivative of V/mid.
+            let d_mid_d_voltage = binding
+                .device
+                .xyce_core_dmid_d_voltage(trial.applied_field, voltage, jacobian_magnetization)
+                .unwrap_or(0.0);
+            let d_static_voltage_direct = if one_step_order2 {
+                -static_scale / mid + static_scale * voltage * d_mid_d_voltage / (mid * mid)
+            } else {
+                static_scale / mid - static_scale * voltage * d_mid_d_voltage / (mid * mid)
+            };
+            let d_current_direct = if one_step_order2 {
+                static_scale * voltage * d_mid_d_current / (mid * mid) + charge_coeff * nominal / dt
+            } else {
+                -static_scale * voltage * d_mid_d_current / (mid * mid)
+                    - charge_coeff * nominal / dt
+            };
+            let (d_current, d_voltage) = (d_current_direct, d_static_voltage_direct);
+            let mut hidden_linearized = 0.0;
+            if let Some(hidden_branch) = hidden_branch {
+                let fixed_mid_m = binding
+                    .device
+                    .xyce_core_dmid_d_magnetization(
+                        trial.applied_field,
+                        voltage,
+                        jacobian_magnetization,
+                    )
+                    .unwrap_or(Value::NAN);
+                let d_m = if one_step_order2 {
+                    static_scale * voltage * fixed_mid_m / (mid * mid)
+                } else {
+                    -static_scale * voltage * fixed_mid_m / (mid * mid)
+                };
+                if !d_m.is_finite() {
+                    self.xyce_core_trial_invalid = true;
+                    continue;
+                }
+                matrix.add(branch - 1, hidden_branch - 1, d_m * XYCE_CORE_M_VAR_SCALING);
+                hidden_linearized = d_m * hidden_m;
+            }
             if !d_current.is_finite() || !d_voltage.is_finite() {
+                self.xyce_core_trial_invalid = true;
                 continue;
             }
 
-            let desired_rhs = -f0 + d_current * current + d_voltage * voltage;
+            let desired_rhs = -f0 + d_current * current + d_voltage * voltage + hidden_linearized;
             if self.inductors.node_pos[index] > 0 {
                 matrix.add(
                     branch - 1,
                     self.inductors.node_pos[index] - 1,
                     d_voltage - 1.0,
                 );
-                if one_step_order2 {
-                    // The ordinary companion stamp is assembled after the
-                    // OneStep static half-scale pass, so its KCL incidence
-                    // is still unit-scaled.  Xyce scales the complete static
-                    // F vector (including the inductor's KCL current) by
-                    // one half; reduce that incidence here while retaining
-                    // the unscaled Q contribution in the branch row.
-                    matrix.add(self.inductors.node_pos[index] - 1, branch - 1, -0.5);
-                }
             }
             if self.inductors.node_neg[index] > 0 {
                 matrix.add(
@@ -235,14 +385,512 @@ impl CircuitData {
                     self.inductors.node_neg[index] - 1,
                     -d_voltage + 1.0,
                 );
-                if one_step_order2 {
-                    matrix.add(self.inductors.node_neg[index] - 1, branch - 1, 0.5);
-                }
             }
-            let old_req = coeff.inductor_req(l_slot, dt);
-            let old_veq = coeff.inductor_veq(l_slot, dt, i_prev, i_prev_prev, v_prev);
+            // OneStep's outer assembler stamps the generic inductor with a
+            // backward-Euler Q companion.  Cancel that exact stamp before
+            // installing the Core DAE row; using the caller's trapezoidal
+            // coefficients here would leave a second Q difference in the
+            // branch equation.
+            let cancellation_coeff = if one_step_order2 {
+                CompanionCoefficients::backward_euler()
+            } else {
+                *coeff
+            };
+            let old_req = cancellation_coeff.inductor_req(l_slot, dt);
+            let old_veq = cancellation_coeff.inductor_veq(l_slot, dt, i_prev, i_prev_prev, v_prev);
+            // The ordinary companion is stamped after the global OneStep
+            // static half-scaling, so its Q-history row is not half-scaled.
+            // Cancel that full companion before installing the Core DAE
+            // derivative; only the physical static F term carries the
+            // order-two half factor in `d_current`/`d_voltage`.
             matrix.add(branch - 1, branch - 1, d_current + old_req);
             rhs[branch - 1] += desired_rhs + old_veq;
+            if let Some(hidden_branch) = hidden_branch {
+                if let Some((g_m, g_happ, g_voltage, g_rate)) = hidden_partials {
+                    if !g_m.is_finite()
+                        || !g_happ.is_finite()
+                        || !g_voltage.is_finite()
+                        || !g_rate.is_finite()
+                    {
+                        self.xyce_core_trial_invalid = true;
+                        continue;
+                    }
+                    matrix.add(
+                        hidden_branch - 1,
+                        hidden_branch - 1,
+                        g_m * XYCE_CORE_M_VAR_SCALING * hidden_m_eq_scale,
+                    );
+                    if let Some(hidden_rate_branch) = hidden_rate_branch {
+                        matrix.add(
+                            hidden_branch - 1,
+                            hidden_rate_branch - 1,
+                            g_rate * XYCE_CORE_R_VAR_SCALING * hidden_m_eq_scale,
+                        );
+                    }
+                    matrix.add(
+                        hidden_branch - 1,
+                        branch - 1,
+                        g_happ * current_happ_slope * hidden_m_eq_scale,
+                    );
+                    if self.inductors.node_pos[index] > 0 {
+                        matrix.add(
+                            hidden_branch - 1,
+                            self.inductors.node_pos[index] - 1,
+                            g_voltage * hidden_m_eq_scale,
+                        );
+                    }
+                    if self.inductors.node_neg[index] > 0 {
+                        matrix.add(
+                            hidden_branch - 1,
+                            self.inductors.node_neg[index] - 1,
+                            -g_voltage * hidden_m_eq_scale,
+                        );
+                    }
+                    rhs[hidden_branch - 1] += hidden_m_eq_scale
+                        * (-trial.level1_residual
+                            + g_m * hidden_m
+                            + g_rate * hidden_rate
+                            + g_happ * current_happ_slope * current
+                            + g_voltage * voltage);
+                } else {
+                    matrix.add(hidden_branch - 1, hidden_branch - 1, 1.0);
+                    rhs[hidden_branch - 1] += 0.0;
+                }
+            }
+            if let Some(hidden_rate_branch) = hidden_rate_branch {
+                let rate_current_derivative = (if one_step_order2 { 2.0 } else { 1.0 })
+                    * binding.device.n_turns_for_xyce_core()
+                    / dt;
+                if !rate_current_derivative.is_finite() {
+                    self.xyce_core_trial_invalid = true;
+                    continue;
+                }
+                matrix.add(
+                    hidden_rate_branch - 1,
+                    hidden_rate_branch - 1,
+                    XYCE_CORE_R_VAR_SCALING * XYCE_CORE_R_EQ_SCALING,
+                );
+                matrix.add(
+                    hidden_rate_branch - 1,
+                    branch - 1,
+                    -rate_current_derivative * XYCE_CORE_R_EQ_SCALING,
+                );
+                rhs[hidden_rate_branch - 1] += XYCE_CORE_R_EQ_SCALING
+                    * (-trial.level1_rate_residual + hidden_rate
+                        - rate_current_derivative * current);
+            }
+        }
+
+        // A nonlinear K-card with multiple windings is one MutIndNonLin2
+        // instance in Xyce.  Assemble its dense constant vacuum Q matrix and
+        // shared constitutive mid factor in the same branch-row orientation
+        // as the single-winding path above.  Xyce 7.10's K-card bundling
+        // passes the authored scalar through the `COUPLING` vector, while
+        // MutIndNonLin2 leaves its scalar `COUP_VAL` at the canonical unity
+        // default.  Mirror that level-2 contract here and retain the source
+        // coefficient only as group metadata.
+        let hidden_base = self.num_nodes + self.num_branches;
+        for group in &mut self.xyce_core_groups {
+            if !group.device.is_xyce_core() || group.windings.len() < 2 {
+                continue;
+            }
+            let first = &group.windings[0];
+            let first_index = first.inductor_index;
+            let first_turns = first.turns;
+            let first_voltage = node_voltage(
+                solution,
+                self.inductors.node_pos[first_index],
+                self.inductors.node_neg[first_index],
+            );
+            let mut currents = Vec::with_capacity(group.windings.len());
+            let mut previous = Vec::with_capacity(group.windings.len());
+            let mut previous_previous = Vec::with_capacity(group.windings.len());
+            let mut voltages = Vec::with_capacity(group.windings.len());
+            let mut ampere_turns = 0.0;
+            let mut old_ampere_turns = 0.0;
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let branch = self.num_nodes + self.inductors.branch_indices[index];
+                let current = solution
+                    .get(branch - 1)
+                    .copied()
+                    .unwrap_or_else(|| self.inductors.i_prev[index]);
+                let i_prev = self.inductors.i_prev.get(index).copied().unwrap_or(0.0);
+                let i_prev_prev = self
+                    .inductors
+                    .i_prev_prev
+                    .get(index)
+                    .copied()
+                    .unwrap_or(i_prev);
+                let voltage = node_voltage(
+                    solution,
+                    self.inductors.node_pos[index],
+                    self.inductors.node_neg[index],
+                );
+                ampere_turns += winding.turns * current;
+                old_ampere_turns += winding.turns * i_prev;
+                currents.push(current);
+                previous.push(i_prev);
+                previous_previous.push(i_prev_prev);
+                voltages.push(voltage);
+            }
+            let happ = group.device.xyce_core_happ_from_ampere_turns(ampere_turns);
+            let old_happ = group
+                .device
+                .xyce_core_happ_from_ampere_turns(old_ampere_turns);
+            let delta_happ = happ - old_happ;
+            let accepted_mid = group.device.xyce_core_accepted_mid();
+            let previous_mid = if accepted_mid.is_finite() && accepted_mid.abs() > 1.0e-12 {
+                accepted_mid
+            } else {
+                1.0
+            };
+            let static_scale = if one_step_order2 { 0.5 } else { 1.0 };
+            let carried_mag_update = group.device.xyce_core_mag_update();
+            let charge_coeff = if one_step_order2 { 1.0 } else { coeff.coeff_g };
+            let hidden_m = solution
+                .get(
+                    group
+                        .hidden_m_slot
+                        .map(|slot| hidden_base + slot)
+                        .unwrap_or(usize::MAX),
+                )
+                .copied()
+                .map(|value| value * XYCE_CORE_M_VAR_SCALING)
+                .filter(|value| value.is_finite())
+                .unwrap_or_else(|| group.device.magnetization());
+            let hidden_rate = solution
+                .get(
+                    group
+                        .hidden_r_slot
+                        .map(|slot| hidden_base + slot)
+                        .unwrap_or(usize::MAX),
+                )
+                .copied()
+                .map(|value| value * XYCE_CORE_R_VAR_SCALING)
+                .filter(|value| value.is_finite())
+                .unwrap_or_else(|| group.device.xyce_core_level1_rate_debug());
+            let Some(trial) = (if !group.device.is_xyce_core_level2() {
+                group
+                    .device
+                    .xyce_core_level1_trial_at_magnetization_and_rate(
+                        happ,
+                        delta_happ,
+                        first_voltage,
+                        dt,
+                        one_step_order2,
+                        hidden_m,
+                        hidden_rate,
+                    )
+            } else {
+                group.device.xyce_core_trial_from_happ_with_update(
+                    happ,
+                    delta_happ,
+                    first_voltage,
+                    carried_mag_update,
+                )
+            }) else {
+                self.xyce_core_trial_invalid = true;
+                continue;
+            };
+            if !trial.mid.is_finite() || trial.mid.abs() <= 1.0e-12 {
+                self.xyce_core_trial_invalid = true;
+                continue;
+            }
+            let representative_current = if first_turns.abs() > 1.0e-30 {
+                ampere_turns / first_turns
+            } else {
+                0.0
+            };
+            group
+                .device
+                .cache_xyce_core_trial(representative_current, first_voltage, trial);
+            // LEVEL=1's hidden M equation is coupled to every winding current
+            // and to the first-winding voltage.  Use its exact local Schur
+            // complement, reducing the explicit MNA rows without replacing
+            // Xyce's hidden unknown by a fixed-electrical-state projection.
+            let hidden_partials = if !group.device.is_xyce_core_level2() {
+                group.device.xyce_core_level1_hidden_partials(
+                    trial,
+                    first_voltage,
+                    dt,
+                    one_step_order2,
+                )
+            } else {
+                None
+            };
+            if !group.device.is_xyce_core_level2() && hidden_partials.is_none() {
+                self.xyce_core_trial_invalid = true;
+                continue;
+            }
+            let fixed_mid_m = if hidden_partials.is_some() {
+                group
+                    .device
+                    .xyce_core_dmid_d_magnetization(happ, first_voltage, trial.latest_magnetization)
+                    .unwrap_or(Value::NAN)
+            } else {
+                0.0
+            };
+            let d_mid_d_first_voltage = group
+                .device
+                .xyce_core_dmid_d_voltage(happ, first_voltage, trial.latest_magnetization)
+                .unwrap_or(0.0);
+            let hidden_branch = group.hidden_m_slot.map(|slot| hidden_base + slot + 1);
+            let hidden_rate_branch = group.hidden_r_slot.map(|slot| hidden_base + slot + 1);
+            for i in 0..group.windings.len() {
+                let winding_i = &group.windings[i];
+                let index_i = winding_i.inductor_index;
+                let branch_i = self.num_nodes + self.inductors.branch_indices[index_i];
+                let l_slot = self.inductors.inductances[index_i];
+                let mut charge_derivative = 0.0;
+                for j in 0..group.windings.len() {
+                    let winding_j = &group.windings[j];
+                    let l0 = group.device.xyce_core_vacuum_mutual_inductance(
+                        winding_i.turns,
+                        winding_j.turns,
+                        1.0,
+                    );
+                    let mut current_delta = charge_coeff * (currents[j] - previous[j]);
+                    if !one_step_order2 && coeff.needs_two_history {
+                        current_delta +=
+                            coeff.coeff_v_n_minus_1 * (previous[j] - previous_previous[j]);
+                    }
+                    charge_derivative += l0 * current_delta / dt;
+                }
+                let previous_static_voltage = self.inductors.v_prev[index_i] / previous_mid;
+                let history = if one_step_order2 {
+                    // The transient assembler supplies +1/2(F_n-B_n) from
+                    // its accepted static-history snapshot.  Keep the Core
+                    // branch's local history empty so that term is not
+                    // counted twice.
+                    0.0
+                } else if coeff.needs_current_history {
+                    previous_static_voltage
+                } else {
+                    0.0
+                };
+                let static_branch = static_scale * voltages[i] / trial.mid;
+                let f0 = if one_step_order2 {
+                    charge_derivative - static_branch + history
+                } else {
+                    static_branch - charge_derivative + history
+                };
+                if !f0.is_finite() {
+                    self.xyce_core_trial_invalid = true;
+                    continue;
+                }
+                let reduced_f0 = f0;
+                let first_voltage_partial = if i == 0 { d_mid_d_first_voltage } else { 0.0 };
+                let d_voltage = if one_step_order2 {
+                    -static_scale / trial.mid
+                        + static_scale * voltages[i] * first_voltage_partial
+                            / (trial.mid * trial.mid)
+                } else {
+                    static_scale / trial.mid
+                        - static_scale * voltages[i] * first_voltage_partial
+                            / (trial.mid * trial.mid)
+                };
+                // For rows belonging to a non-first winding, the same
+                // constitutive mid factor still depends on V(first).  This
+                // cross-row voltage derivative is absent from the ordinary
+                // companion and therefore must be added explicitly.
+                let cross_first_voltage = if i == 0 {
+                    0.0
+                } else if one_step_order2 {
+                    static_scale * voltages[i] * d_mid_d_first_voltage / (trial.mid * trial.mid)
+                } else {
+                    -static_scale * voltages[i] * d_mid_d_first_voltage / (trial.mid * trial.mid)
+                };
+                let mut hidden_linearized = 0.0;
+                if hidden_partials.is_some() {
+                    let d_m = if one_step_order2 {
+                        static_scale * voltages[i] * fixed_mid_m / (trial.mid * trial.mid)
+                    } else {
+                        -static_scale * voltages[i] * fixed_mid_m / (trial.mid * trial.mid)
+                    };
+                    if !d_m.is_finite() {
+                        self.xyce_core_trial_invalid = true;
+                        continue;
+                    }
+                    if let Some(hidden_branch) = hidden_branch {
+                        matrix.add(
+                            branch_i - 1,
+                            hidden_branch - 1,
+                            d_m * XYCE_CORE_M_VAR_SCALING,
+                        );
+                    }
+                    hidden_linearized = d_m * hidden_m;
+                }
+                let mut linearized = 0.0;
+                for j in 0..group.windings.len() {
+                    let winding_j = &group.windings[j];
+                    let index_j = winding_j.inductor_index;
+                    let l0 = group.device.xyce_core_vacuum_mutual_inductance(
+                        winding_i.turns,
+                        winding_j.turns,
+                        1.0,
+                    );
+                    let current_happ_slope =
+                        group.device.xyce_core_happ_slope_for_turns(winding_j.turns);
+                    let d_mid_d_current = group.device.xyce_core_dmid_d_happ(
+                        happ,
+                        first_voltage,
+                        trial.latest_magnetization,
+                        current_happ_slope,
+                    );
+                    let static_derivative = d_mid_d_current.map_or(0.0, |value| {
+                        if one_step_order2 {
+                            static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                        } else {
+                            -static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                        }
+                    });
+                    let charge_derivative_j = if one_step_order2 {
+                        charge_coeff * l0 / dt
+                    } else {
+                        -charge_coeff * l0 / dt
+                    };
+                    let direct_derivative = static_derivative + charge_derivative_j;
+                    let derivative = direct_derivative;
+                    if !derivative.is_finite() {
+                        self.xyce_core_trial_invalid = true;
+                        continue;
+                    }
+                    matrix.add(
+                        branch_i - 1,
+                        self.num_nodes + self.inductors.branch_indices[index_j] - 1,
+                        derivative,
+                    );
+                    linearized += derivative * currents[j];
+                }
+                let voltage_linear = d_voltage * voltages[i] + cross_first_voltage * first_voltage;
+                let desired_rhs = -reduced_f0 + linearized + hidden_linearized + voltage_linear;
+                let cancellation_coeff = if one_step_order2 {
+                    CompanionCoefficients::backward_euler()
+                } else {
+                    *coeff
+                };
+                if self.inductors.node_pos[index_i] > 0 {
+                    matrix.add(
+                        branch_i - 1,
+                        self.inductors.node_pos[index_i] - 1,
+                        d_voltage - 1.0,
+                    );
+                }
+                if self.inductors.node_neg[index_i] > 0 {
+                    matrix.add(
+                        branch_i - 1,
+                        self.inductors.node_neg[index_i] - 1,
+                        -d_voltage + 1.0,
+                    );
+                }
+                if i != 0 && cross_first_voltage.is_finite() {
+                    let first_index = group.windings[0].inductor_index;
+                    let first_pos = self.inductors.node_pos[first_index];
+                    let first_neg = self.inductors.node_neg[first_index];
+                    if first_pos > 0 {
+                        matrix.add(branch_i - 1, first_pos - 1, cross_first_voltage);
+                    }
+                    if first_neg > 0 {
+                        matrix.add(branch_i - 1, first_neg - 1, -cross_first_voltage);
+                    }
+                }
+                let old_req = cancellation_coeff.inductor_req(l_slot, dt);
+                let old_veq = cancellation_coeff.inductor_veq(
+                    l_slot,
+                    dt,
+                    previous[i],
+                    previous_previous[i],
+                    self.inductors.v_prev[index_i],
+                );
+                matrix.add(branch_i - 1, branch_i - 1, old_req);
+                rhs[branch_i - 1] += desired_rhs + old_veq;
+            }
+            if let (Some(hidden_branch), Some((g_m, g_happ, g_voltage, g_rate))) =
+                (hidden_branch, hidden_partials)
+            {
+                if !g_m.is_finite()
+                    || !g_happ.is_finite()
+                    || !g_voltage.is_finite()
+                    || !g_rate.is_finite()
+                {
+                    self.xyce_core_trial_invalid = true;
+                    continue;
+                }
+                matrix.add(
+                    hidden_branch - 1,
+                    hidden_branch - 1,
+                    g_m * XYCE_CORE_M_VAR_SCALING * hidden_m_eq_scale,
+                );
+                if let Some(hidden_rate_branch) = hidden_rate_branch {
+                    matrix.add(
+                        hidden_branch - 1,
+                        hidden_rate_branch - 1,
+                        g_rate * XYCE_CORE_R_VAR_SCALING * hidden_m_eq_scale,
+                    );
+                }
+                let mut current_linear = 0.0;
+                for (winding, &current) in group.windings.iter().zip(&currents) {
+                    let slope = group.device.xyce_core_happ_slope_for_turns(winding.turns);
+                    let derivative = g_happ * slope;
+                    matrix.add(
+                        hidden_branch - 1,
+                        self.num_nodes + self.inductors.branch_indices[winding.inductor_index] - 1,
+                        derivative * hidden_m_eq_scale,
+                    );
+                    current_linear += derivative * current;
+                }
+                let first_index = group.windings[0].inductor_index;
+                if self.inductors.node_pos[first_index] > 0 {
+                    matrix.add(
+                        hidden_branch - 1,
+                        self.inductors.node_pos[first_index] - 1,
+                        g_voltage * hidden_m_eq_scale,
+                    );
+                }
+                if self.inductors.node_neg[first_index] > 0 {
+                    matrix.add(
+                        hidden_branch - 1,
+                        self.inductors.node_neg[first_index] - 1,
+                        -g_voltage * hidden_m_eq_scale,
+                    );
+                }
+                rhs[hidden_branch - 1] += hidden_m_eq_scale
+                    * (-trial.level1_residual
+                        + g_m * hidden_m
+                        + g_rate * hidden_rate
+                        + current_linear
+                        + g_voltage * first_voltage);
+            } else if let Some(hidden_branch) = hidden_branch {
+                matrix.add(hidden_branch - 1, hidden_branch - 1, 1.0);
+            }
+            if let Some(hidden_rate_branch) = hidden_rate_branch {
+                let rate_scale = if one_step_order2 { 2.0 } else { 1.0 };
+                let mut current_linear = 0.0;
+                for (winding, &current) in group.windings.iter().zip(&currents) {
+                    let target_derivative = rate_scale * winding.turns / dt;
+                    let residual_derivative = -target_derivative;
+                    if !residual_derivative.is_finite() {
+                        self.xyce_core_trial_invalid = true;
+                        continue;
+                    }
+                    let branch =
+                        self.num_nodes + self.inductors.branch_indices[winding.inductor_index];
+                    matrix.add(
+                        hidden_rate_branch - 1,
+                        branch - 1,
+                        residual_derivative * XYCE_CORE_R_EQ_SCALING,
+                    );
+                    current_linear += residual_derivative * current;
+                }
+                matrix.add(
+                    hidden_rate_branch - 1,
+                    hidden_rate_branch - 1,
+                    XYCE_CORE_R_VAR_SCALING * XYCE_CORE_R_EQ_SCALING,
+                );
+                rhs[hidden_rate_branch - 1] += XYCE_CORE_R_EQ_SCALING
+                    * (-trial.level1_rate_residual + hidden_rate + current_linear);
+            }
         }
     }
 
@@ -288,6 +936,49 @@ impl CircuitData {
                 matrix.add(branch - 1, self.inductors.node_neg[index] - 1, 1.0 / mid);
             }
         }
+        for group in &self.xyce_core_groups {
+            if !group.device.is_xyce_core() || group.windings.len() < 2 {
+                continue;
+            }
+            let first = &group.windings[0];
+            let ampere_turns = group
+                .windings
+                .iter()
+                .map(|winding| {
+                    let index = winding.inductor_index;
+                    let branch = self.num_nodes + self.inductors.branch_indices[index];
+                    winding.turns * solution.get(branch - 1).copied().unwrap_or(0.0)
+                })
+                .sum::<Value>();
+            let representative_current = if first.turns.abs() > 1.0e-30 {
+                ampere_turns / first.turns
+            } else {
+                0.0
+            };
+            let first_voltage = node_voltage(
+                solution,
+                self.inductors.node_pos[first.inductor_index],
+                self.inductors.node_neg[first.inductor_index],
+            );
+            let mid = group
+                .device
+                .xyce_core_static_mid(representative_current, first_voltage);
+            if !mid.is_finite() || mid.abs() <= 1.0e-12 {
+                continue;
+            }
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let branch = self.num_nodes + self.inductors.branch_indices[index];
+                if self.inductors.node_pos[index] > 0 {
+                    matrix.add(self.inductors.node_pos[index] - 1, branch - 1, 1.0);
+                    matrix.add(branch - 1, self.inductors.node_pos[index] - 1, -1.0 / mid);
+                }
+                if self.inductors.node_neg[index] > 0 {
+                    matrix.add(self.inductors.node_neg[index] - 1, branch - 1, -1.0);
+                    matrix.add(branch - 1, self.inductors.node_neg[index] - 1, 1.0 / mid);
+                }
+            }
+        }
     }
 
     /// Refresh effective inductance values for all Jiles-Atherton inductors.
@@ -329,7 +1020,12 @@ impl CircuitData {
 
     /// Advance Xyce Core states from an accepted transient solution and make
     /// the resulting differential inductance active for the next step.
-    pub fn commit_xyce_core_inductances(&mut self, solution: &[Value], dt: Value) {
+    pub fn commit_xyce_core_inductances(
+        &mut self,
+        solution: &[Value],
+        dt: Value,
+        one_step_order2: bool,
+    ) {
         let num_nodes = self.num_nodes;
         for binding in &mut self.jiles_atherton_inductors {
             if !binding.device.is_xyce_core() {
@@ -337,7 +1033,9 @@ impl CircuitData {
             }
             let branch_matrix_index = num_nodes + binding.branch_ordinal;
             binding.device.set_branch_index(branch_matrix_index);
-            binding.device.commit_xyce_core_solution(solution, dt);
+            binding
+                .device
+                .commit_xyce_core_solution(solution, dt, one_step_order2);
             if let Some(slot) = self.inductors.inductances.get_mut(binding.inductor_index) {
                 let l_eff = binding.device.effective_inductance();
                 // A negative Xyce mid-factor is a valid constitutive state,
@@ -346,6 +1044,58 @@ impl CircuitData {
                 // coefficient until the constitutive factor becomes usable.
                 if l_eff.is_finite()
                     && (l_eff > 0.0 || binding.device.is_xyce_core_level2())
+                    && l_eff.abs() > 1.0e-18
+                {
+                    *slot = l_eff;
+                }
+            }
+        }
+        for group in &mut self.xyce_core_groups {
+            if !group.device.is_xyce_core() || group.windings.len() < 2 {
+                continue;
+            }
+            let mut ampere_turns = 0.0;
+            let first = &group.windings[0];
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let branch = num_nodes + self.inductors.branch_indices[index];
+                let current = solution
+                    .get(branch - 1)
+                    .copied()
+                    .unwrap_or_else(|| self.inductors.i_prev[index]);
+                ampere_turns += winding.turns * current;
+            }
+            let happ = group.device.xyce_core_happ_from_ampere_turns(ampere_turns);
+            // The generic inductor history is rotated before this commit
+            // hook runs.  The shared device's representative current is the
+            // accepted-state coordinate retained by its own prior commit,
+            // so use it to recover the previous aggregate field.
+            let previous_ampere_turns = first.turns * group.device.current_value();
+            let previous_happ = group
+                .device
+                .xyce_core_happ_from_ampere_turns(previous_ampere_turns);
+            let first_voltage = node_voltage(
+                solution,
+                self.inductors.node_pos[first.inductor_index],
+                self.inductors.node_neg[first.inductor_index],
+            );
+            group.device.commit_xyce_core_group_solution(
+                happ,
+                happ - previous_happ,
+                first_voltage,
+                dt,
+                one_step_order2,
+            );
+            let mid = group.device.xyce_core_accepted_mid();
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let l_eff = group.device.xyce_core_vacuum_mutual_inductance(
+                    winding.turns,
+                    winding.turns,
+                    1.0,
+                ) * mid;
+                if let Some(slot) = self.inductors.inductances.get_mut(index)
+                    && l_eff.is_finite()
                     && l_eff.abs() > 1.0e-18
                 {
                     *slot = l_eff;
@@ -407,6 +1157,12 @@ impl CircuitData {
             .filter(|binding| binding.device.is_xyce_core())
             .map(|binding| binding.inductor_index)
             .collect::<Vec<_>>();
+        let mut core_indices = core_indices;
+        core_indices.extend(
+            self.xyce_core_groups
+                .iter()
+                .flat_map(|group| group.windings.iter().map(|winding| winding.inductor_index)),
+        );
         self.inductors.overwrite_transient_correction_rhs_excluding(
             correction_rhs,
             iterate,

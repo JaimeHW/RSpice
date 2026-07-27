@@ -52686,17 +52686,16 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         model: Option<&str>,
     ) -> Result<(), String> {
         if let Some(model_name) = model {
-            if inductors.len() != 1 {
+            if inductors.is_empty() {
                 return Err(format!(
-                    "native .PRINT TRAN comparison does not support nonlinear coupling '{}' with {} windings",
+                    "native .PRINT TRAN comparison does not support nonlinear coupling '{}' without a winding",
                     element_name,
-                    inductors.len()
                 ));
             }
-            if !coefficient.is_finite() || (coefficient - 1.0).abs() > 1.0e-12 {
+            if !coefficient.is_finite() || !(0.0..=1.0).contains(&coefficient) {
                 return Err(format!(
-                    "native .PRINT TRAN comparison requires nonlinear coupling '{}' to use COUPLING=1",
-                    element_name
+                    "native .PRINT TRAN comparison does not support nonlinear coupling '{}' with invalid coefficient {}",
+                    element_name, coefficient
                 ));
             }
             let Some(model_def) = Self::find_model(&netlist.models, model_name) else {
@@ -52711,7 +52710,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     element_name, model_name
                 ));
             }
-            return Self::validate_static_step_inductor_contract(netlist, &inductors[0]);
+            for inductor_name in inductors {
+                Self::validate_static_step_inductor_contract(netlist, inductor_name).map_err(
+                    |err| {
+                        format!(
+                            "native .PRINT TRAN comparison does not support nonlinear coupling '{}' because referenced inductor '{}' is not a supported inductor: {}",
+                            element_name, inductor_name, err
+                        )
+                    },
+                )?;
+            }
+            return Ok(());
         }
         if inductors.len() < 2 {
             return Err(format!(
@@ -57520,7 +57529,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                             model: Some(_),
                             inductors,
                             ..
-                        } if inductors.len() == 1
+                        } if !inductors.is_empty()
                     )
             })
         };
@@ -60663,7 +60672,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 model: Some(_),
                 inductors,
                 ..
-            } if inductors.len() == 1
+            } if !inductors.is_empty()
         )
     }
 

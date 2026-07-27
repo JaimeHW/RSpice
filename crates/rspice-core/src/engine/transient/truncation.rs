@@ -1741,6 +1741,7 @@ impl Engine {
             && circuit.coupled_inductor_pairs.is_empty()
             && circuit.multi_winding_transformers.is_empty()
             && circuit.jiles_atherton_inductors.is_empty()
+            && circuit.xyce_core_groups.is_empty()
             && !circuit.has_xspice_devices()
     }
 
@@ -1762,6 +1763,7 @@ impl Engine {
             && circuit.coupled_inductor_pairs.is_empty()
             && circuit.multi_winding_transformers.is_empty()
             && circuit.jiles_atherton_inductors.is_empty()
+            && circuit.xyce_core_groups.is_empty()
             && !circuit.has_xspice_devices()
     }
 
@@ -1783,6 +1785,7 @@ impl Engine {
             && circuit.coupled_inductor_pairs.is_empty()
             && circuit.multi_winding_transformers.is_empty()
             && circuit.jiles_atherton_inductors.is_empty()
+            && circuit.xyce_core_groups.is_empty()
             && !circuit.has_xspice_devices()
     }
 
@@ -1801,6 +1804,7 @@ impl Engine {
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty()
             || !circuit.jiles_atherton_inductors.is_empty()
+            || !circuit.xyce_core_groups.is_empty()
         {
             return false;
         }

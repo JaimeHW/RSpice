@@ -20,6 +20,7 @@ impl Engine {
         bsim3_history: &mut Bsim3TransientHistory,
         bsim4_history: &mut Bsim4TransientHistory,
         ekv26_history: &mut Ekv26TransientHistory,
+        xyce_one_step_order2: bool,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
         mosfet_caps: Option<&[(Value, Value, Value)]>,
         suppress_gate_charge_history: bool,
@@ -99,7 +100,7 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(accepted_solution);
         circuit.update_multi_winding_transformer_state(accepted_solution);
         circuit.refresh_jiles_atherton_inductances(accepted_solution);
-        circuit.commit_xyce_core_inductances(accepted_solution, dt);
+        circuit.commit_xyce_core_inductances(accepted_solution, dt, xyce_one_step_order2);
         circuit.commit_accepted_nonlinear_state();
         circuit
             .behavioral_sources

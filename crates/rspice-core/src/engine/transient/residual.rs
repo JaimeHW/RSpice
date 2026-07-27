@@ -65,6 +65,10 @@ impl Engine {
             return self.residual_convergence_met(circuit, matrix, solution, rhs);
         }
 
+        if circuit.xyce_core_trial_invalid() {
+            return false;
+        }
+
         matrix
             .raw_residual_inf_norm(solution, rhs)
             .is_ok_and(|norm| norm.is_finite() && norm < self.transient_nonlinear_rhstol())
@@ -201,6 +205,11 @@ impl Engine {
         circuit
             .inductors
             .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        if ctx.xyce_one_step_order2 {
+            circuit
+                .inductors
+                .scale_transient_kcl_rows(matrix, num_nodes, 0.5);
+        }
         circuit.stamp_xyce_core_transient_companion(
             matrix,
             rhs,

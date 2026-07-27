@@ -934,6 +934,9 @@ impl Engine {
         if !circuit.jiles_atherton_inductors.is_empty() {
             blockers.push("Jiles-Atherton hysteretic magnetic history");
         }
+        if !circuit.xyce_core_groups.is_empty() {
+            blockers.push("shared Xyce Core hysteretic magnetic history");
+        }
         if !circuit.behavioral_sources.is_empty() {
             blockers.push("behavioral-source accepted-step memory");
         }

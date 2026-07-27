@@ -72,18 +72,11 @@ pub(super) fn parse_coupling(
     // Xyce's nonlinear magnetic-core form appends a model name after the
     // coupling value (for example `K1 Lp1 1 CORE_MODEL`).  A single-winding
     // card without that model is not a valid mutual-inductor declaration;
-    // cards with multiple windings remain represented here for the builder to
-    // validate against its supported nonlinear-core topology.
+    // multi-winding cards are retained as one shared Core device so the
+    // builder can assemble Xyce's common magnetization state and mutual Q
+    // matrix.
     let model = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
-        if inductors.len() == 1 {
-            Some(expect_ident(stream, line_num)?)
-        } else {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: "Nonlinear coupling models require a single winding in this parser"
-                    .to_string(),
-            });
-        }
+        Some(expect_ident(stream, line_num)?)
     } else {
         None
     };

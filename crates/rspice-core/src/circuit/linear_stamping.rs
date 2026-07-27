@@ -10,6 +10,93 @@
 use super::*;
 
 impl CircuitData {
+    /// Provide a finite operating-point constraint for private LEVEL=1 Core
+    /// states.  The transient companion replaces this identity with the
+    /// physical hidden magnetization equation at every Newton assembly.
+    #[inline]
+    fn stamp_xyce_core_hidden_state_identity_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+    ) {
+        for binding in &self.jiles_atherton_inductors {
+            let Some(slot) = binding.hidden_m_slot else {
+                continue;
+            };
+            let index = self.get_hidden_state_matrix_index(slot);
+            matrix.add(index - 1, index - 1, 1.0);
+            if index <= rhs.len() {
+                rhs[index - 1] += binding.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+            }
+            if let Some(rate_slot) = binding.hidden_r_slot {
+                let rate_index = self.get_hidden_state_matrix_index(rate_slot);
+                matrix.add(rate_index - 1, rate_index - 1, 1.0);
+                if rate_index <= rhs.len() {
+                    rhs[rate_index - 1] +=
+                        binding.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                }
+            }
+        }
+        for group in &self.xyce_core_groups {
+            let Some(slot) = group.hidden_m_slot else {
+                continue;
+            };
+            let index = self.get_hidden_state_matrix_index(slot);
+            matrix.add(index - 1, index - 1, 1.0);
+            if index <= rhs.len() {
+                rhs[index - 1] += group.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+            }
+            if let Some(rate_slot) = group.hidden_r_slot {
+                let rate_index = self.get_hidden_state_matrix_index(rate_slot);
+                matrix.add(rate_index - 1, rate_index - 1, 1.0);
+                if rate_index <= rhs.len() {
+                    rhs[rate_index - 1] +=
+                        group.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn stamp_xyce_core_hidden_state_identity(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
+        for binding in &self.jiles_atherton_inductors {
+            let Some(slot) = binding.hidden_m_slot else {
+                continue;
+            };
+            let index = self.get_hidden_state_matrix_index(slot);
+            matrix.push(index - 1, index - 1, 1.0);
+            if index <= rhs.len() {
+                rhs[index - 1] += binding.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+            }
+            if let Some(rate_slot) = binding.hidden_r_slot {
+                let rate_index = self.get_hidden_state_matrix_index(rate_slot);
+                matrix.push(rate_index - 1, rate_index - 1, 1.0);
+                if rate_index <= rhs.len() {
+                    rhs[rate_index - 1] +=
+                        binding.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                }
+            }
+        }
+        for group in &self.xyce_core_groups {
+            let Some(slot) = group.hidden_m_slot else {
+                continue;
+            };
+            let index = self.get_hidden_state_matrix_index(slot);
+            matrix.push(index - 1, index - 1, 1.0);
+            if index <= rhs.len() {
+                rhs[index - 1] += group.device.magnetization() / XYCE_CORE_M_VAR_SCALING;
+            }
+            if let Some(rate_slot) = group.hidden_r_slot {
+                let rate_index = self.get_hidden_state_matrix_index(rate_slot);
+                matrix.push(rate_index - 1, rate_index - 1, 1.0);
+                if rate_index <= rhs.len() {
+                    rhs[rate_index - 1] +=
+                        group.device.xyce_core_level1_rate_debug() / XYCE_CORE_R_VAR_SCALING;
+                }
+            }
+        }
+    }
+
     #[inline]
     pub(in crate::circuit) fn stamp_tline_port_direct(
         matrix: &mut StaticMatrix,
@@ -568,6 +655,7 @@ impl CircuitData {
         // Transmission-line DC fallback: couple near/far conductors via series path.
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
+        self.stamp_xyce_core_hidden_state_identity_direct(matrix, rhs);
     }
 
     /// Stamp linear devices for transient Newton iterations.
@@ -619,12 +707,22 @@ impl CircuitData {
         self.stamp_transient_linear_base_direct(matrix, rhs);
         self.capacitors
             .stamp_ic_operating_point_direct(matrix, rhs, self.num_nodes);
-        self.inductors
-            .stamp_transient_operating_point_direct(matrix, rhs, self.num_nodes);
+        let grouped_indices = self
+            .xyce_core_groups
+            .iter()
+            .flat_map(|group| group.windings.iter().map(|winding| winding.inductor_index))
+            .collect::<std::collections::HashSet<_>>();
+        self.inductors.stamp_transient_operating_point_direct_where(
+            matrix,
+            rhs,
+            self.num_nodes,
+            |index| grouped_indices.contains(&index),
+        );
         self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
+        self.stamp_xyce_core_hidden_state_identity_direct(matrix, rhs);
     }
 
     /// Stamp a deterministic transient-start seed when the ordinary t=0
@@ -649,6 +747,7 @@ impl CircuitData {
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
+        self.stamp_xyce_core_hidden_state_identity_direct(matrix, rhs);
     }
 
     /// Stamp all devices with scaled source values (for source stepping)
@@ -679,6 +778,7 @@ impl CircuitData {
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
+        self.stamp_xyce_core_hidden_state_identity_direct(matrix, rhs);
     }
 
     /// Stamp all linear devices for DC analysis
@@ -699,5 +799,6 @@ impl CircuitData {
         self.ccvs.stamp_all(matrix, num_nodes);
         self.stamp_tlines_dc(matrix);
         self.stamp_coupled_tlines_dc(matrix);
+        self.stamp_xyce_core_hidden_state_identity(matrix, rhs);
     }
 }

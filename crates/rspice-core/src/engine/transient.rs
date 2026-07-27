@@ -1311,9 +1311,10 @@ impl Engine {
             // Xyce nonlinear magnetic cores publish their hysteresis state
             // through the YMIN!KNAME device-op namespace.  Core state is
             // accepted-step dependent, so retain a trace whenever the
-            // netlist contains the canonical single-winding Core form even
-            // when the deck requests the probes through `.PRINT` rather than
-            // an explicit `.SAVE @device[param]` card.
+            // netlist contains a modeled Core coupling even when the deck
+            // requests the probes through `.PRINT` rather than an explicit
+            // `.SAVE @device[param]` card.  Multi-winding K-cards publish one
+            // shared YMIN namespace entry for the whole group.
             || netlist.elements.iter().any(|element| {
                 matches!(
                     &element.kind,
@@ -1321,7 +1322,7 @@ impl Engine {
                         inductors,
                         model: Some(_),
                         ..
-                    } if inductors.len() == 1
+                    } if !inductors.is_empty()
                 )
             })
     }
@@ -1569,9 +1570,18 @@ impl Engine {
             requires_conservative_nonlinear_limiting,
         );
         let enforce_device_convergence = self.transient_enforce_device_convergence();
+        // MutIndNonLin's hidden M/R equations are part of the physical DAE,
+        // not an optional convergence hint.  A failed constitutive trial must
+        // reject the Newton candidate even when Xyce's general device
+        // convergence status test is disabled.
+        let core_trial_converged = |circuit: &crate::circuit::CircuitData| {
+            !circuit.has_xyce_core_inductors()
+                || (!circuit.xyce_core_trial_invalid() && circuit.xyce_core_trial_converged())
+        };
         let enforce_force_candidate_safety =
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
-        let is_strictly_linear_transient = !circuit.has_nonlinear_devices()
+        let is_strictly_linear_transient = (!circuit.has_nonlinear_devices()
+            && !circuit.has_xyce_core_inductors())
             || circuit.has_only_memoryless_linear_xspice_nonlinearity();
         let uses_inductor_correction = !circuit.inductors.is_empty()
             || !circuit.coupled_inductor_pairs.is_empty()
@@ -2650,6 +2660,8 @@ impl Engine {
                     Value::INFINITY
                 } else if i < num_nodes {
                     MAX_VOLTAGE
+                } else if circuit.has_xyce_core_inductors() {
+                    MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
                 } else {
                     MAX_BRANCH_STATE_MAGNITUDE
                 };
@@ -2824,10 +2836,12 @@ impl Engine {
                 // basin — the saturation-boundary limit cycles this breaks
                 // are unreachable by timestep reduction alone (the cycle is
                 // driven by the static nonlinearity, not by stiffness).
-                let globalization_active = self.config.spice_dialect != SpiceDialect::Xyce
-                    && circuit.has_nonlinear_devices()
-                    && !is_strictly_linear_transient;
-                if globalization_active && _iter > 0 {
+                let globalization_active = !is_strictly_linear_transient
+                    && ((self.config.spice_dialect != SpiceDialect::Xyce
+                        && circuit.has_nonlinear_devices())
+                        || (self.config.spice_dialect == SpiceDialect::Xyce
+                            && circuit.has_xyce_core_inductors()));
+                if globalization_active {
                     let merit_phase_start = crate::time_compat::Instant::now();
                     let current_merit = self
                         .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
@@ -2863,10 +2877,15 @@ impl Engine {
                             globalization::BacktrackAction::Accept => {}
                         }
                     } else if let Some(base_rollback) = last_stamped_rollback.as_ref()
-                        && globalization::NewtonMeritBacktrack::step_needs_globalization(
-                            last_stamped_merit,
-                            current_merit,
-                        )
+                        && ((circuit.has_xyce_core_inductors()
+                            && current_merit.is_finite()
+                            && last_stamped_merit.is_finite()
+                            && current_merit > 1.0
+                            && current_merit > last_stamped_merit)
+                            || globalization::NewtonMeritBacktrack::step_needs_globalization(
+                                last_stamped_merit,
+                                current_merit,
+                            ))
                     {
                         static MERIT_BACKTRACK_LOG_COUNT: std::sync::atomic::AtomicUsize =
                             std::sync::atomic::AtomicUsize::new(0);
@@ -2913,9 +2932,10 @@ impl Engine {
                 if let Some(status) = xyce_nox_status.as_mut() {
                     let (residual_inf_norm, residual_l2_norm) =
                         matrix.raw_residual_norms(&new_solution, &rhs)?;
-                    let device_converged = !enforce_device_convergence
-                        || !circuit.has_nonlinear_devices()
-                        || circuit.nonlinear_converged(self.device_convergence_criteria());
+                    let device_converged = core_trial_converged(&circuit)
+                        && (!enforce_device_convergence
+                            || !circuit.has_nonlinear_devices()
+                            || circuit.nonlinear_converged(self.device_convergence_criteria()));
                     let behavioral_converged = circuit.behavioral_linearizations_converged(
                         &new_solution,
                         t + dt,
@@ -3042,6 +3062,8 @@ impl Engine {
                                 Value::INFINITY
                             } else if i < num_nodes {
                                 MAX_VOLTAGE
+                            } else if circuit.has_xyce_core_inductors() {
+                                MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
                             } else {
                                 MAX_BRANCH_STATE_MAGNITUDE
                             };
@@ -3214,9 +3236,10 @@ impl Engine {
                             nonlinear_state_matches_new_solution = true;
                         }
 
-                        let mut device_converged = !enforce_device_convergence
-                            || !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_criteria());
+                        let mut device_converged = core_trial_converged(&circuit)
+                            && (!enforce_device_convergence
+                                || !circuit.has_nonlinear_devices()
+                                || circuit.nonlinear_converged(self.device_convergence_criteria()));
                         // This is RSpice's consistency check for its internal
                         // behavioral-expression linearization, not a device
                         // `isConverged` flag controlled by Xyce's
@@ -3282,9 +3305,11 @@ impl Engine {
                             // candidate. Re-evaluate convergence afterward so
                             // limiter state advanced by that refresh cannot be
                             // accepted through stale pre-restamp booleans.
-                            device_converged = !enforce_device_convergence
-                                || !circuit.has_nonlinear_devices()
-                                || circuit.nonlinear_converged(self.device_convergence_criteria());
+                            device_converged = core_trial_converged(&circuit)
+                                && (!enforce_device_convergence
+                                    || !circuit.has_nonlinear_devices()
+                                    || circuit
+                                        .nonlinear_converged(self.device_convergence_criteria()));
                             behavioral_converged = circuit.behavioral_linearizations_converged(
                                 &new_solution,
                                 t + dt,
@@ -3354,9 +3379,10 @@ impl Engine {
                     // Check what specifically didn't converge
                     let v_conv =
                         self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
-                    let d_conv = !enforce_device_convergence
-                        || !circuit.has_nonlinear_devices()
-                        || circuit.nonlinear_converged(self.device_convergence_criteria());
+                    let d_conv = core_trial_converged(&circuit)
+                        && (!enforce_device_convergence
+                            || !circuit.has_nonlinear_devices()
+                            || circuit.nonlinear_converged(self.device_convergence_criteria()));
                     let r_conv = self.transient_residual_convergence_met(
                         &circuit,
                         &mut matrix,
@@ -3443,9 +3469,10 @@ impl Engine {
                 if self.node_voltage_convergence_met(&solution, &new_solution, num_nodes) {
                     // Voltage settled but a device/residual criterion held the
                     // point back — the interesting bucket for criteria tuning.
-                    if !enforce_device_convergence
-                        || !circuit.has_nonlinear_devices()
-                        || circuit.nonlinear_converged(self.device_convergence_criteria())
+                    if core_trial_converged(&circuit)
+                        && (!enforce_device_convergence
+                            || !circuit.has_nonlinear_devices()
+                            || circuit.nonlinear_converged(self.device_convergence_criteria()))
                     {
                         failed_residual_only += 1;
                     } else {
@@ -3867,7 +3894,7 @@ impl Engine {
                     }
                     let xyce_static_history_candidate = if self.config.spice_dialect
                         == SpiceDialect::Xyce
-                        && xyce_one_step_order2
+                        && circuit.has_xyce_core_inductors()
                     {
                         Some(self.capture_xyce_static_residual(
                             &mut circuit,
@@ -3895,6 +3922,7 @@ impl Engine {
                         &mut bsim3_history,
                         &mut bsim4_history,
                         &mut ekv26_history,
+                        xyce_one_step_order2,
                         Some(vbic_snapshot_cache.as_slice()),
                         None,
                         suppress_gate_charge,
@@ -4795,13 +4823,13 @@ impl Engine {
                     }
                     let xyce_static_history_candidate = if self.config.spice_dialect
                         == SpiceDialect::Xyce
-                        && xyce_one_step_order2
+                        && circuit.has_xyce_core_inductors()
                     {
                         Some(self.capture_xyce_static_residual(
                             &mut circuit,
                             &mut matrix,
                             &new_solution,
-                            t,
+                            t + dt,
                             transient_baseline_diag_gmin,
                         )?)
                     } else {
@@ -4823,6 +4851,7 @@ impl Engine {
                         &mut bsim3_history,
                         &mut bsim4_history,
                         &mut ekv26_history,
+                        xyce_one_step_order2,
                         Some(vbic_snapshot_cache.as_slice()),
                         None,
                         suppress_gate_charge,
@@ -5047,18 +5076,19 @@ impl Engine {
             };
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
-            let xyce_static_history_candidate =
-                if self.config.spice_dialect == SpiceDialect::Xyce && xyce_one_step_order2 {
-                    Some(self.capture_xyce_static_residual(
-                        &mut circuit,
-                        &mut matrix,
-                        &new_solution,
-                        t,
-                        transient_baseline_diag_gmin,
-                    )?)
-                } else {
-                    None
-                };
+            let xyce_static_history_candidate = if self.config.spice_dialect == SpiceDialect::Xyce
+                && circuit.has_xyce_core_inductors()
+            {
+                Some(self.capture_xyce_static_residual(
+                    &mut circuit,
+                    &mut matrix,
+                    &new_solution,
+                    t,
+                    transient_baseline_diag_gmin,
+                )?)
+            } else {
+                None
+            };
             let history_phase_start = crate::time_compat::Instant::now();
             Self::update_reactive_history(
                 &mut circuit,
@@ -5076,6 +5106,7 @@ impl Engine {
                 &mut bsim3_history,
                 &mut bsim4_history,
                 &mut ekv26_history,
+                xyce_one_step_order2,
                 Some(vbic_snapshot_cache.as_slice()),
                 mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,

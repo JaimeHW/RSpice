@@ -23,6 +23,7 @@ impl CircuitData {
             branch_name_by_ordinal: Vec::new(),
             num_nodes: 0,
             num_branches: 0,
+            hidden_state_count: 0,
             resistors: Resistors::new(),
             resistor_branches: ResistorBranches::new(),
             capacitors: Capacitors::new(),
@@ -62,6 +63,8 @@ impl CircuitData {
             coupled_inductor_pairs: Vec::new(),
             multi_winding_transformers: Vec::new(),
             jiles_atherton_inductors: Vec::new(),
+            xyce_core_groups: Vec::new(),
+            xyce_core_trial_invalid: false,
             transient_max_step_hint: None,
             behavioral_sources: BehavioralSources::new(),
             // XSPICE instances
@@ -420,6 +423,10 @@ impl CircuitData {
             binding.device.node_pos = Self::remap_node_id(binding.device.node_pos, old_node_id);
             binding.device.node_neg = Self::remap_node_id(binding.device.node_neg, old_node_id);
         }
+        for group in &mut self.xyce_core_groups {
+            group.device.node_pos = Self::remap_node_id(group.device.node_pos, old_node_id);
+            group.device.node_neg = Self::remap_node_id(group.device.node_neg, old_node_id);
+        }
         for binding in &mut self.xyce_memristors {
             binding.node_pos = Self::remap_node_id(binding.node_pos, old_node_id);
             binding.node_neg = Self::remap_node_id(binding.node_neg, old_node_id);
@@ -607,6 +614,8 @@ impl CircuitData {
         self.jiles_atherton_inductors.push(JilesAthertonBinding {
             inductor_index,
             branch_ordinal,
+            hidden_m_slot: None,
+            hidden_r_slot: None,
             device,
             core_output_name: None,
             core_bh_si_units: false,
@@ -623,11 +632,38 @@ impl CircuitData {
         core_output_name: String,
         core_bh_si_units: bool,
     ) {
+        let hidden_m_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
+        let hidden_r_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
         self.jiles_atherton_inductors.push(JilesAthertonBinding {
             inductor_index,
             branch_ordinal,
+            hidden_m_slot,
+            hidden_r_slot,
             device,
             core_output_name: Some(core_output_name),
+            core_bh_si_units,
+        });
+    }
+
+    /// Register a shared multi-winding Xyce Core DAE after all of its
+    /// component inductor branches have been allocated.
+    pub fn add_xyce_core_group(
+        &mut self,
+        device: crate::device::passive::JilesAthertonInductor,
+        core_output_name: String,
+        windings: Vec<XyceCoreWindingBinding>,
+        coupling: Value,
+        core_bh_si_units: bool,
+    ) {
+        let hidden_m_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
+        let hidden_r_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
+        self.xyce_core_groups.push(XyceCoreGroupBinding {
+            core_output_name,
+            device,
+            hidden_m_slot,
+            hidden_r_slot,
+            windings,
+            coupling,
             core_bh_si_units,
         });
     }
@@ -775,9 +811,16 @@ impl CircuitData {
         self.num_nodes + branch_ordinal
     }
 
+    /// Convert a private hidden-state slot to its 1-based matrix index.
+    /// Public node and branch indices remain contiguous before this suffix.
+    #[inline]
+    pub fn get_hidden_state_matrix_index(&self, slot: usize) -> usize {
+        self.num_nodes + self.num_branches + slot + 1
+    }
+
     /// Total matrix size
     pub fn matrix_size(&self) -> usize {
-        self.num_nodes + self.num_branches
+        self.num_nodes + self.num_branches + self.hidden_state_count
     }
 
     /// Number of nodes (excluding ground)
@@ -788,6 +831,19 @@ impl CircuitData {
     /// Number of branches
     pub fn num_branches(&self) -> usize {
         self.num_branches
+    }
+
+    /// Number of private scalar state variables appended to the matrix.
+    #[inline]
+    pub fn hidden_state_count(&self) -> usize {
+        self.hidden_state_count
+    }
+
+    #[inline]
+    fn allocate_hidden_state(&mut self) -> usize {
+        let slot = self.hidden_state_count;
+        self.hidden_state_count += 1;
+        slot
     }
 }
 

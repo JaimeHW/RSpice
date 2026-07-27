@@ -174,13 +174,23 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
     if let Some(beta_m) = positive_model_param(model_def, &["BETAM"], "BETAM")? {
         params.beta_m = beta_m;
     }
-    // MutIndNonLin2 exposes LEVEL only as a PSpice-compatibility parameter;
-    // Xyce binds it to LevelIgnored and does not alter the constitutive law.
-    // This resolver already constructs the MutIndNonLin2 contract, whose
-    // voltage-direction factor is DELV/VINF regardless of LEVEL or whether
-    // the compatibility keyword is present.
-    let _ = nonnegative_model_param(model_def, &["LEVEL"], "LEVEL")?;
-    params.xyce_core_level2 = true;
+    // Xyce has two distinct nonlinear mutual-inductor device contracts.  A
+    // CORE model with LEVEL=1 (or with no LEVEL, whose K-device default is
+    // level 1) is routed to MutIndNonLin; LEVEL=2 is routed to
+    // MutIndNonLin2.  The constitutive curve is shared, but the voltage
+    // direction scaling and accepted-state equation are not interchangeable.
+    let level = if let Some(level) = model_param(&model_def.params, &["LEVEL"]) {
+        if !level.is_finite() || level < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Xyce Core model '{}' has invalid LEVEL={level} (must be finite and >= 0)",
+                model_def.name
+            )));
+        }
+        level
+    } else {
+        1.0
+    };
+    params.xyce_core_level2 = level >= 2.0;
     if let Some(delta_v) = positive_model_param(model_def, &["DELV"], "DELV")? {
         params.delta_v = delta_v;
     }

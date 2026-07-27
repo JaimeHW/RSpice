@@ -139,6 +139,63 @@ pub(super) fn add_xyce_core_inductor_element(
     Ok(())
 }
 
+/// Add one winding branch belonging to a shared multi-winding Xyce Core.
+/// The branch remains in the ordinary inductor SoA so its MNA KCL row and
+/// initial-current history are available to the group DAE; the nonlinear
+/// constitutive device itself is registered once, after all windings exist.
+pub(super) fn add_xyce_core_winding_element(
+    circuit: &mut CircuitData,
+    netlist: &Netlist,
+    element: &crate::netlist::Element,
+    winding_turns: f64,
+    model: &str,
+    initial_current: Option<f64>,
+) -> Result<(), SimulationError> {
+    if !winding_turns.is_finite() || winding_turns <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Xyce Core winding '{}' has invalid turns {}",
+            element.name, winding_turns
+        )));
+    }
+    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Xyce Core winding '{}' references unknown model '{}'",
+            element.name, model
+        ))
+    })?;
+    ensure_model_type(
+        "Xyce nonlinear magnetic core",
+        &element.name,
+        model,
+        model_def,
+        &["CORE"],
+    )?;
+    let params = resolve_xyce_core_model_params(model_def, winding_turns)?;
+    let core = crate::device::passive::JilesAthertonInductor::new(element.name.clone(), 0, 0)
+        .with_params(params);
+    let runtime_l = core.nominal_inductance();
+    if !runtime_l.is_finite() || runtime_l <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Xyce Core winding '{}' produced invalid vacuum inductance {}",
+            element.name, runtime_l
+        )));
+    }
+
+    let np = circuit.get_or_create_node(&element.nodes[0]);
+    let nn = circuit.get_or_create_node(&element.nodes[1]);
+    let branch = circuit.allocate_branch_named(&element.name);
+    if let Some(ic) = initial_current {
+        circuit
+            .inductors
+            .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
+    } else {
+        circuit
+            .inductors
+            .add(element.name.clone(), np, nn, branch, runtime_l);
+    }
+    Ok(())
+}
+
 /// `true` when a model card's type names a magnetic-core (Jiles-Atherton)
 /// model rather than a linear inductor card.
 pub(super) fn is_magnetic_core_model_type(model_type: &str) -> bool {

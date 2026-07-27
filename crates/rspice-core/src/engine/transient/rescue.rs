@@ -146,6 +146,8 @@ impl Engine {
                 for (i, value) in sol.iter_mut().enumerate() {
                     let magnitude_limit = if i < num_nodes {
                         MAX_VOLTAGE
+                    } else if circuit.has_xyce_core_inductors() {
+                        MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
                     } else {
                         MAX_BRANCH_STATE_MAGNITUDE
                     };

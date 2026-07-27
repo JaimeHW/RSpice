@@ -437,6 +437,47 @@ impl CircuitData {
             });
         }
 
+        // Shared multi-winding Xyce Core devices publish the same canonical
+        // YMIN!KNAME namespace as single-winding bindings.  The constitutive
+        // state lives on the group device, so report it once per K-card
+        // rather than once per winding.
+        for binding in &self.xyce_core_groups {
+            let name = binding.core_output_name.as_str();
+            let h_si = binding.device.magnetic_field();
+            let b_si = binding.device.flux_density();
+            entries.push(DeviceOpEntry {
+                name: name.to_string(),
+                device_kind: "NONLINEAR_CORE",
+                region: None,
+                params: vec![
+                    (
+                        "m",
+                        if binding.device.is_xyce_core_level2() {
+                            binding.device.magnetization()
+                        } else {
+                            binding.device.magnetization() / 1.0e3
+                        },
+                    ),
+                    (
+                        "h",
+                        if binding.core_bh_si_units {
+                            h_si
+                        } else {
+                            h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                        },
+                    ),
+                    (
+                        "b",
+                        if binding.core_bh_si_units {
+                            b_si
+                        } else {
+                            b_si * 1.0e4
+                        },
+                    ),
+                ],
+            });
+        }
+
         DeviceOpReport { entries }
     }
 

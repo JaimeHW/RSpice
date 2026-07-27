@@ -139,7 +139,38 @@ impl Inductors {
         rhs: &mut [Value],
         num_nodes: usize,
     ) {
+        self.stamp_transient_operating_point_direct_where(matrix, rhs, num_nodes, |_| false);
+    }
+
+    /// Stamp the transient operating-point constraints while allowing
+    /// circuit-level dynamic devices to replace selected inductor shorts
+    /// with deterministic current seeds.
+    #[inline]
+    pub fn stamp_transient_operating_point_direct_where<F>(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+        skip_short: F,
+    ) where
+        F: Fn(usize) -> bool,
+    {
         for i in 0..self.names.len() {
+            if skip_short(i) {
+                let np = self.node_pos[i];
+                let nn = self.node_neg[i];
+                let br = num_nodes + self.branch_indices[i];
+                let current = self.ic[i].unwrap_or(0.0);
+                if np > 0 {
+                    rhs[np - 1] -= current;
+                }
+                if nn > 0 {
+                    rhs[nn - 1] += current;
+                }
+                matrix.add(br - 1, br - 1, 1.0);
+                rhs[br - 1] = current;
+                continue;
+            }
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let br_ordinal = self.branch_indices[i];
@@ -310,6 +341,31 @@ impl Inductors {
             }
             matrix.add(br - 1, br - 1, -r_eq);
             rhs[br - 1] = -v_eq;
+        }
+    }
+
+    /// Scale the algebraic KCL incidence entries added by the transient
+    /// inductor companion.  Xyce OneStep applies its order-two static factor
+    /// to the inductor's node-current F contribution, while the companion is
+    /// stamped after the circuit-wide static half-scaling.  The branch-row
+    /// voltage equation remains unscaled here and is owned by the device
+    /// companion correction.
+    pub fn scale_transient_kcl_rows(
+        &self,
+        matrix: &mut StaticMatrix,
+        num_nodes: usize,
+        factor: Value,
+    ) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let branch = num_nodes + self.branch_indices[i];
+            if np > 0 {
+                matrix.add(np - 1, branch - 1, factor - 1.0);
+            }
+            if nn > 0 {
+                matrix.add(nn - 1, branch - 1, -factor + 1.0);
+            }
         }
     }
 

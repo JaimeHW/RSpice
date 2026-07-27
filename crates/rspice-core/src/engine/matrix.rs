@@ -532,6 +532,123 @@ impl Engine {
             triplets.push((br - 1, br - 1, 0.0));
         }
 
+        // Shared Xyce nonlinear Core groups replace each component winding's
+        // diagonal companion with a dense constant mutual-charge block.
+        // Reserve every branch-row/branch-column pair before freezing the
+        // sparse pattern so Newton stamps can install the coupled Jacobian.
+        for group in &circuit.xyce_core_groups {
+            let first_winding = group.windings.first().map(|winding| winding.inductor_index);
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let br = circuit.get_branch_matrix_index(circuit.inductors.branch_indices[index]);
+                let np = circuit.inductors.node_pos[index];
+                let nn = circuit.inductors.node_neg[index];
+                if np > 0 {
+                    triplets.push((br - 1, np - 1, 0.0));
+                    triplets.push((np - 1, br - 1, 0.0));
+                }
+                if nn > 0 {
+                    triplets.push((br - 1, nn - 1, 0.0));
+                    triplets.push((nn - 1, br - 1, 0.0));
+                }
+            }
+            for row_winding in &group.windings {
+                let row_index = row_winding.inductor_index;
+                let row =
+                    circuit.get_branch_matrix_index(circuit.inductors.branch_indices[row_index]);
+                // LEVEL=1's adaptive voltage-direction factor is driven by
+                // the first winding voltage.  Every branch row therefore
+                // needs structural entries to both first-winding node
+                // columns, including rows for the remaining windings.
+                if let Some(first_index) = first_winding {
+                    let first_pos = circuit.inductors.node_pos[first_index];
+                    let first_neg = circuit.inductors.node_neg[first_index];
+                    if first_pos > 0 {
+                        triplets.push((row - 1, first_pos - 1, 0.0));
+                    }
+                    if first_neg > 0 {
+                        triplets.push((row - 1, first_neg - 1, 0.0));
+                    }
+                }
+                for col_winding in &group.windings {
+                    let col_index = col_winding.inductor_index;
+                    let col = circuit
+                        .get_branch_matrix_index(circuit.inductors.branch_indices[col_index]);
+                    triplets.push((row - 1, col - 1, 0.0));
+                }
+            }
+        }
+
+        // LEVEL=1 Xyce Core devices carry one private magnetization unknown.
+        // Keep these scalar states outside the public branch-ordinal space,
+        // but reserve every Jacobian entry used by the coupled DAE rows.
+        for binding in &circuit.jiles_atherton_inductors {
+            let Some(slot) = binding.hidden_m_slot else {
+                continue;
+            };
+            let hidden = circuit.get_hidden_state_matrix_index(slot);
+            let hidden_idx = hidden - 1;
+            let hidden_r = circuit.get_hidden_state_matrix_index(
+                binding
+                    .hidden_r_slot
+                    .expect("LEVEL=1 Core must reserve R state"),
+            );
+            let hidden_r_idx = hidden_r - 1;
+            let index = binding.inductor_index;
+            let branch = circuit.get_branch_matrix_index(circuit.inductors.branch_indices[index]);
+            let branch_idx = branch - 1;
+            triplets.push((hidden_idx, hidden_idx, 0.0));
+            triplets.push((hidden_idx, hidden_r_idx, 0.0));
+            triplets.push((hidden_r_idx, hidden_r_idx, 0.0));
+            triplets.push((hidden_idx, branch_idx, 0.0));
+            triplets.push((branch_idx, hidden_idx, 0.0));
+            triplets.push((hidden_r_idx, branch_idx, 0.0));
+            for &node in &[
+                circuit.inductors.node_pos[index],
+                circuit.inductors.node_neg[index],
+            ] {
+                if node > 0 {
+                    triplets.push((hidden_idx, node - 1, 0.0));
+                }
+            }
+        }
+        for group in &circuit.xyce_core_groups {
+            let Some(slot) = group.hidden_m_slot else {
+                continue;
+            };
+            let hidden = circuit.get_hidden_state_matrix_index(slot);
+            let hidden_idx = hidden - 1;
+            let hidden_r = circuit.get_hidden_state_matrix_index(
+                group
+                    .hidden_r_slot
+                    .expect("LEVEL=1 Core group must reserve R state"),
+            );
+            let hidden_r_idx = hidden_r - 1;
+            triplets.push((hidden_idx, hidden_idx, 0.0));
+            triplets.push((hidden_idx, hidden_r_idx, 0.0));
+            triplets.push((hidden_r_idx, hidden_r_idx, 0.0));
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let branch =
+                    circuit.get_branch_matrix_index(circuit.inductors.branch_indices[index]);
+                let branch_idx = branch - 1;
+                triplets.push((hidden_idx, branch_idx, 0.0));
+                triplets.push((branch_idx, hidden_idx, 0.0));
+                triplets.push((hidden_r_idx, branch_idx, 0.0));
+            }
+            if let Some(first) = group.windings.first() {
+                let index = first.inductor_index;
+                for &node in &[
+                    circuit.inductors.node_pos[index],
+                    circuit.inductors.node_neg[index],
+                ] {
+                    if node > 0 {
+                        triplets.push((hidden_idx, node - 1, 0.0));
+                    }
+                }
+            }
+        }
+
         // Coupled inductor pair stamps.
         for binding in &circuit.coupled_inductor_pairs {
             let device = &binding.device;
