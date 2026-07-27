@@ -7,13 +7,13 @@
 //!
 //! The bindings are organized into focused modules:
 //!
-//! - [`netlist`] - Netlist parsing and introspection
-//! - [`engine`] - Simulation engine and analysis runners
-//! - [`config`] - Simulation and convergence configuration
-//! - [`results`] - Simulation results with NumPy array support
-//! - [`measure`] - .MEAS evaluation against simulation results
-//! - [`abort`] - Ctrl-C cancellation plumbing
-//! - [`errors`] - Python exception types
+//! - `netlist` - Netlist parsing and introspection
+//! - `engine` - Simulation engine and analysis runners
+//! - `config` - Simulation and convergence configuration
+//! - `results` - Simulation results with NumPy array support
+//! - `measure` - .MEAS evaluation against simulation results
+//! - `abort` - Ctrl-C cancellation plumbing
+//! - `errors` - Python exception types
 //!
 //! ## Example
 //!
