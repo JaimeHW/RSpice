@@ -1,8 +1,8 @@
 use super::*;
 
-/// Embedded transistor model library used for fallback model resolution.
+/// Embedded bipolar model library used for fallback model resolution.
 const BUILTIN_TRANSISTOR_LIB: &str =
-    include_str!("../../../../../models/spice/builtin/lib/transistor.lib");
+    include_str!("../../../../../models/spice/builtin/lib/bjt.lib");
 /// Embedded diode model library used for fallback model resolution.
 const BUILTIN_DIODE_LIB: &str = include_str!("../../../../../models/spice/builtin/lib/diode.lib");
 
