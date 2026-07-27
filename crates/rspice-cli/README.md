@@ -173,7 +173,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 
 | Flag | Description |
 | :--- | :--- |
-| `--monte-carlo <N>` | Run N Monte Carlo iterations (operating-point variation); independent runs solve in parallel across cores with seed-stable sampling |
+| `--monte-carlo <N>` | Run N Monte Carlo iterations (operating-point variation). Runs solve in parallel across cores automatically — bounded by `resources.max_parallel_workers`, not by `-j` — with seed-stable sampling, so statistics match a serial sweep exactly. Non-converging runs are dropped from the statistics and counted; all runs failing is an error |
 | `--seed <SEED>` | Random seed for Monte Carlo; the default seed 1 makes runs reproducible (requires `--monte-carlo`) |
 | `--mc-distribution <D>` | Variation distribution: `gaussian` (default), `uniform`, `worst-case` |
 | `--mc-spread <S>` | Relative spread: sigma for gaussian, tolerance otherwise (default: 0.01) |
@@ -360,7 +360,7 @@ Available on every subcommand:
 | :--- | :--- |
 | `-v, --verbose` | Enable debug-level output |
 | `-q, --quiet` | Suppress non-error output |
-| `--config <FILE>` | Use a specific configuration file |
+| `--config <FILE>` | Use this configuration file instead of the discovered user and project files |
 | `--log-level <LEVEL>` | Set log level: `off`, `error`, `warn`, `info`, `debug`, `trace` |
 | `--log-format <FORMAT>` | Log format: `text` (default) or newline-delimited `json` with timestamp, source, process, thread, and `run_id` |
 | `--error-format <FORMAT>` | Fatal diagnostic format: `text` (default) or versioned `json` with stable code/category, retry policy, exit code, and numeric resource/convergence details |
@@ -386,7 +386,9 @@ Configuration is loaded and merged in order of increasing priority:
 4. Environment variables
 5. Command-line arguments
 
-All files use TOML. The full set of recognized keys, with their defaults:
+`--config <FILE>` replaces layers 2 and 3 with that single file. Scalar keys override the layer below; the `[paths]` lists accumulate, so a project file adds search directories rather than discarding the user's.
+
+All files use TOML. Unknown keys are rejected rather than ignored, and every value is range-checked on load (`min_timestep <= max_timestep`, positive tolerances, known enum names) — a bad file or environment override exits 78 naming the offending key. The full set of recognized keys, with their defaults:
 
 ```toml
 [simulation]
