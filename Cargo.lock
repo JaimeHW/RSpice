@@ -4252,6 +4252,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "clap",
+ "rspice-core",
  "rspice-veriloga",
  "serde",
  "serde_json",

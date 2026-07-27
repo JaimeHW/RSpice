@@ -22,6 +22,9 @@ pub mod builtins {
 #[allow(clippy::all)]
 pub(crate) mod kernel_runtime;
 
+#[cfg(feature = "veriloga-builtins-base")]
+pub mod bench;
+
 #[derive(Debug, Clone, Copy)]
 pub struct GeneratedDdtCoefficients {
     pub active: bool,
