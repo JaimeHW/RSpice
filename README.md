@@ -160,7 +160,7 @@ Full command and option reference: [crates/rspice-cli/README.md](crates/rspice-c
 
 ### Desktop UI
 
-Schematic capture with a component palette, waveform inspection, and analysis views (harmonic-balance tones, phase noise), built on egui with a wgpu renderer:
+An IDE built on egui with a wgpu renderer, organized as seven workspaces — Project, Design, Simulate, Results, Verify, Models, and Netlist. Between them they cover schematic and symbol editing, analysis-plan setup, waveform and RF result views (harmonic-balance tones, phase noise), verification evidence, model and PDK binding, and direct netlist editing. The IDE also drives analyses that have no deck card of their own, including PAC, PXF, PSTB, SOA, and reliability:
 
 ```bash
 cargo run --release -p rspice-ui
