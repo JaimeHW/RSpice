@@ -268,7 +268,9 @@ impl RustTranspiler {
                     Err(error) => Err(error),
                 }
             }
-            kernel_ir::PreferredKernelTier::SparseLocal => self.transpile_sparse_local(artifact),
+            kernel_ir::PreferredKernelTier::SparseLocal => {
+                self.transpile_sparse_local(artifact, &plan)
+            }
             kernel_ir::PreferredKernelTier::Structured => {
                 match device::generate_structured_kernel_device(artifact, &self.options) {
                     Ok(device) => Ok(GeneratedRustDeviceReport {
@@ -304,8 +306,22 @@ impl RustTranspiler {
     fn transpile_sparse_local(
         &self,
         artifact: &CanonicalIrArtifact,
+        plan: &kernel_ir::KernelPlan,
     ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
-        match device::generate_sparse_local_kernel_device(artifact, &self.options) {
+        let preflight_bytes = plan.sparse_source_preflight_estimate_bytes();
+        let local = if preflight_bytes > device::MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES {
+            Err(RustBackendError::unsupported(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!(
+                    "sparse local kernel conservative preflight estimate is {preflight_bytes} source bytes; production limit is {} bytes",
+                    device::MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES
+                ),
+            ))
+        } else {
+            device::generate_sparse_local_kernel_device(artifact, &self.options)
+        };
+        match local {
             Ok(device) => Ok(GeneratedRustDeviceReport {
                 device,
                 backend: RustBackendSelection::SparseLocalKernel,

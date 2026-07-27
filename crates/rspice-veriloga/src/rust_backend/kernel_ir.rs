@@ -24,6 +24,14 @@ use super::{RustBackendError, RustDerivativeStorage, RustKernelPlan, RustKernelT
 const MAX_DIRECT_SCALAR_VALUES: usize = 12_000;
 const MAX_DIRECT_SCALAR_OPTIMIZER_NODES: usize = 32_000;
 const MIN_STRUCTURED_EXPANSION_RATIO: usize = 3;
+// Sparse-local emission writes at least a small expression fragment for each
+// structured operation and a control/assignment wrapper for each statement
+// region. These deliberately low coefficients let the auto planner reject
+// only candidates whose IR is already large enough to make source-budget
+// overflow overwhelmingly likely. Borderline models still go through exact
+// emission and the authoritative post-generation byte check.
+const SPARSE_SOURCE_OPERATION_ESTIMATE_BYTES: usize = 24;
+const SPARSE_SOURCE_STATEMENT_REGION_ESTIMATE_BYTES: usize = 24;
 
 fn scalar_expansion_ratio(scalar_optimizer_nodes: usize, structured_operations: usize) -> usize {
     scalar_optimizer_nodes / structured_operations.max(1)
@@ -202,6 +210,16 @@ impl KernelPlan {
 
     pub(super) fn derivative_storage(&self) -> DerivativeStorageStrategy {
         self.metrics.derivative_storage()
+    }
+
+    pub(super) fn sparse_source_preflight_estimate_bytes(&self) -> usize {
+        self.metrics
+            .structured_operations
+            .saturating_mul(SPARSE_SOURCE_OPERATION_ESTIMATE_BYTES)
+            .saturating_add(
+                count_regions(&self.statement_regions)
+                    .saturating_mul(SPARSE_SOURCE_STATEMENT_REGION_ESTIMATE_BYTES),
+            )
     }
 
     pub(super) fn summary(&self, artifact: &CanonicalIrArtifact) -> RustKernelPlan {
@@ -639,5 +657,65 @@ endmodule
         assert_eq!(scalar_expansion_ratio(300, 100), 3);
         assert_eq!(scalar_expansion_ratio(3, 1), 3);
         assert_eq!(scalar_expansion_ratio(3, 0), 3);
+    }
+
+    #[test]
+    fn sparse_source_preflight_counts_operations_and_nested_statement_regions() {
+        let metrics = KernelMetrics {
+            scalar_values: 0,
+            scalar_derivative_entries: 0,
+            scalar_optimizer_nodes: 0,
+            structured_expressions: 0,
+            structured_operations: 10,
+            structured_control_regions: 0,
+            runtime_loop_operations: 0,
+            derivative_lanes: 0,
+            maximum_value_derivative_lanes: 0,
+            scalar_expansion_ratio: 0,
+        };
+        let leaf = KernelRegionPlan {
+            kind: KernelRegionKind::Assignment,
+            root: ExprId::from(0),
+            operation_count: 1,
+            children: Vec::new(),
+        };
+        let plan = KernelPlan {
+            metrics,
+            statement_regions: vec![KernelRegionPlan {
+                kind: KernelRegionKind::Loop,
+                root: ExprId::from(0),
+                operation_count: 1,
+                children: vec![leaf],
+            }],
+            equation_regions: Vec::new(),
+        };
+
+        assert_eq!(
+            plan.sparse_source_preflight_estimate_bytes(),
+            10 * SPARSE_SOURCE_OPERATION_ESTIMATE_BYTES
+                + 2 * SPARSE_SOURCE_STATEMENT_REGION_ESTIMATE_BYTES
+        );
+    }
+
+    #[test]
+    fn sparse_source_preflight_saturates_instead_of_wrapping() {
+        let plan = KernelPlan {
+            metrics: KernelMetrics {
+                scalar_values: 0,
+                scalar_derivative_entries: 0,
+                scalar_optimizer_nodes: 0,
+                structured_expressions: 0,
+                structured_operations: usize::MAX,
+                structured_control_regions: 0,
+                runtime_loop_operations: 0,
+                derivative_lanes: 0,
+                maximum_value_derivative_lanes: 0,
+                scalar_expansion_ratio: 0,
+            },
+            statement_regions: Vec::new(),
+            equation_regions: Vec::new(),
+        };
+
+        assert_eq!(plan.sparse_source_preflight_estimate_bytes(), usize::MAX);
     }
 }
