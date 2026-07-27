@@ -388,3 +388,140 @@ fn whole_application_mutable_access_does_not_grow() {
          MAX_WHOLE_APP_MUTABLE_PARAMS in tests/module_layering.rs."
     );
 }
+
+/// Files are budgeted at 2500 lines.
+///
+/// The budget is not about style. A 8000-line module is where a state machine
+/// and its renderer get to share private fields without anyone deciding they
+/// should, which is how `hardcopy_sources.rs` came to hold both the persisted
+/// source-set records and the adapters that resolve live documents.
+///
+/// Everything currently over budget is listed with its exact length. As with
+/// the layering table, the number is a ceiling: a file may shrink, never grow,
+/// and an entry that drops under budget must be deleted.
+const LINE_BUDGET: usize = 2500;
+
+const OVERSIZED_FILES: &[(&str, usize)] = &[
+    ("workbench/hardcopy_sources.rs", 8325),
+    ("simulation/runner/worker_contract.rs", 8226),
+    ("io/project_io.rs", 8214),
+    ("workbench/hardcopy_render.rs", 8095),
+    ("state/workspace.rs", 7524),
+    ("workbench/visualization_studio.rs", 7600),
+    ("state/model_library/qualification.rs", 6924),
+    ("workbench/surfaces/model_editor.rs", 6892),
+    ("workbench/surfaces/verify.rs", 6794),
+    ("workbench/surfaces/simulate.rs", 6406),
+    ("results/visualization_document.rs", 6394),
+    ("workbench/model_editor.rs", 5107),
+    ("results/report_document.rs", 4877),
+    ("workbench/commands.rs", 4716),
+    ("io/durable_file.rs", 4689),
+    ("product/capability_readiness.rs", 4593),
+    ("simulation/plan/model.rs", 4241),
+    ("workbench/surfaces/models.rs", 4224),
+    ("workbench/result_document/waves.rs", 4199),
+    ("state/model_library/manager.rs", 4171),
+    ("state/model_library/correlation.rs", 4049),
+    ("hardcopy/contract.rs", 4031),
+    ("workbench/docks/inspector/design.rs", 3994),
+    ("workbench/surfaces/project.rs", 3992),
+    ("workbench/feature_availability_data.rs", 3872),
+    ("workbench/project_lifecycle.rs", 3741),
+    ("workbench/surfaces/model_correlation.rs", 3631),
+    ("workbench/state.rs", 3507),
+    ("schematic/view/interaction.rs", 3490),
+    ("workbench/app/actions/workspace.rs", 3399),
+    ("workbench/hardcopy_print.rs", 3355),
+    ("workbench/app/dialogs/hardcopy/render.rs", 3348),
+    ("state/schematic/state/editor_ops/array_ops.rs", 3320),
+    ("simulation/controller.rs", 3213),
+    ("simulation/execution/snapshot.rs", 3068),
+    ("workbench/project_lifecycle/persistence.rs", 3004),
+    ("workbench/feature_availability.rs", 2987),
+    ("workbench/project_launcher.rs", 2931),
+    ("workbench/docks/navigator.rs", 2877),
+    ("workbench/chrome/title_bar.rs", 2775),
+    ("state/project_sources.rs", 2709),
+    ("io/project_execution.rs", 2709),
+    ("simulation/controller/prepared_run.rs", 2676),
+    ("state/schematic/state/editor_ops/movement_ops.rs", 2629),
+    ("workbench/shortcut_artifacts/merge.rs", 2597),
+    ("state/netlist_document/document.rs", 2579),
+    ("workbench/app/dialogs/hardcopy/publish.rs", 2564),
+    ("workbench/app/dialogs/preferences/shortcut_preferences.rs", 2529),
+];
+
+#[test]
+fn source_files_stay_within_the_line_budget() {
+    let root = src_dir();
+    let allowed: BTreeMap<&str, usize> = OVERSIZED_FILES.iter().copied().collect();
+    assert_eq!(
+        allowed.len(),
+        OVERSIZED_FILES.len(),
+        "OVERSIZED_FILES contains a duplicate path"
+    );
+
+    let mut new_offenders = Vec::new();
+    let mut grown = Vec::new();
+    let mut seen = Vec::new();
+
+    for file in rust_sources(&root) {
+        let relative = file
+            .strip_prefix(&root)
+            .unwrap_or(&file)
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let lines = fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()))
+            .lines()
+            .count();
+        match allowed.get(relative.as_str()) {
+            Some(ceiling) => {
+                seen.push(relative.clone());
+                if lines > *ceiling {
+                    grown.push(format!("  {relative}: {lines} lines, ceiling is {ceiling}"));
+                } else if lines <= LINE_BUDGET {
+                    grown.push(format!(
+                        "  {relative}: now {lines} lines, under the {LINE_BUDGET} budget \
+                         — delete its OVERSIZED_FILES entry"
+                    ));
+                }
+            }
+            None if lines > LINE_BUDGET => {
+                new_offenders.push(format!("  {relative}: {lines} lines"));
+            }
+            None => {}
+        }
+    }
+
+    let mut failures = String::new();
+    if !new_offenders.is_empty() {
+        failures.push_str(&format!(
+            "\nFiles newly over the {LINE_BUDGET}-line budget:\n{}\n\
+             Split along a seam the file already has — state from rendering, \
+             contract from adapter — rather than by line count.\n",
+            new_offenders.join("\n")
+        ));
+    }
+    if !grown.is_empty() {
+        failures.push_str(&format!(
+            "\nOversized files that grew, or that are now under budget:\n{}\n",
+            grown.join("\n")
+        ));
+    }
+    let missing: Vec<String> = allowed
+        .keys()
+        .filter(|path| !seen.iter().any(|s| s == *path))
+        .map(|path| format!("  {path}"))
+        .collect();
+    if !missing.is_empty() {
+        failures.push_str(&format!(
+            "\nOVERSIZED_FILES entries for files that no longer exist:\n{}\n\
+             Delete them.\n",
+            missing.join("\n")
+        ));
+    }
+    assert!(failures.is_empty(), "{failures}");
+}
