@@ -115,6 +115,9 @@ pub enum Commands {
     /// Display netlist information without simulating
     Info(InfoArgs),
 
+    /// List the shipped SPICE model packs and look up parts in them
+    Models(ModelsArgs),
+
     /// Compile a Verilog-A model
     #[command(name = "compile-va")]
     CompileVa(CompileVaArgs),
@@ -423,6 +426,30 @@ pub struct RunArgs {
     /// Library file containing corner definitions
     #[arg(long, value_name = "FILE", requires = "corners")]
     pub corner_lib: Option<PathBuf>,
+}
+
+/// Arguments for the `models` subcommand
+#[derive(Args, Debug)]
+pub struct ModelsArgs {
+    /// Look up one part by exact name, reporting every pack that defines it
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["device", "search"])]
+    pub part: Option<String>,
+
+    /// List every definition of a canonical device class, e.g. diode, jfet-n
+    #[arg(long, value_name = "CLASS", conflicts_with = "search")]
+    pub device: Option<String>,
+
+    /// List definitions whose name contains this text
+    #[arg(long, value_name = "TEXT")]
+    pub search: Option<String>,
+
+    /// Restrict the pack listing to packs RSpice may redistribute
+    #[arg(long)]
+    pub shippable_only: bool,
+
+    /// Model tree to read instead of the discovered one
+    #[arg(long, value_name = "DIR")]
+    pub models_dir: Option<PathBuf>,
 }
 
 /// Arguments for the `info` subcommand

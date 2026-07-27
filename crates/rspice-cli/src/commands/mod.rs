@@ -22,6 +22,7 @@ pub mod convert;
 pub(crate) mod export_table;
 pub mod health;
 pub mod info;
+pub mod models;
 pub mod run;
 mod run_signals;
 pub(crate) mod waveform_io;
@@ -31,6 +32,7 @@ pub use compile_va::execute as compile_va;
 pub use convert::execute as convert;
 pub use health::execute as health;
 pub use info::execute as info;
+pub use models::models;
 pub use run::execute as run;
 
 /// `-` as a netlist argument selects stdin.
