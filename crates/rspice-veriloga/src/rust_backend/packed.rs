@@ -364,9 +364,477 @@ pub(super) fn select_rule(condition: &str) -> LaneRule {
     }
 }
 
+/// How the emitted body reaches quantities it does not compute itself.
+///
+/// Parameterized rather than hard-coded so the same emitter serves the stamp,
+/// where these are struct fields, and a test harness, where they are locals.
+pub(super) struct PackedContext {
+    /// Indexing expression for a model parameter, given its index.
+    pub(super) parameter: fn(usize) -> String,
+    /// Indexing expression for a parameter's `$param_given` flag.
+    pub(super) param_given: fn(usize) -> String,
+    /// Expression yielding the potential at a node index.
+    pub(super) node_potential: fn(usize) -> String,
+    pub(super) temperature: String,
+    pub(super) thermal_voltage: String,
+    pub(super) multiplicity: String,
+    pub(super) ddt_scale: String,
+    /// Simulator parameter lookup, given its name and a fallback expression.
+    pub(super) simparam: fn(&str, &str) -> String,
+    /// Whether the netlist supplied a simulator parameter.
+    pub(super) simparam_given: fn(&str) -> String,
+}
+
+/// A generated body, with the counts that decide whether the rewrite paid off.
+#[derive(Debug, Clone)]
+pub(super) struct PackedBody {
+    pub(super) source: String,
+    pub(super) primal_bindings: usize,
+    pub(super) derivative_bindings: usize,
+}
+
+/// Emit straight-line Rust for a primal graph, packing derivatives into arrays.
+///
+/// Values are emitted in the order the graph defines them, which is already a
+/// valid schedule: the builder guarantees operands precede consumers. One
+/// function, no blocks — the split probe in `benchmarks/reference/split-probe`
+/// measured that cutting the body costs 2.4x at run time to save about twenty
+/// seconds of compile time, because arrays crossing a boundary are forced to
+/// memory.
+pub(super) fn emit_body(
+    opt: &OptModel,
+    width: usize,
+    lane_slot: &dyn Fn(&OptValueKind) -> Option<usize>,
+    differentiated: &HashSet<ValueId>,
+    ctx: &PackedContext,
+) -> Result<PackedBody, String> {
+    let mut source = String::new();
+    let mut primal_bindings = 0usize;
+    let mut derivative_bindings = 0usize;
+
+    for value in &opt.values {
+        let id = usize::from(value.id);
+        let primal = primal_expr(value.id, &value.kind, ctx)?;
+        source.push_str(&format!("let v{id} = {primal};\n"));
+        primal_bindings += 1;
+
+        if !differentiated.contains(&value.id) {
+            continue;
+        }
+        let Some(rendered) = derivative_binding(value.id, &value.kind, width, lane_slot, ctx)?
+        else {
+            continue;
+        };
+        source.push_str(&format!("let d{id}: [f64; {width}] = {rendered};\n"));
+        derivative_bindings += 1;
+    }
+
+    Ok(PackedBody {
+        source,
+        primal_bindings,
+        derivative_bindings,
+    })
+}
+
+fn derivative_binding(
+    id: ValueId,
+    kind: &OptValueKind,
+    width: usize,
+    lane_slot: &dyn Fn(&OptValueKind) -> Option<usize>,
+    ctx: &PackedContext,
+) -> Result<Option<String>, String> {
+    let own = format!("v{}", usize::from(id));
+    let rule = match kind {
+        OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. } => seed_rule(lane_slot(kind)),
+        OptValueKind::Unary { op, input } => {
+            unary_rule(*op, &format!("v{}", usize::from(*input)), &own)
+        }
+        OptValueKind::Binary { op, left, right } => binary_rule(
+            *op,
+            &format!("v{}", usize::from(*left)),
+            &format!("v{}", usize::from(*right)),
+            &own,
+        ),
+        OptValueKind::Select { condition, .. } => {
+            select_rule(&truth(&format!("v{}", usize::from(*condition))))
+        }
+        OptValueKind::Ddt { .. } => ddt_rule(&ctx.ddt_scale),
+        other => {
+            return Err(format!(
+                "packed lowering has no derivative rule for {}",
+                kind_label(other)
+            ));
+        }
+    };
+
+    let (input, left, right) = match kind {
+        OptValueKind::Unary { input, .. } | OptValueKind::Ddt { input, .. } => (
+            format!("d{}", usize::from(*input)),
+            String::new(),
+            String::new(),
+        ),
+        OptValueKind::Binary { left, right, .. } => (
+            String::new(),
+            format!("d{}", usize::from(*left)),
+            format!("d{}", usize::from(*right)),
+        ),
+        OptValueKind::Select {
+            then_value,
+            else_value,
+            ..
+        } => (
+            String::new(),
+            format!("d{}", usize::from(*then_value)),
+            format!("d{}", usize::from(*else_value)),
+        ),
+        _ => (String::new(), String::new(), String::new()),
+    };
+
+    Ok(rule.emit(width, &input, &left, &right))
+}
+
+fn primal_expr(
+    id: ValueId,
+    kind: &OptValueKind,
+    ctx: &PackedContext,
+) -> Result<String, String> {
+    let _ = id;
+    Ok(match kind {
+        OptValueKind::RealConstant(value) => format_f64(*value),
+        OptValueKind::BooleanConstant(value) => {
+            if *value {
+                "1.0f64".to_string()
+            } else {
+                "0.0f64".to_string()
+            }
+        }
+        OptValueKind::Parameter { parameter } => (ctx.parameter)(usize::from(*parameter)),
+        OptValueKind::ParamGiven { parameter } => (ctx.param_given)(usize::from(*parameter)),
+        OptValueKind::Temperature => ctx.temperature.clone(),
+        OptValueKind::ThermalVoltage => ctx.thermal_voltage.clone(),
+        OptValueKind::Multiplicity => ctx.multiplicity.clone(),
+        OptValueKind::DdtScale => ctx.ddt_scale.clone(),
+        OptValueKind::NodePotential { node } => (ctx.node_potential)(usize::from(*node)),
+        OptValueKind::Unary { op, input } => {
+            unary_primal(*op, &format!("v{}", usize::from(*input)))
+        }
+        OptValueKind::Binary { op, left, right } => binary_primal(
+            *op,
+            &format!("v{}", usize::from(*left)),
+            &format!("v{}", usize::from(*right)),
+        ),
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => format!(
+            "(if {} {{ v{} }} else {{ v{} }})",
+            truth(&format!("v{}", usize::from(*condition))),
+            usize::from(*then_value),
+            usize::from(*else_value)
+        ),
+        // `ddt` contributes through the integration scale the caller supplies;
+        // its primal is the operand.
+        OptValueKind::Ddt { input, .. } => format!("v{}", usize::from(*input)),
+        OptValueKind::SimParam { name, fallback } => {
+            (ctx.simparam)(name, &format!("v{}", usize::from(*fallback)))
+        }
+        OptValueKind::SimParamGiven { name } => (ctx.simparam_given)(name),
+        other => {
+            return Err(format!(
+                "packed lowering cannot emit a primal for {}",
+                kind_label(other)
+            ));
+        }
+    })
+}
+
+/// Booleans travel as `f64` in the emitted body, matching the existing
+/// backends, so a condition is a comparison against zero rather than a `bool`.
+fn truth(expr: &str) -> String {
+    format!("({expr} != 0.0)")
+}
+
+fn format_f64(value: f64) -> String {
+    if value == value.trunc() && value.abs() < 1.0e15 {
+        format!("{value:.1}f64")
+    } else {
+        format!("{value:e}f64")
+    }
+}
+
+fn unary_primal(op: OptUnaryOp, input: &str) -> String {
+    match op {
+        OptUnaryOp::Pos => input.to_string(),
+        OptUnaryOp::Neg => format!("(-{input})"),
+        OptUnaryOp::Not => format!("(if {input} != 0.0 {{ 0.0f64 }} else {{ 1.0f64 }})"),
+        OptUnaryOp::Exp => format!("({input}).exp()"),
+        OptUnaryOp::LimExp => format!("limexp({input})"),
+        OptUnaryOp::LimExpDerivative => format!("limexp_derivative({input})"),
+        OptUnaryOp::LimitedExp => format!("limited_exp({input})"),
+        OptUnaryOp::LimitedExpDerivative => format!("limited_exp_derivative({input})"),
+        OptUnaryOp::Ln => format!("({input}).ln()"),
+        OptUnaryOp::Sqrt => format!("({input}).sqrt()"),
+        OptUnaryOp::Abs => format!("({input}).abs()"),
+        OptUnaryOp::Sin => format!("({input}).sin()"),
+        OptUnaryOp::Cos => format!("({input}).cos()"),
+        OptUnaryOp::Tan => format!("({input}).tan()"),
+        OptUnaryOp::Sinh => format!("({input}).sinh()"),
+        OptUnaryOp::Cosh => format!("({input}).cosh()"),
+        OptUnaryOp::Tanh => format!("({input}).tanh()"),
+        OptUnaryOp::Atan => format!("({input}).atan()"),
+        OptUnaryOp::Asinh => format!("({input}).asinh()"),
+        OptUnaryOp::Floor => format!("({input}).floor()"),
+        OptUnaryOp::Ceil => format!("({input}).ceil()"),
+    }
+}
+
+fn binary_primal(op: OptBinaryOp, left: &str, right: &str) -> String {
+    let compare = |symbol: &str| {
+        format!("(if {left} {symbol} {right} {{ 1.0f64 }} else {{ 0.0f64 }})")
+    };
+    match op {
+        OptBinaryOp::Add => format!("({left} + {right})"),
+        OptBinaryOp::Sub => format!("({left} - {right})"),
+        OptBinaryOp::Mul => format!("({left} * {right})"),
+        OptBinaryOp::Div => format!("({left} / {right})"),
+        OptBinaryOp::Mod => format!("({left} % {right})"),
+        OptBinaryOp::Pow => format!("({left}).powf({right})"),
+        OptBinaryOp::Eq => compare("=="),
+        OptBinaryOp::Ne => compare("!="),
+        OptBinaryOp::Lt => compare("<"),
+        OptBinaryOp::Le => compare("<="),
+        OptBinaryOp::Gt => compare(">"),
+        OptBinaryOp::Ge => compare(">="),
+        OptBinaryOp::And => format!(
+            "(if {left} != 0.0 && {right} != 0.0 {{ 1.0f64 }} else {{ 0.0f64 }})"
+        ),
+        OptBinaryOp::Or => format!(
+            "(if {left} != 0.0 || {right} != 0.0 {{ 1.0f64 }} else {{ 0.0f64 }})"
+        ),
+    }
+}
+
+fn kind_label(kind: &OptValueKind) -> &'static str {
+    match kind {
+        OptValueKind::SimParam { .. } => "SimParam",
+        OptValueKind::SimParamGiven { .. } => "SimParamGiven",
+        OptValueKind::Time => "Time",
+        OptValueKind::Analysis { .. } => "Analysis",
+        OptValueKind::Ddx { .. } => "Ddx",
+        OptValueKind::LimitPrevious { .. } => "LimitPrevious",
+        OptValueKind::Limit { .. } => "Limit",
+        OptValueKind::BranchFlow { .. } => "BranchFlow",
+        OptValueKind::BranchUnknownFlow { .. } => "BranchUnknownFlow",
+        OptValueKind::LoopIndex { .. } => "LoopIndex",
+        OptValueKind::CountedSum { .. } => "CountedSum",
+        OptValueKind::RuntimeLoopVariable { .. } => "RuntimeLoopVariable",
+        OptValueKind::RuntimeLoopVariableDerivative { .. } => "RuntimeLoopVariableDerivative",
+        OptValueKind::RuntimeLoopResult { .. } => "RuntimeLoopResult",
+        OptValueKind::RuntimeLoopResultDerivative { .. } => "RuntimeLoopResultDerivative",
+        OptValueKind::EquationValue { .. } => "EquationValue",
+        _ => "value",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonical_ir::OptModel;
+    use crate::{CompilerOptions, VerilogACompiler};
+
+    fn test_context() -> PackedContext {
+        PackedContext {
+            parameter: |index| format!("p[{index}]"),
+            param_given: |index| format!("(if pg[{index}] {{ 1.0f64 }} else {{ 0.0f64 }})"),
+            node_potential: |index| format!("nv[{index}]"),
+            temperature: "temp".to_string(),
+            thermal_voltage: "vt".to_string(),
+            multiplicity: "mult".to_string(),
+            ddt_scale: "ddt_scale".to_string(),
+            simparam: |name, fallback| format!("simparam_or(\"{name}\", {fallback})"),
+            simparam_given: |name| format!("(if simparam_given(\"{name}\") {{ 1.0f64 }} else {{ 0.0f64 }})"),
+        }
+    }
+
+    fn primal_of(source: &str) -> OptModel {
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile to canonical IR");
+        OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir).expect("primal OptIR")
+    }
+
+    #[test]
+    fn emits_a_body_for_a_nonlinear_two_terminal_device() {
+        let opt = primal_of(
+            r#"
+module packed_diode(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real is = 1e-14;
+    parameter real vt = 0.025;
+    analog begin
+        real vd;
+        vd = V(p, n);
+        I(p, n) <+ is * (exp(vd / vt) - 1.0);
+    end
+endmodule
+"#,
+        );
+        let differentiated = differentiated_values(&opt);
+        let body = emit_body(
+            &opt,
+            2,
+            &|kind| match kind {
+                OptValueKind::NodePotential { node } => Some(usize::from(*node)),
+                _ => None,
+            },
+            &differentiated,
+            &test_context(),
+        )
+        .expect("emit body");
+
+        assert!(body.primal_bindings > 0);
+        assert!(
+            body.derivative_bindings > 0,
+            "a diode's current depends on its terminal voltage"
+        );
+        // The seed must be a unit vector, and the exponential must scale by the
+        // value it just computed rather than recomputing exp.
+        assert!(body.source.contains("] = 1.0; d }"), "{}", body.source);
+        assert!(body.source.contains(".exp()"), "{}", body.source);
+        assert!(
+            body.derivative_bindings < body.primal_bindings,
+            "constants and parameters must not carry derivative arrays: {} of {}",
+            body.derivative_bindings,
+            body.primal_bindings
+        );
+    }
+
+    #[test]
+    fn emits_a_body_for_the_phase_one_gate_model() {
+        // bsimbulk is the model the rewrite is measured against. Emitting it is
+        // what tells us the rule set is complete rather than complete for
+        // fixtures; the reported counts are the size half of the gate.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/veriloga/cmc/BSIM-BULK107.2.1_02112025/code/bsimbulk.va");
+        let source = std::fs::read_to_string(&path).expect("read bsimbulk");
+        let mut options = CompilerOptions::default();
+        options
+            .include_paths
+            .push(path.parent().expect("model directory").to_path_buf());
+        let artifact = VerilogACompiler::new(options)
+            .compile_canonical_ir_module(&source, Some("bsimbulk"))
+            .expect("compile bsimbulk");
+        let opt = OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir)
+            .expect("primal OptIR");
+
+        let differentiated = differentiated_values(&opt);
+        // Which awkward kinds actually need a derivative rule, as opposed to
+        // merely a primal one. A counted sum's derivative is another counted
+        // sum -- a real loop, not straight-line code -- so it matters a great
+        // deal whether any of them are reachable from a seed.
+        for (label, count, differentiated_count) in [
+            ("SimParam", 0, 0),
+            ("LoopIndex", 0, 0),
+            ("CountedSum", 0, 0),
+        ]
+        .iter()
+        .map(|(label, _, _): &(&str, usize, usize)| {
+            let matches = |kind: &OptValueKind| match (*label, kind) {
+                ("SimParam", OptValueKind::SimParam { .. }) => true,
+                ("LoopIndex", OptValueKind::LoopIndex { .. }) => true,
+                ("CountedSum", OptValueKind::CountedSum { .. }) => true,
+                _ => false,
+            };
+            let total = opt.values.iter().filter(|v| matches(&v.kind)).count();
+            let diff = opt
+                .values
+                .iter()
+                .filter(|v| matches(&v.kind) && differentiated.contains(&v.id))
+                .count();
+            (*label, total, diff)
+        }) {
+            eprintln!("{label:<12} total={count} differentiated={differentiated_count}");
+        }
+
+        let body = emit_body(
+            &opt,
+            17,
+            &|kind| match kind {
+                OptValueKind::NodePotential { node } => Some(usize::from(*node)),
+                _ => None,
+            },
+            &differentiated,
+            &test_context(),
+        );
+
+        match body {
+            Ok(body) => {
+                eprintln!(
+                    "bsimbulk packed: primal={} derivative={} total={} source={}KB",
+                    body.primal_bindings,
+                    body.derivative_bindings,
+                    body.primal_bindings + body.derivative_bindings,
+                    body.source.len() / 1024
+                );
+                assert!(body.derivative_bindings > 0);
+                assert!(
+                    body.derivative_bindings < body.primal_bindings,
+                    "reachability should spare the parameter and geometry arithmetic"
+                );
+            }
+            Err(message) => {
+                // The one gap left, and it is a bounded one: a counted sum's
+                // term has to be re-emitted inside a loop because it varies
+                // with the loop index, which straight-line emission cannot do.
+                // Neither of bsimbulk's two counted sums is differentiated, so
+                // only the primal path needs it.
+                //
+                // Fail on anything else. A new gap must surface here rather
+                // than be absorbed into a permissive assertion.
+                assert!(
+                    message.contains("CountedSum") || message.contains("LoopIndex"),
+                    "unexpected gap in the packed lowering: {message}"
+                );
+                eprintln!("bsimbulk still blocked on the counted-sum machinery: {message}");
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_kinds_fail_loudly_rather_than_emitting_something_wrong() {
+        // A model reaching a kind with no rule must stop generation. Silently
+        // skipping it would drop a term from the Jacobian, which no test of the
+        // emitted source would catch.
+        let opt = primal_of(
+            r#"
+module packed_transient(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ ddt(V(p, n)) + $abstime;
+    end
+endmodule
+"#,
+        );
+        let differentiated = differentiated_values(&opt);
+        let result = emit_body(
+            &opt,
+            2,
+            &|_| None,
+            &differentiated,
+            &test_context(),
+        );
+        assert!(
+            result.is_err(),
+            "$abstime has no packed rule yet and must be reported"
+        );
+        let message = result.unwrap_err();
+        assert!(message.contains("Time"), "{message}");
+    }
 
     #[test]
     fn exp_scales_by_its_own_result_not_a_recomputed_exp() {
