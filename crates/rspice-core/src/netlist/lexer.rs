@@ -169,10 +169,16 @@ impl<'a> Lexer<'a> {
     }
 
     /// Skip horizontal whitespace (spaces and tabs, not newlines)
+    ///
+    /// `\x1A` is the DOS end-of-file marker. Model files written on DOS-era
+    /// tooling still carry it — 180 of the files vendored under models/spice/
+    /// end with one — and it is meaningless once such a file is concatenated
+    /// or `.include`d into a larger deck. ngspice ignores it, so it is skipped
+    /// here rather than rejected as an unexpected character.
     fn skip_whitespace(&mut self) {
         while self.pos < self.input.len() {
             let c = self.input[self.pos..].chars().next().unwrap();
-            if c == ' ' || c == '\t' || c == '\r' {
+            if c == ' ' || c == '\t' || c == '\r' || c == '\u{1a}' {
                 self.pos += c.len_utf8();
             } else {
                 break;

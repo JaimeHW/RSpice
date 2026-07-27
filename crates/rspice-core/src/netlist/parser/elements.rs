@@ -5563,6 +5563,35 @@ fn try_controlled_source_behavioral_assignment(
     Ok(Some(expression))
 }
 
+/// Consume one controlling node pair of a `POLY(n)` voltage-controlled source.
+///
+/// SPICE2 writes the pairs bare (`POLY(2) 3 0 4 0`). PSpice also permits them
+/// parenthesised and comma-separated (`POLY(2) (3,0) (4,0)`), which is the form
+/// the PARTS-generated op-amp macromodels use — TL072, TL082 and OP07 all open
+/// with `EGND 99 0 POLY(2) (3,0) (4,0) 0 .5 .5`. ngspice accepts both.
+fn expect_poly_controlling_pair(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<(String, String), ParseError> {
+    skip_commas(stream);
+    if !stream.consume(&TokenKind::LParen) {
+        let positive = expect_node(stream, line_num)?;
+        let negative = expect_node(stream, line_num)?;
+        return Ok((positive, negative));
+    }
+
+    let positive = expect_node(stream, line_num)?;
+    skip_commas(stream);
+    let negative = expect_node(stream, line_num)?;
+    if !stream.consume(&TokenKind::RParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected ')' closing POLY controlling pair ({positive},{negative})"),
+        });
+    }
+    Ok((positive, negative))
+}
+
 /// Build the polynomial expression for SPICE2-style `POLY(n)` sources.
 ///
 /// Monomials follow the graded ordering every PSpice-derived deck assumes:
@@ -5756,8 +5785,7 @@ fn parse_voltage_controlled_source(
         Some(ControlledSourceForm::Poly(dims)) => {
             let mut vars = Vec::with_capacity(dims);
             for _ in 0..dims {
-                let cp = expect_node(stream, line_num)?;
-                let cn = expect_node(stream, line_num)?;
+                let (cp, cn) = expect_poly_controlling_pair(stream, line_num)?;
                 vars.push(format!("V({},{})", cp, cn));
             }
             let coeffs = collect_numeric_tail(stream, line_num, params, element_label)?;

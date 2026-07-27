@@ -651,6 +651,7 @@ fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &Param
     };
 
     if command.eq_ignore_ascii_case(".PARAM")
+        || command.eq_ignore_ascii_case(".PARAMS")
         || command.eq_ignore_ascii_case(".CSPARAM")
         || command.eq_ignore_ascii_case(".GLOBAL_PARAM")
     {

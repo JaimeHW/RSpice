@@ -1957,6 +1957,9 @@ pub(super) fn take_deferrable_value(
             });
         }
     }
+    if let Some(value) = take_contiguous_instance_expression(stream, params, defer) {
+        return Some(value);
+    }
     if defer {
         match &stream.peek().kind {
             TokenKind::Expression(_) => {
@@ -1982,6 +1985,49 @@ pub(super) fn take_deferrable_value(
         }
     }
     try_value(stream, params).map(DeferrableValue::Resolved)
+}
+
+/// Take an unbraced arithmetic expression from an instance parameter.
+///
+/// Foundry PDK subcircuits write instance geometry as plain arithmetic over the
+/// subcircuit's own parameters — IHP SG13G2's diode subcircuits carry
+/// `area=mf*aws pj=mf*pws`, and the same shape appears on MOS `w`/`l` across
+/// sky130 and GF180MCU. ngspice evaluates these through numparam without
+/// requiring braces, so `{...}` cannot be the only accepted spelling.
+///
+/// The scan only claims a token run that is genuinely *compound*, reusing the
+/// same guards as the `.model` card path. A lone value or a bare parameter
+/// reference is left to the caller, which keeps engineering suffixes (`1u`) and
+/// deferred single-identifier references on their existing paths.
+fn take_contiguous_instance_expression(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    defer: bool,
+) -> Option<DeferrableValue> {
+    let first = stream.peek().clone();
+    if !model_scalar_expression_token_can_start(&first.kind) {
+        return None;
+    }
+
+    let mut probe = stream.clone();
+    let probed = collect_contiguous_expression(&mut probe)?;
+    if !model_scalar_expression_is_compound(&first, &probed) {
+        return None;
+    }
+
+    let expr = collect_contiguous_expression(stream)?;
+    // A signed literal (`ic=-5`) reads as compound but is still just a number;
+    // resolving it here keeps it off the deferred path it never used before.
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+        return Some(DeferrableValue::Resolved(value));
+    }
+    if defer {
+        return Some(DeferrableValue::Deferred(expr));
+    }
+    Some(match eval_expression(&expr, params) {
+        Ok(value) => DeferrableValue::Resolved(value),
+        Err(_) => DeferrableValue::Deferred(expr),
+    })
 }
 
 pub(super) fn skip_optional_param_name(stream: &mut TokenStream, param_name: &str) {
