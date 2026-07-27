@@ -230,6 +230,19 @@ fn generated_eval_context_reports_analysis_mode() {
 }
 
 #[test]
+fn generated_static_stamp_cache_retains_only_existing_csc_slots() {
+    let nodes = (1..=80).collect::<Vec<_>>();
+    let branches: [usize; 0] = [];
+    let matrix = StaticMatrix::from_triplets(80, 80, &[(0, 0, 0.0), (7, 19, 0.0), (79, 79, 0.0)])
+        .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+
+    cache.link(&matrix, &nodes, &branches, 80);
+
+    assert_eq!(cache.linked_slot_count(), 3);
+}
+
+#[test]
 fn generated_dense_current_stamper_linearizes_in_one_dense_path() {
     let voltages = [1.0, 2.0, 3.0, 4.0];
     let mut rhs = vec![0.0; 4];

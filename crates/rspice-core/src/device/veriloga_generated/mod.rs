@@ -1374,7 +1374,81 @@ pub struct GeneratedStaticStampCache {
     branch_axes: Vec<Option<usize>>,
     axis_matrix_indices: Vec<Option<usize>>,
     matrix_axis_lookup: Vec<(usize, usize)>,
-    slots: Vec<Option<CscIndex>>,
+    slots: GeneratedStaticStampSlots,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GeneratedStaticStampSlots {
+    logical_len: usize,
+    linked_len: usize,
+    dense: Vec<Option<CscIndex>>,
+    entries: Vec<(usize, CscIndex)>,
+}
+
+impl GeneratedStaticStampSlots {
+    const MAX_DENSE_LOGICAL_LEN: usize = 1_024;
+
+    #[inline]
+    fn clear(&mut self) {
+        self.logical_len = 0;
+        self.linked_len = 0;
+        self.dense.clear();
+        self.entries.clear();
+    }
+
+    #[inline]
+    fn reset(&mut self, logical_len: usize) {
+        self.logical_len = logical_len;
+        self.linked_len = 0;
+        self.dense.clear();
+        self.entries.clear();
+    }
+
+    #[inline]
+    fn push(&mut self, key: usize, index: CscIndex) {
+        debug_assert!(
+            self.entries
+                .last()
+                .is_none_or(|&(previous, _)| previous < key),
+            "generated static stamp slots must be linked in key order"
+        );
+        self.linked_len += 1;
+        self.entries.push((key, index));
+    }
+
+    fn finish(&mut self) {
+        let use_dense = self.logical_len <= Self::MAX_DENSE_LOGICAL_LEN
+            || self.entries.len().saturating_mul(3) >= self.logical_len;
+        if !use_dense {
+            return;
+        }
+
+        self.dense.resize(self.logical_len, None);
+        for (key, index) in self.entries.drain(..) {
+            self.dense[key] = Some(index);
+        }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.logical_len
+    }
+
+    #[inline]
+    fn get(&self, key: usize) -> Option<CscIndex> {
+        if !self.dense.is_empty() {
+            return self.dense.get(key).copied().flatten();
+        }
+        self.entries
+            .binary_search_by_key(&key, |&(entry_key, _)| entry_key)
+            .ok()
+            .map(|position| self.entries[position].1)
+    }
+
+    #[inline]
+    fn linked_len(&self) -> usize {
+        self.linked_len
+    }
 }
 
 impl GeneratedStaticStampCache {
@@ -1388,8 +1462,7 @@ impl GeneratedStaticStampCache {
     ) {
         self.rebuild_axis_indices(nodes, branches, num_nodes);
         let width = self.axis_count();
-        self.slots.clear();
-        self.slots.resize(width * width, None);
+        self.slots.reset(width * width);
         for row_axis in 0..width {
             let Some(row) = self.axis_matrix_indices[row_axis] else {
                 continue;
@@ -1398,9 +1471,18 @@ impl GeneratedStaticStampCache {
                 let Some(col) = self.axis_matrix_indices[col_axis] else {
                     continue;
                 };
-                self.slots[row_axis * width + col_axis] = matrix.get_index(row, col);
+                if let Some(index) = matrix.get_index(row, col) {
+                    self.slots.push(row_axis * width + col_axis, index);
+                }
             }
         }
+        self.slots.finish();
+    }
+
+    /// Number of CSC locations retained after linking.
+    #[inline]
+    pub fn linked_slot_count(&self) -> usize {
+        self.slots.linked_len()
     }
 
     #[inline]
@@ -1503,8 +1585,6 @@ impl GeneratedStaticStampCache {
         }
         self.slots
             .get(row_axis.checked_mul(width)?.checked_add(col_axis)?)
-            .copied()
-            .flatten()
     }
 
     #[inline]
@@ -3683,11 +3763,7 @@ impl<'a> GeneratedStamper<'a> {
         let slot = if slots_ready {
             debug_assert!(row_axis < width);
             debug_assert!(col_axis < width);
-            cache
-                .slots
-                .get(row_axis * width + col_axis)
-                .copied()
-                .flatten()
+            cache.slots.get(row_axis * width + col_axis)
         } else {
             None
         };
@@ -5031,11 +5107,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
         let slot = if slots_ready {
             debug_assert!(row_axis < width);
             debug_assert!(col_axis < width);
-            cache
-                .slots
-                .get(row_axis * width + col_axis)
-                .copied()
-                .flatten()
+            cache.slots.get(row_axis * width + col_axis)
         } else {
             None
         };
