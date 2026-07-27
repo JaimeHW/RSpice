@@ -1292,7 +1292,7 @@ mod tests {
 
     #[test]
     fn schematic_canvas_has_no_static_shortcut_prose() {
-        let source = include_str!("mod.rs");
+        let source = include_str!("view.rs");
         assert!(!source.contains(concat!("Use S", " for select")));
         assert!(!source.contains(concat!("Escape", " to cancel")));
     }

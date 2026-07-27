@@ -345,6 +345,35 @@ fn module_references_respect_the_layer_order() {
     assert!(failures.is_empty(), "{failures}");
 }
 
+/// The crate uses one module-file convention: `foo.rs` beside `foo/`.
+///
+/// It previously mixed both forms, sometimes inside the same directory —
+/// `dialogs/` held `hardcopy.rs` + `hardcopy/` next to `library/mod.rs`.
+/// Picking one makes a module's own file findable by name instead of by
+/// remembering which style its author used.
+#[test]
+fn modules_use_the_sibling_file_convention_not_mod_rs() {
+    let root = src_dir();
+    let offenders: Vec<String> = rust_sources(&root)
+        .into_iter()
+        .filter(|path| path.file_name().is_some_and(|name| name == "mod.rs"))
+        .map(|path| {
+            path.strip_prefix(&root)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "these modules use `mod.rs` instead of a sibling `foo.rs`:\n  {}\n\
+         Rename `foo/mod.rs` to `foo.rs`, leaving `foo/` for its submodules.\n\
+         Note that `include_str!` inside a moved file resolves against the new \
+         parent directory, so self-referencing test fixtures need updating too.",
+        offenders.join("\n  ")
+    );
+}
+
 #[test]
 fn whole_application_mutable_access_does_not_grow() {
     let root = src_dir();

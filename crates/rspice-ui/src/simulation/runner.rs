@@ -1077,8 +1077,8 @@ mod tests {
 
     #[test]
     fn production_runner_surface_exposes_only_the_opaque_prepared_start() {
-        let source = include_str!("mod.rs");
-        let controller_source = include_str!("../controller/mod.rs");
+        let source = include_str!("runner.rs");
+        let controller_source = include_str!("controller.rs");
         // Split boundary-sensitive search strings so this test's own source
         // cannot satisfy or invalidate the assertions.
         let prepared_signature = ["pub(in crate::simulation) fn ", "start_prepared"].concat();
