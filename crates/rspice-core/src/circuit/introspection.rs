@@ -403,7 +403,19 @@ impl CircuitData {
                 continue;
             };
             let h_si = binding.device.magnetic_field();
-            let b_si = binding.device.flux_density();
+            let b_output = if binding.core_bh_si_units {
+                binding.device.flux_density()
+            } else {
+                // MutIndNonLin stores H in Oersted before forming its
+                // default Gauss-valued B output.  Preserve that canonical
+                // Xyce conversion instead of converting the physical SI B
+                // directly; the distinction matters for high-field cores.
+                let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
+                1.0e4
+                    * mu_0
+                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                        + binding.device.magnetization())
+            };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
                 device_kind: "NONLINEAR_CORE",
@@ -427,11 +439,7 @@ impl CircuitData {
                     ),
                     (
                         "b",
-                        if binding.core_bh_si_units {
-                            b_si
-                        } else {
-                            b_si * 1.0e4
-                        },
+                        b_output,
                     ),
                 ],
             });
@@ -444,7 +452,15 @@ impl CircuitData {
         for binding in &self.xyce_core_groups {
             let name = binding.core_output_name.as_str();
             let h_si = binding.device.magnetic_field();
-            let b_si = binding.device.flux_density();
+            let b_output = if binding.core_bh_si_units {
+                binding.device.flux_density()
+            } else {
+                let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
+                1.0e4
+                    * mu_0
+                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                        + binding.device.magnetization())
+            };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
                 device_kind: "NONLINEAR_CORE",
@@ -468,11 +484,7 @@ impl CircuitData {
                     ),
                     (
                         "b",
-                        if binding.core_bh_si_units {
-                            b_si
-                        } else {
-                            b_si * 1.0e4
-                        },
+                        b_output,
                     ),
                 ],
             });
