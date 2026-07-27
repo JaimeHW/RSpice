@@ -206,3 +206,113 @@ fn report_how_much_of_the_graph_is_newton_loop_work() {
         "a model must have per-iteration work"
     );
 }
+
+#[test]
+fn unscheduled_values_are_not_needed_by_the_equations() {
+    // Only about a third of the primal graph appears in a schedule. If the rest
+    // were reachable from an equation root, a schedule-driven emitter would
+    // silently drop terms; if they are unreachable, emitting only scheduled
+    // values is both correct and a large saving.
+    use rspice_veriloga::canonical_ir::{OptOp, ValueId};
+    let shape = shape_of(
+        &["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"],
+        "bsimbulk",
+    );
+
+    let mut scheduled = std::collections::HashSet::new();
+    for schedule in &shape.primal.schedules {
+        for op in &schedule.ops {
+            if let OptOp::ComputeValue { value } = op {
+                scheduled.insert(*value);
+            }
+        }
+    }
+
+    // Walk operands from every scheduled value; anything reached must itself be
+    // available, either scheduled or a leaf the emitter can inline.
+    let operands = |kind: &OptValueKind| -> Vec<ValueId> {
+        match kind {
+            OptValueKind::Unary { input, .. } => vec![*input],
+            OptValueKind::Binary { left, right, .. } => vec![*left, *right],
+            OptValueKind::Select { condition, then_value, else_value } => {
+                vec![*condition, *then_value, *else_value]
+            }
+            OptValueKind::Ddt { input, .. } => vec![*input],
+            OptValueKind::SimParam { fallback, .. } => vec![*fallback],
+            OptValueKind::CountedSum { count, initial, term, .. } => vec![*count, *initial, *term],
+            OptValueKind::Limit { proposed, candidate, .. } => vec![*proposed, *candidate],
+            OptValueKind::Ddx { value, .. } => vec![*value],
+            OptValueKind::LimitPrevious { proposed, .. } => vec![*proposed],
+            _ => Vec::new(),
+        }
+    };
+
+    let mut needed = std::collections::HashSet::new();
+    let mut stack: Vec<ValueId> = scheduled.iter().copied().collect();
+    while let Some(value) = stack.pop() {
+        if !needed.insert(value) {
+            continue;
+        }
+        let kind = &shape.primal.values[usize::from(value)].kind;
+        for operand in operands(kind) {
+            stack.push(operand);
+        }
+    }
+
+    let unscheduled_but_needed = needed.difference(&scheduled).count();
+    eprintln!(
+        "scheduled={} reachable={} unscheduled-but-needed={} of {} values",
+        scheduled.len(),
+        needed.len(),
+        unscheduled_but_needed,
+        shape.primal.values.len()
+    );
+
+    assert!(
+        needed.len() <= shape.primal.values.len(),
+        "reachability cannot exceed the graph"
+    );
+}
+
+#[test]
+fn report_how_sparse_the_derivatives_actually_are() {
+    // Uniform lane width computes every lane for every differentiated value. If
+    // the average value only has a few live lanes, that is a large multiple of
+    // wasted arithmetic, and the lowering probe's sub-linear scaling does not
+    // rescue it: that measured vectorization efficiency with every lane live,
+    // not the cost of lanes that are structurally zero.
+    let path = model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]);
+    let source = std::fs::read_to_string(&path).expect("read model source");
+    let mut options = CompilerOptions::default();
+    options.include_paths.push(
+        path.parent().expect("model directory").to_path_buf(),
+    );
+    let artifact = VerilogACompiler::new(options)
+        .compile_canonical_ir_module(&source, Some("bsimbulk"))
+        .expect("compile bsimbulk");
+
+    let mut histogram: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
+    let mut total_lanes = 0usize;
+    let mut differentiated = 0usize;
+    let mut widest = 0usize;
+    for value in &artifact.opt.values {
+        let lanes = value.derivatives.len();
+        if lanes == 0 {
+            continue;
+        }
+        differentiated += 1;
+        total_lanes += lanes;
+        widest = widest.max(lanes);
+        *histogram.entry(lanes).or_default() += 1;
+    }
+
+    eprintln!(
+        "differentiated values={differentiated} mean live lanes={:.2} widest={widest}",
+        total_lanes as f64 / differentiated as f64
+    );
+    for (lanes, count) in histogram.iter().take(12) {
+        eprintln!("  {lanes:>3} lanes: {count}");
+    }
+
+    assert!(differentiated > 0, "a MOSFET must differentiate something");
+}

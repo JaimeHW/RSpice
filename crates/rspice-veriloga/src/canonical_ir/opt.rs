@@ -461,6 +461,21 @@ pub struct OptModel {
 }
 
 impl OptModel {
+    /// The coarsest event that can change each value, indexed by value id.
+    ///
+    /// [`OptSchedule`] already carries this for the values it names, but only
+    /// for those: most of a compact model's graph is inlined into its consumers
+    /// rather than scheduled, and a backend that decides for itself what to
+    /// bind still has to know when each value goes stale. For bsimbulk that is
+    /// the difference between 85 values of per-iteration work and all 12,028.
+    pub fn value_invalidation_classes(&self) -> Vec<InvalidationClass> {
+        let mut memo = vec![None; self.values.len()];
+        self.values
+            .iter()
+            .map(|value| value_invalidation(&self.values, value.id, &mut memo))
+            .collect()
+    }
+
     pub fn from_mir(mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         mir.validate()?;
 

@@ -393,6 +393,23 @@ pub(super) struct PackedBody {
     pub(super) derivative_bindings: usize,
 }
 
+/// A model split into the passes that re-run at different rates.
+///
+/// Emitting one body for everything is correct but measures nothing useful:
+/// almost all of a compact model is parameter and geometry preprocessing that
+/// changes only when the instance does. For bsimbulk that is 5,046 values
+/// against 85 per Newton iteration, so a single pass does roughly sixty times
+/// the per-iteration work and cannot be compared with a backend that caches.
+#[derive(Debug, Clone)]
+pub(super) struct PackedSchedule {
+    /// Recomputed only when instance parameters change.
+    pub(super) instance_static: PackedBody,
+    /// Recomputed when temperature changes.
+    pub(super) temperature_static: PackedBody,
+    /// Recomputed every Newton iteration. This is the hot path.
+    pub(super) newton: PackedBody,
+}
+
 /// Emit straight-line Rust for a primal graph, packing derivatives into arrays.
 ///
 /// Values are emitted in the order the graph defines them, which is already a
@@ -580,6 +597,76 @@ fn counted_sum_expr(
 /// reads this one rather than forcing a binding for every constant in the
 /// model, which would undo what reachability just saved.
 pub(super) const ZERO_ARRAY: &str = "DZERO";
+
+/// Emit one body per invalidation class.
+///
+/// Values keep their names across bodies, so a later pass reads an earlier
+/// one's bindings directly. Whether those cross a function boundary as
+/// arguments or through a cache is the caller's decision; what matters here is
+/// that per-iteration work is separated from work that is not.
+pub(super) fn emit_scheduled(
+    opt: &OptModel,
+    width: usize,
+    lane_slot: &dyn Fn(&OptValueKind) -> Option<usize>,
+    differentiated: &HashSet<ValueId>,
+    ctx: &PackedContext,
+) -> Result<PackedSchedule, String> {
+    use crate::canonical_ir::InvalidationClass;
+
+    let classes = opt.value_invalidation_classes();
+    let loop_interior = loop_dependent_values(opt);
+
+    let mut bodies = [
+        // Anything that is not one of the two static classes runs per
+        // iteration. Treating an unrecognized class as static would cache a
+        // value that changes, which is silent and wrong; treating it as
+        // dynamic only costs time.
+        (InvalidationClass::InstanceStatic, PackedBody { source: String::new(), primal_bindings: 0, derivative_bindings: 0 }),
+        (InvalidationClass::TemperatureStatic, PackedBody { source: String::new(), primal_bindings: 0, derivative_bindings: 0 }),
+        (InvalidationClass::NewtonIteration, PackedBody { source: String::new(), primal_bindings: 0, derivative_bindings: 0 }),
+    ];
+
+    for value in &opt.values {
+        if loop_interior.contains(&value.id) {
+            continue;
+        }
+        let class = classes[usize::from(value.id)];
+        let slot = match class {
+            InvalidationClass::InstanceStatic => 0,
+            InvalidationClass::TemperatureStatic => 1,
+            _ => 2,
+        };
+
+        let id = usize::from(value.id);
+        let primal = match &value.kind {
+            OptValueKind::CountedSum { count, initial, term, .. } => counted_sum_expr(
+                opt, value.id, *count, *initial, *term, &loop_interior, ctx,
+            )?,
+            other => primal_expr(value.id, other, ctx)?,
+        };
+        let body = &mut bodies[slot].1;
+        body.source.push_str(&format!("let v{id} = {primal};\n"));
+        body.primal_bindings += 1;
+
+        if !differentiated.contains(&value.id) {
+            continue;
+        }
+        if let Some(rendered) =
+            derivative_binding(value.id, &value.kind, width, lane_slot, differentiated, ctx)?
+        {
+            body.source
+                .push_str(&format!("let d{id}: [f64; {width}] = {rendered};\n"));
+            body.derivative_bindings += 1;
+        }
+    }
+
+    let [(_, instance_static), (_, temperature_static), (_, newton)] = bodies;
+    Ok(PackedSchedule {
+        instance_static,
+        temperature_static,
+        newton,
+    })
+}
 
 fn derivative_binding(
     id: ValueId,
@@ -1154,6 +1241,92 @@ endmodule
                 "lane {lane}: packed {got:e} vs reference {want:e}"
             );
         }
+    }
+
+    #[test]
+    fn the_newton_body_is_a_small_fraction_of_the_gate_model() {
+        // The point of splitting by invalidation class. A single body does all
+        // of bsimbulk's parameter and geometry preprocessing on every call,
+        // which is not what the existing backends do and not what their
+        // published per-stamp numbers measure.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/veriloga/cmc/BSIM-BULK107.2.1_02112025/code/bsimbulk.va");
+        let source = std::fs::read_to_string(&path).expect("read bsimbulk");
+        let mut options = CompilerOptions::default();
+        options
+            .include_paths
+            .push(path.parent().expect("model directory").to_path_buf());
+        let artifact = VerilogACompiler::new(options)
+            .compile_canonical_ir_module(&source, Some("bsimbulk"))
+            .expect("compile bsimbulk");
+        let opt = OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir)
+            .expect("primal OptIR");
+
+        let differentiated = differentiated_values(&opt);
+        let ctx = test_context();
+        let schedule = emit_scheduled(
+            &opt,
+            17,
+            &|kind| match kind {
+                OptValueKind::NodePotential { node } => Some(usize::from(*node)),
+                _ => None,
+            },
+            &differentiated,
+            &ctx,
+        )
+        .expect("emit scheduled bodies");
+
+        let describe = |label: &str, body: &PackedBody| {
+            eprintln!(
+                "{label:<20} primal={:<6} derivative={:<6} source={}KB",
+                body.primal_bindings,
+                body.derivative_bindings,
+                body.source.len() / 1024
+            );
+        };
+        describe("instance-static", &schedule.instance_static);
+        describe("temperature-static", &schedule.temperature_static);
+        describe("newton", &schedule.newton);
+
+        if let Ok(path) = std::env::var("RSPICE_PACKED_SPLIT_DUMP") {
+            std::fs::write(format!("{path}.static"), &schedule.instance_static.source)
+                .expect("dump static body");
+            std::fs::write(
+                format!("{path}.temperature"),
+                &schedule.temperature_static.source,
+            )
+            .expect("dump temperature body");
+            std::fs::write(format!("{path}.newton"), &schedule.newton.source)
+                .expect("dump newton body");
+        }
+
+        let total = schedule.instance_static.primal_bindings
+            + schedule.temperature_static.primal_bindings
+            + schedule.newton.primal_bindings;
+
+        // Nothing may be lost in the split; a value emitted into no body is a
+        // dropped term, which compiles fine and converges to the wrong answer.
+        assert_eq!(
+            total,
+            opt.values.len() - loop_dependent_values(&opt).len(),
+            "the split must place every value that is not loop interior"
+        );
+
+        // Hoisting helps less here than the schedule listing suggests. Only 85
+        // ops appear in the Newton schedule, but that names one op per
+        // equation, not the per-iteration dataflow: everything downstream of a
+        // node voltage is genuinely per-iteration, which in a MOSFET is most of
+        // the current computation. The static split is worth having, not
+        // decisive.
+        assert!(
+            schedule.instance_static.primal_bindings > total / 5,
+            "instance-static work should be a real share: {} of {total}",
+            schedule.instance_static.primal_bindings
+        );
+        assert_eq!(
+            schedule.instance_static.derivative_bindings, 0,
+            "static values cannot depend on an unknown, so none may carry a derivative array"
+        );
     }
 
     #[test]
