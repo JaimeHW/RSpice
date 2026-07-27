@@ -202,6 +202,10 @@ impl CircuitData {
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || !self.generic_switches.is_empty()
+            || self
+                .jiles_atherton_inductors
+                .iter()
+                .any(|binding| binding.device.is_xyce_core())
             || self.behavioral_sources.has_solution_dependent_sources()
             || {
                 #[cfg(feature = "veriloga-builtins-base")]
@@ -399,6 +403,10 @@ impl CircuitData {
             || !self.xyce_memristors.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
+            || self
+                .jiles_atherton_inductors
+                .iter()
+                .any(|binding| binding.device.is_xyce_core())
             || self
                 .xspice_instances
                 .iter()

@@ -95,6 +95,10 @@ impl Engine {
             .transient_lte_reltol
             .filter(|value| value.is_finite() && *value > 0.0)
             .unwrap_or_else(|| match self.config.spice_dialect {
+                // Xyce's TIAParams constructor defaults TIMEINT RELTOL to
+                // 1e-3 when the netlist does not provide an explicit option.
+                // This is independent of the nonlinear-solver RELTOL and
+                // controls only local-truncation-error acceptance.
                 SpiceDialect::Xyce => 1.0e-3,
                 SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.voltage_reltol(),
             })

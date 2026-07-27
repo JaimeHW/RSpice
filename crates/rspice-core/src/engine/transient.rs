@@ -225,7 +225,7 @@ impl Engine {
     fn xyce_one_step_requires_order_one_for_stateful_topology(
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
-        !circuit.inductors.names.is_empty()
+        (!circuit.inductors.names.is_empty() && !circuit.has_only_xyce_core_inductors())
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty()
             || !circuit.vswitches.is_empty()
@@ -1308,6 +1308,22 @@ impl Engine {
                     } if !value.is_finite()
                 )
             })
+            // Xyce nonlinear magnetic cores publish their hysteresis state
+            // through the YMIN!KNAME device-op namespace.  Core state is
+            // accepted-step dependent, so retain a trace whenever the
+            // netlist contains the canonical single-winding Core form even
+            // when the deck requests the probes through `.PRINT` rather than
+            // an explicit `.SAVE @device[param]` card.
+            || netlist.elements.iter().any(|element| {
+                matches!(
+                    &element.kind,
+                    crate::netlist::ElementKind::Coupling {
+                        inductors,
+                        model: Some(_),
+                        ..
+                    } if inductors.len() == 1
+                )
+            })
     }
 
     fn run_tran_with_abort_resolved(
@@ -1560,6 +1576,14 @@ impl Engine {
         let uses_inductor_correction = !circuit.inductors.is_empty()
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty();
+        // Xyce Core branches are assembled as a complete nonlinear DAE row.
+        // The generic correction-form solve reconstructs `b - A*x` after the
+        // ordinary-inductor cancellation stamp, which loses significant
+        // digits when the constitutive mid-factor crosses zero.  A Core-only
+        // network has no ordinary inductive rows requiring that stabilization,
+        // so solve its absolute Jacobian directly as Xyce does.
+        let uses_inductor_correction =
+            uses_inductor_correction && !circuit.has_only_xyce_core_inductors();
         // ngspice's flat transient Newton: when junction devices replace
         // their own iterate voltages (legacy GP pnjlim in update), the full
         // node step is the algorithm; per-iteration node-delta clamps walk
@@ -3841,6 +3865,20 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
+                    let xyce_static_history_candidate = if self.config.spice_dialect
+                        == SpiceDialect::Xyce
+                        && xyce_one_step_order2
+                    {
+                        Some(self.capture_xyce_static_residual(
+                            &mut circuit,
+                            &mut matrix,
+                            &new_solution,
+                            t,
+                            transient_baseline_diag_gmin,
+                        )?)
+                    } else {
+                        None
+                    };
                     Self::update_reactive_history(
                         &mut circuit,
                         &new_solution,
@@ -3899,16 +3937,8 @@ impl Engine {
                         .resistors
                         .advance_thermal_states(&solution, dt)
                         .map_err(SimulationError::Circuit)?;
-                    if self.config.spice_dialect == SpiceDialect::Xyce
-                        && !xyce_one_step_stateful_topology
-                    {
-                        xyce_static_history = Some(self.capture_xyce_static_residual(
-                            &mut circuit,
-                            &mut matrix,
-                            &solution,
-                            t,
-                            transient_baseline_diag_gmin,
-                        )?);
+                    if let Some(history) = xyce_static_history_candidate {
+                        xyce_static_history = Some(history);
                     }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
@@ -4763,6 +4793,20 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
+                    let xyce_static_history_candidate = if self.config.spice_dialect
+                        == SpiceDialect::Xyce
+                        && xyce_one_step_order2
+                    {
+                        Some(self.capture_xyce_static_residual(
+                            &mut circuit,
+                            &mut matrix,
+                            &new_solution,
+                            t,
+                            transient_baseline_diag_gmin,
+                        )?)
+                    } else {
+                        None
+                    };
                     Self::update_reactive_history(
                         &mut circuit,
                         &new_solution,
@@ -4821,16 +4865,8 @@ impl Engine {
                         .resistors
                         .advance_thermal_states(&solution, dt)
                         .map_err(SimulationError::Circuit)?;
-                    if self.config.spice_dialect == SpiceDialect::Xyce
-                        && !xyce_one_step_stateful_topology
-                    {
-                        xyce_static_history = Some(self.capture_xyce_static_residual(
-                            &mut circuit,
-                            &mut matrix,
-                            &solution,
-                            t,
-                            transient_baseline_diag_gmin,
-                        )?);
+                    if let Some(history) = xyce_static_history_candidate {
+                        xyce_static_history = Some(history);
                     }
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
@@ -5011,6 +5047,18 @@ impl Engine {
             };
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
+            let xyce_static_history_candidate =
+                if self.config.spice_dialect == SpiceDialect::Xyce && xyce_one_step_order2 {
+                    Some(self.capture_xyce_static_residual(
+                        &mut circuit,
+                        &mut matrix,
+                        &new_solution,
+                        t,
+                        transient_baseline_diag_gmin,
+                    )?)
+                } else {
+                    None
+                };
             let history_phase_start = crate::time_compat::Instant::now();
             Self::update_reactive_history(
                 &mut circuit,
@@ -5081,14 +5129,8 @@ impl Engine {
                 .resistors
                 .advance_thermal_states(&solution, dt)
                 .map_err(SimulationError::Circuit)?;
-            if self.config.spice_dialect == SpiceDialect::Xyce && !xyce_one_step_stateful_topology {
-                xyce_static_history = Some(self.capture_xyce_static_residual(
-                    &mut circuit,
-                    &mut matrix,
-                    &solution,
-                    t,
-                    transient_baseline_diag_gmin,
-                )?);
+            if let Some(history) = xyce_static_history_candidate {
+                xyce_static_history = Some(history);
             }
 
             // Store results

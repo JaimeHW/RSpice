@@ -394,6 +394,49 @@ impl CircuitData {
             });
         }
 
+        // Xyce nonlinear-core internal probes are exposed through the
+        // canonical `YMIN!<K-name>` namespace.  Xyce LEVEL=1 reports M in
+        // kA/m while LEVEL=2 reports M in A/m; both use Oersted/Gauss for H/B
+        // unless BHSIUNITS=1 switches those fields back to SI units.
+        for binding in &self.jiles_atherton_inductors {
+            let Some(name) = binding.core_output_name.as_deref() else {
+                continue;
+            };
+            let h_si = binding.device.magnetic_field();
+            let b_si = binding.device.flux_density();
+            entries.push(DeviceOpEntry {
+                name: name.to_string(),
+                device_kind: "NONLINEAR_CORE",
+                region: None,
+                params: vec![
+                    (
+                        "m",
+                        if binding.device.is_xyce_core_level2() {
+                            binding.device.magnetization()
+                        } else {
+                            binding.device.magnetization() / 1.0e3
+                        },
+                    ),
+                    (
+                        "h",
+                        if binding.core_bh_si_units {
+                            h_si
+                        } else {
+                            h_si * (4.0 * std::f64::consts::PI / 1.0e3)
+                        },
+                    ),
+                    (
+                        "b",
+                        if binding.core_bh_si_units {
+                            b_si
+                        } else {
+                            b_si * 1.0e4
+                        },
+                    ),
+                ],
+            });
+        }
+
         DeviceOpReport { entries }
     }
 

@@ -238,7 +238,48 @@ impl Inductors {
         coeff: &CompanionCoefficients,
         num_nodes: usize,
     ) {
+        self.stamp_transient_companion_where(matrix, rhs, dt, coeff, num_nodes, |_| false);
+    }
+
+    /// Stamp transient companions while leaving selected inductor branches to
+    /// a device-specific DAE implementation.  Xyce nonlinear Core branches
+    /// own both their KCL incidence and constitutive branch equation, so they
+    /// must not be superimposed on this generic linear companion.
+    #[inline]
+    pub fn stamp_transient_companion_excluding(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+        excluded_indices: &[usize],
+    ) {
+        self.stamp_transient_companion_where(matrix, rhs, dt, coeff, num_nodes, |index| {
+            excluded_indices.binary_search(&index).is_ok()
+        });
+    }
+
+    /// Stamp transient companions with a zero-allocation branch-selection
+    /// predicate.  Circuit-level device families use this form to leave
+    /// nonlinear branches to their canonical constitutive stamp without
+    /// rebuilding an exclusion vector on every Newton iteration.
+    #[inline]
+    pub fn stamp_transient_companion_where<F>(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+        skip: F,
+    ) where
+        F: Fn(usize) -> bool,
+    {
         for i in 0..self.names.len() {
+            if skip(i) {
+                continue;
+            }
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let br_ordinal = self.branch_indices[i];
@@ -289,8 +330,33 @@ impl Inductors {
         coeff: &CompanionCoefficients,
         num_nodes: usize,
     ) {
+        self.overwrite_transient_correction_rhs_excluding(
+            correction_rhs,
+            iterate,
+            dt,
+            coeff,
+            num_nodes,
+            &[],
+        );
+    }
+
+    /// As [`Self::overwrite_transient_correction_rhs`], but leaves selected
+    /// inductor rows untouched so a device-specific Newton residual can own
+    /// those rows.
+    pub fn overwrite_transient_correction_rhs_excluding(
+        &self,
+        correction_rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+        excluded_indices: &[usize],
+    ) {
         debug_assert!(dt.is_finite() && dt > 0.0);
         for index in 0..self.names.len() {
+            if excluded_indices.contains(&index) {
+                continue;
+            }
             let np = self.node_pos[index];
             let nn = self.node_neg[index];
             let branch = num_nodes + self.branch_indices[index];

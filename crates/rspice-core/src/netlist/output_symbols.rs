@@ -359,6 +359,18 @@ pub fn validate_output_symbols_with_abort(
     for (index, element) in elements.iter().enumerate() {
         poll_parse_abort(abort, index)?;
         devices.insert(canonical_symbol(&element.name));
+        if let ElementKind::Coupling {
+            model: Some(_),
+            inductors,
+            ..
+        } = &element.kind
+            && inductors.len() == 1
+        {
+            // Xyce's nonlinear Core device owns internal vectors under the
+            // generated YMIN!KNAME namespace (for example
+            // N(YMIN!KTRANS1_H)).
+            devices.insert(canonical_symbol(&format!("YMIN!{}", element.name)));
+        }
         for node in &element.nodes {
             nodes.insert(canonical_symbol(node));
         }

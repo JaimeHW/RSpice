@@ -201,6 +201,14 @@ impl Engine {
         circuit
             .inductors
             .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        circuit.stamp_xyce_core_transient_companion(
+            matrix,
+            rhs,
+            solution,
+            dt,
+            &companion_coeff,
+            ctx.xyce_one_step_order2,
+        );
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
         circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
 
@@ -441,6 +449,7 @@ impl Engine {
                 .current_sources
                 .update_transient_rhs(probe_rhs, time);
             circuit.stamp_generic_switches_with_solution(probe, probe_rhs, solution, time);
+            circuit.stamp_xyce_core_static_residual(probe, solution);
             if circuit.has_nonlinear_devices() {
                 circuit
                     .try_stamp_static_probe_nonlinear(probe, probe_rhs, solution)

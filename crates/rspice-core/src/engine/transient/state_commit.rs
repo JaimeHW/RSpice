@@ -99,6 +99,7 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(accepted_solution);
         circuit.update_multi_winding_transformer_state(accepted_solution);
         circuit.refresh_jiles_atherton_inductances(accepted_solution);
+        circuit.commit_xyce_core_inductances(accepted_solution, dt);
         circuit.commit_accepted_nonlinear_state();
         circuit
             .behavioral_sources
