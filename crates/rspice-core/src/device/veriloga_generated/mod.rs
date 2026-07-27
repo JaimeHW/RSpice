@@ -6,6 +6,7 @@
 
 use crate::Value;
 use crate::solver::{ComplexMatrix, CscIndex, StaticMatrix};
+use std::sync::Arc;
 
 pub(crate) mod limiting;
 
@@ -379,7 +380,7 @@ pub struct BuiltinVerilogAInstance {
     temperature: Value,
     analysis_initial_step: bool,
     analysis_final_step: bool,
-    static_stamp_cache: GeneratedStaticStampCache,
+    static_stamp_cache: Arc<GeneratedStaticStampCache>,
     kind: builtins::GeneratedBuiltinKind,
 }
 
@@ -727,8 +728,12 @@ impl BuiltinVerilogAInstance {
 
     #[inline]
     pub fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
-        self.static_stamp_cache
-            .link(matrix, &self.nodes, &self.branches, num_nodes);
+        Arc::make_mut(&mut self.static_stamp_cache).link(
+            matrix,
+            &self.nodes,
+            &self.branches,
+            num_nodes,
+        );
     }
 
     pub(crate) fn evaluate_noise_sources(
@@ -839,8 +844,14 @@ impl BuiltinVerilogAInstance {
         simparams: GeneratedSimulationParameters,
         evaluation_mode: GeneratedEvaluationMode,
     ) {
-        self.static_stamp_cache
-            .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
+        if !self
+            .static_stamp_cache
+            .axis_indices_match(&self.nodes, &self.branches, num_nodes)
+        {
+            let cache = Arc::make_mut(&mut self.static_stamp_cache);
+            cache.rebuild_axis_indices(&self.nodes, &self.branches, num_nodes);
+            cache.slots.clear();
+        }
         let ctx = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
             voltages,
             self.temperature,
@@ -856,7 +867,7 @@ impl BuiltinVerilogAInstance {
             rhs,
             voltages,
             num_nodes,
-            &self.static_stamp_cache,
+            self.static_stamp_cache.as_ref(),
         );
         self.kind.stamp(&ctx, &mut stamper);
     }
@@ -906,13 +917,19 @@ impl BuiltinVerilogAInstance {
             self.analysis_final_step,
             simparams,
         );
-        self.static_stamp_cache
-            .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
+        if !self
+            .static_stamp_cache
+            .axis_indices_match(&self.nodes, &self.branches, num_nodes)
+        {
+            let cache = Arc::make_mut(&mut self.static_stamp_cache);
+            cache.rebuild_axis_indices(&self.nodes, &self.branches, num_nodes);
+            cache.slots.clear();
+        }
         let mut stamper = GeneratedStamper::new_ac_real_with_static_cache(
             matrix,
             voltages,
             num_nodes,
-            &self.static_stamp_cache,
+            self.static_stamp_cache.as_ref(),
         );
         self.kind.stamp(&ctx, &mut stamper);
     }
@@ -935,15 +952,21 @@ impl BuiltinVerilogAInstance {
             self.analysis_final_step,
             simparams,
         );
-        self.static_stamp_cache
-            .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
+        if !self
+            .static_stamp_cache
+            .axis_indices_match(&self.nodes, &self.branches, num_nodes)
+        {
+            let cache = Arc::make_mut(&mut self.static_stamp_cache);
+            cache.rebuild_axis_indices(&self.nodes, &self.branches, num_nodes);
+            cache.slots.clear();
+        }
         let mut stamper = GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
             matrix,
             &self.nodes,
             &self.branches,
             num_nodes,
             omega,
-            &self.static_stamp_cache,
+            self.static_stamp_cache.as_ref(),
         );
         self.kind.stamp_reactive(&ctx, &mut stamper);
     }
@@ -1046,7 +1069,7 @@ pub fn instantiate_builtin(
         temperature: crate::constants::TEMP_REFERENCE,
         analysis_initial_step: false,
         analysis_final_step: false,
-        static_stamp_cache: GeneratedStaticStampCache::default(),
+        static_stamp_cache: Arc::new(GeneratedStaticStampCache::default()),
         kind,
     }))
 }
@@ -1381,7 +1404,7 @@ impl GeneratedStaticStampCache {
     }
 
     #[inline]
-    pub fn ensure_axis_indices(&mut self, nodes: &[usize], branches: &[usize], num_nodes: usize) {
+    fn axis_indices_match(&self, nodes: &[usize], branches: &[usize], num_nodes: usize) -> bool {
         let axis_count = nodes.len() + branches.len();
         let expected_first_branch = branches
             .first()
@@ -1398,10 +1421,7 @@ impl GeneratedStaticStampCache {
             }
             None => true,
         };
-        if self.axis_matrix_indices.len() != axis_count || !branch_index_matches {
-            self.rebuild_axis_indices(nodes, branches, num_nodes);
-            self.slots.clear();
-        }
+        self.axis_matrix_indices.len() == axis_count && branch_index_matches
     }
 
     #[inline]
