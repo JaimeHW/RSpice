@@ -201,7 +201,10 @@ impl PdkSettingsDialogState {
     pub fn apply(&mut self) -> PdkConfig {
         // Save to persistent storage
         if let Err(e) = self.config.save() {
-            eprintln!("Warning: Failed to save PDK config: {}", e);
+            // The desktop app detaches from a console and the browser build
+            // has no stderr, so a failed save must reach the application log
+            // to be visible to anyone at all.
+            log::warn!("Failed to save PDK config: {e}");
         }
         self.original_config = Some(self.config.clone());
         self.config.clone()
