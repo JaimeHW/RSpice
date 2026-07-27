@@ -55767,14 +55767,43 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             Self::parse_device_operating_point_probe(normalized)
             && element_name.to_ascii_lowercase().starts_with("ymin!")
         {
-            let waveform = result
-                .try_device_op_waveform_named(&element_name, &parameter)
-                .ok_or_else(|| {
-                    format!(
-                        "nonlinear-core operating-point waveform '{}:{}' is not present in the transient result",
-                        element_name, parameter
-                    )
-                })?;
+            let waveform = if let Some(waveform) =
+                result.try_device_op_waveform_named(&element_name, &parameter)
+            {
+                waveform
+            } else if let Some(winding_name) = parameter
+                .strip_suffix("_branch")
+                .filter(|name| !name.is_empty())
+                .or_else(|| {
+                    parameter.eq_ignore_ascii_case("branch").then(|| {
+                        element_name
+                            .rsplit_once('_')
+                            .filter(|(core_name, winding_name)| {
+                                core_name.starts_with("ymin!") && !winding_name.is_empty()
+                            })
+                            .map(|(_, winding_name)| winding_name)
+                    }).flatten()
+                })
+            {
+                // Xyce exposes each winding's public MNA branch through the
+                // shared YMIN namespace.  The Rust result already stores the
+                // same accepted current under the authored winding name, so
+                // resolve this internal alias without duplicating a dynamic
+                // device-op parameter for every transient sample.
+                result
+                    .try_branch_current_waveform_named(winding_name)
+                    .ok_or_else(|| {
+                        format!(
+                            "nonlinear-core operating-point waveform '{}:{}' is not present in the transient result",
+                            element_name, parameter
+                        )
+                    })?
+            } else {
+                return Err(format!(
+                    "nonlinear-core operating-point waveform '{}:{}' is not present in the transient result",
+                    element_name, parameter
+                ));
+            };
             return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
         }
 
