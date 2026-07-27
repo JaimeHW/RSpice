@@ -2255,6 +2255,29 @@ impl PyEngine {
     }
 
     /// Run transient analysis with error-bounded voltage waveform compression.
+    ///
+    /// A sample is dropped when linear interpolation from its neighbours
+    /// reproduces it within `abs_tol + rel_tol * |v|`, so the stored waveform
+    /// carries a bounded reconstruction error rather than a fixed decimation.
+    ///
+    /// Args:
+    ///     netlist: Parsed netlist to simulate
+    ///     stop_time: Simulation end time in seconds (positive, finite)
+    ///     max_step: Maximum solver timestep in seconds. Defaults to
+    ///               stop_time / 50.
+    ///     abs_tol: Absolute interpolation error budget in volts
+    ///     rel_tol: Relative interpolation error budget
+    ///     max_interval: Minimum time in seconds between two stored samples.
+    ///                   0.0 (the default) applies no spacing floor; a
+    ///                   positive value compresses further by discarding
+    ///                   samples that fall within it of the last stored one.
+    ///
+    /// Returns:
+    ///     CompressedTransientResult: Decimated node-voltage waveforms
+    ///
+    /// Raises:
+    ///     ValueError: If stop_time or max_step is not positive and finite,
+    ///                 or a tolerance/interval is negative or non-finite
     #[pyo3(signature = (netlist, stop_time, max_step=None, *, abs_tol=1e-6, rel_tol=1e-3, max_interval=0.0))]
     #[allow(clippy::too_many_arguments)]
     fn run_tran_compressed(
@@ -2315,6 +2338,12 @@ impl PyEngine {
     }
 
     /// Run a transient and return a resumable, netlist-fingerprinted checkpoint.
+    ///
+    /// Returns `(TransientResult, TransientCheckpoint)`. `max_step` defaults
+    /// to stop_time / 50. Persist the checkpoint with `checkpoint.save(path)`
+    /// and continue it later with `resume_tran`; the fingerprint makes
+    /// resuming against a different netlist fail rather than produce
+    /// silently wrong state.
     #[pyo3(signature = (netlist, stop_time, max_step=None))]
     fn run_tran_checkpointed(
         &self,
@@ -2347,6 +2376,15 @@ impl PyEngine {
     }
 
     /// Continue a transient from a checkpoint to a later absolute stop time.
+    ///
+    /// `stop_time` is absolute, not a duration, and must exceed
+    /// `checkpoint.time`. `max_step` defaults to the remaining window / 50.
+    /// Returns the next `(TransientResult, TransientCheckpoint)` pair, so a
+    /// long run can be advanced in segments.
+    ///
+    /// Raises:
+    ///     ValueError: If stop_time is not finite and greater than the
+    ///                 checkpoint time, or max_step is not positive
     #[pyo3(signature = (netlist, checkpoint, stop_time, max_step=None))]
     fn resume_tran(
         &self,
