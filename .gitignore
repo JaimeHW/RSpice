@@ -1,5 +1,13 @@
 # Rust
-/target/
+# Unanchored: the workspace root is not the only crate root. The reference
+# probes under benchmarks/, agent worktrees, and crates/rspice-core all grow
+# their own target/ directory.
+target/
+
+# Standalone benchmark probes are throwaway harnesses rebuilt on demand, so
+# their lockfiles are not part of the reproducible build. Drop this rule if a
+# probe result ever needs to be reproduced exactly.
+benchmarks/reference/*/Cargo.lock
 
 # IDE
 .idea/
