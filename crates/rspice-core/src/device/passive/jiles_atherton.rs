@@ -1441,6 +1441,14 @@ impl JilesAthertonInductor {
                 if Self::xyce_endpoint_matches(trial_current, current)
                     && Self::xyce_endpoint_matches(trial_voltage, voltage) =>
             {
+                // MutIndNonLin2 retains the MagVarUpdate produced by the
+                // accepted updateIntermediateVars call.  The cached trial is
+                // that exact endpoint, so carry its predictor across the
+                // accepted-step boundary instead of leaving the previous
+                // Newton iterate installed.
+                if self.params.xyce_core_level2 {
+                    self.xyce_mag_update = trial.magnetization_update;
+                }
                 trial
             }
             Some((_, _, _)) => {
