@@ -83,6 +83,65 @@ fn expanding_derivatives_dominates_a_compact_model_graph() {
 }
 
 #[test]
+fn report_the_value_kinds_a_production_model_actually_uses() {
+    // Scopes the emitter: a kind that never appears in the corpus does not
+    // need a lowering rule to reach the Phase 1 gate, and one that appears in
+    // the thousands had better have a good one.
+    let shape = shape_of(
+        &["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"],
+        "bsimbulk",
+    );
+
+    let mut counts: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+    for value in &shape.primal.values {
+        *counts.entry(kind_name(&value.kind)).or_default() += 1;
+    }
+    for (kind, count) in &counts {
+        eprintln!("{kind:<32} {count}");
+    }
+
+    assert!(
+        counts.contains_key("Binary") && counts.contains_key("NodePotential"),
+        "a MOSFET graph must contain arithmetic over node potentials"
+    );
+}
+
+fn kind_name(kind: &OptValueKind) -> &'static str {
+    match kind {
+        OptValueKind::RealConstant(_) => "RealConstant",
+        OptValueKind::BooleanConstant(_) => "BooleanConstant",
+        OptValueKind::Parameter { .. } => "Parameter",
+        OptValueKind::ParamGiven { .. } => "ParamGiven",
+        OptValueKind::SimParam { .. } => "SimParam",
+        OptValueKind::SimParamGiven { .. } => "SimParamGiven",
+        OptValueKind::Temperature => "Temperature",
+        OptValueKind::ThermalVoltage => "ThermalVoltage",
+        OptValueKind::Multiplicity => "Multiplicity",
+        OptValueKind::Time => "Time",
+        OptValueKind::Analysis { .. } => "Analysis",
+        OptValueKind::Ddx { .. } => "Ddx",
+        OptValueKind::Ddt { .. } => "Ddt",
+        OptValueKind::DdtScale => "DdtScale",
+        OptValueKind::LimitPrevious { .. } => "LimitPrevious",
+        OptValueKind::Limit { .. } => "Limit",
+        OptValueKind::NodePotential { .. } => "NodePotential",
+        OptValueKind::BranchFlow { .. } => "BranchFlow",
+        OptValueKind::BranchUnknownFlow { .. } => "BranchUnknownFlow",
+        OptValueKind::LoopIndex { .. } => "LoopIndex",
+        OptValueKind::CountedSum { .. } => "CountedSum",
+        OptValueKind::RuntimeLoopVariable { .. } => "RuntimeLoopVariable",
+        OptValueKind::RuntimeLoopVariableDerivative { .. } => "RuntimeLoopVariableDerivative",
+        OptValueKind::RuntimeLoopResult { .. } => "RuntimeLoopResult",
+        OptValueKind::RuntimeLoopResultDerivative { .. } => "RuntimeLoopResultDerivative",
+        OptValueKind::Unary { .. } => "Unary",
+        OptValueKind::Binary { .. } => "Binary",
+        OptValueKind::Select { .. } => "Select",
+        OptValueKind::EquationValue { .. } => "EquationValue",
+    }
+}
+
+#[test]
 fn primal_graph_carries_no_derivatives_for_a_production_model() {
     // The unit test for this uses a two-terminal fixture. A production compact
     // model exercises limiters, ddt, bounded loops and analysis queries, any of

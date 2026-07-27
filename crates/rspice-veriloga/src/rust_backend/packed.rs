@@ -182,6 +182,14 @@ pub(super) enum LaneRule {
     /// A rule over two operand arrays, written as a per-lane expression in
     /// terms of `l[k]` and `r[k]`.
     Binary { lane_expr: String },
+    /// `d = <unit vector at slot>`; the value is an unknown.
+    Seed { slot: usize },
+    /// `d = if <condition> { then_d } else { else_d }`.
+    ///
+    /// The scalarized rules select lane by lane. Selecting the whole array at
+    /// once is the same arithmetic — the condition does not vary across lanes —
+    /// and leaves the branch outside the unrolled body instead of inside it.
+    Selected { condition: String },
 }
 
 /// Array-form derivative of a unary operation.
@@ -316,7 +324,43 @@ impl LaneRule {
             Self::Binary { lane_expr } => Some(format!(
                 "{{ let l = &{left}; let r = &{right}; core::array::from_fn::<f64, {width}, _>(|k| {lane_expr}) }}"
             )),
+            Self::Seed { slot } => Some(format!(
+                "{{ let mut d = [0.0f64; {width}]; d[{slot}] = 1.0; d }}"
+            )),
+            Self::Selected { condition } => {
+                Some(format!("(if {condition} {{ {left} }} else {{ {right} }})"))
+            }
         }
+    }
+}
+
+/// Array-form derivative of an unknown the model reads directly.
+///
+/// `slot` is the lane's position from [`super::lanes::LaneSet`]. A seed whose
+/// lane the device does not pack — a branch flow on a branch with no unknown —
+/// has no derivative, matching the scalarized rules, which return an empty map
+/// rather than a zero.
+pub(super) fn seed_rule(slot: Option<usize>) -> LaneRule {
+    match slot {
+        Some(slot) => LaneRule::Seed { slot },
+        None => LaneRule::Zero,
+    }
+}
+
+/// Array-form derivative of `ddt`.
+///
+/// The scalarized rule multiplies each lane by the integration scale, so this
+/// is an ordinary scaling. `scale` is the expression for that factor.
+pub(super) fn ddt_rule(scale: &str) -> LaneRule {
+    LaneRule::Scaled {
+        factor: scale.to_string(),
+    }
+}
+
+/// Array-form derivative of a conditional.
+pub(super) fn select_rule(condition: &str) -> LaneRule {
+    LaneRule::Selected {
+        condition: condition.to_string(),
     }
 }
 
@@ -505,6 +549,49 @@ mod tests {
             else_value: ValueId::from(9),
         });
         assert_eq!(operands, vec![ValueId::from(8), ValueId::from(9)]);
+    }
+
+    #[test]
+    fn a_seed_is_a_unit_vector_at_its_own_lane() {
+        let emitted = seed_rule(Some(3))
+            .emit(5, "", "", "")
+            .expect("a seed has a derivative");
+        assert!(emitted.contains("[0.0f64; 5]"), "{emitted}");
+        assert!(emitted.contains("d[3] = 1.0"), "{emitted}");
+    }
+
+    #[test]
+    fn a_seed_on_an_unpacked_lane_has_no_derivative() {
+        // A branch flow whose branch carries no unknown. The scalarized rules
+        // return an empty map here rather than a zero derivative, and emitting
+        // a zero array instead would cost a binding per such value.
+        assert_eq!(seed_rule(None), LaneRule::Zero);
+        assert_eq!(seed_rule(None).emit(8, "d", "l", "r"), None);
+    }
+
+    #[test]
+    fn select_branches_outside_the_lane_loop() {
+        // Selecting per lane would put a branch inside the unrolled body for a
+        // condition that cannot vary across lanes.
+        let emitted = select_rule("c1 != 0.0")
+            .emit(12, "", "dt", "de")
+            .expect("select has a derivative");
+        assert_eq!(emitted, "(if c1 != 0.0 { dt } else { de })");
+        assert!(!emitted.contains("from_fn"), "{emitted}");
+    }
+
+    #[test]
+    fn ddt_scales_every_lane_by_the_integration_factor() {
+        let rule = ddt_rule("ddt_scale");
+        assert_eq!(
+            rule,
+            LaneRule::Scaled {
+                factor: "ddt_scale".to_string()
+            }
+        );
+        let emitted = rule.emit(6, "din", "", "").expect("ddt has a derivative");
+        assert!(emitted.contains("let s = ddt_scale;"), "{emitted}");
+        assert!(emitted.contains("s * din[k]"), "{emitted}");
     }
 
     #[test]
