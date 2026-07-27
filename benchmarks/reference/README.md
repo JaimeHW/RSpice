@@ -118,3 +118,44 @@ measuring nothing. If this probe is ever changed, keep all lanes live.
 ```
 cd lowering-probe && cargo run --release
 ```
+
+## Split probe
+
+`split-probe/` answers the other question the packed lowering had open: whether
+a compact model's worth of values can be emitted as one function, or has to be
+cut into blocks the way the existing backends cut theirs into 483
+`#[inline(never)]` pieces.
+
+It generates a synthetic body at bsimbulk's scale — 12,028 values at lane width
+17, with bsimbulk's own operator mix — either monolithic or split into functions
+of a given size, each passing the live values across the boundary as arguments.
+
+Result, 2026-07-27:
+
+| block | source | rustc | ns/eval |
+|---|---|---|---|
+| **0 (monolithic)** | 1670 KB | 51.6 s | **25,233** |
+| 500 | 1677 KB | 30.2 s | 61,681 |
+| 2000 | 1672 KB | 34.4 s | 61,875 |
+
+Splitting costs 2.4x at run time and buys about twenty seconds of compile time.
+The cost is what it looks like: `[f64; 17]` arrays crossing a function boundary
+are forced to memory, which is the round-tripping the packed form exists to
+avoid. A monolithic 12,028-value function compiles in under a minute and does
+not blow up, so the lowering does not split and needs no liveness partitioner.
+
+Only the *ratio* is meaningful. The generated chain is fully serial — every
+value depends on the one before it — so roughly half the absolute time is
+dependency latency that a real model's DAG would overlap. Both variants carry
+the identical chain, which is what makes comparing them fair; neither number
+predicts what bsimbulk will do.
+
+The operator mix is load-bearing. An earlier revision made every fourth
+operation an `exp`, putting 3,007 transcendental calls in the body and measuring
+libm throughput rather than the lowering. Keep transcendentals rare, as they are
+in a compact model's inner graph.
+
+```
+cd split-probe && cargo run --release -- 12028 17 0 /tmp/mono.rs
+rustc -O -o /tmp/mono.exe /tmp/mono.rs && /tmp/mono.exe
+```
