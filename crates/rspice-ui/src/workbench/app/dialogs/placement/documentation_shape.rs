@@ -86,10 +86,7 @@ impl RSpiceApp {
                 if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
                     self.state.schematic.pending_documentation_shape = Some(pending);
                     self.state.schematic.documentation_shape_drawing.clear();
-                    crate::workbench::commands::arm_schematic_tool(
-                        &mut self.state.schematic,
-                        Tool::DocumentationShape,
-                    );
+                    self.state.schematic.arm_tool(Tool::DocumentationShape);
                     self.state.dialogs.documentation_shape.close();
                 }
             }

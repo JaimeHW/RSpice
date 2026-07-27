@@ -112,9 +112,15 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // briefly reintroduced three via the wasm clock shim, which now sits at
     // layer 0 as `crate::time_compat`.
 
-    // Reaching up into the application shell for `RSpiceApp` rather than
-    // taking the state actually used. Retired by narrowing those signatures.
-    ("schematic", "workbench", 124),
+    // These were recorded as signature-narrowing work — modules reaching up
+    // for `RSpiceApp` instead of the state they use. That was wrong about
+    // what the edges contain. Only 11 of `schematic`'s references were
+    // `AppState`; the bulk were types and functions parked in the shell that
+    // belong further down, and no amount of narrowing would have moved them.
+    // They are retired by relocating what is misplaced, not by rewriting
+    // signatures: the armed-tool lifecycle moved to `state::schematic`
+    // (124 -> 102), since it only ever read and wrote `SchematicState`.
+    ("schematic", "workbench", 102),
     ("simulation", "workbench", 87),
     ("io", "workbench", 12),
     // The persisted model reaching up into orchestration and editors.

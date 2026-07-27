@@ -86,10 +86,7 @@ impl RSpiceApp {
             DialogChoice::Primary => {
                 if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
                     self.state.schematic.pending_design_note = Some(pending);
-                    crate::workbench::commands::arm_schematic_tool(
-                        &mut self.state.schematic,
-                        Tool::DesignNote,
-                    );
+                    self.state.schematic.arm_tool(Tool::DesignNote);
                     self.state.dialogs.design_note.close();
                 }
             }

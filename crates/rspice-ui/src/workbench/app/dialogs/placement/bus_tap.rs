@@ -131,10 +131,7 @@ impl RSpiceApp {
                         validate_draft(&self.state.dialogs.bus_tap)
                 {
                     self.state.schematic.pending_bus_tap = Some(pending);
-                    crate::workbench::commands::arm_schematic_tool(
-                        &mut self.state.schematic,
-                        Tool::BusTap,
-                    );
+                    self.state.schematic.arm_tool(Tool::BusTap);
                     self.state.dialogs.bus_tap.close();
                 }
             }

@@ -135,8 +135,9 @@ impl RSpiceApp {
 
         match command {
             ShortcutCommand::ProjectLauncher => self.state.workbench.open_project_launcher(),
-            ShortcutCommand::NewProject => self
-                .execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::NewProject),
+            ShortcutCommand::NewProject => self.execute_project_file_shortcut(
+                crate::workbench::menu_bar::FileMenuAction::NewProject,
+            ),
             ShortcutCommand::OpenProject => self.execute_project_file_shortcut(
                 crate::workbench::menu_bar::FileMenuAction::OpenProject,
             ),
@@ -156,9 +157,8 @@ impl RSpiceApp {
             ShortcutCommand::SaveAs => self.execute_project_file_shortcut(
                 crate::workbench::menu_bar::FileMenuAction::SaveProjectAs,
             ),
-            ShortcutCommand::SaveAll => {
-                self.execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::SaveAll)
-            }
+            ShortcutCommand::SaveAll => self
+                .execute_project_file_shortcut(crate::workbench::menu_bar::FileMenuAction::SaveAll),
             ShortcutCommand::CloseActiveDocument => self.execute_project_file_shortcut(
                 crate::workbench::menu_bar::FileMenuAction::CloseActiveDocument,
             ),
@@ -182,85 +182,62 @@ impl RSpiceApp {
                 self.state.dialogs.shortcuts_help = true;
             }
             ShortcutCommand::SelectTool => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Select,
-                );
+                self.state.schematic.arm_tool(Tool::Select);
             }
             ShortcutCommand::PlaceWire => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Wire,
-                );
+                self.state.schematic.arm_tool(Tool::Wire);
             }
             ShortcutCommand::PlaceBus => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Bus,
-                );
+                self.state.schematic.arm_tool(Tool::Bus);
             }
             ShortcutCommand::PlaceBusTap => {
                 self.state.dialogs.bus_tap.open();
             }
             ShortcutCommand::PlaceJunction => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Junction,
-                );
+                self.state.schematic.arm_tool(Tool::Junction);
             }
             ShortcutCommand::Place(ComponentType::Ground) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::Ground),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::Ground));
             }
             ShortcutCommand::Place(ComponentType::VoltageSource) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::VoltageSource),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::VoltageSource));
             }
             ShortcutCommand::Place(ComponentType::CurrentSource) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::CurrentSource),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::CurrentSource));
             }
             ShortcutCommand::Place(ComponentType::Capacitor) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::Capacitor),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::Capacitor));
             }
             ShortcutCommand::Place(ComponentType::Inductor) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::Inductor),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::Inductor));
             }
             ShortcutCommand::Place(ComponentType::Diode) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::Diode),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::Diode));
             }
             ShortcutCommand::Place(ComponentType::Nmos) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::Nmos),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::Nmos));
             }
             ShortcutCommand::Place(ComponentType::NpnBjt) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::NpnBjt),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::NpnBjt));
             }
             ShortcutCommand::PlaceProbe => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Probe,
-                );
+                self.state.schematic.arm_tool(Tool::Probe);
             }
             ShortcutCommand::PlacePin
             | ShortcutCommand::PlaceText
@@ -282,10 +259,9 @@ impl RSpiceApp {
                 command.execute(self);
             }
             ShortcutCommand::Place(ComponentType::Resistor) => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Place(ComponentType::Resistor),
-                );
+                self.state
+                    .schematic
+                    .arm_tool(Tool::Place(ComponentType::Resistor));
             }
             ShortcutCommand::RotateSelection => {
                 self.state.schematic.preview_rotation =
@@ -326,9 +302,7 @@ impl RSpiceApp {
                 {
                     self.state.ui.results.clear_cursors();
                 } else {
-                    crate::workbench::commands::cancel_schematic_interaction_step(
-                        &mut self.state.schematic,
-                    );
+                    self.state.schematic.cancel_interaction_step();
                 }
             }
             ShortcutCommand::RunSimulation => {
@@ -381,10 +355,7 @@ impl RSpiceApp {
                 self.state.schematic.zoom = 1.0;
             }
             ShortcutCommand::PlaceLabel => {
-                crate::workbench::commands::arm_schematic_tool(
-                    &mut self.state.schematic,
-                    Tool::Label,
-                );
+                self.state.schematic.arm_tool(Tool::Label);
             }
             ShortcutCommand::PlaceInstance => {
                 self.state
@@ -423,7 +394,10 @@ impl RSpiceApp {
         }
     }
 
-    fn execute_project_file_shortcut(&mut self, action: crate::workbench::menu_bar::FileMenuAction) {
+    fn execute_project_file_shortcut(
+        &mut self,
+        action: crate::workbench::menu_bar::FileMenuAction,
+    ) {
         crate::workbench::menu_bar::dispatch_file_menu_action(
             &mut self.state,
             action,

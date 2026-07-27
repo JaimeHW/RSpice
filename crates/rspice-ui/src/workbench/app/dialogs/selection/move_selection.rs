@@ -116,10 +116,7 @@ impl RSpiceApp {
             DialogChoice::Primary => {
                 if validate_draft(&self.state).can_commit() {
                     self.state.dialogs.move_selection.arm();
-                    crate::workbench::commands::arm_schematic_tool(
-                        &mut self.state.schematic,
-                        Tool::MoveSelection,
-                    );
+                    self.state.schematic.arm_tool(Tool::MoveSelection);
                     crate::schematic::view::request_schematic_canvas_focus(ctx);
                     let snap = snap_label(self.state.schematic.document_policy.grid_pitch);
                     self.state.push_user_message(ConsoleMessage::info(format!(
@@ -172,7 +169,7 @@ pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), Str
 pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
     state.dialogs.move_selection.close();
     if state.schematic.tool == Tool::MoveSelection {
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
     }
 }
 
@@ -324,7 +321,7 @@ mod tests {
         open_move_selection_dialog(&mut state);
         let baseline = SchematicSnapshot::capture(&state.schematic);
         state.dialogs.move_selection.arm();
-        crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::MoveSelection);
+        state.schematic.arm_tool(Tool::MoveSelection);
         assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.schematic)));
         assert!(state.schematic.selection.has_component(id));
         assert!(armed_move_selection_authority(&state).is_ok());

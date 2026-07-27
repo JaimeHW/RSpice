@@ -4,10 +4,10 @@
 //! command is omitted from a menu when its behavior is not implemented; the
 //! UI does not advertise speculative or placeholder capability.
 
-use crate::workbench::RSpiceApp;
-use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{ComponentType, Tool};
+use crate::workbench::RSpiceApp;
+use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use std::cell::RefCell;
 
 use super::state::{
@@ -1448,10 +1448,11 @@ impl Command {
                 } else {
                     let anchor = app.state.schematic_paste_anchor();
                     if !app.state.schematic.paste_at(anchor) {
-                        app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        app.state.push_user_message(
+                            crate::workbench::app::ConsoleMessage::warning(
                                 "Paste could not be completed at the current canvas target",
-                            ));
+                            ),
+                        );
                     }
                 }
             }
@@ -1915,17 +1916,18 @@ impl Command {
                 ) {
                     Ok(true) => {
                         app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
-                                "{} completed as one undoable transaction.",
-                                command.label()
-                            )))
+                            .push_user_message(crate::workbench::app::ConsoleMessage::info(
+                                format!(
+                                    "{} completed as one undoable transaction.",
+                                    command.label()
+                                ),
+                            ))
                     }
                     Ok(false) => {
                         app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
-                                "{} produced no geometry change.",
-                                command.label()
-                            )))
+                            .push_user_message(crate::workbench::app::ConsoleMessage::info(
+                                format!("{} produced no geometry change.", command.label()),
+                            ))
                     }
                     Err(error) => {
                         app.state
@@ -1955,7 +1957,7 @@ impl Command {
                 {
                     app.state.ui.results.clear_cursors();
                 } else {
-                    cancel_schematic_interaction_step(&mut app.state.schematic);
+                    app.state.schematic.cancel_interaction_step();
                 }
             }
             Self::AscendHierarchy => {
@@ -1995,7 +1997,9 @@ impl Command {
                 if stop_simulation_enabled(app.state.simulation.is_running) {
                     if let Err(error) = app.state.simulation.request_abort_active_run() {
                         app.state
-                            .push_sim_message(crate::workbench::app::ConsoleMessage::warning(error));
+                            .push_sim_message(crate::workbench::app::ConsoleMessage::warning(
+                                error,
+                            ));
                     }
                 } else if app.state.simulation.is_running {
                     app.state.push_sim_message(
@@ -2058,10 +2062,9 @@ impl Command {
                         super::result_document::viewer_unavailability_reason(&app.state, viewer)
                             .unwrap_or("the active dataset is incompatible with this viewer");
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
-                            "{} cannot be opened: {reason}.",
-                            viewer.label()
-                        )));
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                            format!("{} cannot be opened: {reason}.", viewer.label()),
+                        ));
                 }
             }
             Self::EditSpecifications => {
@@ -2096,10 +2099,11 @@ impl Command {
                     if let Err(error) =
                         super::model_editor::open_project_model(app, &library_name, &model_name)
                     {
-                        app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
-                                format!("Cannot open device model editor: {error}"),
-                            ));
+                        app.state.push_user_message(
+                            crate::workbench::app::ConsoleMessage::warning(format!(
+                                "Cannot open device model editor: {error}"
+                            )),
+                        );
                     }
                 }
                 Err(reason) => {
@@ -2115,10 +2119,11 @@ impl Command {
                         super::SurfaceRoute::surface(super::SurfaceId::ModelCorrelation),
                         super::RouteTransitionSource::User,
                     ) {
-                        app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
-                                format!("Cannot open measurement correlation: {error}"),
-                            ));
+                        app.state.push_user_message(
+                            crate::workbench::app::ConsoleMessage::warning(format!(
+                                "Cannot open measurement correlation: {error}"
+                            )),
+                        );
                     }
                 }
                 Err(reason) => {
@@ -2376,66 +2381,7 @@ fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     if app.state.dialogs.array_selection.armed && tool != Tool::ArraySelection {
         app.state.dialogs.array_selection.close();
     }
-    arm_schematic_tool(&mut app.state.schematic, tool);
-}
-
-/// Arm one schematic tool through the single conductor-lifecycle boundary.
-/// Switching tools cancels every incompatible unfinished route, and leaving
-/// typed placement retires every incompatible runtime configuration.
-pub(crate) fn arm_schematic_tool(schematic: &mut crate::state::SchematicState, tool: Tool) {
-    if schematic.tool != tool {
-        schematic.cancel_routing_gestures();
-    }
-    if tool != Tool::BusTap {
-        schematic.pending_bus_tap = None;
-    }
-    if tool != Tool::Place(ComponentType::Port) {
-        schematic.pending_port = None;
-    }
-    if tool != Tool::DesignNote {
-        schematic.pending_design_note = None;
-    }
-    if tool != Tool::DocumentationShape {
-        schematic.pending_documentation_shape = None;
-        schematic.documentation_shape_drawing.clear();
-    }
-    schematic.tool = tool;
-}
-
-/// Escape/cancel is stronger than re-arming Select: it also clears any
-/// inconsistent hidden route restored from legacy or interrupted state.
-pub(crate) fn cancel_schematic_tool(schematic: &mut crate::state::SchematicState) {
-    schematic.cancel_routing_gestures();
-    schematic.pending_bus_tap = None;
-    schematic.pending_port = None;
-    schematic.pending_design_note = None;
-    schematic.pending_documentation_shape = None;
-    schematic.documentation_shape_drawing.clear();
-    schematic.tool = Tool::Select;
-}
-
-/// Apply one level of the schematic Escape contract.
-///
-/// Repeated Escape presses walk back an unfinished route, then the armed
-/// authoring tool, then the selection. Keeping these stages separate prevents
-/// a route cancellation from unexpectedly discarding the user's selection.
-pub(crate) fn cancel_schematic_interaction_step(schematic: &mut crate::state::SchematicState) {
-    if schematic.wire_drawing.active || schematic.bus_drawing.active {
-        schematic.cancel_routing_gestures();
-        return;
-    }
-    if schematic.tool != Tool::Select
-        || schematic.pending_bus_tap.is_some()
-        || schematic.pending_port.is_some()
-        || schematic.pending_design_note.is_some()
-        || schematic.pending_documentation_shape.is_some()
-        || !schematic.documentation_shape_drawing.points.is_empty()
-    {
-        cancel_schematic_tool(schematic);
-        return;
-    }
-    schematic.selection.clear();
-    schematic.selection_rect.cancel();
+    app.state.schematic.arm_tool(tool);
 }
 
 fn open_recent_projects(workbench: &mut WorkbenchState) {
@@ -2925,9 +2871,7 @@ mod tests {
     fn canvas_grid_command_truthfully_toggles_grid_and_snap_as_one_master() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
-        app.state
-            .ui
-            .set_grid_style(crate::state::GridStyle::Lines);
+        app.state.ui.set_grid_style(crate::state::GridStyle::Lines);
         app.state.schematic.snap_engine.enabled = true;
         app.state.schematic.snap_engine.snap_to_wire_segments = false;
         app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
@@ -3613,11 +3557,11 @@ mod tests {
         use crate::state::{BusDeclaration, BusSlice, BusTapOrientation, PendingBusTap, Point};
 
         let mut schematic = crate::state::SchematicState::default();
-        arm_schematic_tool(&mut schematic, Tool::Wire);
+        schematic.arm_tool(Tool::Wire);
         schematic.start_wire(Point::origin());
         assert!(schematic.wire_drawing.active);
 
-        arm_schematic_tool(&mut schematic, Tool::Bus);
+        schematic.arm_tool(Tool::Bus);
         assert!(!schematic.wire_drawing.active);
         schematic.start_bus(Point::new(2, 3), None).unwrap();
         assert!(schematic.bus_drawing.active);
@@ -3630,11 +3574,11 @@ mod tests {
             )
             .unwrap(),
         );
-        arm_schematic_tool(&mut schematic, Tool::BusTap);
+        schematic.arm_tool(Tool::BusTap);
         assert!(!schematic.bus_drawing.active);
         assert!(schematic.pending_bus_tap.is_some());
 
-        arm_schematic_tool(&mut schematic, Tool::Wire);
+        schematic.arm_tool(Tool::Wire);
         assert!(schematic.pending_bus_tap.is_none());
     }
 
@@ -3649,7 +3593,7 @@ mod tests {
         assert!(schematic.wire_drawing.active);
         assert!(schematic.bus_drawing.active);
 
-        cancel_schematic_tool(&mut schematic);
+        schematic.cancel_tool();
 
         assert_eq!(schematic.tool, Tool::Select);
         assert!(!schematic.wire_drawing.active);
@@ -3668,16 +3612,16 @@ mod tests {
         schematic.start_wire(Point::origin());
         schematic.extend_wire(Point::new(10, 0));
 
-        cancel_schematic_interaction_step(&mut schematic);
+        schematic.cancel_interaction_step();
         assert!(!schematic.wire_drawing.active);
         assert_eq!(schematic.tool, Tool::Wire);
         assert!(schematic.selection.has_component(selected));
 
-        cancel_schematic_interaction_step(&mut schematic);
+        schematic.cancel_interaction_step();
         assert_eq!(schematic.tool, Tool::Select);
         assert!(schematic.selection.has_component(selected));
 
-        cancel_schematic_interaction_step(&mut schematic);
+        schematic.cancel_interaction_step();
         assert!(schematic.selection.is_empty());
     }
 

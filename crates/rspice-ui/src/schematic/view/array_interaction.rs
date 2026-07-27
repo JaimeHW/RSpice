@@ -2,8 +2,8 @@
 
 use egui::{Response, Ui};
 
-use crate::workbench::app::{AppState, ConsoleMessage};
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement};
+use crate::workbench::app::{AppState, ConsoleMessage};
 
 use super::SchematicSymbolContext;
 use super::coordinates::screen_to_grid;
@@ -286,7 +286,7 @@ mod tests {
         crate::workbench::app::open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.preview_delta = Point::new(100, 0);
-        crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::ArraySelection);
+        state.schematic.arm_tool(Tool::ArraySelection);
         let symbols = SchematicSymbolContext::from_state(&state);
 
         commit_armed_array_selection(&mut state, &symbols);
@@ -314,7 +314,7 @@ mod tests {
         crate::workbench::app::open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.preview_delta = Point::new(1, 0);
-        crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::ArraySelection);
+        state.schematic.arm_tool(Tool::ArraySelection);
         let symbols = SchematicSymbolContext::from_state(&state);
 
         commit_armed_array_selection(&mut state, &symbols);

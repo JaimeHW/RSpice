@@ -93,10 +93,9 @@ impl RSpiceApp {
                 // contract made invalid by the same frame's text edit.
                 if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
                     self.state.schematic.pending_port = Some(pending);
-                    crate::workbench::commands::arm_schematic_tool(
-                        &mut self.state.schematic,
-                        Tool::Place(crate::state::ComponentType::Port),
-                    );
+                    self.state
+                        .schematic
+                        .arm_tool(Tool::Place(crate::state::ComponentType::Port));
                     self.state.dialogs.pin_port.close();
                 }
             }

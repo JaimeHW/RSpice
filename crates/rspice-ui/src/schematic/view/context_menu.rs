@@ -12,13 +12,13 @@ use egui::{
     pos2, vec2,
 };
 
-use crate::workbench::app::{AppState, ConsoleMessage, ContextTarget};
 use crate::state::{Point, Selection, Tool};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus};
 use crate::workbench::ResultViewer;
+use crate::workbench::app::{AppState, ConsoleMessage, ContextTarget};
 use crate::workbench::commands::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
@@ -1053,9 +1053,7 @@ fn execute_context_action(
         ContextAction::Delete => {
             crate::workbench::app::open_delete_selection_dialog(state);
         }
-        ContextAction::Probe => {
-            crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::Probe)
-        }
+        ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
     }
     ui.close();

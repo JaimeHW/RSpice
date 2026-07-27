@@ -244,10 +244,7 @@ impl RSpiceApp {
                     };
                     self.state.dialogs.array_selection.arm();
                     self.state.dialogs.array_selection.anchor = radial_center;
-                    crate::workbench::commands::arm_schematic_tool(
-                        &mut self.state.schematic,
-                        Tool::ArraySelection,
-                    );
+                    self.state.schematic.arm_tool(Tool::ArraySelection);
                     crate::schematic::view::request_schematic_canvas_focus(ctx);
                     self.state.push_user_message(ConsoleMessage::info(
                         "Create array armed; choose the exact pitch or center on the schematic canvas."
@@ -365,7 +362,7 @@ pub(crate) fn armed_array_selection_plan(
 pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
     state.dialogs.array_selection.close();
     if state.schematic.tool == Tool::ArraySelection {
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
     }
 }
 

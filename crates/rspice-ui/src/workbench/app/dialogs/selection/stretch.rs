@@ -113,10 +113,7 @@ impl RSpiceApp {
             DialogChoice::Primary => {
                 if validate_draft(&self.state).can_commit() {
                     self.state.dialogs.stretch_selection.arm();
-                    crate::workbench::commands::arm_schematic_tool(
-                        &mut self.state.schematic,
-                        Tool::StretchSelection,
-                    );
+                    self.state.schematic.arm_tool(Tool::StretchSelection);
                     crate::schematic::view::request_schematic_canvas_focus(ctx);
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Stretch selection armed with {}; choose an anchor and destination on the {snap} grid.",
@@ -174,7 +171,7 @@ pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), 
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
     state.dialogs.stretch_selection.close();
     if state.schematic.tool == Tool::StretchSelection {
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
     }
 }
 

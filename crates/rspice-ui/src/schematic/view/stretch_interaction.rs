@@ -2,8 +2,8 @@
 
 use egui::{Response, Ui};
 
-use crate::workbench::app::{AppState, ConsoleMessage};
 use crate::state::{Point, StretchTarget};
+use crate::workbench::app::{AppState, ConsoleMessage};
 
 use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_schematic};
@@ -375,10 +375,9 @@ mod tests {
         crate::workbench::app::open_stretch_selection_dialog(state);
         assert!(state.dialogs.stretch_selection.open);
         state.dialogs.stretch_selection.arm();
-        crate::workbench::commands::arm_schematic_tool(
-            &mut state.schematic,
-            crate::state::Tool::StretchSelection,
-        );
+        state
+            .schematic
+            .arm_tool(crate::state::Tool::StretchSelection);
     }
 
     #[test]

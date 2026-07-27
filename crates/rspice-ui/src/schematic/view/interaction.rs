@@ -1,11 +1,11 @@
 use egui::{Response, Ui};
 
-use crate::workbench::app::{AppState, ConsoleMessage, DragType};
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
 use crate::state::{
     ComponentType, NetGraph, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, Tool, ViewType,
 };
+use crate::workbench::app::{AppState, ConsoleMessage, DragType};
 
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;
@@ -45,19 +45,19 @@ pub(super) fn handle_tool_interactions(
         // the legacy direct-drag path.
         return;
     } else if current_tool == Tool::MoveSelection && !state.dialogs.move_selection.armed {
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     } else if state.dialogs.stretch_selection.armed && current_tool != Tool::StretchSelection {
         state.dialogs.stretch_selection.close();
         return;
     } else if current_tool == Tool::StretchSelection && !state.dialogs.stretch_selection.armed {
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     } else if state.dialogs.array_selection.armed && current_tool != Tool::ArraySelection {
         state.dialogs.array_selection.close();
         return;
     } else if current_tool == Tool::ArraySelection && !state.dialogs.array_selection.armed {
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     }
     let shape_double_click = current_tool == Tool::DocumentationShape
@@ -901,7 +901,7 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
                 state.push_user_message(ConsoleMessage::warning(
                     "No library cell selected for placement".to_string(),
                 ));
-                crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+                state.schematic.cancel_tool();
                 return;
             };
             let changed = state
@@ -933,7 +933,7 @@ fn place_pending_port(state: &mut AppState, grid_pos: Point) {
             "Port placement requires a validated interface contract; reopen Place pin or port."
                 .to_owned(),
         ));
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     };
     let authority_matches = pending
@@ -949,13 +949,13 @@ fn place_pending_port(state: &mut AppState, grid_pos: Point) {
             "Interface port was not placed: the active schematic authority changed; reopen Place pin or port."
                 .to_owned(),
         ));
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     }
     let name = pending.name.clone();
     match state.schematic.place_pending_port(grid_pos, pending) {
         Ok(stable_id) => {
-            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.schematic.cancel_tool();
             state.sync_active_schematic_to_workspace();
             state.push_user_message(ConsoleMessage::info(format!(
                 "Placed interface port {name} as stable object {stable_id}; generated symbol synchronization completed where applicable."
@@ -966,7 +966,7 @@ fn place_pending_port(state: &mut AppState, grid_pos: Point) {
             state.push_user_message(ConsoleMessage::warning(format!(
                 "Interface port was not placed: {error}."
             )));
-            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.schematic.cancel_tool();
         }
     }
 }
@@ -977,7 +977,7 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
             "Design-note placement requires a validated documentation contract; reopen Place text or note."
                 .to_owned(),
         ));
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     };
     let authority_matches = pending
@@ -993,13 +993,13 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
             "Design note was not placed: the active schematic authority changed; reopen Place text or note."
                 .to_owned(),
         ));
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     }
     let kind = pending.kind.label();
     match state.schematic.place_pending_design_note(grid_pos, pending) {
         Ok(stable_id) => {
-            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.schematic.cancel_tool();
             state.sync_active_schematic_to_workspace();
             state.push_user_message(ConsoleMessage::info(format!(
                 "Placed {kind} as stable non-electrical object {stable_id}."
@@ -1009,7 +1009,7 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
             state.push_user_message(ConsoleMessage::warning(format!(
                 "Design note was not placed: {error}"
             )));
-            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.schematic.cancel_tool();
         }
     }
 }
@@ -1027,7 +1027,7 @@ fn handle_documentation_shape_click(
             "Documentation-shape placement requires a validated graphics contract; reopen Draw documentation shape."
                 .to_owned(),
         ));
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     };
     let authority_matches = pending
@@ -1043,7 +1043,7 @@ fn handle_documentation_shape_click(
             "Documentation shape was not placed: the active schematic authority changed; reopen Draw documentation shape."
                 .to_owned(),
         ));
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         return;
     }
     let kind = pending.kind;
@@ -1187,7 +1187,7 @@ fn finish_documentation_shape(
         .commit_documentation_shape(pending, geometry)
     {
         Ok(stable_id) => {
-            crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+            state.schematic.cancel_tool();
             state.sync_active_schematic_to_workspace();
             let message = format!(
                 "Placed {} as stable non-electrical documentation shape {stable_id}.",
@@ -1206,7 +1206,7 @@ fn finish_documentation_shape(
                 crate::state::DocumentationShapeError::ReadOnly
                     | crate::state::DocumentationShapeError::StaleDocument
             ) {
-                crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+                state.schematic.cancel_tool();
             }
         }
     }
@@ -2120,7 +2120,7 @@ mod tests {
         crate::workbench::app::open_move_selection_dialog(state);
         state.dialogs.move_selection.mode = mode;
         state.dialogs.move_selection.arm();
-        crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::MoveSelection);
+        state.schematic.arm_tool(Tool::MoveSelection);
     }
 
     fn move_keyboard_input() -> egui::RawInput {

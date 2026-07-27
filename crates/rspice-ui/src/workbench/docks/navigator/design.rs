@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, HashSet};
 
 use egui::{Key, Modifiers, Response, ScrollArea, Ui};
 
-use crate::workbench::RSpiceApp;
 use crate::schematic::view::SchematicShelfDragPayload;
 use crate::schematic::{ComponentPaletteEntry, component_palette};
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
@@ -14,6 +13,7 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 
 use super::super::super::commands::Command;
 use super::super::super::design_system::{
@@ -1632,7 +1632,7 @@ fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) 
         return;
     }
     app.state.schematic.pending_library_cell = None;
-    crate::workbench::commands::arm_schematic_tool(&mut app.state.schematic, Tool::Place(kind));
+    app.state.schematic.arm_tool(Tool::Place(kind));
     app.state.ui.toasts.success(
         ctx,
         "Component placement armed",
@@ -1644,10 +1644,9 @@ fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) 
 fn arm_cell(app: &mut RSpiceApp, binding: LibraryCellInstance, ctx: &egui::Context) {
     let label = format!("{}/{}", binding.library, binding.cell);
     app.state.schematic.pending_library_cell = Some(binding);
-    crate::workbench::commands::arm_schematic_tool(
-        &mut app.state.schematic,
-        Tool::Place(ComponentType::CellInstance),
-    );
+    app.state
+        .schematic
+        .arm_tool(Tool::Place(ComponentType::CellInstance));
     app.state.ui.toasts.success(
         ctx,
         "Component placement armed",

@@ -7,5 +7,6 @@ mod movement_ops;
 mod preview_ops;
 mod replace_ops;
 mod stretch_ops;
+mod tool_ops;
 mod wire_management;
 mod wire_operations;

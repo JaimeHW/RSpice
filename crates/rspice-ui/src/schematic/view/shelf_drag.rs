@@ -7,8 +7,8 @@
 
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
-use crate::workbench::app::{AppState, ConsoleMessage};
 use crate::state::{ComponentType, LibraryCellInstance, Point};
+use crate::workbench::app::{AppState, ConsoleMessage};
 
 /// Typed payload shared by component-shelf drag sources and the schematic
 /// canvas drop target.
@@ -112,7 +112,7 @@ pub(super) fn commit_shelf_drop(
     }
 
     if state.schematic.tool.is_place_tool() {
-        crate::workbench::commands::cancel_schematic_tool(&mut state.schematic);
+        state.schematic.cancel_tool();
         state.schematic.pending_library_cell = None;
     }
     state.push_user_message(ConsoleMessage::info(format!(
