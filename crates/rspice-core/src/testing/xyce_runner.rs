@@ -55775,14 +55775,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 .strip_suffix("_branch")
                 .filter(|name| !name.is_empty())
                 .or_else(|| {
-                    parameter.eq_ignore_ascii_case("branch").then(|| {
-                        element_name
-                            .rsplit_once('_')
-                            .filter(|(core_name, winding_name)| {
-                                core_name.starts_with("ymin!") && !winding_name.is_empty()
-                            })
-                            .map(|(_, winding_name)| winding_name)
-                    }).flatten()
+                    parameter
+                        .eq_ignore_ascii_case("branch")
+                        .then(|| {
+                            element_name
+                                .rsplit_once('_')
+                                .filter(|(core_name, winding_name)| {
+                                    core_name.starts_with("ymin!") && !winding_name.is_empty()
+                                })
+                                .map(|(_, winding_name)| winding_name)
+                        })
+                        .flatten()
                 })
             {
                 // Xyce exposes each winding's public MNA branch through the

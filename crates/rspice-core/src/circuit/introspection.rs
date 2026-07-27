@@ -413,8 +413,7 @@ impl CircuitData {
                 let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
                 1.0e4
                     * mu_0
-                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
-                        + binding.device.magnetization())
+                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3) + binding.device.magnetization())
             };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
@@ -437,10 +436,7 @@ impl CircuitData {
                             h_si * (4.0 * std::f64::consts::PI / 1.0e3)
                         },
                     ),
-                    (
-                        "b",
-                        b_output,
-                    ),
+                    ("b", b_output),
                 ],
             });
         }
@@ -458,8 +454,7 @@ impl CircuitData {
                 let mu_0 = 4.0 * std::f64::consts::PI * 1.0e-7;
                 1.0e4
                     * mu_0
-                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3)
-                        + binding.device.magnetization())
+                    * (h_si * (4.0 * std::f64::consts::PI / 1.0e3) + binding.device.magnetization())
             };
             entries.push(DeviceOpEntry {
                 name: name.to_string(),
@@ -482,10 +477,7 @@ impl CircuitData {
                             h_si * (4.0 * std::f64::consts::PI / 1.0e3)
                         },
                     ),
-                    (
-                        "b",
-                        b_output,
-                    ),
+                    ("b", b_output),
                 ],
             });
         }

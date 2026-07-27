@@ -72,11 +72,19 @@ pub struct GeneratedStampBenchResult {
 #[derive(Debug, Clone)]
 pub enum GeneratedStampBenchError {
     UnknownModel(String),
-    Setup { model_name: String, detail: String },
+    Setup {
+        model_name: String,
+        detail: String,
+    },
     /// The stamp produced nothing, so the timing would measure an empty path.
-    NoContribution { model_name: String },
+    NoContribution {
+        model_name: String,
+    },
     /// The stamp reported a runtime evaluation failure at the bench bias.
-    Evaluation { model_name: String, detail: String },
+    Evaluation {
+        model_name: String,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for GeneratedStampBenchError {
@@ -115,7 +123,10 @@ pub fn run_generated_stamp_benchmarks(
     } else {
         let mut selected = Vec::with_capacity(config.models.len());
         for requested in &config.models {
-            match available.iter().find(|name| name.eq_ignore_ascii_case(requested)) {
+            match available
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case(requested))
+            {
                 Some(name) => selected.push(*name),
                 None => {
                     // Preserve the caller's ordering by emitting the failure in
@@ -129,11 +140,19 @@ pub fn run_generated_stamp_benchmarks(
 
     selected
         .into_iter()
-        .zip(config.models.iter().map(Some).chain(std::iter::repeat(None)))
+        .zip(
+            config
+                .models
+                .iter()
+                .map(Some)
+                .chain(std::iter::repeat(None)),
+        )
         .map(|(name, requested)| {
             if name.is_empty() {
                 let requested = requested.map(String::as_str).unwrap_or_default();
-                return Err(GeneratedStampBenchError::UnknownModel(requested.to_string()));
+                return Err(GeneratedStampBenchError::UnknownModel(
+                    requested.to_string(),
+                ));
             }
             benchmark_model(name, config)
         })

@@ -86,11 +86,15 @@ pub(super) fn parse_coupling(
         (TokenKind::Ident(candidate), TokenKind::Ident(next)) => {
             let candidate = candidate.as_bytes();
             let next = next.as_bytes();
-            candidate.first().is_some_and(|byte| byte.eq_ignore_ascii_case(&b'k'))
+            candidate
+                .first()
+                .is_some_and(|byte| byte.eq_ignore_ascii_case(&b'k'))
                 && candidate.get(1..).is_some_and(|suffix| {
                     !suffix.is_empty() && suffix.iter().all(u8::is_ascii_digit)
                 })
-                && next.first().is_some_and(|byte| byte.eq_ignore_ascii_case(&b'l'))
+                && next
+                    .first()
+                    .is_some_and(|byte| byte.eq_ignore_ascii_case(&b'l'))
         }
         _ => false,
     };

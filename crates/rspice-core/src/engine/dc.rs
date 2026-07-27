@@ -344,10 +344,7 @@ impl Engine {
             result.push_dc_observable(format!("I({})", binding.name), cache.current);
             result.push_dc_observable(format!("P({})", binding.name), power);
             result.push_dc_observable(format!("W({})", binding.name), power);
-            result.push_dc_observable(
-                format!("N({}:R)", binding.name),
-                binding.resistance_store,
-            );
+            result.push_dc_observable(format!("N({}:R)", binding.name), binding.resistance_store);
         }
         Ok(())
     }

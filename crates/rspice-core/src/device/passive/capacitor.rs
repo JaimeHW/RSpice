@@ -3,12 +3,12 @@
 use crate::device::behavioral::{
     compiled_expression_branch_partial, compiled_expression_node_partial,
 };
+use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::expr::{
     CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict,
     resolve_file_lookup_functions_with_limits,
 };
 use crate::netlist::ExpressionDialect;
-use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::{Value, circuit::NodeId};
 use std::path::Path;
 
@@ -93,10 +93,19 @@ impl SolutionDependentCapacitor {
         source_path: Option<&Path>,
         resource_limits: crate::resource::ResourceLimits,
     ) -> Result<Self, String> {
-        let ast = parse_expression_strict(expression)
-            .map_err(|error| format!("Invalid capacitor value expression '{}': {}", expression, error))?;
+        let ast = parse_expression_strict(expression).map_err(|error| {
+            format!(
+                "Invalid capacitor value expression '{}': {}",
+                expression, error
+            )
+        })?;
         let ast = resolve_file_lookup_functions_with_limits(ast, source_path, resource_limits)
-            .map_err(|error| format!("Invalid capacitor value expression '{}': {}", expression, error))?;
+            .map_err(|error| {
+                format!(
+                    "Invalid capacitor value expression '{}': {}",
+                    expression, error
+                )
+            })?;
         let program = compile(&ast);
 
         Ok(Self {
@@ -250,9 +259,8 @@ impl SolutionDependentCapacitor {
     ) -> SolutionDependentCapacitorLinearization {
         self.refresh_expression_inputs(solution);
         let value = self.evaluate_with_cached_inputs(time);
-        let mut partials = Vec::with_capacity(
-            self.node_bindings.len() + self.branch_bindings.len(),
-        );
+        let mut partials =
+            Vec::with_capacity(self.node_bindings.len() + self.branch_bindings.len());
 
         if !value.is_finite() {
             return SolutionDependentCapacitorLinearization { value, partials };
@@ -430,11 +438,9 @@ mod solution_dependent_capacitor_tests {
 
     #[test]
     fn binds_and_evaluates_voltage_and_branch_references() {
-        let mut evaluator = SolutionDependentCapacitor::new(
-            "C1".to_string(),
-            "1e-6 + V(ctrl) + I(V1)",
-        )
-        .expect("solution-dependent capacitor expression parses");
+        let mut evaluator =
+            SolutionDependentCapacitor::new("C1".to_string(), "1e-6 + V(ctrl) + I(V1)")
+                .expect("solution-dependent capacitor expression parses");
         assert!(evaluator.is_solution_dependent());
 
         evaluator

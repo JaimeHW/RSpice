@@ -1525,12 +1525,8 @@ mod tests {
 
     #[test]
     fn xyce_ignored_source_instance_assignment_is_accepted() {
-        let source = parse_source_spec_text(
-            "DC 3.361e-02A M=4.190e-07",
-            1,
-            &ParamContext::new(),
-        )
-        .expect("Xyce source instance assignment parses");
+        let source = parse_source_spec_text("DC 3.361e-02A M=4.190e-07", 1, &ParamContext::new())
+            .expect("Xyce source instance assignment parses");
 
         assert!(matches!(source, SourceSpec::Dc(value) if (value - 3.361e-2).abs() < 1e-15));
     }

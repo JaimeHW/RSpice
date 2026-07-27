@@ -102,9 +102,9 @@ impl Engine {
                 // solutions for large current-driven networks.
                 if index >= non_electrical_state_mask.len()
                     || non_electrical_state_mask
-                    .get(index)
-                    .copied()
-                    .unwrap_or(false)
+                        .get(index)
+                        .copied()
+                        .unwrap_or(false)
                 {
                     return new_v;
                 }
@@ -530,13 +530,11 @@ mod tests {
     fn diode_pnjlim_owns_newton_steps() {
         let mut circuit = CircuitData::new();
         let anode = circuit.get_or_create_node("a");
-        circuit
-            .diodes
-            .add(crate::device::Diode::spice_defaults(
-                "d1".to_string(),
-                anode,
-                0,
-            ));
+        circuit.diodes.add(crate::device::Diode::spice_defaults(
+            "d1".to_string(),
+            anode,
+            0,
+        ));
 
         assert!(Engine::junction_limiting_owns_newton_steps(&circuit));
     }

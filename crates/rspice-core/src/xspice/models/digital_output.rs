@@ -3562,7 +3562,10 @@ impl XyceDSequential {
         }
         for index in 0..Self::INPUT_CAPACITY {
             ctx.set_initial_state(Self::input_state_index(index, Self::INPUT_STATE), f64::NAN);
-            ctx.set_initial_state(Self::input_state_index(index, Self::INPUT_VOLTAGE), f64::NAN);
+            ctx.set_initial_state(
+                Self::input_state_index(index, Self::INPUT_VOLTAGE),
+                f64::NAN,
+            );
             ctx.set_initial_state(
                 Self::input_state_index(index, Self::INPUT_TRANSITION_TIME),
                 0.0,
@@ -3611,19 +3614,13 @@ impl XyceDSequential {
         queue_between_static(ctx, output_pair, low_pair, g_low);
         queue_between_static(ctx, output_pair, high_pair, g_high);
 
-            let current_voltage = ctx.input(port_name);
-            let low_rail = ctx.input("dgnd");
-            let high_rail = ctx.input("dpwr");
+        let current_voltage = ctx.input(port_name);
+        let low_rail = ctx.input("dgnd");
+        let high_rail = ctx.input("dpwr");
         if ctx.is_transient() && ctx.time == 0.0 {
             if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-                ctx.set_initial_state(
-                    previous_low_voltage_state,
-                    current_voltage - low_rail,
-                );
-                ctx.set_initial_state(
-                    previous_high_voltage_state,
-                    current_voltage - high_rail,
-                );
+                ctx.set_initial_state(previous_low_voltage_state, current_voltage - low_rail);
+                ctx.set_initial_state(previous_high_voltage_state, current_voltage - high_rail);
                 ctx.set_initial_state(
                     previous_previous_low_voltage_state,
                     current_voltage - low_rail,
@@ -3640,8 +3637,7 @@ impl XyceDSequential {
         if ctx.is_transient() && ctx.timestep.is_finite() && ctx.timestep > 0.0 {
             let previous_low_voltage = ctx.state_prev(previous_low_voltage_state);
             let previous_high_voltage = ctx.state_prev(previous_high_voltage_state);
-            let previous_previous_low_voltage =
-                ctx.state_prev(previous_previous_low_voltage_state);
+            let previous_previous_low_voltage = ctx.state_prev(previous_previous_low_voltage_state);
             let previous_previous_high_voltage =
                 ctx.state_prev(previous_previous_high_voltage_state);
             let previous_low_current = ctx.state_prev(previous_low_current_state);
@@ -3659,18 +3655,17 @@ impl XyceDSequential {
             } else {
                 previous_high_voltage
             };
-            let older_history_low =
-                if !previous_previous_low_voltage.is_finite() || initial_point {
-                    history_low
-                } else {
-                    previous_previous_low_voltage
-                };
-            let older_history_high =
-                if !previous_previous_high_voltage.is_finite() || initial_point {
-                    history_high
-                } else {
-                    previous_previous_high_voltage
-                };
+            let older_history_low = if !previous_previous_low_voltage.is_finite() || initial_point {
+                history_low
+            } else {
+                previous_previous_low_voltage
+            };
+            let older_history_high = if !previous_previous_high_voltage.is_finite() || initial_point
+            {
+                history_high
+            } else {
+                previous_previous_high_voltage
+            };
             let history_current_low = if previous_low_current.is_finite() {
                 previous_low_current
             } else {
@@ -3703,26 +3698,10 @@ impl XyceDSequential {
             stamp_between_rhs(ctx, output_pair, low_pair, -i_eq_low);
             stamp_between(ctx, output_pair, high_pair, g_cap_high);
             stamp_between_rhs(ctx, output_pair, high_pair, -i_eq_high);
-            Self::commit_state(
-                ctx,
-                previous_low_voltage_state,
-                current_low_voltage,
-            );
-            Self::commit_state(
-                ctx,
-                previous_high_voltage_state,
-                current_high_voltage,
-            );
-            Self::commit_state(
-                ctx,
-                previous_previous_low_voltage_state,
-                history_low,
-            );
-            Self::commit_state(
-                ctx,
-                previous_previous_high_voltage_state,
-                history_high,
-            );
+            Self::commit_state(ctx, previous_low_voltage_state, current_low_voltage);
+            Self::commit_state(ctx, previous_high_voltage_state, current_high_voltage);
+            Self::commit_state(ctx, previous_previous_low_voltage_state, history_low);
+            Self::commit_state(ctx, previous_previous_high_voltage_state, history_high);
             Self::commit_state(
                 ctx,
                 previous_low_current_state,
@@ -3780,13 +3759,7 @@ impl XyceDSequential {
         };
         let coefficients = ctx.transient_companion_coefficients();
         let conductance = coefficients.capacitor_geq(params.cload, ctx.timestep);
-        let current = coefficients.capacitor_ieq(
-            params.cload,
-            ctx.timestep,
-            history,
-            history,
-            0.0,
-        );
+        let current = coefficients.capacitor_ieq(params.cload, ctx.timestep, history, history, 0.0);
         stamp_between(ctx, input_pair, dgnd_pair, conductance);
         stamp_between_rhs(ctx, input_pair, dgnd_pair, -current);
     }
@@ -3886,10 +3859,8 @@ impl XyceDSequential {
             qbar_start,
             qbar_from,
         );
-        for (port_name, state, transition_start) in [
-            ("q", q, q_start),
-            ("qbar", qbar, qbar_start),
-        ] {
+        for (port_name, state, transition_start) in [("q", q, q_start), ("qbar", qbar, qbar_start)]
+        {
             if let Some(state) = state {
                 let event_time = if transition_start.is_finite() && transition_start > 0.0 {
                     (transition_start - params.delay).max(0.0)

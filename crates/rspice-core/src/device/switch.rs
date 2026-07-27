@@ -1607,11 +1607,7 @@ impl GenericSwitch {
             .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect);
         let value = vm.execute(&self.program, &ctx);
-        if value.is_finite() {
-            value
-        } else {
-            self.off
-        }
+        if value.is_finite() { value } else { self.off }
     }
 
     fn refresh_expression_inputs(&mut self, solution: &[Value]) {
@@ -1633,11 +1629,7 @@ impl GenericSwitch {
             .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect);
         let value = self.vm.execute(&self.program, &ctx);
-        if value.is_finite() {
-            value
-        } else {
-            self.off
-        }
+        if value.is_finite() { value } else { self.off }
     }
 
     #[inline]

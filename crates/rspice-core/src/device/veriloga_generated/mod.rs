@@ -2520,9 +2520,10 @@ impl<'a> GeneratedStamper<'a> {
                 GeneratedStampLane::Node(node) => {
                     (self.node_axis_local(node), self.node_value_local(node))
                 }
-                GeneratedStampLane::Branch(branch) => {
-                    (self.branch_axis_local(branch), self.branch_value_local(branch))
-                }
+                GeneratedStampLane::Branch(branch) => (
+                    self.branch_axis_local(branch),
+                    self.branch_value_local(branch),
+                ),
                 GeneratedStampLane::Unused => continue,
             };
             if needs_rhs {
@@ -6179,7 +6180,10 @@ mod tests {
         derivative0: crate::Value,
         derivative1: crate::Value,
         voltages: &[crate::Value],
-    ) -> ((Vec<crate::Value>, Vec<crate::Value>), (Vec<crate::Value>, Vec<crate::Value>)) {
+    ) -> (
+        (Vec<crate::Value>, Vec<crate::Value>),
+        (Vec<crate::Value>, Vec<crate::Value>),
+    ) {
         let nodes = vec![1usize, 2usize];
         let branches: Vec<usize> = Vec::new();
         let size = 2usize;
@@ -6188,7 +6192,8 @@ mod tests {
             .collect();
 
         let mut run = |packed: bool| {
-            let mut matrix = super::StaticMatrix::from_triplets(size, size, &triplets).expect("matrix");
+            let mut matrix =
+                super::StaticMatrix::from_triplets(size, size, &triplets).expect("matrix");
             let mut cache = super::GeneratedStaticStampCache::default();
             cache.link(&matrix, &nodes, &branches, size);
             let mut rhs = vec![0.0 as crate::Value; size];
@@ -6205,7 +6210,10 @@ mod tests {
                         Some(0),
                         Some(1),
                         0.75,
-                        &[super::GeneratedStampLane::Node(0), super::GeneratedStampLane::Node(1)],
+                        &[
+                            super::GeneratedStampLane::Node(0),
+                            super::GeneratedStampLane::Node(1),
+                        ],
                         &[derivative0, derivative1],
                     );
                 } else {

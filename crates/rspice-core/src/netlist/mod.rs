@@ -7135,7 +7135,8 @@ mod tests {
         )
         .expect_err("positional numeric MOS values must be rejected");
         assert!(
-            err.to_string().contains("Unsupported MOSFET instance token"),
+            err.to_string()
+                .contains("Unsupported MOSFET instance token"),
             "unexpected error: {err}"
         );
     }
