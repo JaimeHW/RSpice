@@ -112,25 +112,26 @@ fn legacy_missing_row_identity_is_deterministic_but_null_is_rejected() {
 #[test]
 fn plan_payload_round_trip_preserves_nested_ownership() {
     let plan_id = SimulationPlanId::new();
-    let workspace = ProjectWorkspace {
-        simulation_plan_payloads: vec![SimulationPlanPayloadRecord {
-            plan_id,
-            payload: SimulationPlanPayload {
-                design_variables: vec![resistance_variable(
-                    "RLOAD",
-                    "10 kohm",
-                    DesignVariableScope::Testbench,
-                )],
-                saved_outputs: vec![raw_output(
-                    "VOUT",
-                    "V(out)",
-                    SavedOutputCompatibility::OpTranAc,
-                )],
-                ..SimulationPlanPayload::default()
-            },
-        }],
-        ..ProjectWorkspace::default()
-    };
+    // Assign rather than struct-update: `ProjectWorkspace` keeps its
+    // digest-authenticated hardcopy source sets private, and functional update
+    // syntax still requires every field to be visible from here.
+    let mut workspace = ProjectWorkspace::default();
+    workspace.simulation_plan_payloads = vec![SimulationPlanPayloadRecord {
+        plan_id,
+        payload: SimulationPlanPayload {
+            design_variables: vec![resistance_variable(
+                "RLOAD",
+                "10 kohm",
+                DesignVariableScope::Testbench,
+            )],
+            saved_outputs: vec![raw_output(
+                "VOUT",
+                "V(out)",
+                SavedOutputCompatibility::OpTranAc,
+            )],
+            ..SimulationPlanPayload::default()
+        },
+    }];
 
     let json = serde_json::to_string(&workspace).unwrap();
     let restored: ProjectWorkspace = serde_json::from_str(&json).unwrap();
@@ -162,17 +163,15 @@ fn cloning_refreshes_row_identity_and_remaps_analysis_ownership() {
     );
     let variable_id = variable.id;
     let output_id = output.id;
-    let mut workspace = ProjectWorkspace {
-        simulation_plan_payloads: vec![SimulationPlanPayloadRecord {
-            plan_id: source_plan,
-            payload: SimulationPlanPayload {
-                design_variables: vec![variable],
-                saved_outputs: vec![output],
-                ..SimulationPlanPayload::default()
-            },
-        }],
-        ..ProjectWorkspace::default()
-    };
+    let mut workspace = ProjectWorkspace::default();
+    workspace.simulation_plan_payloads = vec![SimulationPlanPayloadRecord {
+        plan_id: source_plan,
+        payload: SimulationPlanPayload {
+            design_variables: vec![variable],
+            saved_outputs: vec![output],
+            ..SimulationPlanPayload::default()
+        },
+    }];
 
     workspace
         .clone_plan_data(
