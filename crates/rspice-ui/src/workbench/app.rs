@@ -77,6 +77,7 @@ mod console;
 mod design_history;
 mod dialogs;
 mod interaction_state;
+mod run_preflight;
 mod schematic;
 mod session;
 mod sim_setup;
@@ -416,71 +417,13 @@ impl AppState {
     /// User-facing preflight reason a new run cannot start, excluding the
     /// transient "already running" state so queued re-runs can share it.
     pub fn simulation_run_preflight_block_reason(&self) -> Option<String> {
-        let plan = match self.sim_setup.stable_analysis_plan() {
-            Ok(plan) => plan,
-            Err(error) => return Some(error),
-        };
-        let enabled = plan
-            .instances()
-            .iter()
-            .filter(|instance| instance.enabled())
-            .collect::<Vec<_>>();
-        if enabled.is_empty() {
-            return Some("Enable at least one analysis instance in the simulation plan".to_owned());
-        }
-        let configured_root = self.workspace.simulation_root_reference();
-        let Some(configured_schematic) = self
-            .workspace
-            .simulation_root_schematic(&self.workspace.active_view, &self.schematic)
-        else {
-            return Some(format!(
-                "Resolve the configured simulation root '{}' before running",
-                configured_root.display_path()
-            ));
-        };
-        if configured_schematic.components.is_empty() {
-            return Some(format!(
-                "Add a component to the configured simulation root '{}' before running",
-                configured_root.display_path()
-            ));
-        }
-        if let Some(issue) = plan.validation_issues().first() {
-            return Some(format!("Correct simulation plan: {issue}"));
-        }
-        if let Some((instance, error)) = enabled.iter().find_map(|instance| {
-            self.sim_setup
-                .analysis_draft_validation_error(instance.draft())
-                .map(|error| (*instance, error))
-        }) {
-            return Some(format!(
-                "Correct {} instance {}: {error}",
-                instance.kind().label(),
-                instance.id()
-            ));
-        }
-        if let Err(error) = self
-            .model_library_manager
-            .reference_process_model_cards(self.sim_setup.reference_pvt.process)
-        {
-            return Some(error);
-        }
-        // The retained editor DRC result describes only the active schematic.
-        // Hierarchy-wide configured-root checks are owned by the execution
-        // preflight/controller pipeline, so an unrelated editor tab must not
-        // block (or clear) the configured design's run eligibility.
-        let configured_root_is_active = configured_root
-            .key()
-            .eq_ignore_ascii_case(&self.workspace.active_view.key());
-        if configured_root_is_active && let Some(result) = self.current_blocking_drc_result() {
-            let summary = result.summary();
-            return Some(format!(
-                "Fix current DRC errors before simulation ({} critical, {} error{})",
-                summary.critical,
-                summary.errors,
-                if summary.errors == 1 { "" } else { "s" }
-            ));
-        }
-        None
+        run_preflight::run_preflight_block_reason(
+            &self.sim_setup,
+            &self.workspace,
+            &self.schematic,
+            &self.model_library_manager,
+            self.current_blocking_drc_result(),
+        )
     }
 
     /// User-facing reason the Netlist workspace cannot run the current deck.
