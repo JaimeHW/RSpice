@@ -23,6 +23,7 @@ pub mod eye_diagram;
 pub mod fft;
 pub mod hb_tones;
 pub mod histogram;
+pub mod measurements;
 pub mod nyquist;
 pub mod phase_noise;
 pub mod pole_zero;

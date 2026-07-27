@@ -22,7 +22,7 @@
 //! | 1 | `results`, `ui` | Versioned result documents; the design system (tokens, palette, widgets, plot engine) |
 //! | 2 | `hardcopy` | Persisted page setup, print mappings, and source-set records |
 //! | 3 | `state` | The persisted design, library, and project model |
-//! | 4 | `analysis`, `automation_workflow`, `io`, `waveform` | Viewer mathematics, the CI workflow language, file formats |
+//! | 4 | `analysis`, `automation_workflow`, `io` | Viewer mathematics, the CI workflow language, file formats |
 //! | 5 | `services` | DRC, licensing, and the per-analysis engine adapters |
 //! | 6 | `simulation` | Analysis plans, netlist generation, run orchestration |
 //! | 7 | `properties` | Component property editing |
@@ -80,9 +80,6 @@ pub mod analysis;
 
 /// Schematic editor - Canvas, export, toolbar, symbol library
 pub mod schematic;
-
-/// Waveform measurements (min/max/RMS over sample slices)
-pub mod waveform;
 
 /// Simulation management - Controller, dialogs, netlist generation
 pub mod simulation;

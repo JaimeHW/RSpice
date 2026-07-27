@@ -66,7 +66,6 @@ const LAYERS: &[(&str, u32)] = &[
     ("analysis", 4),
     ("automation_workflow", 4),
     ("io", 4),
-    ("waveform", 4),
     ("services", 5),
     ("simulation", 6),
     // Editors and inspectors.

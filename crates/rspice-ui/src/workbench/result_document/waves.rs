@@ -3138,7 +3138,7 @@ fn measurement_rows(
     significant_digits: usize,
     quantity_policy: crate::quantity::QuantityPresentationPolicy,
 ) {
-    use crate::waveform::measurements as basic;
+    use crate::analysis::measurements as basic;
 
     // Window identity for the cache key; u64::MAX is a NaN bit pattern no
     // finite cursor can produce, marking the full-range case.
