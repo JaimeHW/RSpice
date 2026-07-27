@@ -80,6 +80,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_27(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
@@ -89,7 +90,8 @@ impl Instance {
             let t0: f64 = if (s.b[1346] && (s.v[662] < p[2])) { 1.0 } else { 0.0 };
             t0 != 0.0
         } {
-            t1 += 1;assert!(t1 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t1 += 1;
+            if t1 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t1, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if s.b[1346] {s.store_div_from_scalar_offset_scaled_input(12, (1.0 / p[2]), 662, (p[19] + s.v[99]), (p[17] + (0.5 * s.v[99])));s.store_div_from_scalar_offset_scaled_input(13, (1.0 / p[2]), 662, (p[19] + s.v[99]), (p[18] + (0.5 * s.v[99])));s.store_offset(649, 12, s.v[649]);s.store_offset(650, 13, s.v[650]);s.store_primal_offset(662, 662, 1.0);}
         }
         if s.b[1346] {s.store_scalar(651, (1.0 / (p[912] + (0.5 * s.v[99]))));s.store_scalar(652, (1.0 / (p[913] + (0.5 * s.v[99]))));s.store_primal_add(653, 651, 652);s.store_mul_div_from_scalar_lhs_ad_indices(654, p[915], 648, 653);s.store_add(655, 649, 650);s.store_mul_div_from_scalar_lhs_ad_indices(656, p[915], 648, 655);s.store_div_scaled_offset_numerator_mixed_ia(657, 656, 1.0, 1.0, A::offset(s.ad_value(654), 1.0), 1.0);s.store_div_scaled_offset_numerator_mixed_ia(658, 656, p[916], 1.0, A::scale_offset(s.ad_value(654), p[916], 1.0), 1.0);s.store_mul_div_from_scalar_lhs_ad_mixed_ia(659, p[923], 647, A::sub(s.ad_value(655), s.ad_value(653)));s.store_mul_div_from_scalar_lhs_ad(660, p[929], A::powf(s.ad_value(647), p[930]), A::sub(s.ad_value(655), s.ad_value(653)));s.store_mul_div_from_scalar_lhs_ad(661, p[931], A::powf(s.ad_value(647), p[932]), A::sub(s.ad_value(655), s.ad_value(653)));s.store_mul(397, 397, 657);s.store_mul(409, 409, 658);s.store_add(494, 494, 660);s.store_add(420, 420, 661);}

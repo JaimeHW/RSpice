@@ -7,6 +7,7 @@ impl Instance {
         s: &mut Scratch,
         p: &Parameters,
     ) {
+        if s.b[1429] {s.store_scaled_offset_ad(340, A::div_scaled_offset_numerator(s.ad_value(182), 1.0, (-1.0), s.ad_value(782), 1.0), 1.0, 0.5);s.store_scaled_add_mixed_ai(182, A::offset(s.ad_value(182), (-1.0)), 782, 0.5);}
         s.b[1432] = (s.v[182] < 0.0);s.store_scalar(1432, if s.b[1432] { 1.0 } else { 0.0 });
         if (s.b[1429] && s.b[1432]) {s.store_scalar(182, 0.0);s.store_scalar(340, 0.0);}
         if s.b[1429] {s.store_mul(182, 182, 334);s.store_offset_sub_from_scalar_ad(781, 1.0, s.ad_value(182), (-0.05));s.store_scalar(782, (4.0 * 0.05));}
@@ -23,14 +24,14 @@ impl Instance {
         if (p[37] == 0.0) {s.copy_ad(1433, 792);s.store_scalar(1434, 1.0);}
         s.store_scaled_mul(335, 1434, 790, 0.5);s.store_scale(781, 335, (2.0 * 1.0 / (p[262])));s.store_offset_mul_offset_rhs_mixed_ia(782, 781, A::mul_offset_rhs(s.ad_value(781), A::mul_offset_rhs(s.ad_value(781), A::mul_offset_rhs(s.ad_value(781), A::mul(s.ad_value(781), A::scale_offset(s.ad_value(781), (1.0 / 5040.0), (1.0 / 720.0))), (1.0 / 120.0)), (1.0 / 24.0)), (1.0 / 6.0)), (1.0 / 2.0), 1.0);s.store_offset_mul_offset_rhs_mixed_ia(783, 781, A::mul_offset_rhs(s.ad_value(781), A::mul_offset_rhs(s.ad_value(781), A::mul(s.ad_value(781), A::scale_offset(s.ad_value(781), (1.0 / 840.0), (1.0 / 144.0))), (1.0 / 30.0)), (1.0 / 8.0)), (1.0 / 3.0), (1.0 / 2.0));s.store_div_from_scalar(1435, p[262], 782);s.store_div_scaled_inputs_square_rhs(336, 783, (-2.0), 782, 1.0);s.b[1440] = (s.v[1435] < 1e-12);s.store_scalar(1440, if s.b[1440] { 1.0 } else { 0.0 });
         if s.b[1440] {s.store_scalar(1435, 1e-12);}
-        s.store_add(1436, 1433, 1435);s.store_add_scaled_inputs(1437, 790, 1.0, 1435, 2.0);s.store_add(1438, 791, 1435);s.store_add_scaled_inputs3_offset_indices(85, 791, 1.0, 120, 1.0, 182, -1.0, (-s.v[160]));let t0: f64 = (s.v[160] - s.v[120]);let t1: f64 = (t0 + s.v[182]);let t2: f64 = (t1 + s.v[1433]);s.store_scalar(86, t2);s.b[1441] = (s.v[963] != 0.0);s.store_scalar(1441, if s.b[1441] { 1.0 } else { 0.0 });
+        s.store_add(1436, 1433, 1435);s.store_add_scaled_inputs(1437, 790, 1.0, 1435, 2.0);s.store_add(1438, 791, 1435);s.store_add_scaled_inputs3_offset_indices(85, 791, 1.0, 120, 1.0, 182, -1.0, (-s.v[160]));
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_33(
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        s.b[1442] = (p[42] == 1.0);s.store_scalar(1442, if s.b[1442] { 1.0 } else { 0.0 });s.b[1443] = (p[42] == 2.0);s.store_scalar(1443, if s.b[1443] { 1.0 } else { 0.0 });s.b[1444] = (p[42] == 3.0);s.store_scalar(1444, if s.b[1444] { 1.0 } else { 0.0 });
+        let t0: f64 = (s.v[160] - s.v[120]);let t1: f64 = (t0 + s.v[182]);let t2: f64 = (t1 + s.v[1433]);s.store_scalar(86, t2);s.b[1441] = (s.v[963] != 0.0);s.store_scalar(1441, if s.b[1441] { 1.0 } else { 0.0 });s.b[1442] = (p[42] == 1.0);s.store_scalar(1442, if s.b[1442] { 1.0 } else { 0.0 });s.b[1443] = (p[42] == 2.0);s.store_scalar(1443, if s.b[1443] { 1.0 } else { 0.0 });s.b[1444] = (p[42] == 3.0);s.store_scalar(1444, if s.b[1444] { 1.0 } else { 0.0 });
         if (s.b[1441] && s.b[1442]) {s.copy_ad(1461, 960);s.store_scale(1544, 964, 1.6021918e-19);s.store_square(1543, 964);s.store_scale(1500, 964, (1.6021918e-19 * 1.034943e-10));s.store_scale(1542, 622, 1.6021918e-19);s.store_scalar(1539, (1.6021918e-19 * 1.6021918e-19));s.store_scalar(1540, (1.034943e-10 * 1.034943e-10));s.store_square(1541, 965);s.store_div_from_scalar(1545, (2.0 * 1.034943e-10), 1544);s.store_scale(1546, 1544, 1.0 / ((2.0 * 1.034943e-10)));s.store_scale(1547, 1544, (2.0 * 1.034943e-10));s.store_div_from_scalar(1548, (2.0 * 1.034943e-10), 1542);s.store_scale(1549, 1542, 1.0 / ((2.0 * 1.034943e-10)));s.store_div(1534, 964, 622);s.store_div_from_scalar_offset_input(1533, 1.0, 1534, 1.0);s.store_scalar(1550, (1e-12 * 1000.0));s.store_scalar(1551, (1e-10 * 1000.0));s.store_scalar(1459, 0.0);s.store_scalar(1460, 0.0);s.store_scalar(1473, 0.0);s.store_scalar(1474, 0.0);s.store_scalar(1515, 0.0);s.store_scalar(1516, 0.0);s.store_scalar(1495, 0.0);s.store_scalar(1497, 0.0);s.store_scalar(1496, 0.0);s.store_scalar(1498, 0.0);s.store_scalar(1518, 0.0);s.store_offset(85, 85, ((10.0 * 2.220446049250313e-16) * 10000000.0));s.store_div_scaled_product_by_product_indices(1454, 185, 185, 1.0, 209, 209, 1.0);s.store_mul_mixed_ai(1457, A::div_scaled_value_by_product(s.ad_value(1454), 1.0, s.ad_value(394), s.ad_value(394), 1.0), 1543);s.store_sqrt_mul_ad(1451, A::div_scaled_product(s.ad_value(1545), s.ad_value(622), 1.0, A::add(s.ad_value(622), s.ad_value(964)), 1.0), A::sub(s.ad_value(1461), s.ad_value(1433)));}
         s.b[1557] = (s.v[1451] > s.v[965]);s.store_scalar(1557, if s.b[1557] { 1.0 } else { 0.0 });
         if ((s.b[1441] && s.b[1442]) && s.b[1557]) {s.store_scalar(1464, 0.0);s.copy_ad(1445, 965);s.store_scalar(1481, 0.0);s.store_sub_mixed_ia(1462, 1481, A::mul3(s.ad_value(1546), s.ad_value(1445), s.ad_value(1445)));s.store_scalar(1509, 0.0);}
@@ -61,6 +62,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_34(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
         let mut t24: usize = 0;
@@ -68,7 +70,8 @@ impl Instance {
             let t22: f64 = (150.0 + 1.0);let t23: f64 = if (((s.b[1441] && s.b[1442]) && s.b[1557]) && (s.v[97] <= t22)) { 1.0 } else { 0.0 };
             t23 != 0.0
         } {
-            t24 += 1;assert!(t24 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t24 += 1;
+            if t24 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t24, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((s.b[1441] && s.b[1442]) && s.b[1557]) {s.store_sqrt_mul_sub_rhs(1445, 1545, 1481, 1462);}
             s.b[1558] = ((s.v[1445] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));s.store_scalar(1558, if s.b[1558] { 1.0 } else { 0.0 });
             if (((s.b[1441] && s.b[1442]) && s.b[1557]) && s.b[1558]) {s.store_offset_sub(781, 1445, 965, 1e-8);s.store_square(722, 781);s.store_scalar(723, (1e-8 * 1e-8));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
@@ -134,7 +137,8 @@ impl Instance {
                 let td: f64 = if (((((s.b[1441] && s.b[1442]) && s.b[1557]) && s.b[1558]) && s.b[1559]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
                 td != 0.0
             } {
-                te += 1;assert!(te <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                te += 1;
+                if te > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", te, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if ((((s.b[1441] && s.b[1442]) && s.b[1557]) && s.b[1558]) && s.b[1559]) {s.store_sqrt(726, 726);}
                 let (tc,) = {
     if ((((s.b[1441] && s.b[1442]) && s.b[1557]) && s.b[1558]) && s.b[1559]) {
@@ -224,7 +228,8 @@ impl Instance {
                 let t18: f64 = if (((((s.b[1441] && s.b[1442]) && s.b[1557]) && s.b[1564]) && s.b[1565]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
                 t18 != 0.0
             } {
-                t19 += 1;assert!(t19 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                t19 += 1;
+                if t19 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t19, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if ((((s.b[1441] && s.b[1442]) && s.b[1557]) && s.b[1564]) && s.b[1565]) {s.store_sqrt(726, 726);}
                 let (t17,) = {
     if ((((s.b[1441] && s.b[1442]) && s.b[1557]) && s.b[1564]) && s.b[1565]) {
@@ -392,6 +397,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_36(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
         s.b[1580] = (s.v[1478] > (s.v[1465] - s.v[1550]));s.store_scalar(1580, if s.b[1580] { 1.0 } else { 0.0 });
@@ -410,7 +416,8 @@ impl Instance {
             let t3e: f64 = (150.0 + 1.0);let t3f: f64 = if ((((((s.b[1441] && s.b[1442]) && (!s.b[1576])) && (!s.b[1578])) && s.b[1579]) && s.b[1581]) && (s.v[97] <= t3e)) { 1.0 } else { 0.0 };
             t3f != 0.0
         } {
-            t40 += 1;assert!(t40 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t40 += 1;
+            if t40 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t40, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((((s.b[1441] && s.b[1442]) && (!s.b[1576])) && (!s.b[1578])) && s.b[1579]) && s.b[1581]) {s.store_add_scaled_inputs3_indices(1466, 1447, 1.0, 1445, 1.0, 965, -1.0);s.store_add_ad(1506, A::div_scalar_by_product(1.034943e-10, s.ad_value(1544), s.ad_value(1447), 1.0), A::div(A::mul_sub_from_scalar_rhs(A::div_from_scalar(1.034943e-10, s.ad_value(1544)), 1.0, A::div_scaled_value_offset_denominator(s.ad_value(1534), 1.0, s.ad_value(1534), 1.0, 1.0)), s.ad_value(1445)));}
             s.b[1582] = ((((s.v[1466] / s.v[1506])) as f64).abs() > 0.5);s.store_scalar(1582, if s.b[1582] { 1.0 } else { 0.0 });
             if ((((((s.b[1441] && s.b[1442]) && (!s.b[1576])) && (!s.b[1578])) && s.b[1579]) && s.b[1581]) && s.b[1582]) {s.store_offset(1481, 1481, (-(0.5 * (if ((s.v[1466] / s.v[1506]) >= 0.0) { 1.0 } else { (-1.0) }))));}
@@ -475,6 +482,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_37(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
         if ((((s.b[1441] && s.b[1442]) && (!s.b[1576])) && (!s.b[1578])) && (!s.b[1579])) {s.store_div_ad(1478, A::ln(A::mul3(s.ad_value(1458), s.ad_value(85), s.ad_value(85))), A::sub(A::div_from_scalar(2.0, s.ad_value(85)), s.ad_value(154)));s.store_sqrt_mul_sub_rhs(1447, 1545, 1481, 1478);s.store_sqrt_mul_sub_rhs(1445, 1545, 1481, 1462);}
@@ -491,7 +499,8 @@ impl Instance {
             let t48: f64 = (s.v[421] + 1.0);let t49: f64 = if ((((((s.b[1441] && s.b[1442]) && (!s.b[1576])) && (!s.b[1578])) && (!s.b[1579])) && s.b[1588]) && (s.v[97] <= t48)) { 1.0 } else { 0.0 };
             t49 != 0.0
         } {
-            t4a += 1;assert!(t4a <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t4a += 1;
+            if t4a > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t4a, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((((s.b[1441] && s.b[1442]) && (!s.b[1576])) && (!s.b[1578])) && (!s.b[1579])) && s.b[1588]) {s.store_add_scaled_inputs3_indices(1466, 1447, 1.0, 1445, 1.0, 965, -1.0);s.store_add_ad(1506, A::div_scalar_by_product(1.034943e-10, s.ad_value(1544), s.ad_value(1447), 1.0), A::div(A::mul_sub_from_scalar_rhs(A::div_from_scalar(1.034943e-10, s.ad_value(1544)), 1.0, A::div_scaled_value_offset_denominator(s.ad_value(1534), 1.0, s.ad_value(1534), 1.0, 1.0)), s.ad_value(1445)));}
             s.b[1589] = ((((s.v[1466] / s.v[1506])) as f64).abs() > 0.5);s.store_scalar(1589, if s.b[1589] { 1.0 } else { 0.0 });
             if ((((((s.b[1441] && s.b[1442]) && (!s.b[1576])) && (!s.b[1578])) && (!s.b[1579])) && s.b[1588]) && s.b[1589]) {s.store_offset(1481, 1481, (-(0.5 * (if ((s.v[1466] / s.v[1506]) >= 0.0) { 1.0 } else { (-1.0) }))));}
@@ -564,6 +573,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_38(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
         let mut t79: usize = 0;
@@ -571,7 +581,8 @@ impl Instance {
             let t77: f64 = (150.0 + 1.0);let t78: f64 = if ((s.b[1441] && s.b[1442]) && (s.v[97] <= t77)) { 1.0 } else { 0.0 };
             t78 != 0.0
         } {
-            t79 += 1;assert!(t79 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t79 += 1;
+            if t79 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t79, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (s.b[1441] && s.b[1442]) {s.store_mul_sub_mixed_iai(1462, 1533, A::add_scaled_product(s.ad_value(1433), 1.0, s.ad_value(1534), s.ad_value(1481), 1.0), 1461);s.store_mul(1531, 1533, 1534);s.store_sub(335, 1481, 1462);}
             s.b[1592] = ((s.v[335] < 0.1) && (0.1 >= 0.0));s.store_scalar(1592, if s.b[1592] { 1.0 } else { 0.0 });
             if ((s.b[1441] && s.b[1442]) && s.b[1592]) {s.store_sub_from_scalar(781, 0.1, 335);s.store_square(722, 781);s.store_scalar(723, (0.1 * 0.1));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
@@ -637,7 +648,8 @@ impl Instance {
                 let t69: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1592]) && s.b[1593]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
                 t69 != 0.0
             } {
-                t6a += 1;assert!(t6a <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                t6a += 1;
+                if t6a > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t6a, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if (((s.b[1441] && s.b[1442]) && s.b[1592]) && s.b[1593]) {s.store_sqrt(726, 726);}
                 let (t68,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1592]) && s.b[1593]) {
@@ -725,7 +737,8 @@ impl Instance {
                 let t74: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1598]) && s.b[1599]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
                 t74 != 0.0
             } {
-                t75 += 1;assert!(t75 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                t75 += 1;
+                if t75 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t75, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if (((s.b[1441] && s.b[1442]) && s.b[1598]) && s.b[1599]) {s.store_sqrt(726, 726);}
                 let (t73,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1598]) && s.b[1599]) {
@@ -818,7 +831,8 @@ impl Instance {
                 let t59: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1605]) && s.b[1606]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
                 t59 != 0.0
             } {
-                t5a += 1;assert!(t5a <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                t5a += 1;
+                if t5a > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t5a, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if (((s.b[1441] && s.b[1442]) && s.b[1605]) && s.b[1606]) {s.store_sqrt(726, 726);}
                 let (t58,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1605]) && s.b[1606]) {
@@ -893,6 +907,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_39(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
         s.b[1614] = ((s.v[1451] > s.v[965]) && (s.v[1477] != 2.0));s.store_scalar(1614, if s.b[1614] { 1.0 } else { 0.0 });s.b[1615] = ((s.v[1481] > (s.v[1459] - 0.02)) && (0.02 >= 0.0));s.store_scalar(1615, if s.b[1615] { 1.0 } else { 0.0 });
@@ -959,7 +974,8 @@ impl Instance {
             let t83: f64 = if (((((s.b[1441] && s.b[1442]) && s.b[1614]) && s.b[1615]) && s.b[1616]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             t83 != 0.0
         } {
-            t84 += 1;assert!(t84 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t84 += 1;
+            if t84 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t84, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[1441] && s.b[1442]) && s.b[1614]) && s.b[1615]) && s.b[1616]) {s.store_sqrt(726, 726);}
             let (t82,) = {
     if ((((s.b[1441] && s.b[1442]) && s.b[1614]) && s.b[1615]) && s.b[1616]) {
@@ -1005,13 +1021,14 @@ impl Instance {
     }
 };
         s.store_scalar(720, t86);
-        if (((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);}
+        if (((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);}
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_40(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
-        if (((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) {s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
+        if (((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) {s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[1623] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(1623, if s.b[1623] { 1.0 } else { 0.0 });s.b[1624] = (2.0 == 1.0);s.store_scalar(1624, if s.b[1624] { 1.0 } else { 0.0 });
         let (t87,) = {
     if (((((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) && s.b[1623]) && s.b[1624]) {
@@ -1057,7 +1074,8 @@ impl Instance {
             let t8e: f64 = if (((((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) && s.b[1623]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             t8e != 0.0
         } {
-            t8f += 1;assert!(t8f <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t8f += 1;
+            if t8f > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t8f, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) && s.b[1623]) {s.store_sqrt(726, 726);}
             let (t8d,) = {
     if ((((s.b[1441] && s.b[1442]) && s.b[1621]) && s.b[1622]) && s.b[1623]) {
@@ -1090,6 +1108,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_41(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
         if (((s.b[1441] && s.b[1442]) && (!s.b[1621])) && (!s.b[1628])) {s.store_mul_sqrt_mixed_ia(1515, 209, A::offset(A::sub(A::offset(s.ad_value(336), (-1.0)), s.ad_value(335)), 1e-15));}
@@ -1158,7 +1177,8 @@ impl Instance {
             let t99: f64 = if (((((s.b[1441] && s.b[1442]) && (!s.b[1621])) && s.b[1629]) && s.b[1630]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             t99 != 0.0
         } {
-            t9a += 1;assert!(t9a <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t9a += 1;
+            if t9a > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t9a, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[1441] && s.b[1442]) && (!s.b[1621])) && s.b[1629]) && s.b[1630]) {s.store_sqrt(726, 726);}
             let (t98,) = {
     if ((((s.b[1441] && s.b[1442]) && (!s.b[1621])) && s.b[1629]) && s.b[1630]) {
@@ -1221,6 +1241,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_42(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
         s.b[1639] = (2.0 == 4.0);s.store_scalar(1639, if s.b[1639] { 1.0 } else { 0.0 });
@@ -1252,7 +1273,8 @@ impl Instance {
             let ta4: f64 = if (((((s.b[1441] && s.b[1442]) && (!s.b[1621])) && s.b[1635]) && s.b[1636]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             ta4 != 0.0
         } {
-            ta5 += 1;assert!(ta5 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            ta5 += 1;
+            if ta5 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", ta5, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[1441] && s.b[1442]) && (!s.b[1621])) && s.b[1635]) && s.b[1636]) {s.store_sqrt(726, 726);}
             let (ta3,) = {
     if ((((s.b[1441] && s.b[1442]) && (!s.b[1621])) && s.b[1635]) && s.b[1636]) {
@@ -1343,7 +1365,8 @@ impl Instance {
             let taf: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1641]) && s.b[1642]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             taf != 0.0
         } {
-            tb0 += 1;assert!(tb0 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            tb0 += 1;
+            if tb0 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", tb0, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[1441] && s.b[1442]) && s.b[1641]) && s.b[1642]) {s.store_sqrt(726, 726);}
             let (tae,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1641]) && s.b[1642]) {
@@ -1367,12 +1390,13 @@ impl Instance {
         }
         if ((s.b[1441] && s.b[1442]) && (!s.b[1641])) {s.copy_ad(336, 335);s.store_scalar(334, 1.0);}
         if (s.b[1441] && s.b[1442]) {s.store_sqrt_mul(1445, 1545, 336);}
-        s.b[1647] = ((s.v[1445] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));s.store_scalar(1647, if s.b[1647] { 1.0 } else { 0.0 });
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_43(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
+        s.b[1647] = ((s.v[1445] > (s.v[965] - 1e-8)) && (1e-8 >= 0.0));s.store_scalar(1647, if s.b[1647] { 1.0 } else { 0.0 });
         if ((s.b[1441] && s.b[1442]) && s.b[1647]) {s.store_offset_sub(781, 1445, 965, 1e-8);s.store_square(722, 781);s.store_scalar(723, (1e-8 * 1e-8));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
         let (tb1,) = {
     if ((s.b[1441] && s.b[1442]) && s.b[1647]) {
@@ -1436,7 +1460,8 @@ impl Instance {
             let tba: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1647]) && s.b[1648]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             tba != 0.0
         } {
-            tbb += 1;assert!(tbb <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            tbb += 1;
+            if tbb > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", tbb, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[1441] && s.b[1442]) && s.b[1647]) && s.b[1648]) {s.store_sqrt(726, 726);}
             let (tb9,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1647]) && s.b[1648]) {
@@ -1514,6 +1539,12 @@ impl Instance {
     }
 };
         s.store_scalar(720, tc1);
+    }
+    #[inline(never)]
+    pub(super) fn stamp_transient_block_44(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+    ) {
         let (tc2,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1653]) && s.b[1654]) {
         (0.0,)
@@ -1521,18 +1552,13 @@ impl Instance {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, tc2);
-    }
-    #[inline(never)]
-    pub(super) fn stamp_transient_block_44(
-        s: &mut Scratch,
-    ) {
-        let mut tc6: usize = 0;
+        s.store_scalar(719, tc2);let mut tc6: usize = 0;
         while {
             let tc5: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1653]) && s.b[1654]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             tc5 != 0.0
         } {
-            tc6 += 1;assert!(tc6 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            tc6 += 1;
+            if tc6 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", tc6, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[1441] && s.b[1442]) && s.b[1653]) && s.b[1654]) {s.store_sqrt(726, 726);}
             let (tc4,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1653]) && s.b[1654]) {
@@ -1620,7 +1646,8 @@ impl Instance {
             let td0: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1659]) && s.b[1660]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             td0 != 0.0
         } {
-            td1 += 1;assert!(td1 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            td1 += 1;
+            if td1 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", td1, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[1441] && s.b[1442]) && s.b[1659]) && s.b[1660]) {s.store_sqrt(726, 726);}
             let (tcf,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1659]) && s.b[1660]) {
@@ -1662,13 +1689,14 @@ impl Instance {
     }
 };
         s.store_scalar(720, td3);
-        if (((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);}
+        if (((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) {s.store_scalar(770, 0.0);}
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_45(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
-        if (((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) {s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
+        if (((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) {s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[1667] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(1667, if s.b[1667] { 1.0 } else { 0.0 });s.b[1668] = (2.0 == 1.0);s.store_scalar(1668, if s.b[1668] { 1.0 } else { 0.0 });
         let (td4,) = {
     if (((((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) && s.b[1667]) && s.b[1668]) {
@@ -1714,7 +1742,8 @@ impl Instance {
             let tdb: f64 = if (((((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) && s.b[1667]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             tdb != 0.0
         } {
-            tdc += 1;assert!(tdc <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            tdc += 1;
+            if tdc > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", tdc, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) && s.b[1667]) {s.store_sqrt(726, 726);}
             let (tda,) = {
     if ((((s.b[1441] && s.b[1442]) && s.b[1665]) && s.b[1666]) && s.b[1667]) {
@@ -1801,7 +1830,8 @@ impl Instance {
             let te6: f64 = if (((((s.b[1441] && s.b[1442]) && (!s.b[1665])) && s.b[1672]) && s.b[1673]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             te6 != 0.0
         } {
-            te7 += 1;assert!(te7 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            te7 += 1;
+            if te7 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", te7, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[1441] && s.b[1442]) && (!s.b[1665])) && s.b[1672]) && s.b[1673]) {s.store_sqrt(726, 726);}
             let (te5,) = {
     if ((((s.b[1441] && s.b[1442]) && (!s.b[1665])) && s.b[1672]) && s.b[1673]) {
@@ -1813,6 +1843,12 @@ impl Instance {
 };
             s.store_scalar(719, te5);
         }
+    }
+    #[inline(never)]
+    pub(super) fn stamp_transient_block_46(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+    ) {
         if ((((s.b[1441] && s.b[1442]) && (!s.b[1665])) && s.b[1672]) && (!s.b[1673])) {
             if (s.v[726] == 0.0) {
                 s.store_scalar(726, 0.0);
@@ -1823,11 +1859,6 @@ impl Instance {
         if (((s.b[1441] && s.b[1442]) && (!s.b[1665])) && s.b[1672]) {s.store_div_from_scalar(726, 1.0, 726);s.store_scaled_mul(780, 781, 726, 0.8);s.store_div_scaled_product_indices(334, 725, 726, 0.8, 770, 1.0);s.store_add_offset_lhs(336, 1509, (-0.8), 780);}
         if (((s.b[1441] && s.b[1442]) && (!s.b[1665])) && s.b[1672]) {
         }
-    }
-    #[inline(never)]
-    pub(super) fn stamp_transient_block_46(
-        s: &mut Scratch,
-    ) {
         if (((s.b[1441] && s.b[1442]) && (!s.b[1665])) && (!s.b[1672])) {s.copy_ad(336, 1518);s.store_scalar(334, 1.0);}
         if (s.b[1441] && s.b[1442]) {s.store_mul_ad_affine_product_lhs(1503, s.ad_value(964), A::exp(A::mul(s.ad_value(154), A::sub(s.ad_value(336), s.ad_value(1509)))), (-1.6021918e-19), 0.0, 1445);}
         s.b[1678] = (((s.v[1459] - s.v[1509]) < 0.06) && (0.06 >= 0.0));s.store_scalar(1678, if s.b[1678] { 1.0 } else { 0.0 });
@@ -1894,7 +1925,8 @@ impl Instance {
             let tf1: f64 = if ((((s.b[1441] && s.b[1442]) && s.b[1678]) && s.b[1679]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             tf1 != 0.0
         } {
-            tf2 += 1;assert!(tf2 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            tf2 += 1;
+            if tf2 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", tf2, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[1441] && s.b[1442]) && s.b[1678]) && s.b[1679]) {s.store_sqrt(726, 726);}
             let (tf0,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1678]) && s.b[1679]) {
@@ -1919,15 +1951,16 @@ impl Instance {
         if ((s.b[1441] && s.b[1442]) && (!s.b[1678])) {s.store_sub(336, 1459, 1509);s.store_scalar(334, 1.0);}
         if (s.b[1441] && s.b[1442]) {s.store_offset_add_scaled_product_mixed_aii(338, A::offset(A::exp(A::mul(s.ad_value(154), s.ad_value(336))), (-1.0)), 1.0, 154, 336, (-1.0), (10.0 * 2.220446049250313e-16));s.store_mul_scaled_sqrt_rhs(1513, 209, -1.0, 338);s.store_sub_scaled_inputs_mixed_ai(338, A::offset(A::exp_scaled_input(s.ad_value(154), 0.1), (-1.0)), 1.0, 154, 0.1);s.store_mul_sqrt_rhs(1538, 209, 338);s.copy_ad(349, 790);}
         s.b[1684] = (s.v[790] > 1e-6);s.store_scalar(1684, if s.b[1684] { 1.0 } else { 0.0 });
-        if ((s.b[1441] && s.b[1442]) && s.b[1684]) {s.store_div_square_rhs(336, 1500, 185);s.store_add_scaled_inputs3_offset_indices(334, 85, 1.0, 155, (-1.0), 1436, -1.0, 2.0);s.store_offset_mul_ad(338, A::div_from_scalar(2.0, s.ad_value(336)), s.ad_value(334), 1.0);}
-        s.b[1685] = ((s.v[338] < 2.0) && (2.0 >= 0.0));s.store_scalar(1685, if s.b[1685] { 1.0 } else { 0.0 });
-        if (((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1685]) {s.store_sub_from_scalar(781, 2.0, 338);s.store_square(722, 781);s.store_scalar(723, (2.0 * 2.0));}
+        if ((s.b[1441] && s.b[1442]) && s.b[1684]) {s.store_div_square_rhs(336, 1500, 185);s.store_add_scaled_inputs3_offset_indices(334, 85, 1.0, 155, (-1.0), 1436, -1.0, 2.0);}
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_47(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
-        if (((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1685]) {s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
+        if ((s.b[1441] && s.b[1442]) && s.b[1684]) {s.store_offset_mul_ad(338, A::div_from_scalar(2.0, s.ad_value(336)), s.ad_value(334), 1.0);}
+        s.b[1685] = ((s.v[338] < 2.0) && (2.0 >= 0.0));s.store_scalar(1685, if s.b[1685] { 1.0 } else { 0.0 });
+        if (((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1685]) {s.store_sub_from_scalar(781, 2.0, 338);s.store_square(722, 781);s.store_scalar(723, (2.0 * 2.0));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
         let (tf3,) = {
     if (((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1685]) {
         (0.0,)
@@ -1990,7 +2023,8 @@ impl Instance {
             let tfc: f64 = if (((((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1685]) && s.b[1686]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
             tfc != 0.0
         } {
-            tfd += 1;assert!(tfd <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            tfd += 1;
+            if tfd > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", tfd, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1685]) && s.b[1686]) {s.store_sqrt(726, 726);}
             let (tfb,) = {
     if ((((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1685]) && s.b[1686]) {
@@ -2041,22 +2075,6 @@ impl Instance {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t100);s.b[1694] = (4.0 == 2.0);s.store_scalar(1694, if s.b[1694] { 1.0 } else { 0.0 });
-        let (t101,) = {
-    if ((((((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1691]) && s.b[1692]) && (!s.b[1693])) && s.b[1694]) {
-        (2.0,)
-    } else {
-        (s.v[720],)
-    }
-};
-        s.store_scalar(720, t101);s.b[1695] = (4.0 == 4.0);s.store_scalar(1695, if s.b[1695] { 1.0 } else { 0.0 });
-        let (t102,) = {
-    if (((((((s.b[1441] && s.b[1442]) && s.b[1684]) && s.b[1691]) && s.b[1692]) && (!s.b[1693])) && (!s.b[1694])) && s.b[1695]) {
-        (3.0,)
-    } else {
-        (s.v[720],)
-    }
-};
-        s.store_scalar(720, t102);s.b[1696] = (4.0 == 8.0);s.store_scalar(1696, if s.b[1696] { 1.0 } else { 0.0 });
+        s.store_scalar(720, t100);
     }
 }

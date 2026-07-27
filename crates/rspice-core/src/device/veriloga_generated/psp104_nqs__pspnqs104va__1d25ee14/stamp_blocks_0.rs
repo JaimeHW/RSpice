@@ -619,6 +619,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_14(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
@@ -648,7 +649,8 @@ impl Instance {
             let te: f64 = (s.v[5] - 0.5);let tf: f64 = if ((s.b[1030] && s.b[1139]) && (s.v[1018] < te)) { 1.0 } else { 0.0 };
             tf != 0.0
         } {
-            t10 += 1;assert!(t10 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t10 += 1;
+            if t10 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t10, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (s.b[1030] && s.b[1139]) {s.store_primal_add_mixed_ia(1019, 1019, A::div_from_scalar(1.0, A::scale_offset(s.ad_value(1018), (s.v[11] + s.v[7]), (s.v[9] + (0.5 * s.v[7])))));s.store_primal_add_mixed_ia(1020, 1020, A::div_from_scalar(1.0, A::scale_offset(s.ad_value(1018), (s.v[11] + s.v[7]), (s.v[10] + (0.5 * s.v[7])))));s.store_primal_offset(1018, 1018, 1.0);}
         }
         if (s.b[1030] && s.b[1139]) {s.store_primal_mul(1003, 1019, 6);s.store_primal_mul(1004, 1020, 6);s.store_scalar(1005, (1.0 / (p[791] + (0.5 * s.v[7]))));s.store_scalar(1006, (1.0 / (p[792] + (0.5 * s.v[7]))));}

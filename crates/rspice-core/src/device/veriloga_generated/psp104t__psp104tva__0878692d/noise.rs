@@ -7853,7 +7853,7 @@ impl Instance {
                     w[1004] = noise_metadata_schedule_919_0_body_2_e9166;
                 }
                 noise_metadata_schedule_919_0_iterations += 1;
-                assert!(noise_metadata_schedule_919_0_iterations <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A noise evaluation loop exceeded iteration limit");
+                if noise_metadata_schedule_919_0_iterations > Self::MAX_ANALOG_LOOP_ITERATIONS { return Err(GeneratedNoiseEvaluationError::AnalogLoopLimit { iterations: noise_metadata_schedule_919_0_iterations, limit: Self::MAX_ANALOG_LOOP_ITERATIONS }); }
             }
         }
         if (active[0] & 0xff80) != 0 {

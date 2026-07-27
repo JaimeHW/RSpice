@@ -1984,13 +1984,15 @@ impl Engine {
             circuit
                 .stamp_nonlinear(matrix, rhs, linearize_at)
                 .map_err(SimulationError::Circuit)?;
-            circuit.stamp_behavioral(
-                matrix,
-                rhs,
-                linearize_at,
-                t_next,
-                crate::xspice::AnalysisType::Transient,
-            );
+            circuit
+                .stamp_behavioral(
+                    matrix,
+                    rhs,
+                    linearize_at,
+                    t_next,
+                    crate::xspice::AnalysisType::Transient,
+                )
+                .map_err(SimulationError::Circuit)?;
         }
         Ok(())
     }

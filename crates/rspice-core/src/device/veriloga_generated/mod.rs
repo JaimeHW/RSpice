@@ -118,6 +118,57 @@ pub(crate) struct GeneratedVerilogAInstanceCheckpoint {
     pub state: GeneratedVerilogAPersistentState,
 }
 
+/// A recoverable failure reported while evaluating generated device code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedEvaluationError {
+    AnalogLoopLimit {
+        phase: &'static str,
+        iterations: usize,
+        limit: usize,
+    },
+}
+
+impl std::fmt::Display for GeneratedEvaluationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AnalogLoopLimit {
+                phase,
+                iterations,
+                limit,
+            } => write!(
+                f,
+                "generated Verilog-A {phase} exceeded its analog-loop limit: {iterations} iterations (limit {limit})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GeneratedEvaluationError {}
+
+/// Generated evaluation failure with concrete model and instance provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedVerilogAEvaluationError {
+    pub instance_name: String,
+    pub model_name: &'static str,
+    pub source: GeneratedEvaluationError,
+}
+
+impl std::fmt::Display for GeneratedVerilogAEvaluationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "generated Verilog-A instance '{}' (model '{}') failed: {}",
+            self.instance_name, self.model_name, self.source
+        )
+    }
+}
+
+impl std::error::Error for GeneratedVerilogAEvaluationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 /// Canonical Verilog-A noise primitive represented by generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedNoiseKind {
@@ -223,6 +274,10 @@ pub enum GeneratedNoiseEvaluationError {
     InvalidMultiplicity {
         value: Value,
     },
+    AnalogLoopLimit {
+        iterations: usize,
+        limit: usize,
+    },
 }
 
 impl std::fmt::Display for GeneratedNoiseEvaluationError {
@@ -247,6 +302,10 @@ impl std::fmt::Display for GeneratedNoiseEvaluationError {
             Self::InvalidMultiplicity { value } => write!(
                 f,
                 "generated Verilog-A noise evaluation requires a finite positive multiplicity, found {value}"
+            ),
+            Self::AnalogLoopLimit { iterations, limit } => write!(
+                f,
+                "generated Verilog-A noise evaluation exceeded its analog-loop limit: {iterations} iterations (limit {limit})"
             ),
         }
     }
@@ -581,7 +640,7 @@ impl BuiltinVerilogADevices {
         num_nodes: usize,
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
-    ) {
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
         self.stamp_all_with_mode(
             matrix,
             rhs,
@@ -590,7 +649,7 @@ impl BuiltinVerilogADevices {
             analysis,
             simparams,
             GeneratedEvaluationMode::default_for_analysis(analysis),
-        );
+        )
     }
 
     pub(crate) fn stamp_all_with_mode(
@@ -602,18 +661,25 @@ impl BuiltinVerilogADevices {
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
         evaluation_mode: GeneratedEvaluationMode,
-    ) {
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
         for device in &mut self.devices {
-            device.stamp_with_mode(
-                matrix,
-                rhs,
-                voltages,
-                num_nodes,
-                analysis,
-                simparams,
-                evaluation_mode,
-            );
+            device
+                .stamp_with_mode(
+                    matrix,
+                    rhs,
+                    voltages,
+                    num_nodes,
+                    analysis,
+                    simparams,
+                    evaluation_mode,
+                )
+                .map_err(|source| GeneratedVerilogAEvaluationError {
+                    instance_name: device.instance_name.clone(),
+                    model_name: device.model_name,
+                    source,
+                })?;
         }
+        Ok(())
     }
 
     #[inline]
@@ -662,10 +728,17 @@ impl BuiltinVerilogADevices {
         voltages: &[Value],
         num_nodes: usize,
         simparams: GeneratedSimulationParameters,
-    ) {
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
         for device in &mut self.devices {
-            device.stamp_ac_real(matrix, voltages, num_nodes, simparams);
+            device
+                .stamp_ac_real(matrix, voltages, num_nodes, simparams)
+                .map_err(|source| GeneratedVerilogAEvaluationError {
+                    instance_name: device.instance_name.clone(),
+                    model_name: device.model_name,
+                    source,
+                })?;
         }
+        Ok(())
     }
 
     pub fn stamp_reactive_all(
@@ -675,10 +748,17 @@ impl BuiltinVerilogADevices {
         num_nodes: usize,
         omega: Value,
         simparams: GeneratedSimulationParameters,
-    ) {
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
         for device in &mut self.devices {
-            device.stamp_reactive(matrix, voltages, num_nodes, omega, simparams);
+            device
+                .stamp_reactive(matrix, voltages, num_nodes, omega, simparams)
+                .map_err(|source| GeneratedVerilogAEvaluationError {
+                    instance_name: device.instance_name.clone(),
+                    model_name: device.model_name,
+                    source,
+                })?;
         }
+        Ok(())
     }
 }
 
@@ -805,17 +885,23 @@ impl BuiltinVerilogAInstance {
                 },
             )
             .map_err(|source| {
-                let index = match &source {
+                let (index, mechanism) = match &source {
                     GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index, .. }
                     | GeneratedNoiseEvaluationError::NonFinite { index, .. }
-                    | GeneratedNoiseEvaluationError::NegativePower { index, .. } => *index,
-                    GeneratedNoiseEvaluationError::InvalidMultiplicity { .. } => 0,
+                    | GeneratedNoiseEvaluationError::NegativePower { index, .. } => (
+                        *index,
+                        descriptors
+                            .get(*index)
+                            .map_or("<missing descriptor>", |descriptor| descriptor.mechanism),
+                    ),
+                    GeneratedNoiseEvaluationError::InvalidMultiplicity { .. } => {
+                        (0, "<device multiplicity>")
+                    }
+                    GeneratedNoiseEvaluationError::AnalogLoopLimit { .. } => (0, "<analog loop>"),
                 };
                 BuiltinNoiseEvaluationError::Evaluation {
                     index,
-                    mechanism: descriptors
-                        .get(index)
-                        .map_or("<device multiplicity>", |descriptor| descriptor.mechanism),
+                    mechanism,
                     source,
                 }
             })?;
@@ -835,7 +921,7 @@ impl BuiltinVerilogAInstance {
         num_nodes: usize,
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
-    ) {
+    ) -> Result<(), GeneratedEvaluationError> {
         self.stamp_with_mode(
             matrix,
             rhs,
@@ -844,7 +930,7 @@ impl BuiltinVerilogAInstance {
             analysis,
             simparams,
             GeneratedEvaluationMode::default_for_analysis(analysis),
-        );
+        )
     }
 
     fn stamp_with_mode(
@@ -856,7 +942,7 @@ impl BuiltinVerilogAInstance {
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
         evaluation_mode: GeneratedEvaluationMode,
-    ) {
+    ) -> Result<(), GeneratedEvaluationError> {
         if !self
             .static_stamp_cache
             .axis_indices_match(&self.nodes, &self.branches, num_nodes)
@@ -883,6 +969,10 @@ impl BuiltinVerilogAInstance {
             self.static_stamp_cache.as_ref(),
         );
         self.kind.stamp(&ctx, &mut stamper);
+        match ctx.take_evaluation_error() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     #[inline]
@@ -920,7 +1010,7 @@ impl BuiltinVerilogAInstance {
         voltages: &[Value],
         num_nodes: usize,
         simparams: GeneratedSimulationParameters,
-    ) {
+    ) -> Result<(), GeneratedEvaluationError> {
         let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
             voltages,
             self.temperature,
@@ -945,6 +1035,10 @@ impl BuiltinVerilogAInstance {
             self.static_stamp_cache.as_ref(),
         );
         self.kind.stamp(&ctx, &mut stamper);
+        match ctx.take_evaluation_error() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     #[inline]
@@ -955,7 +1049,7 @@ impl BuiltinVerilogAInstance {
         num_nodes: usize,
         omega: Value,
         simparams: GeneratedSimulationParameters,
-    ) {
+    ) -> Result<(), GeneratedEvaluationError> {
         let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
             voltages,
             self.temperature,
@@ -982,6 +1076,10 @@ impl BuiltinVerilogAInstance {
             self.static_stamp_cache.as_ref(),
         );
         self.kind.stamp_reactive(&ctx, &mut stamper);
+        match ctx.take_evaluation_error() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 
@@ -1182,7 +1280,7 @@ impl GeneratedAnalysisKind {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GeneratedEvalContext<'a> {
     voltages: &'a [Value],
     temperature: Value,
@@ -1192,6 +1290,7 @@ pub struct GeneratedEvalContext<'a> {
     analysis_final_step: bool,
     simparams: GeneratedSimulationParameters,
     evaluation_mode: GeneratedEvaluationMode,
+    evaluation_error: std::cell::Cell<Option<GeneratedEvaluationError>>,
 }
 
 impl<'a> GeneratedEvalContext<'a> {
@@ -1273,12 +1372,30 @@ impl<'a> GeneratedEvalContext<'a> {
             analysis_final_step: final_step,
             simparams,
             evaluation_mode,
+            evaluation_error: std::cell::Cell::new(None),
         }
     }
 
     #[inline]
     pub fn limiting_enabled(&self) -> bool {
         matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
+    }
+
+    #[inline]
+    pub fn report_analog_loop_limit(&self, phase: &'static str, iterations: usize, limit: usize) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::AnalogLoopLimit {
+                    phase,
+                    iterations,
+                    limit,
+                }));
+        }
+    }
+
+    #[inline]
+    pub fn take_evaluation_error(&self) -> Option<GeneratedEvaluationError> {
+        self.evaluation_error.take()
     }
 
     #[inline]
@@ -5933,7 +6050,8 @@ impl<'a> GeneratedReactiveStamper<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        GeneratedAnalysisKind, GeneratedEvalContext, GeneratedEvaluationMode,
+        GeneratedAnalysisKind, GeneratedEvalContext, GeneratedEvaluationError,
+        GeneratedEvaluationMode,
         GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseInjection,
         GeneratedNoiseKind, GeneratedNoiseTopologyError, GeneratedSimulationParameters,
     };
@@ -6081,6 +6199,26 @@ mod tests {
         );
         assert!(dc_probe.analysis_dc());
         assert!(!dc_probe.limiting_enabled());
+    }
+
+    #[test]
+    fn generated_evaluation_context_preserves_the_first_recoverable_failure() {
+        let voltages = [0.0];
+        let ctx =
+            GeneratedEvalContext::with_analysis(&voltages, 300.15, 1, GeneratedAnalysisKind::Dc);
+
+        ctx.report_analog_loop_limit("transient stamp", 11, 10);
+        ctx.report_analog_loop_limit("later helper", 21, 20);
+
+        assert_eq!(
+            ctx.take_evaluation_error(),
+            Some(GeneratedEvaluationError::AnalogLoopLimit {
+                phase: "transient stamp",
+                iterations: 11,
+                limit: 10,
+            })
+        );
+        assert_eq!(ctx.take_evaluation_error(), None);
     }
 
     #[test]

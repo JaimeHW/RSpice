@@ -468,6 +468,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_8(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
@@ -487,19 +488,20 @@ impl Instance {
             let t0: f64 = if (s.b[613] && (s.v[495] < p[3])) { 1.0 } else { 0.0 };
             t0 != 0.0
         } {
-            t1 += 1;assert!(t1 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t1 += 1;
+            if t1 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t1, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if s.b[613] {s.store_primal_div_from_scalar_offset_scaled_input(616, (1.0 / p[3]), 495, (p[6] + s.v[474]), (p[4] + (0.5 * s.v[474])));s.store_primal_div_from_scalar_offset_scaled_input(617, (1.0 / p[3]), 495, (p[6] + s.v[474]), (p[5] + (0.5 * s.v[474])));s.store_primal_add(485, 485, 616);s.store_primal_add(486, 486, 617);s.store_primal_offset(495, 495, 1.0);}
         }
         if s.b[613] {s.store_primal_add(490, 485, 486);s.copy_ad(51, 490);s.store_mul_div_from_scalar_lhs_ad_indices(487, p[235], 233, 490);s.store_div_scaled_offset_numerator_mixed_ia(467, 487, 1.0, 1.0, A::offset(s.ad_value(234), 1.0), 1.0);s.store_mul(404, 337, 467);s.store_div_scaled_offset_numerator(468, A::mul(s.ad_value(45), s.ad_value(487)), 1.0, 1.0, A::offset(A::mul(s.ad_value(45), s.ad_value(234)), 1.0), 1.0);s.store_mul(407, 338, 468);s.store_primal_offset(491, 490, (-s.v[235]));s.store_mul_div_from_scalar_lhs_ad_indices(488, p[237], 232, 491);s.store_mul_div_from_scalar_lhs_ad_mixed_ai(492, p[249], A::powf(s.ad_value(232), p[250]), 491);s.store_mul_div_from_scalar_lhs_ad_mixed_ai(493, p[251], A::powf(s.ad_value(232), p[252]), 491);s.store_mul_div_from_scalar_lhs_ad_mixed_ai(494, p[253], A::powf(s.ad_value(232), p[254]), 491);s.store_add(408, 137, 488);s.store_add(402, 124, 492);s.store_add(400, 187, 493);s.store_add(401, 189, 494);}
         if (!s.b[613]) {s.copy_ad(404, 337);s.copy_ad(408, 137);s.copy_ad(407, 338);s.copy_ad(402, 124);s.copy_ad(400, 187);s.copy_ad(401, 189);s.store_scalar(51, 0.0);s.store_scalar(235, 0.0);s.store_scalar(45, 0.0);}
-        s.store_scale(403, 402, (p[66] * 1.0 / (p[67])));s.store_offset(408, 408, p[20]);s.store_offset(406, 152, (p[37] * p[20]));s.store_scalar(52, (s.v[392] * p[8]));
+        s.store_scale(403, 402, (p[66] * 1.0 / (p[67])));s.store_offset(408, 408, p[20]);s.store_offset(406, 152, (p[37] * p[20]));
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_9(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        s.store_scale(53, 43, p[8]);s.store_scalar(54, (s.v[392] * p[7]));s.store_scale(55, 43, p[7]);s.b[618] = (s.v[43] > 0.0);s.store_scalar(618, if s.b[618] { 1.0 } else { 0.0 });s.b[619] = (((s.v[109] > 0.0) && (p[37] > 0.0)) || ((s.v[109] < 0.0) && (p[37] < 0.0)));s.store_scalar(619, if s.b[619] { 1.0 } else { 0.0 });
+        s.store_scalar(52, (s.v[392] * p[8]));s.store_scale(53, 43, p[8]);s.store_scalar(54, (s.v[392] * p[7]));s.store_scale(55, 43, p[7]);s.b[618] = (s.v[43] > 0.0);s.store_scalar(618, if s.b[618] { 1.0 } else { 0.0 });s.b[619] = (((s.v[109] > 0.0) && (p[37] > 0.0)) || ((s.v[109] < 0.0) && (p[37] < 0.0)));s.store_scalar(619, if s.b[619] { 1.0 } else { 0.0 });
         if (s.b[618] && s.b[619]) {s.store_sub(467, 323, 322);s.store_add_scaled_inputs(175, 322, 1.0, 467, p[356]);s.store_sub_from_scalar(468, s.v[52], 53);s.store_div_scaled_value_by_product_indices(469, 468, 1.0, 467, 467, 1.0);s.store_scale(176, 469, 1.0 / (p[356]));s.store_scale(177, 469, 1.0 / ((1.0 - p[356])));s.store_add_scaled_products_indices(56, 467, 468, ((1.0 + p[356]) * 0.3333333333333333), 53, 322, (-1.0));s.store_sub_from_scalar(468, s.v[54], 55);s.store_div_scaled_value_by_product_indices(469, 468, 1.0, 467, 467, 1.0);s.store_scale(178, 469, 1.0 / (p[356]));s.store_scale(179, 469, 1.0 / ((1.0 - p[356])));s.store_add_scaled_products_indices(57, 467, 468, ((1.0 + p[356]) * 0.3333333333333333), 55, 322, (-1.0));}
         if (s.b[618] && (!s.b[619])) {s.store_sub(467, 322, 323);s.store_add_scaled_inputs(175, 323, 1.0, 467, p[356]);s.store_offset(468, 53, (-s.v[52]));s.store_div_scaled_value_by_product_indices(469, 468, 1.0, 467, 467, 1.0);s.store_scale(176, 469, 1.0 / (p[356]));s.store_scale(177, 469, 1.0 / ((1.0 - p[356])));s.store_add_scaled_product_indices(56, 323, (-s.v[52]), 467, 468, ((1.0 + p[356]) * 0.3333333333333333));s.store_offset(468, 55, (-s.v[54]));s.store_div_scaled_value_by_product_indices(469, 468, 1.0, 467, 467, 1.0);s.store_scale(178, 469, 1.0 / (p[356]));s.store_scale(179, 469, 1.0 / ((1.0 - p[356])));s.store_add_scaled_product_indices(57, 323, (-s.v[54]), 467, 468, ((1.0 + p[356]) * 0.3333333333333333));}
         if (!s.b[618]) {s.store_scalar(175, 0.0);s.store_scalar(176, 0.0);s.store_scalar(177, 0.0);s.store_scalar(56, 0.0);s.store_scalar(178, 0.0);s.store_scalar(179, 0.0);s.store_scalar(57, 0.0);}

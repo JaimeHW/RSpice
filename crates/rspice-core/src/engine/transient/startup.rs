@@ -125,13 +125,15 @@ impl Engine {
                 circuit
                     .stamp_nonlinear(matrix, &mut rhs, &solution)
                     .map_err(SimulationError::Circuit)?;
-                circuit.stamp_behavioral(
-                    matrix,
-                    &mut rhs,
-                    &solution,
-                    0.0,
-                    crate::xspice::AnalysisType::DcOp,
-                );
+                circuit
+                    .stamp_behavioral(
+                        matrix,
+                        &mut rhs,
+                        &solution,
+                        0.0,
+                        crate::xspice::AnalysisType::DcOp,
+                    )
+                    .map_err(SimulationError::Circuit)?;
             }
 
             let Ok(mut proposal) = matrix.solve(&rhs) else {
@@ -207,13 +209,15 @@ impl Engine {
                 circuit
                     .stamp_nonlinear(matrix, &mut rhs, &solution)
                     .map_err(SimulationError::Circuit)?;
-                circuit.stamp_behavioral(
-                    matrix,
-                    &mut rhs,
-                    &solution,
-                    time,
-                    crate::xspice::AnalysisType::Transient,
-                );
+                circuit
+                    .stamp_behavioral(
+                        matrix,
+                        &mut rhs,
+                        &solution,
+                        time,
+                        crate::xspice::AnalysisType::Transient,
+                    )
+                    .map_err(SimulationError::Circuit)?;
             }
             if circuit.has_xspice_devices() {
                 circuit.stamp_xspice_transient_trial(matrix, &mut rhs, time, 0.0, &solution);

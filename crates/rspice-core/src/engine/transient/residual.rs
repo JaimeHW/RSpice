@@ -356,14 +356,16 @@ impl Engine {
                     .stamp_nonlinear(matrix, rhs, solution)
                     .map_err(SimulationError::Circuit)?;
             }
-            circuit.stamp_behavioral_with_generated_mode(
-                matrix,
-                rhs,
-                solution,
-                time,
-                crate::xspice::AnalysisType::Transient,
-                evaluation_mode,
-            );
+            circuit
+                .stamp_behavioral_with_generated_mode(
+                    matrix,
+                    rhs,
+                    solution,
+                    time,
+                    crate::xspice::AnalysisType::Transient,
+                    evaluation_mode,
+                )
+                .map_err(SimulationError::Circuit)?;
             if let Some((before_values, before_rhs)) = static_nonlinear_snapshot {
                 for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
                     *value = before + 0.5 * (*value - before);
@@ -443,13 +445,15 @@ impl Engine {
                 circuit
                     .try_stamp_static_probe_nonlinear(probe, probe_rhs, solution)
                     .map_err(SimulationError::Circuit)?;
-                circuit.stamp_behavioral_static_probe(
-                    probe,
-                    probe_rhs,
-                    solution,
-                    time,
-                    crate::xspice::AnalysisType::Transient,
-                );
+                circuit
+                    .stamp_behavioral_static_probe(
+                        probe,
+                        probe_rhs,
+                        solution,
+                        time,
+                        crate::xspice::AnalysisType::Transient,
+                    )
+                    .map_err(SimulationError::Circuit)?;
             } else {
                 circuit.stamp_behavioral_sources(probe, probe_rhs, solution, time);
             }

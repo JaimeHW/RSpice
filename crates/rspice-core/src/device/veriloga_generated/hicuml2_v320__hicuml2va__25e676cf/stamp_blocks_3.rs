@@ -4,6 +4,7 @@ use super::super::state::{Instance, Parameters};
 impl Instance {
     #[inline(never)]
     pub(super) fn stamp_reactive_block_16(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
@@ -13,7 +14,8 @@ impl Instance {
             let t1b: f64 = if s.v[348] >= 0.0 { s.db[348][3] } else { (-s.db[348][3]) };let t1c: f64 = if s.v[348] >= 0.0 { s.db[348][4] } else { (-s.db[348][4]) };let t1d: f64 = if s.v[348] >= 0.0 { s.db[348][5] } else { (-s.db[348][5]) };let t2d: f64 = (t16 * t17);let t34: f64 = (t16 * t1e);let t35: f64 = (t16 * t1f);let t3b: f64 = (t16 * t25);let t3c: f64 = (t16 * t26);let t3d: f64 = (t16 * t27);let t3e: f64 = (t16 * t28);let t3f: f64 = (t16 * t29);let t40: f64 = (t16 * t2a);let t41: f64 = (t16 * t2b);let t42: f64 = (t16 * t2c);let t36: f64 = (t16 * t20);let t37: f64 = (t16 * t21);let t38: f64 = (t16 * t22);let t39: f64 = (t16 * t23);let t3a: f64 = (t16 * t24);let t2e: f64 = (t16 * t18);let t2f: f64 = (t16 * t19);let t30: f64 = (t16 * t1a);let t31: f64 = (t16 * t1b);let t32: f64 = (t16 * t1c);let t33: f64 = (t16 * t1d);let t43: f64 = if (s.b[406] && ((t0 >= t2d) && (s.v[224] <= 100.0))) { 1.0 } else { 0.0 };
             t43 != 0.0
         } {
-            t44 += 1;assert!(t44 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t44 += 1;
+            if t44 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t44, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if s.b[406] {s.store_div(217, 350, 348);s.store_div(218, 351, 348);s.copy_ad(219, 357);s.store_mul(355, 357, 217);}
             s.b[408] = (p[0] >= 310.0);s.store_scalar(408, if s.b[408] { 1.0 } else { 0.0 });
             if (s.b[406] && s.b[408]) {s.store_mul(359, 19, 59);s.store_mul(358, 359, 217);}

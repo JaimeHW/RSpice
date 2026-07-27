@@ -16,6 +16,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_99(
+        ctx: &GeneratedEvalContext<'_>,
         l: &mut StampLocals,
     ) {
         let mut t89: usize = 0;
@@ -23,7 +24,8 @@ impl Instance {
             let t87: f64 = (40.0 + 1.0);let t88: f64 = if ((((l.f7d3 != 0.0) && (l.f7d7 == 0.0)) && (l.f7e6 != 0.0)) && (l.fb04 <= t87)) { 1.0 } else { 0.0 };
             t88 != 0.0
         } {
-            t89 += 1;assert!(t89 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t89 += 1;
+            if t89 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t89, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((l.f7d3 != 0.0) && (l.f7d7 == 0.0)) && (l.f7e6 != 0.0)) {let t14: f64 = (l.ff86 + l.f19a3);let t15: f64 = (l.f7b * t14);(l.f20c, l.f22e, l.f232, l.f233, l.f234, l.f235, l.f236, l.f22f, l.f230, l.f231, ) = (t15, (l.f7b * (l.ff87 + l.f19a4)), (l.f7b * (l.ff8b + l.f19a8)), ((l.f7f * t14) + (l.f7b * (l.ff8c + l.f19a9))), (l.f7b * (l.ff8d + l.f19aa)), (l.f7b * (l.ff8e + l.f19ab)), (l.f7b * (l.ff8f + l.f19ac)), (l.f7b * (l.ff88 + l.f19a5)), (l.f7b * (l.ff89 + l.f19a6)), (l.f7b * (l.ff8a + l.f19a7)), );l.f237 = 0.0;}
             let t2b: f64 = if l.f20c < 5.0 { 1.0 } else { 0.0 };l.f7e8 = t2b;l.f7e9 = 0.0;
             if ((((l.f7d3 != 0.0) && (l.f7d7 == 0.0)) && (l.f7e6 != 0.0)) && (l.f7e8 != 0.0)) {let t4b: f64 = (l.f20c * l.f20c);let t4c: f64 = (t4b * l.f20c);let t4d: f64 = (-0.07053654284009761);let t4e: f64 = (l.f20c * 0.006115288895133179);let t4f: f64 = (t4d + t4e);let t50: f64 = (l.f20c * t4f);let t51: f64 = (0.29693154855771 + t50);let t52: f64 = (t4c * t51);(l.f56b, l.f577, l.f57b, l.f57c, l.f57d, l.f57e, l.f57f, l.f578, l.f579, l.f57a, ) = (t52, ((((((l.f22e * l.f20c) + (l.f20c * l.f22e)) * l.f20c) + (t4b * l.f22e)) * t51) + (t4c * ((l.f22e * t4f) + (l.f20c * (l.f22e * 0.006115288895133179))))), ((((((l.f232 * l.f20c) + (l.f20c * l.f232)) * l.f20c) + (t4b * l.f232)) * t51) + (t4c * ((l.f232 * t4f) + (l.f20c * (l.f232 * 0.006115288895133179))))), ((((((l.f233 * l.f20c) + (l.f20c * l.f233)) * l.f20c) + (t4b * l.f233)) * t51) + (t4c * ((l.f233 * t4f) + (l.f20c * (l.f233 * 0.006115288895133179))))), ((((((l.f234 * l.f20c) + (l.f20c * l.f234)) * l.f20c) + (t4b * l.f234)) * t51) + (t4c * ((l.f234 * t4f) + (l.f20c * (l.f234 * 0.006115288895133179))))), ((((((l.f235 * l.f20c) + (l.f20c * l.f235)) * l.f20c) + (t4b * l.f235)) * t51) + (t4c * ((l.f235 * t4f) + (l.f20c * (l.f235 * 0.006115288895133179))))), ((((((l.f236 * l.f20c) + (l.f20c * l.f236)) * l.f20c) + (t4b * l.f236)) * t51) + (t4c * ((l.f236 * t4f) + (l.f20c * (l.f236 * 0.006115288895133179))))), ((((((l.f22f * l.f20c) + (l.f20c * l.f22f)) * l.f20c) + (t4b * l.f22f)) * t51) + (t4c * ((l.f22f * t4f) + (l.f20c * (l.f22f * 0.006115288895133179))))), ((((((l.f230 * l.f20c) + (l.f20c * l.f230)) * l.f20c) + (t4b * l.f230)) * t51) + (t4c * ((l.f230 * t4f) + (l.f20c * (l.f230 * 0.006115288895133179))))), ((((((l.f231 * l.f20c) + (l.f20c * l.f231)) * l.f20c) + (t4b * l.f231)) * t51) + (t4c * ((l.f231 * t4f) + (l.f20c * (l.f231 * 0.006115288895133179))))), );l.f580 = 0.0;}
@@ -188,6 +190,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_107(
+        ctx: &GeneratedEvalContext<'_>,
         l: &mut StampLocals,
     ) {
         let mut t267: usize = 0;
@@ -195,7 +198,8 @@ impl Instance {
             let t265: f64 = (40.0 + 1.0);let t266: f64 = if ((((l.f7d3 != 0.0) && (l.f7f6 == 0.0)) && (l.f804 != 0.0)) && (l.fb04 <= t265)) { 1.0 } else { 0.0 };
             t266 != 0.0
         } {
-            t267 += 1;assert!(t267 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t267 += 1;
+            if t267 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t267, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((l.f7d3 != 0.0) && (l.f7f6 == 0.0)) && (l.f804 != 0.0)) {let t1f2: f64 = (l.ff86 + l.f19a3);let t1f3: f64 = (l.f7b * t1f2);(l.f20c, l.f22e, l.f232, l.f233, l.f234, l.f235, l.f236, l.f22f, l.f230, l.f231, ) = (t1f3, (l.f7b * (l.ff87 + l.f19a4)), (l.f7b * (l.ff8b + l.f19a8)), ((l.f7f * t1f2) + (l.f7b * (l.ff8c + l.f19a9))), (l.f7b * (l.ff8d + l.f19aa)), (l.f7b * (l.ff8e + l.f19ab)), (l.f7b * (l.ff8f + l.f19ac)), (l.f7b * (l.ff88 + l.f19a5)), (l.f7b * (l.ff89 + l.f19a6)), (l.f7b * (l.ff8a + l.f19a7)), );l.f237 = 0.0;}
             let t209: f64 = if l.f20c < 5.0 { 1.0 } else { 0.0 };l.f806 = t209;l.f807 = 0.0;
             if ((((l.f7d3 != 0.0) && (l.f7f6 == 0.0)) && (l.f804 != 0.0)) && (l.f806 != 0.0)) {let t229: f64 = (l.f20c * l.f20c);let t22a: f64 = (t229 * l.f20c);let t22b: f64 = (-0.07053654284009761);let t22c: f64 = (l.f20c * 0.006115288895133179);let t22d: f64 = (t22b + t22c);let t22e: f64 = (l.f20c * t22d);let t22f: f64 = (0.29693154855771 + t22e);let t230: f64 = (t22a * t22f);(l.f56b, l.f577, l.f57b, l.f57c, l.f57d, l.f57e, l.f57f, l.f578, l.f579, l.f57a, ) = (t230, ((((((l.f22e * l.f20c) + (l.f20c * l.f22e)) * l.f20c) + (t229 * l.f22e)) * t22f) + (t22a * ((l.f22e * t22d) + (l.f20c * (l.f22e * 0.006115288895133179))))), ((((((l.f232 * l.f20c) + (l.f20c * l.f232)) * l.f20c) + (t229 * l.f232)) * t22f) + (t22a * ((l.f232 * t22d) + (l.f20c * (l.f232 * 0.006115288895133179))))), ((((((l.f233 * l.f20c) + (l.f20c * l.f233)) * l.f20c) + (t229 * l.f233)) * t22f) + (t22a * ((l.f233 * t22d) + (l.f20c * (l.f233 * 0.006115288895133179))))), ((((((l.f234 * l.f20c) + (l.f20c * l.f234)) * l.f20c) + (t229 * l.f234)) * t22f) + (t22a * ((l.f234 * t22d) + (l.f20c * (l.f234 * 0.006115288895133179))))), ((((((l.f235 * l.f20c) + (l.f20c * l.f235)) * l.f20c) + (t229 * l.f235)) * t22f) + (t22a * ((l.f235 * t22d) + (l.f20c * (l.f235 * 0.006115288895133179))))), ((((((l.f236 * l.f20c) + (l.f20c * l.f236)) * l.f20c) + (t229 * l.f236)) * t22f) + (t22a * ((l.f236 * t22d) + (l.f20c * (l.f236 * 0.006115288895133179))))), ((((((l.f22f * l.f20c) + (l.f20c * l.f22f)) * l.f20c) + (t229 * l.f22f)) * t22f) + (t22a * ((l.f22f * t22d) + (l.f20c * (l.f22f * 0.006115288895133179))))), ((((((l.f230 * l.f20c) + (l.f20c * l.f230)) * l.f20c) + (t229 * l.f230)) * t22f) + (t22a * ((l.f230 * t22d) + (l.f20c * (l.f230 * 0.006115288895133179))))), ((((((l.f231 * l.f20c) + (l.f20c * l.f231)) * l.f20c) + (t229 * l.f231)) * t22f) + (t22a * ((l.f231 * t22d) + (l.f20c * (l.f231 * 0.006115288895133179))))), );l.f580 = 0.0;}

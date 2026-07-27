@@ -131,6 +131,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_34(
+        ctx: &GeneratedEvalContext<'_>,
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
         l: &mut StampLocals,
@@ -146,7 +147,8 @@ impl Instance {
             let t22b: f64 = (l.ffbf - 0.5);let t22c: f64 = if (((l.fa1e != 0.0) && (l.f78e != 0.0)) && (l.ff03 < t22b)) { 1.0 } else { 0.0 };
             t22c != 0.0
         } {
-            t22d += 1;assert!(t22d <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t22d += 1;
+            if t22d > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t22d, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((l.fa1e != 0.0) && (l.f78e != 0.0)) {let t21c: f64 = (0.5 * l.fee0);let t21d: f64 = (l.f1487 + t21c);let t21e: f64 = (l.f1493 + l.fee0);let t21f: f64 = (l.ff03 * t21e);let t220: f64 = (t21d + t21f);let t221: f64 = (1.0 / t220);let t222: f64 = (l.f17d3 + t221);l.f17d3 = t222;l.f17d4 = 0.0;let t223: f64 = (0.5 * l.fee0);let t224: f64 = (l.f1489 + t223);let t225: f64 = (l.f1493 + l.fee0);let t226: f64 = (l.ff03 * t225);let t227: f64 = (t224 + t226);let t228: f64 = (1.0 / t227);let t229: f64 = (l.f17d5 + t228);l.f17d5 = t229;l.f17d6 = 0.0;let t22a: f64 = (l.ff03 + 1.0);l.ff03 = t22a;l.ff04 = 0.0;}
         }
         if ((l.fa1e != 0.0) && (l.f78e != 0.0)) {let t22e: f64 = (l.f17d3 * l.fe57);l.fe59 = t22e;l.fe5a = 0.0;let t22f: f64 = (l.f17d5 * l.fe57);l.fe5d = t22f;l.fe5e = 0.0;let t230: f64 = (0.5 * l.fee0);let t231: f64 = (p[808] + t230);let t232: f64 = (1.0 / t231);l.fe5b = t232;l.fe5c = 0.0;let t233: f64 = (0.5 * l.fee0);let t234: f64 = (p[809] + t233);let t235: f64 = (1.0 / t234);l.fe5f = t235;l.fe60 = 0.0;}

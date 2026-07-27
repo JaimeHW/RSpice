@@ -4,6 +4,7 @@ use super::super::state::{Instance, Parameters};
 impl Instance {
     #[inline(never)]
     pub(super) fn stamp_reactive_block_29(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
     ) {
         let mut t7: usize = 0;
@@ -11,7 +12,8 @@ impl Instance {
             let t6: f64 = if ((s.b[737] && (!s.b[929])) && (s.v[168] <= s.v[58])) { 1.0 } else { 0.0 };
             t6 != 0.0
         } {
-            t7 += 1;assert!(t7 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t7 += 1;
+            if t7 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t7, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (s.b[737] && (!s.b[929])) {s.store_sub(977, 354, 475);s.store_mul(976, 225, 977);s.store_exp_neg_input(327, 976);}
             s.b[1013] = (s.v[977] < (-1e-9));s.store_scalar(1013, if s.b[1013] { 1.0 } else { 0.0 });
             if ((s.b[737] && (!s.b[929])) && s.b[1013]) {s.store_mul_sqrt_mixed_ia(360, 474, A::offset(A::add(s.ad_value(327), s.ad_value(976)), (-1.0)));s.store_div_scaled_offset_numerator_indices(983, 327, (-s.v[122]), s.v[122], 360, 1.0);}
@@ -27,7 +29,8 @@ impl Instance {
                 let t2: f64 = if (((s.b[737] && (!s.b[929])) && (!s.b[1015])) && (s.v[44] >= 60.0)) { 1.0 } else { 0.0 };
                 t2 != 0.0
             } {
-                t3 += 1;assert!(t3 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                t3 += 1;
+                if t3 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t3, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if ((s.b[737] && (!s.b[929])) && (!s.b[1015])) {s.store_scale(327, 327, 1.14200738981568e26);s.store_offset(44, 44, (-60.0));}
             }
             if ((s.b[737] && (!s.b[929])) && (!s.b[1015])) {s.store_mul_exp_rhs(327, 327, 44);s.copy_ad(333, 327);}
@@ -53,7 +56,8 @@ impl Instance {
                 let t4: f64 = if ((((s.b[737] && (!s.b[929])) && s.b[1018]) && s.b[1019]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
                 t4 != 0.0
             } {
-                t5 += 1;assert!(t5 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                t5 += 1;
+                if t5 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t5, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if (((s.b[737] && (!s.b[929])) && s.b[1018]) && s.b[1019]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
             }
             if (((s.b[737] && (!s.b[929])) && s.b[1018]) && (!s.b[1019])) {s.store_powf(53, 53, (1.0 / (2.0 * 2.0)));}
@@ -80,7 +84,8 @@ impl Instance {
                 let t0: f64 = if ((((s.b[737] && (!s.b[929])) && s.b[1024]) && s.b[1025]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
                 t0 != 0.0
             } {
-                t1 += 1;assert!(t1 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+                t1 += 1;
+                if t1 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t1, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
                 if (((s.b[737] && (!s.b[929])) && s.b[1024]) && s.b[1025]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
             }
             if (((s.b[737] && (!s.b[929])) && s.b[1024]) && (!s.b[1025])) {s.store_powf(53, 53, (1.0 / (2.0 * 2.0)));}
@@ -117,6 +122,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_30(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
     ) {
         if (s.b[737] && (!s.b[929])) {
@@ -150,7 +156,8 @@ impl Instance {
             let t8: f64 = if ((((s.b[737] && (!s.b[929])) && s.b[1042]) && s.b[1043]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
             t8 != 0.0
         } {
-            t9 += 1;assert!(t9 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t9 += 1;
+            if t9 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t9, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[737] && (!s.b[929])) && s.b[1042]) && s.b[1043]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
         }
         if (((s.b[737] && (!s.b[929])) && s.b[1042]) && (!s.b[1043])) {s.store_powf(53, 53, (1.0 / (2.0 * 2.0)));}
@@ -161,13 +168,14 @@ impl Instance {
         if ((s.b[737] && (!s.b[929])) && s.b[1048]) {s.store_sqrt_offset_ad(328, A::mul(s.ad_value(225), s.ad_value(373)), (-1.0));}
         if (s.b[737] && (!s.b[929])) {s.store_sub(414, 355, 358);}
         s.b[1049] = ((s.v[414] < (s.v[341] * 1e-5)) && ((s.v[341] * 1e-5) >= 0.0));s.store_scalar(1049, if s.b[1049] { 1.0 } else { 0.0 });
-        if ((s.b[737] && (!s.b[929])) && s.b[1049]) {s.store_sub_scaled_inputs(44, 341, 1e-5, 414, 1.0);s.store_square(49, 44);s.store_scaled_mul(50, 341, 341, (1e-5 * 1e-5));s.store_scalar(51, 1.0);}
+        if ((s.b[737] && (!s.b[929])) && s.b[1049]) {s.store_sub_scaled_inputs(44, 341, 1e-5, 414, 1.0);s.store_square(49, 44);s.store_scaled_mul(50, 341, 341, (1e-5 * 1e-5));}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_31(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
     ) {
-        if ((s.b[737] && (!s.b[929])) && s.b[1049]) {s.store_scalar(52, 1.0);s.store_scalar(54, 0.0);s.store_scalar(55, 0.0);s.store_scalar(48, 0.0);s.store_scalar(53, 0.0);s.store_mul(51, 51, 49);s.store_mul(52, 52, 50);s.store_mul(51, 51, 49);s.store_mul(52, 52, 50);s.store_add(48, 51, 52);s.copy_ad(53, 48);}
+        if ((s.b[737] && (!s.b[929])) && s.b[1049]) {s.store_scalar(51, 1.0);s.store_scalar(52, 1.0);s.store_scalar(54, 0.0);s.store_scalar(55, 0.0);s.store_scalar(48, 0.0);s.store_scalar(53, 0.0);s.store_mul(51, 51, 49);s.store_mul(52, 52, 50);s.store_mul(51, 51, 49);s.store_mul(52, 52, 50);s.store_add(48, 51, 52);s.copy_ad(53, 48);}
         s.b[1050] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(1050, if s.b[1050] { 1.0 } else { 0.0 });s.b[1051] = (2.0 == 1.0);s.store_scalar(1051, if s.b[1051] { 1.0 } else { 0.0 });
         if ((((s.b[737] && (!s.b[929])) && s.b[1049]) && s.b[1050]) && s.b[1051]) {s.store_scalar(55, 1.0);}
         s.b[1052] = (2.0 == 2.0);s.store_scalar(1052, if s.b[1052] { 1.0 } else { 0.0 });
@@ -182,7 +190,8 @@ impl Instance {
             let ta: f64 = if ((((s.b[737] && (!s.b[929])) && s.b[1049]) && s.b[1050]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
             ta != 0.0
         } {
-            tb += 1;assert!(tb <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            tb += 1;
+            if tb > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", tb, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[737] && (!s.b[929])) && s.b[1049]) && s.b[1050]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
         }
         if (((s.b[737] && (!s.b[929])) && s.b[1049]) && (!s.b[1050])) {s.store_powf(53, 53, (1.0 / (2.0 * 2.0)));}
@@ -206,7 +215,8 @@ impl Instance {
             let tc: f64 = if ((((s.b[737] && (!s.b[929])) && s.b[1055]) && s.b[1056]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
             tc != 0.0
         } {
-            td += 1;assert!(td <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            td += 1;
+            if td > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", td, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.b[737] && (!s.b[929])) && s.b[1055]) && s.b[1056]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
         }
         if (((s.b[737] && (!s.b[929])) && s.b[1055]) && (!s.b[1056])) {s.store_powf(53, 53, (1.0 / (2.0 * 2.0)));}
@@ -214,6 +224,12 @@ impl Instance {
         if ((s.b[737] && (!s.b[929])) && (!s.b[1055])) {
         }
         if (s.b[737] && (!s.b[929])) {s.copy_ad(190, 413);s.store_offset_mul_offset_rhs(478, 190, 190, 1.0, 1.0);}
+    }
+    #[inline(never)]
+    pub(super) fn stamp_reactive_block_32(
+        s: &mut ReactiveScratch,
+        p: &Parameters,
+    ) {
         if (s.b[737] && (!s.b[929])) {
             if ((1.0 + s.v[190]) >= (10.0 * 2.220446049250313e-16)) {
                 s.store_offset(479, 190, 1.0);
@@ -221,12 +237,6 @@ impl Instance {
                 s.store_scalar(479, (10.0 * 2.220446049250313e-16));
             }
         }
-    }
-    #[inline(never)]
-    pub(super) fn stamp_reactive_block_32(
-        s: &mut ReactiveScratch,
-        p: &Parameters,
-    ) {
         if (s.b[737] && (!s.b[929])) {s.store_scaled_add(436, 355, 358, (-0.5));}
         if (!s.b[737]) {s.copy_ad(515, 154);}
         s.b[1067] = (s.v[416] < p[237]);s.store_scalar(1067, if s.b[1067] { 1.0 } else { 0.0 });
@@ -250,7 +260,7 @@ impl Instance {
         }
         if (((!s.b[737]) && (!s.b[1068])) && (!s.b[1070])) {s.store_add_product3_rhs_mixed_iia(376, 159, 241, 225, A::sub_from_scalar(1.0, A::sqrt(s.ad_value(336))), 0.5);s.store_mul_sub_rhs(181, 225, 376, 515);}
         s.b[1071] = (s.v[181] < 3.0);s.store_scalar(1071, if s.b[1071] { 1.0 } else { 0.0 });
-        if ((((!s.b[737]) && (!s.b[1068])) && (!s.b[1070])) && s.b[1071]) {s.store_mul_sub_rhs(337, 225, 159, 515);s.store_div_scalar_by_product_indices(328, 1.0, 225, 240, (1.414213562373095 / 108.0));s.store_offset_scaled(329, 328, 3.0, 81.0);s.store_add_scaled_sub_value_product_mixed_aii(330, (-2916.0), A::scale(s.ad_value(328), 81.0), 1.0, 328, 337, 27.0);s.store_add_scaled_sub_value_product_mixed_aii(331, 1458.0, A::scaled_offset(s.ad_value(328), 54.0, 81.0), 1.0, 328, 337, 27.0);s.store_square(331, 331);s.store_powf_ad(332, A::add(s.ad_value(330), A::sqrt(A::add(A::mul3_scaled_output(s.ad_value(329), s.ad_value(329), s.ad_value(329), 4.0), s.ad_value(331)))), 0.3333333333333333);s.store_add_scaled_inputs_mixed_ai(336, A::sub_from_scalar(3.0, A::div_scaled_inputs(s.ad_value(329), 1.259921049894873, s.ad_value(332), 3.0)), 1.0, 332, (1.0 / (3.0 * 1.259921049894873)));s.store_add_scaled_product_indices(376, 515, 1.0, 336, 227, 1.0);s.copy_ad(378, 376);}
+        if ((((!s.b[737]) && (!s.b[1068])) && (!s.b[1070])) && s.b[1071]) {s.store_mul_sub_rhs(337, 225, 159, 515);s.store_div_scalar_by_product_indices(328, 1.0, 225, 240, (1.414213562373095 / 108.0));s.store_offset_scaled(329, 328, 3.0, 81.0);s.store_add_scaled_sub_value_product_mixed_aii(330, (-2916.0), A::scale(s.ad_value(328), 81.0), 1.0, 328, 337, 27.0);s.store_add_scaled_sub_value_product_mixed_aii(331, 1458.0, A::scaled_offset(s.ad_value(328), 54.0, 81.0), 1.0, 328, 337, 27.0);s.store_square(331, 331);s.store_powf_ad(332, A::add(s.ad_value(330), A::sqrt(A::add(A::mul3_scaled_output(s.ad_value(329), s.ad_value(329), s.ad_value(329), 4.0), s.ad_value(331)))), 0.3333333333333333);}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_33(
@@ -259,6 +269,7 @@ impl Instance {
         p: &Parameters,
         nodes: &[usize; Instance::NODE_COUNT],
     ) {
+        if ((((!s.b[737]) && (!s.b[1068])) && (!s.b[1070])) && s.b[1071]) {s.store_add_scaled_inputs_mixed_ai(336, A::sub_from_scalar(3.0, A::div_scaled_inputs(s.ad_value(329), 1.259921049894873, s.ad_value(332), 3.0)), 1.0, 332, (1.0 / (3.0 * 1.259921049894873)));s.store_add_scaled_product_indices(376, 515, 1.0, 336, 227, 1.0);s.copy_ad(378, 376);}
         s.b[1072] = (s.v[158] <= s.v[182]);s.store_scalar(1072, if s.b[1072] { 1.0 } else { 0.0 });
         if (((((!s.b[737]) && (!s.b[1068])) && (!s.b[1070])) && (!s.b[1071])) && s.b[1072]) {s.copy_ad(378, 376);}
         if (((((!s.b[737]) && (!s.b[1068])) && (!s.b[1070])) && (!s.b[1071])) && (!s.b[1072])) {s.store_div_scalar_by_product_indices(328, 1.0, 379, 434, 1.0);s.store_mul3_lhs(329, 328, 159, 159);s.store_add_div_from_scalar_rhs(330, 225, 2.0, 159);s.store_div_ln_lhs(377, 329, 330);s.store_offset_sub(44, 377, 376, (-0.0008));s.store_scale(45, 377, (4.0 * 0.0008));}
@@ -280,6 +291,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_34(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
@@ -288,7 +300,8 @@ impl Instance {
             let te: f64 = (s.v[57] + 1.0);let tf: f64 = if ((!s.b[737]) && (s.v[167] <= te)) { 1.0 } else { 0.0 };
             tf != 0.0
         } {
-            t10 += 1;assert!(t10 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t10 += 1;
+            if t10 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t10, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (!s.b[737]) {s.store_sub(417, 349, 515);s.store_mul(181, 225, 417);s.store_mul_sub_rhs(337, 420, 417, 419);}
             s.b[1075] = (s.v[337] < 80.0);s.store_scalar(1075, if s.b[1075] { 1.0 } else { 0.0 });
             if ((!s.b[737]) && s.b[1075]) {s.store_exp(328, 337);s.store_exp_mul_scaled_lhs_indices(327, 420, -1.0, 419);s.store_sub(329, 328, 327);s.store_div_ln_offset_lhs(422, 329, 1.0, 420);s.store_div_scaled_value_offset_denominator(423, s.ad_value(328), 1.0, s.ad_value(329), 1.0, 1.0);}
@@ -341,6 +354,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_35(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
     ) {
         if (!s.b[737]) {s.store_primal_offset(167, 167, (-1.0));s.copy_ad(371, 370);s.copy_ad(356, 371);s.copy_ad(161, 349);s.store_div(568, 371, 238);s.store_offset_square(169, 568, (10.0 * 2.220446049250313e-16));s.store_scale(328, 568, 2.0);s.store_offset(170, 568, (10.0 * 2.220446049250313e-16));s.store_mul(245, 238, 170);s.store_div_from_scalar_add_ad(328, 1.0, s.ad_value(490), s.ad_value(170));s.store_mul3_lhs(244, 238, 488, 328);s.store_neg(355, 244);s.store_mul(192, 244, 324);}
@@ -364,18 +378,20 @@ impl Instance {
             let t11: f64 = if (((((!s.b[737]) && s.b[1089]) && s.b[1097]) && s.b[1098]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
             t11 != 0.0
         } {
-            t12 += 1;assert!(t12 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t12 += 1;
+            if t12 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t12, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((!s.b[737]) && s.b[1089]) && s.b[1097]) && s.b[1098]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
         }
         if ((((!s.b[737]) && s.b[1089]) && s.b[1097]) && (!s.b[1098])) {s.store_powf(53, 53, (1.0 / (2.0 * 4.0)));}
-        if (((!s.b[737]) && s.b[1089]) && s.b[1097]) {s.store_div_from_scalar(53, 1.0, 53);s.store_mul3_lhs(43, 44, 332, 53);s.store_sub(1093, 332, 43);}
-        if (((!s.b[737]) && s.b[1089]) && (!s.b[1097])) {
-        }
+        if (((!s.b[737]) && s.b[1089]) && s.b[1097]) {s.store_div_from_scalar(53, 1.0, 53);s.store_mul3_lhs(43, 44, 332, 53);}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_36(
         s: &mut ReactiveScratch,
     ) {
+        if (((!s.b[737]) && s.b[1089]) && s.b[1097]) {s.store_sub(1093, 332, 43);}
+        if (((!s.b[737]) && s.b[1089]) && (!s.b[1097])) {
+        }
         if ((!s.b[737]) && s.b[1089]) {s.store_sqrt(1092, 1093);s.store_add_mul_sub_from_scalar_rhs_indices(1096, 159, 1091, 1.0, 1092);s.store_sqrt_square_offset(44, 1096, ((4.0 * 0.01) * 0.01));s.store_offset_add_scaled_inputs_indices(1096, 1096, 0.5, 44, 0.5, (1e-10 * 0.01));}
         s.b[1103] = (s.v[1096] < 0.0);s.store_scalar(1103, if s.b[1103] { 1.0 } else { 0.0 });
         if (((!s.b[737]) && s.b[1089]) && s.b[1103]) {s.store_scalar(1096, 0.0);}
@@ -415,6 +431,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_37(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
     ) {
         let mut t15: usize = 0;
@@ -422,7 +439,8 @@ impl Instance {
             let t13: f64 = (s.v[58] + 1.0);let t14: f64 = if (((!s.b[737]) && s.b[1089]) && (s.v[168] <= t13)) { 1.0 } else { 0.0 };
             t14 != 0.0
         } {
-            t15 += 1;assert!(t15 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t15 += 1;
+            if t15 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t15, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((!s.b[737]) && s.b[1089]) {s.store_sub(418, 352, 515);s.store_mul(181, 225, 418);s.store_mul_sub_rhs(337, 420, 418, 419);}
             s.b[1109] = (s.v[337] < 80.0);s.store_scalar(1109, if s.b[1109] { 1.0 } else { 0.0 });
             if (((!s.b[737]) && s.b[1089]) && s.b[1109]) {s.store_exp(328, 337);s.store_exp_mul_scaled_lhs_indices(327, 420, -1.0, 419);s.store_sub(329, 328, 327);s.store_div_ln_offset_lhs(422, 329, 1.0, 420);s.store_div_scaled_value_offset_denominator(423, s.ad_value(328), 1.0, s.ad_value(329), 1.0, 1.0);}
@@ -483,6 +501,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_39(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
@@ -501,7 +520,8 @@ impl Instance {
             let t16: f64 = if ((((!s.b[737]) && s.b[1089]) && s.b[1123]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
             t16 != 0.0
         } {
-            t17 += 1;assert!(t17 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t17 += 1;
+            if t17 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t17, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((!s.b[737]) && s.b[1089]) && s.b[1123]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
         }
         if (((!s.b[737]) && s.b[1089]) && (!s.b[1123])) {s.store_powf(53, 53, (1.0 / (2.0 * 4.0)));}
@@ -527,13 +547,13 @@ impl Instance {
         if ((s.b[1133] && s.b[1136]) && s.b[1152]) {s.store_scalar(316, 0.0);s.copy_ad(314, 162);}
         s.b[1153] = (s.v[314] > ((s.v[161] + s.v[173]) - (10.0 * 2.220446049250313e-16)));s.store_scalar(1153, if s.b[1153] { 1.0 } else { 0.0 });
         if (((s.b[1133] && s.b[1136]) && s.b[1152]) && s.b[1153]) {s.store_offset_add(314, 161, 173, (-(10.0 * 2.220446049250313e-16)));}
-        if ((s.b[1133] && s.b[1136]) && (!s.b[1152])) {s.store_scalar(1151, (if (p[43] == 1.0) { p[237] } else { s.v[402] }));}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_40(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
+        if ((s.b[1133] && s.b[1136]) && (!s.b[1152])) {s.store_scalar(1151, (if (p[43] == 1.0) { p[237] } else { s.v[402] }));}
         if ((s.b[1133] && s.b[1136]) && (!s.b[1152])) {s.store_primal_div_from_scalar(1137, 1.0, 1151);s.store_mul(1138, 244, 1137);s.store_scale(1139, 1138, p[191]);s.store_add_scaled_product_indices(1142, 1139, 1.0, 80, 229, 1.0);s.store_div_from_scalar(1138, 1.0, 1142);s.store_scale(1141, 1138, 1.034943e-10);s.store_scalar(1138, (1.0 - p[189]));s.store_add_scaled_inputs_product_indices(314, 157, p[189], 161, p[189], 1138, 162, 1.0);}
         s.b[1154] = (s.v[314] > ((s.v[161] + s.v[173]) - (10.0 * 2.220446049250313e-16)));s.store_scalar(1154, if s.b[1154] { 1.0 } else { 0.0 });
         if (((s.b[1133] && s.b[1136]) && (!s.b[1152])) && s.b[1154]) {s.store_offset_add(314, 161, 173, (-(10.0 * 2.220446049250313e-16)));}
@@ -557,14 +577,14 @@ impl Instance {
         if s.b[1133] {s.store_add(176, 161, 177);s.store_scalar(1170, (1.034943e-10 / 100.0));s.store_scale(1171, 437, 0.0001);s.store_scale(1172, 436, 0.0001);s.store_div_from_scalar(1161, p[92], 1170);s.store_primal_div_from_scalar(1162, p[93], 1170);s.store_scalar(1163, p[94]);s.store_offset_mul_ad(1164, A::sub(s.ad_value(162), s.ad_value(161)), s.ad_value(1163), 1.0);s.store_add_scaled_products_indices(1165, 1161, 1171, 1.0, 1162, 1172, 1.0);s.store_div(1166, 1165, 1164);s.copy_ad(248, 1166);s.store_sqrt_square_offset(44, 248, ((4.0 * 3000.0) * 3000.0));s.store_offset_add_scaled_inputs_indices(1163, 248, 0.5, 44, 0.5, (1e-10 * 3000.0));}
         s.b[1173] = (s.v[1163] < 0.0);s.store_scalar(1173, if s.b[1173] { 1.0 } else { 0.0 });
         if (s.b[1133] && s.b[1173]) {s.store_scalar(1163, 0.0);}
-        if s.b[1133] {s.store_powf(1165, 1163, (p[97] - 1.0));s.store_mul(1167, 1165, 1163);}
+        if s.b[1133] {s.store_powf(1165, 1163, (p[97] - 1.0));}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_41(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        if s.b[1133] {s.store_powf(1168, 1163, (s.v[111] - 1.0));s.store_mul(1169, 1168, 1163);s.store_scale(249, 1172, 6.241449993689894e18);s.store_add_scaled_inputs_mixed_ai(1161, A::add_scaled_product(A::div_from_scalar(1.0, A::scale_offset(s.ad_value(249), (p[96] * 1e-11), p[95])), 1.0, s.ad_value(543), s.ad_value(1167), 1.0), 1.0, 1169, 1.0 / (p[106]));s.store_div_from_scalar(251, 1.0, 1161);s.store_scale(251, 251, 0.0001);s.store_mul3_lhs(1174, 225, 244, 441);s.store_sqrt_square_offset(44, 1174, ((4.0 * 1e-50) * 1e-50));s.store_offset_add_scaled_inputs_indices(1174, 1174, 0.5, 44, 0.5, (1e-10 * 1e-50));}
+        if s.b[1133] {s.store_mul(1167, 1165, 1163);s.store_powf(1168, 1163, (s.v[111] - 1.0));s.store_mul(1169, 1168, 1163);s.store_scale(249, 1172, 6.241449993689894e18);s.store_add_scaled_inputs_mixed_ai(1161, A::add_scaled_product(A::div_from_scalar(1.0, A::scale_offset(s.ad_value(249), (p[96] * 1e-11), p[95])), 1.0, s.ad_value(543), s.ad_value(1167), 1.0), 1.0, 1169, 1.0 / (p[106]));s.store_div_from_scalar(251, 1.0, 1161);s.store_scale(251, 251, 0.0001);s.store_mul3_lhs(1174, 225, 244, 441);s.store_sqrt_square_offset(44, 1174, ((4.0 * 1e-50) * 1e-50));s.store_offset_add_scaled_inputs_indices(1174, 1174, 0.5, 44, 0.5, (1e-10 * 1e-50));}
         s.b[1182] = (s.v[1174] < 0.0);s.store_scalar(1182, if s.b[1182] { 1.0 } else { 0.0 });
         if (s.b[1133] && s.b[1182]) {s.store_scalar(1174, 0.0);}
         if s.b[1133] {s.store_div_from_scalar(1175, 1.0, 1174);s.store_mul(1176, 246, 1175);s.store_div_scaled_inputs_indices(1174, 253, 0.2, 251, 1.0);s.store_sqrt_square_sum(252, 1176, 1174);s.store_mul(1177, 251, 252);s.store_div(1175, 1177, 253);}
@@ -591,13 +611,14 @@ impl Instance {
         if (s.b[1133] && s.b[1196]) {s.store_add_product3_rhs_indices(1191, 1191, 173, 1188, 1192, 1.0);s.store_mul(1193, 1190, 1191);s.copy_ad(1190, 1193);}
         if (s.b[1133] && (!s.b[1196])) {s.store_scalar(1190, 0.0);}
         s.b[1199] = (p[248] != 0.0);s.store_scalar(1199, if s.b[1199] { 1.0 } else { 0.0 });
-        if (s.b[1133] && s.b[1199]) {s.store_scale(1187, 225, s.v[118]);s.store_mul(1195, 323, 1187);s.store_mul(1194, 1195, 173);}
+        if (s.b[1133] && s.b[1199]) {s.store_scale(1187, 225, s.v[118]);s.store_mul(1195, 323, 1187);}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_42(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
+        if (s.b[1133] && s.b[1199]) {s.store_mul(1194, 1195, 173);}
         if (s.b[1133] && (!s.b[1199])) {s.store_scalar(1194, 0.0);}
         s.b[1200] = ((s.v[1190] + s.v[1194]) > 0.0);s.store_scalar(1200, if s.b[1200] { 1.0 } else { 0.0 });
         if (s.b[1133] && s.b[1200]) {s.store_mul_add_rhs(247, 164, 1190, 1194);s.store_mul3_lhs(201, 264, 247, 250);}
@@ -615,6 +636,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_43(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
@@ -638,7 +660,8 @@ impl Instance {
             let t18: f64 = if (((s.b[1133] && s.b[1210]) && s.b[1215]) && (s.v[54] < s.v[55])) { 1.0 } else { 0.0 };
             t18 != 0.0
         } {
-            t19 += 1;assert!(t19 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t19 += 1;
+            if t19 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("reactive stamp", t19, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((s.b[1133] && s.b[1210]) && s.b[1215]) {s.store_sqrt(53, 53);s.store_primal_offset(54, 54, 1.0);}
         }
         if ((s.b[1133] && s.b[1210]) && (!s.b[1215])) {s.store_powf(53, 53, (1.0 / (2.0 * 4.0)));}

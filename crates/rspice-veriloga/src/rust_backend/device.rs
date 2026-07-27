@@ -54782,8 +54782,13 @@ fn emit_loop_statement(
     out.push_str(&format!("{inner_indent}{} != 0.0\n", condition.value));
     out.push_str(&format!("{indent}}} {{\n"));
     out.push_str(&format!("{inner_indent}{guard} += 1;\n"));
+    let phase = if reactive {
+        "reactive stamp"
+    } else {
+        "transient stamp"
+    };
     out.push_str(&format!(
-        "{inner_indent}assert!({guard} <= Self::MAX_ANALOG_LOOP_ITERATIONS, \"generated Verilog-A analog loop exceeded iteration guard\");\n"
+        "{inner_indent}if {guard} > Self::MAX_ANALOG_LOOP_ITERATIONS {{ ctx.report_analog_loop_limit({phase:?}, {guard}, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }}\n"
     ));
     let body_prefix = format!("{prefix}_body");
     emit_statement_list(

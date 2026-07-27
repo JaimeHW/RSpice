@@ -143,6 +143,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_23(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
         p: &Parameters,
     ) {
@@ -158,7 +159,8 @@ impl Instance {
             let t0: f64 = if (s.b[1608] && (s.v[929] < p[2])) { 1.0 } else { 0.0 };
             t0 != 0.0
         } {
-            t1 += 1;assert!(t1 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t1 += 1;
+            if t1 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t1, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if s.b[1608] {s.store_div_from_scalar_offset_scaled_input(167, (1.0 / p[2]), 929, (p[12] + s.v[262]), (p[10] + (0.5 * s.v[262])));s.store_div_from_scalar_offset_scaled_input(168, (1.0 / p[2]), 929, (p[12] + s.v[262]), (p[11] + (0.5 * s.v[262])));s.store_offset(916, 167, s.v[916]);s.store_offset(917, 168, s.v[917]);s.store_primal_offset(929, 929, 1.0);}
         }
         if s.b[1608] {s.store_scalar(918, (1.0 / (p[1102] + (0.5 * s.v[262]))));s.store_scalar(919, (1.0 / (p[1103] + (0.5 * s.v[262]))));s.store_primal_add(920, 918, 919);s.store_mul_div_from_scalar_lhs_ad_indices(921, p[1105], 915, 920);s.store_add(922, 916, 917);s.store_mul_div_from_scalar_lhs_ad_indices(923, p[1105], 915, 922);s.store_div_scaled_offset_numerator_mixed_ia(924, 923, 1.0, 1.0, A::offset(s.ad_value(921), 1.0), 1.0);s.store_div_scaled_offset_numerator_mixed_ia(925, 923, p[1106], 1.0, A::scale_offset(s.ad_value(921), p[1106], 1.0), 1.0);s.store_mul_div_from_scalar_lhs_ad_mixed_ia(926, p[1113], 914, A::sub(s.ad_value(922), s.ad_value(920)));s.store_mul_div_from_scalar_lhs_ad(927, p[1119], A::powf(s.ad_value(914), p[1120]), A::sub(s.ad_value(922), s.ad_value(920)));s.store_mul_div_from_scalar_lhs_ad(928, p[1121], A::powf(s.ad_value(914), p[1122]), A::sub(s.ad_value(922), s.ad_value(920)));s.store_mul(641, 641, 924);s.store_mul(653, 653, 925);s.store_add(734, 734, 927);s.store_add(663, 663, 928);}

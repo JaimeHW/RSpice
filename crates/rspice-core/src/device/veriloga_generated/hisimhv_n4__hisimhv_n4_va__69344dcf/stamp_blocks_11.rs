@@ -4,6 +4,114 @@ use super::super::state::{Instance, Parameters};
 impl Instance {
     #[inline(never)]
     pub(super) fn stamp_transient_block_176(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+    ) {
+        if (((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) {s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
+        s.b[3019] = ((((1.0 == 1.0) || (1.0 == 2.0)) || (1.0 == 4.0)) || (1.0 == 8.0));s.store_scalar(3019, if s.b[3019] { 1.0 } else { 0.0 });s.b[3020] = (1.0 == 1.0);s.store_scalar(3020, if s.b[3020] { 1.0 } else { 0.0 });
+        let (t0,) = {
+    if (((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) && s.b[3020]) {
+        (1.0,)
+    } else {
+        (s.v[720],)
+    }
+};
+        s.store_scalar(720, t0);s.b[3021] = (1.0 == 2.0);s.store_scalar(3021, if s.b[3021] { 1.0 } else { 0.0 });
+        let (t1,) = {
+    if ((((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) && (!s.b[3020])) && s.b[3021]) {
+        (2.0,)
+    } else {
+        (s.v[720],)
+    }
+};
+        s.store_scalar(720, t1);s.b[3022] = (1.0 == 4.0);s.store_scalar(3022, if s.b[3022] { 1.0 } else { 0.0 });
+        let (t2,) = {
+    if (((((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) && (!s.b[3020])) && (!s.b[3021])) && s.b[3022]) {
+        (3.0,)
+    } else {
+        (s.v[720],)
+    }
+};
+        s.store_scalar(720, t2);s.b[3023] = (1.0 == 8.0);s.store_scalar(3023, if s.b[3023] { 1.0 } else { 0.0 });
+        let (t3,) = {
+    if ((((((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) && (!s.b[3020])) && (!s.b[3021])) && (!s.b[3022])) && s.b[3023]) {
+        (4.0,)
+    } else {
+        (s.v[720],)
+    }
+};
+        s.store_scalar(720, t3);
+        let (t4,) = {
+    if ((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) {
+        (0.0,)
+    } else {
+        (s.v[719],)
+    }
+};
+        s.store_scalar(719, t4);let mut t8: usize = 0;
+        while {
+            let t7: f64 = if (((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            t7 != 0.0
+        } {
+            t8 += 1;
+            if t8 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t8, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
+            if ((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) {s.store_sqrt(726, 726);}
+            let (t6,) = {
+    if ((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && s.b[3019]) {
+        let t5: f64 = (s.v[719] + 1.0);
+        (t5,)
+    } else {
+        (s.v[719],)
+    }
+};
+            s.store_scalar(719, t6);
+        }
+        if ((((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) && (!s.b[3019])) {
+            if (s.v[726] == 0.0) {
+                s.store_scalar(726, 0.0);
+            } else {
+                s.store_powf(726, 726, (1.0 / 2.0));
+            }
+        }
+        if (((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) {s.store_div_from_scalar(726, 1.0, 726);s.store_mul3_lhs(780, 781, 335, 726);s.store_div_scaled_product3_indices(334, 335, 725, 726, 1.0, 770, 1.0);s.store_add_scaled_inputs(335, 335, -1.0, 780, 1.0);}
+        if (((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && s.b[3018]) {
+        }
+        if (((s.v[2621] != 0.0) && (s.v[406] != 0.0)) && (!s.b[3018])) {s.store_add(335, 402, 397);s.store_scalar(334, 1.0);}
+        if ((s.v[2621] != 0.0) && (s.v[406] != 0.0)) {s.store_sub(397, 335, 402);}
+        let (tc,) = {
+    if ((s.v[2621] != 0.0) && (s.v[406] != 0.0)) {
+        let t9: f64 = (-s.v[397]);let ta: f64 = (10.0 * 2.220446049250313e-16);let tb: f64 = (t9 + ta);
+        (tb,)
+    } else {
+        (s.v[403],)
+    }
+};
+        s.store_scalar(403, tc);s.b[3024] = (s.v[402] < s.v[403]);s.store_scalar(3024, if s.b[3024] { 1.0 } else { 0.0 });
+        if ((s.v[2621] != 0.0) && s.b[3024]) {s.store_mul_scaled_ln_ad_rhs(271, 155, 2.0, A::div_from_scalar((-s.v[270]), s.ad_value(212)));s.store_mul_add_rhs(332, 154, 402, 397);s.store_div_scalar_by_product_indices(335, 1.0, 154, 410, 1.0);s.store_mul(333, 335, 413);s.store_offset_scaled(279, 333, (3.0 * 1.414213562373095), 2.0);s.store_mul3_affine_lhs(277, 279, 279, 8.0, 0.0, 279);s.store_sub_from_scalar_scaled_mul_mixed_ia(278, (7.0 * 1.414213562373095), 333, A::offset(s.ad_value(332), (-2.0)), 9.0);s.store_square(276, 278);}
+        s.b[3025] = (s.v[277] < (s.v[276] * 1e-8));s.store_scalar(3025, if s.b[3025] { 1.0 } else { 0.0 });
+        if (((s.v[2621] != 0.0) && s.b[3024]) && s.b[3025]) {s.store_div_scaled_inputs_indices(274, 277, 0.5, 278, 1.0);}
+        if (((s.v[2621] != 0.0) && s.b[3024]) && (!s.b[3025])) {s.store_sqrt_add(275, 277, 276);s.store_sub(274, 275, 278);}
+        if ((s.v[2621] != 0.0) && s.b[3024]) {s.store_powf(273, 274, 0.3333333333333333);s.store_add_scaled_inputs_product_mixed_aiii(272, A::sub_from_scalar(((-4.0) * 1.414213562373095), A::scale(s.ad_value(333), 12.0)), 1.0, 273, 2.0, 273, 273, 1.414213562373095);s.store_div(116, 272, 273);s.store_mul(335, 116, 155);s.store_div(336, 335, 271);s.store_sqrt_square_offset(337, 336, 1.0);s.store_sub_div_lhs_indices(404, 335, 337, 397);s.store_sub(336, 402, 404);s.store_mul(398, 413, 336);s.copy_ad(354, 398);s.copy_ad(3007, 404);}
+        s.b[3026] = ((s.v[154] * (s.v[402] + s.v[397])) < (1.0 + (((((10.0 * 2.220446049250313e-16) - 1.0) * s.v[213]) * s.v[156]) / 4.0)));s.store_scalar(3026, if s.b[3026] { 1.0 } else { 0.0 });
+        if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3026]) {s.store_add_scaled_product_indices(89, 402, 1.0, 213, 154, 0.5);}
+        if (((s.v[2621] != 0.0) && (!s.b[3024])) && (!s.b[3026])) {s.store_offset_div_scaled_offset_numerator(332, A::mul(s.ad_value(154), A::add(s.ad_value(402), s.ad_value(397))), 4.0, ((-1.0) * 4.0), A::mul(s.ad_value(213), s.ad_value(156)), 1.0, 1.0);}
+    }
+    #[inline(never)]
+    pub(super) fn stamp_transient_block_177(
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if (((s.v[2621] != 0.0) && (!s.b[3024])) && (!s.b[3026])) {s.store_add_product3_rhs_mixed_iia(89, 402, 213, 154, A::sub_from_scalar(1.0, A::sqrt(s.ad_value(332))), 1.0 / (2.0));}
+        if ((s.v[2621] != 0.0) && (!s.b[3024])) {s.store_mul_add_rhs(116, 154, 89, 397);}
+        s.b[3027] = (s.v[116] >= 3.0);s.store_scalar(3027, if s.b[3027] { 1.0 } else { 0.0 });
+        if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3027]) {s.store_exp_neg_input(333, 116);s.store_offset_div_scaled_inputs2_mixed_aia(332, A::offset(A::mul(s.ad_value(154), A::add(s.ad_value(402), s.ad_value(397))), (-1.0)), 4.0, 333, 4.0, A::mul(s.ad_value(213), s.ad_value(156)), 1.0, 1.0);s.store_add_product3_rhs_mixed_iia(89, 402, 213, 154, A::sub_from_scalar(1.0, A::sqrt(s.ad_value(332))), 1.0 / (2.0));s.store_mul_add_rhs(116, 154, 89, 397);s.store_exp_neg_input(333, 116);s.store_offset_div_scaled_inputs2_mixed_aia(332, A::offset(A::mul(s.ad_value(154), A::add(s.ad_value(402), s.ad_value(397))), (-1.0)), 4.0, 333, 4.0, A::mul(s.ad_value(213), s.ad_value(156)), 1.0, 1.0);s.store_add_product3_rhs_mixed_iia(89, 402, 213, 154, A::sub_from_scalar(1.0, A::sqrt(s.ad_value(332))), 1.0 / (2.0));s.store_mul_add_rhs(116, 154, 89, 397);}
+        if (((s.v[2621] != 0.0) && (!s.b[3024])) && (!s.b[3027])) {s.store_scalar(434, ((1.0 / (9.0 * ((2.0) as f64).sqrt())) - ((5.0 + (7.0 * (((-3.0)) as f64).exp())) / (54.0 * (((2.0 + (((-3.0)) as f64).exp())) as f64).sqrt()))));s.store_scalar(435, (((1.0 + (((-3.0)) as f64).exp()) / (2.0 * (((2.0 + (((-3.0)) as f64).exp())) as f64).sqrt())) - (((2.0) as f64).sqrt() / 3.0)));s.store_offset_div_from_scalar_ad(436, 1.0, A::mul(s.ad_value(154), s.ad_value(212)), (1.0 / ((2.0) as f64).sqrt()));s.store_div_scaled_inputs2_indices(437, 402, -1.0, 397, -1.0, 212, 1.0);s.store_add_scaled_inputs3_div_scaled_third_mixed_aaii(441, A::div_scaled_product(A::square(s.ad_value(435)), s.ad_value(435), 1.0, A::mul3_scaled_output(s.ad_value(434), s.ad_value(434), s.ad_value(434), 27.0), 1.0), 1.0, A::div_scaled_product_by_product(s.ad_value(435), s.ad_value(436), 1.0, s.ad_value(434), s.ad_value(434), 6.0), (-1.0), 437, 1.0, 434, 2.0, 1.0);s.store_div_scaled_value_by_product_mixed_aii(440, A::add_scaled_square_product(s.ad_value(435), (-1.0), s.ad_value(434), s.ad_value(436), 3.0), 1.0, 434, 434, 9.0);s.store_sqrt_add_scaled_square_cube_product(339, 441, 1.0, 440, 1.0);s.store_powf_ad(439, A::sub(s.ad_value(339), s.ad_value(441)), 0.3333333333333333);s.store_neg_powf_add_input(438, 441, 339, 0.3333333333333333);s.store_add_scaled_inputs3_div_scaled_third_indices(116, 439, 1.0, 438, 1.0, 435, 1.0, 434, 3.0, -1.0);s.store_add_scaled_product_indices(89, 397, (-1.0), 116, 155, 1.0);}
+        s.b[3028] = (p[33] > 0.0);s.store_scalar(3028, if s.b[3028] { 1.0 } else { 0.0 });
+        if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) {s.store_offset_add(442, 402, 397, 0.1);s.store_mul(222, 405, 229);s.store_mul(443, 405, 229);s.store_mul(334, 156, 213);s.store_mul(444, 154, 442);}
+    }
+    #[inline(never)]
+    pub(super) fn stamp_transient_block_178(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
         p: &Parameters,
     ) {
@@ -39,83 +147,84 @@ impl Instance {
         if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) {s.copy_ad(445, 116);}
         s.b[3030] = (p[33] == 2.0);s.store_scalar(3030, if s.b[3030] { 1.0 } else { 0.0 });s.b[3031] = ((s.v[445] > (s.v[446] - (0.2 * s.v[446]))) && ((0.2 * s.v[446]) >= 0.0));s.store_scalar(3031, if s.b[3031] { 1.0 } else { 0.0 });
         if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) {s.store_add_scaled_inputs3_indices(781, 445, 1.0, 446, (-1.0), 446, 0.2);s.store_square(722, 781);s.store_scaled_mul(723, 446, 446, (0.2 * 0.2));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
-        let (t0,) = {
+        let (td,) = {
     if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t0);
-        let (t1,) = {
+        s.store_scalar(719, td);
+        let (te,) = {
     if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) {
         (0.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t1);
+        s.store_scalar(720, te);
         if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[3032] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(3032, if s.b[3032] { 1.0 } else { 0.0 });s.b[3033] = (2.0 == 1.0);s.store_scalar(3033, if s.b[3033] { 1.0 } else { 0.0 });
-        let (t2,) = {
+        let (tf,) = {
     if (((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) && s.b[3033]) {
         (1.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t2);s.b[3034] = (2.0 == 2.0);s.store_scalar(3034, if s.b[3034] { 1.0 } else { 0.0 });
-        let (t3,) = {
+        s.store_scalar(720, tf);s.b[3034] = (2.0 == 2.0);s.store_scalar(3034, if s.b[3034] { 1.0 } else { 0.0 });
+        let (t10,) = {
     if ((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) && (!s.b[3033])) && s.b[3034]) {
         (2.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t3);s.b[3035] = (2.0 == 4.0);s.store_scalar(3035, if s.b[3035] { 1.0 } else { 0.0 });
-        let (t4,) = {
+        s.store_scalar(720, t10);s.b[3035] = (2.0 == 4.0);s.store_scalar(3035, if s.b[3035] { 1.0 } else { 0.0 });
+        let (t11,) = {
     if (((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) && (!s.b[3033])) && (!s.b[3034])) && s.b[3035]) {
         (3.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t4);s.b[3036] = (2.0 == 8.0);s.store_scalar(3036, if s.b[3036] { 1.0 } else { 0.0 });
-        let (t5,) = {
+        s.store_scalar(720, t11);s.b[3036] = (2.0 == 8.0);s.store_scalar(3036, if s.b[3036] { 1.0 } else { 0.0 });
+        let (t12,) = {
     if ((((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) && (!s.b[3033])) && (!s.b[3034])) && (!s.b[3035])) && s.b[3036]) {
         (4.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t5);
-        let (t6,) = {
+        s.store_scalar(720, t12);
+        let (t13,) = {
     if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t6);let mut ta: usize = 0;
+        s.store_scalar(719, t13);let mut t17: usize = 0;
         while {
-            let t9: f64 = if (((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            t9 != 0.0
+            let t16: f64 = if (((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            t16 != 0.0
         } {
-            ta += 1;assert!(ta <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t17 += 1;
+            if t17 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t17, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) {s.store_sqrt(726, 726);}
-            let (t8,) = {
+            let (t15,) = {
     if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3028]) && s.b[3030]) && s.b[3031]) && s.b[3032]) {
-        let t7: f64 = (s.v[719] + 1.0);
-        (t7,)
+        let t14: f64 = (s.v[719] + 1.0);
+        (t14,)
     } else {
         (s.v[719],)
     }
 };
-            s.store_scalar(719, t8);
+            s.store_scalar(719, t15);
         }
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_177(
+    pub(super) fn stamp_transient_block_179(
         s: &mut Scratch,
         p: &Parameters,
     ) {
@@ -154,15 +263,15 @@ impl Instance {
         if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3037]) && (!s.b[3041])) {s.store_sub(416, 414, 418);}
         if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3037]) {s.store_mul(415, 154, 416);}
         s.b[3042] = ((s.v[415] > (s.v[116] / 100.0)) && (s.v[415] > 0.0));s.store_scalar(3042, if s.b[3042] { 1.0 } else { 0.0 });
-        let (tc,) = {
+        let (t19,) = {
     if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3037]) && s.b[3042]) {
-        let tb: f64 = (s.v[3006] + 1.0);
-        (tb,)
+        let t18: f64 = (s.v[3006] + 1.0);
+        (t18,)
     } else {
         (s.v[3006],)
     }
 };
-        s.store_scalar(3006, tc);
+        s.store_scalar(3006, t19);
         if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3037]) && s.b[3042]) {s.copy_ad(116, 447);}
         if ((s.v[2621] != 0.0) && (!s.b[3024])) {s.store_add_scaled_product_indices(404, 397, (-1.0), 116, 155, 1.0);}
         s.b[3043] = (((s.v[116]) as f64).abs() > 1e-6);s.store_scalar(3043, if s.b[3043] { 1.0 } else { 0.0 });
@@ -171,85 +280,87 @@ impl Instance {
         if ((s.v[2621] != 0.0) && (!s.b[3024])) {s.store_mul(354, 410, 336);s.store_mul_sub_rhs(398, 413, 402, 404);s.store_div(3044, 354, 3000);}
         s.b[3046] = (p[33] == 2.0);s.store_scalar(3046, if s.b[3046] { 1.0 } else { 0.0 });s.b[3047] = ((s.v[3044] > (s.v[386] - (s.v[386] * 0.1))) && ((s.v[386] * 0.1) >= 0.0));s.store_scalar(3047, if s.b[3047] { 1.0 } else { 0.0 });
         if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) {s.store_add_scaled_inputs3_indices(781, 3044, 1.0, 386, (-1.0), 386, 0.1);s.store_square(722, 781);s.store_scaled_mul(723, 386, 386, (0.1 * 0.1));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
-        let (td,) = {
+        let (t1a,) = {
     if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, td);
+        s.store_scalar(719, t1a);
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_178(
+    pub(super) fn stamp_transient_block_180(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        let (te,) = {
+        let (t1b,) = {
     if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) {
         (0.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, te);
+        s.store_scalar(720, t1b);
         if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[3048] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(3048, if s.b[3048] { 1.0 } else { 0.0 });s.b[3049] = (2.0 == 1.0);s.store_scalar(3049, if s.b[3049] { 1.0 } else { 0.0 });
-        let (tf,) = {
+        let (t1c,) = {
     if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) && s.b[3049]) {
         (1.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, tf);s.b[3050] = (2.0 == 2.0);s.store_scalar(3050, if s.b[3050] { 1.0 } else { 0.0 });
-        let (t10,) = {
+        s.store_scalar(720, t1c);s.b[3050] = (2.0 == 2.0);s.store_scalar(3050, if s.b[3050] { 1.0 } else { 0.0 });
+        let (t1d,) = {
     if (((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) && (!s.b[3049])) && s.b[3050]) {
         (2.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t10);s.b[3051] = (2.0 == 4.0);s.store_scalar(3051, if s.b[3051] { 1.0 } else { 0.0 });
-        let (t11,) = {
+        s.store_scalar(720, t1d);s.b[3051] = (2.0 == 4.0);s.store_scalar(3051, if s.b[3051] { 1.0 } else { 0.0 });
+        let (t1e,) = {
     if ((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) && (!s.b[3049])) && (!s.b[3050])) && s.b[3051]) {
         (3.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t11);s.b[3052] = (2.0 == 8.0);s.store_scalar(3052, if s.b[3052] { 1.0 } else { 0.0 });
-        let (t12,) = {
+        s.store_scalar(720, t1e);s.b[3052] = (2.0 == 8.0);s.store_scalar(3052, if s.b[3052] { 1.0 } else { 0.0 });
+        let (t1f,) = {
     if (((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) && (!s.b[3049])) && (!s.b[3050])) && (!s.b[3051])) && s.b[3052]) {
         (4.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t12);
-        let (t13,) = {
+        s.store_scalar(720, t1f);
+        let (t20,) = {
     if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t13);let mut t17: usize = 0;
+        s.store_scalar(719, t20);let mut t24: usize = 0;
         while {
-            let t16: f64 = if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            t16 != 0.0
+            let t23: f64 = if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            t23 != 0.0
         } {
-            t17 += 1;assert!(t17 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t24 += 1;
+            if t24 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t24, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) {s.store_sqrt(726, 726);}
-            let (t15,) = {
+            let (t22,) = {
     if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && s.b[3048]) {
-        let t14: f64 = (s.v[719] + 1.0);
-        (t14,)
+        let t21: f64 = (s.v[719] + 1.0);
+        (t21,)
     } else {
         (s.v[719],)
     }
 };
-            s.store_scalar(719, t15);
+            s.store_scalar(719, t22);
         }
         if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3047]) && (!s.b[3048])) {
             if (s.v[726] == 0.0) {
@@ -263,15 +374,15 @@ impl Instance {
         }
         if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && (!s.b[3047])) {s.copy_ad(335, 3044);s.store_scalar(334, 1.0);}
         s.b[3053] = (s.v[334] < 1.0);s.store_scalar(3053, if s.b[3053] { 1.0 } else { 0.0 });
-        let (t19,) = {
+        let (t26,) = {
     if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3046]) && s.b[3053]) {
-        let t18: f64 = (s.v[3006] + 2.0);
-        (t18,)
+        let t25: f64 = (s.v[3006] + 2.0);
+        (t25,)
     } else {
         (s.v[3006],)
     }
 };
-        s.store_scalar(3006, t19);
+        s.store_scalar(3006, t26);
         if (((s.v[2621] != 0.0) && (!s.b[3024])) && (!s.b[3046])) {
             if (s.v[3044] <= s.v[386]) {
                 s.copy_ad(335, 3044);
@@ -280,97 +391,99 @@ impl Instance {
             }
         }
         s.b[3054] = (s.v[3044] >= s.v[386]);s.store_scalar(3054, if s.b[3054] { 1.0 } else { 0.0 });
-        let (t1b,) = {
+        let (t28,) = {
     if ((((s.v[2621] != 0.0) && (!s.b[3024])) && (!s.b[3046])) && s.b[3054]) {
-        let t1a: f64 = (s.v[3006] + 2.0);
-        (t1a,)
+        let t27: f64 = (s.v[3006] + 2.0);
+        (t27,)
     } else {
         (s.v[3006],)
     }
 };
-        s.store_scalar(3006, t1b);s.b[3055] = (s.v[3006] >= 2.0);s.store_scalar(3055, if s.b[3055] { 1.0 } else { 0.0 });
+        s.store_scalar(3006, t28);s.b[3055] = (s.v[3006] >= 2.0);s.store_scalar(3055, if s.b[3055] { 1.0 } else { 0.0 });
         if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) {s.copy_ad(3045, 404);s.store_mul(354, 335, 3000);s.store_sub_div_rhs_indices(404, 402, 354, 413);}
         s.b[3056] = (p[33] == 2.0);s.store_scalar(3056, if s.b[3056] { 1.0 } else { 0.0 });s.b[3057] = ((s.v[404] > (s.v[3045] - 0.1)) && (0.1 >= 0.0));s.store_scalar(3057, if s.b[3057] { 1.0 } else { 0.0 });
         if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) {s.store_offset_sub(781, 404, 3045, 0.1);s.store_square(722, 781);s.store_scalar(723, (0.1 * 0.1));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
-        let (t1c,) = {
+        let (t29,) = {
     if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t1c);
-        let (t1d,) = {
+        s.store_scalar(719, t29);
+        let (t2a,) = {
     if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) {
         (0.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t1d);
+        s.store_scalar(720, t2a);
         if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[3058] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(3058, if s.b[3058] { 1.0 } else { 0.0 });s.b[3059] = (2.0 == 1.0);s.store_scalar(3059, if s.b[3059] { 1.0 } else { 0.0 });
-        let (t1e,) = {
+        let (t2b,) = {
     if (((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) && s.b[3059]) {
         (1.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t1e);s.b[3060] = (2.0 == 2.0);s.store_scalar(3060, if s.b[3060] { 1.0 } else { 0.0 });
+        s.store_scalar(720, t2b);s.b[3060] = (2.0 == 2.0);s.store_scalar(3060, if s.b[3060] { 1.0 } else { 0.0 });
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_179(
+    pub(super) fn stamp_transient_block_181(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        let (t1f,) = {
+        let (t2c,) = {
     if ((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) && (!s.b[3059])) && s.b[3060]) {
         (2.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t1f);s.b[3061] = (2.0 == 4.0);s.store_scalar(3061, if s.b[3061] { 1.0 } else { 0.0 });
-        let (t20,) = {
+        s.store_scalar(720, t2c);s.b[3061] = (2.0 == 4.0);s.store_scalar(3061, if s.b[3061] { 1.0 } else { 0.0 });
+        let (t2d,) = {
     if (((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) && (!s.b[3059])) && (!s.b[3060])) && s.b[3061]) {
         (3.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t20);s.b[3062] = (2.0 == 8.0);s.store_scalar(3062, if s.b[3062] { 1.0 } else { 0.0 });
-        let (t21,) = {
+        s.store_scalar(720, t2d);s.b[3062] = (2.0 == 8.0);s.store_scalar(3062, if s.b[3062] { 1.0 } else { 0.0 });
+        let (t2e,) = {
     if ((((((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) && (!s.b[3059])) && (!s.b[3060])) && (!s.b[3061])) && s.b[3062]) {
         (4.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t21);
-        let (t22,) = {
+        s.store_scalar(720, t2e);
+        let (t2f,) = {
     if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t22);let mut t26: usize = 0;
+        s.store_scalar(719, t2f);let mut t33: usize = 0;
         while {
-            let t25: f64 = if (((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            t25 != 0.0
+            let t32: f64 = if (((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            t32 != 0.0
         } {
-            t26 += 1;assert!(t26 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t33 += 1;
+            if t33 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t33, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) {s.store_sqrt(726, 726);}
-            let (t24,) = {
+            let (t31,) = {
     if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && s.b[3058]) {
-        let t23: f64 = (s.v[719] + 1.0);
-        (t23,)
+        let t30: f64 = (s.v[719] + 1.0);
+        (t30,)
     } else {
         (s.v[719],)
     }
 };
-            s.store_scalar(719, t24);
+            s.store_scalar(719, t31);
         }
         if ((((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3055]) && s.b[3056]) && s.b[3057]) && (!s.b[3058])) {
             if (s.v[726] == 0.0) {
@@ -393,14 +506,14 @@ impl Instance {
         }
         if ((s.v[2621] != 0.0) && (!s.b[3024])) {s.copy_ad(3007, 404);}
         s.b[3063] = (p[33] == 1.0);s.store_scalar(3063, if s.b[3063] { 1.0 } else { 0.0 });
-        let (t27,) = {
+        let (t34,) = {
     if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {
         (0.0,)
     } else {
         (s.v[79],)
     }
 };
-        s.store_scalar(79, t27);
+        s.store_scalar(79, t34);
         if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {s.store_sqrt_scaled_input_ad(982, A::mul(A::div_from_scalar(1.034943e-10, s.ad_value(3000)), s.ad_value(155)), 2.0);}
         s.b[3064] = (s.v[411] > 0.0);s.store_scalar(3064, if s.b[3064] { 1.0 } else { 0.0 });
         if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && s.b[3064]) {s.store_sub_from_scalar(336, p[334], 411);}
@@ -412,25 +525,27 @@ impl Instance {
         s.b[3066] = (s.v[336] < 0.0);s.store_scalar(3066, if s.b[3066] { 1.0 } else { 0.0 });
         if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && s.b[3066]) {s.store_scalar(336, 0.0);s.store_scalar(343, 0.0);}
         if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {s.copy_ad(386, 336);s.store_mul3_affine_lhs(418, 3000, 386, (0.5 * 9662367879.197212), 0.0, 386);s.store_sqrt_mul_scaled_lhs(334, 154, 2.0, 418);s.store_scaled_add_ad(335, A::limited_exp(s.ad_value(334)), A::limited_exp_scaled_input(s.ad_value(334), -1.0), 0.5);s.store_div_ln_lhs(419, 335, 418);}
-        let (t28,) = {
+        let (t35,) = {
     if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {
         (1.0,)
     } else {
         (s.v[97],)
     }
 };
-        s.store_scalar(97, t28);
+        s.store_scalar(97, t35);
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_180(
+    pub(super) fn stamp_transient_block_182(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
-        let mut t30: usize = 0;
+        let mut t3d: usize = 0;
         while {
-            let t2e: f64 = (s.v[421] + 1.0);let t2f: f64 = if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (s.v[97] <= t2e)) { 1.0 } else { 0.0 };
-            t2f != 0.0
+            let t3b: f64 = (s.v[421] + 1.0);let t3c: f64 = if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (s.v[97] <= t3b)) { 1.0 } else { 0.0 };
+            t3c != 0.0
         } {
-            t30 += 1;assert!(t30 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t3d += 1;
+            if t3d > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t3d, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {s.store_add(414, 404, 397);s.store_mul(116, 154, 414);s.store_mul_sub_rhs(333, 419, 414, 418);}
             s.b[3068] = (s.v[333] < 60.0);s.store_scalar(3068, if s.b[3068] { 1.0 } else { 0.0 });
             if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && s.b[3068]) {s.store_exp(335, 333);s.store_exp_mul_scaled_lhs_indices(334, 419, -1.0, 418);s.store_sub(336, 335, 334);s.store_div_ln_offset_lhs(416, 336, 1.0, 419);s.store_div_scaled_value_offset_denominator(417, s.ad_value(335), 1.0, s.ad_value(336), 1.0, 1.0);}
@@ -458,15 +573,15 @@ impl Instance {
             if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (!s.b[3073])) && (!s.b[3076])) {s.copy_ad(216, 223);s.copy_ad(217, 420);}
             if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {s.store_add_scaled_inputs_product_indices(232, 404, 1.0, 402, (-1.0), 212, 216, 1.0);s.store_offset_mul(233, 212, 217, 1.0);}
             s.b[3077] = (s.v[79] == 1.0);s.store_scalar(3077, if s.b[3077] { 1.0 } else { 0.0 });
-            let (t2a,) = {
+            let (t37,) = {
     if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && s.b[3077]) {
-        let t29: f64 = (s.v[421] + 1.0);
-        (t29,)
+        let t36: f64 = (s.v[421] + 1.0);
+        (t36,)
     } else {
         (s.v[97],)
     }
 };
-            s.store_scalar(97, t2a);
+            s.store_scalar(97, t37);
             if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (!s.b[3077])) {s.store_div_scaled_inputs_indices(236, 232, -1.0, 233, 1.0);}
             if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (!s.b[3077])) {
                 s.store_scaled_offset_ad(93, {
@@ -481,41 +596,41 @@ impl Instance {
             if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (!s.b[3077])) && s.b[3078]) {s.store_scale(236, 93, (if (s.v[236] >= 0.0) { 1.0 } else { (-1.0) }));}
             if ((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (!s.b[3077])) {s.store_add(404, 404, 236);}
             s.b[3079] = ((((s.v[236]) as f64).abs() <= 1e-12) && (((s.v[232]) as f64).abs() <= 1e-8));s.store_scalar(3079, if s.b[3079] { 1.0 } else { 0.0 });
-            let (t2b,) = {
+            let (t38,) = {
     if (((((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) && (!s.b[3077])) && s.b[3079]) {
         (1.0,)
     } else {
         (s.v[79],)
     }
 };
-            s.store_scalar(79, t2b);
-            let (t2d,) = {
+            s.store_scalar(79, t38);
+            let (t3a,) = {
     if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {
-        let t2c: f64 = (s.v[97] + 1.0);
-        (t2c,)
+        let t39: f64 = (s.v[97] + 1.0);
+        (t39,)
     } else {
         (s.v[97],)
     }
 };
-            s.store_scalar(97, t2d);
+            s.store_scalar(97, t3a);
         }
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_181(
+    pub(super) fn stamp_transient_block_183(
         s: &mut Scratch,
         p: &Parameters,
     ) {
         if (((s.v[2621] != 0.0) && (!s.b[3024])) && s.b[3063]) {s.store_mul(2998, 982, 223);s.store_mul(2999, 3000, 2998);s.store_offset_div(100, 2999, 410, (10.0 * 2.220446049250313e-16));s.store_mul(354, 410, 100);s.store_div_from_scalar_add_ad(335, 1.0, s.ad_value(216), s.ad_value(100));s.store_mul3_lhs(399, 410, 214, 335);s.store_add(398, 354, 399);}
         s.b[3081] = (p[33] == 4.0);s.store_scalar(3081, if s.b[3081] { 1.0 } else { 0.0 });
         if ((s.v[2621] != 0.0) && s.b[3081]) {s.store_exp_ad(229, A::mul_scaled_rhs(s.ad_value(154), s.ad_value(397), -1.0));s.store_div(334, 394, 409);s.store_square(405, 334);s.store_mul(222, 405, 229);s.copy_ad(404, 3007);}
-        let (t31,) = {
+        let (t3e,) = {
     if ((s.v[2621] != 0.0) && s.b[3081]) {
         (0.0,)
     } else {
         (s.v[79],)
     }
 };
-        s.store_scalar(79, t31);
+        s.store_scalar(79, t3e);
         if ((s.v[2621] != 0.0) && s.b[3081]) {s.store_sqrt_scaled_input_ad(982, A::mul(A::div_from_scalar(1.034943e-10, s.ad_value(3000)), s.ad_value(155)), 2.0);}
         s.b[3082] = (s.v[411] > 0.0);s.store_scalar(3082, if s.b[3082] { 1.0 } else { 0.0 });
         if (((s.v[2621] != 0.0) && s.b[3081]) && s.b[3082]) {s.store_sub_from_scalar(336, p[334], 411);}
@@ -527,25 +642,27 @@ impl Instance {
         s.b[3084] = (s.v[336] < 0.0);s.store_scalar(3084, if s.b[3084] { 1.0 } else { 0.0 });
         if (((s.v[2621] != 0.0) && s.b[3081]) && s.b[3084]) {s.store_scalar(336, 0.0);s.store_scalar(343, 0.0);}
         if ((s.v[2621] != 0.0) && s.b[3081]) {s.copy_ad(386, 336);s.store_mul3_affine_lhs(418, 3000, 386, (0.5 * 9662367879.197212), 0.0, 386);s.store_sqrt_mul_scaled_lhs(334, 154, 2.0, 418);s.store_scaled_add_ad(335, A::limited_exp(s.ad_value(334)), A::limited_exp_scaled_input(s.ad_value(334), -1.0), 0.5);s.store_div_ln_lhs(419, 335, 418);}
-        let (t32,) = {
+        let (t3f,) = {
     if ((s.v[2621] != 0.0) && s.b[3081]) {
         (1.0,)
     } else {
         (s.v[97],)
     }
 };
-        s.store_scalar(97, t32);
+        s.store_scalar(97, t3f);
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_182(
+    pub(super) fn stamp_transient_block_184(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
-        let mut t3b: usize = 0;
+        let mut t48: usize = 0;
         while {
-            let t39: f64 = (s.v[421] + 1.0);let t3a: f64 = if (((s.v[2621] != 0.0) && s.b[3081]) && (s.v[97] <= t39)) { 1.0 } else { 0.0 };
-            t3a != 0.0
+            let t46: f64 = (s.v[421] + 1.0);let t47: f64 = if (((s.v[2621] != 0.0) && s.b[3081]) && (s.v[97] <= t46)) { 1.0 } else { 0.0 };
+            t47 != 0.0
         } {
-            t3b += 1;assert!(t3b <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t48 += 1;
+            if t48 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t48, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((s.v[2621] != 0.0) && s.b[3081]) {s.store_add(414, 404, 397);s.store_mul(116, 154, 414);s.store_mul_sub_rhs(333, 419, 414, 418);}
             s.b[3086] = (s.v[333] < 60.0);s.store_scalar(3086, if s.b[3086] { 1.0 } else { 0.0 });
             if (((s.v[2621] != 0.0) && s.b[3081]) && s.b[3086]) {s.store_exp(335, 333);s.store_exp_mul_scaled_lhs_indices(334, 419, -1.0, 418);s.store_sub(336, 335, 334);s.store_div_ln_offset_lhs(416, 336, 1.0, 419);s.store_div_scaled_value_offset_denominator(417, s.ad_value(335), 1.0, s.ad_value(336), 1.0, 1.0);}
@@ -568,15 +685,15 @@ impl Instance {
             if ((s.v[2621] != 0.0) && s.b[3081]) {s.store_scale(217, 217, (if (s.v[116] >= 0.0) { 1.0 } else { (-1.0) }));}
             if ((s.v[2621] != 0.0) && s.b[3081]) {s.store_add_scaled_inputs_product_indices(232, 404, 1.0, 402, (-1.0), 212, 216, 1.0);s.store_offset_mul(233, 212, 217, 1.0);}
             s.b[3092] = (s.v[79] > 0.0);s.store_scalar(3092, if s.b[3092] { 1.0 } else { 0.0 });
-            let (t34,) = {
+            let (t41,) = {
     if (((s.v[2621] != 0.0) && s.b[3081]) && s.b[3092]) {
-        let t33: f64 = (s.v[421] + 1.0);
-        (t33,)
+        let t40: f64 = (s.v[421] + 1.0);
+        (t40,)
     } else {
         (s.v[97],)
     }
 };
-            s.store_scalar(97, t34);
+            s.store_scalar(97, t41);
             if (((s.v[2621] != 0.0) && s.b[3081]) && (!s.b[3092])) {s.store_div_scaled_inputs_indices(236, 232, -1.0, 233, 1.0);}
             if (((s.v[2621] != 0.0) && s.b[3081]) && (!s.b[3092])) {
                 s.store_scaled_offset_ad(93, {
@@ -591,28 +708,28 @@ impl Instance {
             if ((((s.v[2621] != 0.0) && s.b[3081]) && (!s.b[3092])) && s.b[3093]) {s.store_scale(236, 93, (if (s.v[236] >= 0.0) { 1.0 } else { (-1.0) }));}
             if (((s.v[2621] != 0.0) && s.b[3081]) && (!s.b[3092])) {s.store_add(404, 404, 236);}
             s.b[3094] = ((((s.v[236]) as f64).abs() <= 1e-12) && (((s.v[232]) as f64).abs() <= 1e-8));s.store_scalar(3094, if s.b[3094] { 1.0 } else { 0.0 });
-            let (t36,) = {
+            let (t43,) = {
     if ((((s.v[2621] != 0.0) && s.b[3081]) && (!s.b[3092])) && s.b[3094]) {
-        let t35: f64 = (s.v[79] + 2.0);
-        (t35,)
+        let t42: f64 = (s.v[79] + 2.0);
+        (t42,)
     } else {
         (s.v[79],)
     }
 };
-            s.store_scalar(79, t36);
-            let (t38,) = {
+            s.store_scalar(79, t43);
+            let (t45,) = {
     if ((s.v[2621] != 0.0) && s.b[3081]) {
-        let t37: f64 = (s.v[97] + 1.0);
-        (t37,)
+        let t44: f64 = (s.v[97] + 1.0);
+        (t44,)
     } else {
         (s.v[97],)
     }
 };
-            s.store_scalar(97, t38);
+            s.store_scalar(97, t45);
         }
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_183(
+    pub(super) fn stamp_transient_block_185(
         s: &mut Scratch,
         p: &Parameters,
     ) {
@@ -655,41 +772,41 @@ impl Instance {
         if ((s.v[2621] != 0.0) && (s.b[3102] && (!(s.b[3100] || s.b[3101])))) {s.store_mul(352, 338, 398);s.store_mul(355, 338, 354);s.copy_ad(816, 355);}
         if ((s.v[2621] != 0.0) && (s.b[3103] && (!((s.b[3100] || s.b[3101]) || s.b[3102])))) {s.store_scale(338, 407, (s.v[635] * s.v[526]));s.store_mul(350, 338, 398);s.store_mul(358, 338, 354);}
         s.b[3107] = (p[430] > 0.0);s.store_scalar(3107, if s.b[3107] { 1.0 } else { 0.0 });
-        let (t3c,) = {
+        let (t49,) = {
     if s.b[3107] {
         (1.0,)
     } else {
         (s.v[406],)
     }
 };
-        s.store_scalar(406, t3c);s.b[3108] = (((p[35] == 1.0) && (p[63] > 0.0)) && (s.v[459] > 0.0));s.store_scalar(3108, if s.b[3108] { 1.0 } else { 0.0 });
+        s.store_scalar(406, t49);s.b[3108] = (((p[35] == 1.0) && (p[63] > 0.0)) && (s.v[459] > 0.0));s.store_scalar(3108, if s.b[3108] { 1.0 } else { 0.0 });
         if (s.b[3107] && s.b[3108]) {s.store_sub(395, 731, 728);s.store_sub(396, 729, 728);s.store_scalar(409, s.v[459]);s.store_scalar(407, 0.0);s.copy_ad(411, 384);s.copy_ad(410, 686);s.copy_ad(413, 412);s.store_scalar(3116, 0.4);}
-        let (t3d,) = {
+        let (t4a,) = {
     if (s.b[3107] && s.b[3108]) {
         (0.0,)
     } else {
         (s.v[3117],)
     }
 };
-        s.store_scalar(3117, t3d);
+        s.store_scalar(3117, t4a);
         if (s.b[3107] && s.b[3108]) {s.store_scalar(223, 0.0);s.store_scalar(214, 0.0);}
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_184(
+    pub(super) fn stamp_transient_block_186(
         s: &mut Scratch,
         p: &Parameters,
         param_given: &[bool; Instance::PARAMETER_COUNT],
     ) {
         if (s.b[3107] && s.b[3108]) {s.store_scalar(216, 0.0);s.store_scalar(232, 0.0);s.store_scalar(236, 0.0);s.store_scalar(233, 0.0);s.store_scalar(217, 0.0);s.store_scalar(420, 0.0);s.store_scalar(215, 0.0);s.store_scalar(447, 0.0);s.store_scalar(445, 0.0);s.store_scalar(446, 0.0);}
-        let (t3f,) = {
+        let (t4c,) = {
     if (s.b[3107] && s.b[3108]) {
-        let t3e: f64 = (-1.0);
-        (t3e,)
+        let t4b: f64 = (-1.0);
+        (t4b,)
     } else {
         (s.v[79],)
     }
 };
-        s.store_scalar(79, t3f);
+        s.store_scalar(79, t4c);
         if (s.b[3107] && s.b[3108]) {s.store_scalar(3118, 0.0);s.store_scalar(3119, 0.0);s.store_mul_scaled_ln_ad_rhs(3114, 155, 2.0, A::div(s.ad_value(409), s.ad_value(394)));s.store_offset_sub_from_scalar_ad(781, 0.8, s.ad_value(3114), (-0.1));s.store_scalar(782, ((4.0 * 0.8) * 0.1));}
         if (s.b[3107] && s.b[3108]) {
             if (s.v[782] > 0.0) {
@@ -716,30 +833,32 @@ impl Instance {
         if ((s.b[3107] && s.b[3108]) && s.b[3126]) {s.store_neg(397, 344);}
         if ((s.b[3107] && s.b[3108]) && (!s.b[3126])) {s.copy_ad(397, 396);}
         if (s.b[3107] && s.b[3108]) {s.store_div(212, 410, 413);s.store_square(213, 212);s.store_sub_from_scalar(402, s.v[458], 395);}
-        let (t43,) = {
+        let (t50,) = {
     if (s.b[3107] && s.b[3108]) {
-        let t40: f64 = (-s.v[397]);let t41: f64 = (10.0 * 2.220446049250313e-16);let t42: f64 = (t40 + t41);
-        (t42,)
+        let t4d: f64 = (-s.v[397]);let t4e: f64 = (10.0 * 2.220446049250313e-16);let t4f: f64 = (t4d + t4e);
+        (t4f,)
     } else {
         (s.v[403],)
     }
 };
-        s.store_scalar(403, t43);
+        s.store_scalar(403, t50);
         if (s.b[3107] && s.b[3108]) {s.store_scalar(3110, 0.0);s.store_primal_scale(3111, 409, 1.6021918e-19);s.store_div(334, 394, 409);s.store_square(405, 334);}
         s.b[3128] = ((s.v[154] * (-s.v[397])) >= 500.0);s.store_scalar(3128, if s.b[3128] { 1.0 } else { 0.0 });
         if ((s.b[3107] && s.b[3108]) && s.b[3128]) {s.store_scaled_offset_ad(229, A::mul_scaled_rhs(s.ad_value(154), s.ad_value(397), -1.0), ((1.0) + ((-500.0))), 1.403592217853e217);s.store_scalar(334, 1.403592217853e217);}
         if ((s.b[3107] && s.b[3108]) && (!s.b[3128])) {s.store_mul_scale_offset_indices(781, 154, 397, -1.0, 0.0);s.store_scalar(229, 1.0);}
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_185(
+    pub(super) fn stamp_transient_block_187(
+        ctx: &GeneratedEvalContext<'_>,
         s: &mut Scratch,
     ) {
-        let mut t45: usize = 0;
+        let mut t52: usize = 0;
         while {
-            let t44: f64 = if (((s.b[3107] && s.b[3108]) && (!s.b[3128])) && (s.v[781] >= 60.0)) { 1.0 } else { 0.0 };
-            t44 != 0.0
+            let t51: f64 = if (((s.b[3107] && s.b[3108]) && (!s.b[3128])) && (s.v[781] >= 60.0)) { 1.0 } else { 0.0 };
+            t51 != 0.0
         } {
-            t45 += 1;assert!(t45 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t52 += 1;
+            if t52 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t52, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((s.b[3107] && s.b[3108]) && (!s.b[3128])) {s.store_scale(229, 229, 1.14200738981568e26);s.store_offset(781, 781, (-60.0));}
         }
         if ((s.b[3107] && s.b[3108]) && (!s.b[3128])) {s.store_mul_exp_rhs(229, 229, 781);s.copy_ad(334, 229);}
@@ -753,79 +872,80 @@ impl Instance {
         if ((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) {s.store_sqrt_square_add(782, 781, 782);s.store_offset_scaled_div(334, 781, 782, 0.5, 0.5);s.store_offset_add_scaled_inputs_indices(335, 781, 0.5, 782, 0.5, 0.5);}
         s.b[3129] = (((s.v[402] + s.v[397]) > (-s.v[335])) && (s.v[335] >= 0.0));s.store_scalar(3129, if s.b[3129] { 1.0 } else { 0.0 });
         if (((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) {s.store_add_scaled_inputs3_indices(781, 402, 1.0, 397, 1.0, 335, 1.0);s.store_square(722, 781);s.store_square(723, 335);s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
-        let (t46,) = {
+        let (t53,) = {
     if (((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t46);
-        let (t47,) = {
+        s.store_scalar(719, t53);
+        let (t54,) = {
     if (((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) {
         (0.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t47);
+        s.store_scalar(720, t54);
         if (((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[3130] = ((((1.0 == 1.0) || (1.0 == 2.0)) || (1.0 == 4.0)) || (1.0 == 8.0));s.store_scalar(3130, if s.b[3130] { 1.0 } else { 0.0 });s.b[3131] = (1.0 == 1.0);s.store_scalar(3131, if s.b[3131] { 1.0 } else { 0.0 });
-        let (t48,) = {
+        let (t55,) = {
     if (((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) && s.b[3131]) {
         (1.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t48);s.b[3132] = (1.0 == 2.0);s.store_scalar(3132, if s.b[3132] { 1.0 } else { 0.0 });
-        let (t49,) = {
+        s.store_scalar(720, t55);s.b[3132] = (1.0 == 2.0);s.store_scalar(3132, if s.b[3132] { 1.0 } else { 0.0 });
+        let (t56,) = {
     if ((((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) && (!s.b[3131])) && s.b[3132]) {
         (2.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t49);s.b[3133] = (1.0 == 4.0);s.store_scalar(3133, if s.b[3133] { 1.0 } else { 0.0 });
-        let (t4a,) = {
+        s.store_scalar(720, t56);s.b[3133] = (1.0 == 4.0);s.store_scalar(3133, if s.b[3133] { 1.0 } else { 0.0 });
+        let (t57,) = {
     if (((((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) && (!s.b[3131])) && (!s.b[3132])) && s.b[3133]) {
         (3.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t4a);s.b[3134] = (1.0 == 8.0);s.store_scalar(3134, if s.b[3134] { 1.0 } else { 0.0 });
-        let (t4b,) = {
+        s.store_scalar(720, t57);s.b[3134] = (1.0 == 8.0);s.store_scalar(3134, if s.b[3134] { 1.0 } else { 0.0 });
+        let (t58,) = {
     if ((((((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) && (!s.b[3131])) && (!s.b[3132])) && (!s.b[3133])) && s.b[3134]) {
         (4.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t4b);
-        let (t4c,) = {
+        s.store_scalar(720, t58);
+        let (t59,) = {
     if ((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t4c);let mut t50: usize = 0;
+        s.store_scalar(719, t59);let mut t5d: usize = 0;
         while {
-            let t4f: f64 = if (((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            t4f != 0.0
+            let t5c: f64 = if (((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            t5c != 0.0
         } {
-            t50 += 1;assert!(t50 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t5d += 1;
+            if t5d > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t5d, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) {s.store_sqrt(726, 726);}
-            let (t4e,) = {
+            let (t5b,) = {
     if ((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && s.b[3130]) {
-        let t4d: f64 = (s.v[719] + 1.0);
-        (t4d,)
+        let t5a: f64 = (s.v[719] + 1.0);
+        (t5a,)
     } else {
         (s.v[719],)
     }
 };
-            s.store_scalar(719, t4e);
+            s.store_scalar(719, t5b);
         }
         if ((((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && s.b[3129]) && (!s.b[3130])) {
             if (s.v[726] == 0.0) {
@@ -839,25 +959,24 @@ impl Instance {
         }
         if (((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) && (!s.b[3129])) {s.store_add(335, 402, 397);s.store_scalar(334, 1.0);}
         if ((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) {s.store_sub(397, 335, 402);}
-        let (t54,) = {
+        let (t61,) = {
     if ((s.b[3107] && s.b[3108]) && (s.v[406] != 0.0)) {
-        let t51: f64 = (-s.v[397]);let t52: f64 = (10.0 * 2.220446049250313e-16);let t53: f64 = (t51 + t52);
-        (t53,)
+        let t5e: f64 = (-s.v[397]);let t5f: f64 = (10.0 * 2.220446049250313e-16);let t60: f64 = (t5e + t5f);
+        (t60,)
     } else {
         (s.v[403],)
     }
 };
-        s.store_scalar(403, t54);s.b[3135] = (s.v[402] < s.v[403]);s.store_scalar(3135, if s.b[3135] { 1.0 } else { 0.0 });
+        s.store_scalar(403, t61);s.b[3135] = (s.v[402] < s.v[403]);s.store_scalar(3135, if s.b[3135] { 1.0 } else { 0.0 });
         if ((s.b[3107] && s.b[3108]) && s.b[3135]) {s.store_mul_scaled_ln_ad_rhs(271, 155, 2.0, A::div_from_scalar((-s.v[270]), s.ad_value(212)));s.store_mul_add_rhs(332, 154, 402, 397);s.store_div_scalar_by_product_indices(335, 1.0, 154, 410, 1.0);s.store_mul(333, 335, 413);s.store_offset_scaled(279, 333, (3.0 * 1.414213562373095), 2.0);s.store_mul3_affine_lhs(277, 279, 279, 8.0, 0.0, 279);s.store_sub_from_scalar_scaled_mul_mixed_ia(278, (7.0 * 1.414213562373095), 333, A::offset(s.ad_value(332), (-2.0)), 9.0);s.store_square(276, 278);}
         s.b[3136] = (s.v[277] < (s.v[276] * 1e-8));s.store_scalar(3136, if s.b[3136] { 1.0 } else { 0.0 });
-        if (((s.b[3107] && s.b[3108]) && s.b[3135]) && s.b[3136]) {s.store_div_scaled_inputs_indices(274, 277, 0.5, 278, 1.0);}
-        if (((s.b[3107] && s.b[3108]) && s.b[3135]) && (!s.b[3136])) {s.store_sqrt_add(275, 277, 276);}
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_186(
+    pub(super) fn stamp_transient_block_188(
         s: &mut Scratch,
     ) {
-        if (((s.b[3107] && s.b[3108]) && s.b[3135]) && (!s.b[3136])) {s.store_sub(274, 275, 278);}
+        if (((s.b[3107] && s.b[3108]) && s.b[3135]) && s.b[3136]) {s.store_div_scaled_inputs_indices(274, 277, 0.5, 278, 1.0);}
+        if (((s.b[3107] && s.b[3108]) && s.b[3135]) && (!s.b[3136])) {s.store_sqrt_add(275, 277, 276);s.store_sub(274, 275, 278);}
         if ((s.b[3107] && s.b[3108]) && s.b[3135]) {s.store_powf(273, 274, 0.3333333333333333);s.store_add_scaled_inputs_product_mixed_aiii(272, A::sub_from_scalar(((-4.0) * 1.414213562373095), A::scale(s.ad_value(333), 12.0)), 1.0, 273, 2.0, 273, 273, 1.414213562373095);s.store_div(116, 272, 273);s.store_mul(335, 116, 155);s.store_div(336, 335, 271);s.store_sqrt_square_offset(337, 336, 1.0);s.store_sub_div_lhs_indices(404, 335, 337, 397);s.store_sub(336, 402, 404);s.store_mul(398, 413, 336);s.copy_ad(354, 398);s.copy_ad(3118, 404);}
         s.b[3137] = ((s.v[154] * (s.v[402] + s.v[397])) < (1.0 + (((((10.0 * 2.220446049250313e-16) - 1.0) * s.v[213]) * s.v[156]) / 4.0)));s.store_scalar(3137, if s.b[3137] { 1.0 } else { 0.0 });
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3137]) {s.store_add_scaled_product_indices(89, 402, 1.0, 213, 154, 0.5);}
@@ -865,14 +984,14 @@ impl Instance {
         if ((s.b[3107] && s.b[3108]) && (!s.b[3135])) {s.store_mul_add_rhs(116, 154, 89, 397);}
         s.b[3138] = (s.v[116] >= 3.0);s.store_scalar(3138, if s.b[3138] { 1.0 } else { 0.0 });
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3138]) {s.store_exp_neg_input(333, 116);s.store_offset_div_scaled_inputs2_mixed_aia(332, A::offset(A::mul(s.ad_value(154), A::add(s.ad_value(402), s.ad_value(397))), (-1.0)), 4.0, 333, 4.0, A::mul(s.ad_value(213), s.ad_value(156)), 1.0, 1.0);s.store_add_product3_rhs_mixed_iia(89, 402, 213, 154, A::sub_from_scalar(1.0, A::sqrt(s.ad_value(332))), 1.0 / (2.0));s.store_mul_add_rhs(116, 154, 89, 397);s.store_exp_neg_input(333, 116);s.store_offset_div_scaled_inputs2_mixed_aia(332, A::offset(A::mul(s.ad_value(154), A::add(s.ad_value(402), s.ad_value(397))), (-1.0)), 4.0, 333, 4.0, A::mul(s.ad_value(213), s.ad_value(156)), 1.0, 1.0);s.store_add_product3_rhs_mixed_iia(89, 402, 213, 154, A::sub_from_scalar(1.0, A::sqrt(s.ad_value(332))), 1.0 / (2.0));s.store_mul_add_rhs(116, 154, 89, 397);}
-        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && (!s.b[3138])) {s.store_scalar(434, ((1.0 / (9.0 * ((2.0) as f64).sqrt())) - ((5.0 + (7.0 * (((-3.0)) as f64).exp())) / (54.0 * (((2.0 + (((-3.0)) as f64).exp())) as f64).sqrt()))));s.store_scalar(435, (((1.0 + (((-3.0)) as f64).exp()) / (2.0 * (((2.0 + (((-3.0)) as f64).exp())) as f64).sqrt())) - (((2.0) as f64).sqrt() / 3.0)));s.store_offset_div_from_scalar_ad(436, 1.0, A::mul(s.ad_value(154), s.ad_value(212)), (1.0 / ((2.0) as f64).sqrt()));s.store_div_scaled_inputs2_indices(437, 402, -1.0, 397, -1.0, 212, 1.0);s.store_add_scaled_inputs3_div_scaled_third_mixed_aaii(441, A::div_scaled_product(A::square(s.ad_value(435)), s.ad_value(435), 1.0, A::mul3_scaled_output(s.ad_value(434), s.ad_value(434), s.ad_value(434), 27.0), 1.0), 1.0, A::div_scaled_product_by_product(s.ad_value(435), s.ad_value(436), 1.0, s.ad_value(434), s.ad_value(434), 6.0), (-1.0), 437, 1.0, 434, 2.0, 1.0);}
+        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && (!s.b[3138])) {s.store_scalar(434, ((1.0 / (9.0 * ((2.0) as f64).sqrt())) - ((5.0 + (7.0 * (((-3.0)) as f64).exp())) / (54.0 * (((2.0 + (((-3.0)) as f64).exp())) as f64).sqrt()))));s.store_scalar(435, (((1.0 + (((-3.0)) as f64).exp()) / (2.0 * (((2.0 + (((-3.0)) as f64).exp())) as f64).sqrt())) - (((2.0) as f64).sqrt() / 3.0)));s.store_offset_div_from_scalar_ad(436, 1.0, A::mul(s.ad_value(154), s.ad_value(212)), (1.0 / ((2.0) as f64).sqrt()));s.store_div_scaled_inputs2_indices(437, 402, -1.0, 397, -1.0, 212, 1.0);}
     }
     #[inline(never)]
-    pub(super) fn stamp_transient_block_187(
+    pub(super) fn stamp_transient_block_189(
         s: &mut Scratch,
         p: &Parameters,
     ) {
-        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && (!s.b[3138])) {s.store_div_scaled_value_by_product_mixed_aii(440, A::add_scaled_square_product(s.ad_value(435), (-1.0), s.ad_value(434), s.ad_value(436), 3.0), 1.0, 434, 434, 9.0);s.store_sqrt_add_scaled_square_cube_product(339, 441, 1.0, 440, 1.0);s.store_powf_ad(439, A::sub(s.ad_value(339), s.ad_value(441)), 0.3333333333333333);s.store_neg_powf_add_input(438, 441, 339, 0.3333333333333333);s.store_add_scaled_inputs3_div_scaled_third_indices(116, 439, 1.0, 438, 1.0, 435, 1.0, 434, 3.0, -1.0);s.store_add_scaled_product_indices(89, 397, (-1.0), 116, 155, 1.0);}
+        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && (!s.b[3138])) {s.store_add_scaled_inputs3_div_scaled_third_mixed_aaii(441, A::div_scaled_product(A::square(s.ad_value(435)), s.ad_value(435), 1.0, A::mul3_scaled_output(s.ad_value(434), s.ad_value(434), s.ad_value(434), 27.0), 1.0), 1.0, A::div_scaled_product_by_product(s.ad_value(435), s.ad_value(436), 1.0, s.ad_value(434), s.ad_value(434), 6.0), (-1.0), 437, 1.0, 434, 2.0, 1.0);s.store_div_scaled_value_by_product_mixed_aii(440, A::add_scaled_square_product(s.ad_value(435), (-1.0), s.ad_value(434), s.ad_value(436), 3.0), 1.0, 434, 434, 9.0);s.store_sqrt_add_scaled_square_cube_product(339, 441, 1.0, 440, 1.0);s.store_powf_ad(439, A::sub(s.ad_value(339), s.ad_value(441)), 0.3333333333333333);s.store_neg_powf_add_input(438, 441, 339, 0.3333333333333333);s.store_add_scaled_inputs3_div_scaled_third_indices(116, 439, 1.0, 438, 1.0, 435, 1.0, 434, 3.0, -1.0);s.store_add_scaled_product_indices(89, 397, (-1.0), 116, 155, 1.0);}
         s.b[3139] = (p[33] > 0.0);s.store_scalar(3139, if s.b[3139] { 1.0 } else { 0.0 });
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) {s.store_offset_add(442, 402, 397, 0.1);s.store_mul(222, 405, 229);s.store_mul(443, 405, 229);s.store_mul(334, 156, 213);s.store_mul(444, 154, 442);s.store_add_scaled_inputs_product_mixed_aaii(447, A::ln(A::add_scaled_square_product(s.ad_value(444), 1.0, s.ad_value(443), s.ad_value(334), 1.0)), 1.0, A::ln(A::mul(s.ad_value(405), s.ad_value(334))), (-1.0), 154, 397, 1.0);}
         s.b[3140] = (p[33] == 2.0);s.store_scalar(3140, if s.b[3140] { 1.0 } else { 0.0 });
@@ -906,86 +1025,88 @@ impl Instance {
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) {s.copy_ad(445, 116);}
         s.b[3141] = (p[33] == 2.0);s.store_scalar(3141, if s.b[3141] { 1.0 } else { 0.0 });s.b[3142] = ((s.v[445] > (s.v[446] - (0.2 * s.v[446]))) && ((0.2 * s.v[446]) >= 0.0));s.store_scalar(3142, if s.b[3142] { 1.0 } else { 0.0 });
         if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) {s.store_add_scaled_inputs3_indices(781, 445, 1.0, 446, (-1.0), 446, 0.2);s.store_square(722, 781);s.store_scaled_mul(723, 446, 446, (0.2 * 0.2));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
-        let (t55,) = {
+        let (t62,) = {
     if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t55);
-        let (t56,) = {
+        s.store_scalar(719, t62);
+        let (t63,) = {
     if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) {
         (0.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t56);
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
+        s.store_scalar(720, t63);
+        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);}
+    }
+    #[inline(never)]
+    pub(super) fn stamp_transient_block_190(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
+        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) {s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[3143] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(3143, if s.b[3143] { 1.0 } else { 0.0 });s.b[3144] = (2.0 == 1.0);s.store_scalar(3144, if s.b[3144] { 1.0 } else { 0.0 });
-        let (t57,) = {
+        let (t64,) = {
     if (((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) && s.b[3144]) {
         (1.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t57);s.b[3145] = (2.0 == 2.0);s.store_scalar(3145, if s.b[3145] { 1.0 } else { 0.0 });
-        let (t58,) = {
+        s.store_scalar(720, t64);s.b[3145] = (2.0 == 2.0);s.store_scalar(3145, if s.b[3145] { 1.0 } else { 0.0 });
+        let (t65,) = {
     if ((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) && (!s.b[3144])) && s.b[3145]) {
         (2.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t58);
-    }
-    #[inline(never)]
-    pub(super) fn stamp_transient_block_188(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        s.b[3146] = (2.0 == 4.0);s.store_scalar(3146, if s.b[3146] { 1.0 } else { 0.0 });
-        let (t59,) = {
+        s.store_scalar(720, t65);s.b[3146] = (2.0 == 4.0);s.store_scalar(3146, if s.b[3146] { 1.0 } else { 0.0 });
+        let (t66,) = {
     if (((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) && (!s.b[3144])) && (!s.b[3145])) && s.b[3146]) {
         (3.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t59);s.b[3147] = (2.0 == 8.0);s.store_scalar(3147, if s.b[3147] { 1.0 } else { 0.0 });
-        let (t5a,) = {
+        s.store_scalar(720, t66);s.b[3147] = (2.0 == 8.0);s.store_scalar(3147, if s.b[3147] { 1.0 } else { 0.0 });
+        let (t67,) = {
     if ((((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) && (!s.b[3144])) && (!s.b[3145])) && (!s.b[3146])) && s.b[3147]) {
         (4.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t5a);
-        let (t5b,) = {
+        s.store_scalar(720, t67);
+        let (t68,) = {
     if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t5b);let mut t5f: usize = 0;
+        s.store_scalar(719, t68);let mut t6c: usize = 0;
         while {
-            let t5e: f64 = if (((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            t5e != 0.0
+            let t6b: f64 = if (((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            t6b != 0.0
         } {
-            t5f += 1;assert!(t5f <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t6c += 1;
+            if t6c > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t6c, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) {s.store_sqrt(726, 726);}
-            let (t5d,) = {
+            let (t6a,) = {
     if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && s.b[3143]) {
-        let t5c: f64 = (s.v[719] + 1.0);
-        (t5c,)
+        let t69: f64 = (s.v[719] + 1.0);
+        (t69,)
     } else {
         (s.v[719],)
     }
 };
-            s.store_scalar(719, t5d);
+            s.store_scalar(719, t6a);
         }
         if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3139]) && s.b[3141]) && s.b[3142]) && (!s.b[3143])) {
             if (s.v[726] == 0.0) {
@@ -1021,103 +1142,105 @@ impl Instance {
         if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3148]) && s.b[3152]) {s.store_exp(335, 333);s.store_exp_mul_scaled_lhs_indices(334, 419, -1.0, 418);s.store_sub(336, 335, 334);s.store_div_ln_offset_lhs(416, 336, 1.0, 419);}
         if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3148]) && (!s.b[3152])) {s.store_sub(416, 414, 418);}
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3148]) {s.store_mul(415, 154, 416);}
+    }
+    #[inline(never)]
+    pub(super) fn stamp_transient_block_191(
+        ctx: &GeneratedEvalContext<'_>,
+        s: &mut Scratch,
+        p: &Parameters,
+    ) {
         s.b[3153] = ((s.v[415] > (s.v[116] / 100.0)) && (s.v[415] > 0.0));s.store_scalar(3153, if s.b[3153] { 1.0 } else { 0.0 });
-        let (t61,) = {
+        let (t6e,) = {
     if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3148]) && s.b[3153]) {
-        let t60: f64 = (s.v[3117] + 1.0);
-        (t60,)
+        let t6d: f64 = (s.v[3117] + 1.0);
+        (t6d,)
     } else {
         (s.v[3117],)
     }
 };
-        s.store_scalar(3117, t61);
+        s.store_scalar(3117, t6e);
         if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3148]) && s.b[3153]) {s.copy_ad(116, 447);}
         if ((s.b[3107] && s.b[3108]) && (!s.b[3135])) {s.store_add_scaled_product_indices(404, 397, (-1.0), 116, 155, 1.0);}
         s.b[3154] = (((s.v[116]) as f64).abs() > 1e-6);s.store_scalar(3154, if s.b[3154] { 1.0 } else { 0.0 });
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3154]) {s.store_add_offset_lhs_mixed_ia(335, 116, (-1.0), A::exp_scaled_input(s.ad_value(116), -1.0));s.store_sqrt(336, 335);}
-    }
-    #[inline(never)]
-    pub(super) fn stamp_transient_block_189(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && (!s.b[3154])) {s.store_mul_scaled_sqrt_ad_rhs(336, 116, 0.7071067811865475, A::sub_from_scalar(1.0, A::scale(s.ad_value(116), 0.3333333333333333)));}
         if ((s.b[3107] && s.b[3108]) && (!s.b[3135])) {s.store_mul(354, 410, 336);s.store_mul_sub_rhs(398, 413, 402, 404);s.store_div(3155, 354, 3111);}
         s.b[3157] = (p[33] == 2.0);s.store_scalar(3157, if s.b[3157] { 1.0 } else { 0.0 });s.b[3158] = ((s.v[3155] > (s.v[386] - (s.v[386] * 0.1))) && ((s.v[386] * 0.1) >= 0.0));s.store_scalar(3158, if s.b[3158] { 1.0 } else { 0.0 });
         if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) {s.store_add_scaled_inputs3_indices(781, 3155, 1.0, 386, (-1.0), 386, 0.1);s.store_square(722, 781);s.store_scaled_mul(723, 386, 386, (0.1 * 0.1));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
-        let (t62,) = {
+        let (t6f,) = {
     if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t62);
-        let (t63,) = {
+        s.store_scalar(719, t6f);
+        let (t70,) = {
     if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) {
         (0.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t63);
+        s.store_scalar(720, t70);
         if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
         s.b[3159] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(3159, if s.b[3159] { 1.0 } else { 0.0 });s.b[3160] = (2.0 == 1.0);s.store_scalar(3160, if s.b[3160] { 1.0 } else { 0.0 });
-        let (t64,) = {
+        let (t71,) = {
     if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) && s.b[3160]) {
         (1.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t64);s.b[3161] = (2.0 == 2.0);s.store_scalar(3161, if s.b[3161] { 1.0 } else { 0.0 });
-        let (t65,) = {
+        s.store_scalar(720, t71);s.b[3161] = (2.0 == 2.0);s.store_scalar(3161, if s.b[3161] { 1.0 } else { 0.0 });
+        let (t72,) = {
     if (((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) && (!s.b[3160])) && s.b[3161]) {
         (2.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t65);s.b[3162] = (2.0 == 4.0);s.store_scalar(3162, if s.b[3162] { 1.0 } else { 0.0 });
-        let (t66,) = {
+        s.store_scalar(720, t72);s.b[3162] = (2.0 == 4.0);s.store_scalar(3162, if s.b[3162] { 1.0 } else { 0.0 });
+        let (t73,) = {
     if ((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) && (!s.b[3160])) && (!s.b[3161])) && s.b[3162]) {
         (3.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t66);s.b[3163] = (2.0 == 8.0);s.store_scalar(3163, if s.b[3163] { 1.0 } else { 0.0 });
-        let (t67,) = {
+        s.store_scalar(720, t73);s.b[3163] = (2.0 == 8.0);s.store_scalar(3163, if s.b[3163] { 1.0 } else { 0.0 });
+        let (t74,) = {
     if (((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) && (!s.b[3160])) && (!s.b[3161])) && (!s.b[3162])) && s.b[3163]) {
         (4.0,)
     } else {
         (s.v[720],)
     }
 };
-        s.store_scalar(720, t67);
-        let (t68,) = {
+        s.store_scalar(720, t74);
+        let (t75,) = {
     if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) {
         (0.0,)
     } else {
         (s.v[719],)
     }
 };
-        s.store_scalar(719, t68);let mut t6c: usize = 0;
+        s.store_scalar(719, t75);let mut t79: usize = 0;
         while {
-            let t6b: f64 = if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            t6b != 0.0
+            let t78: f64 = if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
+            t78 != 0.0
         } {
-            t6c += 1;assert!(t6c <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t79 += 1;
+            if t79 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t79, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) {s.store_sqrt(726, 726);}
-            let (t6a,) = {
+            let (t77,) = {
     if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && s.b[3159]) {
-        let t69: f64 = (s.v[719] + 1.0);
-        (t69,)
+        let t76: f64 = (s.v[719] + 1.0);
+        (t76,)
     } else {
         (s.v[719],)
     }
 };
-            s.store_scalar(719, t6a);
+            s.store_scalar(719, t77);
         }
         if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3158]) && (!s.b[3159])) {
             if (s.v[726] == 0.0) {
@@ -1131,15 +1254,15 @@ impl Instance {
         }
         if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && (!s.b[3158])) {s.copy_ad(335, 3155);s.store_scalar(334, 1.0);}
         s.b[3164] = (s.v[334] < 1.0);s.store_scalar(3164, if s.b[3164] { 1.0 } else { 0.0 });
-        let (t6e,) = {
+        let (t7b,) = {
     if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3157]) && s.b[3164]) {
-        let t6d: f64 = (s.v[3117] + 2.0);
-        (t6d,)
+        let t7a: f64 = (s.v[3117] + 2.0);
+        (t7a,)
     } else {
         (s.v[3117],)
     }
 };
-        s.store_scalar(3117, t6e);
+        s.store_scalar(3117, t7b);
         if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && (!s.b[3157])) {
             if (s.v[3155] <= s.v[386]) {
                 s.copy_ad(335, 3155);
@@ -1148,150 +1271,15 @@ impl Instance {
             }
         }
         s.b[3165] = (s.v[3155] >= s.v[386]);s.store_scalar(3165, if s.b[3165] { 1.0 } else { 0.0 });
-        let (t70,) = {
+        let (t7d,) = {
     if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && (!s.b[3157])) && s.b[3165]) {
-        let t6f: f64 = (s.v[3117] + 2.0);
-        (t6f,)
+        let t7c: f64 = (s.v[3117] + 2.0);
+        (t7c,)
     } else {
         (s.v[3117],)
     }
 };
-        s.store_scalar(3117, t70);s.b[3166] = (s.v[3117] >= 2.0);s.store_scalar(3166, if s.b[3166] { 1.0 } else { 0.0 });
-        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) {s.copy_ad(3156, 404);s.store_mul(354, 335, 3111);s.store_sub_div_rhs_indices(404, 402, 354, 413);}
-        s.b[3167] = (p[33] == 2.0);s.store_scalar(3167, if s.b[3167] { 1.0 } else { 0.0 });s.b[3168] = ((s.v[404] > (s.v[3156] - 0.1)) && (0.1 >= 0.0));s.store_scalar(3168, if s.b[3168] { 1.0 } else { 0.0 });
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) {s.store_offset_sub(781, 404, 3156, 0.1);s.store_square(722, 781);s.store_scalar(723, (0.1 * 0.1));s.store_scalar(724, 1.0);s.store_scalar(725, 1.0);}
-        let (t71,) = {
-    if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) {
-        (0.0,)
-    } else {
-        (s.v[719],)
-    }
-};
-        s.store_scalar(719, t71);
-    }
-    #[inline(never)]
-    pub(super) fn stamp_transient_block_190(
-        s: &mut Scratch,
-        p: &Parameters,
-    ) {
-        let (t72,) = {
-    if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) {
-        (0.0,)
-    } else {
-        (s.v[720],)
-    }
-};
-        s.store_scalar(720, t72);
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) {s.store_scalar(770, 0.0);s.store_scalar(726, 0.0);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_mul(724, 724, 722);s.store_mul(725, 725, 723);s.store_add(770, 724, 725);s.copy_ad(726, 770);}
-        s.b[3169] = ((((2.0 == 1.0) || (2.0 == 2.0)) || (2.0 == 4.0)) || (2.0 == 8.0));s.store_scalar(3169, if s.b[3169] { 1.0 } else { 0.0 });s.b[3170] = (2.0 == 1.0);s.store_scalar(3170, if s.b[3170] { 1.0 } else { 0.0 });
-        let (t73,) = {
-    if (((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) && s.b[3170]) {
-        (1.0,)
-    } else {
-        (s.v[720],)
-    }
-};
-        s.store_scalar(720, t73);s.b[3171] = (2.0 == 2.0);s.store_scalar(3171, if s.b[3171] { 1.0 } else { 0.0 });
-        let (t74,) = {
-    if ((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) && (!s.b[3170])) && s.b[3171]) {
-        (2.0,)
-    } else {
-        (s.v[720],)
-    }
-};
-        s.store_scalar(720, t74);s.b[3172] = (2.0 == 4.0);s.store_scalar(3172, if s.b[3172] { 1.0 } else { 0.0 });
-        let (t75,) = {
-    if (((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) && (!s.b[3170])) && (!s.b[3171])) && s.b[3172]) {
-        (3.0,)
-    } else {
-        (s.v[720],)
-    }
-};
-        s.store_scalar(720, t75);s.b[3173] = (2.0 == 8.0);s.store_scalar(3173, if s.b[3173] { 1.0 } else { 0.0 });
-        let (t76,) = {
-    if ((((((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) && (!s.b[3170])) && (!s.b[3171])) && (!s.b[3172])) && s.b[3173]) {
-        (4.0,)
-    } else {
-        (s.v[720],)
-    }
-};
-        s.store_scalar(720, t76);
-        let (t77,) = {
-    if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) {
-        (0.0,)
-    } else {
-        (s.v[719],)
-    }
-};
-        s.store_scalar(719, t77);let mut t7b: usize = 0;
-        while {
-            let t7a: f64 = if (((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) && (s.v[719] < s.v[720])) { 1.0 } else { 0.0 };
-            t7a != 0.0
-        } {
-            t7b += 1;assert!(t7b <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
-            if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) {s.store_sqrt(726, 726);}
-            let (t79,) = {
-    if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && s.b[3169]) {
-        let t78: f64 = (s.v[719] + 1.0);
-        (t78,)
-    } else {
-        (s.v[719],)
-    }
-};
-            s.store_scalar(719, t79);
-        }
-        if ((((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) && (!s.b[3169])) {
-            if (s.v[726] == 0.0) {
-                s.store_scalar(726, 0.0);
-            } else {
-                s.store_powf(726, 726, (1.0 / (2.0 * 2.0)));
-            }
-        }
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) {s.store_div_from_scalar(726, 1.0, 726);s.store_scaled_mul(780, 781, 726, 0.1);s.store_div_scaled_product_indices(334, 725, 726, 0.1, 770, 1.0);s.store_add_offset_lhs(404, 3156, (-0.1), 780);}
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && s.b[3168]) {
-        }
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && (!s.b[3168])) {
-        }
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && s.b[3167]) && (!s.b[3168])) {s.store_scalar(334, 1.0);}
-        if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) && (!s.b[3167])) {
-            if (s.v[404] <= s.v[3156]) {
-            } else {
-                s.copy_ad(404, 3156);
-            }
-        }
-        if ((s.b[3107] && s.b[3108]) && (!s.b[3135])) {s.copy_ad(3118, 404);}
-        s.b[3174] = (p[33] == 1.0);s.store_scalar(3174, if s.b[3174] { 1.0 } else { 0.0 });
-        let (t7c,) = {
-    if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) {
-        (0.0,)
-    } else {
-        (s.v[79],)
-    }
-};
-        s.store_scalar(79, t7c);
-        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) {s.store_sqrt_scaled_input_ad(982, A::mul(A::div_from_scalar(1.034943e-10, s.ad_value(3111)), s.ad_value(155)), 2.0);}
-        s.b[3175] = (s.v[411] > 0.0);s.store_scalar(3175, if s.b[3175] { 1.0 } else { 0.0 });
-        if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) && s.b[3175]) {s.store_sub_from_scalar(336, p[334], 411);}
-        if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) && (!s.b[3175])) {s.store_sqrt_offset_square_offset(782, 729, p[137], ((4.0 * 0.1) * 0.1));s.store_scaled_offset_ad(343, A::div_scaled_offset_numerator(s.ad_value(729), 1.0, p[137], s.ad_value(782), 1.0), 1.0, 0.5);s.store_scaled_add_mixed_ai(336, A::offset(s.ad_value(729), p[137]), 782, 0.5);}
-        s.b[3176] = (s.v[336] < 0.0);s.store_scalar(3176, if s.b[3176] { 1.0 } else { 0.0 });
-        if (((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) && (!s.b[3175])) && s.b[3176]) {s.store_scalar(336, 0.0);s.store_scalar(343, 0.0);}
-        if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) && (!s.b[3175])) {s.store_scaled_sqrt_mul(600, 651, 336, p[432]);s.store_sub_from_scalar(336, p[334], 600);}
-        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) {s.store_sqrt_square_offset(782, 336, ((4.0 * (p[334] * 0.01)) * (p[334] * 0.01)));s.store_offset_scaled_div(343, 336, 782, 0.5, 0.5);s.store_scaled_add(336, 336, 782, 0.5);}
-        s.b[3177] = (s.v[336] < 0.0);s.store_scalar(3177, if s.b[3177] { 1.0 } else { 0.0 });
-        if ((((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) && s.b[3177]) {s.store_scalar(336, 0.0);s.store_scalar(343, 0.0);}
-        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) {s.copy_ad(386, 336);s.store_mul3_affine_lhs(418, 3111, 386, (0.5 * 9662367879.197212), 0.0, 386);s.store_sqrt_mul_scaled_lhs(334, 154, 2.0, 418);s.store_scaled_add_ad(335, A::limited_exp(s.ad_value(334)), A::limited_exp_scaled_input(s.ad_value(334), -1.0), 0.5);s.store_div_ln_lhs(419, 335, 418);}
-    }
-    #[inline(never)]
-    pub(super) fn stamp_transient_block_191(
-        s: &mut Scratch,
-    ) {
-        let (t7d,) = {
-    if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3174]) {
-        (1.0,)
-    } else {
-        (s.v[97],)
-    }
-};
-        s.store_scalar(97, t7d);
+        s.store_scalar(3117, t7d);s.b[3166] = (s.v[3117] >= 2.0);s.store_scalar(3166, if s.b[3166] { 1.0 } else { 0.0 });
+        if (((s.b[3107] && s.b[3108]) && (!s.b[3135])) && s.b[3166]) {s.copy_ad(3156, 404);}
     }
 }

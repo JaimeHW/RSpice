@@ -1440,8 +1440,12 @@ impl Engine {
                 0.0,
                 crate::device::veriloga_generated::GeneratedDdtCoefficients::inactive(),
             );
-            generated.stamp_ac_real_all(matrix, op_voltages, num_nodes, simparams);
-            generated.stamp_reactive_all(matrix, op_voltages, num_nodes, omega, simparams);
+            generated
+                .stamp_ac_real_all(matrix, op_voltages, num_nodes, simparams)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            generated
+                .stamp_reactive_all(matrix, op_voltages, num_nodes, omega, simparams)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         Ok(())
     }

@@ -1015,7 +1015,7 @@ impl CircuitData {
         solution: &[Value],
         time: Value,
         analysis: crate::xspice::AnalysisType,
-    ) {
+    ) -> Result<(), String> {
         self.stamp_behavioral_with_generated_mode(
             matrix,
             rhs,
@@ -1023,7 +1023,7 @@ impl CircuitData {
             time,
             analysis,
             crate::device::veriloga_generated::GeneratedEvaluationMode::NewtonLimited,
-        );
+        )
     }
 
     /// Stamp behavioral devices for a physical residual probe. Generated
@@ -1035,7 +1035,7 @@ impl CircuitData {
         solution: &[Value],
         time: Value,
         analysis: crate::xspice::AnalysisType,
-    ) {
+    ) -> Result<(), String> {
         self.stamp_behavioral_with_generated_mode(
             matrix,
             rhs,
@@ -1043,7 +1043,7 @@ impl CircuitData {
             time,
             analysis,
             crate::device::veriloga_generated::GeneratedEvaluationMode::StaticProbe,
-        );
+        )
     }
 
     pub(crate) fn stamp_behavioral_with_generated_mode(
@@ -1054,7 +1054,7 @@ impl CircuitData {
         time: Value,
         _analysis: crate::xspice::AnalysisType,
         _evaluation_mode: crate::device::veriloga_generated::GeneratedEvaluationMode,
-    ) {
+    ) -> Result<(), String> {
         self.stamp_behavioral_sources(matrix, rhs, solution, time);
         #[cfg(feature = "veriloga-builtins-base")]
         {
@@ -1072,16 +1072,19 @@ impl CircuitData {
             };
             let num_nodes = self.num_nodes;
             let simparams = self.generated_simulation_parameters;
-            self.generated_veriloga_devices_mut().stamp_all_with_mode(
-                matrix,
-                rhs,
-                solution,
-                num_nodes,
-                generated_analysis,
-                simparams,
-                _evaluation_mode,
-            );
+            self.generated_veriloga_devices_mut()
+                .stamp_all_with_mode(
+                    matrix,
+                    rhs,
+                    solution,
+                    num_nodes,
+                    generated_analysis,
+                    simparams,
+                    _evaluation_mode,
+                )
+                .map_err(|error| error.to_string())?;
         }
+        Ok(())
     }
 
     /// Check if all nonlinear devices have converged

@@ -4078,7 +4078,7 @@ fn emit_runtime_loop(
     out.push_str("            } {\n");
     out.push_str(&format!("                {guard}+=1;\n"));
     out.push_str(&format!(
-        "                assert!({guard}<=Self::MAX_ANALOG_LOOP_ITERATIONS,\"generated Verilog-A scalar runtime loop exceeded iteration guard\");\n"
+        "                if {guard}>Self::MAX_ANALOG_LOOP_ITERATIONS{{ctx.report_analog_loop_limit(\"scalar stamp\",{guard},Self::MAX_ANALOG_LOOP_ITERATIONS);break;}}\n"
     ));
 
     let body_values = ordered_counted_sum_values(artifact, &body_live, context.cached_values)?;

@@ -1843,7 +1843,7 @@ fn rust_backend_auto_lowers_runtime_bounded_scalar_loops_without_scratch() {
         .as_str();
 
     assert!(stamp.contains("while"), "{stamp}");
-    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
+    assert!(stamp.contains("report_analog_loop_limit"), "{stamp}");
     assert!(stamp.contains("r0_0n0"), "{stamp}");
     assert!(stamp.contains("r0_0n1"), "{stamp}");
     assert!(
@@ -1879,7 +1879,7 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_current_equations() {
         .expect("reactive stamp body");
 
     assert!(
-        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
+        stamp.contains("while") && stamp.contains("report_analog_loop_limit"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(stamp.contains("eval_ddt"), "{stamp}");
@@ -2093,7 +2093,7 @@ fn rust_backend_auto_uses_local_storage_for_reactive_assignments() {
 
     assert!(stamp.contains("pub fn stamp_reactive"), "{stamp}");
     assert!(stamp.contains("while"), "{stamp}");
-    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
+    assert!(stamp.contains("report_analog_loop_limit"), "{stamp}");
     assert!(
         stamp.contains("stamp_current_reactive_node2_branch1_local")
             && stamp.contains("r0_0n0")
@@ -2424,7 +2424,7 @@ fn rust_backend_auto_scalarizes_hybrid_potential_equations() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
+        stamp.contains("while") && stamp.contains("report_analog_loop_limit"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -2465,7 +2465,7 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_named_branch_current_cache() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
+        stamp.contains("while") && stamp.contains("report_analog_loop_limit"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -2541,7 +2541,7 @@ fn rust_backend_auto_scalarizes_hybrid_static_named_branch_current_cache() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
+        stamp.contains("while") && stamp.contains("report_analog_loop_limit"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -2575,7 +2575,7 @@ fn rust_backend_auto_scalarizes_hybrid_terminal_named_branch_current_cache() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
+        stamp.contains("while") && stamp.contains("report_analog_loop_limit"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -11484,7 +11484,7 @@ fn rust_backend_lowers_runtime_loops_with_derivative_shadows() {
 
     assert!(state.contains("MAX_ANALOG_LOOP_ITERATIONS"), "{state}");
     assert!(stamp.contains("while"), "{stamp}");
-    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
+    assert!(stamp.contains("report_analog_loop_limit"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
@@ -11518,7 +11518,7 @@ fn rust_backend_splits_large_local_variable_blocks_without_scratch() {
         .as_str();
     assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
     assert!(stamp.contains("while"), "{stamp}");
-    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
+    assert!(stamp.contains("report_analog_loop_limit"), "{stamp}");
     assert!(stamp.contains("r0_0n0"), "{stamp}");
     assert!(stamp.contains("r0_0n1"), "{stamp}");
     assert!(!stamp.contains("var_acc_slot"), "{stamp}");
@@ -13404,7 +13404,7 @@ fn rust_backend_uses_const_stamp_for_wide_zero_derivative_current() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
+        stamp.contains("while") && stamp.contains("report_analog_loop_limit"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -14576,6 +14576,7 @@ pub mod runtime {{
         NonFinite {{ index: usize, quantity: &'static str, value: f64 }},
         NegativePower {{ index: usize, value: f64 }},
         InvalidMultiplicity {{ value: f64 }},
+        AnalogLoopLimit {{ iterations: usize, limit: usize }},
     }}
 
     pub struct GeneratedEvalContext<'a> {{
@@ -14623,6 +14624,14 @@ pub mod runtime {{
 
         pub fn has_simparam(&self, _name: &str) -> bool {{
             false
+        }}
+
+        pub fn report_analog_loop_limit(
+            &self,
+            _phase: &'static str,
+            _iterations: usize,
+            _limit: usize,
+        ) {{
         }}
 
         pub fn analysis(&self, query: &str) -> bool {{
@@ -15464,6 +15473,7 @@ pub mod runtime {{
         NonFinite {{ index: usize, quantity: &'static str, value: f64 }},
         NegativePower {{ index: usize, value: f64 }},
         InvalidMultiplicity {{ value: f64 }},
+        AnalogLoopLimit {{ iterations: usize, limit: usize }},
     }}
 
     pub struct GeneratedEvalContext<'a> {{
@@ -15501,6 +15511,14 @@ pub mod runtime {{
 
         pub fn has_simparam(&self, _name: &str) -> bool {{
             false
+        }}
+
+        pub fn report_analog_loop_limit(
+            &self,
+            _phase: &'static str,
+            _iterations: usize,
+            _limit: usize,
+        ) {{
         }}
 
         pub fn analysis(&self, query: &str) -> bool {{

@@ -347,6 +347,7 @@ impl Instance {
     }
     #[inline(never)]
     pub(super) fn stamp_transient_block_28(
+        ctx: &GeneratedEvalContext<'_>,
         p: &Parameters,
         l: &mut StampLocals,
     ) {
@@ -355,7 +356,8 @@ impl Instance {
             let t364: f64 = (l.ffbf - 0.5);let t365: f64 = if (((l.fa1e != 0.0) && (l.f78e != 0.0)) && (l.ff03 < t364)) { 1.0 } else { 0.0 };
             t365 != 0.0
         } {
-            t366 += 1;assert!(t366 <= Self::MAX_ANALOG_LOOP_ITERATIONS, "generated Verilog-A analog loop exceeded iteration guard");
+            t366 += 1;
+            if t366 > Self::MAX_ANALOG_LOOP_ITERATIONS { ctx.report_analog_loop_limit("transient stamp", t366, Self::MAX_ANALOG_LOOP_ITERATIONS); break; }
             if ((l.fa1e != 0.0) && (l.f78e != 0.0)) {let t355: f64 = (0.5 * l.fee0);let t356: f64 = (l.f1487 + t355);let t357: f64 = (l.f1493 + l.fee0);let t358: f64 = (l.ff03 * t357);let t359: f64 = (t356 + t358);let t35a: f64 = (1.0 / t359);let t35b: f64 = (l.f17d3 + t35a);l.f17d3 = t35b;let t35c: f64 = (0.5 * l.fee0);let t35d: f64 = (l.f1489 + t35c);let t35e: f64 = (l.f1493 + l.fee0);let t35f: f64 = (l.ff03 * t35e);let t360: f64 = (t35d + t35f);let t361: f64 = (1.0 / t360);let t362: f64 = (l.f17d5 + t361);l.f17d5 = t362;let t363: f64 = (l.ff03 + 1.0);l.ff03 = t363;}
         }
         if ((l.fa1e != 0.0) && (l.f78e != 0.0)) {let t367: f64 = (l.f17d3 * l.fe57);l.fe59 = t367;let t368: f64 = (l.f17d5 * l.fe57);l.fe5d = t368;let t369: f64 = (0.5 * l.fee0);let t36a: f64 = (p[808] + t369);let t36b: f64 = (1.0 / t36a);l.fe5b = t36b;let t36c: f64 = (0.5 * l.fee0);let t36d: f64 = (p[809] + t36c);let t36e: f64 = (1.0 / t36d);l.fe5f = t36e;}
