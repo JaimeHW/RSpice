@@ -768,6 +768,36 @@ fn workbench_references_respect_the_layer_order() {
     assert!(failures.is_empty(), "{failures}");
 }
 
+/// No source file starts with a UTF-8 byte-order mark.
+///
+/// Three did. A BOM is invisible in every editor that matters, survives
+/// copy-paste, and turns the first `//!` of a module into something a doc
+/// tool can misread — so it is worth a test rather than a periodic sweep.
+#[test]
+fn source_files_have_no_byte_order_mark() {
+    const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+    let root = src_dir();
+    let offenders: Vec<String> = rust_sources(&root)
+        .into_iter()
+        .filter(|path| {
+            fs::read(path)
+                .map(|bytes| bytes.starts_with(BOM))
+                .unwrap_or(false)
+        })
+        .map(|path| {
+            path.strip_prefix(&root)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "these files begin with a UTF-8 BOM:\n  {}\nStrip the leading EF BB BF bytes.",
+        offenders.join("\n  ")
+    );
+}
+
 /// The crate uses one module-file convention: `foo.rs` beside `foo/`.
 ///
 /// It previously mixed both forms, sometimes inside the same directory —

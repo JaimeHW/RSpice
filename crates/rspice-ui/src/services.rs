@@ -1,4 +1,4 @@
-﻿//! Services Module
+//! Services Module
 //!
 //! Backend services for the RSpice UI application.
 //! Contains specialized processing and analysis utilities.

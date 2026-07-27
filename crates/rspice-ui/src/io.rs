@@ -1,4 +1,4 @@
-﻿//! I/O Module
+//! I/O Module
 //!
 //! File input/output for SPICE libraries, netlists, waveforms, and sessions.
 //!

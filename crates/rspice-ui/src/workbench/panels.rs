@@ -1,4 +1,4 @@
-﻿//! Panel Components for egui Application
+//! Panel Components for egui Application
 //!
 //! Dialog-hosted panels (PDK settings, Verilog-A, property dialog, script
 //! console, calculator) and the structured log model consumed by the workbench
