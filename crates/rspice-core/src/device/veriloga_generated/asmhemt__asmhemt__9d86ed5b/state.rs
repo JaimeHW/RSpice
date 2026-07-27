@@ -5,47 +5,23 @@ use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVeril
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Parameters {
-    pub p0: f64, pub p1: f64, pub p2: f64, pub p3: f64, pub p4: f64, pub p5: f64, pub p6: f64, pub p7: f64,
-    pub p8: f64, pub p9: f64, pub p10: f64, pub p11: f64, pub p12: f64, pub p13: f64, pub p14: f64, pub p15: f64,
-    pub p16: f64, pub p17: f64, pub p18: f64, pub p19: f64, pub p20: f64, pub p21: f64, pub p22: f64, pub p23: f64,
-    pub p24: f64, pub p25: f64, pub p26: f64, pub p27: f64, pub p28: f64, pub p29: f64, pub p30: f64, pub p31: f64,
-    pub p32: f64, pub p33: f64, pub p34: f64, pub p35: f64, pub p36: f64, pub p37: f64, pub p38: f64, pub p39: f64,
-    pub p40: f64, pub p41: f64, pub p42: f64, pub p43: f64, pub p44: f64, pub p45: f64, pub p46: f64, pub p47: f64,
-    pub p48: f64, pub p49: f64, pub p50: f64, pub p51: f64, pub p52: f64, pub p53: f64, pub p54: f64, pub p55: f64,
-    pub p56: f64, pub p57: f64, pub p58: f64, pub p59: f64, pub p60: f64, pub p61: f64, pub p62: f64, pub p63: f64,
-    pub p64: f64, pub p65: f64, pub p66: f64, pub p67: f64, pub p68: f64, pub p69: f64, pub p70: f64, pub p71: f64,
-    pub p72: f64, pub p73: f64, pub p74: f64, pub p75: f64, pub p76: f64, pub p77: f64, pub p78: f64, pub p79: f64,
-    pub p80: f64, pub p81: f64, pub p82: f64, pub p83: f64, pub p84: f64, pub p85: f64, pub p86: f64, pub p87: f64,
-    pub p88: f64, pub p89: f64, pub p90: f64, pub p91: f64, pub p92: f64, pub p93: f64, pub p94: f64, pub p95: f64,
-    pub p96: f64, pub p97: f64, pub p98: f64, pub p99: f64, pub p100: f64, pub p101: f64, pub p102: f64, pub p103: f64,
-    pub p104: f64, pub p105: f64, pub p106: f64, pub p107: f64, pub p108: f64, pub p109: f64, pub p110: f64, pub p111: f64,
-    pub p112: f64, pub p113: f64, pub p114: f64, pub p115: f64, pub p116: f64, pub p117: f64, pub p118: f64, pub p119: f64,
-    pub p120: f64, pub p121: f64, pub p122: f64, pub p123: f64, pub p124: f64, pub p125: f64, pub p126: f64, pub p127: f64,
-    pub p128: f64, pub p129: f64, pub p130: f64, pub p131: f64, pub p132: f64, pub p133: f64, pub p134: f64, pub p135: f64,
-    pub p136: f64, pub p137: f64, pub p138: f64, pub p139: f64, pub p140: f64, pub p141: f64, pub p142: f64, pub p143: f64,
-    pub p144: f64, pub p145: f64, pub p146: f64, pub p147: f64, pub p148: f64, pub p149: f64, pub p150: f64, pub p151: f64,
-    pub p152: f64, pub p153: f64, pub p154: f64, pub p155: f64, pub p156: f64, pub p157: f64, pub p158: f64, pub p159: f64,
-    pub p160: f64, pub p161: f64, pub p162: f64, pub p163: f64, pub p164: f64, pub p165: f64, pub p166: f64, pub p167: f64,
-    pub p168: f64, pub p169: f64, pub p170: f64, pub p171: f64, pub p172: f64, pub p173: f64, pub p174: f64, pub p175: f64,
-    pub p176: f64, pub p177: f64, pub p178: f64, pub p179: f64, pub p180: f64, pub p181: f64, pub p182: f64, pub p183: f64,
-    pub p184: f64, pub p185: f64, pub p186: f64, pub p187: f64, pub p188: f64, pub p189: f64, pub p190: f64, pub p191: f64,
-    pub p192: f64, pub p193: f64, pub p194: f64, pub p195: f64, pub p196: f64, pub p197: f64, pub p198: f64, pub p199: f64,
-    pub p200: f64, pub p201: f64, pub p202: f64, pub p203: f64, pub p204: f64, pub p205: f64, pub p206: f64, pub p207: f64,
-    pub p208: f64, pub p209: f64, pub p210: f64, pub p211: f64, pub p212: f64, pub p213: f64, pub p214: f64, pub p215: f64,
-    pub p216: f64, pub p217: f64, pub p218: f64, pub p219: f64, pub p220: f64, pub p221: f64, pub p222: f64, pub p223: f64,
-    pub p224: f64, pub p225: f64, pub p226: f64, pub p227: f64, pub p228: f64, pub p229: f64, pub p230: f64, pub p231: f64,
-    pub p232: f64, pub p233: f64, pub p234: f64, pub p235: f64, pub p236: f64, pub p237: f64, pub p238: f64, pub p239: f64,
-    pub p240: f64, pub p241: f64, pub p242: f64, pub p243: f64, pub p244: f64, pub p245: f64, pub p246: f64, pub p247: f64,
-    pub p248: f64, pub p249: f64, pub p250: f64, pub p251: f64, pub p252: f64, pub p253: f64, pub p254: f64, pub p255: f64,
-    pub p256: f64, pub p257: f64, pub p258: f64, pub p259: f64, pub p260: f64, pub p261: f64, pub p262: f64, pub p263: f64,
-    pub p264: f64, pub p265: f64, pub p266: f64, pub p267: f64, pub p268: f64, pub p269: f64, pub p270: f64, pub p271: f64,
-    pub p272: f64, pub p273: f64, pub p274: f64, pub p275: f64, pub p276: f64, pub p277: f64, pub p278: f64, pub p279: f64,
-    pub p280: f64, pub p281: f64, pub p282: f64, pub p283: f64, pub p284: f64, pub p285: f64, pub p286: f64,
+    pub values: [f64; 287],
+}
+
+impl std::ops::Index<usize> for Parameters {
+    type Output = f64;
+    #[inline]
+    fn index(&self, index: usize) -> &Self::Output { &self.values[index] }
+}
+
+impl std::ops::IndexMut<usize> for Parameters {
+    #[inline]
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output { &mut self.values[index] }
 }
 
 impl Parameters {
     fn new_box() -> Box<Self> {
-        // SAFETY: Parameters is repr(C) and every field is f64; zero bytes are valid 0.0 values, and numeric default chunks are copied into field-order slots.
+        // SAFETY: every parameter slot is f64, so zero bytes are valid 0.0 values; numeric default chunks are copied into the values array.
         let mut boxed = Box::<Self>::new_uninit();
         unsafe {
             let ptr = boxed.as_mut_ptr();
@@ -53,11 +29,11 @@ impl Parameters {
             const DEFAULTS_0: [f64; 8] = [
                 27.0, 2.5e-8, 1.64e-6, 2.5e-7, 0.0002, 1.0, 1.0, 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (ptr as *mut f64).add(0), 8);
+            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (*ptr).values.as_mut_ptr().add(0), 8);
             {
                 let params = &mut *ptr;
-                params.p8 = params.p6;
-                validate_parameter("mult_fn", params.p8, false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[8] = params[6];
+                validate_parameter("mult_fn", params[8], false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_1: [f64; 278] = [
                 1.066e-10, -2.0, 0.0, 0.0, 0.17, 0.0, 0.0, 0.0,
@@ -96,7 +72,7 @@ impl Parameters {
                 0.0, 0.0, 100.0, 100.0, 0.0, 0.0, 50.0, 50.0,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_1.as_ptr(), (ptr as *mut f64).add(9), 278);
+            std::ptr::copy_nonoverlapping(DEFAULTS_1.as_ptr(), (*ptr).values.as_mut_ptr().add(9), 278);
             let params = &*ptr;
             for index in 0..PARAMETER_DISPLAY_NAMES.len() {
                 let value = read_parameter_slot(params, index);
@@ -125,8 +101,7 @@ const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 #[inline]
 fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
     debug_assert!(index < PARAMETER_DISPLAY_NAMES.len(), "generated parameter index out of range");
-    // SAFETY: Parameters is repr(C), contains only f64 fields, and every caller validates or generates the index.
-    unsafe { *((parameters as *const Parameters as *const f64).add(index)) }
+    parameters.values[index]
 }
 
 fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), String> {
@@ -686,7 +661,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 612;
     pub const DDT_STATE_COUNT: usize = 121;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "c51c5e7a68b79c975227fc72d3948e49c13cca8be5c2d05678fc18255067c00a";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "20e8eccd9c8141adffeba88d962c3808a717a50f4269fe2dfea4f4d0201a0d17";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -828,13 +803,10 @@ impl Instance {
     #[inline]
     fn write_parameter_slot(&mut self, index: usize, value: f64) -> bool {
         debug_assert!(index < Self::PARAMETER_COUNT, "generated parameter index out of range");
-        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.
-        unsafe {
-            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;
-            let changed = (*ptr.add(index)).to_bits() != value.to_bits();
-            *ptr.add(index) = value;
-            changed
-        }
+        let slot = &mut self.params.values[index];
+        let changed = slot.to_bits() != value.to_bits();
+        *slot = value;
+        changed
     }
 
     #[inline]

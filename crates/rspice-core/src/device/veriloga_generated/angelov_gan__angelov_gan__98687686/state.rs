@@ -5,24 +5,23 @@ use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVeril
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Parameters {
-    pub p0: f64, pub p1: f64, pub p2: f64, pub p3: f64, pub p4: f64, pub p5: f64, pub p6: f64, pub p7: f64,
-    pub p8: f64, pub p9: f64, pub p10: f64, pub p11: f64, pub p12: f64, pub p13: f64, pub p14: f64, pub p15: f64,
-    pub p16: f64, pub p17: f64, pub p18: f64, pub p19: f64, pub p20: f64, pub p21: f64, pub p22: f64, pub p23: f64,
-    pub p24: f64, pub p25: f64, pub p26: f64, pub p27: f64, pub p28: f64, pub p29: f64, pub p30: f64, pub p31: f64,
-    pub p32: f64, pub p33: f64, pub p34: f64, pub p35: f64, pub p36: f64, pub p37: f64, pub p38: f64, pub p39: f64,
-    pub p40: f64, pub p41: f64, pub p42: f64, pub p43: f64, pub p44: f64, pub p45: f64, pub p46: f64, pub p47: f64,
-    pub p48: f64, pub p49: f64, pub p50: f64, pub p51: f64, pub p52: f64, pub p53: f64, pub p54: f64, pub p55: f64,
-    pub p56: f64, pub p57: f64, pub p58: f64, pub p59: f64, pub p60: f64, pub p61: f64, pub p62: f64, pub p63: f64,
-    pub p64: f64, pub p65: f64, pub p66: f64, pub p67: f64, pub p68: f64, pub p69: f64, pub p70: f64, pub p71: f64,
-    pub p72: f64, pub p73: f64, pub p74: f64, pub p75: f64, pub p76: f64, pub p77: f64, pub p78: f64, pub p79: f64,
-    pub p80: f64, pub p81: f64, pub p82: f64, pub p83: f64, pub p84: f64, pub p85: f64, pub p86: f64, pub p87: f64,
-    pub p88: f64, pub p89: f64, pub p90: f64, pub p91: f64, pub p92: f64, pub p93: f64, pub p94: f64, pub p95: f64,
-    pub p96: f64, pub p97: f64, pub p98: f64, pub p99: f64, pub p100: f64,
+    pub values: [f64; 101],
+}
+
+impl std::ops::Index<usize> for Parameters {
+    type Output = f64;
+    #[inline]
+    fn index(&self, index: usize) -> &Self::Output { &self.values[index] }
+}
+
+impl std::ops::IndexMut<usize> for Parameters {
+    #[inline]
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output { &mut self.values[index] }
 }
 
 impl Parameters {
     fn new_box() -> Box<Self> {
-        // SAFETY: Parameters is repr(C) and every field is f64; zero bytes are valid 0.0 values, and numeric default chunks are copied into field-order slots.
+        // SAFETY: every parameter slot is f64, so zero bytes are valid 0.0 values; numeric default chunks are copied into the values array.
         let mut boxed = Box::<Self>::new_uninit();
         unsafe {
             let ptr = boxed.as_mut_ptr();
@@ -42,7 +41,7 @@ impl Parameters {
                 0.9, 0.0, 0.0, 1.0, 1.0, 25.0, 0.1, 1.0,
                 1e-14, 60000.0, 0.3, 0.1, 27.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (ptr as *mut f64).add(0), 101);
+            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (*ptr).values.as_mut_ptr().add(0), 101);
             let params = &*ptr;
             for index in 0..PARAMETER_DISPLAY_NAMES.len() {
                 let value = read_parameter_slot(params, index);
@@ -71,8 +70,7 @@ const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 #[inline]
 fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
     debug_assert!(index < PARAMETER_DISPLAY_NAMES.len(), "generated parameter index out of range");
-    // SAFETY: Parameters is repr(C), contains only f64 fields, and every caller validates or generates the index.
-    unsafe { *((parameters as *const Parameters as *const f64).add(index)) }
+    parameters.values[index]
 }
 
 fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), String> {
@@ -514,7 +512,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 145;
     pub const DDT_STATE_COUNT: usize = 17;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "9692f82e99d4213d1fe1a63c98314848cd45ba0b8d54d1aaecdf00671a629825";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "aefbf3fa7eff9c4398134ee80f8dee28768a6243743e1043007d9704860a255b";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -660,13 +658,10 @@ impl Instance {
     #[inline]
     fn write_parameter_slot(&mut self, index: usize, value: f64) -> bool {
         debug_assert!(index < Self::PARAMETER_COUNT, "generated parameter index out of range");
-        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.
-        unsafe {
-            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;
-            let changed = (*ptr.add(index)).to_bits() != value.to_bits();
-            *ptr.add(index) = value;
-            changed
-        }
+        let slot = &mut self.params.values[index];
+        let changed = slot.to_bits() != value.to_bits();
+        *slot = value;
+        changed
     }
 
     #[inline]
@@ -776,74 +771,74 @@ impl Instance {
         let p = &(*self.params);
         let param_given = self.param_given.as_ref();
         self.scalar_static.f64_values[0]=if param_given[3]{1.0}else{0.0};
-        self.scalar_static.f64_values[1]=p.p3;
+        self.scalar_static.f64_values[1]=p[3];
         self.scalar_static.f64_values[2]=(self.scalar_static.f64_values[1]+273.15);
         self.scalar_static.f64_values[3]=(if ((self.scalar_static.f64_values[0])!=0.0){self.scalar_static.f64_values[2]}else{0.0});
         self.scalar_static.bool_values[0]=(!((self.scalar_static.f64_values[0])!=0.0));
-        self.scalar_static.f64_values[4]=p.p2;
+        self.scalar_static.f64_values[4]=p[2];
         self.scalar_static.f64_values[5]=if param_given[100]{1.0}else{0.0};
-        self.scalar_static.f64_values[6]=p.p100;
+        self.scalar_static.f64_values[6]=p[100];
         self.scalar_static.f64_values[7]=(273.15+self.scalar_static.f64_values[6]);
         self.scalar_static.f64_values[8]=(if ((self.scalar_static.f64_values[5])!=0.0){self.scalar_static.f64_values[7]}else{0.0});
         self.scalar_static.bool_values[1]=(!((self.scalar_static.f64_values[5])!=0.0));
         self.scalar_static.f64_values[9]=(if self.scalar_static.bool_values[1]{300.15}else{self.scalar_static.f64_values[8]});
-        self.scalar_static.f64_values[10]=p.p1;
-        self.scalar_static.f64_values[11]=p.p66;
+        self.scalar_static.f64_values[10]=p[1];
+        self.scalar_static.f64_values[11]=p[66];
         self.scalar_static.bool_values[2]=(self.scalar_static.f64_values[11]>0.0);
-        self.scalar_static.f64_values[12]=p.p77;
-        self.scalar_static.f64_values[13]=p.p8;
-        self.scalar_static.f64_values[14]=p.p68;
-        self.scalar_static.f64_values[15]=p.p20;
-        self.scalar_static.f64_values[16]=p.p80;
-        self.scalar_static.f64_values[17]=p.p26;
-        self.scalar_static.f64_values[18]=p.p72;
-        self.scalar_static.f64_values[19]=p.p29;
-        self.scalar_static.f64_values[20]=p.p73;
-        self.scalar_static.f64_values[21]=p.p58;
-        self.scalar_static.f64_values[22]=p.p74;
-        self.scalar_static.f64_values[23]=p.p59;
-        self.scalar_static.f64_values[24]=p.p75;
-        self.scalar_static.f64_values[25]=p.p9;
-        self.scalar_static.f64_values[26]=p.p78;
-        self.scalar_static.f64_values[27]=p.p30;
-        self.scalar_static.f64_values[28]=p.p71;
-        self.scalar_static.f64_values[29]=p.p36;
-        self.scalar_static.f64_values[30]=p.p45;
-        self.scalar_static.f64_values[31]=p.p79;
-        self.scalar_static.f64_values[32]=p.p21;
-        self.scalar_static.f64_values[33]=p.p81;
-        self.scalar_static.f64_values[34]=p.p4;
+        self.scalar_static.f64_values[12]=p[77];
+        self.scalar_static.f64_values[13]=p[8];
+        self.scalar_static.f64_values[14]=p[68];
+        self.scalar_static.f64_values[15]=p[20];
+        self.scalar_static.f64_values[16]=p[80];
+        self.scalar_static.f64_values[17]=p[26];
+        self.scalar_static.f64_values[18]=p[72];
+        self.scalar_static.f64_values[19]=p[29];
+        self.scalar_static.f64_values[20]=p[73];
+        self.scalar_static.f64_values[21]=p[58];
+        self.scalar_static.f64_values[22]=p[74];
+        self.scalar_static.f64_values[23]=p[59];
+        self.scalar_static.f64_values[24]=p[75];
+        self.scalar_static.f64_values[25]=p[9];
+        self.scalar_static.f64_values[26]=p[78];
+        self.scalar_static.f64_values[27]=p[30];
+        self.scalar_static.f64_values[28]=p[71];
+        self.scalar_static.f64_values[29]=p[36];
+        self.scalar_static.f64_values[30]=p[45];
+        self.scalar_static.f64_values[31]=p[79];
+        self.scalar_static.f64_values[32]=p[21];
+        self.scalar_static.f64_values[33]=p[81];
+        self.scalar_static.f64_values[34]=p[4];
         self.scalar_static.bool_values[3]=(1.0==self.scalar_static.f64_values[34]);
         self.scalar_static.bool_values[4]=(self.scalar_static.f64_values[34]==4.0);
         self.scalar_static.bool_values[5]=(self.scalar_static.bool_values[3]||self.scalar_static.bool_values[4]);
-        self.scalar_static.f64_values[35]=p.p6;
+        self.scalar_static.f64_values[35]=p[6];
         self.scalar_static.bool_values[6]=(4.0==self.scalar_static.f64_values[35]);
         self.scalar_static.bool_values[7]=(self.scalar_static.bool_values[5]&&self.scalar_static.bool_values[6]);
         self.scalar_static.f64_values[36]=(if self.scalar_static.bool_values[7]{1.0}else{0.0});
-        self.scalar_static.f64_values[37]=p.p62;
-        self.scalar_static.f64_values[38]=p.p63;
+        self.scalar_static.f64_values[37]=p[62];
+        self.scalar_static.f64_values[38]=p[63];
         self.scalar_static.bool_values[8]=(!((self.scalar_static.f64_values[36])!=0.0));
         self.scalar_static.f64_values[39]=if param_given[43]{1.0}else{0.0};
         self.scalar_static.bool_values[9]=(!((self.scalar_static.f64_values[39])!=0.0));
         self.scalar_static.f64_values[40]=if param_given[44]{1.0}else{0.0};
         self.scalar_static.bool_values[10]=(self.scalar_static.bool_values[9]&&((self.scalar_static.f64_values[40])!=0.0));
         self.scalar_static.f64_values[41]=(if self.scalar_static.bool_values[10]{1.0}else{0.0});
-        self.scalar_static.f64_values[42]=p.p44;
+        self.scalar_static.f64_values[42]=p[44];
         self.scalar_static.f64_values[43]=(0.5/self.scalar_static.f64_values[42]);
         self.scalar_static.bool_values[11]=(!((self.scalar_static.f64_values[41])!=0.0));
-        self.scalar_static.f64_values[44]=p.p43;
-        self.scalar_static.f64_values[45]=p.p19;
-        self.scalar_static.f64_values[46]=p.p64;
-        self.scalar_static.f64_values[47]=p.p11;
-        self.scalar_static.f64_values[48]=p.p18;
-        self.scalar_static.f64_values[49]=p.p69;
-        self.scalar_static.f64_values[50]=p.p13;
-        self.scalar_static.f64_values[51]=p.p70;
-        self.scalar_static.f64_values[52]=p.p10;
-        self.scalar_static.f64_values[53]=p.p15;
-        self.scalar_static.f64_values[54]=p.p22;
-        self.scalar_static.f64_values[55]=p.p12;
-        self.scalar_static.f64_values[56]=p.p14;
+        self.scalar_static.f64_values[44]=p[43];
+        self.scalar_static.f64_values[45]=p[19];
+        self.scalar_static.f64_values[46]=p[64];
+        self.scalar_static.f64_values[47]=p[11];
+        self.scalar_static.f64_values[48]=p[18];
+        self.scalar_static.f64_values[49]=p[69];
+        self.scalar_static.f64_values[50]=p[13];
+        self.scalar_static.f64_values[51]=p[70];
+        self.scalar_static.f64_values[52]=p[10];
+        self.scalar_static.f64_values[53]=p[15];
+        self.scalar_static.f64_values[54]=p[22];
+        self.scalar_static.f64_values[55]=p[12];
+        self.scalar_static.f64_values[56]=p[14];
         self.scalar_static.bool_values[12]=(0.0==self.scalar_static.f64_values[34]);
         self.scalar_static.f64_values[57]=(if self.scalar_static.bool_values[12]{1.0}else{0.0});
         self.scalar_static.f64_values[58]=(if self.scalar_static.bool_values[3]{1.0}else{0.0});
@@ -852,11 +847,11 @@ impl Instance {
         self.scalar_static.bool_values[14]=(self.scalar_static.f64_values[34]==3.0);
         self.scalar_static.f64_values[60]=(if self.scalar_static.bool_values[14]{1.0}else{0.0});
         self.scalar_static.f64_values[61]=(if self.scalar_static.bool_values[4]{1.0}else{0.0});
-        self.scalar_static.f64_values[62]=p.p16;
+        self.scalar_static.f64_values[62]=p[16];
         self.scalar_static.bool_values[15]=(!((self.scalar_static.f64_values[57])!=0.0));
         self.scalar_static.bool_values[16]=(((self.scalar_static.f64_values[58])!=0.0)&&self.scalar_static.bool_values[15]);
-        self.scalar_static.f64_values[63]=p.p17;
-        self.scalar_static.f64_values[64]=p.p23;
+        self.scalar_static.f64_values[63]=p[17];
+        self.scalar_static.f64_values[64]=p[23];
         self.scalar_static.bool_values[17]=(((self.scalar_static.f64_values[57])!=0.0)||((self.scalar_static.f64_values[58])!=0.0));
         self.scalar_static.bool_values[18]=(!self.scalar_static.bool_values[17]);
         self.scalar_static.bool_values[19]=(((self.scalar_static.f64_values[59])!=0.0)&&self.scalar_static.bool_values[18]);
@@ -866,23 +861,23 @@ impl Instance {
         self.scalar_static.bool_values[23]=(((self.scalar_static.f64_values[60])!=0.0)||self.scalar_static.bool_values[20]);
         self.scalar_static.bool_values[24]=(!self.scalar_static.bool_values[23]);
         self.scalar_static.bool_values[25]=(((self.scalar_static.f64_values[61])!=0.0)&&self.scalar_static.bool_values[24]);
-        self.scalar_static.f64_values[65]=p.p65;
+        self.scalar_static.f64_values[65]=p[65];
         self.scalar_static.bool_values[26]=(self.scalar_static.bool_values[3]||self.scalar_static.bool_values[12]);
         self.scalar_static.bool_values[27]=(self.scalar_static.bool_values[4]||self.scalar_static.bool_values[26]);
         self.scalar_static.f64_values[66]=(if self.scalar_static.bool_values[27]{1.0}else{0.0});
-        self.scalar_static.f64_values[67]=p.p57;
-        self.scalar_static.f64_values[68]=p.p47;
-        self.scalar_static.f64_values[69]=p.p48;
-        self.scalar_static.f64_values[70]=p.p50;
+        self.scalar_static.f64_values[67]=p[57];
+        self.scalar_static.f64_values[68]=p[47];
+        self.scalar_static.f64_values[69]=p[48];
+        self.scalar_static.f64_values[70]=p[50];
         self.scalar_static.bool_values[28]=(!((self.scalar_static.f64_values[66])!=0.0));
-        self.scalar_static.f64_values[71]=p.p76;
-        self.scalar_static.f64_values[72]=p.p5;
+        self.scalar_static.f64_values[71]=p[76];
+        self.scalar_static.f64_values[72]=p[5];
         self.scalar_static.bool_values[29]=(0.0==self.scalar_static.f64_values[72]);
         self.scalar_static.f64_values[73]=(if self.scalar_static.bool_values[29]{1.0}else{0.0});
-        self.scalar_static.f64_values[74]=p.p83;
-        self.scalar_static.f64_values[75]=p.p84;
+        self.scalar_static.f64_values[74]=p[83];
+        self.scalar_static.f64_values[75]=p[84];
         self.scalar_static.bool_values[30]=(!((self.scalar_static.f64_values[73])!=0.0));
-        self.scalar_static.f64_values[76]=p.p85;
+        self.scalar_static.f64_values[76]=p[85];
         self.scalar_static.f64_values[77]=(-self.scalar_static.f64_values[76]);
         self.scalar_static.f64_values[78]=(self.scalar_static.f64_values[74]*self.scalar_static.f64_values[77]);
         self.scalar_static.f64_values[79]={ let limexp_arg = self.scalar_static.f64_values[78]; if limexp_arg < 80.0 { limexp_arg.exp() } else { 5.54062238439351e34 * (1.0 + (limexp_arg - 80.0)) } };
@@ -895,16 +890,16 @@ impl Instance {
         self.scalar_static.bool_values[32]=(self.scalar_static.bool_values[30]&&((self.scalar_static.f64_values[84])!=0.0));
         self.scalar_static.bool_values[33]=(!((self.scalar_static.f64_values[84])!=0.0));
         self.scalar_static.bool_values[34]=(self.scalar_static.bool_values[30]&&self.scalar_static.bool_values[33]);
-        self.scalar_static.f64_values[85]=p.p42;
-        self.scalar_static.f64_values[86]=p.p82;
+        self.scalar_static.f64_values[85]=p[42];
+        self.scalar_static.f64_values[86]=p[82];
         self.scalar_static.f64_values[87]=(0.001*self.scalar_static.f64_values[86]);
-        self.scalar_static.f64_values[88]=p.p31;
-        self.scalar_static.f64_values[89]=p.p38;
-        self.scalar_static.f64_values[90]=p.p32;
-        self.scalar_static.f64_values[91]=p.p33;
-        self.scalar_static.f64_values[92]=p.p34;
-        self.scalar_static.f64_values[93]=p.p35;
-        self.scalar_static.f64_values[94]=p.p37;
+        self.scalar_static.f64_values[88]=p[31];
+        self.scalar_static.f64_values[89]=p[38];
+        self.scalar_static.f64_values[90]=p[32];
+        self.scalar_static.f64_values[91]=p[33];
+        self.scalar_static.f64_values[92]=p[34];
+        self.scalar_static.f64_values[93]=p[35];
+        self.scalar_static.f64_values[94]=p[37];
         self.scalar_static.bool_values[35]=(0.0==self.scalar_static.f64_values[35]);
         self.scalar_static.f64_values[95]=(if self.scalar_static.bool_values[35]{1.0}else{0.0});
         self.scalar_static.bool_values[36]=(1.0==self.scalar_static.f64_values[35]);
@@ -914,9 +909,9 @@ impl Instance {
         self.scalar_static.bool_values[38]=(self.scalar_static.f64_values[35]==3.0);
         self.scalar_static.f64_values[98]=(if self.scalar_static.bool_values[38]{1.0}else{0.0});
         self.scalar_static.f64_values[99]=(if self.scalar_static.bool_values[6]{1.0}else{0.0});
-        self.scalar_static.f64_values[100]=p.p25;
+        self.scalar_static.f64_values[100]=p[25];
         self.scalar_static.f64_values[101]=(if ((self.scalar_static.f64_values[95])!=0.0){self.scalar_static.f64_values[100]}else{0.0});
-        self.scalar_static.f64_values[102]=p.p27;
+        self.scalar_static.f64_values[102]=p[27];
         self.scalar_static.f64_values[103]=(if ((self.scalar_static.f64_values[95])!=0.0){self.scalar_static.f64_values[102]}else{0.0});
         self.scalar_static.bool_values[39]=(!((self.scalar_static.f64_values[95])!=0.0));
         self.scalar_static.bool_values[40]=(((self.scalar_static.f64_values[96])!=0.0)&&self.scalar_static.bool_values[39]);
@@ -927,14 +922,14 @@ impl Instance {
         self.scalar_static.bool_values[44]=(((self.scalar_static.f64_values[97])!=0.0)||self.scalar_static.bool_values[41]);
         self.scalar_static.bool_values[45]=(!self.scalar_static.bool_values[44]);
         self.scalar_static.bool_values[46]=(((self.scalar_static.f64_values[98])!=0.0)&&self.scalar_static.bool_values[45]);
-        self.scalar_static.f64_values[105]=p.p40;
+        self.scalar_static.f64_values[105]=p[40];
         self.scalar_static.f64_values[106]=(if self.scalar_static.bool_values[46]{0.5}else{0.0});
-        self.scalar_static.f64_values[107]=p.p41;
+        self.scalar_static.f64_values[107]=p[41];
         self.scalar_static.f64_values[108]=(-1.0-self.scalar_static.f64_values[106]);
         self.scalar_static.f64_values[109]=(2.0*self.scalar_static.f64_values[106]);
         self.scalar_static.f64_values[110]=(1.0-self.scalar_static.f64_values[109]);
         self.scalar_static.f64_values[111]=(1.0-self.scalar_static.f64_values[89]);
-        self.scalar_static.f64_values[112]=p.p39;
+        self.scalar_static.f64_values[112]=p[39];
         self.scalar_static.bool_values[47]=(((self.scalar_static.f64_values[98])!=0.0)||self.scalar_static.bool_values[44]);
         self.scalar_static.bool_values[48]=(!self.scalar_static.bool_values[47]);
         self.scalar_static.bool_values[49]=(((self.scalar_static.f64_values[99])!=0.0)&&self.scalar_static.bool_values[48]);
@@ -947,23 +942,23 @@ impl Instance {
         self.scalar_static.f64_values[119]=(if self.scalar_static.bool_values[49]{self.scalar_static.f64_values[118]}else{0.0});
         self.scalar_static.bool_values[50]=(self.scalar_static.bool_values[6]||self.scalar_static.bool_values[37]);
         self.scalar_static.f64_values[120]=(if self.scalar_static.bool_values[50]{1.0}else{0.0});
-        self.scalar_static.f64_values[121]=p.p55;
+        self.scalar_static.f64_values[121]=p[55];
         self.scalar_static.bool_values[51]=(self.scalar_static.f64_values[21]>0.0);
         self.scalar_static.f64_values[122]=(if self.scalar_static.bool_values[51]{1.0}else{0.0});
         self.scalar_static.bool_values[52]=(self.scalar_static.f64_values[38]>0.0);
         self.scalar_static.bool_values[53]=(self.scalar_static.f64_values[37]>0.0);
         self.scalar_static.bool_values[54]=(self.scalar_static.bool_values[52]||self.scalar_static.bool_values[53]);
         self.scalar_static.f64_values[123]=(if self.scalar_static.bool_values[54]{1.0}else{0.0});
-        self.scalar_static.f64_values[124]=p.p60;
+        self.scalar_static.f64_values[124]=p[60];
         self.scalar_static.bool_values[55]=(self.scalar_static.f64_values[124]>0.0);
         self.scalar_static.f64_values[125]=(if self.scalar_static.bool_values[55]{1.0}else{0.0});
-        self.scalar_static.f64_values[126]=p.p51;
+        self.scalar_static.f64_values[126]=p[51];
         self.scalar_static.bool_values[56]=(self.scalar_static.f64_values[126]>0.0);
         self.scalar_static.f64_values[127]=(if self.scalar_static.bool_values[56]{1.0}else{0.0});
-        self.scalar_static.f64_values[128]=p.p49;
+        self.scalar_static.f64_values[128]=p[49];
         self.scalar_static.bool_values[57]=(self.scalar_static.f64_values[128]>0.0);
         self.scalar_static.f64_values[129]=(if self.scalar_static.bool_values[57]{1.0}else{0.0});
-        self.scalar_static.f64_values[130]=p.p46;
+        self.scalar_static.f64_values[130]=p[46];
         self.scalar_static.bool_values[58]=(self.scalar_static.f64_values[130]>0.0);
         self.scalar_static.f64_values[131]=(if self.scalar_static.bool_values[58]{1.0}else{0.0});
         self.scalar_static.bool_values[59]=(self.scalar_static.f64_values[70]>0.0);
@@ -972,32 +967,32 @@ impl Instance {
         self.scalar_static.bool_values[61]=(self.scalar_static.f64_values[69]>0.0);
         self.scalar_static.bool_values[62]=(self.scalar_static.bool_values[60]||self.scalar_static.bool_values[61]);
         self.scalar_static.f64_values[133]=(if self.scalar_static.bool_values[62]{1.0}else{0.0});
-        self.scalar_static.f64_values[134]=p.p7;
+        self.scalar_static.f64_values[134]=p[7];
         self.scalar_static.bool_values[63]=(0.0==self.scalar_static.f64_values[134]);
         self.scalar_static.f64_values[135]=(if self.scalar_static.bool_values[63]{1.0}else{0.0});
         self.scalar_static.bool_values[64]=(1.0==self.scalar_static.f64_values[134]);
         self.scalar_static.f64_values[136]=(if self.scalar_static.bool_values[64]{1.0}else{0.0});
         self.scalar_static.bool_values[65]=(!((self.scalar_static.f64_values[135])!=0.0));
         self.scalar_static.bool_values[66]=(((self.scalar_static.f64_values[136])!=0.0)&&self.scalar_static.bool_values[65]);
-        self.scalar_static.f64_values[137]=p.p0;
+        self.scalar_static.f64_values[137]=p[0];
         self.scalar_static.bool_values[67]=(self.scalar_static.bool_values[66]&&((self.scalar_static.f64_values[137])!=0.0));
-        self.scalar_static.f64_values[138]=p.p87;
-        self.scalar_static.f64_values[139]=p.p86;
-        self.scalar_static.f64_values[140]=p.p88;
+        self.scalar_static.f64_values[138]=p[87];
+        self.scalar_static.f64_values[139]=p[86];
+        self.scalar_static.f64_values[140]=p[88];
         self.scalar_static.f64_values[141]=(self.scalar_static.f64_values[138]*self.scalar_static.f64_values[139]);
         self.scalar_static.f64_values[142]=(self.scalar_static.f64_values[141]).sqrt();
         self.scalar_static.bool_values[68]=(self.scalar_static.f64_values[10]==1.0);
         self.scalar_static.f64_values[143]=(if self.scalar_static.bool_values[68]{1.0}else{0.0});
-        self.scalar_static.f64_values[144]=p.p56;
+        self.scalar_static.f64_values[144]=p[56];
         self.scalar_static.f64_values[145]=(self.scalar_static.f64_values[144]/3.0);
         self.scalar_static.bool_values[69]=(!((self.scalar_static.f64_values[120])!=0.0));
-        self.scalar_static.f64_values[146]=p.p28;
-        self.scalar_static.f64_values[147]=p.p24;
-        self.scalar_static.f64_values[148]=p.p61;
-        self.scalar_static.f64_values[149]=p.p54;
-        self.scalar_static.f64_values[150]=p.p53;
-        self.scalar_static.f64_values[151]=p.p52;
-        self.scalar_static.f64_values[152]=p.p67;
+        self.scalar_static.f64_values[146]=p[28];
+        self.scalar_static.f64_values[147]=p[24];
+        self.scalar_static.f64_values[148]=p[61];
+        self.scalar_static.f64_values[149]=p[54];
+        self.scalar_static.f64_values[150]=p[53];
+        self.scalar_static.f64_values[151]=p[52];
+        self.scalar_static.f64_values[152]=p[67];
         self.scalar_static.bool_values[70]=(!((self.scalar_static.f64_values[143])!=0.0));
         self.scalar_static.f64_values[153]=(-self.scalar_static.f64_values[45]);
         self.scalar_static.f64_values[154]=(-self.scalar_static.f64_values[46]);

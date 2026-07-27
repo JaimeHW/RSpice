@@ -234,7 +234,7 @@ endmodule
             .count(),
         1
     );
-    assert_eq!(state.matches("scalar_limit,\n").count(), 2);
+    assert_eq!(state.matches("scalar_limit,\n").count(), 0);
     assert!(
         stamp.contains("if ctx.limiting_enabled(){self.scalar_limit_active=false;}"),
         "{stamp}"
@@ -1107,7 +1107,7 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
 
     assert!(stamp.contains("ctx.node_voltage(nodes[0])"));
     assert!(stamp.contains("ctx.node_voltage(nodes[1])"));
-    assert!(stamp.contains("p.p0"));
+    assert!(stamp.contains("p[0]"));
     assert!(stamp.contains("eq0_value"));
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
@@ -1127,7 +1127,7 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
         "generated subtraction must emit one derivative pass instead of negating then adding:\n{stamp}"
     );
     assert!(
-        !stamp.contains("p.p0 / (p.p0 * p.p0)"),
+        !stamp.contains("p[0] / (p[0] * p[0])"),
         "division derivatives with constant denominator axis should simplify to one division:\n{stamp}"
     );
     assert!(
@@ -1282,7 +1282,7 @@ fn scalar_rust_backend_caches_parameter_static_values_outside_stamp() {
         "{state}"
     );
     assert!(
-        state.contains("self.scalar_static.f64_values[0]=p.p0;"),
+        state.contains("self.scalar_static.f64_values[0]=p[0];"),
         "{state}"
     );
     assert!(
@@ -1311,7 +1311,7 @@ fn scalar_rust_backend_caches_parameter_static_values_outside_stamp() {
         "{stamp}"
     );
     assert!(!stamp.contains("let p ="), "{stamp}");
-    assert!(!stamp.contains("let v3: f64 = p.p0;"), "{stamp}");
+    assert!(!stamp.contains("let v3: f64 = p[0];"), "{stamp}");
     assert!(!stamp.contains("let v5: f64 = 1.0;"), "{stamp}");
     assert!(!stamp.contains("let v6: f64 = -1.0;"), "{stamp}");
     assert!(!stamp.contains("let v7: f64 = (v5 / v3);"), "{stamp}");
@@ -1618,7 +1618,7 @@ fn rust_backend_inlines_simple_derivative_leaf_locals() {
         "simple field and numeric derivative leaves should be inlined:\n{}\n\n{stamp}",
         leaf_locals.join("\n")
     );
-    assert!(stamp.contains("p.p0"), "{stamp}");
+    assert!(stamp.contains("p[0]"), "{stamp}");
     assert!(stamp.contains("0.5"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -2915,7 +2915,7 @@ fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
         .as_str();
 
     assert!(stamp.contains("self.scalar_static.f64_values["), "{stamp}");
-    assert!(!stamp.contains("p.p0"), "{stamp}");
+    assert!(!stamp.contains("p[0]"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
@@ -3214,10 +3214,10 @@ fn rust_backend_does_not_copy_scratch_derivatives_through_temporary_locals() {
         .as_str();
 
     assert!(!stamp.contains(": f64 = s.dn"), "{stamp}");
-    assert!(!stamp.contains("if (p.p0 > 0.0) { s.dn"), "{stamp}");
+    assert!(!stamp.contains("if (p[0] > 0.0) { s.dn"), "{stamp}");
     assert!(!stamp.contains("A::select"), "{stamp}");
     assert!(
-        !stamp.contains("if (p.p0 > 0.0) { s.v[0] } else { s.v[0] }"),
+        !stamp.contains("if (p[0] > 0.0) { s.v[0] } else { s.v[0] }"),
         "{stamp}"
     );
     assert!(
@@ -3281,7 +3281,7 @@ fn rust_backend_lowers_compact_conditional_noop_branch_as_guarded_store() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("if (p.p0 > 0.0) {"), "{stamp}");
+    assert!(stamp.contains("if (p[0] > 0.0) {"), "{stamp}");
     assert!(
         stamp.contains("s.store_voltage(0, ctx, nodes, Some(0), Some(1));"),
         "{stamp}"
@@ -3308,7 +3308,7 @@ fn rust_backend_lowers_compact_conditional_scalar_noop_branch_as_direct_store() 
         .contents
         .as_str();
 
-    assert!(stamp.contains("if (p.p0 > 0.0) {"), "{stamp}");
+    assert!(stamp.contains("if (p[0] > 0.0) {"), "{stamp}");
     assert!(stamp.contains("s.store_scalar(1, s.v[0]);"), "{stamp}");
     assert!(!stamp.contains("A::constant(s.v[0])"), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -3441,7 +3441,7 @@ fn rust_backend_uses_direct_compact_voltage_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_scaled_voltage(1, ctx, nodes, Some(0), Some(1), p.p0);"),
+        stamp.contains("s.store_scaled_voltage(1, ctx, nodes, Some(0), Some(1), p[0]);"),
         "{stamp}"
     );
     assert!(
@@ -3449,7 +3449,7 @@ fn rust_backend_uses_direct_compact_voltage_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_voltage(3, ctx, nodes, Some(0), Some(1), p.p1);"),
+        stamp.contains("s.store_offset_voltage(3, ctx, nodes, Some(0), Some(1), p[1]);"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad_value(0, A::voltage"), "{stamp}");
@@ -3703,7 +3703,7 @@ fn rust_backend_lowers_compact_conditional_ad_branches_as_direct_stores() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("if (p.p0 > 0.0) {"), "{stamp}");
+    assert!(stamp.contains("if (p[0] > 0.0) {"), "{stamp}");
     assert!(
         stamp.contains("s.store_sqrt_voltage(0, ctx, nodes, Some(0), Some(1));"),
         "{stamp}"
@@ -3809,7 +3809,7 @@ fn rust_backend_lowers_compact_conditional_ad_noop_branch_as_direct_copy() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("if (p.p0 > 0.0) {"), "{stamp}");
+    assert!(stamp.contains("if (p[0] > 0.0) {"), "{stamp}");
     assert!(stamp.contains("s.copy_ad(1, 0);"), "{stamp}");
     assert!(!stamp.contains("s.dn[1] = s.dn[0];"), "{stamp}");
     assert!(!stamp.contains("s.store_ad(1, &s.ad_value(0));"), "{stamp}");
@@ -3854,10 +3854,10 @@ fn rust_backend_uses_compact_ad_operation_store_helpers() {
     assert!(stamp.contains("s.store_sqrt(6, 5);"), "{stamp}");
     assert!(stamp.contains("s.store_square(7, 6);"), "{stamp}");
     assert!(!stamp.contains("s.store_powf(7, 6, 2.0);"), "{stamp}");
-    assert!(stamp.contains("s.store_scale(8, 7, p.p0);"), "{stamp}");
-    assert!(stamp.contains("s.store_offset(9, 8, p.p1);"), "{stamp}");
+    assert!(stamp.contains("s.store_scale(8, 7, p[0]);"), "{stamp}");
+    assert!(stamp.contains("s.store_offset(9, 8, p[1]);"), "{stamp}");
     assert!(
-        stamp.contains("s.store_sub_from_scalar(10, p.p0, 9);"),
+        stamp.contains("s.store_sub_from_scalar(10, p[0], 9);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_neg(11, 10);"), "{stamp}");
@@ -3925,7 +3925,7 @@ fn rust_backend_uses_compact_dynamic_integer_power_exponents() {
         "dynamic integer power exponents should use powi instead of powf:\n{stamp}"
     );
     assert!(
-        stamp.contains("p.p0 as i32"),
+        stamp.contains("p[0] as i32"),
         "integer parameter exponent should be cast at the generated powi call:\n{stamp}"
     );
     assert!(
@@ -4046,7 +4046,7 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_operands() {
 
     assert_eq!(
         stamp
-            .matches("A::scale_offset(s.ad_value(0), p.p0, p.p1)")
+            .matches("A::scale_offset(s.ad_value(0), p[0], p[1])")
             .count(),
         1,
         "repeated non-leaf AD operands feeding expensive calls should be materialized once:\n{stamp}"
@@ -4102,7 +4102,7 @@ fn rust_backend_avoids_pow_operand_local_when_pow_root_is_reused() {
 
     assert_eq!(
         stamp
-            .matches(": A = A::scale_offset(s.ad_value(0), p.p0, p.p1)")
+            .matches(": A = A::scale_offset(s.ad_value(0), p[0], p[1])")
             .count(),
         0,
         "the pow root local should make a separate base local unnecessary:\n{stamp}"
@@ -4135,36 +4135,36 @@ fn rust_backend_uses_compact_nested_ad_operation_store_helpers() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scaled_add(2, 0, 1, p.p0);"),
+        stamp.contains("s.store_scaled_add(2, 0, 1, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_scaled_sub(3, 0, 1, p.p0);"),
+        stamp.contains("s.store_scaled_sub(3, 0, 1, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_scaled_mul(4, 0, 1, p.p0);"),
+        stamp.contains("s.store_scaled_mul(4, 0, 1, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_scaled_div(5, 0, 1, p.p0);"),
+        stamp.contains("s.store_scaled_div(5, 0, 1, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_scaled(6, 0, p.p0, p.p1);"),
+        stamp.contains("s.store_offset_scaled(6, 0, p[0], p[1]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_scaled_offset(7, 0, p.p1, p.p0);"),
+        stamp.contains("s.store_scaled_offset(7, 0, p[1], p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset(8, 0, ((p.p1) + (p.p0)));"),
+        stamp.contains("s.store_offset(8, 0, ((p[1]) + (p[0])));"),
         "{stamp}"
     );
-    assert!(stamp.contains("s.store_scaled_exp(9, 0, p.p0);"), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_exp(9, 0, p[0]);"), "{stamp}");
     assert!(
-        stamp.contains("s.store_scaled_sqrt(10, 0, p.p0);"),
+        stamp.contains("s.store_scaled_sqrt(10, 0, p[0]);"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -4707,11 +4707,11 @@ fn rust_backend_uses_compact_scaled_and_offset_negation_store_helpers() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scale(") && stamp.contains("(-p.p0)"),
+        stamp.contains("s.store_scale(") && stamp.contains("(-p[0])"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_scaled(") && stamp.contains("-1.0, (-p.p1)"),
+        stamp.contains("s.store_offset_scaled(") && stamp.contains("-1.0, (-p[1])"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
@@ -4880,12 +4880,12 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_mul_scaled_ln_offset_rhs(2, 0, p.p0, 1, p.p1);"),
+        stamp.contains("s.store_mul_scaled_ln_offset_rhs(2, 0, p[0], 1, p[1]);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_mul_scaled_atan_rhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_scaled_sin_rhs("), "{stamp}");
-    assert!(!stamp.contains("A::offset(s.ad_value(1), p.p1)"), "{stamp}");
+    assert!(!stamp.contains("A::offset(s.ad_value(1), p[1])"), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(
@@ -7547,10 +7547,10 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_mul_scaled_ln_offset_rhs(2, 0, p.p1, 1, p.p0);"),
+        stamp.contains("s.store_mul_scaled_ln_offset_rhs(2, 0, p[1], 1, p[0]);"),
         "{stamp}"
     );
-    assert!(!stamp.contains("A::offset(s.ad_value(1), p.p0)"), "{stamp}");
+    assert!(!stamp.contains("A::offset(s.ad_value(1), p[0])"), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(
@@ -7574,7 +7574,7 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_scaled_div_ln_offset_rhs(4, 0, 1, p.p0, p.p1);"),
+        stamp.contains("s.store_scaled_div_ln_offset_rhs(4, 0, 1, p[0], p[1]);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_scaled_div_mixed_ai("), "{stamp}");
@@ -7855,7 +7855,7 @@ fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
     assert!(stamp.contains("s.store_scaled_exp_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_ln_ad("), "{stamp}");
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_add(4, 0, 1, p.p0, 0.0);"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(4, 0, 1, p[0], 0.0);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_scaled_limexp_ad("), "{stamp}");
@@ -7863,7 +7863,7 @@ fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
     assert!(stamp.contains("s.store_scaled_abs_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_powf_ad("), "{stamp}");
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_add(9, 0, 1, (-p.p0), ((p.p1) * (p.p0)));"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(9, 0, 1, (-p[0]), ((p[1]) * (p[0])));"),
         "{stamp}"
     );
     assert!(
@@ -8202,7 +8202,7 @@ fn rust_backend_uses_compact_offset_general_ad_store_helpers() {
     assert!(stamp.contains("s.store_offset_div_ad("), "{stamp}");
     assert!(stamp.contains("s.store_offset_exp_ad("), "{stamp}");
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_add(8, 0, 1, 1.0, p.p1);"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(8, 0, 1, 1.0, p[1]);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_offset_ln_ad("), "{stamp}");
@@ -8483,7 +8483,7 @@ fn rust_backend_combines_scaled_offset_scaled_inputs() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_offset_scaled(1, 0, ((p.p0) * (p.p1)), ((p.p2) * (p.p1)));"),
+        stamp.contains("s.store_offset_scaled(1, 0, ((p[0]) * (p[1])), ((p[2]) * (p[1])));"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
@@ -9016,7 +9016,7 @@ fn rust_backend_fuses_scaled_value_mixed_multiply_store_helpers() {
         assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
     }
     assert!(
-        stamp.contains("s.store_mul_add_scaled_inputs_rhs_indices(6, 2, 0, p.p0, 1, p.p0);"),
+        stamp.contains("s.store_mul_add_scaled_inputs_rhs_indices(6, 2, 0, p[0], 1, p[0]);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_scaled_mul("), "{stamp}");
@@ -9505,23 +9505,23 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
     assert!(stamp.contains("s.store_sqrt_add(6, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_exp_add(7, 0, 1);"), "{stamp}");
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_add(8, 0, 1, p.p0, 0.0);"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(8, 0, 1, p[0], 0.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_add(9, 0, 1, 1.0, p.p1);"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(9, 0, 1, 1.0, p[1]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_add(10, 0, 1, -1.0, p.p0);"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(10, 0, 1, -1.0, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_div_from_scalar_sqrt_add(11, p.p0, 0, 1);"),
+        stamp.contains("s.store_div_from_scalar_sqrt_add(11, p[0], 0, 1);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_powf_sqrt_binary(12, 0, 1, 1.0, p.p0);"),
+        stamp.contains("s.store_powf_sqrt_binary(12, 0, 1, 1.0, p[0]);"),
         "{stamp}"
     );
     assert!(
@@ -9564,15 +9564,15 @@ fn rust_backend_uses_compact_offset_scaled_sqrt_binary_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_sub(2, 0, 1, p.p0, 0.0);"),
+        stamp.contains("s.store_offset_scaled_sqrt_sub(2, 0, 1, p[0], 0.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_sub(3, 0, 1, 1.0, p.p1);"),
+        stamp.contains("s.store_offset_scaled_sqrt_sub(3, 0, 1, 1.0, p[1]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_scaled_sqrt_sub(5, 0, 1, p.p0, p.p1);"),
+        stamp.contains("s.store_offset_scaled_sqrt_sub(5, 0, 1, p[0], p[1]);"),
         "{stamp}"
     );
     assert_eq!(
@@ -9635,7 +9635,7 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_pow_offset_rhs(10, 0, 1, p.p0);"),
+        stamp.contains("s.store_pow_offset_rhs(10, 0, 1, p[0]);"),
         "{stamp}"
     );
     assert!(
@@ -9647,23 +9647,23 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_min_offset_rhs(11, 0, 1, p.p0);"),
+        stamp.contains("s.store_min_offset_rhs(11, 0, 1, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_max_offset_rhs(12, 0, 1, p.p0);"),
+        stamp.contains("s.store_max_offset_rhs(12, 0, 1, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_max_with_scalar_sqrt_binary(5, 0, 1, 1.0, p.p0);"),
+        stamp.contains("s.store_max_with_scalar_sqrt_binary(5, 0, 1, 1.0, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_min_from_scalar_sqrt_binary(6, p.p1, 0, 1, 1.0);"),
+        stamp.contains("s.store_min_from_scalar_sqrt_binary(6, p[1], 0, 1, 1.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_pow_from_scalar_sqrt_binary(7, p.p0, 0, 1, 1.0);"),
+        stamp.contains("s.store_pow_from_scalar_sqrt_binary(7, p[0], 0, 1, 1.0);"),
         "{stamp}"
     );
     assert!(
@@ -9729,19 +9729,19 @@ fn rust_backend_uses_compact_sqrt_binary_wrapped_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_powf_sqrt_binary(4, 0, 1, -1.0, p.p0);"),
+        stamp.contains("s.store_powf_sqrt_binary(4, 0, 1, -1.0, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_max_with_scalar_sqrt_binary(5, 0, 1, -1.0, p.p1);"),
+        stamp.contains("s.store_max_with_scalar_sqrt_binary(5, 0, 1, -1.0, p[1]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_min_from_scalar_sqrt_binary(6, p.p2, 0, 1, -1.0);"),
+        stamp.contains("s.store_min_from_scalar_sqrt_binary(6, p[2], 0, 1, -1.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_pow_from_scalar_sqrt_binary(7, p.p1, 0, 1, -1.0);"),
+        stamp.contains("s.store_pow_from_scalar_sqrt_binary(7, p[1], 0, 1, -1.0);"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::sqrt(A::sub("), "{stamp}");
@@ -9924,11 +9924,11 @@ fn rust_backend_lowers_compact_scalar_plus_negated_operand_without_constant_ad_w
         .as_str();
 
     assert!(
-        stamp.contains("s.store_sub_from_scalar(1, p.p0, 0);"),
+        stamp.contains("s.store_sub_from_scalar(1, p[0], 0);"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::sub(A::constant(p.p0), s.ad_value(0))"),
+        !stamp.contains("A::sub(A::constant(p[0]), s.ad_value(0))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -9975,11 +9975,11 @@ fn rust_backend_lowers_compact_parameter_scale_without_full_ad_multiply() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), p.p0);"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), p[0]);"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::mul(A::constant(p.p0), A::voltage"),
+        !stamp.contains("A::mul(A::constant(p[0]), A::voltage"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -10004,12 +10004,12 @@ fn rust_backend_lowers_compact_scalar_expression_scale_without_full_ad_multiply(
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (p.p0 - 1.0));"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (p[0] - 1.0));"),
         "{stamp}"
     );
     assert!(
         !stamp.contains(
-            "A::mul(A::constant((p.p0 - 1.0)), A::voltage(ctx, nodes, Some(0), Some(1)))"
+            "A::mul(A::constant((p[0] - 1.0)), A::voltage(ctx, nodes, Some(0), Some(1)))"
         ),
         "{stamp}"
     );
@@ -10064,7 +10064,7 @@ fn rust_backend_combines_nested_compact_scalar_scales() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (3.0 * p.p0));"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (3.0 * p[0]));"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::scale(A::scale"), "{stamp}");
@@ -10090,7 +10090,7 @@ fn rust_backend_combines_scaled_compact_duplicate_ad_operands() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (2.0 * p.p0));"),
+        stamp.contains("s.store_scaled_voltage(0, ctx, nodes, Some(0), Some(1), (2.0 * p[0]));"),
         "{stamp}"
     );
     assert!(!stamp.contains("A::scale(A::scale"), "{stamp}");
@@ -10116,12 +10116,12 @@ fn rust_backend_folds_compact_scalar_only_arithmetic_to_scratch_value() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scalar(0, (0.5 * p.p0));"),
+        stamp.contains("s.store_scalar(0, (0.5 * p[0]));"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(
-        !stamp.contains("A::scale(A::constant(p.p0), 0.5)"),
+        !stamp.contains("A::scale(A::constant(p[0]), 0.5)"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -10145,14 +10145,14 @@ fn rust_backend_folds_compact_scalar_comparisons_without_ad_wrappers() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("s.b[0] = (p.p0 <= 0.0);"), "{stamp}");
+    assert!(stamp.contains("s.b[0] = (p[0] <= 0.0);"), "{stamp}");
     assert!(
         stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(
-        !stamp.contains("A::constant(p.p0).value <= A::constant(0.0).value"),
+        !stamp.contains("A::constant(p[0]).value <= A::constant(0.0).value"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -10176,7 +10176,7 @@ fn rust_backend_stores_zero_derivative_compact_comparison_assignments_as_values(
         .contents
         .as_str();
 
-    assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p.p0);"), "{stamp}");
+    assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p[0]);"), "{stamp}");
     assert!(
         stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
@@ -10206,7 +10206,7 @@ fn rust_backend_caches_compact_boolean_assignments_for_later_conditions() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p.p0);"), "{stamp}");
+    assert!(stamp.contains("s.b[0] = ((nv0 - nv1) > p[0]);"), "{stamp}");
     assert!(
         stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
@@ -10235,7 +10235,7 @@ fn rust_backend_caches_compact_boolean_literal_conditionals_for_later_conditions
         .contents
         .as_str();
 
-    assert!(stamp.contains("s.b[0] = (!(p.p0 > 0.0));"), "{stamp}");
+    assert!(stamp.contains("s.b[0] = (!(p[0] > 0.0));"), "{stamp}");
     assert!(
         stamp.contains("s.store_scalar(0, if s.b[0] { 1.0 } else { 0.0 });"),
         "{stamp}"
@@ -10263,7 +10263,7 @@ fn rust_backend_lowers_compact_comparison_scale_factors_as_plain_scalars() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("if (p.p0 > 0.0)"), "{stamp}");
+    assert!(stamp.contains("if (p[0] > 0.0)"), "{stamp}");
     assert!(!stamp.contains("A::constant(if"), "{stamp}");
     assert!(!stamp.contains("A::add(A::constant"), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -10344,10 +10344,10 @@ fn rust_backend_lowers_compact_scalar_truth_conditions_without_ad_wrappers() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("if (p.p0 != 0.0)"), "{stamp}");
-    assert!(stamp.contains("if (p.p0 == 0.0)"), "{stamp}");
-    assert!(!stamp.contains("!(p.p0 != 0.0)"), "{stamp}");
-    assert!(!stamp.contains("A::constant(p.p0).value != 0.0"), "{stamp}");
+    assert!(stamp.contains("if (p[0] != 0.0)"), "{stamp}");
+    assert!(stamp.contains("if (p[0] == 0.0)"), "{stamp}");
+    assert!(!stamp.contains("!(p[0] != 0.0)"), "{stamp}");
+    assert!(!stamp.contains("A::constant(p[0]).value != 0.0"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -10370,13 +10370,13 @@ fn rust_backend_lowers_compact_compound_conditions_as_value_arithmetic() {
         .as_str();
 
     assert!(stamp.contains("s.v[0]"), "{stamp}");
-    assert!(stamp.contains(" > p.p0"), "{stamp}");
+    assert!(stamp.contains(" > p[0]"), "{stamp}");
     assert!(
-        !stamp.contains("A::add(") || !stamp.contains(").value > p.p0"),
+        !stamp.contains("A::add(") || !stamp.contains(").value > p[0]"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::mul(") || !stamp.contains(").value > p.p0"),
+        !stamp.contains("A::mul(") || !stamp.contains(").value > p[0]"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -10401,7 +10401,7 @@ fn rust_backend_lowers_compact_scalar_offsets_without_full_ad_add_or_subtract() 
         .as_str();
 
     assert!(
-        stamp.contains("s.store_offset_voltage(0, ctx, nodes, Some(0), Some(1), p.p0);"),
+        stamp.contains("s.store_offset_voltage(0, ctx, nodes, Some(0), Some(1), p[0]);"),
         "{stamp}"
     );
     assert!(
@@ -10413,7 +10413,7 @@ fn rust_backend_lowers_compact_scalar_offsets_without_full_ad_add_or_subtract() 
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::add(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p.p0))"),
+        !stamp.contains("A::add(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p[0]))"),
         "{stamp}"
     );
     assert!(
@@ -10442,12 +10442,12 @@ fn rust_backend_folds_nested_compact_scalar_only_arithmetic_to_scratch_value() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scalar(0, ((4.0 * p.p0) * p.p0));"),
+        stamp.contains("s.store_scalar(0, ((4.0 * p[0]) * p[0]));"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
     assert!(
-        !stamp.contains("A::scale(A::constant((4.0 * p.p0)), p.p0)"),
+        !stamp.contains("A::scale(A::constant((4.0 * p[0])), p[0])"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -11913,7 +11913,7 @@ fn rust_backend_lowers_scaled_ddx_projection_as_scalar_store() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_scalar(0, (A::ddx_projection") && stamp.contains("* p.p0));"),
+        stamp.contains("s.store_scalar(0, (A::ddx_projection") && stamp.contains("* p[0]));"),
         "{stamp}"
     );
     assert!(
@@ -12128,7 +12128,7 @@ fn rust_backend_scalar_lowers_parameter_idt_initial_condition() {
         .collect::<String>();
     assert!(compact.contains("letp=&(*self.params);"), "{stamp}");
     assert!(
-        stamp.contains("eval_idt") && stamp.contains("(p.p0 + 0.25)"),
+        stamp.contains("eval_idt") && stamp.contains("(p[0] + 0.25)"),
         "parameter IC should be emitted in the scalar IDT state call:\n{stamp}"
     );
     assert!(
@@ -12467,11 +12467,11 @@ fn rust_backend_lowers_compact_scalar_exponent_pow_without_constant_ad_wrapper()
         .as_str();
 
     assert!(
-        stamp.contains("A::powf(A::voltage(ctx, nodes, Some(0), Some(1)), p.p0)"),
+        stamp.contains("A::powf(A::voltage(ctx, nodes, Some(0), Some(1)), p[0])"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::pow(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p.p0))"),
+        !stamp.contains("A::pow(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p[0]))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -12528,19 +12528,19 @@ fn rust_backend_lowers_compact_scalar_min_max_without_constant_ad_wrapper() {
         .as_str();
 
     assert!(
-        stamp.contains("A::max_with_scalar(A::voltage(ctx, nodes, Some(0), Some(1)), p.p0)"),
+        stamp.contains("A::max_with_scalar(A::voltage(ctx, nodes, Some(0), Some(1)), p[0])"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("A::min_from_scalar(p.p1, A::voltage(ctx, nodes, Some(0), Some(1)))"),
+        stamp.contains("A::min_from_scalar(p[1], A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::max(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p.p0))"),
+        !stamp.contains("A::max(A::voltage(ctx, nodes, Some(0), Some(1)), A::constant(p[0]))"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("A::min(A::constant(p.p1), A::voltage(ctx, nodes, Some(0), Some(1)))"),
+        !stamp.contains("A::min(A::constant(p[1]), A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -12573,20 +12573,20 @@ fn rust_backend_uses_direct_compact_scalar_choice_store_helpers() {
         assert!(support.contains(helper), "{support}");
     }
     assert!(
-        stamp.contains("s.store_max_with_scalar(1, 0, p.p0);"),
+        stamp.contains("s.store_max_with_scalar(1, 0, p[0]);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_min_with_scalar(2, 0, p.p1);"),
+        stamp.contains("s.store_min_with_scalar(2, 0, p[1]);"),
         "{stamp}"
     );
     assert!(stamp.contains("s.store_abs(3, 0);"), "{stamp}");
     assert!(
-        !stamp.contains("s.store_ad_value(1, A::max_with_scalar(s.ad_value(0), p.p0));"),
+        !stamp.contains("s.store_ad_value(1, A::max_with_scalar(s.ad_value(0), p[0]));"),
         "{stamp}"
     );
     assert!(
-        !stamp.contains("s.store_ad_value(2, A::min_with_scalar(s.ad_value(0), p.p1));"),
+        !stamp.contains("s.store_ad_value(2, A::min_with_scalar(s.ad_value(0), p[1]));"),
         "{stamp}"
     );
     assert!(
@@ -12874,8 +12874,8 @@ fn generated_scalar_literal_min_max_rust_compiles_with_runtime_stub() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("(0.001_f64).max(p.p0)"), "{stamp}");
-    assert!(stamp.contains("(1e-9_f64).min(p.p0)"), "{stamp}");
+    assert!(stamp.contains("(0.001_f64).max(p[0])"), "{stamp}");
+    assert!(stamp.contains("(1e-9_f64).min(p[0])"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -12951,7 +12951,7 @@ fn rust_backend_evaluates_scalar_limexp_argument_once() {
     assert!(stamp.contains("limexp_arg.exp()"), "{stamp}");
     assert!(stamp.contains("LIMEXP_MAX"), "{stamp}");
     assert!(!stamp.contains("80.0_f64.exp()"), "{stamp}");
-    assert_eq!(stamp.matches("((p.p0 + 1.0) / (p.p0 + 2.0))").count(), 1);
+    assert_eq!(stamp.matches("((p[0] + 1.0) / (p[0] + 2.0))").count(), 1);
 }
 
 #[test]
@@ -13818,20 +13818,20 @@ fn rust_backend_uses_compact_parameter_state_initialization_and_validation() {
         "unconstrained parameter validation should use a compact finite-only helper:\n{state}"
     );
     assert!(
-        !state.contains("validate_parameter(\"r\", params.p0"),
+        !state.contains("validate_parameter(\"r\", params[0]"),
         "constant defaults are already validated during codegen and should not emit default-time checks:\n{state}"
     );
     assert!(
-        !state.contains("validate_parameter(\"scale\", params.p1"),
+        !state.contains("validate_parameter(\"scale\", params[1]"),
         "constant defaults with ranges are already validated during codegen and should not emit default-time checks:\n{state}"
     );
     assert!(
-        state.contains("validate_finite_parameter(\"derived\", params.p2"),
+        state.contains("validate_finite_parameter(\"derived\", params[2]"),
         "unconstrained dependent defaults should keep runtime finite validation:\n{state}"
     );
     assert!(
         !state
-            .contains("validate_parameter(\"derived\", params.p2, None, false, None, false, &[])"),
+            .contains("validate_parameter(\"derived\", params[2], None, false, None, false, &[])"),
         "unconstrained defaults should not emit the full range validator call:\n{state}"
     );
     assert!(
@@ -13894,7 +13894,7 @@ endmodule
         "set_parameter should reject integer parameter values outside the generated i32 domain:\n{state}"
     );
     assert!(
-        state.contains("validate_parameter(\"nf\", params.p1, true"),
+        state.contains("validate_parameter(\"nf\", params[1], true"),
         "integer parameter defaults that require runtime validation should pass the integer flag:\n{state}"
     );
     assert_generated_rust_compiles(&generated);
@@ -13990,8 +13990,9 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
         .contents
         .as_str();
 
-    assert!(state.contains("pub p0: f64"), "{state}");
-    assert!(state.contains("pub p1: f64"), "{state}");
+    assert!(state.contains("pub values: [f64; 2]"), "{state}");
+    assert!(!state.contains("pub p0: f64"), "{state}");
+    assert!(!state.contains("as *mut Parameters as *mut f64"), "{state}");
     assert!(
         stamp.contains("let p = Box::as_ref(&self.params);"),
         "{stamp}"
@@ -14000,8 +14001,8 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
     assert!(!stamp.contains("let p = self.p.as_ref();"), "{stamp}");
     assert!(stamp.contains("let nodes = &(*self).nodes;"), "{stamp}");
     assert!(!stamp.contains("let nodes = self.nodes;"), "{stamp}");
-    assert!(stamp.contains("p.p0"), "{stamp}");
-    assert!(stamp.contains("p.p1"), "{stamp}");
+    assert!(stamp.contains("p[0]"), "{stamp}");
+    assert!(stamp.contains("p[1]"), "{stamp}");
     assert!(
         stamp.contains("let nv0 = ctx.node_voltage(nodes[0]);"),
         "{stamp}"
@@ -14011,10 +14012,10 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
         "{stamp}"
     );
     assert!(stamp.contains("nv0 - nv1"), "{stamp}");
-    assert!(!stamp.contains("params.p0"), "{stamp}");
-    assert!(!stamp.contains("params.p1"), "{stamp}");
-    assert!(!stamp.contains("self.params.p0"), "{stamp}");
-    assert!(!stamp.contains("self.params.p1"), "{stamp}");
+    assert!(!stamp.contains("params[0]"), "{stamp}");
+    assert!(!stamp.contains("params[1]"), "{stamp}");
+    assert!(!stamp.contains("self.params[0]"), "{stamp}");
+    assert!(!stamp.contains("self.params[1]"), "{stamp}");
     assert!(
         !state.contains("pub very_long_process_corner_gain_parameter"),
         "generated Rust field names should be compact while preserving public parameter lookup names:\n{state}"
@@ -16331,7 +16332,7 @@ fn rust_backend_lowers_conditional_parameter_default() {
         .as_str();
 
     assert!(state.contains("if"), "{state}");
-    assert!(state.contains("params.p0"), "{state}");
+    assert!(state.contains("params[0]"), "{state}");
 }
 
 #[test]
@@ -16364,7 +16365,7 @@ fn rust_backend_lowers_simparam_parameter_default_to_explicit_fallback() {
         .contents
         .as_str();
 
-    assert!(state.contains("params.p0"), "{state}");
+    assert!(state.contains("params[0]"), "{state}");
     assert!(state.contains("1.0"), "{state}");
 }
 
@@ -16600,7 +16601,7 @@ fn rust_backend_lowers_potential_branch_current_axis_derivative() {
         stamp.contains("stamper.stamp_potential_branch1_local("),
         "{stamp}"
     );
-    assert!(stamp.contains("p.p0"), "{stamp}");
+    assert!(stamp.contains("p[0]"), "{stamp}");
     assert!(!stamp.contains("let eq0_d_b0"), "{stamp}");
 }
 
@@ -16664,7 +16665,7 @@ fn rust_backend_propagates_branch_current_axis_through_assignment() {
         "{stamp}"
     );
     assert!(!stamp.contains("A::branch_current"), "{stamp}");
-    assert!(stamp.contains("p.p0"), "{stamp}");
+    assert!(stamp.contains("p[0]"), "{stamp}");
 }
 
 #[test]

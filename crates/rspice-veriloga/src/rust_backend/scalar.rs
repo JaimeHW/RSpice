@@ -4547,7 +4547,7 @@ fn emit_parameter_expr(
                 format!("missing parameter field '{}'", parameter_slot.name),
             )
         })?;
-    Ok(format!("p.{field}"))
+    Ok(format!("p[{field}]"))
 }
 
 fn value_ref(

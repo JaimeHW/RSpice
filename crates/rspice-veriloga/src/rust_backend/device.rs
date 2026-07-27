@@ -1196,6 +1196,7 @@ fn compact_generated_stamp_surface_base(mut source: String) -> String {
         ("type AdValue = KernelAdValue", "type A = KernelAdValue"),
         ("AdValue::", "A::"),
         (": AdValue", ": A"),
+        ("params[", "p["),
         ("params.", "p."),
         ("&self.nodes", "nodes"),
         ("self.nodes[", "nodes["),
@@ -15635,16 +15636,30 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("#[repr(C)]\n");
     out.push_str("#[derive(Copy, Clone)]\n");
     out.push_str("pub struct Parameters {\n");
-    emit_parameter_struct_fields(artifact, parameter_fields, &mut out);
+    out.push_str(&format!(
+        "    pub values: [f64; {}],\n",
+        artifact.mir.parameters.len()
+    ));
+    out.push_str("}\n\n");
+
+    out.push_str("impl std::ops::Index<usize> for Parameters {\n");
+    out.push_str("    type Output = f64;\n");
+    out.push_str("    #[inline]\n");
+    out.push_str("    fn index(&self, index: usize) -> &Self::Output { &self.values[index] }\n");
+    out.push_str("}\n\n");
+    out.push_str("impl std::ops::IndexMut<usize> for Parameters {\n");
+    out.push_str("    #[inline]\n");
+    out.push_str(
+        "    fn index_mut(&mut self, index: usize) -> &mut Self::Output { &mut self.values[index] }\n",
+    );
     out.push_str("}\n\n");
 
     out.push_str("impl Parameters {\n");
     out.push_str("    fn new_box() -> Box<Self> {\n");
     if artifact.mir.parameters.is_empty() {
-        out.push_str("        Box::new(Self {\n");
-        out.push_str("        })\n");
+        out.push_str("        Box::new(Self { values: [] })\n");
     } else {
-        out.push_str("        // SAFETY: Parameters is repr(C) and every field is f64; zero bytes are valid 0.0 values, and numeric default chunks are copied into field-order slots.\n");
+        out.push_str("        // SAFETY: every parameter slot is f64, so zero bytes are valid 0.0 values; numeric default chunks are copied into the values array.\n");
         out.push_str("        let mut boxed = Box::<Self>::new_uninit();\n");
         out.push_str("        unsafe {\n");
         out.push_str("            let ptr = boxed.as_mut_ptr();\n");
@@ -16005,13 +16020,10 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    #[inline]\n");
     out.push_str("    fn write_parameter_slot(&mut self, index: usize, value: f64) -> bool {\n");
     out.push_str("        debug_assert!(index < Self::PARAMETER_COUNT, \"generated parameter index out of range\");\n");
-    out.push_str("        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.\n");
-    out.push_str("        unsafe {\n");
-    out.push_str("            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;\n");
-    out.push_str("            let changed = (*ptr.add(index)).to_bits() != value.to_bits();\n");
-    out.push_str("            *ptr.add(index) = value;\n");
-    out.push_str("            changed\n");
-    out.push_str("        }\n");
+    out.push_str("        let slot = &mut self.params.values[index];\n");
+    out.push_str("        let changed = slot.to_bits() != value.to_bits();\n");
+    out.push_str("        *slot = value;\n");
+    out.push_str("        changed\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str(
@@ -16266,27 +16278,6 @@ mod checkpoint_identity_tests {
     }
 }
 
-fn emit_parameter_struct_fields(
-    artifact: &CanonicalIrArtifact,
-    parameter_fields: &HashMap<String, String>,
-    out: &mut String,
-) {
-    const FIELDS_PER_LINE: usize = 8;
-    for chunk in artifact.mir.parameters.chunks(FIELDS_PER_LINE) {
-        out.push_str("    ");
-        let fields = chunk
-            .iter()
-            .map(|parameter| {
-                let field = &parameter_fields[parameter.name.as_str()];
-                format!("pub {field}: f64")
-            })
-            .collect::<Vec<_>>();
-        out.push_str(&fields.join(", "));
-        out.push(',');
-        out.push('\n');
-    }
-}
-
 fn emit_parameter_defaults(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
@@ -16319,7 +16310,7 @@ fn emit_parameter_defaults(
         let default = parameter_default_rust_expr(artifact, parameter, parameter_fields)?;
         out.push_str("            {\n");
         out.push_str("                let params = &mut *ptr;\n");
-        out.push_str(&format!("                params.{field} = {default};\n"));
+        out.push_str(&format!("                params[{field}] = {default};\n"));
         emit_parameter_default_validation(parameter, field, "                ", out)?;
         out.push_str("            }\n");
         index += 1;
@@ -16342,7 +16333,7 @@ fn emit_numeric_parameter_default_chunk(
     let name = format!("DEFAULTS_{chunk_index}");
     emit_f64_const_array(&name, &defaults, out);
     out.push_str(&format!(
-        "            std::ptr::copy_nonoverlapping({name}.as_ptr(), (ptr as *mut f64).add({start}), {});\n",
+        "            std::ptr::copy_nonoverlapping({name}.as_ptr(), (*ptr).values.as_mut_ptr().add({start}), {});\n",
         defaults.len()
     ));
     Ok(())
@@ -16371,7 +16362,7 @@ fn emit_parameter_default_validation(
     if parameter_default_requires_runtime_validation(parameter) {
         let validation = parameter_validation_call(
             parameter.name.as_str(),
-            &format!("params.{field}"),
+            &format!("params[{field}]"),
             parameter.value_type,
             parameter.range.as_ref(),
         )?;
@@ -16889,7 +16880,7 @@ fn lower_parameter_default_expr(
         HirExprKind::Number { value, .. } => Ok(format_f64(*value)),
         HirExprKind::Identifier { name } => parameter_fields
             .get(name.as_str())
-            .map(|field| format!("params.{field}"))
+            .map(|field| format!("params[{field}]"))
             .ok_or_else(|| {
                 unsupported(
                     artifact,
@@ -17179,8 +17170,7 @@ const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 #[inline]
 fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
     debug_assert!(index < PARAMETER_DISPLAY_NAMES.len(), "generated parameter index out of range");
-    // SAFETY: Parameters is repr(C), contains only f64 fields, and every caller validates or generates the index.
-    unsafe { *((parameters as *const Parameters as *const f64).add(index)) }
+    parameters.values[index]
 }
 
 fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), String> {
@@ -36694,7 +36684,7 @@ fn block_uses_path_alias(block: &str, alias: &str) -> bool {
         }
         if let Some(start) = token_start.take()
             && &block[start..index] == alias
-            && block[index..].starts_with('.')
+            && matches!(block[index..].as_bytes().first(), Some(b'.' | b'['))
         {
             return true;
         }
@@ -52363,7 +52353,7 @@ impl CompactAdEmitter<'_> {
 
     fn lower_identifier(&self, name: &str) -> Result<String, RustBackendError> {
         if let Some(field) = self.parameter_fields.get(name) {
-            Ok(format!("AdValue::constant(params.{field})"))
+            Ok(format!("AdValue::constant(params[{field}])"))
         } else if let Some(variable) = self.variables.get(name) {
             if lowered_variable_has_zero_derivatives(variable) {
                 return Ok(format!("AdValue::constant({})", variable.value));
@@ -52569,7 +52559,7 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Number { value, .. } => Ok(Some(format_f64(value))),
             HirExprKind::Identifier { name } => {
                 if let Some(field) = self.parameter_fields.get(name.as_str()) {
-                    Ok(Some(format!("params.{field}")))
+                    Ok(Some(format!("params[{field}]")))
                 } else if let Some(variable) = self.variables.get(name.as_str()) {
                     Ok(lowered_variable_has_zero_derivatives(variable)
                         .then(|| variable.value.clone()))
@@ -52670,7 +52660,7 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Number { value, .. } => Ok(Some(format_f64(value))),
             HirExprKind::Identifier { name } => {
                 if let Some(field) = self.parameter_fields.get(name.as_str()) {
-                    Ok(Some(format!("params.{field}")))
+                    Ok(Some(format!("params[{field}]")))
                 } else if let Some(variable) = self.variables.get(name.as_str()) {
                     Ok(lowered_variable_has_zero_derivatives(variable)
                         .then(|| variable.value.clone()))
@@ -53767,7 +53757,7 @@ impl CompactAdEmitter<'_> {
             HirExprKind::Number { value, .. } => Ok(Some(format_f64(value))),
             HirExprKind::Identifier { name } => {
                 if let Some(field) = self.parameter_fields.get(name.as_str()) {
-                    Ok(Some(format!("params.{field}")))
+                    Ok(Some(format!("params[{field}]")))
                 } else if let Some(variable) = self.variables.get(name.as_str()) {
                     Ok(Some(variable.value.clone()))
                 } else if let Some(index) = self.variable_index(name.as_str())? {
@@ -55294,7 +55284,7 @@ endmodule
             ("state".to_string(), state.clone()),
             ("drive".to_string(), drive),
         ]);
-        let parameter_fields = HashMap::from([("enable".to_string(), "p0".to_string())]);
+        let parameter_fields = HashMap::from([("enable".to_string(), "0".to_string())]);
         let ddt_slots = DdtSlots::default();
         let branch_current_unknowns = HashMap::new();
         let mut out = String::new();
@@ -55317,7 +55307,7 @@ endmodule
             .expect("emit local no-op conditional")
         );
 
-        assert!(out.contains("        if (params.p0 != 0.0) {\n"), "{out}");
+        assert!(out.contains("        if (params[0] != 0.0) {\n"), "{out}");
         assert!(
             out.contains(
                 "            (var_state, var_state_dn0, var_state_dn1, ) = (var_drive, var_drive_dn0, var_drive_dn1, );\n"

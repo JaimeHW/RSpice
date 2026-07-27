@@ -11,7 +11,7 @@ impl Instance {
         nodes: &[usize; Instance::NODE_COUNT],
         multiplicity: f64,
     ) {
-        let nv1 = ctx.node_voltage(nodes[1]);let nv2 = ctx.node_voltage(nodes[2]);let nv4 = ctx.node_voltage(nodes[4]);let eq217_e2707: f64 = (p.p4 * p.p5);let eq217_e2709: f64 = (eq217_e2707 * p.p220);let eq217_e2711: f64 = (eq217_e2709 * (nv1 - nv2));let eq217_e2712_q: f64 = eq217_e2711;let eq217_e2713: f64 = (p.p7 * eq217_e2711);let eq217_e2713_d_n1: f64 = (p.p7 * eq217_e2709);let eq217_e2713_d_n2: f64 = (p.p7 * (-eq217_e2709));let eq217_e2713_q: f64 = (p.p7 * eq217_e2712_q);
+        let nv1 = ctx.node_voltage(nodes[1]);let nv2 = ctx.node_voltage(nodes[2]);let nv4 = ctx.node_voltage(nodes[4]);let eq217_e2707: f64 = (p[4] * p[5]);let eq217_e2709: f64 = (eq217_e2707 * p[220]);let eq217_e2711: f64 = (eq217_e2709 * (nv1 - nv2));let eq217_e2712_q: f64 = eq217_e2711;let eq217_e2713: f64 = (p[7] * eq217_e2711);let eq217_e2713_d_n1: f64 = (p[7] * eq217_e2709);let eq217_e2713_d_n2: f64 = (p[7] * (-eq217_e2709));let eq217_e2713_q: f64 = (p[7] * eq217_e2712_q);
         stamper.stamp_current_reactive_node2_local(
             Some(1),
             Some(2),
@@ -19,32 +19,32 @@ impl Instance {
             multiplicity * (eq217_e2713_d_n1),
             2,
             multiplicity * (eq217_e2713_d_n2),
-        );let eq218_e2716_q: f64 = s.v[196];let eq218_e2717: f64 = (p.p7 * s.v[196]);let eq218_e2717_q: f64 = (p.p7 * eq218_e2716_q);
+        );let eq218_e2716_q: f64 = s.v[196];let eq218_e2717: f64 = (p[7] * s.v[196]);let eq218_e2717_q: f64 = (p[7] * eq218_e2716_q);
         stamper.stamp_current_reactive_dense_local(
             Some(9),
             Some(2),
             &s.dn[196],
             &s.db[196],
-            (multiplicity) * (p.p7),
-        );let eq219_e2720_q: f64 = s.v[197];let eq219_e2721: f64 = (p.p7 * s.v[197]);let eq219_e2721_q: f64 = (p.p7 * eq219_e2720_q);
+            (multiplicity) * (p[7]),
+        );let eq219_e2720_q: f64 = s.v[197];let eq219_e2721: f64 = (p[7] * s.v[197]);let eq219_e2721_q: f64 = (p[7] * eq219_e2720_q);
         stamper.stamp_current_reactive_dense_local(
             Some(2),
             Some(0),
             &s.dn[197],
             &s.db[197],
-            (multiplicity) * (p.p7),
-        );let eq220_e2724_q: f64 = s.v[194];let eq220_e2725: f64 = (p.p7 * s.v[194]);let eq220_e2725_q: f64 = (p.p7 * eq220_e2724_q);
+            (multiplicity) * (p[7]),
+        );let eq220_e2724_q: f64 = s.v[194];let eq220_e2725: f64 = (p[7] * s.v[194]);let eq220_e2725_q: f64 = (p[7] * eq220_e2724_q);
         stamper.stamp_current_reactive_dense_local(
             Some(2),
             Some(0),
             &s.dn[194],
             &s.db[194],
-            (multiplicity) * (p.p7),
+            (multiplicity) * (p[7]),
         );
         let (eq223_e2771, eq223_e2771_d_n4, eq223_e2771_q,) = {
     if s.b[610] {
-        let eq223_e2768: f64 = ((nv4 - 0.0) * p.p33);let eq223_e2769_q: f64 = eq223_e2768;
-        (eq223_e2768, p.p33, eq223_e2769_q,)
+        let eq223_e2768: f64 = ((nv4 - 0.0) * p[33]);let eq223_e2769_q: f64 = eq223_e2768;
+        (eq223_e2768, p[33], eq223_e2769_q,)
     } else {
         (0.0, 0.0, 0.0,)
     }

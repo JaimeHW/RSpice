@@ -8,154 +8,154 @@ impl Instance {
         l: &mut StampLocals,
     ) {
         let (t182,) = {
-    if (p.p33 > 0.01) {
-        (p.p33,)
+    if (p[33] > 0.01) {
+        (p[33],)
     } else {
         (0.01,)
     }
 };
         l.f5c5 = t182;l.f5c6 = 0.0;
         let (t183,) = {
-    if (p.p34 > 0.0) {
-        (p.p34,)
+    if (p[34] > 0.0) {
+        (p[34],)
     } else {
         (0.0,)
     }
 };
         l.f24 = t183;l.f25 = 0.0;
         let (t19c,) = {
-    if (p.p35 > 0.0) {
-        (p.p35,)
+    if (p[35] > 0.0) {
+        (p[35],)
     } else {
         (0.0,)
     }
 };
         l.f28 = t19c;l.f29 = 0.0;
         let (t1a1,) = {
-    if (p.p36 > 0.0) {
-        (p.p36,)
+    if (p[36] > 0.0) {
+        (p[36],)
     } else {
         (0.0,)
     }
 };
-        l.f26 = t1a1;l.f27 = 0.0;l.fa5 = p.p37;l.fa6 = 0.0;l.fa9 = p.p38;l.faa = 0.0;l.fa7 = p.p39;l.fa8 = 0.0;l.f6c6 = p.p40;l.f6c7 = 0.0;l.f6ca = p.p41;l.f6cb = 0.0;l.f6c8 = p.p42;l.f6c9 = 0.0;
+        l.f26 = t1a1;l.f27 = 0.0;l.fa5 = p[37];l.fa6 = 0.0;l.fa9 = p[38];l.faa = 0.0;l.fa7 = p[39];l.fa8 = 0.0;l.f6c6 = p[40];l.f6c7 = 0.0;l.f6ca = p[41];l.f6cb = 0.0;l.f6c8 = p[42];l.f6c9 = 0.0;
         let (t1ee,) = {
-    if (p.p43 > 0.1) {
-        (p.p43,)
+    if (p[43] > 0.1) {
+        (p[43],)
     } else {
         (0.1,)
     }
 };
         l.f783 = t1ee;l.f784 = 0.0;
         let (t207,) = {
-    if (p.p44 > 0.1) {
-        (p.p44,)
+    if (p[44] > 0.1) {
+        (p[44],)
     } else {
         (0.1,)
     }
 };
         l.f78d = t207;l.f78e = 0.0;
         let (t224,) = {
-    if (p.p45 > 0.1) {
-        (p.p45,)
+    if (p[45] > 0.1) {
+        (p[45],)
     } else {
         (0.1,)
     }
 };
         l.f785 = t224;l.f786 = 0.0;
         let (t28c,) = {
-    if (p.p46 > 0.1) {
-        (p.p46,)
+    if (p[46] > 0.1) {
+        (p[46],)
     } else {
         (0.1,)
     }
 };
         l.f625 = t28c;l.f626 = 0.0;
         let (t2a7,) = {
-    if (p.p47 > 0.1) {
-        (p.p47,)
+    if (p[47] > 0.1) {
+        (p[47],)
     } else {
         (0.1,)
     }
 };
         l.f629 = t2a7;l.f62a = 0.0;
         let (t2b3,) = {
-    if (p.p48 > 0.1) {
-        (p.p48,)
+    if (p[48] > 0.1) {
+        (p[48],)
     } else {
         (0.1,)
     }
 };
-        l.f627 = t2b3;l.f628 = 0.0;l.fc1 = p.p7;l.fc2 = 0.0;
+        l.f627 = t2b3;l.f628 = 0.0;l.fc1 = p[7];l.fc2 = 0.0;
         let (t2b4,) = {
-    if (p.p56 > 0.0) {
-        (p.p56,)
+    if (p[56] > 0.0) {
+        (p[56],)
     } else {
         (0.0,)
     }
 };
-        l.f711 = t2b4;l.f712 = 0.0;l.f6cd = p.p57;l.f6ce = 0.0;l.f6cf = p.p58;l.f6d0 = 0.0;l.f6d5 = p.p59;l.f6d6 = 0.0;l.f6d7 = p.p60;l.f6d8 = 0.0;l.f6d1 = p.p61;l.f6d2 = 0.0;l.f6d3 = p.p62;l.f6d4 = 0.0;
+        l.f711 = t2b4;l.f712 = 0.0;l.f6cd = p[57];l.f6ce = 0.0;l.f6cf = p[58];l.f6d0 = 0.0;l.f6d5 = p[59];l.f6d6 = 0.0;l.f6d7 = p[60];l.f6d8 = 0.0;l.f6d1 = p[61];l.f6d2 = 0.0;l.f6d3 = p[62];l.f6d4 = 0.0;
         let (t2b5,) = {
-    if (p.p63 > 0.1) {
-        (p.p63,)
+    if (p[63] > 0.1) {
+        (p[63],)
     } else {
         (0.1,)
     }
 };
         l.f5e5 = t2b5;l.f5e6 = 0.0;
         let (t2b6,) = {
-    if (p.p64 > 0.1) {
-        (p.p64,)
+    if (p[64] > 0.1) {
+        (p[64],)
     } else {
         (0.1,)
     }
 };
         l.f5e9 = t2b6;l.f5ea = 0.0;
         let (t2b7,) = {
-    if (p.p65 > 0.1) {
-        (p.p65,)
+    if (p[65] > 0.1) {
+        (p[65],)
     } else {
         (0.1,)
     }
 };
         l.f5e7 = t2b7;l.f5e8 = 0.0;
         let (t2b8,) = {
-    if (p.p76 > 0.1) {
-        (p.p76,)
+    if (p[76] > 0.1) {
+        (p[76],)
     } else {
         (0.1,)
     }
 };
         l.f80e = t2b8;l.f80f = 0.0;
         let (t2b9,) = {
-    if (p.p77 > 0.0) {
-        (p.p77,)
+    if (p[77] > 0.0) {
+        (p[77],)
     } else {
         (0.0,)
     }
 };
         l.f6b4 = t2b9;l.f6b5 = 0.0;
         let (t2ba,) = {
-    if (p.p78 > 0.0) {
-        (p.p78,)
+    if (p[78] > 0.0) {
+        (p[78],)
     } else {
         (0.0,)
     }
 };
-        l.f6b6 = t2ba;l.f6b7 = 0.0;l.f6d9 = 0.0;l.f6da = 0.0;let t2bb: f64 = if p.p81 > 0.5 { 1.0 } else { 0.0 };l.f1ad = t2bb;l.f282 = 0.0;
+        l.f6b6 = t2ba;l.f6b7 = 0.0;l.f6d9 = 0.0;l.f6da = 0.0;let t2bb: f64 = if p[81] > 0.5 { 1.0 } else { 0.0 };l.f1ad = t2bb;l.f282 = 0.0;
         if (l.f1ad != 0.0) {l.f6d9 = 1.0;l.f6da = 0.0;}
         if (l.f1ad == 0.0) {l.f6d9 = 0.0;l.f6da = 0.0;}
         let (t2bc,) = {
-    if (p.p82 > 0.5) {
-        (p.p82,)
+    if (p[82] > 0.5) {
+        (p[82],)
     } else {
         (0.5,)
     }
 };
         l.f7ab = t2bc;l.f7ac = 0.0;
         let (t2bd,) = {
-    if (p.p83 > 0.0) {
-        (p.p83,)
+    if (p[83] > 0.0) {
+        (p[83],)
     } else {
         (0.0,)
     }
@@ -168,7 +168,7 @@ impl Instance {
         p: &Parameters,
         l: &mut StampLocals,
     ) {
-        let ctx_temp = ctx.temperature();let t2bf: f64 = ctx_temp;let t2c0: f64 = (t2bf + p.p102);let t2c1: f64 = (-250.0);let t2c2: f64 = (273.15 + t2c1);let t2c3: f64 = (t2c0).max(t2c2);l.f6e7 = t2c3;l.f6e8 = 0.0;let t2c4: f64 = (l.f6e7 / l.f6e9);l.f14 = t2c4;l.f15 = 0.0;let t2c5: f64 = (1.3806505e-23 / 1.6021918e-19);l.f5a5 = t2c5;l.f5a6 = 0.0;let t2c6: f64 = (l.f5a5 * l.f6e9);l.f647 = t2c6;l.f648 = 0.0;let t2c7: f64 = (1.0 / l.f647);l.f649 = t2c7;l.f64a = 0.0;let t2c8: f64 = (l.f5a5 * l.f6e7);l.f643 = t2c8;l.f644 = 0.0;let t2c9: f64 = (1.0 / l.f643);l.f645 = t2c9;l.f646 = 0.0;let t2ca: f64 = (0.000702 * l.f6e9);let t2cb: f64 = (t2ca * l.f6e9);let t2cc: f64 = (-t2cb);let t2cd: f64 = (1108.0 + l.f6e9);let t2ce: f64 = (t2cc / t2cd);l.f4f = t2ce;l.f50 = 0.0;let t2cf: f64 = (l.f631 + l.f4f);l.f63b = t2cf;l.f63c = 0.0;let t2d0: f64 = (l.f641 + l.f4f);l.f63f = t2d0;l.f640 = 0.0;let t2d1: f64 = (l.f639 + l.f4f);l.f63d = t2d1;l.f63e = 0.0;let t2d2: f64 = (0.000702 * l.f6e7);let t2d3: f64 = (t2d2 * l.f6e7);let t2d4: f64 = (-t2d3);let t2d5: f64 = (1108.0 + l.f6e7);let t2d6: f64 = (t2d4 / t2d5);l.f4d = t2d6;l.f4e = 0.0;let t2d7: f64 = (l.f631 + l.f4d);l.f633 = t2d7;l.f634 = 0.0;let t2d8: f64 = (l.f641 + l.f4d);l.f637 = t2d8;l.f638 = 0.0;let t2d9: f64 = (l.f639 + l.f4d);l.f635 = t2d9;l.f636 = 0.0;let t2da: f64 = (l.f80e / 2.0);let t2db: f64 = (l.f14).powf(t2da);let t2dc: f64 = (l.f63b * l.f649);let t2dd: f64 = (l.f633 * l.f645);let t2de: f64 = (t2dc - t2dd);let t2df: f64 = (0.5 * t2de);let t2e0: f64 = (t2df).exp();let t2e1: f64 = (t2db * t2e0);l.fc9 = t2e1;l.fcc = 0.0;let t0: f64 = (l.f80e / 2.0);let t1: f64 = (l.f14).powf(t0);let t2: f64 = (l.f63f * l.f649);let t3: f64 = (l.f637 * l.f645);let t4: f64 = (t2 - t3);let t5: f64 = (0.5 * t4);let t6: f64 = (t5).exp();let t7: f64 = (t1 * t6);l.fd1 = t7;l.fd4 = 0.0;let t8: f64 = (l.f80e / 2.0);let t9: f64 = (l.f14).powf(t8);let ta: f64 = (l.f63d * l.f649);let tb: f64 = (l.f635 * l.f645);let tc: f64 = (ta - tb);let td: f64 = (0.5 * tc);let te: f64 = (td).exp();let tf: f64 = (t9 * te);l.fcd = tf;l.fd0 = 0.0;
+        let ctx_temp = ctx.temperature();let t2bf: f64 = ctx_temp;let t2c0: f64 = (t2bf + p[102]);let t2c1: f64 = (-250.0);let t2c2: f64 = (273.15 + t2c1);let t2c3: f64 = (t2c0).max(t2c2);l.f6e7 = t2c3;l.f6e8 = 0.0;let t2c4: f64 = (l.f6e7 / l.f6e9);l.f14 = t2c4;l.f15 = 0.0;let t2c5: f64 = (1.3806505e-23 / 1.6021918e-19);l.f5a5 = t2c5;l.f5a6 = 0.0;let t2c6: f64 = (l.f5a5 * l.f6e9);l.f647 = t2c6;l.f648 = 0.0;let t2c7: f64 = (1.0 / l.f647);l.f649 = t2c7;l.f64a = 0.0;let t2c8: f64 = (l.f5a5 * l.f6e7);l.f643 = t2c8;l.f644 = 0.0;let t2c9: f64 = (1.0 / l.f643);l.f645 = t2c9;l.f646 = 0.0;let t2ca: f64 = (0.000702 * l.f6e9);let t2cb: f64 = (t2ca * l.f6e9);let t2cc: f64 = (-t2cb);let t2cd: f64 = (1108.0 + l.f6e9);let t2ce: f64 = (t2cc / t2cd);l.f4f = t2ce;l.f50 = 0.0;let t2cf: f64 = (l.f631 + l.f4f);l.f63b = t2cf;l.f63c = 0.0;let t2d0: f64 = (l.f641 + l.f4f);l.f63f = t2d0;l.f640 = 0.0;let t2d1: f64 = (l.f639 + l.f4f);l.f63d = t2d1;l.f63e = 0.0;let t2d2: f64 = (0.000702 * l.f6e7);let t2d3: f64 = (t2d2 * l.f6e7);let t2d4: f64 = (-t2d3);let t2d5: f64 = (1108.0 + l.f6e7);let t2d6: f64 = (t2d4 / t2d5);l.f4d = t2d6;l.f4e = 0.0;let t2d7: f64 = (l.f631 + l.f4d);l.f633 = t2d7;l.f634 = 0.0;let t2d8: f64 = (l.f641 + l.f4d);l.f637 = t2d8;l.f638 = 0.0;let t2d9: f64 = (l.f639 + l.f4d);l.f635 = t2d9;l.f636 = 0.0;let t2da: f64 = (l.f80e / 2.0);let t2db: f64 = (l.f14).powf(t2da);let t2dc: f64 = (l.f63b * l.f649);let t2dd: f64 = (l.f633 * l.f645);let t2de: f64 = (t2dc - t2dd);let t2df: f64 = (0.5 * t2de);let t2e0: f64 = (t2df).exp();let t2e1: f64 = (t2db * t2e0);l.fc9 = t2e1;l.fcc = 0.0;let t0: f64 = (l.f80e / 2.0);let t1: f64 = (l.f14).powf(t0);let t2: f64 = (l.f63f * l.f649);let t3: f64 = (l.f637 * l.f645);let t4: f64 = (t2 - t3);let t5: f64 = (0.5 * t4);let t6: f64 = (t5).exp();let t7: f64 = (t1 * t6);l.fd1 = t7;l.fd4 = 0.0;let t8: f64 = (l.f80e / 2.0);let t9: f64 = (l.f14).powf(t8);let ta: f64 = (l.f63d * l.f649);let tb: f64 = (l.f635 * l.f645);let tc: f64 = (ta - tb);let td: f64 = (0.5 * tc);let te: f64 = (td).exp();let tf: f64 = (t9 * te);l.fcd = tf;l.fd0 = 0.0;
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_3(
@@ -213,18 +213,18 @@ impl Instance {
         p: &Parameters,
         l: &mut StampLocals,
     ) {
-        let tee: f64 = (l.fc5 * l.fc5);let tef: f64 = (l.f627 - 1.0);let tf0: f64 = (l.f2).powf(tef);let tf1: f64 = (tee * tf0);let tf2: f64 = (-tf1);let tf3: f64 = (tf2 * l.f627);let tf4: f64 = (tf3 * l.f789);l.f6bc = tf4;l.f6bd = 0.0;let tf5: f64 = (p.p87 * 1000000.0);l.f5df = tf5;l.f5e0 = 0.0;let tf6: f64 = (p.p89 * 1000000.0);l.f5e3 = tf6;l.f5e4 = 0.0;let tf7: f64 = (p.p88 * 1000000.0);l.f5e1 = tf7;l.f5e2 = 0.0;l.f5dd = l.f5df;l.f5de = 0.0;l.f609 = l.f5e5;l.f60a = 0.0;let tf8: f64 = (1450.0 * 0.0001);l.f5d9 = tf8;l.f5da = 0.0;let tf9: f64 = (500.0 * 0.0001);l.f5db = tf9;l.f5dc = 0.0;l.f61f = 0.6;l.f620 = 0.0;l.f5a3 = 0.001;l.f5a4 = 0.0;let tfa: f64 = (1.45e16 * l.fca);l.f5eb = tfa;l.f5ec = 0.0;let tfb: f64 = (l.f5eb * l.f5eb);let tfc: f64 = (tfb / l.f5dd);l.f64d = tfc;l.f64e = 0.0;let tfd: f64 = (-1.5);let tfe: f64 = (l.f14).powf(tfd);l.f6db = tfe;l.f6dc = 0.0;let tff: f64 = (l.f5d9 * l.f6db);let t100: f64 = (tff / l.f645);l.f59 = t100;l.f5a = 0.0;let t101: f64 = (l.f5db * l.f6db);let t102: f64 = (t101 / l.f645);l.f5f = t102;l.f60 = 0.0;let t103: f64 = (2.0 * l.f59);let t104: f64 = (t103 * l.f5f);let t105: f64 = (l.f59 + l.f5f);let t106: f64 = (t104 / t105);l.f45 = t106;l.f46 = 0.0;let t107: f64 = (l.f14).powf(p.p97);l.f6dd = t107;l.f6de = 0.0;let t108: f64 = (p.p93 * l.f6dd);l.f6df = t108;l.f6e0 = 0.0;let t109: f64 = (l.f6df * l.f45);let t10a: f64 = (t109).sqrt();l.f5ad = t10a;l.f5ae = 0.0;let t10b: f64 = (l.f609 / l.f645);let t10c: f64 = (l.f5dd / l.f64d);let t10d: f64 = (t10c).ln();let t10e: f64 = (t10b * t10d);l.f741 = t10e;l.f742 = 0.0;let t10f: f64 = (l.f609 / l.f645);let t110: f64 = (l.f5dd / l.f64d);let t111: f64 = (t110).ln();let t112: f64 = (p.p94 / l.f5ad);let t113: f64 = (t111 + t112);let t114: f64 = (t10f * t113);l.f743 = t114;l.f744 = 0.0;
+        let tee: f64 = (l.fc5 * l.fc5);let tef: f64 = (l.f627 - 1.0);let tf0: f64 = (l.f2).powf(tef);let tf1: f64 = (tee * tf0);let tf2: f64 = (-tf1);let tf3: f64 = (tf2 * l.f627);let tf4: f64 = (tf3 * l.f789);l.f6bc = tf4;l.f6bd = 0.0;let tf5: f64 = (p[87] * 1000000.0);l.f5df = tf5;l.f5e0 = 0.0;let tf6: f64 = (p[89] * 1000000.0);l.f5e3 = tf6;l.f5e4 = 0.0;let tf7: f64 = (p[88] * 1000000.0);l.f5e1 = tf7;l.f5e2 = 0.0;l.f5dd = l.f5df;l.f5de = 0.0;l.f609 = l.f5e5;l.f60a = 0.0;let tf8: f64 = (1450.0 * 0.0001);l.f5d9 = tf8;l.f5da = 0.0;let tf9: f64 = (500.0 * 0.0001);l.f5db = tf9;l.f5dc = 0.0;l.f61f = 0.6;l.f620 = 0.0;l.f5a3 = 0.001;l.f5a4 = 0.0;let tfa: f64 = (1.45e16 * l.fca);l.f5eb = tfa;l.f5ec = 0.0;let tfb: f64 = (l.f5eb * l.f5eb);let tfc: f64 = (tfb / l.f5dd);l.f64d = tfc;l.f64e = 0.0;let tfd: f64 = (-1.5);let tfe: f64 = (l.f14).powf(tfd);l.f6db = tfe;l.f6dc = 0.0;let tff: f64 = (l.f5d9 * l.f6db);let t100: f64 = (tff / l.f645);l.f59 = t100;l.f5a = 0.0;let t101: f64 = (l.f5db * l.f6db);let t102: f64 = (t101 / l.f645);l.f5f = t102;l.f60 = 0.0;let t103: f64 = (2.0 * l.f59);let t104: f64 = (t103 * l.f5f);let t105: f64 = (l.f59 + l.f5f);let t106: f64 = (t104 / t105);l.f45 = t106;l.f46 = 0.0;let t107: f64 = (l.f14).powf(p[97]);l.f6dd = t107;l.f6de = 0.0;let t108: f64 = (p[93] * l.f6dd);l.f6df = t108;l.f6e0 = 0.0;let t109: f64 = (l.f6df * l.f45);let t10a: f64 = (t109).sqrt();l.f5ad = t10a;l.f5ae = 0.0;let t10b: f64 = (l.f609 / l.f645);let t10c: f64 = (l.f5dd / l.f64d);let t10d: f64 = (t10c).ln();let t10e: f64 = (t10b * t10d);l.f741 = t10e;l.f742 = 0.0;let t10f: f64 = (l.f609 / l.f645);let t110: f64 = (l.f5dd / l.f64d);let t111: f64 = (t110).ln();let t112: f64 = (p[94] / l.f5ad);let t113: f64 = (t111 + t112);let t114: f64 = (t10f * t113);l.f743 = t114;l.f744 = 0.0;
         let (t115,) = {
-    if (p.p99 > 0.0) {
-        (p.p99,)
+    if (p[99] > 0.0) {
+        (p[99],)
     } else {
         (0.0,)
     }
 };
         let t116: f64 = (t115 * l.f6b4);let t117: f64 = (t116 * l.f6b4);let t118: f64 = (t117 * l.f6b8);let t119: f64 = (t118 * l.f6b8);l.f0 = t119;l.f1 = 0.0;
         let (t11a,) = {
-    if (p.p100 > 0.0) {
-        (p.p100,)
+    if (p[100] > 0.0) {
+        (p[100],)
     } else {
         (0.0,)
     }
@@ -237,8 +237,8 @@ impl Instance {
         l: &mut StampLocals,
     ) {
         let (t11d,) = {
-    if (p.p101 > 0.0) {
-        (p.p101,)
+    if (p[101] > 0.0) {
+        (p[101],)
     } else {
         (0.0,)
     }
@@ -281,9 +281,9 @@ impl Instance {
         p: &Parameters,
         l: &mut StampLocals,
     ) {
-        let t189: f64 = (p.p94 - l.f7bd);let t18a: f64 = (t189 - 1e-7);(l.f6f3, l.f6f4, l.f6f5, ) = (t18a, (-l.f7be), (-l.f7bf), );l.f6f6 = 0.0;let t18b: f64 = (4.0 * p.p94);let t18c: f64 = (t18b * 1e-7);(l.f6f7, l.f6f8, l.f6f9, ) = (t18c, 0.0, 0.0, );l.f6fa = 0.0;
+        let t189: f64 = (p[94] - l.f7bd);let t18a: f64 = (t189 - 1e-7);(l.f6f3, l.f6f4, l.f6f5, ) = (t18a, (-l.f7be), (-l.f7bf), );l.f6f6 = 0.0;let t18b: f64 = (4.0 * p[94]);let t18c: f64 = (t18b * 1e-7);(l.f6f7, l.f6f8, l.f6f9, ) = (t18c, 0.0, 0.0, );l.f6fa = 0.0;
         if (!(l.f6f7 > 0.0)) {let t18d: f64 = (-l.f6f7);(l.f6f7, l.f6f8, l.f6f9, ) = (t18d, (-l.f6f8), (-l.f6f9), );l.f6fa = 0.0;}
-        let t18e: f64 = (l.f6f3 * l.f6f3);let t18f: f64 = (t18e + l.f6f7);let t190: f64 = (t18f).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t190, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t190)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t190)), );l.f6fa = 0.0;let t191: f64 = (l.f6f3 + l.f6f7);let t192: f64 = (0.5 * t191);let t193: f64 = (p.p94 - t192);(l.f7bd, l.f7be, l.f7bf, ) = (t193, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f7c0 = 0.0;let t194: f64 = if l.f6d9 > 0.9 { 1.0 } else { 0.0 };l.f22a = t194;l.f23f = 0.0;let t195: f64 = (l.f5e5 - l.f5e7);let t196: f64 = (t195).abs();let t197: f64 = (l.f5e5 - l.f5e9);let t198: f64 = (t197).abs();let t199: f64 = (l.f5e7 - l.f5e9);let t19a: f64 = (t199).abs();let t19b: f64 = if (((((t196 > 1e-6) && (l.f0 > 0.0)) && (l.f5af > 0.0)) || (((t198 > 1e-6) && (l.f0 > 0.0)) && (l.f5b1 > 0.0))) || (((t19a > 1e-6) && (l.f5af > 0.0)) && (l.f5b1 > 0.0))) { 1.0 } else { 0.0 };l.f240 = t19b;l.f255 = 0.0;
+        let t18e: f64 = (l.f6f3 * l.f6f3);let t18f: f64 = (t18e + l.f6f7);let t190: f64 = (t18f).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t190, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t190)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t190)), );l.f6fa = 0.0;let t191: f64 = (l.f6f3 + l.f6f7);let t192: f64 = (0.5 * t191);let t193: f64 = (p[94] - t192);(l.f7bd, l.f7be, l.f7bf, ) = (t193, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f7c0 = 0.0;let t194: f64 = if l.f6d9 > 0.9 { 1.0 } else { 0.0 };l.f22a = t194;l.f23f = 0.0;let t195: f64 = (l.f5e5 - l.f5e7);let t196: f64 = (t195).abs();let t197: f64 = (l.f5e5 - l.f5e9);let t198: f64 = (t197).abs();let t199: f64 = (l.f5e7 - l.f5e9);let t19a: f64 = (t199).abs();let t19b: f64 = if (((((t196 > 1e-6) && (l.f0 > 0.0)) && (l.f5af > 0.0)) || (((t198 > 1e-6) && (l.f0 > 0.0)) && (l.f5b1 > 0.0))) || (((t19a > 1e-6) && (l.f5af > 0.0)) && (l.f5b1 > 0.0))) { 1.0 } else { 0.0 };l.f240 = t19b;l.f255 = 0.0;
         if ((l.f22a != 0.0) && (l.f240 != 0.0)) {l.f6d9 = 0.0;l.f6da = 0.0;}
         let t19d: f64 = if l.f0 > 0.0 { 1.0 } else { 0.0 };l.f256 = t19d;l.f26b = 0.0;
         if (((l.f22a != 0.0) && (l.f240 == 0.0)) && (l.f256 != 0.0)) {l.f5c9 = l.f5e5;l.f5ca = 0.0;}
@@ -314,15 +314,15 @@ impl Instance {
         if (((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4af == 0.0)) && (l.f4b1 != 0.0)) {let t1c3: f64 = (-230.25850929940458);let t1c4: f64 = (l.f737 * l.f645);let t1c5: f64 = (0.5 * t1c4);let t1c6: f64 = (t1c3 - t1c5);let t1c7: f64 = (-230.25850929940458);let t1c8: f64 = (l.f737 * l.f645);let t1c9: f64 = (0.5 * t1c8);let t1ca: f64 = (t1c7 - t1c9);let t1cb: f64 = (-230.25850929940458);let t1cc: f64 = (l.f737 * l.f645);let t1cd: f64 = (0.5 * t1cc);let t1ce: f64 = (t1cb - t1cd);let t1cf: f64 = (t1ce * 0.3333333333333333);let t1d0: f64 = (1.0 + t1cf);let t1d1: f64 = (t1ca * t1d0);let t1d2: f64 = (0.5 * t1d1);let t1d3: f64 = (1.0 + t1d2);let t1d4: f64 = (t1c6 * t1d3);let t1d5: f64 = (1.0 + t1d4);let t1d6: f64 = (1e-100 / t1d5);l.f825 = t1d6;l.f826 = 0.0;}
         if (((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4af == 0.0)) && (l.f4b1 == 0.0)) {let t1d7: f64 = (l.f737 * l.f645);let t1d8: f64 = (0.5 * t1d7);let t1d9: f64 = (t1d8 - 230.25850929940458);let t1da: f64 = (l.f737 * l.f645);let t1db: f64 = (0.5 * t1da);let t1dc: f64 = (t1db - 230.25850929940458);let t1dd: f64 = (l.f737 * l.f645);let t1de: f64 = (0.5 * t1dd);let t1df: f64 = (t1de - 230.25850929940458);let t1e0: f64 = (t1df * 0.3333333333333333);let t1e1: f64 = (1.0 + t1e0);let t1e2: f64 = (t1dc * t1e1);let t1e3: f64 = (0.5 * t1e2);let t1e4: f64 = (1.0 + t1e3);let t1e5: f64 = (t1d9 * t1e4);let t1e6: f64 = (1.0 + t1e5);let t1e7: f64 = (1e100 * t1e6);l.f825 = t1e7;l.f826 = 0.0;}
         if (((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) {let t1e8: f64 = (l.f5eb * l.f5eb);let t1e9: f64 = (t1e8 / l.f5df);l.f64f = t1e9;l.f650 = 0.0;let t1ea: f64 = (l.f5e5 / l.f645);let t1eb: f64 = (l.f5df / l.f64f);let t1ec: f64 = (t1eb).ln();let t1ed: f64 = (t1ea * t1ec);l.f793 = t1ed;l.f794 = 0.0;}
-        let t1ef: f64 = if l.f5e5 < p.p85 { 1.0 } else { 0.0 };l.f4b5 = t1ef;l.f4b6 = 0.0;
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t1f0: f64 = (l.f737 - l.f793);let t1f1: f64 = (p.p86 * t1f0);let t1f2: f64 = (t1f1 + l.f5e5);(l.f601, l.f602, l.f603, ) = (t1f2, 0.0, 0.0, );l.f604 = 0.0;let t1f3: f64 = (p.p86 * l.f793);let t1f4: f64 = (l.f5e5 - t1f3);(l.f5ed, l.f5ee, l.f5ef, ) = (t1f4, 0.0, 0.0, );l.f5f0 = 0.0;let t1f5: f64 = (p.p85 - l.f601);let t1f6: f64 = (t1f5 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t1f6, (-l.f602), (-l.f603), );l.f6f6 = 0.0;}
+        let t1ef: f64 = if l.f5e5 < p[85] { 1.0 } else { 0.0 };l.f4b5 = t1ef;l.f4b6 = 0.0;
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t1f0: f64 = (l.f737 - l.f793);let t1f1: f64 = (p[86] * t1f0);let t1f2: f64 = (t1f1 + l.f5e5);(l.f601, l.f602, l.f603, ) = (t1f2, 0.0, 0.0, );l.f604 = 0.0;let t1f3: f64 = (p[86] * l.f793);let t1f4: f64 = (l.f5e5 - t1f3);(l.f5ed, l.f5ee, l.f5ef, ) = (t1f4, 0.0, 0.0, );l.f5f0 = 0.0;let t1f5: f64 = (p[85] - l.f601);let t1f6: f64 = (t1f5 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t1f6, (-l.f602), (-l.f603), );l.f6f6 = 0.0;}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_14(
         p: &Parameters,
         l: &mut StampLocals,
     ) {
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t1f7: f64 = (4.0 * p.p85);let t1f8: f64 = (t1f7 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t1f8, 0.0, 0.0, );l.f6fa = 0.0;}
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t1f7: f64 = (4.0 * p[85]);let t1f8: f64 = (t1f7 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t1f8, 0.0, 0.0, );l.f6fa = 0.0;}
         if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {
             let (t1fa, t1fb, t1fc,) = {
     if (l.f6f7 > 0.0) {
@@ -334,7 +334,7 @@ impl Instance {
 };
             (l.f6f7, l.f6f8, l.f6f9, ) = (t1fa, t1fb, t1fc, );l.f6fa = 0.0;
         }
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t1fd: f64 = (l.f6f3 * l.f6f3);let t1fe: f64 = (t1fd + l.f6f7);let t1ff: f64 = (t1fe).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t1ff, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t1ff)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t1ff)), );l.f6fa = 0.0;let t200: f64 = (l.f6f3 + l.f6f7);let t201: f64 = (0.5 * t200);let t202: f64 = (p.p85 - t201);(l.f605, l.f606, l.f607, ) = (t202, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f608 = 0.0;let t203: f64 = (l.f605 - l.f5e5);let t204: f64 = (t203 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t204, l.f606, l.f607, );l.f6f6 = 0.0;let t205: f64 = (4.0 * l.f5e5);let t206: f64 = (t205 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t206, 0.0, 0.0, );l.f6fa = 0.0;}
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t1fd: f64 = (l.f6f3 * l.f6f3);let t1fe: f64 = (t1fd + l.f6f7);let t1ff: f64 = (t1fe).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t1ff, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t1ff)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t1ff)), );l.f6fa = 0.0;let t200: f64 = (l.f6f3 + l.f6f7);let t201: f64 = (0.5 * t200);let t202: f64 = (p[85] - t201);(l.f605, l.f606, l.f607, ) = (t202, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f608 = 0.0;let t203: f64 = (l.f605 - l.f5e5);let t204: f64 = (t203 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t204, l.f606, l.f607, );l.f6f6 = 0.0;let t205: f64 = (4.0 * l.f5e5);let t206: f64 = (t205 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t206, 0.0, 0.0, );l.f6fa = 0.0;}
         if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {
             let (t209, t20a, t20b,) = {
     if (l.f6f7 > 0.0) {
@@ -346,7 +346,7 @@ impl Instance {
 };
             (l.f6f7, l.f6f8, l.f6f9, ) = (t209, t20a, t20b, );l.f6fa = 0.0;
         }
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t20c: f64 = (l.f6f3 * l.f6f3);let t20d: f64 = (t20c + l.f6f7);let t20e: f64 = (t20d).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t20e, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t20e)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t20e)), );l.f6fa = 0.0;let t20f: f64 = (l.f6f3 + l.f6f7);let t210: f64 = (0.5 * t20f);let t211: f64 = (l.f5e5 + t210);(l.f5f1, l.f5f2, l.f5f3, ) = (t211, (0.5 * (l.f6f4 + l.f6f8)), (0.5 * (l.f6f5 + l.f6f9)), );l.f5f4 = 0.0;let t212: f64 = (p.p85 - l.f5ed);let t213: f64 = (t212 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t213, (-l.f5ee), (-l.f5ef), );l.f6f6 = 0.0;let t214: f64 = (4.0 * p.p85);let t215: f64 = (t214 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t215, 0.0, 0.0, );l.f6fa = 0.0;}
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t20c: f64 = (l.f6f3 * l.f6f3);let t20d: f64 = (t20c + l.f6f7);let t20e: f64 = (t20d).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t20e, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t20e)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t20e)), );l.f6fa = 0.0;let t20f: f64 = (l.f6f3 + l.f6f7);let t210: f64 = (0.5 * t20f);let t211: f64 = (l.f5e5 + t210);(l.f5f1, l.f5f2, l.f5f3, ) = (t211, (0.5 * (l.f6f4 + l.f6f8)), (0.5 * (l.f6f5 + l.f6f9)), );l.f5f4 = 0.0;let t212: f64 = (p[85] - l.f5ed);let t213: f64 = (t212 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t213, (-l.f5ee), (-l.f5ef), );l.f6f6 = 0.0;let t214: f64 = (4.0 * p[85]);let t215: f64 = (t214 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t215, 0.0, 0.0, );l.f6fa = 0.0;}
         if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {
             let (t217, t218, t219,) = {
     if (l.f6f7 > 0.0) {
@@ -358,7 +358,7 @@ impl Instance {
 };
             (l.f6f7, l.f6f8, l.f6f9, ) = (t217, t218, t219, );l.f6fa = 0.0;
         }
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t21a: f64 = (l.f6f3 * l.f6f3);let t21b: f64 = (t21a + l.f6f7);let t21c: f64 = (t21b).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t21c, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t21c)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t21c)), );l.f6fa = 0.0;let t21d: f64 = (l.f6f3 + l.f6f7);let t21e: f64 = (0.5 * t21d);let t21f: f64 = (p.p85 - t21e);(l.f5ed, l.f5ee, l.f5ef, ) = (t21f, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f5f0 = 0.0;let t220: f64 = (l.f5ed - l.f5e5);let t221: f64 = (t220 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t221, l.f5ee, l.f5ef, );l.f6f6 = 0.0;let t222: f64 = (4.0 * l.f5e5);let t223: f64 = (t222 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t223, 0.0, 0.0, );l.f6fa = 0.0;}
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {let t21a: f64 = (l.f6f3 * l.f6f3);let t21b: f64 = (t21a + l.f6f7);let t21c: f64 = (t21b).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t21c, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t21c)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t21c)), );l.f6fa = 0.0;let t21d: f64 = (l.f6f3 + l.f6f7);let t21e: f64 = (0.5 * t21d);let t21f: f64 = (p[85] - t21e);(l.f5ed, l.f5ee, l.f5ef, ) = (t21f, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f5f0 = 0.0;let t220: f64 = (l.f5ed - l.f5e5);let t221: f64 = (t220 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t221, l.f5ee, l.f5ef, );l.f6f6 = 0.0;let t222: f64 = (4.0 * l.f5e5);let t223: f64 = (t222 * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t223, 0.0, 0.0, );l.f6fa = 0.0;}
         if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b5 != 0.0)) {
             let (t226, t227, t228,) = {
     if (l.f6f7 > 0.0) {
@@ -378,20 +378,20 @@ impl Instance {
         p: &Parameters,
         l: &mut StampLocals,
     ) {
-        let t22f: f64 = (l.f737 / l.f5f1);let t230: f64 = (l.f5f1 - l.f5ed);let t231: f64 = (l.f793 * t230);let t232: f64 = (l.f5ed * p.p85);let t233: f64 = (t231 / t232);let t234: f64 = (t22f + t233);let t235: f64 = (l.f645 * t234);let t236: f64 = (t235).abs();let t237: f64 = if t236 < 230.25850929940458 { 1.0 } else { 0.0 };l.f4b7 = t237;l.f4b8 = 0.0;
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b7 != 0.0)) {let t238: f64 = (l.f737 / l.f5f1);let t239: f64 = (l.f5f1 - l.f5ed);let t23a: f64 = (l.f793 * t239);let t23b: f64 = (l.f5ed * p.p85);let t23c: f64 = (t23a / t23b);let t23d: f64 = (t238 + t23c);let t23e: f64 = (l.f645 * t23d);let t23f: f64 = (t23e).exp();(l.f536, l.f537, l.f538, ) = (t23f, (t23f * (l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t23b) - (t23a * (l.f5ee * p.p85))) / (t23b * t23b))))), (t23f * (l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t23b) - (t23a * (l.f5ef * p.p85))) / (t23b * t23b))))), );l.f539 = 0.0;}
-        let t240: f64 = (l.f737 / l.f5f1);let t241: f64 = (l.f5f1 - l.f5ed);let t242: f64 = (l.f793 * t241);let t243: f64 = (l.f5ed * p.p85);let t244: f64 = (t242 / t243);let t245: f64 = (t240 + t244);let t246: f64 = (l.f645 * t245);let t247: f64 = (-230.25850929940458);let t248: f64 = if t246 < t247 { 1.0 } else { 0.0 };l.f4b9 = t248;l.f4ba = 0.0;
-        if (((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b7 == 0.0)) && (l.f4b9 != 0.0)) {let t249: f64 = (-230.25850929940458);let t24a: f64 = (l.f737 / l.f5f1);let t24b: f64 = (l.f5f1 - l.f5ed);let t24c: f64 = (l.f793 * t24b);let t24d: f64 = (l.f5ed * p.p85);let t24e: f64 = (t24c / t24d);let t24f: f64 = (t24a + t24e);let t250: f64 = (l.f645 * t24f);let t251: f64 = (t249 - t250);let t252: f64 = (-230.25850929940458);let t253: f64 = (l.f737 / l.f5f1);let t254: f64 = (l.f5f1 - l.f5ed);let t255: f64 = (l.f793 * t254);let t256: f64 = (l.f5ed * p.p85);let t257: f64 = (t255 / t256);let t258: f64 = (t253 + t257);let t259: f64 = (l.f645 * t258);let t25a: f64 = (t252 - t259);let t25b: f64 = (-230.25850929940458);let t25c: f64 = (l.f737 / l.f5f1);let t25d: f64 = (l.f5f1 - l.f5ed);let t25e: f64 = (l.f793 * t25d);let t25f: f64 = (l.f5ed * p.p85);let t260: f64 = (t25e / t25f);let t261: f64 = (t25c + t260);let t262: f64 = (l.f645 * t261);let t263: f64 = (t25b - t262);let t264: f64 = (t263 * 0.3333333333333333);let t265: f64 = (1.0 + t264);let t266: f64 = (t25a * t265);let t267: f64 = (0.5 * t266);let t268: f64 = (1.0 + t267);let t269: f64 = (t251 * t268);let t26a: f64 = (1.0 + t269);let t26b: f64 = (1e-100 / t26a);(l.f536, l.f537, l.f538, ) = (t26b, (-((1e-100 * (((-(l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t24d) - (t24c * (l.f5ee * p.p85))) / (t24d * t24d))))) * t268) + (t251 * (0.5 * (((-(l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t256) - (t255 * (l.f5ee * p.p85))) / (t256 * t256))))) * t265) + (t25a * ((-(l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t25f) - (t25e * (l.f5ee * p.p85))) / (t25f * t25f))))) * 0.3333333333333333))))))) / (t26a * t26a))), (-((1e-100 * (((-(l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t24d) - (t24c * (l.f5ef * p.p85))) / (t24d * t24d))))) * t268) + (t251 * (0.5 * (((-(l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t256) - (t255 * (l.f5ef * p.p85))) / (t256 * t256))))) * t265) + (t25a * ((-(l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t25f) - (t25e * (l.f5ef * p.p85))) / (t25f * t25f))))) * 0.3333333333333333))))))) / (t26a * t26a))), );l.f539 = 0.0;}
+        let t22f: f64 = (l.f737 / l.f5f1);let t230: f64 = (l.f5f1 - l.f5ed);let t231: f64 = (l.f793 * t230);let t232: f64 = (l.f5ed * p[85]);let t233: f64 = (t231 / t232);let t234: f64 = (t22f + t233);let t235: f64 = (l.f645 * t234);let t236: f64 = (t235).abs();let t237: f64 = if t236 < 230.25850929940458 { 1.0 } else { 0.0 };l.f4b7 = t237;l.f4b8 = 0.0;
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b7 != 0.0)) {let t238: f64 = (l.f737 / l.f5f1);let t239: f64 = (l.f5f1 - l.f5ed);let t23a: f64 = (l.f793 * t239);let t23b: f64 = (l.f5ed * p[85]);let t23c: f64 = (t23a / t23b);let t23d: f64 = (t238 + t23c);let t23e: f64 = (l.f645 * t23d);let t23f: f64 = (t23e).exp();(l.f536, l.f537, l.f538, ) = (t23f, (t23f * (l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t23b) - (t23a * (l.f5ee * p[85]))) / (t23b * t23b))))), (t23f * (l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t23b) - (t23a * (l.f5ef * p[85]))) / (t23b * t23b))))), );l.f539 = 0.0;}
+        let t240: f64 = (l.f737 / l.f5f1);let t241: f64 = (l.f5f1 - l.f5ed);let t242: f64 = (l.f793 * t241);let t243: f64 = (l.f5ed * p[85]);let t244: f64 = (t242 / t243);let t245: f64 = (t240 + t244);let t246: f64 = (l.f645 * t245);let t247: f64 = (-230.25850929940458);let t248: f64 = if t246 < t247 { 1.0 } else { 0.0 };l.f4b9 = t248;l.f4ba = 0.0;
+        if (((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b7 == 0.0)) && (l.f4b9 != 0.0)) {let t249: f64 = (-230.25850929940458);let t24a: f64 = (l.f737 / l.f5f1);let t24b: f64 = (l.f5f1 - l.f5ed);let t24c: f64 = (l.f793 * t24b);let t24d: f64 = (l.f5ed * p[85]);let t24e: f64 = (t24c / t24d);let t24f: f64 = (t24a + t24e);let t250: f64 = (l.f645 * t24f);let t251: f64 = (t249 - t250);let t252: f64 = (-230.25850929940458);let t253: f64 = (l.f737 / l.f5f1);let t254: f64 = (l.f5f1 - l.f5ed);let t255: f64 = (l.f793 * t254);let t256: f64 = (l.f5ed * p[85]);let t257: f64 = (t255 / t256);let t258: f64 = (t253 + t257);let t259: f64 = (l.f645 * t258);let t25a: f64 = (t252 - t259);let t25b: f64 = (-230.25850929940458);let t25c: f64 = (l.f737 / l.f5f1);let t25d: f64 = (l.f5f1 - l.f5ed);let t25e: f64 = (l.f793 * t25d);let t25f: f64 = (l.f5ed * p[85]);let t260: f64 = (t25e / t25f);let t261: f64 = (t25c + t260);let t262: f64 = (l.f645 * t261);let t263: f64 = (t25b - t262);let t264: f64 = (t263 * 0.3333333333333333);let t265: f64 = (1.0 + t264);let t266: f64 = (t25a * t265);let t267: f64 = (0.5 * t266);let t268: f64 = (1.0 + t267);let t269: f64 = (t251 * t268);let t26a: f64 = (1.0 + t269);let t26b: f64 = (1e-100 / t26a);(l.f536, l.f537, l.f538, ) = (t26b, (-((1e-100 * (((-(l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t24d) - (t24c * (l.f5ee * p[85]))) / (t24d * t24d))))) * t268) + (t251 * (0.5 * (((-(l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t256) - (t255 * (l.f5ee * p[85]))) / (t256 * t256))))) * t265) + (t25a * ((-(l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t25f) - (t25e * (l.f5ee * p[85]))) / (t25f * t25f))))) * 0.3333333333333333))))))) / (t26a * t26a))), (-((1e-100 * (((-(l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t24d) - (t24c * (l.f5ef * p[85]))) / (t24d * t24d))))) * t268) + (t251 * (0.5 * (((-(l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t256) - (t255 * (l.f5ef * p[85]))) / (t256 * t256))))) * t265) + (t25a * ((-(l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t25f) - (t25e * (l.f5ef * p[85]))) / (t25f * t25f))))) * 0.3333333333333333))))))) / (t26a * t26a))), );l.f539 = 0.0;}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_16(
         p: &Parameters,
         l: &mut StampLocals,
     ) {
-        if (((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b7 == 0.0)) && (l.f4b9 == 0.0)) {let t26c: f64 = (l.f737 / l.f5f1);let t26d: f64 = (l.f5f1 - l.f5ed);let t26e: f64 = (l.f793 * t26d);let t26f: f64 = (l.f5ed * p.p85);let t270: f64 = (t26e / t26f);let t271: f64 = (t26c + t270);let t272: f64 = (l.f645 * t271);let t273: f64 = (t272 - 230.25850929940458);let t274: f64 = (l.f737 / l.f5f1);let t275: f64 = (l.f5f1 - l.f5ed);let t276: f64 = (l.f793 * t275);let t277: f64 = (l.f5ed * p.p85);let t278: f64 = (t276 / t277);let t279: f64 = (t274 + t278);let t27a: f64 = (l.f645 * t279);let t27b: f64 = (t27a - 230.25850929940458);let t27c: f64 = (l.f737 / l.f5f1);let t27d: f64 = (l.f5f1 - l.f5ed);let t27e: f64 = (l.f793 * t27d);let t27f: f64 = (l.f5ed * p.p85);let t280: f64 = (t27e / t27f);let t281: f64 = (t27c + t280);let t282: f64 = (l.f645 * t281);let t283: f64 = (t282 - 230.25850929940458);let t284: f64 = (t283 * 0.3333333333333333);let t285: f64 = (1.0 + t284);let t286: f64 = (t27b * t285);let t287: f64 = (0.5 * t286);let t288: f64 = (1.0 + t287);let t289: f64 = (t273 * t288);let t28a: f64 = (1.0 + t289);let t28b: f64 = (1e100 * t28a);(l.f536, l.f537, l.f538, ) = (t28b, (1e100 * (((l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t26f) - (t26e * (l.f5ee * p.p85))) / (t26f * t26f)))) * t288) + (t273 * (0.5 * (((l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t277) - (t276 * (l.f5ee * p.p85))) / (t277 * t277)))) * t285) + (t27b * ((l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t27f) - (t27e * (l.f5ee * p.p85))) / (t27f * t27f)))) * 0.3333333333333333))))))), (1e100 * (((l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t26f) - (t26e * (l.f5ef * p.p85))) / (t26f * t26f)))) * t288) + (t273 * (0.5 * (((l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t277) - (t276 * (l.f5ef * p.p85))) / (t277 * t277)))) * t285) + (t27b * ((l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t27f) - (t27e * (l.f5ef * p.p85))) / (t27f * t27f)))) * 0.3333333333333333))))))), );l.f539 = 0.0;}
+        if (((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4b7 == 0.0)) && (l.f4b9 == 0.0)) {let t26c: f64 = (l.f737 / l.f5f1);let t26d: f64 = (l.f5f1 - l.f5ed);let t26e: f64 = (l.f793 * t26d);let t26f: f64 = (l.f5ed * p[85]);let t270: f64 = (t26e / t26f);let t271: f64 = (t26c + t270);let t272: f64 = (l.f645 * t271);let t273: f64 = (t272 - 230.25850929940458);let t274: f64 = (l.f737 / l.f5f1);let t275: f64 = (l.f5f1 - l.f5ed);let t276: f64 = (l.f793 * t275);let t277: f64 = (l.f5ed * p[85]);let t278: f64 = (t276 / t277);let t279: f64 = (t274 + t278);let t27a: f64 = (l.f645 * t279);let t27b: f64 = (t27a - 230.25850929940458);let t27c: f64 = (l.f737 / l.f5f1);let t27d: f64 = (l.f5f1 - l.f5ed);let t27e: f64 = (l.f793 * t27d);let t27f: f64 = (l.f5ed * p[85]);let t280: f64 = (t27e / t27f);let t281: f64 = (t27c + t280);let t282: f64 = (l.f645 * t281);let t283: f64 = (t282 - 230.25850929940458);let t284: f64 = (t283 * 0.3333333333333333);let t285: f64 = (1.0 + t284);let t286: f64 = (t27b * t285);let t287: f64 = (0.5 * t286);let t288: f64 = (1.0 + t287);let t289: f64 = (t273 * t288);let t28a: f64 = (1.0 + t289);let t28b: f64 = (1e100 * t28a);(l.f536, l.f537, l.f538, ) = (t28b, (1e100 * (((l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t26f) - (t26e * (l.f5ee * p[85]))) / (t26f * t26f)))) * t288) + (t273 * (0.5 * (((l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t277) - (t276 * (l.f5ee * p[85]))) / (t277 * t277)))) * t285) + (t27b * ((l.f645 * ((-((l.f737 * l.f5f2) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f2 - l.f5ee)) * t27f) - (t27e * (l.f5ee * p[85]))) / (t27f * t27f)))) * 0.3333333333333333))))))), (1e100 * (((l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t26f) - (t26e * (l.f5ef * p[85]))) / (t26f * t26f)))) * t288) + (t273 * (0.5 * (((l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t277) - (t276 * (l.f5ef * p[85]))) / (t277 * t277)))) * t285) + (t27b * ((l.f645 * ((-((l.f737 * l.f5f3) / (l.f5f1 * l.f5f1))) + ((((l.f793 * (l.f5f3 - l.f5ef)) * t27f) - (t27e * (l.f5ef * p[85]))) / (t27f * t27f)))) * 0.3333333333333333))))))), );l.f539 = 0.0;}
         if (((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) {let t28d: f64 = (l.f5eb * l.f5eb);let t28e: f64 = (t28d / l.f5e3);l.f64f = t28e;l.f650 = 0.0;let t28f: f64 = (l.f5e9 / l.f645);let t290: f64 = (l.f5e3 / l.f64f);let t291: f64 = (t290).ln();let t292: f64 = (t28f * t291);l.f793 = t292;l.f794 = 0.0;}
-        let t293: f64 = if l.f5e9 < p.p85 { 1.0 } else { 0.0 };l.f4bb = t293;l.f4bc = 0.0;
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4bb != 0.0)) {let t294: f64 = (l.f737 - l.f793);let t295: f64 = (p.p86 * t294);let t296: f64 = (t295 + l.f5e9);(l.f601, l.f602, l.f603, ) = (t296, 0.0, 0.0, );l.f604 = 0.0;let t297: f64 = (p.p86 * l.f793);let t298: f64 = (l.f5e9 - t297);(l.f5ed, l.f5ee, l.f5ef, ) = (t298, 0.0, 0.0, );l.f5f0 = 0.0;let t299: f64 = (p.p85 - l.f601);let t29a: f64 = (t299 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t29a, (-l.f602), (-l.f603), );l.f6f6 = 0.0;let t29b: f64 = (4.0 * p.p85);let t29c: f64 = (t29b * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t29c, 0.0, 0.0, );l.f6fa = 0.0;}
+        let t293: f64 = if l.f5e9 < p[85] { 1.0 } else { 0.0 };l.f4bb = t293;l.f4bc = 0.0;
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4bb != 0.0)) {let t294: f64 = (l.f737 - l.f793);let t295: f64 = (p[86] * t294);let t296: f64 = (t295 + l.f5e9);(l.f601, l.f602, l.f603, ) = (t296, 0.0, 0.0, );l.f604 = 0.0;let t297: f64 = (p[86] * l.f793);let t298: f64 = (l.f5e9 - t297);(l.f5ed, l.f5ee, l.f5ef, ) = (t298, 0.0, 0.0, );l.f5f0 = 0.0;let t299: f64 = (p[85] - l.f601);let t29a: f64 = (t299 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t29a, (-l.f602), (-l.f603), );l.f6f6 = 0.0;let t29b: f64 = (4.0 * p[85]);let t29c: f64 = (t29b * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t29c, 0.0, 0.0, );l.f6fa = 0.0;}
         if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4bb != 0.0)) {
             let (t29e, t29f, t2a0,) = {
     if (l.f6f7 > 0.0) {
@@ -403,7 +403,7 @@ impl Instance {
 };
             (l.f6f7, l.f6f8, l.f6f9, ) = (t29e, t29f, t2a0, );l.f6fa = 0.0;
         }
-        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4bb != 0.0)) {let t2a1: f64 = (l.f6f3 * l.f6f3);let t2a2: f64 = (t2a1 + l.f6f7);let t2a3: f64 = (t2a2).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t2a3, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t2a3)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t2a3)), );l.f6fa = 0.0;let t2a4: f64 = (l.f6f3 + l.f6f7);let t2a5: f64 = (0.5 * t2a4);let t2a6: f64 = (p.p85 - t2a5);(l.f605, l.f606, l.f607, ) = (t2a6, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f608 = 0.0;let t2a8: f64 = (l.f605 - l.f5e9);let t2a9: f64 = (t2a8 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t2a9, l.f606, l.f607, );l.f6f6 = 0.0;let t2aa: f64 = (4.0 * l.f5e9);let t2ab: f64 = (t2aa * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t2ab, 0.0, 0.0, );l.f6fa = 0.0;}
+        if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4bb != 0.0)) {let t2a1: f64 = (l.f6f3 * l.f6f3);let t2a2: f64 = (t2a1 + l.f6f7);let t2a3: f64 = (t2a2).sqrt();(l.f6f7, l.f6f8, l.f6f9, ) = (t2a3, ((((l.f6f4 * l.f6f3) + (l.f6f3 * l.f6f4)) + l.f6f8) / (2.0 * t2a3)), ((((l.f6f5 * l.f6f3) + (l.f6f3 * l.f6f5)) + l.f6f9) / (2.0 * t2a3)), );l.f6fa = 0.0;let t2a4: f64 = (l.f6f3 + l.f6f7);let t2a5: f64 = (0.5 * t2a4);let t2a6: f64 = (p[85] - t2a5);(l.f605, l.f606, l.f607, ) = (t2a6, (-(0.5 * (l.f6f4 + l.f6f8))), (-(0.5 * (l.f6f5 + l.f6f9))), );l.f608 = 0.0;let t2a8: f64 = (l.f605 - l.f5e9);let t2a9: f64 = (t2a8 - 0.01);(l.f6f3, l.f6f4, l.f6f5, ) = (t2a9, l.f606, l.f607, );l.f6f6 = 0.0;let t2aa: f64 = (4.0 * l.f5e9);let t2ab: f64 = (t2aa * 0.01);(l.f6f7, l.f6f8, l.f6f9, ) = (t2ab, 0.0, 0.0, );l.f6fa = 0.0;}
         if ((((l.f29a != 0.0) && (l.f4ab != 0.0)) && (l.f4ad != 0.0)) && (l.f4bb != 0.0)) {
             let (t2ad, t2ae, t2af,) = {
     if (l.f6f7 > 0.0) {

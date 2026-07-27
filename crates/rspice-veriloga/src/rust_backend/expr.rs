@@ -1084,7 +1084,7 @@ impl ExprEmitter<'_> {
 
     fn lower_identifier(&self, name: &str) -> Result<String, RustBackendError> {
         if let Some(field) = self.parameter_fields.get(name) {
-            Ok(format!("params.{field}"))
+            Ok(format!("params[{field}]"))
         } else if let Some(variable) = self.variables.get(name) {
             Ok(variable.value.clone())
         } else {
@@ -2451,7 +2451,7 @@ pub fn parameter_field_names(artifact: &CanonicalIrArtifact) -> HashMap<String, 
         .parameters
         .iter()
         .enumerate()
-        .map(|(index, parameter)| (parameter.name.to_string(), format!("p{index}")))
+        .map(|(index, parameter)| (parameter.name.to_string(), index.to_string()))
         .collect()
 }
 

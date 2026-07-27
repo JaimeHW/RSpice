@@ -1039,12 +1039,13 @@ endmodule
             .contents
             .as_str();
 
-        assert!(state.contains("#[repr(C)]"), "{state}");
         assert!(state.contains("#[derive(Copy, Clone)]"), "{state}");
+        assert!(state.contains("pub values: [f64; 4]"), "{state}");
         assert!(state.contains("const DEFAULTS_0: [f64; 2]"), "{state}");
         assert!(state.contains("std::ptr::copy_nonoverlapping"), "{state}");
         assert!(state.contains("let params = &mut *ptr;"), "{state}");
-        assert!(state.contains("params.p2 = params.p0"), "{state}");
+        assert!(state.contains("params[2] = params[0]"), "{state}");
+        assert!(!state.contains("as *mut Parameters as *mut f64"), "{state}");
         assert!(
             state.contains(
                 "fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool)"
@@ -1066,7 +1067,9 @@ endmodule
             "{state}"
         );
         assert!(
-            state.contains("if invalidates_caches {\n            self.scalar_static.instance_dirty = true;"),
+            state.contains(
+                "if invalidates_caches {\n            self.scalar_static.instance_dirty = true;"
+            ),
             "{state}"
         );
         assert!(
@@ -1074,7 +1077,7 @@ endmodule
             "{state}"
         );
         assert!(!state.contains("match name.to_ascii_lowercase"), "{state}");
-        assert!(!state.contains("self.params.p0 = value"), "{state}");
+        assert!(!state.contains("self.params[0] = value"), "{state}");
         assert!(!state.contains("impl Copy for Parameters"), "{state}");
     }
 

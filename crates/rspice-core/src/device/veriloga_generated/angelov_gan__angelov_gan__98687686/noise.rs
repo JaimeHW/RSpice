@@ -35,64 +35,64 @@ impl Instance {
         let mut w = [0.0; 145];
         self.noise_activation_schedule_part_0(ctx, &mut w);
         let noise_source_0_active = {
-            params.p0 != 0.0
+            params[0] != 0.0
         };
         let noise_source_1_active = {
-            let noise_1_activation_e250: f64 = if ((w[125] != 0.0) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_1_activation_e250: f64 = if ((w[125] != 0.0) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_1_activation_e250 != 0.0
         };
         let noise_source_2_active = {
-            let noise_2_activation_e279: f64 = if ((w[126] != 0.0) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_2_activation_e279: f64 = if ((w[126] != 0.0) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_2_activation_e279 != 0.0
         };
         let noise_source_3_active = {
-            let noise_3_activation_e308: f64 = if ((w[127] != 0.0) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_3_activation_e308: f64 = if ((w[127] != 0.0) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_3_activation_e308 != 0.0
         };
         let noise_source_4_active = {
-            let noise_4_activation_e336: f64 = if ((w[128] != 0.0) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_4_activation_e336: f64 = if ((w[128] != 0.0) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_4_activation_e336 != 0.0
         };
         let noise_source_5_active = {
-            let noise_5_activation_e344: f64 = if ((w[128] != 0.0) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_5_activation_e344: f64 = if ((w[128] != 0.0) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_5_activation_e344 != 0.0
         };
         let noise_source_6_active = {
-            let noise_6_activation_e358: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_6_activation_e358: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_6_activation_e358 != 0.0
         };
         let noise_source_7_active = {
-            let noise_7_activation_e378: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_7_activation_e378: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_7_activation_e378 != 0.0
         };
         let noise_source_8_active = {
-            let noise_8_activation_e435: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_8_activation_e435: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_8_activation_e435 != 0.0
         };
         let noise_source_9_active = {
-            let noise_9_activation_e446: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_9_activation_e446: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_9_activation_e446 != 0.0
         };
         let noise_source_10_active = {
-            let noise_10_activation_e458: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) { 1.0 } else { 0.0 };
+            let noise_10_activation_e458: f64 = if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) { 1.0 } else { 0.0 };
             noise_10_activation_e458 != 0.0
         };
         let noise_source_11_active = {
-            let noise_11_activation_e472: f64 = if ((((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) && (w[142] != 0.0)) { 1.0 } else { 0.0 };
+            let noise_11_activation_e472: f64 = if ((((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) && (w[142] != 0.0)) { 1.0 } else { 0.0 };
             noise_11_activation_e472 != 0.0
         };
         let noise_source_12_active = {
-            params.p0 != 0.0
+            params[0] != 0.0
         };
         let noise_source_13_active = {
-            params.p0 != 0.0
+            params[0] != 0.0
         };
         let noise_source_14_active = {
-            let noise_14_activation_e509: f64 = if ((params.p0 != 0.0) && (w[143] != 0.0)) { 1.0 } else { 0.0 };
+            let noise_14_activation_e509: f64 = if ((params[0] != 0.0) && (w[143] != 0.0)) { 1.0 } else { 0.0 };
             noise_14_activation_e509 != 0.0
         };
         let noise_source_15_active = {
-            let noise_15_activation_e523: f64 = if ((params.p0 != 0.0) && (w[143] != 0.0)) { 1.0 } else { 0.0 };
+            let noise_15_activation_e523: f64 = if ((params[0] != 0.0) && (w[143] != 0.0)) { 1.0 } else { 0.0 };
             noise_15_activation_e523 != 0.0
         };
         let noise_source_active = [noise_source_0_active, noise_source_1_active, noise_source_2_active, noise_source_3_active, noise_source_4_active, noise_source_5_active, noise_source_6_active, noise_source_7_active, noise_source_8_active, noise_source_9_active, noise_source_10_active, noise_source_11_active, noise_source_12_active, noise_source_13_active, noise_source_14_active, noise_source_15_active];
@@ -107,7 +107,7 @@ impl Instance {
             let noise_0_psd_e3085: f64 = 1.0;
             let noise_0_psd_e222: f64 = (4.0 * 1.3806503e-23);
             let noise_0_psd_e224: f64 = (noise_0_psd_e222 * w[15]);
-            let noise_0_psd_e226: f64 = (noise_0_psd_e224 * params.p51);
+            let noise_0_psd_e226: f64 = (noise_0_psd_e224 * params[51]);
             let noise_0_psd_e3086: f64 = (noise_0_psd_e3085 * noise_0_psd_e226);
             let psd = noise_0_psd_e3086;
             if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
@@ -125,7 +125,7 @@ impl Instance {
             let noise_1_psd_e3088: f64 = 1.0;
             let noise_1_psd_e253: f64 = (4.0 * 1.3806503e-23);
             let noise_1_psd_e255: f64 = (noise_1_psd_e253 * w[15]);
-            let noise_1_psd_e257: f64 = (noise_1_psd_e255 * params.p46);
+            let noise_1_psd_e257: f64 = (noise_1_psd_e255 * params[46]);
             let noise_1_psd_e3089: f64 = (noise_1_psd_e3088 * noise_1_psd_e257);
             let psd = noise_1_psd_e3089;
             if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
@@ -192,12 +192,12 @@ impl Instance {
             if !visitor.visit(5, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
             let noise_5_psd_e3100: f64 = 1.0;
-            let noise_5_psd_e347: f64 = (w[131] * params.p96);
+            let noise_5_psd_e347: f64 = (w[131] * params[96]);
             let noise_5_psd_e3101: f64 = (noise_5_psd_e3100 * noise_5_psd_e347);
             let psd = noise_5_psd_e3101;
             if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 5, value: psd }); }
-            let exponent: Option<f64> = Some(params.p98);
+            let exponent: Option<f64> = Some(params[98]);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -283,13 +283,13 @@ impl Instance {
             if !visitor.visit(11, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
             let noise_11_psd_e3118: f64 = 1.0;
-            let noise_11_psd_e476: f64 = (w[18]).powf(params.p91);
-            let noise_11_psd_e477: f64 = (params.p90 * noise_11_psd_e476);
+            let noise_11_psd_e476: f64 = (w[18]).powf(params[91]);
+            let noise_11_psd_e477: f64 = (params[90] * noise_11_psd_e476);
             let noise_11_psd_e3119: f64 = (noise_11_psd_e3118 * noise_11_psd_e477);
             let psd = noise_11_psd_e3119;
             if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 11, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 11, value: psd }); }
-            let exponent: Option<f64> = Some(params.p92);
+            let exponent: Option<f64> = Some(params[92]);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 11, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -337,13 +337,13 @@ impl Instance {
         } else {
             let noise_14_psd_e3127: f64 = 1.0;
             let noise_14_psd_e512: f64 = (w[7]).abs();
-            let noise_14_psd_e514: f64 = (noise_14_psd_e512).powf(params.p91);
-            let noise_14_psd_e515: f64 = (params.p90 * noise_14_psd_e514);
+            let noise_14_psd_e514: f64 = (noise_14_psd_e512).powf(params[91]);
+            let noise_14_psd_e515: f64 = (params[90] * noise_14_psd_e514);
             let noise_14_psd_e3128: f64 = (noise_14_psd_e3127 * noise_14_psd_e515);
             let psd = noise_14_psd_e3128;
             if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 14, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 14, value: psd }); }
-            let exponent: Option<f64> = Some(params.p92);
+            let exponent: Option<f64> = Some(params[92]);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 14, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -355,13 +355,13 @@ impl Instance {
         } else {
             let noise_15_psd_e3130: f64 = 1.0;
             let noise_15_psd_e526: f64 = (w[9]).abs();
-            let noise_15_psd_e528: f64 = (noise_15_psd_e526).powf(params.p91);
-            let noise_15_psd_e529: f64 = (params.p90 * noise_15_psd_e528);
+            let noise_15_psd_e528: f64 = (noise_15_psd_e526).powf(params[91]);
+            let noise_15_psd_e529: f64 = (params[90] * noise_15_psd_e528);
             let noise_15_psd_e3131: f64 = (noise_15_psd_e3130 * noise_15_psd_e529);
             let psd = noise_15_psd_e3131;
             if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 15, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 15, value: psd }); }
-            let exponent: Option<f64> = Some(params.p92);
+            let exponent: Option<f64> = Some(params[92]);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 15, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -374,19 +374,19 @@ impl Instance {
     #[inline(never)]
     fn noise_activation_schedule_part_0(&self, ctx: &GeneratedEvalContext<'_>, w: &mut [f64; 145]) {
         let params = &*self.params;
-        let noise_activation_schedule_215_0_e2856: f64 = if params.p46 > 0.0 { 1.0 } else { 0.0 };
+        let noise_activation_schedule_215_0_e2856: f64 = if params[46] > 0.0 { 1.0 } else { 0.0 };
         w[125] = noise_activation_schedule_215_0_e2856;
-        let noise_activation_schedule_216_0_e2859: f64 = if params.p50 > 0.0 { 1.0 } else { 0.0 };
+        let noise_activation_schedule_216_0_e2859: f64 = if params[50] > 0.0 { 1.0 } else { 0.0 };
         w[126] = noise_activation_schedule_216_0_e2859;
-        let noise_activation_schedule_217_0_e2866: f64 = if ((params.p47 > 0.0) || (params.p48 > 0.0)) { 1.0 } else { 0.0 };
+        let noise_activation_schedule_217_0_e2866: f64 = if ((params[47] > 0.0) || (params[48] > 0.0)) { 1.0 } else { 0.0 };
         w[127] = noise_activation_schedule_217_0_e2866;
-        let noise_activation_schedule_221_0_e2882: f64 = if params.p7 == 0.0 { 1.0 } else { 0.0 };
+        let noise_activation_schedule_221_0_e2882: f64 = if params[7] == 0.0 { 1.0 } else { 0.0 };
         w[128] = noise_activation_schedule_221_0_e2882;
-        let noise_activation_schedule_222_0_e2885: f64 = if params.p7 == 1.0 { 1.0 } else { 0.0 };
+        let noise_activation_schedule_222_0_e2885: f64 = if params[7] == 1.0 { 1.0 } else { 0.0 };
         w[129] = noise_activation_schedule_222_0_e2885;
-        let noise_activation_schedule_236_0_e3077: f64 = if params.p90 > 0.0 { 1.0 } else { 0.0 };
+        let noise_activation_schedule_236_0_e3077: f64 = if params[90] > 0.0 { 1.0 } else { 0.0 };
         w[142] = noise_activation_schedule_236_0_e3077;
-        let noise_activation_schedule_237_0_e3080: f64 = if params.p90 > 0.0 { 1.0 } else { 0.0 };
+        let noise_activation_schedule_237_0_e3080: f64 = if params[90] > 0.0 { 1.0 } else { 0.0 };
         w[143] = noise_activation_schedule_237_0_e3080;
     }
 
@@ -434,7 +434,7 @@ impl Instance {
         if (active[0] & 0xf7ff) != 0 {
             let (noise_metadata_schedule_16_0_e593,) = {
     if (w[101] != 0.0) {
-        let noise_metadata_schedule_16_0_e591: f64 = (params.p3 + 273.15);
+        let noise_metadata_schedule_16_0_e591: f64 = (params[3] + 273.15);
         (noise_metadata_schedule_16_0_e591,)
     } else {
         (w[15],)
@@ -446,7 +446,7 @@ impl Instance {
             let (noise_metadata_schedule_17_0_e600,) = {
     if (w[101] == 0.0) {
         let noise_metadata_schedule_17_0_e596: f64 = ctx.temperature();
-        let noise_metadata_schedule_17_0_e598: f64 = (noise_metadata_schedule_17_0_e596 + params.p2);
+        let noise_metadata_schedule_17_0_e598: f64 = (noise_metadata_schedule_17_0_e596 + params[2]);
         (noise_metadata_schedule_17_0_e598,)
     } else {
         (w[15],)
@@ -461,7 +461,7 @@ impl Instance {
         if (active[0] & 0xf7fc) != 0 {
             let (noise_metadata_schedule_19_0_e608,) = {
     if (w[102] != 0.0) {
-        let noise_metadata_schedule_19_0_e606: f64 = (params.p100 + 273.15);
+        let noise_metadata_schedule_19_0_e606: f64 = (params[100] + 273.15);
         (noise_metadata_schedule_19_0_e606,)
     } else {
         (w[14],)
@@ -482,7 +482,7 @@ impl Instance {
         }
         if (active[0] & 0xf7ff) != 0 {
             let (noise_metadata_schedule_21_0_e622,) = {
-    if (params.p1 != 0.0) {
+    if (params[1] != 0.0) {
         let noise_metadata_schedule_21_0_e619: f64 = ((ctx.node_voltage(self.nodes[3]) - 0.0)).abs();
         let noise_metadata_schedule_21_0_e620: f64 = (w[15] + noise_metadata_schedule_21_0_e619);
         (noise_metadata_schedule_21_0_e620,)
@@ -502,16 +502,16 @@ impl Instance {
             w[16] = noise_metadata_schedule_23_0_e628;
         }
         if (active[0] & 0xf7fc) != 0 {
-            let noise_metadata_schedule_24_0_e635: f64 = if ((w[16] > 0.0) || (params.p66 > 0.0)) { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_24_0_e635: f64 = if ((w[16] > 0.0) || (params[66] > 0.0)) { 1.0 } else { 0.0 };
             w[103] = noise_metadata_schedule_24_0_e635;
         }
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_26_0_e657,) = {
     if (w[103] != 0.0) {
         let noise_metadata_schedule_26_0_e652: f64 = (w[16]).abs();
-        let noise_metadata_schedule_26_0_e653: f64 = (params.p68 * noise_metadata_schedule_26_0_e652);
+        let noise_metadata_schedule_26_0_e653: f64 = (params[68] * noise_metadata_schedule_26_0_e652);
         let noise_metadata_schedule_26_0_e654: f64 = (1.0 + noise_metadata_schedule_26_0_e653);
-        let noise_metadata_schedule_26_0_e655: f64 = (params.p8 * noise_metadata_schedule_26_0_e654);
+        let noise_metadata_schedule_26_0_e655: f64 = (params[8] * noise_metadata_schedule_26_0_e654);
         (noise_metadata_schedule_26_0_e655,)
     } else {
         (w[39],)
@@ -523,9 +523,9 @@ impl Instance {
             let (noise_metadata_schedule_27_0_e668,) = {
     if (w[103] != 0.0) {
         let noise_metadata_schedule_27_0_e663: f64 = (w[16]).abs();
-        let noise_metadata_schedule_27_0_e664: f64 = (params.p80 * noise_metadata_schedule_27_0_e663);
+        let noise_metadata_schedule_27_0_e664: f64 = (params[80] * noise_metadata_schedule_27_0_e663);
         let noise_metadata_schedule_27_0_e665: f64 = (1.0 + noise_metadata_schedule_27_0_e664);
-        let noise_metadata_schedule_27_0_e666: f64 = (params.p20 * noise_metadata_schedule_27_0_e665);
+        let noise_metadata_schedule_27_0_e666: f64 = (params[20] * noise_metadata_schedule_27_0_e665);
         (noise_metadata_schedule_27_0_e666,)
     } else {
         (w[43],)
@@ -537,9 +537,9 @@ impl Instance {
             let (noise_metadata_schedule_28_0_e679,) = {
     if (w[103] != 0.0) {
         let noise_metadata_schedule_28_0_e674: f64 = (w[16]).abs();
-        let noise_metadata_schedule_28_0_e675: f64 = (params.p72 * noise_metadata_schedule_28_0_e674);
+        let noise_metadata_schedule_28_0_e675: f64 = (params[72] * noise_metadata_schedule_28_0_e674);
         let noise_metadata_schedule_28_0_e676: f64 = (1.0 + noise_metadata_schedule_28_0_e675);
-        let noise_metadata_schedule_28_0_e677: f64 = (params.p26 * noise_metadata_schedule_28_0_e676);
+        let noise_metadata_schedule_28_0_e677: f64 = (params[26] * noise_metadata_schedule_28_0_e676);
         (noise_metadata_schedule_28_0_e677,)
     } else {
         (w[44],)
@@ -550,8 +550,8 @@ impl Instance {
         if (active[0] & 0xf73c) != 0 {
             let (noise_metadata_schedule_32_0_e720,) = {
     if (w[103] != 0.0) {
-        let noise_metadata_schedule_32_0_e717: f64 = (params.p78 * w[16]);
-        let noise_metadata_schedule_32_0_e718: f64 = (params.p9 + noise_metadata_schedule_32_0_e717);
+        let noise_metadata_schedule_32_0_e717: f64 = (params[78] * w[16]);
+        let noise_metadata_schedule_32_0_e718: f64 = (params[9] + noise_metadata_schedule_32_0_e717);
         (noise_metadata_schedule_32_0_e718,)
     } else {
         (w[54],)
@@ -562,8 +562,8 @@ impl Instance {
         if (active[0] & 0xf030) != 0 {
             let (noise_metadata_schedule_35_0_e748,) = {
     if (w[103] != 0.0) {
-        let noise_metadata_schedule_35_0_e745: f64 = (params.p79 * w[16]);
-        let noise_metadata_schedule_35_0_e746: f64 = (params.p45 + noise_metadata_schedule_35_0_e745);
+        let noise_metadata_schedule_35_0_e745: f64 = (params[79] * w[16]);
+        let noise_metadata_schedule_35_0_e746: f64 = (params[45] + noise_metadata_schedule_35_0_e745);
         (noise_metadata_schedule_35_0_e746,)
     } else {
         (w[57],)
@@ -574,8 +574,8 @@ impl Instance {
         if (active[0] & 0xf73c) != 0 {
             let (noise_metadata_schedule_36_0_e756,) = {
     if (w[103] != 0.0) {
-        let noise_metadata_schedule_36_0_e753: f64 = (params.p81 * w[16]);
-        let noise_metadata_schedule_36_0_e754: f64 = (params.p21 + noise_metadata_schedule_36_0_e753);
+        let noise_metadata_schedule_36_0_e753: f64 = (params[81] * w[16]);
+        let noise_metadata_schedule_36_0_e754: f64 = (params[21] + noise_metadata_schedule_36_0_e753);
         (noise_metadata_schedule_36_0_e754,)
     } else {
         (w[53],)
@@ -586,7 +586,7 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_42_0_e828,) = {
     if (w[103] == 0.0) {
-        (params.p8,)
+        (params[8],)
     } else {
         (w[39],)
     }
@@ -596,7 +596,7 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_43_0_e833,) = {
     if (w[103] == 0.0) {
-        (params.p20,)
+        (params[20],)
     } else {
         (w[43],)
     }
@@ -606,7 +606,7 @@ impl Instance {
         if (active[0] & 0x2c0) != 0 {
             let (noise_metadata_schedule_44_0_e838,) = {
     if (w[103] == 0.0) {
-        (params.p26,)
+        (params[26],)
     } else {
         (w[44],)
     }
@@ -616,7 +616,7 @@ impl Instance {
         if (active[0] & 0xf73c) != 0 {
             let (noise_metadata_schedule_50_0_e868,) = {
     if (w[103] == 0.0) {
-        (params.p9,)
+        (params[9],)
     } else {
         (w[54],)
     }
@@ -626,7 +626,7 @@ impl Instance {
         if (active[0] & 0xf030) != 0 {
             let (noise_metadata_schedule_53_0_e883,) = {
     if (w[103] == 0.0) {
-        (params.p45,)
+        (params[45],)
     } else {
         (w[57],)
     }
@@ -636,7 +636,7 @@ impl Instance {
         if (active[0] & 0xf73c) != 0 {
             let (noise_metadata_schedule_54_0_e888,) = {
     if (w[103] == 0.0) {
-        (params.p21,)
+        (params[21],)
     } else {
         (w[53],)
     }
@@ -650,7 +650,7 @@ impl Instance {
         if (active[0] & 0xf030) != 0 {
             let (noise_metadata_schedule_56_0_e902,) = {
     if (w[105] != 0.0) {
-        let noise_metadata_schedule_56_0_e898: f64 = (0.5 / params.p44);
+        let noise_metadata_schedule_56_0_e898: f64 = (0.5 / params[44]);
         let noise_metadata_schedule_56_0_e900: f64 = (noise_metadata_schedule_56_0_e898 / w[13]);
         (noise_metadata_schedule_56_0_e900,)
     } else {
@@ -662,7 +662,7 @@ impl Instance {
         if (active[0] & 0xf030) != 0 {
             let (noise_metadata_schedule_57_0_e907,) = {
     if (w[105] == 0.0) {
-        (params.p43,)
+        (params[43],)
     } else {
         (w[19],)
     }
@@ -670,45 +670,45 @@ impl Instance {
             w[19] = noise_metadata_schedule_57_0_e907;
         }
         if (active[0] & 0xf73c) != 0 {
-            let noise_metadata_schedule_58_0_e910: f64 = (params.p19 * w[5]);
+            let noise_metadata_schedule_58_0_e910: f64 = (params[19] * w[5]);
             let noise_metadata_schedule_58_0_e911: f64 = (noise_metadata_schedule_58_0_e910).cosh();
             w[63] = noise_metadata_schedule_58_0_e911;
         }
         if (active[0] & 0xf73c) != 0 {
-            let noise_metadata_schedule_59_0_e914: f64 = (params.p64 * w[11]);
+            let noise_metadata_schedule_59_0_e914: f64 = (params[64] * w[11]);
             w[12] = noise_metadata_schedule_59_0_e914;
         }
         if (active[0] & 0x73c) != 0 {
             let noise_metadata_schedule_60_0_e921: f64 = (w[63] * w[63]);
             let noise_metadata_schedule_60_0_e922: f64 = (1e-12 + noise_metadata_schedule_60_0_e921);
-            let noise_metadata_schedule_60_0_e923: f64 = (params.p18 / noise_metadata_schedule_60_0_e922);
+            let noise_metadata_schedule_60_0_e923: f64 = (params[18] / noise_metadata_schedule_60_0_e922);
             let noise_metadata_schedule_60_0_e924: f64 = (1.0 + noise_metadata_schedule_60_0_e923);
-            let noise_metadata_schedule_60_0_e925: f64 = (params.p11 * noise_metadata_schedule_60_0_e924);
+            let noise_metadata_schedule_60_0_e925: f64 = (params[11] * noise_metadata_schedule_60_0_e924);
             w[59] = noise_metadata_schedule_60_0_e925;
         }
         if (active[0] & 0x73c) != 0 {
             let noise_metadata_schedule_61_0_e930: f64 = (w[16]).abs();
-            let noise_metadata_schedule_61_0_e931: f64 = (params.p69 * noise_metadata_schedule_61_0_e930);
+            let noise_metadata_schedule_61_0_e931: f64 = (params[69] * noise_metadata_schedule_61_0_e930);
             let noise_metadata_schedule_61_0_e932: f64 = (1.0 + noise_metadata_schedule_61_0_e931);
             let noise_metadata_schedule_61_0_e933: f64 = (w[59] * noise_metadata_schedule_61_0_e932);
             w[60] = noise_metadata_schedule_61_0_e933;
         }
         if (active[0] & 0x73c) != 0 {
             let noise_metadata_schedule_62_0_e938: f64 = (w[16]).abs();
-            let noise_metadata_schedule_62_0_e939: f64 = (params.p70 * noise_metadata_schedule_62_0_e938);
+            let noise_metadata_schedule_62_0_e939: f64 = (params[70] * noise_metadata_schedule_62_0_e938);
             let noise_metadata_schedule_62_0_e940: f64 = (1.0 + noise_metadata_schedule_62_0_e939);
-            let noise_metadata_schedule_62_0_e941: f64 = (params.p13 * noise_metadata_schedule_62_0_e940);
+            let noise_metadata_schedule_62_0_e941: f64 = (params[13] * noise_metadata_schedule_62_0_e940);
             w[61] = noise_metadata_schedule_62_0_e941;
         }
         if (active[0] & 0xf73c) != 0 {
-            let noise_metadata_schedule_63_0_e944: f64 = (w[54] - params.p10);
-            let noise_metadata_schedule_63_0_e948: f64 = (params.p15 * w[5]);
+            let noise_metadata_schedule_63_0_e944: f64 = (w[54] - params[10]);
+            let noise_metadata_schedule_63_0_e948: f64 = (params[15] * w[5]);
             let noise_metadata_schedule_63_0_e949: f64 = (noise_metadata_schedule_63_0_e948).tanh();
-            let noise_metadata_schedule_63_0_e950: f64 = (params.p10 * noise_metadata_schedule_63_0_e949);
+            let noise_metadata_schedule_63_0_e950: f64 = (params[10] * noise_metadata_schedule_63_0_e949);
             let noise_metadata_schedule_63_0_e951: f64 = (noise_metadata_schedule_63_0_e944 + noise_metadata_schedule_63_0_e950);
             let noise_metadata_schedule_63_0_e953: f64 = (noise_metadata_schedule_63_0_e951 - w[12]);
             let noise_metadata_schedule_63_0_e957: f64 = (w[6] - w[53]);
-            let noise_metadata_schedule_63_0_e958: f64 = (params.p22 * noise_metadata_schedule_63_0_e957);
+            let noise_metadata_schedule_63_0_e958: f64 = (params[22] * noise_metadata_schedule_63_0_e957);
             let noise_metadata_schedule_63_0_e961: f64 = (w[6] - w[53]);
             let noise_metadata_schedule_63_0_e962: f64 = (noise_metadata_schedule_63_0_e958 * noise_metadata_schedule_63_0_e961);
             let noise_metadata_schedule_63_0_e963: f64 = (noise_metadata_schedule_63_0_e953 - noise_metadata_schedule_63_0_e962);
@@ -716,7 +716,7 @@ impl Instance {
         }
         if (active[0] & 0xf73c) != 0 {
             let noise_metadata_schedule_64_0_e968: f64 = (w[16]).abs();
-            let noise_metadata_schedule_64_0_e969: f64 = (params.p78 * noise_metadata_schedule_64_0_e968);
+            let noise_metadata_schedule_64_0_e969: f64 = (params[78] * noise_metadata_schedule_64_0_e968);
             let noise_metadata_schedule_64_0_e970: f64 = (1.0 + noise_metadata_schedule_64_0_e969);
             let noise_metadata_schedule_64_0_e971: f64 = (w[62] * noise_metadata_schedule_64_0_e970);
             w[58] = noise_metadata_schedule_64_0_e971;
@@ -731,7 +731,7 @@ impl Instance {
         }
         if (active[0] & 0x73c) != 0 {
             let noise_metadata_schedule_67_0_e980: f64 = (w[60] * w[64]);
-            let noise_metadata_schedule_67_0_e983: f64 = (params.p12 * w[65]);
+            let noise_metadata_schedule_67_0_e983: f64 = (params[12] * w[65]);
             let noise_metadata_schedule_67_0_e984: f64 = (noise_metadata_schedule_67_0_e980 + noise_metadata_schedule_67_0_e983);
             let noise_metadata_schedule_67_0_e987: f64 = (w[61] * w[64]);
             let noise_metadata_schedule_67_0_e989: f64 = (noise_metadata_schedule_67_0_e987 * w[65]);
@@ -754,8 +754,8 @@ impl Instance {
             w[76] = noise_metadata_schedule_69_0_e1005;
         }
         if (active[0] & 0x730) != 0 {
-            let noise_metadata_schedule_70_0_e1009: f64 = (params.p15 * w[75]);
-            let noise_metadata_schedule_70_0_e1010: f64 = (params.p14 + noise_metadata_schedule_70_0_e1009);
+            let noise_metadata_schedule_70_0_e1009: f64 = (params[15] * w[75]);
+            let noise_metadata_schedule_70_0_e1010: f64 = (params[14] + noise_metadata_schedule_70_0_e1009);
             w[0] = noise_metadata_schedule_70_0_e1010;
         }
         if (active[0] & 0x730) != 0 {
@@ -764,23 +764,23 @@ impl Instance {
             w[79] = noise_metadata_schedule_71_0_e1014;
         }
         if (active[0] & 0xf73c) != 0 {
-            let noise_metadata_schedule_72_0_e1017: f64 = if params.p4 == 0.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_72_0_e1017: f64 = if params[4] == 0.0 { 1.0 } else { 0.0 };
             w[106] = noise_metadata_schedule_72_0_e1017;
         }
         if (active[0] & 0xf73c) != 0 {
-            let noise_metadata_schedule_73_0_e1020: f64 = if params.p4 == 1.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_73_0_e1020: f64 = if params[4] == 1.0 { 1.0 } else { 0.0 };
             w[107] = noise_metadata_schedule_73_0_e1020;
         }
         if (active[0] & 0xf73c) != 0 {
-            let noise_metadata_schedule_74_0_e1023: f64 = if params.p4 == 2.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_74_0_e1023: f64 = if params[4] == 2.0 { 1.0 } else { 0.0 };
             w[108] = noise_metadata_schedule_74_0_e1023;
         }
         if (active[0] & 0xf73c) != 0 {
-            let noise_metadata_schedule_75_0_e1026: f64 = if params.p4 == 3.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_75_0_e1026: f64 = if params[4] == 3.0 { 1.0 } else { 0.0 };
             w[109] = noise_metadata_schedule_75_0_e1026;
         }
         if (active[0] & 0x700) != 0 {
-            let noise_metadata_schedule_76_0_e1029: f64 = if params.p4 == 4.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_76_0_e1029: f64 = if params[4] == 4.0 { 1.0 } else { 0.0 };
             w[110] = noise_metadata_schedule_76_0_e1029;
         }
         if (active[0] & 0x700) != 0 {
@@ -788,7 +788,7 @@ impl Instance {
     if (w[106] != 0.0) {
         let noise_metadata_schedule_77_0_e1033: f64 = (w[39] * w[75]);
         let noise_metadata_schedule_77_0_e1035: f64 = (noise_metadata_schedule_77_0_e1033 * w[79]);
-        let noise_metadata_schedule_77_0_e1039: f64 = (params.p16 * w[5]);
+        let noise_metadata_schedule_77_0_e1039: f64 = (params[16] * w[5]);
         let noise_metadata_schedule_77_0_e1040: f64 = (1.0 + noise_metadata_schedule_77_0_e1039);
         let noise_metadata_schedule_77_0_e1044: f64 = (w[6] - w[53]);
         let noise_metadata_schedule_77_0_e1045: f64 = { let limexp_arg = noise_metadata_schedule_77_0_e1044; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
@@ -839,7 +839,7 @@ impl Instance {
             let (noise_metadata_schedule_81_0_e1094,) = {
     if ((w[107] != 0.0) && (w[106] == 0.0)) {
         let noise_metadata_schedule_81_0_e1084: f64 = (w[60] * w[63]);
-        let noise_metadata_schedule_81_0_e1087: f64 = (params.p12 * w[64]);
+        let noise_metadata_schedule_81_0_e1087: f64 = (params[12] * w[64]);
         let noise_metadata_schedule_81_0_e1088: f64 = (noise_metadata_schedule_81_0_e1084 + noise_metadata_schedule_81_0_e1087);
         let noise_metadata_schedule_81_0_e1091: f64 = (w[61] * w[65]);
         let noise_metadata_schedule_81_0_e1092: f64 = (noise_metadata_schedule_81_0_e1088 + noise_metadata_schedule_81_0_e1091);
@@ -865,8 +865,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_83_0_e1115,) = {
     if ((w[107] != 0.0) && (w[106] == 0.0)) {
-        let noise_metadata_schedule_83_0_e1112: f64 = (params.p15 * w[77]);
-        let noise_metadata_schedule_83_0_e1113: f64 = (params.p14 + noise_metadata_schedule_83_0_e1112);
+        let noise_metadata_schedule_83_0_e1112: f64 = (params[15] * w[77]);
+        let noise_metadata_schedule_83_0_e1113: f64 = (params[14] + noise_metadata_schedule_83_0_e1112);
         (noise_metadata_schedule_83_0_e1113,)
     } else {
         (w[72],)
@@ -877,8 +877,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_84_0_e1126,) = {
     if ((w[107] != 0.0) && (w[106] == 0.0)) {
-        let noise_metadata_schedule_84_0_e1123: f64 = (params.p17 * w[75]);
-        let noise_metadata_schedule_84_0_e1124: f64 = (params.p16 + noise_metadata_schedule_84_0_e1123);
+        let noise_metadata_schedule_84_0_e1123: f64 = (params[17] * w[75]);
+        let noise_metadata_schedule_84_0_e1124: f64 = (params[16] + noise_metadata_schedule_84_0_e1123);
         (noise_metadata_schedule_84_0_e1124,)
     } else {
         (w[69],)
@@ -900,7 +900,7 @@ impl Instance {
         let noise_metadata_schedule_85_0_e1141: f64 = (w[69] * w[5]);
         let noise_metadata_schedule_85_0_e1142: f64 = (1.0 + noise_metadata_schedule_85_0_e1141);
         let noise_metadata_schedule_85_0_e1147: f64 = (w[5] - w[53]);
-        let noise_metadata_schedule_85_0_e1148: f64 = (params.p23 * noise_metadata_schedule_85_0_e1147);
+        let noise_metadata_schedule_85_0_e1148: f64 = (params[23] * noise_metadata_schedule_85_0_e1147);
         let noise_metadata_schedule_85_0_e1149: f64 = { let limexp_arg = noise_metadata_schedule_85_0_e1148; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         let noise_metadata_schedule_85_0_e1150: f64 = (w[43] * noise_metadata_schedule_85_0_e1149);
         let noise_metadata_schedule_85_0_e1151: f64 = (noise_metadata_schedule_85_0_e1142 + noise_metadata_schedule_85_0_e1150);
@@ -915,8 +915,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_86_0_e1165,) = {
     if ((w[107] != 0.0) && (w[106] == 0.0)) {
-        let noise_metadata_schedule_86_0_e1162: f64 = (params.p17 * w[77]);
-        let noise_metadata_schedule_86_0_e1163: f64 = (params.p16 + noise_metadata_schedule_86_0_e1162);
+        let noise_metadata_schedule_86_0_e1162: f64 = (params[17] * w[77]);
+        let noise_metadata_schedule_86_0_e1163: f64 = (params[16] + noise_metadata_schedule_86_0_e1162);
         (noise_metadata_schedule_86_0_e1163,)
     } else {
         (w[67],)
@@ -989,7 +989,7 @@ impl Instance {
         if (active[0] & 0x70c) != 0 {
             let (noise_metadata_schedule_92_0_e1248,) = {
     if ((w[108] != 0.0) && (!((w[106] != 0.0) || (w[107] != 0.0)))) {
-        let noise_metadata_schedule_92_0_e1238: f64 = (params.p12 * w[64]);
+        let noise_metadata_schedule_92_0_e1238: f64 = (params[12] * w[64]);
         let noise_metadata_schedule_92_0_e1239: f64 = (w[63] + noise_metadata_schedule_92_0_e1238);
         let noise_metadata_schedule_92_0_e1242: f64 = (w[61] * w[64]);
         let noise_metadata_schedule_92_0_e1244: f64 = (noise_metadata_schedule_92_0_e1242 * w[63]);
@@ -1022,8 +1022,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_94_0_e1280,) = {
     if ((w[108] != 0.0) && (!((w[106] != 0.0) || (w[107] != 0.0)))) {
-        let noise_metadata_schedule_94_0_e1277: f64 = (params.p15 * w[76]);
-        let noise_metadata_schedule_94_0_e1278: f64 = (params.p14 + noise_metadata_schedule_94_0_e1277);
+        let noise_metadata_schedule_94_0_e1277: f64 = (params[15] * w[76]);
+        let noise_metadata_schedule_94_0_e1278: f64 = (params[14] + noise_metadata_schedule_94_0_e1277);
         (noise_metadata_schedule_94_0_e1278,)
     } else {
         (w[1],)
@@ -1046,8 +1046,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_96_0_e1305,) = {
     if ((w[108] != 0.0) && (!((w[106] != 0.0) || (w[107] != 0.0)))) {
-        let noise_metadata_schedule_96_0_e1302: f64 = (params.p17 * w[76]);
-        let noise_metadata_schedule_96_0_e1303: f64 = (params.p16 + noise_metadata_schedule_96_0_e1302);
+        let noise_metadata_schedule_96_0_e1302: f64 = (params[17] * w[76]);
+        let noise_metadata_schedule_96_0_e1303: f64 = (params[16] + noise_metadata_schedule_96_0_e1302);
         (noise_metadata_schedule_96_0_e1303,)
     } else {
         (w[69],)
@@ -1063,7 +1063,7 @@ impl Instance {
         let noise_metadata_schedule_97_0_e1320: f64 = (w[69] * w[5]);
         let noise_metadata_schedule_97_0_e1321: f64 = (1.0 + noise_metadata_schedule_97_0_e1320);
         let noise_metadata_schedule_97_0_e1326: f64 = (w[6] - w[53]);
-        let noise_metadata_schedule_97_0_e1327: f64 = (params.p23 * noise_metadata_schedule_97_0_e1326);
+        let noise_metadata_schedule_97_0_e1327: f64 = (params[23] * noise_metadata_schedule_97_0_e1326);
         let noise_metadata_schedule_97_0_e1328: f64 = { let limexp_arg = noise_metadata_schedule_97_0_e1327; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         let noise_metadata_schedule_97_0_e1329: f64 = (w[43] * noise_metadata_schedule_97_0_e1328);
         let noise_metadata_schedule_97_0_e1330: f64 = (noise_metadata_schedule_97_0_e1321 + noise_metadata_schedule_97_0_e1329);
@@ -1100,7 +1100,7 @@ impl Instance {
         if (active[0] & 0x70c) != 0 {
             let (noise_metadata_schedule_100_0_e1382,) = {
     if ((w[109] != 0.0) && (!(((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)))) {
-        let noise_metadata_schedule_100_0_e1372: f64 = (params.p12 * w[64]);
+        let noise_metadata_schedule_100_0_e1372: f64 = (params[12] * w[64]);
         let noise_metadata_schedule_100_0_e1373: f64 = (w[63] + noise_metadata_schedule_100_0_e1372);
         let noise_metadata_schedule_100_0_e1376: f64 = (w[61] * w[64]);
         let noise_metadata_schedule_100_0_e1378: f64 = (noise_metadata_schedule_100_0_e1376 * w[63]);
@@ -1138,7 +1138,7 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_103_0_e1431,) = {
     if ((w[109] != 0.0) && (!(((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)))) {
-        let noise_metadata_schedule_103_0_e1421: f64 = (params.p12 * w[66]);
+        let noise_metadata_schedule_103_0_e1421: f64 = (params[12] * w[66]);
         let noise_metadata_schedule_103_0_e1422: f64 = (w[65] + noise_metadata_schedule_103_0_e1421);
         let noise_metadata_schedule_103_0_e1425: f64 = (w[61] * w[65]);
         let noise_metadata_schedule_103_0_e1427: f64 = (noise_metadata_schedule_103_0_e1425 * w[66]);
@@ -1188,8 +1188,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_106_0_e1488,) = {
     if ((w[109] != 0.0) && (!(((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)))) {
-        let noise_metadata_schedule_106_0_e1485: f64 = (params.p15 * w[76]);
-        let noise_metadata_schedule_106_0_e1486: f64 = (params.p14 + noise_metadata_schedule_106_0_e1485);
+        let noise_metadata_schedule_106_0_e1485: f64 = (params[15] * w[76]);
+        let noise_metadata_schedule_106_0_e1486: f64 = (params[14] + noise_metadata_schedule_106_0_e1485);
         (noise_metadata_schedule_106_0_e1486,)
     } else {
         (w[1],)
@@ -1200,8 +1200,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_107_0_e1503,) = {
     if ((w[109] != 0.0) && (!(((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)))) {
-        let noise_metadata_schedule_107_0_e1500: f64 = (params.p15 * w[78]);
-        let noise_metadata_schedule_107_0_e1501: f64 = (params.p14 + noise_metadata_schedule_107_0_e1500);
+        let noise_metadata_schedule_107_0_e1500: f64 = (params[15] * w[78]);
+        let noise_metadata_schedule_107_0_e1501: f64 = (params[14] + noise_metadata_schedule_107_0_e1500);
         (noise_metadata_schedule_107_0_e1501,)
     } else {
         (w[2],)
@@ -1236,8 +1236,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_110_0_e1546,) = {
     if ((w[109] != 0.0) && (!(((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)))) {
-        let noise_metadata_schedule_110_0_e1543: f64 = (params.p17 * w[78]);
-        let noise_metadata_schedule_110_0_e1544: f64 = (params.p16 + noise_metadata_schedule_110_0_e1543);
+        let noise_metadata_schedule_110_0_e1543: f64 = (params[17] * w[78]);
+        let noise_metadata_schedule_110_0_e1544: f64 = (params[16] + noise_metadata_schedule_110_0_e1543);
         (noise_metadata_schedule_110_0_e1544,)
     } else {
         (w[68],)
@@ -1248,8 +1248,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_111_0_e1561,) = {
     if ((w[109] != 0.0) && (!(((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)))) {
-        let noise_metadata_schedule_111_0_e1558: f64 = (params.p17 * w[76]);
-        let noise_metadata_schedule_111_0_e1559: f64 = (params.p16 + noise_metadata_schedule_111_0_e1558);
+        let noise_metadata_schedule_111_0_e1558: f64 = (params[17] * w[76]);
+        let noise_metadata_schedule_111_0_e1559: f64 = (params[16] + noise_metadata_schedule_111_0_e1558);
         (noise_metadata_schedule_111_0_e1559,)
     } else {
         (w[70],)
@@ -1266,7 +1266,7 @@ impl Instance {
         let noise_metadata_schedule_112_0_e1580: f64 = (w[70] * w[5]);
         let noise_metadata_schedule_112_0_e1581: f64 = (1.0 + noise_metadata_schedule_112_0_e1580);
         let noise_metadata_schedule_112_0_e1586: f64 = (w[5] - w[53]);
-        let noise_metadata_schedule_112_0_e1587: f64 = (params.p23 * noise_metadata_schedule_112_0_e1586);
+        let noise_metadata_schedule_112_0_e1587: f64 = (params[23] * noise_metadata_schedule_112_0_e1586);
         let noise_metadata_schedule_112_0_e1588: f64 = { let limexp_arg = noise_metadata_schedule_112_0_e1587; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         let noise_metadata_schedule_112_0_e1589: f64 = (w[43] * noise_metadata_schedule_112_0_e1588);
         let noise_metadata_schedule_112_0_e1590: f64 = (noise_metadata_schedule_112_0_e1581 + noise_metadata_schedule_112_0_e1589);
@@ -1309,8 +1309,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_115_0_e1648,) = {
     if ((w[110] != 0.0) && (!((((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)) || (w[109] != 0.0)))) {
-        let noise_metadata_schedule_115_0_e1645: f64 = (params.p17 * w[75]);
-        let noise_metadata_schedule_115_0_e1646: f64 = (params.p16 + noise_metadata_schedule_115_0_e1645);
+        let noise_metadata_schedule_115_0_e1645: f64 = (params[17] * w[75]);
+        let noise_metadata_schedule_115_0_e1646: f64 = (params[16] + noise_metadata_schedule_115_0_e1645);
         (noise_metadata_schedule_115_0_e1646,)
     } else {
         (w[69],)
@@ -1321,8 +1321,8 @@ impl Instance {
         if (active[0] & 0x700) != 0 {
             let (noise_metadata_schedule_116_0_e1665,) = {
     if ((w[110] != 0.0) && (!((((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)) || (w[109] != 0.0)))) {
-        let noise_metadata_schedule_116_0_e1662: f64 = (params.p15 * w[76]);
-        let noise_metadata_schedule_116_0_e1663: f64 = (params.p14 + noise_metadata_schedule_116_0_e1662);
+        let noise_metadata_schedule_116_0_e1662: f64 = (params[15] * w[76]);
+        let noise_metadata_schedule_116_0_e1663: f64 = (params[14] + noise_metadata_schedule_116_0_e1662);
         (noise_metadata_schedule_116_0_e1663,)
     } else {
         (w[1],)
@@ -1358,15 +1358,15 @@ impl Instance {
             let (noise_metadata_schedule_119_0_e1737,) = {
     if ((w[110] != 0.0) && (!((((w[106] != 0.0) || (w[107] != 0.0)) || (w[108] != 0.0)) || (w[109] != 0.0)))) {
         let noise_metadata_schedule_119_0_e1710: f64 = (w[39] * w[75]);
-        let noise_metadata_schedule_119_0_e1714: f64 = (params.p65 * w[83]);
+        let noise_metadata_schedule_119_0_e1714: f64 = (params[65] * w[83]);
         let noise_metadata_schedule_119_0_e1715: f64 = (w[81] + noise_metadata_schedule_119_0_e1714);
         let noise_metadata_schedule_119_0_e1716: f64 = (noise_metadata_schedule_119_0_e1710 * noise_metadata_schedule_119_0_e1715);
-        let noise_metadata_schedule_119_0_e1722: f64 = (params.p65 * w[11]);
+        let noise_metadata_schedule_119_0_e1722: f64 = (params[65] * w[11]);
         let noise_metadata_schedule_119_0_e1723: f64 = (w[5] + noise_metadata_schedule_119_0_e1722);
         let noise_metadata_schedule_119_0_e1724: f64 = (w[69] * noise_metadata_schedule_119_0_e1723);
         let noise_metadata_schedule_119_0_e1725: f64 = (1.0 + noise_metadata_schedule_119_0_e1724);
         let noise_metadata_schedule_119_0_e1730: f64 = (w[5] - w[53]);
-        let noise_metadata_schedule_119_0_e1731: f64 = (params.p23 * noise_metadata_schedule_119_0_e1730);
+        let noise_metadata_schedule_119_0_e1731: f64 = (params[23] * noise_metadata_schedule_119_0_e1730);
         let noise_metadata_schedule_119_0_e1732: f64 = { let limexp_arg = noise_metadata_schedule_119_0_e1731; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         let noise_metadata_schedule_119_0_e1733: f64 = (w[43] * noise_metadata_schedule_119_0_e1732);
         let noise_metadata_schedule_119_0_e1734: f64 = (noise_metadata_schedule_119_0_e1725 + noise_metadata_schedule_119_0_e1733);
@@ -1379,14 +1379,14 @@ impl Instance {
             w[98] = noise_metadata_schedule_119_0_e1737;
         }
         if (active[0] & 0xc) != 0 {
-            let noise_metadata_schedule_120_0_e1748: f64 = if (((params.p4 == 0.0) || (params.p4 == 1.0)) || (params.p4 == 4.0)) { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_120_0_e1748: f64 = if (((params[4] == 0.0) || (params[4] == 1.0)) || (params[4] == 4.0)) { 1.0 } else { 0.0 };
             w[111] = noise_metadata_schedule_120_0_e1748;
         }
         if (active[0] & 0x8) != 0 {
             let (noise_metadata_schedule_122_0_e1766,) = {
     if (w[111] != 0.0) {
-        let noise_metadata_schedule_122_0_e1763: f64 = (params.p48 * w[75]);
-        let noise_metadata_schedule_122_0_e1764: f64 = (params.p47 + noise_metadata_schedule_122_0_e1763);
+        let noise_metadata_schedule_122_0_e1763: f64 = (params[48] * w[75]);
+        let noise_metadata_schedule_122_0_e1764: f64 = (params[47] + noise_metadata_schedule_122_0_e1763);
         (noise_metadata_schedule_122_0_e1764,)
     } else {
         (w[41],)
@@ -1402,8 +1402,8 @@ impl Instance {
         if (active[0] & 0x4) != 0 {
             let (noise_metadata_schedule_123_0_e1774,) = {
     if (w[111] != 0.0) {
-        let noise_metadata_schedule_123_0_e1771: f64 = (params.p48 * w[75]);
-        let noise_metadata_schedule_123_0_e1772: f64 = (params.p50 + noise_metadata_schedule_123_0_e1771);
+        let noise_metadata_schedule_123_0_e1771: f64 = (params[48] * w[75]);
+        let noise_metadata_schedule_123_0_e1772: f64 = (params[50] + noise_metadata_schedule_123_0_e1771);
         (noise_metadata_schedule_123_0_e1772,)
     } else {
         (w[42],)
@@ -1414,8 +1414,8 @@ impl Instance {
         if (active[0] & 0x8) != 0 {
             let (noise_metadata_schedule_125_0_e1794,) = {
     if (w[111] == 0.0) {
-        let noise_metadata_schedule_125_0_e1791: f64 = (params.p48 * w[76]);
-        let noise_metadata_schedule_125_0_e1792: f64 = (params.p47 + noise_metadata_schedule_125_0_e1791);
+        let noise_metadata_schedule_125_0_e1791: f64 = (params[48] * w[76]);
+        let noise_metadata_schedule_125_0_e1792: f64 = (params[47] + noise_metadata_schedule_125_0_e1791);
         (noise_metadata_schedule_125_0_e1792,)
     } else {
         (w[41],)
@@ -1426,8 +1426,8 @@ impl Instance {
         if (active[0] & 0x4) != 0 {
             let (noise_metadata_schedule_126_0_e1803,) = {
     if (w[111] == 0.0) {
-        let noise_metadata_schedule_126_0_e1800: f64 = (params.p48 * w[76]);
-        let noise_metadata_schedule_126_0_e1801: f64 = (params.p50 + noise_metadata_schedule_126_0_e1800);
+        let noise_metadata_schedule_126_0_e1800: f64 = (params[48] * w[76]);
+        let noise_metadata_schedule_126_0_e1801: f64 = (params[50] + noise_metadata_schedule_126_0_e1800);
         (noise_metadata_schedule_126_0_e1801,)
     } else {
         (w[42],)
@@ -1437,20 +1437,20 @@ impl Instance {
         }
         if (active[0] & 0x4) != 0 {
             let noise_metadata_schedule_127_0_e1808: f64 = (w[16]).abs();
-            let noise_metadata_schedule_127_0_e1809: f64 = (params.p76 * noise_metadata_schedule_127_0_e1808);
+            let noise_metadata_schedule_127_0_e1809: f64 = (params[76] * noise_metadata_schedule_127_0_e1808);
             let noise_metadata_schedule_127_0_e1810: f64 = (1.0 + noise_metadata_schedule_127_0_e1809);
             let noise_metadata_schedule_127_0_e1811: f64 = (w[42] * noise_metadata_schedule_127_0_e1810);
             w[50] = noise_metadata_schedule_127_0_e1811;
         }
         if (active[0] & 0x8) != 0 {
             let noise_metadata_schedule_128_0_e1816: f64 = (w[16]).abs();
-            let noise_metadata_schedule_128_0_e1817: f64 = (params.p76 * noise_metadata_schedule_128_0_e1816);
+            let noise_metadata_schedule_128_0_e1817: f64 = (params[76] * noise_metadata_schedule_128_0_e1816);
             let noise_metadata_schedule_128_0_e1818: f64 = (1.0 + noise_metadata_schedule_128_0_e1817);
             let noise_metadata_schedule_128_0_e1819: f64 = (w[41] * noise_metadata_schedule_128_0_e1818);
             w[49] = noise_metadata_schedule_128_0_e1819;
         }
         if (active[0] & 0xf030) != 0 {
-            let noise_metadata_schedule_130_0_e1830: f64 = if params.p5 == 0.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_130_0_e1830: f64 = if params[5] == 0.0 { 1.0 } else { 0.0 };
             w[112] = noise_metadata_schedule_130_0_e1830;
         }
         if (active[0] & 0xf030) != 0 {
@@ -1484,7 +1484,7 @@ impl Instance {
             let (noise_metadata_schedule_133_0_e1856,) = {
     if (w[112] != 0.0) {
         let noise_metadata_schedule_133_0_e1852: f64 = (-w[96]);
-        let noise_metadata_schedule_133_0_e1854: f64 = (noise_metadata_schedule_133_0_e1852 - params.p83);
+        let noise_metadata_schedule_133_0_e1854: f64 = (noise_metadata_schedule_133_0_e1852 - params[83]);
         (noise_metadata_schedule_133_0_e1854,)
     } else {
         (w[21],)
@@ -1508,7 +1508,7 @@ impl Instance {
             let (noise_metadata_schedule_135_0_e1871,) = {
     if (w[112] != 0.0) {
         let noise_metadata_schedule_135_0_e1867: f64 = (-w[97]);
-        let noise_metadata_schedule_135_0_e1869: f64 = (noise_metadata_schedule_135_0_e1867 - params.p84);
+        let noise_metadata_schedule_135_0_e1869: f64 = (noise_metadata_schedule_135_0_e1867 - params[84]);
         (noise_metadata_schedule_135_0_e1869,)
     } else {
         (w[23],)
@@ -1532,8 +1532,8 @@ impl Instance {
         if (active[0] & 0x5000) != 0 {
             let (noise_metadata_schedule_137_0_e1889,) = {
     if (w[112] == 0.0) {
-        let noise_metadata_schedule_137_0_e1884: f64 = (-params.p85);
-        let noise_metadata_schedule_137_0_e1886: f64 = (noise_metadata_schedule_137_0_e1884 * params.p83);
+        let noise_metadata_schedule_137_0_e1884: f64 = (-params[85]);
+        let noise_metadata_schedule_137_0_e1886: f64 = (noise_metadata_schedule_137_0_e1884 * params[83]);
         let noise_metadata_schedule_137_0_e1887: f64 = { let limexp_arg = noise_metadata_schedule_137_0_e1886; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         (noise_metadata_schedule_137_0_e1887,)
     } else {
@@ -1545,8 +1545,8 @@ impl Instance {
         if (active[0] & 0xa030) != 0 {
             let (noise_metadata_schedule_138_0_e1898,) = {
     if (w[112] == 0.0) {
-        let noise_metadata_schedule_138_0_e1893: f64 = (-params.p85);
-        let noise_metadata_schedule_138_0_e1895: f64 = (noise_metadata_schedule_138_0_e1893 * params.p84);
+        let noise_metadata_schedule_138_0_e1893: f64 = (-params[85]);
+        let noise_metadata_schedule_138_0_e1895: f64 = (noise_metadata_schedule_138_0_e1893 * params[84]);
         let noise_metadata_schedule_138_0_e1896: f64 = { let limexp_arg = noise_metadata_schedule_138_0_e1895; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
         (noise_metadata_schedule_138_0_e1896,)
     } else {
@@ -1556,7 +1556,7 @@ impl Instance {
             w[25] = noise_metadata_schedule_138_0_e1898;
         }
         if (active[0] & 0xf030) != 0 {
-            let noise_metadata_schedule_139_0_e1901: f64 = if params.p5 == 1.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_139_0_e1901: f64 = if params[5] == 1.0 { 1.0 } else { 0.0 };
             w[113] = noise_metadata_schedule_139_0_e1901;
         }
         if (active[0] & 0x5000) != 0 {
@@ -1609,7 +1609,7 @@ impl Instance {
             let (noise_metadata_schedule_144_0_e1949,) = {
     if (w[112] == 0.0) {
         let noise_metadata_schedule_144_0_e1945: f64 = (-w[96]);
-        let noise_metadata_schedule_144_0_e1947: f64 = (noise_metadata_schedule_144_0_e1945 - params.p83);
+        let noise_metadata_schedule_144_0_e1947: f64 = (noise_metadata_schedule_144_0_e1945 - params[83]);
         (noise_metadata_schedule_144_0_e1947,)
     } else {
         (w[21],)
@@ -1621,7 +1621,7 @@ impl Instance {
             let (noise_metadata_schedule_145_0_e1957,) = {
     if (w[112] == 0.0) {
         let noise_metadata_schedule_145_0_e1953: f64 = (-w[97]);
-        let noise_metadata_schedule_145_0_e1955: f64 = (noise_metadata_schedule_145_0_e1953 - params.p84);
+        let noise_metadata_schedule_145_0_e1955: f64 = (noise_metadata_schedule_145_0_e1953 - params[84]);
         (noise_metadata_schedule_145_0_e1955,)
     } else {
         (w[23],)
@@ -1630,7 +1630,7 @@ impl Instance {
             w[23] = noise_metadata_schedule_145_0_e1957;
         }
         if (active[0] & 0x5000) != 0 {
-            let noise_metadata_schedule_146_0_e1960: f64 = (params.p85 * w[21]);
+            let noise_metadata_schedule_146_0_e1960: f64 = (params[85] * w[21]);
             let noise_metadata_schedule_146_0_e1961: f64 = { let limexp_arg = noise_metadata_schedule_146_0_e1960; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
             let noise_metadata_schedule_146_0_e1963: f64 = (noise_metadata_schedule_146_0_e1961 - w[24]);
             w[8] = noise_metadata_schedule_146_0_e1963;
@@ -1638,15 +1638,15 @@ impl Instance {
         if (active[0] & 0x5000) != 0 {
             let noise_metadata_schedule_147_0_e1967: f64 = (w[19] * w[20]);
             let noise_metadata_schedule_147_0_e1968: f64 = { let limexp_arg = noise_metadata_schedule_147_0_e1967; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
-            let noise_metadata_schedule_147_0_e1971: f64 = (0.001 * params.p82);
+            let noise_metadata_schedule_147_0_e1971: f64 = (0.001 * params[82]);
             let noise_metadata_schedule_147_0_e1973: f64 = (noise_metadata_schedule_147_0_e1971 * w[8]);
             let noise_metadata_schedule_147_0_e1974: f64 = (noise_metadata_schedule_147_0_e1968 - noise_metadata_schedule_147_0_e1973);
             let noise_metadata_schedule_147_0_e1976: f64 = (noise_metadata_schedule_147_0_e1974 - w[63]);
-            let noise_metadata_schedule_147_0_e1977: f64 = (params.p42 * noise_metadata_schedule_147_0_e1976);
+            let noise_metadata_schedule_147_0_e1977: f64 = (params[42] * noise_metadata_schedule_147_0_e1976);
             w[7] = noise_metadata_schedule_147_0_e1977;
         }
         if (active[0] & 0xa030) != 0 {
-            let noise_metadata_schedule_148_0_e1980: f64 = (params.p85 * w[23]);
+            let noise_metadata_schedule_148_0_e1980: f64 = (params[85] * w[23]);
             let noise_metadata_schedule_148_0_e1981: f64 = { let limexp_arg = noise_metadata_schedule_148_0_e1980; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
             let noise_metadata_schedule_148_0_e1983: f64 = (noise_metadata_schedule_148_0_e1981 - w[25]);
             w[10] = noise_metadata_schedule_148_0_e1983;
@@ -1654,11 +1654,11 @@ impl Instance {
         if (active[0] & 0xa030) != 0 {
             let noise_metadata_schedule_149_0_e1987: f64 = (w[19] * w[22]);
             let noise_metadata_schedule_149_0_e1988: f64 = { let limexp_arg = noise_metadata_schedule_149_0_e1987; if limexp_arg < 80.0 { limexp_arg.exp() } else { LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) } };
-            let noise_metadata_schedule_149_0_e1991: f64 = (0.001 * params.p82);
+            let noise_metadata_schedule_149_0_e1991: f64 = (0.001 * params[82]);
             let noise_metadata_schedule_149_0_e1993: f64 = (noise_metadata_schedule_149_0_e1991 * w[10]);
             let noise_metadata_schedule_149_0_e1994: f64 = (noise_metadata_schedule_149_0_e1988 - noise_metadata_schedule_149_0_e1993);
             let noise_metadata_schedule_149_0_e1996: f64 = (noise_metadata_schedule_149_0_e1994 - w[63]);
-            let noise_metadata_schedule_149_0_e1997: f64 = (params.p42 * noise_metadata_schedule_149_0_e1996);
+            let noise_metadata_schedule_149_0_e1997: f64 = (params[42] * noise_metadata_schedule_149_0_e1996);
             w[9] = noise_metadata_schedule_149_0_e1997;
         }
         if (active[0] & 0x700) != 0 {
@@ -1666,17 +1666,17 @@ impl Instance {
             w[99] = noise_metadata_schedule_218_0_e2869;
         }
         if (active[0] & 0x700) != 0 {
-            let noise_metadata_schedule_219_0_e2874: f64 = (w[99] * params.p50);
+            let noise_metadata_schedule_219_0_e2874: f64 = (w[99] * params[50]);
             let noise_metadata_schedule_219_0_e2875: f64 = (1.0 + noise_metadata_schedule_219_0_e2874);
             let noise_metadata_schedule_219_0_e2876: f64 = (w[99] / noise_metadata_schedule_219_0_e2875);
             w[99] = noise_metadata_schedule_219_0_e2876;
         }
         if (active[0] & 0x7f0) != 0 {
-            let noise_metadata_schedule_221_0_e2882: f64 = if params.p7 == 0.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_221_0_e2882: f64 = if params[7] == 0.0 { 1.0 } else { 0.0 };
             w[128] = noise_metadata_schedule_221_0_e2882;
         }
         if (active[0] & 0x7c0) != 0 {
-            let noise_metadata_schedule_222_0_e2885: f64 = if params.p7 == 1.0 { 1.0 } else { 0.0 };
+            let noise_metadata_schedule_222_0_e2885: f64 = if params[7] == 1.0 { 1.0 } else { 0.0 };
             w[129] = noise_metadata_schedule_222_0_e2885;
         }
         if (active[0] & 0x30) != 0 {
@@ -1695,11 +1695,11 @@ impl Instance {
         if (active[0] & 0x30) != 0 {
             let (noise_metadata_schedule_225_0_e2917,) = {
     if (w[128] != 0.0) {
-        let noise_metadata_schedule_225_0_e2900: f64 = (params.p93 + 273.15);
-        let noise_metadata_schedule_225_0_e2904: f64 = (params.p95 * w[75]);
+        let noise_metadata_schedule_225_0_e2900: f64 = (params[93] + 273.15);
+        let noise_metadata_schedule_225_0_e2904: f64 = (params[95] * w[75]);
         let noise_metadata_schedule_225_0_e2906: f64 = (w[79]).abs();
         let noise_metadata_schedule_225_0_e2907: f64 = (noise_metadata_schedule_225_0_e2904 * noise_metadata_schedule_225_0_e2906);
-        let noise_metadata_schedule_225_0_e2911: f64 = (params.p16 * w[5]);
+        let noise_metadata_schedule_225_0_e2911: f64 = (params[16] * w[5]);
         let noise_metadata_schedule_225_0_e2912: f64 = (1.0 + noise_metadata_schedule_225_0_e2911);
         let noise_metadata_schedule_225_0_e2913: f64 = (noise_metadata_schedule_225_0_e2907 * noise_metadata_schedule_225_0_e2912);
         let noise_metadata_schedule_225_0_e2914: f64 = (1.0 + noise_metadata_schedule_225_0_e2913);
@@ -1714,12 +1714,12 @@ impl Instance {
         if (active[0] & 0x30) != 0 {
             let (noise_metadata_schedule_226_0_e2941,) = {
     if (w[128] != 0.0) {
-        let noise_metadata_schedule_226_0_e2921: f64 = (params.p99 * 4.0);
+        let noise_metadata_schedule_226_0_e2921: f64 = (params[99] * 4.0);
         let noise_metadata_schedule_226_0_e2923: f64 = (noise_metadata_schedule_226_0_e2921 * 1.3806503e-23);
         let noise_metadata_schedule_226_0_e2925: f64 = (noise_metadata_schedule_226_0_e2923 * w[15]);
         let noise_metadata_schedule_226_0_e2928: f64 = (w[133] / w[15]);
         let noise_metadata_schedule_226_0_e2930: f64 = (noise_metadata_schedule_226_0_e2928 * w[132]);
-        let noise_metadata_schedule_226_0_e2933: f64 = (params.p94 * w[132]);
+        let noise_metadata_schedule_226_0_e2933: f64 = (params[94] * w[132]);
         let noise_metadata_schedule_226_0_e2935: f64 = (noise_metadata_schedule_226_0_e2933 * w[132]);
         let noise_metadata_schedule_226_0_e2936: f64 = (noise_metadata_schedule_226_0_e2930 + noise_metadata_schedule_226_0_e2935);
         let noise_metadata_schedule_226_0_e2937: f64 = (noise_metadata_schedule_226_0_e2936).abs();
@@ -1734,11 +1734,11 @@ impl Instance {
         }
         if (active[0] & 0x100) != 0 {
             let (noise_metadata_schedule_227_0_e2958,) = {
-    if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) {
+    if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) {
         let noise_metadata_schedule_227_0_e2950: f64 = (4.0 * 1.3806503e-23);
         let noise_metadata_schedule_227_0_e2952: f64 = (noise_metadata_schedule_227_0_e2950 * w[15]);
         let noise_metadata_schedule_227_0_e2954: f64 = (noise_metadata_schedule_227_0_e2952 * w[99]);
-        let noise_metadata_schedule_227_0_e2956: f64 = (noise_metadata_schedule_227_0_e2954 * params.p87);
+        let noise_metadata_schedule_227_0_e2956: f64 = (noise_metadata_schedule_227_0_e2954 * params[87]);
         (noise_metadata_schedule_227_0_e2956,)
     } else {
         (w[134],)
@@ -1752,12 +1752,12 @@ impl Instance {
         }
         if (active[0] & 0x200) != 0 {
             let (noise_metadata_schedule_229_0_e2984,) = {
-    if ((((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) && (w[136] != 0.0)) {
+    if ((((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) && (w[136] != 0.0)) {
         let noise_metadata_schedule_229_0_e2972: f64 = (w[44] * w[44]);
         let noise_metadata_schedule_229_0_e2974: f64 = (noise_metadata_schedule_229_0_e2972 * 4.0);
         let noise_metadata_schedule_229_0_e2976: f64 = (noise_metadata_schedule_229_0_e2974 * 1.3806503e-23);
         let noise_metadata_schedule_229_0_e2978: f64 = (noise_metadata_schedule_229_0_e2976 * w[15]);
-        let noise_metadata_schedule_229_0_e2980: f64 = (noise_metadata_schedule_229_0_e2978 * params.p86);
+        let noise_metadata_schedule_229_0_e2980: f64 = (noise_metadata_schedule_229_0_e2978 * params[86]);
         let noise_metadata_schedule_229_0_e2982: f64 = (noise_metadata_schedule_229_0_e2980 / w[99]);
         (noise_metadata_schedule_229_0_e2982,)
     } else {
@@ -1768,7 +1768,7 @@ impl Instance {
         }
         if (active[0] & 0x200) != 0 {
             let (noise_metadata_schedule_230_0_e2996,) = {
-    if ((((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) && (w[136] == 0.0)) {
+    if ((((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) && (w[136] == 0.0)) {
         (0.0,)
     } else {
         (w[135],)
@@ -1778,12 +1778,12 @@ impl Instance {
         }
         if (active[0] & 0xc0) != 0 {
             let (noise_metadata_schedule_231_0_e3018,) = {
-    if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) {
+    if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) {
         let noise_metadata_schedule_231_0_e3005: f64 = (4.0 * 1.3806503e-23);
         let noise_metadata_schedule_231_0_e3007: f64 = (noise_metadata_schedule_231_0_e3005 * w[15]);
-        let noise_metadata_schedule_231_0_e3009: f64 = (noise_metadata_schedule_231_0_e3007 * params.p88);
+        let noise_metadata_schedule_231_0_e3009: f64 = (noise_metadata_schedule_231_0_e3007 * params[88]);
         let noise_metadata_schedule_231_0_e3011: f64 = (noise_metadata_schedule_231_0_e3009 * w[44]);
-        let noise_metadata_schedule_231_0_e3014: f64 = (params.p87 * params.p86);
+        let noise_metadata_schedule_231_0_e3014: f64 = (params[87] * params[86]);
         let noise_metadata_schedule_231_0_e3015: f64 = (noise_metadata_schedule_231_0_e3014).sqrt();
         let noise_metadata_schedule_231_0_e3016: f64 = (noise_metadata_schedule_231_0_e3011 * noise_metadata_schedule_231_0_e3015);
         (noise_metadata_schedule_231_0_e3016,)
@@ -1795,12 +1795,12 @@ impl Instance {
         }
         if (active[0] & 0x400) != 0 {
             let (noise_metadata_schedule_235_0_e3074,) = {
-    if (((w[129] != 0.0) && (w[128] == 0.0)) && (params.p0 != 0.0)) {
+    if (((w[129] != 0.0) && (w[128] == 0.0)) && (params[0] != 0.0)) {
         let noise_metadata_schedule_235_0_e3064: f64 = (4.0 * 1.3806503e-23);
         let noise_metadata_schedule_235_0_e3066: f64 = (noise_metadata_schedule_235_0_e3064 * w[15]);
         let noise_metadata_schedule_235_0_e3068: f64 = (noise_metadata_schedule_235_0_e3066 * w[99]);
-        let noise_metadata_schedule_235_0_e3070: f64 = (noise_metadata_schedule_235_0_e3068 * params.p87);
-        let noise_metadata_schedule_235_0_e3072: f64 = (noise_metadata_schedule_235_0_e3070 * params.p89);
+        let noise_metadata_schedule_235_0_e3070: f64 = (noise_metadata_schedule_235_0_e3068 * params[87]);
+        let noise_metadata_schedule_235_0_e3072: f64 = (noise_metadata_schedule_235_0_e3070 * params[89]);
         (noise_metadata_schedule_235_0_e3072,)
     } else {
         (w[141],)

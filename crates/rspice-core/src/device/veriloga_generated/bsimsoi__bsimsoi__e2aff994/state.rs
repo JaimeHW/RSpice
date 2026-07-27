@@ -5,187 +5,23 @@ use crate::device::veriloga_generated::{GeneratedDdtCoefficients, GeneratedVeril
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Parameters {
-    pub p0: f64, pub p1: f64, pub p2: f64, pub p3: f64, pub p4: f64, pub p5: f64, pub p6: f64, pub p7: f64,
-    pub p8: f64, pub p9: f64, pub p10: f64, pub p11: f64, pub p12: f64, pub p13: f64, pub p14: f64, pub p15: f64,
-    pub p16: f64, pub p17: f64, pub p18: f64, pub p19: f64, pub p20: f64, pub p21: f64, pub p22: f64, pub p23: f64,
-    pub p24: f64, pub p25: f64, pub p26: f64, pub p27: f64, pub p28: f64, pub p29: f64, pub p30: f64, pub p31: f64,
-    pub p32: f64, pub p33: f64, pub p34: f64, pub p35: f64, pub p36: f64, pub p37: f64, pub p38: f64, pub p39: f64,
-    pub p40: f64, pub p41: f64, pub p42: f64, pub p43: f64, pub p44: f64, pub p45: f64, pub p46: f64, pub p47: f64,
-    pub p48: f64, pub p49: f64, pub p50: f64, pub p51: f64, pub p52: f64, pub p53: f64, pub p54: f64, pub p55: f64,
-    pub p56: f64, pub p57: f64, pub p58: f64, pub p59: f64, pub p60: f64, pub p61: f64, pub p62: f64, pub p63: f64,
-    pub p64: f64, pub p65: f64, pub p66: f64, pub p67: f64, pub p68: f64, pub p69: f64, pub p70: f64, pub p71: f64,
-    pub p72: f64, pub p73: f64, pub p74: f64, pub p75: f64, pub p76: f64, pub p77: f64, pub p78: f64, pub p79: f64,
-    pub p80: f64, pub p81: f64, pub p82: f64, pub p83: f64, pub p84: f64, pub p85: f64, pub p86: f64, pub p87: f64,
-    pub p88: f64, pub p89: f64, pub p90: f64, pub p91: f64, pub p92: f64, pub p93: f64, pub p94: f64, pub p95: f64,
-    pub p96: f64, pub p97: f64, pub p98: f64, pub p99: f64, pub p100: f64, pub p101: f64, pub p102: f64, pub p103: f64,
-    pub p104: f64, pub p105: f64, pub p106: f64, pub p107: f64, pub p108: f64, pub p109: f64, pub p110: f64, pub p111: f64,
-    pub p112: f64, pub p113: f64, pub p114: f64, pub p115: f64, pub p116: f64, pub p117: f64, pub p118: f64, pub p119: f64,
-    pub p120: f64, pub p121: f64, pub p122: f64, pub p123: f64, pub p124: f64, pub p125: f64, pub p126: f64, pub p127: f64,
-    pub p128: f64, pub p129: f64, pub p130: f64, pub p131: f64, pub p132: f64, pub p133: f64, pub p134: f64, pub p135: f64,
-    pub p136: f64, pub p137: f64, pub p138: f64, pub p139: f64, pub p140: f64, pub p141: f64, pub p142: f64, pub p143: f64,
-    pub p144: f64, pub p145: f64, pub p146: f64, pub p147: f64, pub p148: f64, pub p149: f64, pub p150: f64, pub p151: f64,
-    pub p152: f64, pub p153: f64, pub p154: f64, pub p155: f64, pub p156: f64, pub p157: f64, pub p158: f64, pub p159: f64,
-    pub p160: f64, pub p161: f64, pub p162: f64, pub p163: f64, pub p164: f64, pub p165: f64, pub p166: f64, pub p167: f64,
-    pub p168: f64, pub p169: f64, pub p170: f64, pub p171: f64, pub p172: f64, pub p173: f64, pub p174: f64, pub p175: f64,
-    pub p176: f64, pub p177: f64, pub p178: f64, pub p179: f64, pub p180: f64, pub p181: f64, pub p182: f64, pub p183: f64,
-    pub p184: f64, pub p185: f64, pub p186: f64, pub p187: f64, pub p188: f64, pub p189: f64, pub p190: f64, pub p191: f64,
-    pub p192: f64, pub p193: f64, pub p194: f64, pub p195: f64, pub p196: f64, pub p197: f64, pub p198: f64, pub p199: f64,
-    pub p200: f64, pub p201: f64, pub p202: f64, pub p203: f64, pub p204: f64, pub p205: f64, pub p206: f64, pub p207: f64,
-    pub p208: f64, pub p209: f64, pub p210: f64, pub p211: f64, pub p212: f64, pub p213: f64, pub p214: f64, pub p215: f64,
-    pub p216: f64, pub p217: f64, pub p218: f64, pub p219: f64, pub p220: f64, pub p221: f64, pub p222: f64, pub p223: f64,
-    pub p224: f64, pub p225: f64, pub p226: f64, pub p227: f64, pub p228: f64, pub p229: f64, pub p230: f64, pub p231: f64,
-    pub p232: f64, pub p233: f64, pub p234: f64, pub p235: f64, pub p236: f64, pub p237: f64, pub p238: f64, pub p239: f64,
-    pub p240: f64, pub p241: f64, pub p242: f64, pub p243: f64, pub p244: f64, pub p245: f64, pub p246: f64, pub p247: f64,
-    pub p248: f64, pub p249: f64, pub p250: f64, pub p251: f64, pub p252: f64, pub p253: f64, pub p254: f64, pub p255: f64,
-    pub p256: f64, pub p257: f64, pub p258: f64, pub p259: f64, pub p260: f64, pub p261: f64, pub p262: f64, pub p263: f64,
-    pub p264: f64, pub p265: f64, pub p266: f64, pub p267: f64, pub p268: f64, pub p269: f64, pub p270: f64, pub p271: f64,
-    pub p272: f64, pub p273: f64, pub p274: f64, pub p275: f64, pub p276: f64, pub p277: f64, pub p278: f64, pub p279: f64,
-    pub p280: f64, pub p281: f64, pub p282: f64, pub p283: f64, pub p284: f64, pub p285: f64, pub p286: f64, pub p287: f64,
-    pub p288: f64, pub p289: f64, pub p290: f64, pub p291: f64, pub p292: f64, pub p293: f64, pub p294: f64, pub p295: f64,
-    pub p296: f64, pub p297: f64, pub p298: f64, pub p299: f64, pub p300: f64, pub p301: f64, pub p302: f64, pub p303: f64,
-    pub p304: f64, pub p305: f64, pub p306: f64, pub p307: f64, pub p308: f64, pub p309: f64, pub p310: f64, pub p311: f64,
-    pub p312: f64, pub p313: f64, pub p314: f64, pub p315: f64, pub p316: f64, pub p317: f64, pub p318: f64, pub p319: f64,
-    pub p320: f64, pub p321: f64, pub p322: f64, pub p323: f64, pub p324: f64, pub p325: f64, pub p326: f64, pub p327: f64,
-    pub p328: f64, pub p329: f64, pub p330: f64, pub p331: f64, pub p332: f64, pub p333: f64, pub p334: f64, pub p335: f64,
-    pub p336: f64, pub p337: f64, pub p338: f64, pub p339: f64, pub p340: f64, pub p341: f64, pub p342: f64, pub p343: f64,
-    pub p344: f64, pub p345: f64, pub p346: f64, pub p347: f64, pub p348: f64, pub p349: f64, pub p350: f64, pub p351: f64,
-    pub p352: f64, pub p353: f64, pub p354: f64, pub p355: f64, pub p356: f64, pub p357: f64, pub p358: f64, pub p359: f64,
-    pub p360: f64, pub p361: f64, pub p362: f64, pub p363: f64, pub p364: f64, pub p365: f64, pub p366: f64, pub p367: f64,
-    pub p368: f64, pub p369: f64, pub p370: f64, pub p371: f64, pub p372: f64, pub p373: f64, pub p374: f64, pub p375: f64,
-    pub p376: f64, pub p377: f64, pub p378: f64, pub p379: f64, pub p380: f64, pub p381: f64, pub p382: f64, pub p383: f64,
-    pub p384: f64, pub p385: f64, pub p386: f64, pub p387: f64, pub p388: f64, pub p389: f64, pub p390: f64, pub p391: f64,
-    pub p392: f64, pub p393: f64, pub p394: f64, pub p395: f64, pub p396: f64, pub p397: f64, pub p398: f64, pub p399: f64,
-    pub p400: f64, pub p401: f64, pub p402: f64, pub p403: f64, pub p404: f64, pub p405: f64, pub p406: f64, pub p407: f64,
-    pub p408: f64, pub p409: f64, pub p410: f64, pub p411: f64, pub p412: f64, pub p413: f64, pub p414: f64, pub p415: f64,
-    pub p416: f64, pub p417: f64, pub p418: f64, pub p419: f64, pub p420: f64, pub p421: f64, pub p422: f64, pub p423: f64,
-    pub p424: f64, pub p425: f64, pub p426: f64, pub p427: f64, pub p428: f64, pub p429: f64, pub p430: f64, pub p431: f64,
-    pub p432: f64, pub p433: f64, pub p434: f64, pub p435: f64, pub p436: f64, pub p437: f64, pub p438: f64, pub p439: f64,
-    pub p440: f64, pub p441: f64, pub p442: f64, pub p443: f64, pub p444: f64, pub p445: f64, pub p446: f64, pub p447: f64,
-    pub p448: f64, pub p449: f64, pub p450: f64, pub p451: f64, pub p452: f64, pub p453: f64, pub p454: f64, pub p455: f64,
-    pub p456: f64, pub p457: f64, pub p458: f64, pub p459: f64, pub p460: f64, pub p461: f64, pub p462: f64, pub p463: f64,
-    pub p464: f64, pub p465: f64, pub p466: f64, pub p467: f64, pub p468: f64, pub p469: f64, pub p470: f64, pub p471: f64,
-    pub p472: f64, pub p473: f64, pub p474: f64, pub p475: f64, pub p476: f64, pub p477: f64, pub p478: f64, pub p479: f64,
-    pub p480: f64, pub p481: f64, pub p482: f64, pub p483: f64, pub p484: f64, pub p485: f64, pub p486: f64, pub p487: f64,
-    pub p488: f64, pub p489: f64, pub p490: f64, pub p491: f64, pub p492: f64, pub p493: f64, pub p494: f64, pub p495: f64,
-    pub p496: f64, pub p497: f64, pub p498: f64, pub p499: f64, pub p500: f64, pub p501: f64, pub p502: f64, pub p503: f64,
-    pub p504: f64, pub p505: f64, pub p506: f64, pub p507: f64, pub p508: f64, pub p509: f64, pub p510: f64, pub p511: f64,
-    pub p512: f64, pub p513: f64, pub p514: f64, pub p515: f64, pub p516: f64, pub p517: f64, pub p518: f64, pub p519: f64,
-    pub p520: f64, pub p521: f64, pub p522: f64, pub p523: f64, pub p524: f64, pub p525: f64, pub p526: f64, pub p527: f64,
-    pub p528: f64, pub p529: f64, pub p530: f64, pub p531: f64, pub p532: f64, pub p533: f64, pub p534: f64, pub p535: f64,
-    pub p536: f64, pub p537: f64, pub p538: f64, pub p539: f64, pub p540: f64, pub p541: f64, pub p542: f64, pub p543: f64,
-    pub p544: f64, pub p545: f64, pub p546: f64, pub p547: f64, pub p548: f64, pub p549: f64, pub p550: f64, pub p551: f64,
-    pub p552: f64, pub p553: f64, pub p554: f64, pub p555: f64, pub p556: f64, pub p557: f64, pub p558: f64, pub p559: f64,
-    pub p560: f64, pub p561: f64, pub p562: f64, pub p563: f64, pub p564: f64, pub p565: f64, pub p566: f64, pub p567: f64,
-    pub p568: f64, pub p569: f64, pub p570: f64, pub p571: f64, pub p572: f64, pub p573: f64, pub p574: f64, pub p575: f64,
-    pub p576: f64, pub p577: f64, pub p578: f64, pub p579: f64, pub p580: f64, pub p581: f64, pub p582: f64, pub p583: f64,
-    pub p584: f64, pub p585: f64, pub p586: f64, pub p587: f64, pub p588: f64, pub p589: f64, pub p590: f64, pub p591: f64,
-    pub p592: f64, pub p593: f64, pub p594: f64, pub p595: f64, pub p596: f64, pub p597: f64, pub p598: f64, pub p599: f64,
-    pub p600: f64, pub p601: f64, pub p602: f64, pub p603: f64, pub p604: f64, pub p605: f64, pub p606: f64, pub p607: f64,
-    pub p608: f64, pub p609: f64, pub p610: f64, pub p611: f64, pub p612: f64, pub p613: f64, pub p614: f64, pub p615: f64,
-    pub p616: f64, pub p617: f64, pub p618: f64, pub p619: f64, pub p620: f64, pub p621: f64, pub p622: f64, pub p623: f64,
-    pub p624: f64, pub p625: f64, pub p626: f64, pub p627: f64, pub p628: f64, pub p629: f64, pub p630: f64, pub p631: f64,
-    pub p632: f64, pub p633: f64, pub p634: f64, pub p635: f64, pub p636: f64, pub p637: f64, pub p638: f64, pub p639: f64,
-    pub p640: f64, pub p641: f64, pub p642: f64, pub p643: f64, pub p644: f64, pub p645: f64, pub p646: f64, pub p647: f64,
-    pub p648: f64, pub p649: f64, pub p650: f64, pub p651: f64, pub p652: f64, pub p653: f64, pub p654: f64, pub p655: f64,
-    pub p656: f64, pub p657: f64, pub p658: f64, pub p659: f64, pub p660: f64, pub p661: f64, pub p662: f64, pub p663: f64,
-    pub p664: f64, pub p665: f64, pub p666: f64, pub p667: f64, pub p668: f64, pub p669: f64, pub p670: f64, pub p671: f64,
-    pub p672: f64, pub p673: f64, pub p674: f64, pub p675: f64, pub p676: f64, pub p677: f64, pub p678: f64, pub p679: f64,
-    pub p680: f64, pub p681: f64, pub p682: f64, pub p683: f64, pub p684: f64, pub p685: f64, pub p686: f64, pub p687: f64,
-    pub p688: f64, pub p689: f64, pub p690: f64, pub p691: f64, pub p692: f64, pub p693: f64, pub p694: f64, pub p695: f64,
-    pub p696: f64, pub p697: f64, pub p698: f64, pub p699: f64, pub p700: f64, pub p701: f64, pub p702: f64, pub p703: f64,
-    pub p704: f64, pub p705: f64, pub p706: f64, pub p707: f64, pub p708: f64, pub p709: f64, pub p710: f64, pub p711: f64,
-    pub p712: f64, pub p713: f64, pub p714: f64, pub p715: f64, pub p716: f64, pub p717: f64, pub p718: f64, pub p719: f64,
-    pub p720: f64, pub p721: f64, pub p722: f64, pub p723: f64, pub p724: f64, pub p725: f64, pub p726: f64, pub p727: f64,
-    pub p728: f64, pub p729: f64, pub p730: f64, pub p731: f64, pub p732: f64, pub p733: f64, pub p734: f64, pub p735: f64,
-    pub p736: f64, pub p737: f64, pub p738: f64, pub p739: f64, pub p740: f64, pub p741: f64, pub p742: f64, pub p743: f64,
-    pub p744: f64, pub p745: f64, pub p746: f64, pub p747: f64, pub p748: f64, pub p749: f64, pub p750: f64, pub p751: f64,
-    pub p752: f64, pub p753: f64, pub p754: f64, pub p755: f64, pub p756: f64, pub p757: f64, pub p758: f64, pub p759: f64,
-    pub p760: f64, pub p761: f64, pub p762: f64, pub p763: f64, pub p764: f64, pub p765: f64, pub p766: f64, pub p767: f64,
-    pub p768: f64, pub p769: f64, pub p770: f64, pub p771: f64, pub p772: f64, pub p773: f64, pub p774: f64, pub p775: f64,
-    pub p776: f64, pub p777: f64, pub p778: f64, pub p779: f64, pub p780: f64, pub p781: f64, pub p782: f64, pub p783: f64,
-    pub p784: f64, pub p785: f64, pub p786: f64, pub p787: f64, pub p788: f64, pub p789: f64, pub p790: f64, pub p791: f64,
-    pub p792: f64, pub p793: f64, pub p794: f64, pub p795: f64, pub p796: f64, pub p797: f64, pub p798: f64, pub p799: f64,
-    pub p800: f64, pub p801: f64, pub p802: f64, pub p803: f64, pub p804: f64, pub p805: f64, pub p806: f64, pub p807: f64,
-    pub p808: f64, pub p809: f64, pub p810: f64, pub p811: f64, pub p812: f64, pub p813: f64, pub p814: f64, pub p815: f64,
-    pub p816: f64, pub p817: f64, pub p818: f64, pub p819: f64, pub p820: f64, pub p821: f64, pub p822: f64, pub p823: f64,
-    pub p824: f64, pub p825: f64, pub p826: f64, pub p827: f64, pub p828: f64, pub p829: f64, pub p830: f64, pub p831: f64,
-    pub p832: f64, pub p833: f64, pub p834: f64, pub p835: f64, pub p836: f64, pub p837: f64, pub p838: f64, pub p839: f64,
-    pub p840: f64, pub p841: f64, pub p842: f64, pub p843: f64, pub p844: f64, pub p845: f64, pub p846: f64, pub p847: f64,
-    pub p848: f64, pub p849: f64, pub p850: f64, pub p851: f64, pub p852: f64, pub p853: f64, pub p854: f64, pub p855: f64,
-    pub p856: f64, pub p857: f64, pub p858: f64, pub p859: f64, pub p860: f64, pub p861: f64, pub p862: f64, pub p863: f64,
-    pub p864: f64, pub p865: f64, pub p866: f64, pub p867: f64, pub p868: f64, pub p869: f64, pub p870: f64, pub p871: f64,
-    pub p872: f64, pub p873: f64, pub p874: f64, pub p875: f64, pub p876: f64, pub p877: f64, pub p878: f64, pub p879: f64,
-    pub p880: f64, pub p881: f64, pub p882: f64, pub p883: f64, pub p884: f64, pub p885: f64, pub p886: f64, pub p887: f64,
-    pub p888: f64, pub p889: f64, pub p890: f64, pub p891: f64, pub p892: f64, pub p893: f64, pub p894: f64, pub p895: f64,
-    pub p896: f64, pub p897: f64, pub p898: f64, pub p899: f64, pub p900: f64, pub p901: f64, pub p902: f64, pub p903: f64,
-    pub p904: f64, pub p905: f64, pub p906: f64, pub p907: f64, pub p908: f64, pub p909: f64, pub p910: f64, pub p911: f64,
-    pub p912: f64, pub p913: f64, pub p914: f64, pub p915: f64, pub p916: f64, pub p917: f64, pub p918: f64, pub p919: f64,
-    pub p920: f64, pub p921: f64, pub p922: f64, pub p923: f64, pub p924: f64, pub p925: f64, pub p926: f64, pub p927: f64,
-    pub p928: f64, pub p929: f64, pub p930: f64, pub p931: f64, pub p932: f64, pub p933: f64, pub p934: f64, pub p935: f64,
-    pub p936: f64, pub p937: f64, pub p938: f64, pub p939: f64, pub p940: f64, pub p941: f64, pub p942: f64, pub p943: f64,
-    pub p944: f64, pub p945: f64, pub p946: f64, pub p947: f64, pub p948: f64, pub p949: f64, pub p950: f64, pub p951: f64,
-    pub p952: f64, pub p953: f64, pub p954: f64, pub p955: f64, pub p956: f64, pub p957: f64, pub p958: f64, pub p959: f64,
-    pub p960: f64, pub p961: f64, pub p962: f64, pub p963: f64, pub p964: f64, pub p965: f64, pub p966: f64, pub p967: f64,
-    pub p968: f64, pub p969: f64, pub p970: f64, pub p971: f64, pub p972: f64, pub p973: f64, pub p974: f64, pub p975: f64,
-    pub p976: f64, pub p977: f64, pub p978: f64, pub p979: f64, pub p980: f64, pub p981: f64, pub p982: f64, pub p983: f64,
-    pub p984: f64, pub p985: f64, pub p986: f64, pub p987: f64, pub p988: f64, pub p989: f64, pub p990: f64, pub p991: f64,
-    pub p992: f64, pub p993: f64, pub p994: f64, pub p995: f64, pub p996: f64, pub p997: f64, pub p998: f64, pub p999: f64,
-    pub p1000: f64, pub p1001: f64, pub p1002: f64, pub p1003: f64, pub p1004: f64, pub p1005: f64, pub p1006: f64, pub p1007: f64,
-    pub p1008: f64, pub p1009: f64, pub p1010: f64, pub p1011: f64, pub p1012: f64, pub p1013: f64, pub p1014: f64, pub p1015: f64,
-    pub p1016: f64, pub p1017: f64, pub p1018: f64, pub p1019: f64, pub p1020: f64, pub p1021: f64, pub p1022: f64, pub p1023: f64,
-    pub p1024: f64, pub p1025: f64, pub p1026: f64, pub p1027: f64, pub p1028: f64, pub p1029: f64, pub p1030: f64, pub p1031: f64,
-    pub p1032: f64, pub p1033: f64, pub p1034: f64, pub p1035: f64, pub p1036: f64, pub p1037: f64, pub p1038: f64, pub p1039: f64,
-    pub p1040: f64, pub p1041: f64, pub p1042: f64, pub p1043: f64, pub p1044: f64, pub p1045: f64, pub p1046: f64, pub p1047: f64,
-    pub p1048: f64, pub p1049: f64, pub p1050: f64, pub p1051: f64, pub p1052: f64, pub p1053: f64, pub p1054: f64, pub p1055: f64,
-    pub p1056: f64, pub p1057: f64, pub p1058: f64, pub p1059: f64, pub p1060: f64, pub p1061: f64, pub p1062: f64, pub p1063: f64,
-    pub p1064: f64, pub p1065: f64, pub p1066: f64, pub p1067: f64, pub p1068: f64, pub p1069: f64, pub p1070: f64, pub p1071: f64,
-    pub p1072: f64, pub p1073: f64, pub p1074: f64, pub p1075: f64, pub p1076: f64, pub p1077: f64, pub p1078: f64, pub p1079: f64,
-    pub p1080: f64, pub p1081: f64, pub p1082: f64, pub p1083: f64, pub p1084: f64, pub p1085: f64, pub p1086: f64, pub p1087: f64,
-    pub p1088: f64, pub p1089: f64, pub p1090: f64, pub p1091: f64, pub p1092: f64, pub p1093: f64, pub p1094: f64, pub p1095: f64,
-    pub p1096: f64, pub p1097: f64, pub p1098: f64, pub p1099: f64, pub p1100: f64, pub p1101: f64, pub p1102: f64, pub p1103: f64,
-    pub p1104: f64, pub p1105: f64, pub p1106: f64, pub p1107: f64, pub p1108: f64, pub p1109: f64, pub p1110: f64, pub p1111: f64,
-    pub p1112: f64, pub p1113: f64, pub p1114: f64, pub p1115: f64, pub p1116: f64, pub p1117: f64, pub p1118: f64, pub p1119: f64,
-    pub p1120: f64, pub p1121: f64, pub p1122: f64, pub p1123: f64, pub p1124: f64, pub p1125: f64, pub p1126: f64, pub p1127: f64,
-    pub p1128: f64, pub p1129: f64, pub p1130: f64, pub p1131: f64, pub p1132: f64, pub p1133: f64, pub p1134: f64, pub p1135: f64,
-    pub p1136: f64, pub p1137: f64, pub p1138: f64, pub p1139: f64, pub p1140: f64, pub p1141: f64, pub p1142: f64, pub p1143: f64,
-    pub p1144: f64, pub p1145: f64, pub p1146: f64, pub p1147: f64, pub p1148: f64, pub p1149: f64, pub p1150: f64, pub p1151: f64,
-    pub p1152: f64, pub p1153: f64, pub p1154: f64, pub p1155: f64, pub p1156: f64, pub p1157: f64, pub p1158: f64, pub p1159: f64,
-    pub p1160: f64, pub p1161: f64, pub p1162: f64, pub p1163: f64, pub p1164: f64, pub p1165: f64, pub p1166: f64, pub p1167: f64,
-    pub p1168: f64, pub p1169: f64, pub p1170: f64, pub p1171: f64, pub p1172: f64, pub p1173: f64, pub p1174: f64, pub p1175: f64,
-    pub p1176: f64, pub p1177: f64, pub p1178: f64, pub p1179: f64, pub p1180: f64, pub p1181: f64, pub p1182: f64, pub p1183: f64,
-    pub p1184: f64, pub p1185: f64, pub p1186: f64, pub p1187: f64, pub p1188: f64, pub p1189: f64, pub p1190: f64, pub p1191: f64,
-    pub p1192: f64, pub p1193: f64, pub p1194: f64, pub p1195: f64, pub p1196: f64, pub p1197: f64, pub p1198: f64, pub p1199: f64,
-    pub p1200: f64, pub p1201: f64, pub p1202: f64, pub p1203: f64, pub p1204: f64, pub p1205: f64, pub p1206: f64, pub p1207: f64,
-    pub p1208: f64, pub p1209: f64, pub p1210: f64, pub p1211: f64, pub p1212: f64, pub p1213: f64, pub p1214: f64, pub p1215: f64,
-    pub p1216: f64, pub p1217: f64, pub p1218: f64, pub p1219: f64, pub p1220: f64, pub p1221: f64, pub p1222: f64, pub p1223: f64,
-    pub p1224: f64, pub p1225: f64, pub p1226: f64, pub p1227: f64, pub p1228: f64, pub p1229: f64, pub p1230: f64, pub p1231: f64,
-    pub p1232: f64, pub p1233: f64, pub p1234: f64, pub p1235: f64, pub p1236: f64, pub p1237: f64, pub p1238: f64, pub p1239: f64,
-    pub p1240: f64, pub p1241: f64, pub p1242: f64, pub p1243: f64, pub p1244: f64, pub p1245: f64, pub p1246: f64, pub p1247: f64,
-    pub p1248: f64, pub p1249: f64, pub p1250: f64, pub p1251: f64, pub p1252: f64, pub p1253: f64, pub p1254: f64, pub p1255: f64,
-    pub p1256: f64, pub p1257: f64, pub p1258: f64, pub p1259: f64, pub p1260: f64, pub p1261: f64, pub p1262: f64, pub p1263: f64,
-    pub p1264: f64, pub p1265: f64, pub p1266: f64, pub p1267: f64, pub p1268: f64, pub p1269: f64, pub p1270: f64, pub p1271: f64,
-    pub p1272: f64, pub p1273: f64, pub p1274: f64, pub p1275: f64, pub p1276: f64, pub p1277: f64, pub p1278: f64, pub p1279: f64,
-    pub p1280: f64, pub p1281: f64, pub p1282: f64, pub p1283: f64, pub p1284: f64, pub p1285: f64, pub p1286: f64, pub p1287: f64,
-    pub p1288: f64, pub p1289: f64, pub p1290: f64, pub p1291: f64, pub p1292: f64, pub p1293: f64, pub p1294: f64, pub p1295: f64,
-    pub p1296: f64, pub p1297: f64, pub p1298: f64, pub p1299: f64, pub p1300: f64, pub p1301: f64, pub p1302: f64, pub p1303: f64,
-    pub p1304: f64, pub p1305: f64, pub p1306: f64, pub p1307: f64, pub p1308: f64, pub p1309: f64, pub p1310: f64, pub p1311: f64,
-    pub p1312: f64, pub p1313: f64, pub p1314: f64, pub p1315: f64, pub p1316: f64, pub p1317: f64, pub p1318: f64, pub p1319: f64,
-    pub p1320: f64, pub p1321: f64, pub p1322: f64, pub p1323: f64, pub p1324: f64, pub p1325: f64, pub p1326: f64, pub p1327: f64,
-    pub p1328: f64, pub p1329: f64, pub p1330: f64, pub p1331: f64, pub p1332: f64, pub p1333: f64, pub p1334: f64, pub p1335: f64,
-    pub p1336: f64, pub p1337: f64, pub p1338: f64, pub p1339: f64, pub p1340: f64, pub p1341: f64, pub p1342: f64, pub p1343: f64,
-    pub p1344: f64, pub p1345: f64, pub p1346: f64, pub p1347: f64, pub p1348: f64, pub p1349: f64, pub p1350: f64, pub p1351: f64,
-    pub p1352: f64, pub p1353: f64, pub p1354: f64, pub p1355: f64, pub p1356: f64, pub p1357: f64, pub p1358: f64, pub p1359: f64,
-    pub p1360: f64, pub p1361: f64, pub p1362: f64, pub p1363: f64, pub p1364: f64, pub p1365: f64, pub p1366: f64, pub p1367: f64,
-    pub p1368: f64, pub p1369: f64, pub p1370: f64, pub p1371: f64, pub p1372: f64, pub p1373: f64, pub p1374: f64, pub p1375: f64,
-    pub p1376: f64, pub p1377: f64, pub p1378: f64, pub p1379: f64, pub p1380: f64, pub p1381: f64, pub p1382: f64, pub p1383: f64,
-    pub p1384: f64, pub p1385: f64, pub p1386: f64, pub p1387: f64, pub p1388: f64, pub p1389: f64, pub p1390: f64, pub p1391: f64,
-    pub p1392: f64, pub p1393: f64, pub p1394: f64, pub p1395: f64, pub p1396: f64, pub p1397: f64, pub p1398: f64, pub p1399: f64,
-    pub p1400: f64,
+    pub values: [f64; 1401],
+}
+
+impl std::ops::Index<usize> for Parameters {
+    type Output = f64;
+    #[inline]
+    fn index(&self, index: usize) -> &Self::Output { &self.values[index] }
+}
+
+impl std::ops::IndexMut<usize> for Parameters {
+    #[inline]
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output { &mut self.values[index] }
 }
 
 impl Parameters {
     fn new_box() -> Box<Self> {
-        // SAFETY: Parameters is repr(C) and every field is f64; zero bytes are valid 0.0 values, and numeric default chunks are copied into field-order slots.
+        // SAFETY: every parameter slot is f64, so zero bytes are valid 0.0 values; numeric default chunks are copied into the values array.
         let mut boxed = Box::<Self>::new_uninit();
         unsafe {
             let ptr = boxed.as_mut_ptr();
@@ -202,76 +38,76 @@ impl Parameters {
                 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0.0, 0.0, 4e-8, 2e-7, 3e-9,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (ptr as *mut f64).add(0), 77);
+            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (*ptr).values.as_mut_ptr().add(0), 77);
             {
                 let params = &mut *ptr;
-                params.p77 = params.p76;
-                validate_parameter("TOXP", params.p77, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[77] = params[76];
+                validate_parameter("TOXP", params[77], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_1: [f64; 13] = [
                 0.0, 1e24, 0.0, 1.0, 0.0, 2.0, 0.0, 1.0,
                 0.0, 1.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_1.as_ptr(), (ptr as *mut f64).add(78), 13);
+            std::ptr::copy_nonoverlapping(DEFAULTS_1.as_ptr(), (*ptr).values.as_mut_ptr().add(78), 13);
             {
                 let params = &mut *ptr;
-                params.p91 = params.p79;
-                validate_finite_parameter("NDEPCV", params.p91).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[91] = params[79];
+                validate_finite_parameter("NDEPCV", params[91]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p92 = params.p80;
-                validate_finite_parameter("NDEPCVL1", params.p92).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[92] = params[80];
+                validate_finite_parameter("NDEPCVL1", params[92]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p93 = params.p81;
-                validate_parameter("NDEPCVLEXP1", params.p93, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[93] = params[81];
+                validate_parameter("NDEPCVLEXP1", params[93], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p94 = params.p82;
-                validate_finite_parameter("NDEPCVL2", params.p94).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[94] = params[82];
+                validate_finite_parameter("NDEPCVL2", params[94]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p95 = params.p83;
-                validate_parameter("NDEPCVLEXP2", params.p95, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[95] = params[83];
+                validate_parameter("NDEPCVLEXP2", params[95], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p96 = params.p84;
-                validate_finite_parameter("NDEPCVW", params.p96).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[96] = params[84];
+                validate_finite_parameter("NDEPCVW", params[96]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p97 = params.p85;
-                validate_parameter("NDEPCVWEXP", params.p97, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[97] = params[85];
+                validate_parameter("NDEPCVWEXP", params[97], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p98 = params.p86;
-                validate_finite_parameter("NDEPCVWL", params.p98).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[98] = params[86];
+                validate_finite_parameter("NDEPCVWL", params[98]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p99 = params.p87;
-                validate_parameter("NDEPCVWLEXP", params.p99, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[99] = params[87];
+                validate_parameter("NDEPCVWLEXP", params[99], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p100 = params.p88;
-                validate_finite_parameter("LNDEPCV", params.p100).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[100] = params[88];
+                validate_finite_parameter("LNDEPCV", params[100]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p101 = params.p89;
-                validate_finite_parameter("WNDEPCV", params.p101).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[101] = params[89];
+                validate_finite_parameter("WNDEPCV", params[101]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p102 = params.p90;
-                validate_finite_parameter("PNDEPCV", params.p102).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[102] = params[90];
+                validate_finite_parameter("PNDEPCV", params[102]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_2: [f64; 26] = [
                 5e25, 0.0, 0.0, 0.0, 1.1e16, 1.17, 11.9, 3.9,
@@ -279,70 +115,70 @@ impl Parameters {
                 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0,
                 0.0, 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_2.as_ptr(), (ptr as *mut f64).add(103), 26);
+            std::ptr::copy_nonoverlapping(DEFAULTS_2.as_ptr(), (*ptr).values.as_mut_ptr().add(103), 26);
             {
                 let params = &mut *ptr;
-                params.p129 = params.p115;
-                validate_finite_parameter("VFBCV", params.p129).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[129] = params[115];
+                validate_finite_parameter("VFBCV", params[129]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p130 = params.p116;
-                validate_finite_parameter("LVFBCV", params.p130).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[130] = params[116];
+                validate_finite_parameter("LVFBCV", params[130]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p131 = params.p117;
-                validate_finite_parameter("WVFBCV", params.p131).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[131] = params[117];
+                validate_finite_parameter("WVFBCV", params[131]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p132 = params.p118;
-                validate_finite_parameter("PVFBCV", params.p132).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[132] = params[118];
+                validate_finite_parameter("PVFBCV", params[132]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p133 = params.p123;
-                validate_finite_parameter("VFBCVL", params.p133).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[133] = params[123];
+                validate_finite_parameter("VFBCVL", params[133]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p134 = params.p124;
-                validate_parameter("VFBCVLEXP", params.p134, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[134] = params[124];
+                validate_parameter("VFBCVLEXP", params[134], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p135 = params.p125;
-                validate_finite_parameter("VFBCVW", params.p135).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[135] = params[125];
+                validate_finite_parameter("VFBCVW", params[135]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p136 = params.p126;
-                validate_parameter("VFBCVWEXP", params.p136, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[136] = params[126];
+                validate_parameter("VFBCVWEXP", params[136], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p137 = params.p127;
-                validate_finite_parameter("VFBCVWL", params.p137).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[137] = params[127];
+                validate_finite_parameter("VFBCVWL", params[137]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p138 = params.p128;
-                validate_parameter("VFBCVWLEXP", params.p138, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[138] = params[128];
+                validate_parameter("VFBCVWLEXP", params[138], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_3: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_3.as_ptr(), (ptr as *mut f64).add(139), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_3.as_ptr(), (*ptr).values.as_mut_ptr().add(139), 1);
             {
                 let params = &mut *ptr;
-                params.p140 = params.p115;
-                validate_finite_parameter("VFBAGBCP2", params.p140).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[140] = params[115];
+                validate_finite_parameter("VFBAGBCP2", params[140]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p141 = params.p79;
-                validate_parameter("NDEPAGBCP2", params.p141, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[141] = params[79];
+                validate_parameter("NDEPAGBCP2", params[141], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_4: [f64; 56] = [
                 1e26, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -353,26 +189,26 @@ impl Parameters {
                 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0.045, 0.0, 0.0, 0.0, 0.08, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_4.as_ptr(), (ptr as *mut f64).add(142), 56);
+            std::ptr::copy_nonoverlapping(DEFAULTS_4.as_ptr(), (*ptr).values.as_mut_ptr().add(142), 56);
             {
                 let params = &mut *ptr;
-                params.p198 = params.p194;
-                validate_finite_parameter("ETA0R", params.p198).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[198] = params[194];
+                validate_finite_parameter("ETA0R", params[198]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p199 = params.p195;
-                validate_finite_parameter("LETA0R", params.p199).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[199] = params[195];
+                validate_finite_parameter("LETA0R", params[199]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p200 = params.p196;
-                validate_finite_parameter("WETA0R", params.p200).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[200] = params[196];
+                validate_finite_parameter("WETA0R", params[200]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p201 = params.p197;
-                validate_finite_parameter("PETA0R", params.p201).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[201] = params[197];
+                validate_finite_parameter("PETA0R", params[201]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_5: [f64; 82] = [
                 1.0, -0.07, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -387,289 +223,289 @@ impl Parameters {
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0.0, 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_5.as_ptr(), (ptr as *mut f64).add(202), 82);
+            std::ptr::copy_nonoverlapping(DEFAULTS_5.as_ptr(), (*ptr).values.as_mut_ptr().add(202), 82);
             {
                 let params = &mut *ptr;
-                params.p284 = params.p258;
-                validate_finite_parameter("CDSCDR", params.p284).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[284] = params[258];
+                validate_finite_parameter("CDSCDR", params[284]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p285 = params.p259;
-                validate_finite_parameter("LCDSCDR", params.p285).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[285] = params[259];
+                validate_finite_parameter("LCDSCDR", params[285]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p286 = params.p260;
-                validate_finite_parameter("WCDSCDR", params.p286).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[286] = params[260];
+                validate_finite_parameter("WCDSCDR", params[286]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p287 = params.p261;
-                validate_finite_parameter("PCDSCDR", params.p287).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[287] = params[261];
+                validate_finite_parameter("PCDSCDR", params[287]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_6: [f64; 17] = [
                 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 100000.0,
                 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,
                 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_6.as_ptr(), (ptr as *mut f64).add(288), 17);
+            std::ptr::copy_nonoverlapping(DEFAULTS_6.as_ptr(), (*ptr).values.as_mut_ptr().add(288), 17);
             {
                 let params = &mut *ptr;
-                params.p305 = params.p295;
-                validate_finite_parameter("VSATR", params.p305).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[305] = params[295];
+                validate_finite_parameter("VSATR", params[305]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p306 = params.p296;
-                validate_finite_parameter("LVSATR", params.p306).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[306] = params[296];
+                validate_finite_parameter("LVSATR", params[306]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p307 = params.p297;
-                validate_finite_parameter("WVSATR", params.p307).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[307] = params[297];
+                validate_finite_parameter("WVSATR", params[307]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p308 = params.p298;
-                validate_finite_parameter("PVSATR", params.p308).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[308] = params[298];
+                validate_finite_parameter("PVSATR", params[308]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_7: [f64; 6] = [
                 0.125, 0.0, 0.0, 0.0, 0.0, 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_7.as_ptr(), (ptr as *mut f64).add(309), 6);
+            std::ptr::copy_nonoverlapping(DEFAULTS_7.as_ptr(), (*ptr).values.as_mut_ptr().add(309), 6);
             {
                 let params = &mut *ptr;
-                params.p315 = params.p295;
-                validate_finite_parameter("VSATCV", params.p315).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[315] = params[295];
+                validate_finite_parameter("VSATCV", params[315]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p316 = params.p296;
-                validate_finite_parameter("LVSATCV", params.p316).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[316] = params[296];
+                validate_finite_parameter("LVSATCV", params[316]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p317 = params.p297;
-                validate_finite_parameter("WVSATCV", params.p317).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[317] = params[297];
+                validate_finite_parameter("WVSATCV", params[317]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p318 = params.p298;
-                validate_finite_parameter("PVSATCV", params.p318).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[318] = params[298];
+                validate_finite_parameter("PVSATCV", params[318]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p319 = params.p299;
-                validate_finite_parameter("VSATCVL", params.p319).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[319] = params[299];
+                validate_finite_parameter("VSATCVL", params[319]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p320 = params.p300;
-                validate_parameter("VSATCVLEXP", params.p320, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[320] = params[300];
+                validate_parameter("VSATCVLEXP", params[320], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p321 = params.p301;
-                validate_finite_parameter("VSATCVW", params.p321).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[321] = params[301];
+                validate_finite_parameter("VSATCVW", params[321]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p322 = params.p302;
-                validate_parameter("VSATCVWEXP", params.p322, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[322] = params[302];
+                validate_parameter("VSATCVWEXP", params[322], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p323 = params.p303;
-                validate_finite_parameter("VSATCVWL", params.p323).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[323] = params[303];
+                validate_finite_parameter("VSATCVWL", params[323]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p324 = params.p304;
-                validate_parameter("VSATCVWLEXP", params.p324, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[324] = params[304];
+                validate_parameter("VSATCVWLEXP", params[324], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_8: [f64; 18] = [
                 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0.0, 1e-8, 0.0, 1e-8, 0.067, 0.0, 1.0, 0.0,
                 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_8.as_ptr(), (ptr as *mut f64).add(325), 18);
+            std::ptr::copy_nonoverlapping(DEFAULTS_8.as_ptr(), (*ptr).values.as_mut_ptr().add(325), 18);
             {
                 let params = &mut *ptr;
-                params.p343 = params.p337;
-                validate_finite_parameter("U0R", params.p343).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[343] = params[337];
+                validate_finite_parameter("U0R", params[343]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p344 = params.p340;
-                validate_finite_parameter("LU0R", params.p344).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[344] = params[340];
+                validate_finite_parameter("LU0R", params[344]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p345 = params.p341;
-                validate_finite_parameter("WU0R", params.p345).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[345] = params[341];
+                validate_finite_parameter("WU0R", params[345]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p346 = params.p342;
-                validate_finite_parameter("PU0R", params.p346).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[346] = params[342];
+                validate_finite_parameter("PU0R", params[346]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_9: [f64; 11] = [
                 1.0, 0.001, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0,
                 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_9.as_ptr(), (ptr as *mut f64).add(347), 11);
+            std::ptr::copy_nonoverlapping(DEFAULTS_9.as_ptr(), (*ptr).values.as_mut_ptr().add(347), 11);
             {
                 let params = &mut *ptr;
-                params.p358 = params.p348;
-                validate_finite_parameter("UAR", params.p358).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[358] = params[348];
+                validate_finite_parameter("UAR", params[358]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p359 = params.p355;
-                validate_finite_parameter("LUAR", params.p359).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[359] = params[355];
+                validate_finite_parameter("LUAR", params[359]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p360 = params.p356;
-                validate_finite_parameter("WUAR", params.p360).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[360] = params[356];
+                validate_finite_parameter("WUAR", params[360]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p361 = params.p357;
-                validate_finite_parameter("PUAR", params.p361).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[361] = params[357];
+                validate_finite_parameter("PUAR", params[361]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_10: [f64; 16] = [
                 1.5, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0,
                 0.0, 1.0, 0.001, 0.0, 1.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_10.as_ptr(), (ptr as *mut f64).add(362), 16);
+            std::ptr::copy_nonoverlapping(DEFAULTS_10.as_ptr(), (*ptr).values.as_mut_ptr().add(362), 16);
             {
                 let params = &mut *ptr;
-                params.p378 = params.p372;
-                validate_finite_parameter("UDR", params.p378).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[378] = params[372];
+                validate_finite_parameter("UDR", params[378]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p379 = params.p375;
-                validate_finite_parameter("LUDR", params.p379).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[379] = params[375];
+                validate_finite_parameter("LUDR", params[379]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p380 = params.p376;
-                validate_finite_parameter("WUDR", params.p380).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[380] = params[376];
+                validate_finite_parameter("WUDR", params[380]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p381 = params.p377;
-                validate_finite_parameter("PUDR", params.p381).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[381] = params[377];
+                validate_finite_parameter("PUDR", params[381]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_11: [f64; 4] = [
                 2.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_11.as_ptr(), (ptr as *mut f64).add(382), 4);
+            std::ptr::copy_nonoverlapping(DEFAULTS_11.as_ptr(), (*ptr).values.as_mut_ptr().add(382), 4);
             {
                 let params = &mut *ptr;
-                params.p386 = params.p382;
-                validate_finite_parameter("UCSR", params.p386).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[386] = params[382];
+                validate_finite_parameter("UCSR", params[386]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p387 = params.p383;
-                validate_finite_parameter("LUCSR", params.p387).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[387] = params[383];
+                validate_finite_parameter("LUCSR", params[387]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p388 = params.p384;
-                validate_finite_parameter("WUCSR", params.p388).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[388] = params[384];
+                validate_finite_parameter("WUCSR", params[388]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p389 = params.p385;
-                validate_finite_parameter("PUCSR", params.p389).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[389] = params[385];
+                validate_finite_parameter("PUCSR", params[389]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_12: [f64; 10] = [
                 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
                 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_12.as_ptr(), (ptr as *mut f64).add(390), 10);
+            std::ptr::copy_nonoverlapping(DEFAULTS_12.as_ptr(), (*ptr).values.as_mut_ptr().add(390), 10);
             {
                 let params = &mut *ptr;
-                params.p400 = params.p390;
-                validate_finite_parameter("UCR", params.p400).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[400] = params[390];
+                validate_finite_parameter("UCR", params[400]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p401 = params.p397;
-                validate_finite_parameter("LUCR", params.p401).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[401] = params[397];
+                validate_finite_parameter("LUCR", params[401]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p402 = params.p398;
-                validate_finite_parameter("WUCR", params.p402).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[402] = params[398];
+                validate_finite_parameter("WUCR", params[402]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p403 = params.p399;
-                validate_finite_parameter("PUCR", params.p403).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[403] = params[399];
+                validate_finite_parameter("PUCR", params[403]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_13: [f64; 6] = [
                 0.003, 0.0, 1.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_13.as_ptr(), (ptr as *mut f64).add(404), 6);
+            std::ptr::copy_nonoverlapping(DEFAULTS_13.as_ptr(), (*ptr).values.as_mut_ptr().add(404), 6);
             {
                 let params = &mut *ptr;
-                params.p410 = params.p404;
-                validate_finite_parameter("PCLMR", params.p410).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[410] = params[404];
+                validate_finite_parameter("PCLMR", params[410]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p411 = params.p407;
-                validate_finite_parameter("LPCLMR", params.p411).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[411] = params[407];
+                validate_finite_parameter("LPCLMR", params[411]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p412 = params.p408;
-                validate_finite_parameter("WPCLMR", params.p412).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[412] = params[408];
+                validate_finite_parameter("WPCLMR", params[412]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p413 = params.p409;
-                validate_finite_parameter("PPCLMR", params.p413).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[413] = params[409];
+                validate_finite_parameter("PPCLMR", params[413]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_14: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_14.as_ptr(), (ptr as *mut f64).add(414), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_14.as_ptr(), (*ptr).values.as_mut_ptr().add(414), 1);
             {
                 let params = &mut *ptr;
-                params.p415 = params.p404;
-                validate_finite_parameter("PCLMCV", params.p415).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[415] = params[404];
+                validate_finite_parameter("PCLMCV", params[415]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p416 = params.p405;
-                validate_finite_parameter("PCLMCVL", params.p416).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[416] = params[405];
+                validate_finite_parameter("PCLMCVL", params[416]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p417 = params.p406;
-                validate_parameter("PCLMCVLEXP", params.p417, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[417] = params[406];
+                validate_parameter("PCLMCVLEXP", params[417], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p418 = params.p407;
-                validate_finite_parameter("LPCLMCV", params.p418).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[418] = params[407];
+                validate_finite_parameter("LPCLMCV", params[418]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p419 = params.p408;
-                validate_finite_parameter("WPCLMCV", params.p419).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[419] = params[408];
+                validate_finite_parameter("WPCLMCV", params[419]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p420 = params.p409;
-                validate_finite_parameter("PPCLMCV", params.p420).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[420] = params[409];
+                validate_finite_parameter("PPCLMCV", params[420]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_15: [f64; 42] = [
                 424000000.0, 0.0, 0.0, 0.0, 1e-8, 0.0, 0.0, 0.0,
@@ -679,107 +515,107 @@ impl Parameters {
                 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0,
                 0.0, 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_15.as_ptr(), (ptr as *mut f64).add(421), 42);
+            std::ptr::copy_nonoverlapping(DEFAULTS_15.as_ptr(), (*ptr).values.as_mut_ptr().add(421), 42);
             {
                 let params = &mut *ptr;
-                params.p463 = params.p453;
-                validate_finite_parameter("RDWMIN", params.p463).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[463] = params[453];
+                validate_finite_parameter("RDWMIN", params[463]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p464 = params.p454;
-                validate_finite_parameter("LRDWMIN", params.p464).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[464] = params[454];
+                validate_finite_parameter("LRDWMIN", params[464]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p465 = params.p455;
-                validate_finite_parameter("WRDWMIN", params.p465).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[465] = params[455];
+                validate_finite_parameter("WRDWMIN", params[465]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p466 = params.p456;
-                validate_finite_parameter("PRDWMIN", params.p466).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[466] = params[456];
+                validate_finite_parameter("PRDWMIN", params[466]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p467 = params.p457;
-                validate_finite_parameter("RDW", params.p467).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[467] = params[457];
+                validate_finite_parameter("RDW", params[467]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p468 = params.p458;
-                validate_finite_parameter("LRDW", params.p468).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[468] = params[458];
+                validate_finite_parameter("LRDW", params[468]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p469 = params.p459;
-                validate_finite_parameter("WRDW", params.p469).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[469] = params[459];
+                validate_finite_parameter("WRDW", params[469]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p470 = params.p460;
-                validate_finite_parameter("PRDW", params.p470).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[470] = params[460];
+                validate_finite_parameter("PRDW", params[470]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p471 = params.p461;
-                validate_finite_parameter("RDWL", params.p471).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[471] = params[461];
+                validate_finite_parameter("RDWL", params[471]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p472 = params.p462;
-                validate_parameter("RDWLEXP", params.p472, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[472] = params[462];
+                validate_parameter("RDWLEXP", params[472], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_16: [f64; 17] = [
                 0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 1.0, 0.0,
                 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_16.as_ptr(), (ptr as *mut f64).add(473), 17);
+            std::ptr::copy_nonoverlapping(DEFAULTS_16.as_ptr(), (*ptr).values.as_mut_ptr().add(473), 17);
             {
                 let params = &mut *ptr;
-                params.p490 = params.p483;
-                validate_finite_parameter("PSATR", params.p490).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[490] = params[483];
+                validate_finite_parameter("PSATR", params[490]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p491 = params.p484;
-                validate_finite_parameter("LPSATR", params.p491).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[491] = params[484];
+                validate_finite_parameter("LPSATR", params[491]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p492 = params.p485;
-                validate_finite_parameter("WPSATR", params.p492).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[492] = params[485];
+                validate_finite_parameter("WPSATR", params[492]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p493 = params.p486;
-                validate_finite_parameter("PPSATR", params.p493).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[493] = params[486];
+                validate_finite_parameter("PPSATR", params[493]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_17: [f64; 12] = [
                 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
                 0.0, 0.05, 0.01, 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_17.as_ptr(), (ptr as *mut f64).add(494), 12);
+            std::ptr::copy_nonoverlapping(DEFAULTS_17.as_ptr(), (*ptr).values.as_mut_ptr().add(494), 12);
             {
                 let params = &mut *ptr;
-                params.p506 = params.p498;
-                validate_finite_parameter("PTWGR", params.p506).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[506] = params[498];
+                validate_finite_parameter("PTWGR", params[506]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p507 = params.p499;
-                validate_finite_parameter("LPTWGR", params.p507).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[507] = params[499];
+                validate_finite_parameter("LPTWGR", params[507]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p508 = params.p500;
-                validate_finite_parameter("WPTWGR", params.p508).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[508] = params[500];
+                validate_finite_parameter("WPTWGR", params[508]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p509 = params.p501;
-                validate_finite_parameter("PPTWGR", params.p509).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[509] = params[501];
+                validate_finite_parameter("PPTWGR", params[509]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_18: [f64; 26] = [
                 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -787,89 +623,89 @@ impl Parameters {
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
                 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_18.as_ptr(), (ptr as *mut f64).add(510), 26);
+            std::ptr::copy_nonoverlapping(DEFAULTS_18.as_ptr(), (*ptr).values.as_mut_ptr().add(510), 26);
             {
                 let params = &mut *ptr;
-                params.p536 = params.p530;
-                validate_finite_parameter("PDIBLCR", params.p536).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[536] = params[530];
+                validate_finite_parameter("PDIBLCR", params[536]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p537 = params.p533;
-                validate_finite_parameter("LPDIBLCR", params.p537).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[537] = params[533];
+                validate_finite_parameter("LPDIBLCR", params[537]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p538 = params.p534;
-                validate_finite_parameter("WPDIBLCR", params.p538).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[538] = params[534];
+                validate_finite_parameter("WPDIBLCR", params[538]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p539 = params.p535;
-                validate_finite_parameter("PPDIBLCR", params.p539).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[539] = params[535];
+                validate_finite_parameter("PPDIBLCR", params[539]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_19: [f64; 24] = [
                 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
                 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 10.0,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_19.as_ptr(), (ptr as *mut f64).add(540), 24);
+            std::ptr::copy_nonoverlapping(DEFAULTS_19.as_ptr(), (*ptr).values.as_mut_ptr().add(540), 24);
             {
                 let params = &mut *ptr;
-                params.p564 = params.p563;
-                validate_finite_parameter("AHLID", params.p564).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[564] = params[563];
+                validate_finite_parameter("AHLID", params[564]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_20: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_20.as_ptr(), (ptr as *mut f64).add(565), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_20.as_ptr(), (*ptr).values.as_mut_ptr().add(565), 1);
             {
                 let params = &mut *ptr;
-                params.p566 = params.p565;
-                validate_finite_parameter("LAHLID", params.p566).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[566] = params[565];
+                validate_finite_parameter("LAHLID", params[566]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_21: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_21.as_ptr(), (ptr as *mut f64).add(567), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_21.as_ptr(), (*ptr).values.as_mut_ptr().add(567), 1);
             {
                 let params = &mut *ptr;
-                params.p568 = params.p567;
-                validate_finite_parameter("WAHLID", params.p568).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[568] = params[567];
+                validate_finite_parameter("WAHLID", params[568]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_22: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_22.as_ptr(), (ptr as *mut f64).add(569), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_22.as_ptr(), (*ptr).values.as_mut_ptr().add(569), 1);
             {
                 let params = &mut *ptr;
-                params.p570 = params.p569;
-                validate_finite_parameter("PAHLID", params.p570).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[570] = params[569];
+                validate_finite_parameter("PAHLID", params[570]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_23: [f64; 12] = [
                 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
                 0.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_23.as_ptr(), (ptr as *mut f64).add(571), 12);
+            std::ptr::copy_nonoverlapping(DEFAULTS_23.as_ptr(), (*ptr).values.as_mut_ptr().add(571), 12);
             {
                 let params = &mut *ptr;
-                params.p583 = params.p579;
-                validate_finite_parameter("IDBJT", params.p583).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[583] = params[579];
+                validate_finite_parameter("IDBJT", params[583]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p584 = params.p582;
-                validate_finite_parameter("LIDBJT", params.p584).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[584] = params[582];
+                validate_finite_parameter("LIDBJT", params[584]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p585 = params.p581;
-                validate_finite_parameter("WIDBJT", params.p585).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[585] = params[581];
+                validate_finite_parameter("WIDBJT", params[585]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p586 = params.p580;
-                validate_finite_parameter("PIDBJT", params.p586).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[586] = params[580];
+                validate_finite_parameter("PIDBJT", params[586]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_24: [f64; 120] = [
                 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2e-7,
@@ -888,69 +724,69 @@ impl Parameters {
                 0.0, 0.05, 0.0, 0.0, 0.0, 17.0, 300.0, 3.7622e-7,
                 -31051000000.0, 4.9758e-7, -23570000000.0, 3.4254e-7, 4.9723e-7, 1166500000000.0, 745670000000.0, 1.1,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_24.as_ptr(), (ptr as *mut f64).add(587), 120);
+            std::ptr::copy_nonoverlapping(DEFAULTS_24.as_ptr(), (*ptr).values.as_mut_ptr().add(587), 120);
             {
                 let params = &mut *ptr;
-                params.p707 = if (params.p30 == 1.0) { 0.0136 } else { 0.0098 };
-                validate_finite_parameter("AIGC", params.p707).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[707] = if (params[30] == 1.0) { 0.0136 } else { 0.0098 };
+                validate_finite_parameter("AIGC", params[707]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p708 = if (params.p30 == 1.0) { 0.00171 } else { 0.000759 };
-                validate_finite_parameter("BIGC", params.p708).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[708] = if (params[30] == 1.0) { 0.00171 } else { 0.000759 };
+                validate_finite_parameter("BIGC", params[708]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p709 = if (params.p30 == 1.0) { 0.075 } else { 0.03 };
-                validate_finite_parameter("CIGC", params.p709).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[709] = if (params[30] == 1.0) { 0.075 } else { 0.03 };
+                validate_finite_parameter("CIGC", params[709]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p710 = if (params.p30 == 1.0) { 0.0136 } else { 0.0098 };
-                validate_finite_parameter("AIGS", params.p710).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[710] = if (params[30] == 1.0) { 0.0136 } else { 0.0098 };
+                validate_finite_parameter("AIGS", params[710]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_25: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_25.as_ptr(), (ptr as *mut f64).add(711), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_25.as_ptr(), (*ptr).values.as_mut_ptr().add(711), 1);
             {
                 let params = &mut *ptr;
-                params.p712 = if (params.p30 == 1.0) { 0.00171 } else { 0.000759 };
-                validate_finite_parameter("BIGS", params.p712).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[712] = if (params[30] == 1.0) { 0.00171 } else { 0.000759 };
+                validate_finite_parameter("BIGS", params[712]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p713 = if (params.p30 == 1.0) { 0.075 } else { 0.03 };
-                validate_finite_parameter("CIGS", params.p713).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[713] = if (params[30] == 1.0) { 0.075 } else { 0.03 };
+                validate_finite_parameter("CIGS", params[713]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p714 = if (params.p30 == 1.0) { 0.0136 } else { 0.0098 };
-                validate_finite_parameter("AIGD", params.p714).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[714] = if (params[30] == 1.0) { 0.0136 } else { 0.0098 };
+                validate_finite_parameter("AIGD", params[714]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_26: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_26.as_ptr(), (ptr as *mut f64).add(715), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_26.as_ptr(), (*ptr).values.as_mut_ptr().add(715), 1);
             {
                 let params = &mut *ptr;
-                params.p716 = if (params.p30 == 1.0) { 0.00171 } else { 0.000759 };
-                validate_finite_parameter("BIGD", params.p716).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[716] = if (params[30] == 1.0) { 0.00171 } else { 0.000759 };
+                validate_finite_parameter("BIGD", params[716]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p717 = if (params.p30 == 1.0) { 0.075 } else { 0.03 };
-                validate_finite_parameter("CIGD", params.p717).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[717] = if (params[30] == 1.0) { 0.075 } else { 0.03 };
+                validate_finite_parameter("CIGD", params[717]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p718 = params.p54;
-                validate_finite_parameter("DLCIG", params.p718).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[718] = params[54];
+                validate_finite_parameter("DLCIG", params[718]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p719 = params.p718;
-                validate_finite_parameter("DLCIGD", params.p719).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[719] = params[718];
+                validate_finite_parameter("DLCIGD", params[719]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_27: [f64; 101] = [
                 1.0, 1.0, 3e-9, 1.0, 0.0, 0.0, 0.0, 0.0,
@@ -967,181 +803,181 @@ impl Parameters {
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0,
                 0.0, 0.8, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_27.as_ptr(), (ptr as *mut f64).add(720), 101);
+            std::ptr::copy_nonoverlapping(DEFAULTS_27.as_ptr(), (*ptr).values.as_mut_ptr().add(720), 101);
             {
                 let params = &mut *ptr;
-                params.p821 = params.p799;
-                validate_finite_parameter("AGISL", params.p821).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[821] = params[799];
+                validate_finite_parameter("AGISL", params[821]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p822 = params.p800;
-                validate_finite_parameter("AGISLL", params.p822).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[822] = params[800];
+                validate_finite_parameter("AGISLL", params[822]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p823 = params.p801;
-                validate_finite_parameter("AGISLW", params.p823).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[823] = params[801];
+                validate_finite_parameter("AGISLW", params[823]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p824 = params.p802;
-                validate_finite_parameter("LAGISL", params.p824).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[824] = params[802];
+                validate_finite_parameter("LAGISL", params[824]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p825 = params.p803;
-                validate_finite_parameter("WAGISL", params.p825).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[825] = params[803];
+                validate_finite_parameter("WAGISL", params[825]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p826 = params.p804;
-                validate_finite_parameter("PAGISL", params.p826).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[826] = params[804];
+                validate_finite_parameter("PAGISL", params[826]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p827 = params.p805;
-                validate_finite_parameter("BGISL", params.p827).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[827] = params[805];
+                validate_finite_parameter("BGISL", params[827]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p828 = params.p806;
-                validate_finite_parameter("BGISL1", params.p828).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[828] = params[806];
+                validate_finite_parameter("BGISL1", params[828]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p829 = params.p807;
-                validate_finite_parameter("LBGISL", params.p829).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[829] = params[807];
+                validate_finite_parameter("LBGISL", params[829]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p830 = params.p808;
-                validate_finite_parameter("WBGISL", params.p830).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[830] = params[808];
+                validate_finite_parameter("WBGISL", params[830]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p831 = params.p809;
-                validate_finite_parameter("PBGISL", params.p831).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[831] = params[809];
+                validate_finite_parameter("PBGISL", params[831]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p832 = params.p810;
-                validate_finite_parameter("LBGISL1", params.p832).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[832] = params[810];
+                validate_finite_parameter("LBGISL1", params[832]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p833 = params.p811;
-                validate_finite_parameter("WBGISL1", params.p833).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[833] = params[811];
+                validate_finite_parameter("WBGISL1", params[833]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p834 = params.p812;
-                validate_finite_parameter("PBGISL1", params.p834).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[834] = params[812];
+                validate_finite_parameter("PBGISL1", params[834]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p835 = params.p813;
-                validate_finite_parameter("CGISL", params.p835).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[835] = params[813];
+                validate_finite_parameter("CGISL", params[835]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p836 = params.p814;
-                validate_finite_parameter("LCGISL", params.p836).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[836] = params[814];
+                validate_finite_parameter("LCGISL", params[836]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p837 = params.p815;
-                validate_finite_parameter("WCGISL", params.p837).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[837] = params[815];
+                validate_finite_parameter("WCGISL", params[837]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p838 = params.p816;
-                validate_finite_parameter("PCGISL", params.p838).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[838] = params[816];
+                validate_finite_parameter("PCGISL", params[838]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p839 = params.p817;
-                validate_finite_parameter("EGISL", params.p839).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[839] = params[817];
+                validate_finite_parameter("EGISL", params[839]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p840 = params.p818;
-                validate_finite_parameter("LEGISL", params.p840).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[840] = params[818];
+                validate_finite_parameter("LEGISL", params[840]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p841 = params.p819;
-                validate_finite_parameter("WEGISL", params.p841).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[841] = params[819];
+                validate_finite_parameter("WEGISL", params[841]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p842 = params.p820;
-                validate_finite_parameter("PEGISL", params.p842).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[842] = params[820];
+                validate_finite_parameter("PEGISL", params[842]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_28: [f64; 12] = [
                 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_28.as_ptr(), (ptr as *mut f64).add(843), 12);
+            std::ptr::copy_nonoverlapping(DEFAULTS_28.as_ptr(), (*ptr).values.as_mut_ptr().add(843), 12);
             {
                 let params = &mut *ptr;
-                params.p855 = params.p843;
-                validate_finite_parameter("RGISL", params.p855).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[855] = params[843];
+                validate_finite_parameter("RGISL", params[855]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p856 = params.p844;
-                validate_finite_parameter("LRGISL", params.p856).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[856] = params[844];
+                validate_finite_parameter("LRGISL", params[856]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p857 = params.p845;
-                validate_finite_parameter("WRGISL", params.p857).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[857] = params[845];
+                validate_finite_parameter("WRGISL", params[857]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p858 = params.p846;
-                validate_finite_parameter("PRGISL", params.p858).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[858] = params[846];
+                validate_finite_parameter("PRGISL", params[858]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p859 = params.p847;
-                validate_finite_parameter("KGISL", params.p859).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[859] = params[847];
+                validate_finite_parameter("KGISL", params[859]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p860 = params.p848;
-                validate_finite_parameter("LKGISL", params.p860).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[860] = params[848];
+                validate_finite_parameter("LKGISL", params[860]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p861 = params.p849;
-                validate_finite_parameter("WKGISL", params.p861).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[861] = params[849];
+                validate_finite_parameter("WKGISL", params[861]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p862 = params.p850;
-                validate_finite_parameter("PKGISL", params.p862).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[862] = params[850];
+                validate_finite_parameter("PKGISL", params[862]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p863 = params.p851;
-                validate_finite_parameter("FGISL", params.p863).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[863] = params[851];
+                validate_finite_parameter("FGISL", params[863]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p864 = params.p852;
-                validate_finite_parameter("LFGISL", params.p864).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[864] = params[852];
+                validate_finite_parameter("LFGISL", params[864]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p865 = params.p853;
-                validate_finite_parameter("WFGISL", params.p865).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[865] = params[853];
+                validate_finite_parameter("WFGISL", params[865]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p866 = params.p854;
-                validate_finite_parameter("PFGISL", params.p866).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[866] = params[854];
+                validate_finite_parameter("PFGISL", params[866]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_29: [f64; 29] = [
                 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
@@ -1149,362 +985,362 @@ impl Parameters {
                 0.6, 0.0, 0.0, 0.0, 0.6, 0.0, 0.0, 0.0,
                 1000000.0, 1.0, 1000000.0, 1.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_29.as_ptr(), (ptr as *mut f64).add(867), 29);
+            std::ptr::copy_nonoverlapping(DEFAULTS_29.as_ptr(), (*ptr).values.as_mut_ptr().add(867), 29);
             {
                 let params = &mut *ptr;
-                params.p896 = params.p895;
-                validate_parameter("DMCI", params.p896, false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[896] = params[895];
+                validate_parameter("DMCI", params[896], false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_30: [f64; 5] = [
                 0.0, 0.0, 0.0, 0.1, 0.0005,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_30.as_ptr(), (ptr as *mut f64).add(897), 5);
+            std::ptr::copy_nonoverlapping(DEFAULTS_30.as_ptr(), (*ptr).values.as_mut_ptr().add(897), 5);
             {
                 let params = &mut *ptr;
-                params.p902 = params.p901;
-                validate_finite_parameter("CJD", params.p902).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[902] = params[901];
+                validate_finite_parameter("CJD", params[902]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_31: [f64; 1] = [
                 5e-10,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_31.as_ptr(), (ptr as *mut f64).add(903), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_31.as_ptr(), (*ptr).values.as_mut_ptr().add(903), 1);
             {
                 let params = &mut *ptr;
-                params.p904 = params.p903;
-                validate_finite_parameter("CJSWD", params.p904).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[904] = params[903];
+                validate_finite_parameter("CJSWD", params[904]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_32: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_32.as_ptr(), (ptr as *mut f64).add(905), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_32.as_ptr(), (*ptr).values.as_mut_ptr().add(905), 1);
             {
                 let params = &mut *ptr;
-                params.p906 = params.p905;
-                validate_finite_parameter("CJSWGD", params.p906).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[906] = params[905];
+                validate_finite_parameter("CJSWGD", params[906]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_33: [f64; 1] = [
                 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_33.as_ptr(), (ptr as *mut f64).add(907), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_33.as_ptr(), (*ptr).values.as_mut_ptr().add(907), 1);
             {
                 let params = &mut *ptr;
-                params.p908 = params.p907;
-                validate_finite_parameter("PBD", params.p908).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[908] = params[907];
+                validate_finite_parameter("PBD", params[908]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_34: [f64; 1] = [
                 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_34.as_ptr(), (ptr as *mut f64).add(909), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_34.as_ptr(), (*ptr).values.as_mut_ptr().add(909), 1);
             {
                 let params = &mut *ptr;
-                params.p910 = params.p909;
-                validate_finite_parameter("PBSWD", params.p910).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[910] = params[909];
+                validate_finite_parameter("PBSWD", params[910]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p911 = params.p909;
-                validate_finite_parameter("PBSWGS", params.p911).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[911] = params[909];
+                validate_finite_parameter("PBSWGS", params[911]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p912 = params.p911;
-                validate_finite_parameter("PBSWGD", params.p912).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[912] = params[911];
+                validate_finite_parameter("PBSWGD", params[912]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_35: [f64; 1] = [
                 0.5,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_35.as_ptr(), (ptr as *mut f64).add(913), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_35.as_ptr(), (*ptr).values.as_mut_ptr().add(913), 1);
             {
                 let params = &mut *ptr;
-                params.p914 = params.p913;
-                validate_finite_parameter("MJD", params.p914).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[914] = params[913];
+                validate_finite_parameter("MJD", params[914]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_36: [f64; 1] = [
                 0.33,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_36.as_ptr(), (ptr as *mut f64).add(915), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_36.as_ptr(), (*ptr).values.as_mut_ptr().add(915), 1);
             {
                 let params = &mut *ptr;
-                params.p916 = params.p915;
-                validate_finite_parameter("MJSWD", params.p916).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[916] = params[915];
+                validate_finite_parameter("MJSWD", params[916]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p917 = params.p915;
-                validate_finite_parameter("MJSWGS", params.p917).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[917] = params[915];
+                validate_finite_parameter("MJSWGS", params[917]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p918 = params.p917;
-                validate_finite_parameter("MJSWGD", params.p918).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[918] = params[917];
+                validate_finite_parameter("MJSWGD", params[918]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_37: [f64; 8] = [
                 1e-12, 1.0, -1.0, 0.0, 0.0, 0.0, 0.026, 1.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_37.as_ptr(), (ptr as *mut f64).add(919), 8);
+            std::ptr::copy_nonoverlapping(DEFAULTS_37.as_ptr(), (*ptr).values.as_mut_ptr().add(919), 8);
             {
                 let params = &mut *ptr;
-                params.p927 = params.p70;
-                validate_finite_parameter("DWJ", params.p927).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[927] = params[70];
+                validate_finite_parameter("DWJ", params[927]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p928 = params.p571;
-                validate_finite_parameter("XDIF", params.p928).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[928] = params[571];
+                validate_finite_parameter("XDIF", params[928]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_38: [f64; 4] = [
                 0.0, 0.0, 0.0, 1e-7,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_38.as_ptr(), (ptr as *mut f64).add(929), 4);
+            std::ptr::copy_nonoverlapping(DEFAULTS_38.as_ptr(), (*ptr).values.as_mut_ptr().add(929), 4);
             {
                 let params = &mut *ptr;
-                params.p933 = params.p932;
-                validate_finite_parameter("IDDIF", params.p933).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[933] = params[932];
+                validate_finite_parameter("IDDIF", params[933]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_39: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_39.as_ptr(), (ptr as *mut f64).add(934), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_39.as_ptr(), (*ptr).values.as_mut_ptr().add(934), 1);
             {
                 let params = &mut *ptr;
-                params.p935 = params.p934;
-                validate_finite_parameter("LIDDIF", params.p935).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[935] = params[934];
+                validate_finite_parameter("LIDDIF", params[935]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_40: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_40.as_ptr(), (ptr as *mut f64).add(936), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_40.as_ptr(), (*ptr).values.as_mut_ptr().add(936), 1);
             {
                 let params = &mut *ptr;
-                params.p937 = params.p936;
-                validate_finite_parameter("WIDDIF", params.p937).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[937] = params[936];
+                validate_finite_parameter("WIDDIF", params[937]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_41: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_41.as_ptr(), (ptr as *mut f64).add(938), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_41.as_ptr(), (*ptr).values.as_mut_ptr().add(938), 1);
             {
                 let params = &mut *ptr;
-                params.p939 = params.p938;
-                validate_finite_parameter("PIDDIF", params.p939).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[939] = params[938];
+                validate_finite_parameter("PIDDIF", params[939]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_42: [f64; 13] = [
                 2.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0,
                 1.0, 0.0, 0.0, 0.0, 1e-5,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_42.as_ptr(), (ptr as *mut f64).add(940), 13);
+            std::ptr::copy_nonoverlapping(DEFAULTS_42.as_ptr(), (*ptr).values.as_mut_ptr().add(940), 13);
             {
                 let params = &mut *ptr;
-                params.p953 = params.p952;
-                validate_finite_parameter("IDREC", params.p953).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[953] = params[952];
+                validate_finite_parameter("IDREC", params[953]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_43: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_43.as_ptr(), (ptr as *mut f64).add(954), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_43.as_ptr(), (*ptr).values.as_mut_ptr().add(954), 1);
             {
                 let params = &mut *ptr;
-                params.p955 = params.p954;
-                validate_finite_parameter("LIDREC", params.p955).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[955] = params[954];
+                validate_finite_parameter("LIDREC", params[955]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_44: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_44.as_ptr(), (ptr as *mut f64).add(956), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_44.as_ptr(), (*ptr).values.as_mut_ptr().add(956), 1);
             {
                 let params = &mut *ptr;
-                params.p957 = params.p956;
-                validate_finite_parameter("WIDREC", params.p957).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[957] = params[956];
+                validate_finite_parameter("WIDREC", params[957]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_45: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_45.as_ptr(), (ptr as *mut f64).add(958), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_45.as_ptr(), (*ptr).values.as_mut_ptr().add(958), 1);
             {
                 let params = &mut *ptr;
-                params.p959 = params.p958;
-                validate_finite_parameter("PIDREC", params.p959).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[959] = params[958];
+                validate_finite_parameter("PIDREC", params[959]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_46: [f64; 9] = [
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 1e-8,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_46.as_ptr(), (ptr as *mut f64).add(960), 9);
+            std::ptr::copy_nonoverlapping(DEFAULTS_46.as_ptr(), (*ptr).values.as_mut_ptr().add(960), 9);
             {
                 let params = &mut *ptr;
-                params.p969 = params.p968;
-                validate_finite_parameter("IDTUN", params.p969).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[969] = params[968];
+                validate_finite_parameter("IDTUN", params[969]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_47: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_47.as_ptr(), (ptr as *mut f64).add(970), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_47.as_ptr(), (*ptr).values.as_mut_ptr().add(970), 1);
             {
                 let params = &mut *ptr;
-                params.p971 = params.p970;
-                validate_finite_parameter("LIDTUN", params.p971).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[971] = params[970];
+                validate_finite_parameter("LIDTUN", params[971]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_48: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_48.as_ptr(), (ptr as *mut f64).add(972), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_48.as_ptr(), (*ptr).values.as_mut_ptr().add(972), 1);
             {
                 let params = &mut *ptr;
-                params.p973 = params.p972;
-                validate_finite_parameter("WIDTUN", params.p973).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[973] = params[972];
+                validate_finite_parameter("WIDTUN", params[973]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_49: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_49.as_ptr(), (ptr as *mut f64).add(974), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_49.as_ptr(), (*ptr).values.as_mut_ptr().add(974), 1);
             {
                 let params = &mut *ptr;
-                params.p975 = params.p974;
-                validate_finite_parameter("PIDTUN", params.p975).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[975] = params[974];
+                validate_finite_parameter("PIDTUN", params[975]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_50: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_50.as_ptr(), (ptr as *mut f64).add(976), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_50.as_ptr(), (*ptr).values.as_mut_ptr().add(976), 1);
             {
                 let params = &mut *ptr;
-                params.p977 = params.p976;
-                validate_finite_parameter("XTUND", params.p977).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[977] = params[976];
+                validate_finite_parameter("XTUND", params[977]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_51: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_51.as_ptr(), (ptr as *mut f64).add(978), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_51.as_ptr(), (*ptr).values.as_mut_ptr().add(978), 1);
             {
                 let params = &mut *ptr;
-                params.p979 = params.p978;
-                validate_finite_parameter("LXTUND", params.p979).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[979] = params[978];
+                validate_finite_parameter("LXTUND", params[979]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_52: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_52.as_ptr(), (ptr as *mut f64).add(980), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_52.as_ptr(), (*ptr).values.as_mut_ptr().add(980), 1);
             {
                 let params = &mut *ptr;
-                params.p981 = params.p980;
-                validate_finite_parameter("WXTUND", params.p981).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[981] = params[980];
+                validate_finite_parameter("WXTUND", params[981]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_53: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_53.as_ptr(), (ptr as *mut f64).add(982), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_53.as_ptr(), (*ptr).values.as_mut_ptr().add(982), 1);
             {
                 let params = &mut *ptr;
-                params.p983 = params.p982;
-                validate_finite_parameter("PXTUND", params.p983).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[983] = params[982];
+                validate_finite_parameter("PXTUND", params[983]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_54: [f64; 1] = [
                 10.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_54.as_ptr(), (ptr as *mut f64).add(984), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_54.as_ptr(), (*ptr).values.as_mut_ptr().add(984), 1);
             {
                 let params = &mut *ptr;
-                params.p985 = params.p984;
-                validate_finite_parameter("NTUND", params.p985).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[985] = params[984];
+                validate_finite_parameter("NTUND", params[985]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_55: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_55.as_ptr(), (ptr as *mut f64).add(986), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_55.as_ptr(), (*ptr).values.as_mut_ptr().add(986), 1);
             {
                 let params = &mut *ptr;
-                params.p987 = params.p986;
-                validate_finite_parameter("LNTUND", params.p987).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[987] = params[986];
+                validate_finite_parameter("LNTUND", params[987]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_56: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_56.as_ptr(), (ptr as *mut f64).add(988), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_56.as_ptr(), (*ptr).values.as_mut_ptr().add(988), 1);
             {
                 let params = &mut *ptr;
-                params.p989 = params.p988;
-                validate_finite_parameter("WNTUND", params.p989).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[989] = params[988];
+                validate_finite_parameter("WNTUND", params[989]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_57: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_57.as_ptr(), (ptr as *mut f64).add(990), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_57.as_ptr(), (*ptr).values.as_mut_ptr().add(990), 1);
             {
                 let params = &mut *ptr;
-                params.p991 = params.p990;
-                validate_finite_parameter("PNTUND", params.p991).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[991] = params[990];
+                validate_finite_parameter("PNTUND", params[991]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_58: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_58.as_ptr(), (ptr as *mut f64).add(992), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_58.as_ptr(), (*ptr).values.as_mut_ptr().add(992), 1);
             {
                 let params = &mut *ptr;
-                params.p993 = params.p992;
-                validate_finite_parameter("VTUN0D", params.p993).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[993] = params[992];
+                validate_finite_parameter("VTUN0D", params[993]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_59: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_59.as_ptr(), (ptr as *mut f64).add(994), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_59.as_ptr(), (*ptr).values.as_mut_ptr().add(994), 1);
             {
                 let params = &mut *ptr;
-                params.p995 = params.p994;
-                validate_finite_parameter("LVTUN0D", params.p995).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[995] = params[994];
+                validate_finite_parameter("LVTUN0D", params[995]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_60: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_60.as_ptr(), (ptr as *mut f64).add(996), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_60.as_ptr(), (*ptr).values.as_mut_ptr().add(996), 1);
             {
                 let params = &mut *ptr;
-                params.p997 = params.p996;
-                validate_finite_parameter("WVTUN0D", params.p997).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[997] = params[996];
+                validate_finite_parameter("WVTUN0D", params[997]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_61: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_61.as_ptr(), (ptr as *mut f64).add(998), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_61.as_ptr(), (*ptr).values.as_mut_ptr().add(998), 1);
             {
                 let params = &mut *ptr;
-                params.p999 = params.p998;
-                validate_finite_parameter("PVTUN0D", params.p999).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[999] = params[998];
+                validate_finite_parameter("PVTUN0D", params[999]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_62: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_62.as_ptr(), (ptr as *mut f64).add(1000), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_62.as_ptr(), (*ptr).values.as_mut_ptr().add(1000), 1);
             {
                 let params = &mut *ptr;
-                params.p1001 = params.p1000;
-                validate_finite_parameter("VREC0D", params.p1001).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1001] = params[1000];
+                validate_finite_parameter("VREC0D", params[1001]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_63: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_63.as_ptr(), (ptr as *mut f64).add(1002), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_63.as_ptr(), (*ptr).values.as_mut_ptr().add(1002), 1);
             {
                 let params = &mut *ptr;
-                params.p1003 = params.p1002;
-                validate_finite_parameter("LVREC0D", params.p1003).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1003] = params[1002];
+                validate_finite_parameter("LVREC0D", params[1003]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_64: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_64.as_ptr(), (ptr as *mut f64).add(1004), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_64.as_ptr(), (*ptr).values.as_mut_ptr().add(1004), 1);
             {
                 let params = &mut *ptr;
-                params.p1005 = params.p1004;
-                validate_finite_parameter("WVREC0D", params.p1005).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1005] = params[1004];
+                validate_finite_parameter("WVREC0D", params[1005]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_65: [f64; 1] = [
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_65.as_ptr(), (ptr as *mut f64).add(1006), 1);
+            std::ptr::copy_nonoverlapping(DEFAULTS_65.as_ptr(), (*ptr).values.as_mut_ptr().add(1006), 1);
             {
                 let params = &mut *ptr;
-                params.p1007 = params.p1006;
-                validate_finite_parameter("PVREC0D", params.p1007).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1007] = params[1006];
+                validate_finite_parameter("PVREC0D", params[1007]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_66: [f64; 313] = [
                 12.0, 1.0, 1.0, 41000000.0, 6.25e40, 3.125e25, 875000000.0, 0.0,
@@ -1548,46 +1384,46 @@ impl Parameters {
                 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,
                 1e-8,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_66.as_ptr(), (ptr as *mut f64).add(1008), 313);
+            std::ptr::copy_nonoverlapping(DEFAULTS_66.as_ptr(), (*ptr).values.as_mut_ptr().add(1008), 313);
             {
                 let params = &mut *ptr;
-                params.p1321 = params.p1012;
-                validate_finite_parameter("NOIA2", params.p1321).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1321] = params[1012];
+                validate_finite_parameter("NOIA2", params[1321]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p1322 = params.p79;
-                validate_parameter("HNDEP", params.p1322, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1322] = params[79];
+                validate_parameter("HNDEP", params[1322], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_67: [f64; 24] = [
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_67.as_ptr(), (ptr as *mut f64).add(1323), 24);
+            std::ptr::copy_nonoverlapping(DEFAULTS_67.as_ptr(), (*ptr).values.as_mut_ptr().add(1323), 24);
             {
                 let params = &mut *ptr;
-                params.p1347 = 0.001;
-                validate_parameter("minr", params.p1347, false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1347] = 0.001;
+                validate_parameter("minr", params[1347], false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_68: [f64; 5] = [
                 1.0, 0.0, 0.0, 1.0, 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_68.as_ptr(), (ptr as *mut f64).add(1348), 5);
+            std::ptr::copy_nonoverlapping(DEFAULTS_68.as_ptr(), (*ptr).values.as_mut_ptr().add(1348), 5);
             {
                 let params = &mut *ptr;
-                params.p1353 = params.p1349;
-                validate_finite_parameter("A0CV", params.p1353).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1353] = params[1349];
+                validate_finite_parameter("A0CV", params[1353]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p1354 = params.p1350;
-                validate_finite_parameter("AGSCV", params.p1354).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1354] = params[1350];
+                validate_finite_parameter("AGSCV", params[1354]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p1355 = params.p1352;
-                validate_parameter("KETACV", params.p1355, false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1355] = params[1352];
+                validate_parameter("KETACV", params[1355], false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_69: [f64; 25] = [
                 0.0, 1.0, 0.0, 1.0, 1000000000000000.0, 0.067, 0.0, 0.0,
@@ -1595,27 +1431,27 @@ impl Parameters {
                 0.0, 1.0, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0,
                 2e-12,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_69.as_ptr(), (ptr as *mut f64).add(1356), 25);
+            std::ptr::copy_nonoverlapping(DEFAULTS_69.as_ptr(), (*ptr).values.as_mut_ptr().add(1356), 25);
             {
                 let params = &mut *ptr;
-                params.p1381 = params.p1379;
-                validate_finite_parameter("AGBCPD", params.p1381).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1381] = params[1379];
+                validate_finite_parameter("AGBCPD", params[1381]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             const DEFAULTS_70: [f64; 17] = [
                 0.0, 1.12, 6e22, 0.0, 0.0, 0.0, 1.0, 1.0,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0,
                 0.0,
             ];
-            std::ptr::copy_nonoverlapping(DEFAULTS_70.as_ptr(), (ptr as *mut f64).add(1382), 17);
+            std::ptr::copy_nonoverlapping(DEFAULTS_70.as_ptr(), (*ptr).values.as_mut_ptr().add(1382), 17);
             {
                 let params = &mut *ptr;
-                params.p1399 = params.p1397;
-                validate_parameter("ACEDB", params.p1399, false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1399] = params[1397];
+                validate_parameter("ACEDB", params[1399], false, Some((0.0, "0.0")), true, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             {
                 let params = &mut *ptr;
-                params.p1400 = params.p1398;
-                validate_finite_parameter("BCEDB", params.p1400).expect("generated Verilog-A parameter default must satisfy declared range");
+                params[1400] = params[1398];
+                validate_finite_parameter("BCEDB", params[1400]).expect("generated Verilog-A parameter default must satisfy declared range");
             }
             let params = &*ptr;
             for index in 0..PARAMETER_DISPLAY_NAMES.len() {
@@ -1645,8 +1481,7 @@ const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 #[inline]
 fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
     debug_assert!(index < PARAMETER_DISPLAY_NAMES.len(), "generated parameter index out of range");
-    // SAFETY: Parameters is repr(C), contains only f64 fields, and every caller validates or generates the index.
-    unsafe { *((parameters as *const Parameters as *const f64).add(index)) }
+    parameters.values[index]
 }
 
 fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), String> {
@@ -3010,7 +2845,7 @@ fn parameter_computed_min_bound(parameters: &Parameters, index: usize) -> Result
 fn parameter_computed_max_bound(parameters: &Parameters, index: usize) -> Result<Option<ParameterBound>, String> {
     let params = parameters;
     let bound: Option<ParameterBound> = match index {
-        899 => Some(ParameterBound { value: ((params.p0 * params.p49) + params.p51), label: "computed upper-bound expression" }),
+        899 => Some(ParameterBound { value: ((params[0] * params[49]) + params[51]), label: "computed upper-bound expression" }),
         _ => None,
     };
     if let Some(bound) = bound {
@@ -3117,7 +2952,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 2040;
     pub const DDT_STATE_COUNT: usize = 23;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "b2416920bbaefc34a8514342d28f091e7564bcc8f32d5a6ad68c96f0de758cc7";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "e16990f742019f5b7f5d8b2c1284906a8e19c91cf24d1af3d08d79fc0d442426";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -3259,13 +3094,10 @@ impl Instance {
     #[inline]
     fn write_parameter_slot(&mut self, index: usize, value: f64) -> bool {
         debug_assert!(index < Self::PARAMETER_COUNT, "generated parameter index out of range");
-        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.
-        unsafe {
-            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;
-            let changed = (*ptr.add(index)).to_bits() != value.to_bits();
-            *ptr.add(index) = value;
-            changed
-        }
+        let slot = &mut self.params.values[index];
+        let changed = slot.to_bits() != value.to_bits();
+        *slot = value;
+        changed
     }
 
     #[inline]
