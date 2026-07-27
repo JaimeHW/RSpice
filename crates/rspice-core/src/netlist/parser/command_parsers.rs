@@ -396,7 +396,7 @@ pub(super) fn parse_temp_command(
     Ok(temperatures)
 }
 
-/// Parse .FOUR command: .FOUR freq [num_harmonics] output1 [output2...]
+/// Parse .FOUR command: .FOUR freq `[num_harmonics]` output1 [output2...]
 pub(super) fn parse_four_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -522,7 +522,7 @@ mod step_command_tests {
     }
 }
 
-/// Parse .SP command: .SP DEC|LIN|OCT np fstart fstop [donoise]
+/// Parse .SP command: .SP DEC|LIN|OCT np fstart fstop `[donoise]`
 pub(super) fn parse_sp_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -560,7 +560,7 @@ pub(super) fn parse_sp_command(
     })
 }
 
-/// Parse .DISTO command: .DISTO DEC|LIN|OCT np fstart fstop [f2overf1]
+/// Parse .DISTO command: .DISTO DEC|LIN|OCT np fstart fstop `[f2overf1]`
 pub(super) fn parse_disto_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -600,7 +600,7 @@ pub(super) fn parse_disto_command(
     })
 }
 
-/// Parse .NOISE command: .NOISE V(out[,ref]) Vsource DEC|LIN|OCT np fstart fstop [pts_per_summary]
+/// Parse .NOISE command: .NOISE V(out`[,ref]`) Vsource DEC|LIN|OCT np fstart fstop `[pts_per_summary]`
 pub(super) fn parse_noise_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -657,7 +657,7 @@ pub(super) fn parse_noise_command(
     })
 }
 
-/// Parse .TF command: .TF V(out[,ref]) insrc  |  .TF I(element) insrc
+/// Parse .TF command: .TF V(out`[,ref]`) insrc  |  .TF I(element) insrc
 pub(super) fn parse_tf_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -718,7 +718,7 @@ fn parse_inline_current_probe(token: &str, line_num: usize) -> Result<String, Pa
 }
 
 /// Parse .SENS command:
-/// .SENS V(out[,ref])|I(vsource) [devspec ...] [AC DEC|LIN|OCT np fstart fstop]
+/// .SENS V(out`[,ref]`)|I(vsource) [devspec ...] [AC DEC|LIN|OCT np fstart fstop]
 pub(super) fn parse_sens_command(
     stream: &mut TokenStream,
     line_num: usize,

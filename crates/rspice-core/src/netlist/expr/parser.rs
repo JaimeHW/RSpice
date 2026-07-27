@@ -1,3 +1,12 @@
+//! Recursive-descent parser from expression text to [`Expr`].
+//!
+//! Handles operator precedence and associativity, parenthesized grouping,
+//! quoted expressions, SPICE engineering-suffix numbers, and function-call
+//! syntax. Function *names* are not validated here — an unknown name parses
+//! successfully and fails at evaluation with
+//! [`ExprError::UnknownFunction`], so a deck that never evaluates a branch
+//! never trips over it.
+
 use super::*;
 
 //=============================================================================

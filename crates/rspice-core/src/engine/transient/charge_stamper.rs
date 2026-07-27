@@ -2,8 +2,8 @@
 
 use super::*;
 
-/// Adapter exposing the transient [`StaticMatrix`] + RHS pair as a
-/// [`MatrixStamper`] for devices that stamp through the generic trait (the
+/// Adapter exposing the transient [`StaticMatrix`](crate::solver::StaticMatrix)
+/// + RHS pair as a [`MatrixStamper`](crate::device::MatrixStamper) for devices that stamp through the generic trait (the
 /// B3SOIDD charge companion). Maps 1-indexed device NodeIds to the 0-indexed
 /// matrix/RHS, matching `CircuitData`'s own stamper convention.
 pub(super) struct StaticMatrixChargeStamper<'a> {

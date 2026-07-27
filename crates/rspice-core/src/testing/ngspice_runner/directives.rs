@@ -112,7 +112,7 @@ impl TestRunner {
         }
     }
 
-    /// Parse .tran directive: .tran tstep tstop [tstart] [tmax]
+    /// Parse .tran directive: .tran tstep tstop `[tstart]` `[tmax]`
     pub(super) fn parse_tran_directive(&self, line: &str) -> Option<AnalysisSpec> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 3 {
@@ -164,7 +164,7 @@ impl TestRunner {
     }
 
     /// Parse .disto directive using AC sweep semantics:
-    /// .disto dec|oct|lin points fstart fstop [f2overf1]
+    /// .disto dec|oct|lin points fstart fstop `[f2overf1]`
     ///
     /// The ngspice runner currently validates against AC-like responses, so we
     /// map DISTO sweep setup onto AC execution for broad compatibility coverage.
@@ -221,7 +221,7 @@ impl TestRunner {
         })
     }
 
-    /// Parse .noise directive: .noise v(out[,ref]) input dec|oct|lin points fstart fstop
+    /// Parse .noise directive: .noise v(out`[,ref]`) input dec|oct|lin points fstart fstop
     pub(super) fn parse_noise_directive(&self, line: &str) -> Option<AnalysisSpec> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 7 {

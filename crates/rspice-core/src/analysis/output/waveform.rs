@@ -181,7 +181,7 @@ pub struct WaveformRecorder {
     /// independent time points, but this adds complexity for post-processing
     times: Vec<Value>,
 
-    /// Stored values: values[channel][point_index]
+    /// Stored values: values`[channel][point_index]`
     values: Vec<Vec<Value>>,
 
     /// Total number of input points (for compression ratio stats)

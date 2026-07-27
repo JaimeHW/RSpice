@@ -8,7 +8,7 @@
 //!
 //! This module replaces that solve with restarted GMRES, right-
 //! preconditioned by the per-harmonic diagonal blocks (block-Jacobi):
-//! each n×n block J[·,k][·,k] is LU-factorized once per Newton iteration,
+//! each n×n block `J[·,k][·,k]` is LU-factorized once per Newton iteration,
 //! and GMRES iterates with O((n·h)²) matrix-vector products. With moderate
 //! harmonic coupling the preconditioned iteration converges in a few tens
 //! of steps, turning the cubic bottleneck into an effectively quadratic
@@ -48,7 +48,7 @@ pub(super) struct LuFactors {
     n: usize,
     /// Combined L (unit lower, below diagonal) and U (upper), row-major.
     lu: Vec<Complex64>,
-    /// Row swap applied at elimination step k: rows k <-> pivot[k].
+    /// Row swap applied at elimination step k: rows k <-> pivot`[k]`.
     pivots: Vec<usize>,
     /// True when any pivot needed regularization.
     pub regularized: bool,

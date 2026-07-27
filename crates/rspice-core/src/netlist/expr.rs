@@ -1,10 +1,30 @@
-//! Expression evaluator for SPICE .PARAM statements
+//! Expression evaluator for `.PARAM` statements and behavioral sources.
 //!
-//! Supports:
-//! - Basic arithmetic: +, -, *, /, ** (power)
-//! - Parentheses for grouping
-//! - Built-in functions: sqrt, sin, cos, tan, exp, log, log10, abs, min, max
-//! - Parameter substitution from context
+//! Evaluation is complex-valued throughout so the same expressions serve AC
+//! analysis; real-only callers use the `eval_simple*` entry points.
+//!
+//! Supports arithmetic (`+ - * / **`), comparison and boolean operators,
+//! parenthesized grouping, parameter substitution from a [`ParamContext`],
+//! and roughly fifty built-in functions: transcendental and hyperbolic
+//! functions and their inverses, rounding (`FLOOR`, `CEIL`, `ROUND`, `INT`,
+//! `NINT`), complex accessors (`R`/`RE`, `IMG`, `PH`, `M`/`MAG`, `DB`),
+//! conditionals (`IF`, `LIMIT`, `TABLE`), sign and step helpers (`SGN`,
+//! `URAMP`, `U`, `U2`, `EQ0`, `GT0`, and the rest of the comparison family),
+//! and the statistical generators `GAUSS`, `UNIF`, and `RAND`. Most accept
+//! several spellings, so `ABS`, `M`, and `MAG` are one function.
+//!
+//! Two dialect-sensitive cases are worth knowing, since they change results
+//! rather than raise errors:
+//!
+//! - `LOG` is the natural logarithm, except under
+//!   [`ExpressionDialect::Xyce`] where it is base 10. `LN` and `LOG10` are
+//!   unambiguous and always mean what they say.
+//! - `PH`/`PHASE` returns degrees, not radians.
+//!
+//! Submodules: `parser` and `types` build the AST, `eval` walks it, `context`
+//! holds parameter scopes and the statistical generators' state, `behavioral`
+//! adds the circuit probes and runtime quantities that behavioral sources
+//! reference, and `api` is the public entry surface.
 
 use crate::Value;
 use std::collections::HashMap;

@@ -1,3 +1,15 @@
+//! Parameter scope and evaluation policy.
+//!
+//! [`ParamContext`] resolves parameter names, holds user-defined
+//! [`FunctionDef`]s, and carries the settings that change how expressions
+//! evaluate: the [`ExpressionDialect`], the
+//! [`ParameterRedefinitionPolicy`] applied when a name is defined twice, and
+//! the [`StatisticalParamMode`] governing `GAUSS`/`UNIF`/`RAND`.
+//!
+//! Those generators draw from a seeded [`RandomState`] rather than thread
+//! RNG, so a Monte Carlo or corner run reproduces exactly given the same
+//! seed ([`DEFAULT_RANDOM_SEED`] unless overridden).
+
 use super::*;
 use std::cell::Cell;
 use std::collections::HashSet;

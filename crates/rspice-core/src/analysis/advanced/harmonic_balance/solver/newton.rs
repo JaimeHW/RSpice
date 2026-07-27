@@ -623,7 +623,7 @@ impl HbSolver {
     /// Add nonlinear Jacobian contributions via FFT (Toeplitz/convolution)
     ///
     /// For nonlinear devices, the frequency-domain Jacobian is a Toeplitz matrix
-    /// representing convolution: J[k,l] = G[k-l] where G is the DFT of g(t).
+    /// representing convolution: J`[k,l]` = G[k-l] where G is the DFT of g(t).
     ///
     /// This is the implementation that exactly matches the
     /// FFT-based residual computation, ensuring proper Newton convergence.
@@ -935,7 +935,7 @@ impl HbSolver {
     /// exact dense elimination, so the Krylov path can change only speed,
     /// never convergence.
     ///
-    /// Returns flattened delta_x vector that maps back to [node][harmonic].
+    /// Returns flattened delta_x vector that maps back to `[node][harmonic]`.
     fn solve_jacobian_system(
         &self,
         jac: &[Vec<Complex64>],

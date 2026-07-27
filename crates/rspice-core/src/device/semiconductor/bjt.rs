@@ -60,7 +60,7 @@ impl BjtSubstrateTopology {
 }
 
 /// Pre-computed stamp indices for O(1) matrix access (3-terminal device)
-/// Layout: [row][col] where row/col are C, B, E
+/// Layout: `[row][col]` where row/col are C, B, E
 #[derive(Debug, Clone, Default)]
 pub struct BjtIndices {
     // Collector row

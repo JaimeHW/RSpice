@@ -35,7 +35,7 @@
 //! [λ] = [L] * [i]
 //! [v] = d[λ]/dt
 //! ```
-//! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
+//! where `[L]` is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use crate::analysis::CompanionCoefficients;

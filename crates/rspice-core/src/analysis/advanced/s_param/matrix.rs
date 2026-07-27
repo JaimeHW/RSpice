@@ -45,7 +45,7 @@ pub struct SMatrix {
     pub frequency: Value,
     /// Angular frequency ω = 2πf
     pub omega: Value,
-    /// S-parameter data [row][col] = S[row+1, col+1]
+    /// S-parameter data `[row][col]` = S[row+1, col+1]
     data: Vec<Vec<Complex>>,
     /// Number of ports
     num_ports: usize,

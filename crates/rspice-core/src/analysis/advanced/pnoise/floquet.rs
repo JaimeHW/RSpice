@@ -74,7 +74,7 @@ pub struct FloquetAnalyzer {
     floquet_exponents: Vec<Complex64>,
 
     /// Impulse Sensitivity Function samples over one period
-    /// isf[node][time_sample] - how noise at node affects phase at each time
+    /// isf`[node][time_sample]` - how noise at node affects phase at each time
     isf_samples: Vec<Vec<Value>>,
 
     /// RMS value of ISF for each node (Γ_rms)
@@ -84,14 +84,14 @@ pub struct FloquetAnalyzer {
     q_max: Vec<Value>,
 
     /// Time-varying Jacobian dA/dx sampled over period
-    /// jacobian_samples[time_idx][row][col]
+    /// jacobian_samples`[time_idx][row][col]`
     jacobian_samples: Vec<Vec<Vec<Value>>>,
 
     /// Number of time samples per period for Jacobian
     num_time_samples: usize,
 
     /// Periodic waveform samples for ISF computation
-    /// waveform[node][time_sample]
+    /// waveform`[node][time_sample]`
     waveform_samples: Vec<Vec<Value>>,
 
     /// Whether the analyzer has been initialized with proper data

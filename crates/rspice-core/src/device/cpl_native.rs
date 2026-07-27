@@ -997,11 +997,11 @@ pub(crate) struct NativeCplStampPlan {
     pub(crate) ff: Vec<f64>,
     /// RHS for the far-end (`ibr2`) branch rows.
     pub(crate) gg: Vec<f64>,
-    /// `h1t.aten + h1*h1C[m][p]`: ibr1->Vpos[p] and ibr2->Vneg[p] coefficient.
+    /// `h1t.aten + h1*h1C[m][p]`: `ibr1->Vpos[p]` and `ibr2->Vneg[p]` coefficient.
     pub(crate) aten_h1: Matrix,
-    /// `sum_q ratio[q]*(h1*h2C[m][p][q] + h2t.aten)`: ibr1->ibr2[p] / ibr2->ibr1[p].
+    /// `sum_q ratio[q]*(h1*h2C[m][p][q] + h2t.aten)`: `ibr1->ibr2[p]` / `ibr2->ibr1[p]`.
     pub(crate) f2: Matrix,
-    /// `sum_q ratio[q]*(h1*h3C[m][p][q] + h3t.aten)`: ibr1->Vneg[p] / ibr2->Vpos[p].
+    /// `sum_q ratio[q]*(h1*h3C[m][p][q] + h3t.aten)`: `ibr1->Vneg[p]` / `ibr2->Vpos[p]`.
     pub(crate) f3: Matrix,
 }
 

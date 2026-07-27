@@ -153,7 +153,7 @@ pub struct DiscreteFilter {
     sample_period: Value,
     /// Numerator coefficients in z-domain
     b: Vec<Value>,
-    /// Denominator coefficients in z-domain (a[0] normalized to 1)
+    /// Denominator coefficients in z-domain (a`[0]` normalized to 1)
     a: Vec<Value>,
     /// Input history (most recent first)
     x_history: VecDeque<Value>,

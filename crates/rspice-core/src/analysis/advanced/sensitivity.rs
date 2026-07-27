@@ -505,7 +505,7 @@ impl SensitivityAnalyzer {
     /// Compute sensitivity of an independent current source.
     ///
     /// MNA stamp for a source flowing from n_pos -> n_neg:
-    /// b[n_pos] -= I, b[n_neg] += I
+    /// b`[n_pos]` -= I, b`[n_neg]` += I
     ///
     /// With residual form Gx - b = 0:
     /// d(output)/dI = lambda^T * db/dI = -(lambda_pos - lambda_neg)

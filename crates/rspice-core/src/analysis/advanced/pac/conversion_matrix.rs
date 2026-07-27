@@ -13,8 +13,8 @@
 //!
 //! Key properties:
 //! - H[0,-1] is mixer conversion gain (RF→IF for k=0, m=-1 or +1)
-//! - H[0,0] is IF-to-IF transfer (direct feedthrough)
-//! - Diagonal elements H[k,k] represent harmonic transfer at same sideband
+//! - H`[0,0]` is IF-to-IF transfer (direct feedthrough)
+//! - Diagonal elements H`[k,k]` represent harmonic transfer at same sideband
 
 use crate::{Complex64, Value};
 use std::collections::HashMap;
@@ -106,7 +106,7 @@ pub struct ConversionMatrix {
     /// Frequency offset points analyzed
     frequencies: Vec<Value>,
 
-    /// Matrix elements: [freq_index][output_sideband][input_sideband]
+    /// Matrix elements: `[freq_index][output_sideband][input_sideband]`
     /// Stored as flattened Vec with computed indexing
     elements: Vec<Complex64>,
 

@@ -1,3 +1,11 @@
+//! Expression AST and the numeric type it evaluates to.
+//!
+//! [`Expr`] is the parsed tree; [`BinOpKind`] and [`UnaryOpKind`] cover
+//! arithmetic, comparison, and boolean operators. [`ComplexValue`] is the
+//! evaluation type — expressions are always evaluated complex so AC-analysis
+//! callers can project the imaginary component, with real-valued callers
+//! simply taking `re`.
+
 use super::*;
 
 // Expression AST

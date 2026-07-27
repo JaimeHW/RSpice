@@ -1,3 +1,10 @@
+//! Public entry points for parsing and evaluating expressions.
+//!
+//! `parse_expression` yields an AST that can be evaluated repeatedly, which
+//! is what callers inside the Newton loop want. The `eval_*` helpers parse
+//! and evaluate in one call for one-shot use. Each comes in a real-valued
+//! form and a `_complex` form; the real form takes the real component.
+
 use super::*;
 
 //=============================================================================

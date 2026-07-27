@@ -72,11 +72,20 @@ impl Engine {
     ///
     /// Mirrors the matrix pointers written by `CPLload` (cplload.c) for the
     /// transient (non-MODEDC) path:
-    /// - KCL: `pos[m]` row gets `+Ibr1[m]`, `far[m]` row gets `+Ibr2[m]`.
-    /// - Branch1 row m: `-Ibr1[m] + sum_p aten_h1[m][p] Vpos[p]
-    ///   - sum_p f3[m][p] Vfar[p] - sum_p f2[m][p] Ibr2[p] = ff[m]`.
-    /// - Branch2 row m: `-Ibr2[m] + sum_p aten_h1[m][p] Vfar[p]
-    ///   - sum_p f3[m][p] Vpos[p] - sum_p f2[m][p] Ibr1[p] = gg[m]`.
+    ///
+    /// ```text
+    /// KCL:      pos[m] row gets +Ibr1[m], far[m] row gets +Ibr2[m]
+    ///
+    /// Branch1 row m:
+    ///   -Ibr1[m] + sum_p aten_h1[m][p] Vpos[p]
+    ///            - sum_p f3[m][p] Vfar[p]
+    ///            - sum_p f2[m][p] Ibr2[p]  =  ff[m]
+    ///
+    /// Branch2 row m:
+    ///   -Ibr2[m] + sum_p aten_h1[m][p] Vfar[p]
+    ///            - sum_p f3[m][p] Vpos[p]
+    ///            - sum_p f2[m][p] Ibr1[p]  =  gg[m]
+    /// ```
     ///
     /// When the native step plan is unavailable (e.g. degenerate dt before the
     /// runtime is seeded) the branch rows are anchored with `-Ibr=0` so the

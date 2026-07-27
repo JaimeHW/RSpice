@@ -1,3 +1,8 @@
+//! Errors raised while parsing or evaluating an expression.
+//!
+//! [`ExprError`] covers both phases, since callers using the combined
+//! `eval_expression` entry points cannot tell them apart anyway.
+
 //=============================================================================
 // Errors
 //=============================================================================

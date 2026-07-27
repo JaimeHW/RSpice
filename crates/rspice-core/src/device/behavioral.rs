@@ -63,9 +63,9 @@ pub struct BehavioralVoltageSource {
     node_values: Vec<Value>,
     /// Reused scratch storage for expression branch-current values
     branch_values: Vec<Value>,
-    /// Linearization partials d(expr)/d(node_values[idx])
+    /// Linearization partials d(expr)/d(node_values`[idx]`)
     node_partials: Vec<Value>,
-    /// Linearization partials d(expr)/d(branch_values[idx])
+    /// Linearization partials d(expr)/d(branch_values`[idx]`)
     branch_partials: Vec<Value>,
     /// Affine term for the most recent expression linearization.
     linearized_affine: Value,
@@ -1523,9 +1523,9 @@ pub struct BehavioralCurrentSource {
     node_values: Vec<Value>,
     /// Reused scratch storage for expression branch-current values
     branch_values: Vec<Value>,
-    /// Linearization partials d(expr)/d(node_values[idx])
+    /// Linearization partials d(expr)/d(node_values`[idx]`)
     node_partials: Vec<Value>,
-    /// Linearization partials d(expr)/d(branch_values[idx])
+    /// Linearization partials d(expr)/d(branch_values`[idx]`)
     branch_partials: Vec<Value>,
     /// Affine term for the most recent expression linearization.
     linearized_affine: Value,
