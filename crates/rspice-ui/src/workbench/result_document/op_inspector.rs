@@ -460,82 +460,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-#[cfg(test)]
-mod layout_tests {
-    use super::*;
-
-    #[test]
-    fn op_table_keeps_all_mosfet_columns_at_phone_width() {
-        assert_eq!(family_columns("MOSFET").len(), OP_MAX_VALUE_COLUMNS);
-        assert_eq!(op_table_min_width(), 902.0);
-        assert!(op_table_min_width() > 390.0);
-    }
-
-    #[test]
-    fn default_selected_detail_keeps_the_authoritative_report_useful() {
-        use crate::state::OperatingPointDeviceDetailEvidence;
-
-        assert!(retained_detail_allows(
-            "M1",
-            &Some((
-                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
-                Vec::new(),
-                Vec::new(),
-            )),
-        ));
-        assert!(retained_detail_allows(
-            "m1",
-            &Some((
-                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
-                vec!["M1".to_owned()],
-                Vec::new(),
-            )),
-        ));
-        assert!(!retained_detail_allows(
-            "M2",
-            &Some((
-                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
-                vec!["M1".to_owned()],
-                Vec::new(),
-            )),
-        ));
-        assert!(retained_detail_allows(
-            "M2",
-            &Some((
-                OperatingPointDeviceDetailEvidence::ViolationsOnly,
-                Vec::new(),
-                vec!["M2".to_owned()],
-            )),
-        ));
-    }
-
-    #[test]
-    fn report_selection_never_falls_back_to_a_stale_analysis() {
-        use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
-
-        let report = || rspice_core::circuit::DeviceOpReport {
-            entries: vec![rspice_core::circuit::DeviceOpEntry {
-                name: "M1".to_owned(),
-                device_kind: "MOSFET",
-                region: Some("saturation"),
-                params: Vec::new(),
-            }],
-        };
-        let mut state = AppState::default();
-        let mut run = SimulationRun::new(1);
-        let mut first = AnalysisResult::new(1, AnalysisType::DcOp, "OP 1");
-        first.device_op = Some(report());
-        run.add_analysis(first);
-        run.add_analysis(AnalysisResult::new(2, AnalysisType::DcOp, "OP 2"));
-        state.simulation.runs.push(run);
-        state.simulation.active_run_idx = Some(0);
-
-        state.simulation.active_analysis_idx = Some(1);
-        assert!(active_report(&state).is_none());
-        state.simulation.active_analysis_idx = Some(0);
-        assert_eq!(active_report(&state).unwrap().1, "OP 1");
-    }
-}
 
 /// Right panel: report summary (counts by family and region, extremes).
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
@@ -617,5 +541,82 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         section_header(ui, "Largest gm", None);
         let value = fmt_si(gm, "S", 3);
         measurement_table(ui, &[(name, value.as_str())]);
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn op_table_keeps_all_mosfet_columns_at_phone_width() {
+        assert_eq!(family_columns("MOSFET").len(), OP_MAX_VALUE_COLUMNS);
+        assert_eq!(op_table_min_width(), 902.0);
+        assert!(op_table_min_width() > 390.0);
+    }
+
+    #[test]
+    fn default_selected_detail_keeps_the_authoritative_report_useful() {
+        use crate::state::OperatingPointDeviceDetailEvidence;
+
+        assert!(retained_detail_allows(
+            "M1",
+            &Some((
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+                Vec::new(),
+                Vec::new(),
+            )),
+        ));
+        assert!(retained_detail_allows(
+            "m1",
+            &Some((
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+                vec!["M1".to_owned()],
+                Vec::new(),
+            )),
+        ));
+        assert!(!retained_detail_allows(
+            "M2",
+            &Some((
+                OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+                vec!["M1".to_owned()],
+                Vec::new(),
+            )),
+        ));
+        assert!(retained_detail_allows(
+            "M2",
+            &Some((
+                OperatingPointDeviceDetailEvidence::ViolationsOnly,
+                Vec::new(),
+                vec!["M2".to_owned()],
+            )),
+        ));
+    }
+
+    #[test]
+    fn report_selection_never_falls_back_to_a_stale_analysis() {
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+
+        let report = || rspice_core::circuit::DeviceOpReport {
+            entries: vec![rspice_core::circuit::DeviceOpEntry {
+                name: "M1".to_owned(),
+                device_kind: "MOSFET",
+                region: Some("saturation"),
+                params: Vec::new(),
+            }],
+        };
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        let mut first = AnalysisResult::new(1, AnalysisType::DcOp, "OP 1");
+        first.device_op = Some(report());
+        run.add_analysis(first);
+        run.add_analysis(AnalysisResult::new(2, AnalysisType::DcOp, "OP 2"));
+        state.simulation.runs.push(run);
+        state.simulation.active_run_idx = Some(0);
+
+        state.simulation.active_analysis_idx = Some(1);
+        assert!(active_report(&state).is_none());
+        state.simulation.active_analysis_idx = Some(0);
+        assert_eq!(active_report(&state).unwrap().1, "OP 1");
     }
 }

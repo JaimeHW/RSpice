@@ -1642,6 +1642,24 @@ impl RSpiceApp {
     }
 }
 
+
+fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
+    encoded
+        .split_whitespace()
+        .filter_map(|entry| {
+            let (name, direction) = entry.split_once(':')?;
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some(PortSpec {
+                name: name.to_owned(),
+                direction: PortDirection::parse(direction),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::workbench::app::AppState;
@@ -3379,21 +3397,4 @@ mod tests {
                 .is_some()
         );
     }
-}
-
-fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
-    encoded
-        .split_whitespace()
-        .filter_map(|entry| {
-            let (name, direction) = entry.split_once(':')?;
-            let name = name.trim();
-            if name.is_empty() {
-                return None;
-            }
-            Some(PortSpec {
-                name: name.to_owned(),
-                direction: PortDirection::parse(direction),
-            })
-        })
-        .collect()
 }

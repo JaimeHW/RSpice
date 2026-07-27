@@ -159,43 +159,6 @@ pub(super) fn parse_non_windowed_values<'a>(
     Ok(cursor)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::super::toc::TocEntry;
-    use super::*;
-
-    #[test]
-    fn sweep_points_are_bounded_by_value_payload_before_allocation() {
-        let mut header = HashMap::new();
-        header.insert("PSF sweep points".to_string(), CadencePsfValue::Int(2));
-        let sweeps = vec![SignalRef {
-            id: 1,
-            name: "time".to_string(),
-            type_id: 11,
-        }];
-        let types = HashMap::new();
-        let traces = Vec::new();
-        let file = [0, 0, 0, 0, 0, 0, 0, 8];
-
-        let err = parse_values(
-            &file,
-            TocEntry { start: 0, end: 8 },
-            &header,
-            &types,
-            &sweeps,
-            &traces,
-        )
-        .expect_err("sweep point count beyond payload must be rejected");
-
-        let message = err.to_string();
-        assert!(
-            message.contains("PSF sweep points")
-                && message.contains("declares 2")
-                && message.contains("remaining"),
-            "unexpected error: {message}"
-        );
-    }
-}
 
 pub(super) fn parse_windowed_values<'a>(
     mut cursor: &'a [u8],
@@ -352,4 +315,42 @@ pub(super) fn parse_windowed_values<'a>(
     }
 
     Ok(cursor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::toc::TocEntry;
+    use super::*;
+
+    #[test]
+    fn sweep_points_are_bounded_by_value_payload_before_allocation() {
+        let mut header = HashMap::new();
+        header.insert("PSF sweep points".to_string(), CadencePsfValue::Int(2));
+        let sweeps = vec![SignalRef {
+            id: 1,
+            name: "time".to_string(),
+            type_id: 11,
+        }];
+        let types = HashMap::new();
+        let traces = Vec::new();
+        let file = [0, 0, 0, 0, 0, 0, 0, 8];
+
+        let err = parse_values(
+            &file,
+            TocEntry { start: 0, end: 8 },
+            &header,
+            &types,
+            &sweeps,
+            &traces,
+        )
+        .expect_err("sweep point count beyond payload must be rejected");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("PSF sweep points")
+                && message.contains("declares 2")
+                && message.contains("remaining"),
+            "unexpected error: {message}"
+        );
+    }
 }

@@ -488,6 +488,68 @@ fn historical_annotation_run(state: &AppState) -> Option<u64> {
     (solved && !annotates_this_drawing).then_some(run.id)
 }
 
+
+fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .fill(t.color.warn.gamma_multiply(0.14))
+        .inner_margin(egui::Margin::symmetric(12, 6))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} is read only. Create an editable copy before changing this document.",
+                    app.state.workspace.active_display_path()
+                ))
+                .color(t.color.warn),
+            );
+        });
+}
+
+fn source_document(ui: &mut Ui, app: &mut RSpiceApp) {
+    let t = Tokens::get(ui.ctx());
+    let reference = app.state.workspace.active_view.clone();
+    let contents = app
+        .state
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .and_then(|view| view.metadata.get("source"))
+        .cloned()
+        .unwrap_or_default();
+    if contents.is_empty() {
+        empty_state(
+            ui,
+            super::super::design_system::WorkbenchIcon::Netlist,
+            "No source text stored",
+            "Import or compile this behavioral view from the Models workspace.",
+        );
+        return;
+    }
+    let mut display = contents;
+    egui::Frame::new().fill(t.color.canvas_bg).show(ui, |ui| {
+        ui.add_sized(
+            ui.available_size(),
+            egui::TextEdit::multiline(&mut display)
+                .font(egui::TextStyle::Monospace)
+                .code_editor()
+                .interactive(false),
+        );
+    });
+}
+
+fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
+    empty_state(
+        ui,
+        super::super::design_system::WorkbenchIcon::File,
+        &format!("{} view", view_type.display_name()),
+        &format!(
+            "{} is registered in the project and available for downstream integrations.",
+            app.state.workspace.active_display_path()
+        ),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,65 +660,4 @@ mod tests {
         assert!(app.state.dialogs.new_cell_dialog);
         assert!(app.state.dialogs.new_cell_create_schematic);
     }
-}
-
-fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .fill(t.color.warn.gamma_multiply(0.14))
-        .inner_margin(egui::Margin::symmetric(12, 6))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} is read only. Create an editable copy before changing this document.",
-                    app.state.workspace.active_display_path()
-                ))
-                .color(t.color.warn),
-            );
-        });
-}
-
-fn source_document(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    let reference = app.state.workspace.active_view.clone();
-    let contents = app
-        .state
-        .library_manager
-        .get_library(&reference.library)
-        .and_then(|library| library.get_cell(&reference.cell))
-        .and_then(|cell| cell.get_view(&reference.view))
-        .and_then(|view| view.metadata.get("source"))
-        .cloned()
-        .unwrap_or_default();
-    if contents.is_empty() {
-        empty_state(
-            ui,
-            super::super::design_system::WorkbenchIcon::Netlist,
-            "No source text stored",
-            "Import or compile this behavioral view from the Models workspace.",
-        );
-        return;
-    }
-    let mut display = contents;
-    egui::Frame::new().fill(t.color.canvas_bg).show(ui, |ui| {
-        ui.add_sized(
-            ui.available_size(),
-            egui::TextEdit::multiline(&mut display)
-                .font(egui::TextStyle::Monospace)
-                .code_editor()
-                .interactive(false),
-        );
-    });
-}
-
-fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
-    empty_state(
-        ui,
-        super::super::design_system::WorkbenchIcon::File,
-        &format!("{} view", view_type.display_name()),
-        &format!(
-            "{} is registered in the project and available for downstream integrations.",
-            app.state.workspace.active_display_path()
-        ),
-    );
 }

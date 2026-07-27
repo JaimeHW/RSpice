@@ -43,23 +43,6 @@ impl AppState {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rename_cell_dialog_starts_with_the_exact_active_cell_identity() {
-        let mut state = AppState::default();
-
-        state.open_rename_cell_dialog("work", "amplifier");
-
-        assert!(state.dialogs.rename_cell_dialog);
-        assert_eq!(state.dialogs.rename_cell_library, "work");
-        assert_eq!(state.dialogs.rename_cell_current, "amplifier");
-        assert_eq!(state.dialogs.rename_cell_name, "amplifier");
-        assert!(state.dialogs.rename_cell_error.is_none());
-    }
-}
 
 impl RSpiceApp {
     pub(in crate::workbench::app) fn process_copy_cell_dialog(&mut self, ctx: &Context) {
@@ -267,5 +250,23 @@ impl RSpiceApp {
             dialogs.rename_cell_name.clear();
             dialogs.rename_cell_error = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_cell_dialog_starts_with_the_exact_active_cell_identity() {
+        let mut state = AppState::default();
+
+        state.open_rename_cell_dialog("work", "amplifier");
+
+        assert!(state.dialogs.rename_cell_dialog);
+        assert_eq!(state.dialogs.rename_cell_library, "work");
+        assert_eq!(state.dialogs.rename_cell_current, "amplifier");
+        assert_eq!(state.dialogs.rename_cell_name, "amplifier");
+        assert!(state.dialogs.rename_cell_error.is_none());
     }
 }

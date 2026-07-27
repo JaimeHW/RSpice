@@ -59,7 +59,6 @@
         clippy::default_constructed_unit_structs,
         clippy::expect_fun_call,
         clippy::field_reassign_with_default,
-        clippy::items_after_test_module,
         clippy::len_zero,
         clippy::manual_range_contains,
         clippy::manual_repeat_n,

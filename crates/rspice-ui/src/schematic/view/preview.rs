@@ -1045,6 +1045,26 @@ fn component_preview_enabled(read_only: bool) -> bool {
     !read_only
 }
 
+
+fn draw_selection_rect(painter: &Painter, state: &AppState, tool_viewport: &Viewport) {
+    if state.schematic.selection_rect.is_active() {
+        let (min_x, min_y, max_x, max_y) = state.schematic.selection_rect.bounds();
+        let top_left = tool_viewport.schematic_to_screen(Point::new(min_x, min_y));
+        let bottom_right = tool_viewport.schematic_to_screen(Point::new(max_x, max_y));
+
+        let selection_rect = Rect::from_min_max(top_left, bottom_right);
+
+        let accent = crate::ui::tokens::active_palette().accent;
+        painter.rect_filled(selection_rect, 0.0, accent.gamma_multiply(0.14));
+        painter.rect_stroke(
+            selection_rect,
+            0.0,
+            Stroke::new(1.0, accent),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1139,24 +1159,5 @@ mod tests {
             Some(("work", "amp"))
         );
         assert_eq!(symbol.connectable_pins().count(), 1);
-    }
-}
-
-fn draw_selection_rect(painter: &Painter, state: &AppState, tool_viewport: &Viewport) {
-    if state.schematic.selection_rect.is_active() {
-        let (min_x, min_y, max_x, max_y) = state.schematic.selection_rect.bounds();
-        let top_left = tool_viewport.schematic_to_screen(Point::new(min_x, min_y));
-        let bottom_right = tool_viewport.schematic_to_screen(Point::new(max_x, max_y));
-
-        let selection_rect = Rect::from_min_max(top_left, bottom_right);
-
-        let accent = crate::ui::tokens::active_palette().accent;
-        painter.rect_filled(selection_rect, 0.0, accent.gamma_multiply(0.14));
-        painter.rect_stroke(
-            selection_rect,
-            0.0,
-            Stroke::new(1.0, accent),
-            egui::StrokeKind::Inside,
-        );
     }
 }

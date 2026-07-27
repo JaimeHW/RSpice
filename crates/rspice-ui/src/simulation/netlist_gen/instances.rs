@@ -668,6 +668,15 @@ fn model_bound_instance_params(
     }
 }
 
+
+fn same_terminal_sequence(master_ports: &[String], placed_ports: &[String]) -> bool {
+    master_ports.len() == placed_ports.len()
+        && master_ports
+            .iter()
+            .zip(placed_ports)
+            .all(|(master, placed)| master.eq_ignore_ascii_case(placed))
+}
+
 #[cfg(test)]
 mod model_bound_template_tests {
     use super::{model_bound_instance_params, render_model_bound_instance_template};
@@ -765,12 +774,4 @@ mod model_bound_template_tests {
 
         assert_eq!(generator.instance_name(&component), "M17");
     }
-}
-
-fn same_terminal_sequence(master_ports: &[String], placed_ports: &[String]) -> bool {
-    master_ports.len() == placed_ports.len()
-        && master_ports
-            .iter()
-            .zip(placed_ports)
-            .all(|(master, placed)| master.eq_ignore_ascii_case(placed))
 }

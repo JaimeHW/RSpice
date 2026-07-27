@@ -108,6 +108,83 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
     })
 }
 
+
+/// Run temperature sweep analysis with explicit base-mode configuration.
+pub fn run_parametric_analysis_with_config(
+    netlist_text: &str,
+    config: &TempRunConfig,
+) -> Result<ParametricData, String> {
+    run_parametric_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
+        .map_err(|error| error.to_string())
+}
+
+/// Run an explicitly configured temperature sweep with cooperative
+/// cancellation.
+pub fn run_parametric_analysis_with_config_and_abort(
+    netlist_text: &str,
+    config: &TempRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ParametricData> {
+    run_parametric_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
+}
+
+/// Run temperature sweep analysis with explicit base-mode configuration and a
+/// source path used to resolve relative includes and model file references.
+pub fn run_parametric_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &TempRunConfig,
+    source_path: Option<&Path>,
+) -> Result<ParametricData, String> {
+    run_parametric_analysis_with_config_and_source_path_and_abort(
+        netlist_text,
+        config,
+        source_path,
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Run an explicitly configured temperature sweep with source-path resolution
+/// and cooperative cancellation.
+pub fn run_parametric_analysis_with_config_and_source_path_and_abort(
+    netlist_text: &str,
+    config: &TempRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ParametricData> {
+    let netlist = super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_parametric_analysis_with_netlist_and_config(&netlist, config, "TEMP", abort)
+}
+
+fn run_parametric_analysis_with_netlist_and_config(
+    netlist: &rspice_core::Netlist,
+    config: &TempRunConfig,
+    target: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<ParametricData> {
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
+
+    let results = run_temperature_sweep(netlist, &config.temperatures_c, &config.base_mode, abort)?;
+    if results.is_empty() {
+        return Err(ServiceRunError::Failure(
+            "Parametric analysis produced no converged sweep points".to_string(),
+        ));
+    }
+
+    let num_failures = config.temperatures_c.len().saturating_sub(results.len());
+    let metric_label = config.base_mode.metric_label();
+    let (sweep_values, voltages) = map_temperature_results(&results, metric_label, abort)?;
+
+    Ok(ParametricData {
+        target: target.to_string(),
+        num_points: sweep_values.len(),
+        sweep_values,
+        voltages,
+        num_failures,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -192,80 +269,4 @@ R2 out 0 1k
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
         assert!(abort.polls.load(Ordering::Relaxed) >= 8);
     }
-}
-
-/// Run temperature sweep analysis with explicit base-mode configuration.
-pub fn run_parametric_analysis_with_config(
-    netlist_text: &str,
-    config: &TempRunConfig,
-) -> Result<ParametricData, String> {
-    run_parametric_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run an explicitly configured temperature sweep with cooperative
-/// cancellation.
-pub fn run_parametric_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &TempRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ParametricData> {
-    run_parametric_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run temperature sweep analysis with explicit base-mode configuration and a
-/// source path used to resolve relative includes and model file references.
-pub fn run_parametric_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &TempRunConfig,
-    source_path: Option<&Path>,
-) -> Result<ParametricData, String> {
-    run_parametric_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Run an explicitly configured temperature sweep with source-path resolution
-/// and cooperative cancellation.
-pub fn run_parametric_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &TempRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ParametricData> {
-    let netlist = super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_parametric_analysis_with_netlist_and_config(&netlist, config, "TEMP", abort)
-}
-
-fn run_parametric_analysis_with_netlist_and_config(
-    netlist: &rspice_core::Netlist,
-    config: &TempRunConfig,
-    target: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ParametricData> {
-    ensure_not_aborted(abort)?;
-    config.validate().map_err(ServiceRunError::Failure)?;
-
-    let results = run_temperature_sweep(netlist, &config.temperatures_c, &config.base_mode, abort)?;
-    if results.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Parametric analysis produced no converged sweep points".to_string(),
-        ));
-    }
-
-    let num_failures = config.temperatures_c.len().saturating_sub(results.len());
-    let metric_label = config.base_mode.metric_label();
-    let (sweep_values, voltages) = map_temperature_results(&results, metric_label, abort)?;
-
-    Ok(ParametricData {
-        target: target.to_string(),
-        num_points: sweep_values.len(),
-        sweep_values,
-        voltages,
-        num_failures,
-    })
 }

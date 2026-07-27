@@ -806,6 +806,244 @@ pub(crate) fn select_signal_conductor(
     Ok(net)
 }
 
+
+/// Render the schematic view (central canvas)
+pub fn render_schematic_view(
+    ui: &mut Ui,
+    state: &mut AppState,
+    symbol_library: Option<&SymbolLibrary>,
+) {
+    let available = ui.available_rect_before_wrap();
+    let mut symbol_context = SchematicSymbolContext::from_state(state);
+
+    if state.schematic.needs_fit {
+        state.schematic.needs_fit = false;
+        let bounds = symbol_context.content_bounds(&state.schematic);
+        state.schematic.zoom_to_fit_bounds(
+            bounds,
+            available.width() as f64,
+            available.height() as f64,
+        );
+    }
+    if let Some(target) = state.schematic.center_request.take() {
+        state
+            .schematic
+            .center_view_on(target, available.width() as f64, available.height() as f64);
+    }
+
+    let response = ui.interact(
+        available,
+        egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID),
+        Sense::click_and_drag(),
+    );
+    if response.clicked() || response.secondary_clicked() || response.drag_started() {
+        state.dialogs.interaction.schematic_keyboard_focus = None;
+    }
+    ui.advance_cursor_after_rect(available);
+    let painter = ui.painter_at(available);
+
+    // Input first, painting second. Pan/zoom and tool edits apply BEFORE
+    // the camera is built and the scene is painted — the old order drew
+    // last frame's state, so the canvas trailed the cursor by a full
+    // frame during pans and drags.
+    handle_viewport_navigation(ui, &response, available, state);
+    let viewport = viewport_from_state(state, available, ui.ctx().pixels_per_point());
+    let shelf_drag = response.dnd_hover_payload::<SchematicShelfDragPayload>();
+    let shelf_drag_position = shelf_drag
+        .as_ref()
+        .and_then(|_| ui.ctx().pointer_hover_pos());
+    let shelf_drag_over_canvas = shelf_drag.is_some() && shelf_drag_position.is_some();
+    handle_placement_transform_keys(&response, state, shelf_drag_over_canvas);
+    if let Some(payload) = shelf_drag.as_deref() {
+        ui.ctx()
+            .set_cursor_icon(if can_accept_shelf_drop(state, payload) {
+                egui::CursorIcon::Copy
+            } else {
+                egui::CursorIcon::NoDrop
+            });
+    }
+    let dropped_payload = response.dnd_release_payload::<SchematicShelfDragPayload>();
+    let before_interactions_topology = state.schematic.topology_version();
+    // Keep the pre-interaction route state available to the context-menu
+    // layer for diagnostics. Secondary click is exclusively a context-menu
+    // gesture; routes commit with Enter or primary double-click.
+    let routing_was_active = state.schematic.wire_drawing.active
+        || state.schematic.bus_drawing.active
+        || !state
+            .schematic
+            .documentation_shape_drawing
+            .points
+            .is_empty();
+    if let (Some(payload), Some(position)) = (dropped_payload.as_deref(), shelf_drag_position) {
+        let grid_pos = coordinates::screen_to_grid(&viewport, state.schematic.grid_size, position);
+        match commit_shelf_drop(state, payload, grid_pos) {
+            ShelfDropOutcome::Placed => {
+                state.ui.toasts.success(
+                    ui.ctx(),
+                    "Component placed",
+                    format!(
+                        "{} was placed at ({}, {}).",
+                        payload.component_type().display_name(),
+                        grid_pos.x,
+                        grid_pos.y
+                    ),
+                );
+            }
+            ShelfDropOutcome::ReadOnly => {
+                state.ui.toasts.warn_with_title(
+                    ui.ctx(),
+                    "Drop not permitted",
+                    "The active schematic is read-only; no component was placed.",
+                );
+            }
+            ShelfDropOutcome::RequiresConfiguration => {
+                state.ui.toasts.warn_with_title(
+                    ui.ctx(),
+                    "Configuration required",
+                    "Use Place pin or port to define the interface contract before placement.",
+                );
+            }
+        }
+    } else {
+        handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
+    }
+    refresh_symbol_context_after_interactions(
+        state,
+        &mut symbol_context,
+        before_interactions_topology,
+    );
+    let before_context_menu_topology = state.schematic.topology_version();
+    context_menu::handle_context_menu(
+        &response,
+        state,
+        &viewport,
+        routing_was_active,
+        &symbol_context,
+    );
+    handle_keyboard_object_navigation(&response, state, &symbol_context);
+    refresh_symbol_context_after_interactions(
+        state,
+        &mut symbol_context,
+        before_context_menu_topology,
+    );
+
+    // Refresh the frame-coherent canvas cache (culling bounds + hover
+    // hit-test index) after interactions may have edited topology.
+    state.schematic.ensure_canvas_cache();
+
+    draw_scene(
+        &painter,
+        available,
+        &viewport,
+        state,
+        symbol_library,
+        &symbol_context,
+    );
+    draw_interaction_previews(
+        &painter,
+        &response,
+        state,
+        &viewport,
+        &symbol_context,
+        symbol_library,
+    );
+    if dropped_payload.is_none()
+        && let (Some(payload), Some(position)) = (shelf_drag.as_deref(), shelf_drag_position)
+        && can_accept_shelf_drop(state, payload)
+    {
+        draw_shelf_drag_preview(
+            &painter,
+            state,
+            &viewport,
+            payload,
+            position,
+            symbol_library,
+        );
+    }
+
+    // Report the cursor position in grid units; the workbench status bar shows it.
+    let to_grid_units = |pos: egui::Pos2, state: &AppState| {
+        let grid = f64::from(state.schematic.grid_size.max(1));
+        let x = ((f64::from(pos.x - available.min.x)) - state.schematic.pan.0)
+            / state.schematic.zoom
+            / grid;
+        let y = ((f64::from(pos.y - available.min.y)) - state.schematic.pan.1)
+            / state.schematic.zoom
+            / grid;
+        (x, y)
+    };
+    state.ui.canvas_hover = shelf_drag_position
+        .or_else(|| response.hover_pos())
+        .map(|cursor| to_grid_units(cursor, state));
+    state.ui.canvas_view_center = Some(to_grid_units(available.center(), state));
+
+    let shortcut_platform = crate::workbench::app::runtime_command_platform(ui.ctx());
+    let operating_system = ui.ctx().os();
+    let accessibility_label = schematic_accessibility_label();
+    let accessibility_description =
+        schematic_accessibility_description(state, shortcut_platform, operating_system);
+    response.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), accessibility_label)
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Canvas);
+        node.set_label(accessibility_label);
+        node.set_description(accessibility_description);
+    });
+    let selection_status = schematic_selection_accessibility_status(state);
+    let selection_status_response = ui.interact(
+        egui::Rect::from_min_size(available.min, egui::Vec2::splat(1.0)),
+        response.id.with("selection-status"),
+        egui::Sense::hover(),
+    );
+    ui.ctx()
+        .accesskit_node_builder(selection_status_response.id, |node| {
+            node.set_role(egui::accesskit::Role::Status);
+            node.set_label(selection_status);
+            node.set_live(egui::accesskit::Live::Polite);
+        });
+    crate::workbench::app::report_engineering_canvas_focus(
+        &response,
+        state.workspace.active_view_type(),
+    );
+}
+
+/// Paint a component symbol centered in `rect` — used by the component
+/// browser's preview pane. Pure presentation: no state access.
+///
+/// Uses the same SVG symbol the canvas renders (scaled to fit the rect);
+/// procedural primitives are only the no-library fallback.
+pub fn draw_symbol_preview(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    kind: crate::state::ComponentType,
+    color: egui::Color32,
+    symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
+) {
+    let stroke = egui::Stroke::new(1.6, color);
+
+    if let Some(library) = symbol_library
+        && let Some((symbol, rotation)) = library.get_with_rotation_variant(kind, 0, None)
+    {
+        // Fit the symbol's grid-unit box into the preview rect.
+        let fit = ((rect.width() - 12.0) / symbol.target_width.max(0.001))
+            .min((rect.height() - 8.0) / symbol.target_height.max(0.001));
+        crate::schematic::symbols::draw_symbol(
+            painter,
+            symbol,
+            rect.center(),
+            fit,
+            rotation,
+            false,
+            false,
+            stroke,
+        );
+        return;
+    }
+
+    preview::draw_procedural_component_preview(painter, kind, rect.center(), 0.9, 0, stroke);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1296,241 +1534,4 @@ mod tests {
         assert!(!source.contains(concat!("Use S", " for select")));
         assert!(!source.contains(concat!("Escape", " to cancel")));
     }
-}
-
-/// Render the schematic view (central canvas)
-pub fn render_schematic_view(
-    ui: &mut Ui,
-    state: &mut AppState,
-    symbol_library: Option<&SymbolLibrary>,
-) {
-    let available = ui.available_rect_before_wrap();
-    let mut symbol_context = SchematicSymbolContext::from_state(state);
-
-    if state.schematic.needs_fit {
-        state.schematic.needs_fit = false;
-        let bounds = symbol_context.content_bounds(&state.schematic);
-        state.schematic.zoom_to_fit_bounds(
-            bounds,
-            available.width() as f64,
-            available.height() as f64,
-        );
-    }
-    if let Some(target) = state.schematic.center_request.take() {
-        state
-            .schematic
-            .center_view_on(target, available.width() as f64, available.height() as f64);
-    }
-
-    let response = ui.interact(
-        available,
-        egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID),
-        Sense::click_and_drag(),
-    );
-    if response.clicked() || response.secondary_clicked() || response.drag_started() {
-        state.dialogs.interaction.schematic_keyboard_focus = None;
-    }
-    ui.advance_cursor_after_rect(available);
-    let painter = ui.painter_at(available);
-
-    // Input first, painting second. Pan/zoom and tool edits apply BEFORE
-    // the camera is built and the scene is painted — the old order drew
-    // last frame's state, so the canvas trailed the cursor by a full
-    // frame during pans and drags.
-    handle_viewport_navigation(ui, &response, available, state);
-    let viewport = viewport_from_state(state, available, ui.ctx().pixels_per_point());
-    let shelf_drag = response.dnd_hover_payload::<SchematicShelfDragPayload>();
-    let shelf_drag_position = shelf_drag
-        .as_ref()
-        .and_then(|_| ui.ctx().pointer_hover_pos());
-    let shelf_drag_over_canvas = shelf_drag.is_some() && shelf_drag_position.is_some();
-    handle_placement_transform_keys(&response, state, shelf_drag_over_canvas);
-    if let Some(payload) = shelf_drag.as_deref() {
-        ui.ctx()
-            .set_cursor_icon(if can_accept_shelf_drop(state, payload) {
-                egui::CursorIcon::Copy
-            } else {
-                egui::CursorIcon::NoDrop
-            });
-    }
-    let dropped_payload = response.dnd_release_payload::<SchematicShelfDragPayload>();
-    let before_interactions_topology = state.schematic.topology_version();
-    // Keep the pre-interaction route state available to the context-menu
-    // layer for diagnostics. Secondary click is exclusively a context-menu
-    // gesture; routes commit with Enter or primary double-click.
-    let routing_was_active = state.schematic.wire_drawing.active
-        || state.schematic.bus_drawing.active
-        || !state
-            .schematic
-            .documentation_shape_drawing
-            .points
-            .is_empty();
-    if let (Some(payload), Some(position)) = (dropped_payload.as_deref(), shelf_drag_position) {
-        let grid_pos = coordinates::screen_to_grid(&viewport, state.schematic.grid_size, position);
-        match commit_shelf_drop(state, payload, grid_pos) {
-            ShelfDropOutcome::Placed => {
-                state.ui.toasts.success(
-                    ui.ctx(),
-                    "Component placed",
-                    format!(
-                        "{} was placed at ({}, {}).",
-                        payload.component_type().display_name(),
-                        grid_pos.x,
-                        grid_pos.y
-                    ),
-                );
-            }
-            ShelfDropOutcome::ReadOnly => {
-                state.ui.toasts.warn_with_title(
-                    ui.ctx(),
-                    "Drop not permitted",
-                    "The active schematic is read-only; no component was placed.",
-                );
-            }
-            ShelfDropOutcome::RequiresConfiguration => {
-                state.ui.toasts.warn_with_title(
-                    ui.ctx(),
-                    "Configuration required",
-                    "Use Place pin or port to define the interface contract before placement.",
-                );
-            }
-        }
-    } else {
-        handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
-    }
-    refresh_symbol_context_after_interactions(
-        state,
-        &mut symbol_context,
-        before_interactions_topology,
-    );
-    let before_context_menu_topology = state.schematic.topology_version();
-    context_menu::handle_context_menu(
-        &response,
-        state,
-        &viewport,
-        routing_was_active,
-        &symbol_context,
-    );
-    handle_keyboard_object_navigation(&response, state, &symbol_context);
-    refresh_symbol_context_after_interactions(
-        state,
-        &mut symbol_context,
-        before_context_menu_topology,
-    );
-
-    // Refresh the frame-coherent canvas cache (culling bounds + hover
-    // hit-test index) after interactions may have edited topology.
-    state.schematic.ensure_canvas_cache();
-
-    draw_scene(
-        &painter,
-        available,
-        &viewport,
-        state,
-        symbol_library,
-        &symbol_context,
-    );
-    draw_interaction_previews(
-        &painter,
-        &response,
-        state,
-        &viewport,
-        &symbol_context,
-        symbol_library,
-    );
-    if dropped_payload.is_none()
-        && let (Some(payload), Some(position)) = (shelf_drag.as_deref(), shelf_drag_position)
-        && can_accept_shelf_drop(state, payload)
-    {
-        draw_shelf_drag_preview(
-            &painter,
-            state,
-            &viewport,
-            payload,
-            position,
-            symbol_library,
-        );
-    }
-
-    // Report the cursor position in grid units; the workbench status bar shows it.
-    let to_grid_units = |pos: egui::Pos2, state: &AppState| {
-        let grid = f64::from(state.schematic.grid_size.max(1));
-        let x = ((f64::from(pos.x - available.min.x)) - state.schematic.pan.0)
-            / state.schematic.zoom
-            / grid;
-        let y = ((f64::from(pos.y - available.min.y)) - state.schematic.pan.1)
-            / state.schematic.zoom
-            / grid;
-        (x, y)
-    };
-    state.ui.canvas_hover = shelf_drag_position
-        .or_else(|| response.hover_pos())
-        .map(|cursor| to_grid_units(cursor, state));
-    state.ui.canvas_view_center = Some(to_grid_units(available.center(), state));
-
-    let shortcut_platform = crate::workbench::app::runtime_command_platform(ui.ctx());
-    let operating_system = ui.ctx().os();
-    let accessibility_label = schematic_accessibility_label();
-    let accessibility_description =
-        schematic_accessibility_description(state, shortcut_platform, operating_system);
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), accessibility_label)
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Canvas);
-        node.set_label(accessibility_label);
-        node.set_description(accessibility_description);
-    });
-    let selection_status = schematic_selection_accessibility_status(state);
-    let selection_status_response = ui.interact(
-        egui::Rect::from_min_size(available.min, egui::Vec2::splat(1.0)),
-        response.id.with("selection-status"),
-        egui::Sense::hover(),
-    );
-    ui.ctx()
-        .accesskit_node_builder(selection_status_response.id, |node| {
-            node.set_role(egui::accesskit::Role::Status);
-            node.set_label(selection_status);
-            node.set_live(egui::accesskit::Live::Polite);
-        });
-    crate::workbench::app::report_engineering_canvas_focus(
-        &response,
-        state.workspace.active_view_type(),
-    );
-}
-
-/// Paint a component symbol centered in `rect` — used by the component
-/// browser's preview pane. Pure presentation: no state access.
-///
-/// Uses the same SVG symbol the canvas renders (scaled to fit the rect);
-/// procedural primitives are only the no-library fallback.
-pub fn draw_symbol_preview(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    kind: crate::state::ComponentType,
-    color: egui::Color32,
-    symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
-) {
-    let stroke = egui::Stroke::new(1.6, color);
-
-    if let Some(library) = symbol_library
-        && let Some((symbol, rotation)) = library.get_with_rotation_variant(kind, 0, None)
-    {
-        // Fit the symbol's grid-unit box into the preview rect.
-        let fit = ((rect.width() - 12.0) / symbol.target_width.max(0.001))
-            .min((rect.height() - 8.0) / symbol.target_height.max(0.001));
-        crate::schematic::symbols::draw_symbol(
-            painter,
-            symbol,
-            rect.center(),
-            fit,
-            rotation,
-            false,
-            false,
-            stroke,
-        );
-        return;
-    }
-
-    preview::draw_procedural_component_preview(painter, kind, rect.center(), 0.9, 0, stroke);
 }

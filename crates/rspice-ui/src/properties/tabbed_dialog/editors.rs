@@ -297,6 +297,73 @@ fn value_for_property_schema(def: &PropertyDefinition, value_si: f64) -> f64 {
     }
 }
 
+
+/// Enum editor — chips for small sets, dropdown beyond that.
+fn render_enum_editor(
+    ui: &mut Ui,
+    def: &PropertyDefinition,
+    current: &PropertyValue,
+) -> ValueEditorOutput {
+    let (selected, options) = match current {
+        PropertyValue::Enum { selected, options } => (selected.clone(), options.clone()),
+        _ => (current.display_string(), vec![current.display_string()]),
+    };
+
+    let mut new_selected = selected.clone();
+    let control_id;
+
+    if options.len() <= 4 {
+        let mut first = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for option in &options {
+                let response = chip(ui, option, *option == selected);
+                first.get_or_insert(response.id);
+                if response.clicked() {
+                    new_selected = option.clone();
+                }
+            }
+        });
+        control_id = first;
+    } else {
+        let response = egui::ComboBox::from_id_salt(("property-enum", &def.name))
+            .selected_text(&new_selected)
+            .show_ui(ui, |ui| {
+                for option in &options {
+                    if ui.selectable_label(*option == selected, option).clicked() {
+                        new_selected = option.clone();
+                    }
+                }
+            });
+        control_id = Some(response.response.id);
+    }
+
+    ValueEditorOutput {
+        changed: (new_selected != selected)
+            .then(|| PropertyValue::enumeration(new_selected, options)),
+        control_id,
+        numeric_text: None,
+        parse_error: None,
+    }
+}
+
+/// Boolean editor (checkbox).
+fn render_boolean_editor(ui: &mut Ui, current: &PropertyValue) -> ValueEditorOutput {
+    let value = match current {
+        PropertyValue::Boolean(b) => *b,
+        _ => false,
+    };
+
+    let mut new_value = value;
+    let response = ui.checkbox(&mut new_value, "");
+    ValueEditorOutput::control(
+        response.id,
+        response
+            .changed()
+            .then_some(PropertyValue::Boolean(new_value)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -529,70 +596,4 @@ mod tests {
             }
         }
     }
-}
-
-/// Enum editor — chips for small sets, dropdown beyond that.
-fn render_enum_editor(
-    ui: &mut Ui,
-    def: &PropertyDefinition,
-    current: &PropertyValue,
-) -> ValueEditorOutput {
-    let (selected, options) = match current {
-        PropertyValue::Enum { selected, options } => (selected.clone(), options.clone()),
-        _ => (current.display_string(), vec![current.display_string()]),
-    };
-
-    let mut new_selected = selected.clone();
-    let control_id;
-
-    if options.len() <= 4 {
-        let mut first = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for option in &options {
-                let response = chip(ui, option, *option == selected);
-                first.get_or_insert(response.id);
-                if response.clicked() {
-                    new_selected = option.clone();
-                }
-            }
-        });
-        control_id = first;
-    } else {
-        let response = egui::ComboBox::from_id_salt(("property-enum", &def.name))
-            .selected_text(&new_selected)
-            .show_ui(ui, |ui| {
-                for option in &options {
-                    if ui.selectable_label(*option == selected, option).clicked() {
-                        new_selected = option.clone();
-                    }
-                }
-            });
-        control_id = Some(response.response.id);
-    }
-
-    ValueEditorOutput {
-        changed: (new_selected != selected)
-            .then(|| PropertyValue::enumeration(new_selected, options)),
-        control_id,
-        numeric_text: None,
-        parse_error: None,
-    }
-}
-
-/// Boolean editor (checkbox).
-fn render_boolean_editor(ui: &mut Ui, current: &PropertyValue) -> ValueEditorOutput {
-    let value = match current {
-        PropertyValue::Boolean(b) => *b,
-        _ => false,
-    };
-
-    let mut new_value = value;
-    let response = ui.checkbox(&mut new_value, "");
-    ValueEditorOutput::control(
-        response.id,
-        response
-            .changed()
-            .then_some(PropertyValue::Boolean(new_value)),
-    )
 }

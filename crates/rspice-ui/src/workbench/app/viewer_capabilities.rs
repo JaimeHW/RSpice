@@ -25,6 +25,175 @@ impl ViewerCapability {
     }
 }
 
+
+impl AppState {
+    /// Clear execution and viewer state tied to the previous design document.
+    ///
+    /// Use when replacing the active schematic/project with unrelated design
+    /// content. File identity and dirty state are intentionally left to the
+    /// caller because open/import/new workflows each own those semantics.
+    pub(crate) fn clear_design_execution_context(&mut self) {
+        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+        self.workspace.netlist_source = None;
+        self.workspace.netlist_document = None;
+        self.workspace.netlist_descriptor = None;
+        self.workspace.netlist_source_path = None;
+        self.workspace.netlist_source_dirty = false;
+        self.simulation = crate::state::SimulationState::default();
+        self.ui.netlist = Default::default();
+        self.ui.results_seen_version = 0;
+        self.ui.results.clear_project_scoped_state();
+        self.dialogs.drc_results = None;
+        self.dialogs.drc_cycle = None;
+        self.log_buffer.clear_source(crate::workbench::panels::LogSource::Drc);
+        self.clear_specialized_viewer_data();
+    }
+
+    /// Clear user-visible simulation result history and derived result viewers.
+    pub(crate) fn clear_simulation_results(&mut self) {
+        if self.simulation.active_execution.is_some() || self.simulation.is_running {
+            return;
+        }
+        self.simulation.clear_runs();
+        self.clear_specialized_viewer_data();
+    }
+
+    /// Clear transient-derived viewer caches without disturbing AC/RF state.
+    pub fn clear_transient_specialized_viewer_data(&mut self) {
+        self.analysis.fft_state.clear();
+        self.analysis
+            .eye_diagram_state
+            .load_data(crate::analysis::eye_diagram::EyeData::default());
+    }
+
+    /// Clear all specialized (non-waveform) viewer data caches.
+    ///
+    /// Use when result selection changes in a way that can invalidate
+    /// cached analysis-specific visualizations.
+    pub fn clear_specialized_viewer_data(&mut self) {
+        self.clear_transient_specialized_viewer_data();
+        self.analysis.histogram_state.clear();
+        self.analysis
+            .bode_plot_state
+            .load_data(crate::analysis::bode::BodeData::new());
+        self.analysis.nyquist_state.clear();
+        self.analysis.smith_chart_state.clear_traces();
+        self.analysis.pole_zero_state.clear();
+    }
+
+    /// Resolve whether a viewer can currently be opened with meaningful data.
+    pub fn viewer_capability(&self, viewer: ActiveViewer) -> ViewerCapability {
+        match viewer {
+            ActiveViewer::Waveform => ViewerCapability::available("Always available"),
+            ActiveViewer::SmithChart => {
+                if self.analysis.smith_chart_state.traces.is_empty() {
+                    ViewerCapability::unavailable("Requires S-parameter complex traces")
+                } else {
+                    ViewerCapability::available("S-parameter traces loaded")
+                }
+            }
+            ActiveViewer::EyeDiagram => {
+                if self.analysis.eye_diagram_state.trace_count() > 0 {
+                    ViewerCapability::available("Eye traces loaded")
+                } else if self.active_analysis_supports_eye_diagram() {
+                    ViewerCapability::available(
+                        "Can derive eye data from active transient waveforms",
+                    )
+                } else {
+                    ViewerCapability::unavailable("Requires transient eye traces")
+                }
+            }
+            ActiveViewer::Histogram => {
+                if self.analysis.histogram_state.is_empty() {
+                    ViewerCapability::unavailable("Requires histogram bins from sweep/MC data")
+                } else {
+                    ViewerCapability::available("Histogram data loaded")
+                }
+            }
+            ActiveViewer::BodePlot => {
+                if self.analysis.bode_plot_state.is_empty() {
+                    ViewerCapability::unavailable("Requires AC/transfer-function response data")
+                } else {
+                    ViewerCapability::available("Frequency-response data loaded")
+                }
+            }
+            ActiveViewer::Nyquist => {
+                if self.analysis.nyquist_state.is_empty() {
+                    ViewerCapability::unavailable("Requires complex loop-gain/AC response data")
+                } else {
+                    ViewerCapability::available("Nyquist curves loaded")
+                }
+            }
+            ActiveViewer::Fft => {
+                let has_spectrum = self
+                    .analysis
+                    .fft_state
+                    .data
+                    .as_ref()
+                    .map(|data| !data.is_empty())
+                    .unwrap_or(false);
+                if has_spectrum {
+                    ViewerCapability::available("FFT spectrum data loaded")
+                } else if self.active_analysis_supports_fft() {
+                    ViewerCapability::available("Can derive FFT from active transient waveforms")
+                } else {
+                    ViewerCapability::unavailable("Requires sampled time-domain data for FFT")
+                }
+            }
+            ActiveViewer::PoleZero => {
+                let retained = self.simulation.active_analysis().is_some_and(|analysis| {
+                    analysis.success
+                        && analysis.analysis_type == crate::state::AnalysisType::PoleZero
+                        && analysis.result_payload.as_ref().is_some_and(|payload| {
+                            matches!(
+                                payload,
+                                crate::state::AnalysisResultPayload::PoleZero { .. }
+                            ) && payload.validate_for(analysis.analysis_type).is_ok()
+                        })
+                });
+                if retained {
+                    ViewerCapability::available("Pole-zero result retained by the active analysis")
+                } else {
+                    ViewerCapability::unavailable(
+                        "Requires a retained pole-zero payload in the active analysis",
+                    )
+                }
+            }
+        }
+    }
+
+    /// Whether a viewer is currently available for activation.
+    pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
+        self.viewer_capability(viewer).available
+    }
+
+    fn active_analysis_supports_eye_diagram(&self) -> bool {
+        self.active_time_domain_waveform_len()
+            .map(|len| len >= 8)
+            .unwrap_or(false)
+    }
+
+    fn active_analysis_supports_fft(&self) -> bool {
+        self.active_time_domain_waveform_len()
+            .map(|len| len >= crate::analysis::fft::MIN_FFT_SAMPLES)
+            .unwrap_or(false)
+    }
+
+    fn active_time_domain_waveform_len(&self) -> Option<usize> {
+        let analysis = self.simulation.active_analysis()?;
+        crate::simulation::SimulationController::analysis_supports_transient_derivation(
+            analysis.analysis_type,
+        )
+        .then_some(())?;
+
+        analysis
+            .waveforms
+            .iter()
+            .map(|wf| wf.x.len().min(wf.y.len()))
+            .max()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,173 +429,5 @@ mod tests {
         assert!(results.op_filter.is_empty());
         assert_eq!(results.op_sort, None);
         assert!(results.spec_drafts.is_none());
-    }
-}
-
-impl AppState {
-    /// Clear execution and viewer state tied to the previous design document.
-    ///
-    /// Use when replacing the active schematic/project with unrelated design
-    /// content. File identity and dirty state are intentionally left to the
-    /// caller because open/import/new workflows each own those semantics.
-    pub(crate) fn clear_design_execution_context(&mut self) {
-        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.workspace.netlist_source = None;
-        self.workspace.netlist_document = None;
-        self.workspace.netlist_descriptor = None;
-        self.workspace.netlist_source_path = None;
-        self.workspace.netlist_source_dirty = false;
-        self.simulation = crate::state::SimulationState::default();
-        self.ui.netlist = Default::default();
-        self.ui.results_seen_version = 0;
-        self.ui.results.clear_project_scoped_state();
-        self.dialogs.drc_results = None;
-        self.dialogs.drc_cycle = None;
-        self.log_buffer.clear_source(crate::workbench::panels::LogSource::Drc);
-        self.clear_specialized_viewer_data();
-    }
-
-    /// Clear user-visible simulation result history and derived result viewers.
-    pub(crate) fn clear_simulation_results(&mut self) {
-        if self.simulation.active_execution.is_some() || self.simulation.is_running {
-            return;
-        }
-        self.simulation.clear_runs();
-        self.clear_specialized_viewer_data();
-    }
-
-    /// Clear transient-derived viewer caches without disturbing AC/RF state.
-    pub fn clear_transient_specialized_viewer_data(&mut self) {
-        self.analysis.fft_state.clear();
-        self.analysis
-            .eye_diagram_state
-            .load_data(crate::analysis::eye_diagram::EyeData::default());
-    }
-
-    /// Clear all specialized (non-waveform) viewer data caches.
-    ///
-    /// Use when result selection changes in a way that can invalidate
-    /// cached analysis-specific visualizations.
-    pub fn clear_specialized_viewer_data(&mut self) {
-        self.clear_transient_specialized_viewer_data();
-        self.analysis.histogram_state.clear();
-        self.analysis
-            .bode_plot_state
-            .load_data(crate::analysis::bode::BodeData::new());
-        self.analysis.nyquist_state.clear();
-        self.analysis.smith_chart_state.clear_traces();
-        self.analysis.pole_zero_state.clear();
-    }
-
-    /// Resolve whether a viewer can currently be opened with meaningful data.
-    pub fn viewer_capability(&self, viewer: ActiveViewer) -> ViewerCapability {
-        match viewer {
-            ActiveViewer::Waveform => ViewerCapability::available("Always available"),
-            ActiveViewer::SmithChart => {
-                if self.analysis.smith_chart_state.traces.is_empty() {
-                    ViewerCapability::unavailable("Requires S-parameter complex traces")
-                } else {
-                    ViewerCapability::available("S-parameter traces loaded")
-                }
-            }
-            ActiveViewer::EyeDiagram => {
-                if self.analysis.eye_diagram_state.trace_count() > 0 {
-                    ViewerCapability::available("Eye traces loaded")
-                } else if self.active_analysis_supports_eye_diagram() {
-                    ViewerCapability::available(
-                        "Can derive eye data from active transient waveforms",
-                    )
-                } else {
-                    ViewerCapability::unavailable("Requires transient eye traces")
-                }
-            }
-            ActiveViewer::Histogram => {
-                if self.analysis.histogram_state.is_empty() {
-                    ViewerCapability::unavailable("Requires histogram bins from sweep/MC data")
-                } else {
-                    ViewerCapability::available("Histogram data loaded")
-                }
-            }
-            ActiveViewer::BodePlot => {
-                if self.analysis.bode_plot_state.is_empty() {
-                    ViewerCapability::unavailable("Requires AC/transfer-function response data")
-                } else {
-                    ViewerCapability::available("Frequency-response data loaded")
-                }
-            }
-            ActiveViewer::Nyquist => {
-                if self.analysis.nyquist_state.is_empty() {
-                    ViewerCapability::unavailable("Requires complex loop-gain/AC response data")
-                } else {
-                    ViewerCapability::available("Nyquist curves loaded")
-                }
-            }
-            ActiveViewer::Fft => {
-                let has_spectrum = self
-                    .analysis
-                    .fft_state
-                    .data
-                    .as_ref()
-                    .map(|data| !data.is_empty())
-                    .unwrap_or(false);
-                if has_spectrum {
-                    ViewerCapability::available("FFT spectrum data loaded")
-                } else if self.active_analysis_supports_fft() {
-                    ViewerCapability::available("Can derive FFT from active transient waveforms")
-                } else {
-                    ViewerCapability::unavailable("Requires sampled time-domain data for FFT")
-                }
-            }
-            ActiveViewer::PoleZero => {
-                let retained = self.simulation.active_analysis().is_some_and(|analysis| {
-                    analysis.success
-                        && analysis.analysis_type == crate::state::AnalysisType::PoleZero
-                        && analysis.result_payload.as_ref().is_some_and(|payload| {
-                            matches!(
-                                payload,
-                                crate::state::AnalysisResultPayload::PoleZero { .. }
-                            ) && payload.validate_for(analysis.analysis_type).is_ok()
-                        })
-                });
-                if retained {
-                    ViewerCapability::available("Pole-zero result retained by the active analysis")
-                } else {
-                    ViewerCapability::unavailable(
-                        "Requires a retained pole-zero payload in the active analysis",
-                    )
-                }
-            }
-        }
-    }
-
-    /// Whether a viewer is currently available for activation.
-    pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
-        self.viewer_capability(viewer).available
-    }
-
-    fn active_analysis_supports_eye_diagram(&self) -> bool {
-        self.active_time_domain_waveform_len()
-            .map(|len| len >= 8)
-            .unwrap_or(false)
-    }
-
-    fn active_analysis_supports_fft(&self) -> bool {
-        self.active_time_domain_waveform_len()
-            .map(|len| len >= crate::analysis::fft::MIN_FFT_SAMPLES)
-            .unwrap_or(false)
-    }
-
-    fn active_time_domain_waveform_len(&self) -> Option<usize> {
-        let analysis = self.simulation.active_analysis()?;
-        crate::simulation::SimulationController::analysis_supports_transient_derivation(
-            analysis.analysis_type,
-        )
-        .then_some(())?;
-
-        analysis
-            .waveforms
-            .iter()
-            .map(|wf| wf.x.len().min(wf.y.len()))
-            .max()
     }
 }

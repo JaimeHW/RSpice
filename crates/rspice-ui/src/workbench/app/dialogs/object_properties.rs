@@ -1662,6 +1662,86 @@ fn field_note(ui: &mut Ui, note: &str) {
     );
 }
 
+
+// =============================================================================
+// Design-system preview adapters
+// =============================================================================
+//
+// The selection-command widget draws previews from plain coordinate pairs and
+// a small presentation vocabulary. Translating the schematic model into that
+// vocabulary is this dialog's job, not the design system's: `crate::ui` stays
+// free of any dependency on `crate::state`.
+
+/// Project a schematic point into the preview's coordinate pair.
+fn preview_point(point: Point) -> PreviewPoint {
+    (point.x, point.y)
+}
+
+fn preview_points(points: &[Point]) -> Vec<PreviewPoint> {
+    points.iter().copied().map(preview_point).collect()
+}
+
+/// Map a design-note kind onto how the preview should read it.
+fn note_preview_style(kind: DesignNoteKind) -> NotePreviewStyle {
+    match kind {
+        DesignNoteKind::PlainText => NotePreviewStyle::Muted,
+        DesignNoteKind::PropertyDisplay => NotePreviewStyle::Accent,
+        DesignNoteKind::RequirementLink => NotePreviewStyle::AccentUnderlined,
+        DesignNoteKind::ReviewNote => NotePreviewStyle::Warning,
+    }
+}
+
+/// Tessellate a documentation shape for preview and say how to stroke it.
+///
+/// Arcs are flattened to a polyline here so the widget never needs the curve
+/// solver. A degenerate arc falls back to its three defining points, which is
+/// what the previous in-widget helper did.
+fn shape_preview_outline(
+    geometry: &DocumentationShapeGeometry,
+) -> (Vec<PreviewPoint>, ShapePreviewStroke) {
+    match geometry {
+        DocumentationShapeGeometry::Arc {
+            start,
+            through,
+            end,
+        } => {
+            let Some((cx, cy, radius, start_angle, sweep)) = arc_parameters(*start, *through, *end)
+            else {
+                return (
+                    preview_points(&[*start, *through, *end]),
+                    ShapePreviewStroke::Polyline,
+                );
+            };
+            let outline = (0..=48)
+                .map(|index| {
+                    let angle = start_angle + sweep * f64::from(index) / 48.0;
+                    (
+                        (cx + radius * angle.cos()).round() as i32,
+                        (cy + radius * angle.sin()).round() as i32,
+                    )
+                })
+                .collect();
+            (outline, ShapePreviewStroke::Polyline)
+        }
+        DocumentationShapeGeometry::Rectangle { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::Rectangle,
+        ),
+        DocumentationShapeGeometry::Polygon { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::ClosedPolyline,
+        ),
+        DocumentationShapeGeometry::Callout { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::Callout,
+        ),
+        DocumentationShapeGeometry::Line { .. } => (
+            preview_points(&geometry.points()),
+            ShapePreviewStroke::Polyline,
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2169,84 +2249,5 @@ mod tests {
                 node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
             }));
         }
-    }
-}
-
-// =============================================================================
-// Design-system preview adapters
-// =============================================================================
-//
-// The selection-command widget draws previews from plain coordinate pairs and
-// a small presentation vocabulary. Translating the schematic model into that
-// vocabulary is this dialog's job, not the design system's: `crate::ui` stays
-// free of any dependency on `crate::state`.
-
-/// Project a schematic point into the preview's coordinate pair.
-fn preview_point(point: Point) -> PreviewPoint {
-    (point.x, point.y)
-}
-
-fn preview_points(points: &[Point]) -> Vec<PreviewPoint> {
-    points.iter().copied().map(preview_point).collect()
-}
-
-/// Map a design-note kind onto how the preview should read it.
-fn note_preview_style(kind: DesignNoteKind) -> NotePreviewStyle {
-    match kind {
-        DesignNoteKind::PlainText => NotePreviewStyle::Muted,
-        DesignNoteKind::PropertyDisplay => NotePreviewStyle::Accent,
-        DesignNoteKind::RequirementLink => NotePreviewStyle::AccentUnderlined,
-        DesignNoteKind::ReviewNote => NotePreviewStyle::Warning,
-    }
-}
-
-/// Tessellate a documentation shape for preview and say how to stroke it.
-///
-/// Arcs are flattened to a polyline here so the widget never needs the curve
-/// solver. A degenerate arc falls back to its three defining points, which is
-/// what the previous in-widget helper did.
-fn shape_preview_outline(
-    geometry: &DocumentationShapeGeometry,
-) -> (Vec<PreviewPoint>, ShapePreviewStroke) {
-    match geometry {
-        DocumentationShapeGeometry::Arc {
-            start,
-            through,
-            end,
-        } => {
-            let Some((cx, cy, radius, start_angle, sweep)) = arc_parameters(*start, *through, *end)
-            else {
-                return (
-                    preview_points(&[*start, *through, *end]),
-                    ShapePreviewStroke::Polyline,
-                );
-            };
-            let outline = (0..=48)
-                .map(|index| {
-                    let angle = start_angle + sweep * f64::from(index) / 48.0;
-                    (
-                        (cx + radius * angle.cos()).round() as i32,
-                        (cy + radius * angle.sin()).round() as i32,
-                    )
-                })
-                .collect();
-            (outline, ShapePreviewStroke::Polyline)
-        }
-        DocumentationShapeGeometry::Rectangle { .. } => (
-            preview_points(&geometry.points()),
-            ShapePreviewStroke::Rectangle,
-        ),
-        DocumentationShapeGeometry::Polygon { .. } => (
-            preview_points(&geometry.points()),
-            ShapePreviewStroke::ClosedPolyline,
-        ),
-        DocumentationShapeGeometry::Callout { .. } => (
-            preview_points(&geometry.points()),
-            ShapePreviewStroke::Callout,
-        ),
-        DocumentationShapeGeometry::Line { .. } => (
-            preview_points(&geometry.points()),
-            ShapePreviewStroke::Polyline,
-        ),
     }
 }

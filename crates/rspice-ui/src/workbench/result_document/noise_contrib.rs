@@ -259,17 +259,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn noise_table_preserves_every_desktop_column_at_phone_width() {
-        assert_eq!(noise_table_min_width(), 624.0);
-        assert!(noise_table_min_width() > 390.0);
-        assert!(SHARE_W >= 150.0);
-    }
-}
 
 /// Right panel: band, total, dominant contributor.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
@@ -308,5 +297,17 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         section_header(ui, "Dominant", None);
         let share = format!("{:.1} % ({})", top.share_pct, top.mechanism);
         measurement_table(ui, &[(top.device.as_str(), share.as_str())]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noise_table_preserves_every_desktop_column_at_phone_width() {
+        assert_eq!(noise_table_min_width(), 624.0);
+        assert!(noise_table_min_width() > 390.0);
+        assert!(SHARE_W >= 150.0);
     }
 }

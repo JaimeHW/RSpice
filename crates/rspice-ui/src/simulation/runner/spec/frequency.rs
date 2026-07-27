@@ -263,122 +263,6 @@ fn finite_optional(value: Option<f64>, label: &str) -> Result<Option<f64>, Simul
         .transpose()
 }
 
-#[cfg(test)]
-mod transfer_function_tests {
-    use super::*;
-    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
-    use crate::simulation::results::{TransferFunctionQuantity, TransferFunctionScalar};
-    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
-
-    const DIVIDER: &str = "\
-structured TF runner
-VIN in 0 1
-R1 in out 1k
-R2 out 0 1k
-.end
-";
-
-    fn tf_spec() -> AnalysisSpec {
-        AnalysisSpec::Tf {
-            input_source: "VIN".to_owned(),
-            output_expression: "V(out)".to_owned(),
-            transfer_gain: true,
-            input_resistance: true,
-            output_resistance: true,
-            normalization: TfNormalization::None,
-            accuracy: TfAccuracy::Balanced,
-        }
-    }
-
-    fn assert_finite_scalar_close(
-        scalar: Option<TransferFunctionScalar>,
-        expected: f64,
-        label: &str,
-    ) {
-        let Some(TransferFunctionScalar::Finite(actual)) = scalar else {
-            panic!("{label} must be a retained finite scalar, got {scalar:?}")
-        };
-        let tolerance = 1.0e-9 * expected.abs().max(1.0);
-        assert!(
-            (actual - expected).abs() <= tolerance,
-            "{label}: expected {expected:.16e}, got {actual:.16e}"
-        );
-    }
-
-    #[test]
-    fn structured_tf_spec_returns_exact_typed_scalars() {
-        let result = run_frequency_spec(
-            tf_spec(),
-            SpecExecutionOptions::default(),
-            DIVIDER,
-            None,
-            &ResolvedExecutionDependencies::default(),
-            &NoAbort,
-        )
-        .expect("TF runner succeeds");
-
-        let SimulationResult::TransferFunction {
-            input_source,
-            output_expression,
-            input_quantity,
-            output_quantity,
-            input_unit,
-            output_unit,
-            gain_unit,
-            normalization,
-            accuracy,
-            gain,
-            input_resistance,
-            output_resistance,
-            nominal_input,
-            nominal_output,
-        } = result
-        else {
-            panic!("expected transfer-function result")
-        };
-        assert_eq!(input_source, "VIN");
-        assert_eq!(output_expression, "V(out)");
-        assert_eq!(input_quantity, TransferFunctionQuantity::Voltage);
-        assert_eq!(output_quantity, TransferFunctionQuantity::Voltage);
-        assert_eq!(input_unit, "V");
-        assert_eq!(output_unit, "V");
-        assert_eq!(gain_unit, "V/V");
-        assert_eq!(normalization, TfNormalization::None);
-        assert_eq!(accuracy, TfAccuracy::Balanced);
-        assert_finite_scalar_close(gain, 0.5, "gain");
-        assert_finite_scalar_close(input_resistance, 2_000.0, "input resistance");
-        assert_finite_scalar_close(output_resistance, 500.0, "output resistance");
-        assert_eq!(nominal_input, None);
-        assert_eq!(nominal_output, None);
-    }
-
-    #[test]
-    fn structured_tf_spec_preserves_typed_cancellation() {
-        let result = run_frequency_spec(
-            tf_spec(),
-            SpecExecutionOptions::default(),
-            "not a netlist",
-            None,
-            &ResolvedExecutionDependencies::default(),
-            &ImmediateAbort,
-        );
-
-        assert!(matches!(result, Err(SimulationError::Aborted)));
-    }
-
-    #[test]
-    fn scalar_conversion_is_json_safe_for_infinite_resistance() {
-        assert_eq!(
-            transfer_scalar(f64::INFINITY, "input resistance").unwrap(),
-            TransferFunctionScalar::PositiveInfinity
-        );
-        assert_eq!(
-            transfer_scalar(f64::NEG_INFINITY, "output resistance").unwrap(),
-            TransferFunctionScalar::NegativeInfinity
-        );
-        assert!(transfer_scalar(f64::NAN, "input resistance").is_err());
-    }
-}
 
 fn run_pac(
     netlist: &str,
@@ -764,4 +648,121 @@ fn insert_scalar_waveform(
             y_imag: None,
         },
     );
+}
+
+#[cfg(test)]
+mod transfer_function_tests {
+    use super::*;
+    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+    use crate::simulation::results::{TransferFunctionQuantity, TransferFunctionScalar};
+    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+
+    const DIVIDER: &str = "\
+structured TF runner
+VIN in 0 1
+R1 in out 1k
+R2 out 0 1k
+.end
+";
+
+    fn tf_spec() -> AnalysisSpec {
+        AnalysisSpec::Tf {
+            input_source: "VIN".to_owned(),
+            output_expression: "V(out)".to_owned(),
+            transfer_gain: true,
+            input_resistance: true,
+            output_resistance: true,
+            normalization: TfNormalization::None,
+            accuracy: TfAccuracy::Balanced,
+        }
+    }
+
+    fn assert_finite_scalar_close(
+        scalar: Option<TransferFunctionScalar>,
+        expected: f64,
+        label: &str,
+    ) {
+        let Some(TransferFunctionScalar::Finite(actual)) = scalar else {
+            panic!("{label} must be a retained finite scalar, got {scalar:?}")
+        };
+        let tolerance = 1.0e-9 * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{label}: expected {expected:.16e}, got {actual:.16e}"
+        );
+    }
+
+    #[test]
+    fn structured_tf_spec_returns_exact_typed_scalars() {
+        let result = run_frequency_spec(
+            tf_spec(),
+            SpecExecutionOptions::default(),
+            DIVIDER,
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &NoAbort,
+        )
+        .expect("TF runner succeeds");
+
+        let SimulationResult::TransferFunction {
+            input_source,
+            output_expression,
+            input_quantity,
+            output_quantity,
+            input_unit,
+            output_unit,
+            gain_unit,
+            normalization,
+            accuracy,
+            gain,
+            input_resistance,
+            output_resistance,
+            nominal_input,
+            nominal_output,
+        } = result
+        else {
+            panic!("expected transfer-function result")
+        };
+        assert_eq!(input_source, "VIN");
+        assert_eq!(output_expression, "V(out)");
+        assert_eq!(input_quantity, TransferFunctionQuantity::Voltage);
+        assert_eq!(output_quantity, TransferFunctionQuantity::Voltage);
+        assert_eq!(input_unit, "V");
+        assert_eq!(output_unit, "V");
+        assert_eq!(gain_unit, "V/V");
+        assert_eq!(normalization, TfNormalization::None);
+        assert_eq!(accuracy, TfAccuracy::Balanced);
+        assert_finite_scalar_close(gain, 0.5, "gain");
+        assert_finite_scalar_close(input_resistance, 2_000.0, "input resistance");
+        assert_finite_scalar_close(output_resistance, 500.0, "output resistance");
+        assert_eq!(nominal_input, None);
+        assert_eq!(nominal_output, None);
+    }
+
+    #[test]
+    fn structured_tf_spec_preserves_typed_cancellation() {
+        let result = run_frequency_spec(
+            tf_spec(),
+            SpecExecutionOptions::default(),
+            "not a netlist",
+            None,
+            &ResolvedExecutionDependencies::default(),
+            &ImmediateAbort,
+        );
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+    }
+
+    #[test]
+    fn scalar_conversion_is_json_safe_for_infinite_resistance() {
+        assert_eq!(
+            transfer_scalar(f64::INFINITY, "input resistance").unwrap(),
+            TransferFunctionScalar::PositiveInfinity
+        );
+        assert_eq!(
+            transfer_scalar(f64::NEG_INFINITY, "output resistance").unwrap(),
+            TransferFunctionScalar::NegativeInfinity
+        );
+        assert!(transfer_scalar(f64::NAN, "input resistance").is_err());
+    }
 }

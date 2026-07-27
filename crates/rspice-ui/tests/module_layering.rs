@@ -402,7 +402,7 @@ fn whole_application_mutable_access_does_not_grow() {
 const LINE_BUDGET: usize = 2500;
 
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("workbench/hardcopy_sources.rs", 8325),
+    ("workbench/hardcopy_sources.rs", 8328),
     ("simulation/runner/worker_contract.rs", 8226),
     ("io/project_io.rs", 8214),
     ("workbench/hardcopy_render.rs", 8095),
@@ -431,7 +431,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/surfaces/model_correlation.rs", 3631),
     ("workbench/state.rs", 3507),
     ("schematic/view/interaction.rs", 3490),
-    ("workbench/app/actions/workspace.rs", 3399),
+    ("workbench/app/actions/workspace.rs", 3400),
     ("workbench/hardcopy_print.rs", 3355),
     ("workbench/app/dialogs/hardcopy/render.rs", 3348),
     ("state/schematic/state/editor_ops/array_ops.rs", 3320),
