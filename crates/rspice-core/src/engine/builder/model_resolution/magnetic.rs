@@ -100,3 +100,97 @@ pub(in crate::engine::builder) fn resolve_jiles_atherton_model_params(
 
     Ok(params)
 }
+
+/// Resolve Xyce's level-1 nonlinear mutual-inductor (`Core`) model.
+///
+/// Unlike a standalone Jiles-Atherton inductor card, Xyce interprets the
+/// numeric value on each winding as its number of turns and supplies `AREA`,
+/// `PATH`, and `GAP` in centimetres/centimetres².  Keep that distinction
+/// explicit so a Core card cannot silently acquire the standalone resolver's
+/// inferred-turns or SI-geometry semantics.
+pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
+    model_def: &crate::netlist::ModelDef,
+    winding_turns: f64,
+) -> Result<crate::device::passive::JilesAthertonParams, SimulationError> {
+    if !winding_turns.is_finite() || winding_turns <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Xyce Core model '{}' has invalid winding turns {}",
+            model_def.name, winding_turns
+        )));
+    }
+
+    // Defaults are the canonical values from Xyce's MutIndNonLin model
+    // metadata (N_DEV_MutIndNonLin.C), expressed in the SI units consumed by
+    // the native runtime below.
+    let mut params = crate::device::passive::JilesAthertonParams {
+        ms: 1.0e6,
+        a: 1000.0,
+        k: 500.0,
+        c: 0.2,
+        alpha: 5.0e-5,
+        area: 0.1e-4,
+        length: 1.0e-2,
+        n_turns: winding_turns,
+        gap: 0.0,
+        xyce_core: true,
+        xyce_core_level2: false,
+        delta_v: 0.1,
+        v_inf: 1.0,
+        delta_v_scaling: 1.0e3,
+        beta_h: 1.0e-4,
+        beta_m: 3.125e-5,
+    };
+
+    if let Some(ms) = positive_model_param(model_def, &["MS"], "MS")? {
+        params.ms = ms;
+    }
+    if let Some(a) = positive_model_param(model_def, &["A"], "A")? {
+        params.a = a;
+    }
+    if let Some(k) = positive_model_param(model_def, &["K", "KIRR"], "K")? {
+        params.k = k;
+    }
+    if let Some(c) = unit_interval_model_param(model_def, &["C"], "C")? {
+        params.c = c;
+    }
+    if let Some(alpha) = nonnegative_model_param(model_def, &["ALPHA"], "ALPHA")? {
+        params.alpha = alpha;
+    }
+    if let Some(area_cm2) = positive_model_param(model_def, &["AREA", "ACORE", "COREAREA"], "AREA")?
+    {
+        params.area = area_cm2 * 1.0e-4;
+    }
+    if let Some(path_cm) =
+        positive_model_param(model_def, &["PATH", "LENGTH", "LEN", "PATHLEN"], "PATH")?
+    {
+        params.length = path_cm * 1.0e-2;
+    }
+    if let Some(gap_cm) = nonnegative_model_param(model_def, &["GAP"], "GAP")? {
+        params.gap = gap_cm * 1.0e-2;
+    }
+    if let Some(beta_h) = positive_model_param(model_def, &["BETAH"], "BETAH")? {
+        params.beta_h = beta_h;
+    }
+    if let Some(beta_m) = positive_model_param(model_def, &["BETAM"], "BETAM")? {
+        params.beta_m = beta_m;
+    }
+    // MutIndNonLin2 exposes LEVEL only as a PSpice-compatibility parameter;
+    // Xyce binds it to LevelIgnored and does not alter the constitutive law.
+    // This resolver already constructs the MutIndNonLin2 contract, whose
+    // voltage-direction factor is DELV/VINF regardless of LEVEL or whether
+    // the compatibility keyword is present.
+    let _ = nonnegative_model_param(model_def, &["LEVEL"], "LEVEL")?;
+    params.xyce_core_level2 = true;
+    if let Some(delta_v) = positive_model_param(model_def, &["DELV"], "DELV")? {
+        params.delta_v = delta_v;
+    }
+    if let Some(v_inf) = positive_model_param(model_def, &["VINF"], "VINF")? {
+        params.v_inf = v_inf;
+    }
+    if let Some(delta_v_scaling) = positive_model_param(model_def, &["DELVSCALING"], "DELVSCALING")?
+    {
+        params.delta_v_scaling = delta_v_scaling;
+    }
+
+    Ok(params)
+}

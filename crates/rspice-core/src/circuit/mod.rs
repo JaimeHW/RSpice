@@ -255,6 +255,12 @@ pub struct JilesAthertonBinding {
     pub branch_ordinal: NodeId,
     /// Stateful Jiles-Atherton model used to update effective inductance.
     pub device: crate::device::passive::JilesAthertonInductor,
+    /// Xyce nonlinear-core output namespace (`YMIN!<K-name>`), when this
+    /// binding originated from a `K ... Core(...)` card.
+    pub core_output_name: Option<String>,
+    /// Whether the Core model requested SI rather than Xyce's default CGS
+    /// B/H output units.
+    pub core_bh_si_units: bool,
 }
 
 /// Runtime binding for a coupled inductor pair.

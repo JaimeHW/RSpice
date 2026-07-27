@@ -1684,34 +1684,33 @@ fn pspice_u_dig_gate_ports(
         "d_jkff" => Some(5),
         _ => None,
     };
-    let (inputs, outputs): (Vec<XspicePort>, Vec<XspicePort>) = if let Some(input_count) =
-        sequential_input_count
-    {
-        if ports.len() != input_count + 2 {
-            return None;
-        }
-        (ports[..input_count].to_vec(), ports[input_count..].to_vec())
-    } else if is_legacy_dff {
-        let [inputs, q, qbar] = ports else {
-            return None;
+    let (inputs, outputs): (Vec<XspicePort>, Vec<XspicePort>) =
+        if let Some(input_count) = sequential_input_count {
+            if ports.len() != input_count + 2 {
+                return None;
+            }
+            (ports[..input_count].to_vec(), ports[input_count..].to_vec())
+        } else if is_legacy_dff {
+            let [inputs, q, qbar] = ports else {
+                return None;
+            };
+            (vec![inputs.clone()], vec![q.clone(), qbar.clone()])
+        } else if is_legacy {
+            let [inputs, output] = ports else {
+                return None;
+            };
+            (vec![inputs.clone()], vec![output.clone()])
+        } else if model.eq_ignore_ascii_case("d_add") {
+            let [inputs, sum, carry] = ports else {
+                return None;
+            };
+            (vec![inputs.clone()], vec![sum.clone(), carry.clone()])
+        } else {
+            let [inputs, output] = ports else {
+                return None;
+            };
+            (vec![inputs.clone()], vec![output.clone()])
         };
-        (vec![inputs.clone()], vec![q.clone(), qbar.clone()])
-    } else if is_legacy {
-        let [inputs, output] = ports else {
-            return None;
-        };
-        (vec![inputs.clone()], vec![output.clone()])
-    } else if model.eq_ignore_ascii_case("d_add") {
-        let [inputs, sum, carry] = ports else {
-            return None;
-        };
-        (vec![inputs.clone()], vec![sum.clone(), carry.clone()])
-    } else {
-        let [inputs, output] = ports else {
-            return None;
-        };
-        (vec![inputs.clone()], vec![output.clone()])
-    };
     let analog_inputs = if sequential_input_count.is_some() {
         let nodes = inputs
             .iter()
@@ -4343,6 +4342,52 @@ impl Engine {
             self.config.temperature,
         )?;
 
+        // Xyce encodes a nonlinear magnetic core on a K-card rather than on
+        // the winding's L-card (`Kname L1 1 CoreModel`).  Pre-index those
+        // relationships before construction so the winding is dispatched to
+        // the native hysteretic runtime regardless of source order.
+        let mut xyce_core_by_winding: HashMap<String, (String, String)> = HashMap::new();
+        for element in &flat_elements {
+            let ElementKind::Coupling {
+                inductors,
+                coefficient,
+                model: Some(model),
+            } = &element.kind
+            else {
+                continue;
+            };
+            if inductors.len() != 1 {
+                return Err(SimulationError::Circuit(format!(
+                    "Nonlinear magnetic coupling '{}' with model '{}' requires exactly one winding; multi-winding Core cards are not supported by this runtime",
+                    element.name, model
+                )));
+            }
+            if (*coefficient - 1.0).abs() > 1.0e-12 {
+                return Err(SimulationError::Circuit(format!(
+                    "Nonlinear magnetic coupling '{}' has coefficient {}; Xyce Core winding cards require COUPLING=1",
+                    element.name, coefficient
+                )));
+            }
+            if find_model_def(netlist, model)
+                .is_none_or(|definition| !definition.model_type.eq_ignore_ascii_case("CORE"))
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "Nonlinear magnetic coupling '{}' references '{}' which is not a CORE model",
+                    element.name, model
+                )));
+            }
+            let winding_key = inductors[0].to_ascii_uppercase();
+            if xyce_core_by_winding
+                .insert(winding_key, (element.name.clone(), model.clone()))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "Winding '{}' is referenced by more than one nonlinear magnetic coupling",
+                    inductors[0]
+                )));
+            }
+        }
+
         log::debug!("Building circuit with {} elements", flat_elements.len());
         if log::log_enabled!(log::Level::Trace) {
             for element in &flat_elements {
@@ -4669,6 +4714,21 @@ impl Engine {
                     instance_params,
                     ..
                 } => {
+                    if let Some((core_name, core_model)) =
+                        xyce_core_by_winding.get(&element.name.to_ascii_uppercase())
+                    {
+                        add_xyce_core_inductor_element(
+                            &mut circuit,
+                            netlist,
+                            element,
+                            *value,
+                            core_model,
+                            format!("YMIN!{core_name}"),
+                            *initial_current,
+                        )?;
+                        continue;
+                    }
+
                     // Magnetic-core model cards (Jiles-Atherton) route to the
                     // hysteretic inductor; plain L/IND cards and modelless
                     // instances stay linear.
@@ -7036,7 +7096,20 @@ impl Engine {
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
+                    model,
                 } => {
+                    if let Some(model) = model {
+                        // Single-winding nonlinear Core cards are consumed by
+                        // the winding dispatch above; they do not create a
+                        // separate linear mutual overlay.
+                        if inductors.len() == 1 {
+                            continue;
+                        }
+                        return Err(SimulationError::Circuit(format!(
+                            "Nonlinear magnetic coupling '{}' references model '{}' but has unsupported winding topology",
+                            element.name, model
+                        )));
+                    }
                     // Store coupling for later resolution
                     circuit.couplings.push(crate::device::InductorCoupling::new(
                         element.name.clone(),

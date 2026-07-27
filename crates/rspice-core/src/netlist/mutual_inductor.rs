@@ -586,6 +586,7 @@ mod tests {
                 kind: ElementKind::Coupling {
                     inductors: vec!["L1".into(), missing.into()],
                     coefficient: 0.5,
+                    model: None,
                 },
                 nodes: Vec::new(),
                 provenance: crate::netlist::ElementProvenance::Authored,

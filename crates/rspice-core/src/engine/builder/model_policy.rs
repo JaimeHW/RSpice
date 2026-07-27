@@ -67,6 +67,78 @@ pub(super) fn add_jiles_atherton_inductor_element(
     Ok(())
 }
 
+/// Construct a single-winding Xyce `K ... Core(...)` device.  The winding
+/// value is the physical turn count (not an inductance), and the K-card name
+/// is retained for the `YMIN!KNAME_{M,H,B}` operating-point namespace.
+pub(super) fn add_xyce_core_inductor_element(
+    circuit: &mut CircuitData,
+    netlist: &Netlist,
+    element: &crate::netlist::Element,
+    winding_turns: f64,
+    model: &str,
+    core_output_name: String,
+    initial_current: Option<f64>,
+) -> Result<(), SimulationError> {
+    let np = circuit.get_or_create_node(&element.nodes[0]);
+    let nn = circuit.get_or_create_node(&element.nodes[1]);
+    let branch = circuit.allocate_branch_named(&element.name);
+    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Xyce Core winding '{}' references unknown model '{}'",
+            element.name, model
+        ))
+    })?;
+    ensure_model_type(
+        "Xyce nonlinear magnetic core",
+        &element.name,
+        model,
+        model_def,
+        &["CORE"],
+    )?;
+
+    let params = resolve_xyce_core_model_params(model_def, winding_turns)?;
+    let core_bh_si_units =
+        model_param(&model_def.params, &["BHSIUNITS"]).is_some_and(|value| value != 0.0);
+    let mut core = crate::device::passive::JilesAthertonInductor::new(element.name.clone(), np, nn)
+        .with_params(params);
+    if let Some(ic) = initial_current {
+        core.set_initial_current(ic);
+    }
+
+    let effective_l = core.effective_inductance();
+    let runtime_l = if effective_l.is_finite() && effective_l > 0.0 {
+        effective_l
+    } else if core.nominal_inductance().is_finite() && core.nominal_inductance() > 0.0 {
+        // Xyce's zero-field no-gap constitutive denominator can be negative;
+        // its Q-vector nevertheless starts from the positive vacuum
+        // inductance until the first accepted magnetic state is available.
+        core.nominal_inductance()
+    } else {
+        return Err(SimulationError::Circuit(format!(
+            "Xyce Core winding '{}' produced invalid initial inductance {}",
+            element.name, effective_l
+        )));
+    };
+    if let Some(ic) = initial_current {
+        circuit
+            .inductors
+            .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
+    } else {
+        circuit
+            .inductors
+            .add(element.name.clone(), np, nn, branch, runtime_l);
+    }
+    let inductor_index = circuit.inductors.len().saturating_sub(1);
+    circuit.add_xyce_core_inductor(
+        inductor_index,
+        branch,
+        core,
+        core_output_name,
+        core_bh_si_units,
+    );
+    Ok(())
+}
+
 /// `true` when a model card's type names a magnetic-core (Jiles-Atherton)
 /// model rather than a linear inductor card.
 pub(super) fn is_magnetic_core_model_type(model_type: &str) -> bool {

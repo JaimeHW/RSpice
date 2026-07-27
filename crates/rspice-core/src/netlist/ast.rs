@@ -450,12 +450,18 @@ pub enum ElementKind {
     //-------------------------------------------------------------------------
     // Coupled Inductors
     //-------------------------------------------------------------------------
-    /// Coupling coefficient: K1 L1 L2 [L3...] coefficient
+    /// Coupling coefficient: K1 L1 L2 [L3...] coefficient [model]
     Coupling {
         /// Names of coupled inductors
         inductors: Vec<String>,
         /// Coupling coefficient (0 < k ≤ 1)
         coefficient: Value,
+        /// Optional nonlinear magnetic-core model name.  Xyce's nonlinear
+        /// mutual-inductor form is `Kname L1 [L2 ...] 1 CoreModel`;
+        /// retaining the model separately keeps ordinary mutual coupling
+        /// semantics unambiguous while allowing the builder to dispatch the
+        /// canonical core device.
+        model: Option<String>,
     },
 
     //-------------------------------------------------------------------------

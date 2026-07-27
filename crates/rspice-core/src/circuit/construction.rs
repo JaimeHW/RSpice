@@ -608,6 +608,27 @@ impl CircuitData {
             inductor_index,
             branch_ordinal,
             device,
+            core_output_name: None,
+            core_bh_si_units: false,
+        });
+    }
+
+    /// Register a nonlinear Xyce Core binding with its canonical internal
+    /// output namespace.
+    pub fn add_xyce_core_inductor(
+        &mut self,
+        inductor_index: usize,
+        branch_ordinal: NodeId,
+        device: crate::device::passive::JilesAthertonInductor,
+        core_output_name: String,
+        core_bh_si_units: bool,
+    ) {
+        self.jiles_atherton_inductors.push(JilesAthertonBinding {
+            inductor_index,
+            branch_ordinal,
+            device,
+            core_output_name: Some(core_output_name),
+            core_bh_si_units,
         });
     }
 

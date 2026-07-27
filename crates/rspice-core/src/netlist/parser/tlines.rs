@@ -21,7 +21,7 @@ fn reject_unexpected_tail(
     })
 }
 
-/// Parse coupling coefficient: K1 L1 L2 [L3...] coefficient
+/// Parse coupling coefficient: K1 L1 L2 [L3...] coefficient [model]
 pub(super) fn parse_coupling(
     stream: &mut TokenStream,
     line_num: usize,
@@ -60,13 +60,6 @@ pub(super) fn parse_coupling(
         }
     }
 
-    if inductors.len() < 2 {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "Coupling requires at least two inductors".to_string(),
-        });
-    }
-
     let coefficient = expect_value(stream, line_num, params)?;
     if !coefficient.is_finite() || !(0.0..=1.0).contains(&coefficient) {
         return Err(ParseError::Syntax {
@@ -76,6 +69,32 @@ pub(super) fn parse_coupling(
             ),
         });
     }
+    // Xyce's nonlinear magnetic-core form appends a model name after the
+    // coupling value (for example `K1 Lp1 1 CORE_MODEL`).  A single-winding
+    // card without that model is not a valid mutual-inductor declaration;
+    // cards with multiple windings remain represented here for the builder to
+    // validate against its supported nonlinear-core topology.
+    let model = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
+        if inductors.len() == 1 {
+            Some(expect_ident(stream, line_num)?)
+        } else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Nonlinear coupling models require a single winding in this parser"
+                    .to_string(),
+            });
+        }
+    } else {
+        None
+    };
+
+    if inductors.len() < 2 && model.is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Coupling requires at least two inductors or a nonlinear core model"
+                .to_string(),
+        });
+    }
     reject_unexpected_tail(stream, line_num, "coupling")?;
 
     elements.push(Element {
@@ -83,6 +102,7 @@ pub(super) fn parse_coupling(
         kind: ElementKind::Coupling {
             inductors,
             coefficient,
+            model,
         },
         nodes: vec![], // Coupling doesn't have direct node connections
         provenance: crate::netlist::ElementProvenance::Authored,

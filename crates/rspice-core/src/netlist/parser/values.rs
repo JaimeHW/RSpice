@@ -309,9 +309,15 @@ pub(super) fn parse_model_params(
                             }
                         }
                     }
+                    // Numeric tokens are values even when the parameter name
+                    // also admits a bare string form (for example XSPICE
+                    // `*_PATH` parameters).  A numeric filename is preserved
+                    // only for the explicitly string-valued table payload;
+                    // ordinary model geometry such as CORE `PATH=8.49` must
+                    // remain numeric instead of silently moving to
+                    // `string_params`.
                     TokenKind::Number(_)
-                        if crate::netlist::xspice_param_preserves_numeric_string(&name)
-                            || model_param_accepts_bare_string(&name, model_type) =>
+                        if crate::netlist::xspice_param_preserves_numeric_string(&name) =>
                     {
                         let value = parse_model_bare_string_value(stream, line_num, &name)?;
                         push_model_string_value(
@@ -463,7 +469,8 @@ pub(super) fn parse_model_params(
                         }
                     }
                     kind if model_param_accepts_bare_string(&name, model_type)
-                        && model_bare_string_token_can_start(kind) =>
+                        && model_bare_string_token_can_start(kind)
+                        && !matches!(kind, TokenKind::Number(_)) =>
                     {
                         let value = parse_model_bare_string_value(stream, line_num, &name)?;
                         push_model_string_value(
@@ -1507,17 +1514,41 @@ pub(super) fn expect_ident(
 ) -> Result<String, ParseError> {
     skip_commas(stream);
 
-    match &stream.peek().kind {
-        TokenKind::Ident(s) => {
-            let s = s.clone();
-            stream.advance();
-            Ok(s)
-        }
-        other => Err(ParseError::Syntax {
+    let first = stream.peek().clone();
+    let TokenKind::Ident(head) = &first.kind else {
+        return Err(ParseError::Syntax {
             line: line_num,
-            message: format!("Expected identifier, found {:?}", other),
-        }),
+            message: format!("Expected identifier, found {:?}", first.kind),
+        });
+    };
+
+    // Xyce permits punctuation-rich model names (for example
+    // `TX39-20-13_3C80_25C`).  The lexer keeps `-` and digit fragments
+    // separate because they are operators/numeric tokens elsewhere; when
+    // those fragments are contiguous in the source they are one identifier
+    // at this grammar boundary.
+    let mut name = head.clone();
+    let mut end = first.span.end;
+    stream.advance();
+    while stream.peek().span.start == end {
+        let token = stream.peek().clone();
+        let Some(fragment) = xyce_dev_name_fragment(&token) else {
+            break;
+        };
+        name.push_str(&fragment);
+        end = token.span.end;
+        stream.advance();
     }
+    if !name.chars().all(is_xyce_dev_name_char) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Invalid identifier '{}': contains unsupported punctuation",
+                name
+            ),
+        });
+    }
+    Ok(name)
 }
 
 /// Consume an element-head name using Xyce's contiguous DEV token grammar.

@@ -9624,15 +9624,15 @@ impl XyceTestRunner {
         Self::validate_abm_transient_topology(&parsed, kind)?;
         self.check_abm_transient_deadline(start, "parse and exact topology")?;
 
-        let (netlist, result) =
-            self.run_transient_family_plan(&plan, start, None, None)
-                .map_err(|error| match error {
-                    SimulationError::Aborted => format!(
-                        "ABM transient native execution exceeded shared timeout ({}ms)",
-                        self.config.max_time_per_test_ms
-                    ),
-                    other => format!("ABM transient native execution failed: {other}"),
-                })?;
+        let (netlist, result) = self
+            .run_transient_family_plan(&plan, start, None, None)
+            .map_err(|error| match error {
+                SimulationError::Aborted => format!(
+                    "ABM transient native execution exceeded shared timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                other => format!("ABM transient native execution failed: {other}"),
+            })?;
         Self::validate_abm_transient_topology(&netlist, kind)?;
         let actual = Self::transient_family_result_to_prn_table(&plan, &netlist, &result)?;
         Self::validate_abm_transient_output_domain(&actual, kind)?;
@@ -15729,26 +15729,24 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     );
                 }
             };
-        let result =
-            match self.run_transient_family_netlist(
-                &contract.plan,
-                &contract.netlist,
-                start,
-                None,
-                None,
-            )
-            {
-                Ok(result) => result,
-                Err(error) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        result_contract,
-                        format!("BUG702 positive simulation failed: {error}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let result = match self.run_transient_family_netlist(
+            &contract.plan,
+            &contract.netlist,
+            start,
+            None,
+            None,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!("BUG702 positive simulation failed: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
         let mismatches = match self.compare_static_tran_primary_reference(
             &reference,
             &contract.plan,
@@ -31962,30 +31960,31 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         start: Instant,
     ) -> XyceTestResult {
         const RESULT_CONTRACT: &str = "analytic_first_order_rc_tran_wrapper";
-        let (netlist, result) = match self.run_transient_family_plan(&contract.plan, start, None, None) {
-            Ok(result) => result,
-            Err(SimulationError::Aborted) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    RESULT_CONTRACT,
-                    format!(
-                        "analytic first-order RC execution exceeded timeout ({}ms)",
-                        self.config.max_time_per_test_ms
-                    ),
-                    Vec::new(),
-                );
-            }
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    RESULT_CONTRACT,
-                    format!("analytic first-order RC execution failed: {err}"),
-                    Vec::new(),
-                );
-            }
-        };
+        let (netlist, result) =
+            match self.run_transient_family_plan(&contract.plan, start, None, None) {
+                Ok(result) => result,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!(
+                            "analytic first-order RC execution exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!("analytic first-order RC execution failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
         let actual =
             match Self::transient_family_result_to_prn_table(&contract.plan, &netlist, &result) {
                 Ok(table) => table,
@@ -32211,30 +32210,31 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         start: Instant,
     ) -> XyceTestResult {
         const RESULT_CONTRACT: &str = "analytic_sinusoidal_first_order_rc_tran_wrapper";
-        let (netlist, result) = match self.run_transient_family_plan(&contract.plan, start, None, None) {
-            Ok(result) => result,
-            Err(SimulationError::Aborted) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    RESULT_CONTRACT,
-                    format!(
-                        "analytic sinusoidal first-order RC execution exceeded timeout ({}ms)",
-                        self.config.max_time_per_test_ms
-                    ),
-                    Vec::new(),
-                );
-            }
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    RESULT_CONTRACT,
-                    format!("analytic sinusoidal first-order RC execution failed: {err}"),
-                    Vec::new(),
-                );
-            }
-        };
+        let (netlist, result) =
+            match self.run_transient_family_plan(&contract.plan, start, None, None) {
+                Ok(result) => result,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!(
+                            "analytic sinusoidal first-order RC execution exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!("analytic sinusoidal first-order RC execution failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
         let actual =
             match Self::transient_family_result_to_prn_table(&contract.plan, &netlist, &result) {
                 Ok(table) => table,
@@ -46866,8 +46866,11 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                         )?,
                     ),
                 };
-                let actual =
-                    Self::quantize_dc_print_value_with_precisions(&print_precisions, probe, actual)?;
+                let actual = Self::quantize_dc_print_value_with_precisions(
+                    &print_precisions,
+                    probe,
+                    actual,
+                )?;
                 let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
                     .get(&normalized_probe)
@@ -52257,13 +52260,10 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Diode { .. }
                     if Self::netlist_element_is_native_exact_is_diode(netlist, element) => {}
                 ElementKind::Diode { .. }
-                    if Self::netlist_element_is_native_generated_cmc_diode(
-                        netlist, element,
-                    ) => {}
+                    if Self::netlist_element_is_native_generated_cmc_diode(netlist, element) => {}
                 ElementKind::Diode { .. }
-                    if Self::netlist_element_is_native_generated_juncap_diode(
-                        netlist, element,
-                    ) => {}
+                    if Self::netlist_element_is_native_generated_juncap_diode(netlist, element) => {
+                }
                 _ => {
                     return Err(format!(
                         "native static .PRINT AC comparison currently supports flattened hierarchy containing non-RF independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, exact IS-only diodes, exact IS/BF PNPs at all frequencies, exact IS/BF NPNs through 20 kHz, strictly qualified single-device classic MOSFET LEVEL=1/2/3/6, validated single-device BSIM3 LEVEL=9 cards, validated single-device BSIMSOI LEVEL=10 cards with explicit SOIMOD=1, validated single-device BSIM4 LEVEL=14/54 cards, and validated native legacy level-1 NPN Gummel-Poon sweeps through 10 GHz; element '{}' requires a broader AC oracle contract",
@@ -52294,12 +52294,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
+                    model,
                 } => {
                     Self::validate_static_step_coupling_contract(
                         netlist,
                         &element.name,
                         inductors,
                         *coefficient,
+                        model.as_deref(),
                     )?;
                 }
                 ElementKind::TransmissionLine {
@@ -52681,7 +52683,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         element_name: &str,
         inductors: &[String],
         coefficient: Value,
+        model: Option<&str>,
     ) -> Result<(), String> {
+        if let Some(model_name) = model {
+            if inductors.len() != 1 {
+                return Err(format!(
+                    "native .PRINT TRAN comparison does not support nonlinear coupling '{}' with {} windings",
+                    element_name,
+                    inductors.len()
+                ));
+            }
+            if !coefficient.is_finite() || (coefficient - 1.0).abs() > 1.0e-12 {
+                return Err(format!(
+                    "native .PRINT TRAN comparison requires nonlinear coupling '{}' to use COUPLING=1",
+                    element_name
+                ));
+            }
+            let Some(model_def) = Self::find_model(&netlist.models, model_name) else {
+                return Err(format!(
+                    "native .PRINT TRAN comparison could not resolve nonlinear Core model '{}' for coupling '{}'",
+                    model_name, element_name
+                ));
+            };
+            if !model_def.model_type.eq_ignore_ascii_case("CORE") {
+                return Err(format!(
+                    "native .PRINT TRAN comparison requires coupling '{}' model '{}' to be CORE",
+                    element_name, model_name
+                ));
+            }
+            return Self::validate_static_step_inductor_contract(netlist, &inductors[0]);
+        }
         if inductors.len() < 2 {
             return Err(format!(
                 "native .PRINT TRAN comparison does not support coupling '{}' with fewer than two inductors",
@@ -52945,12 +52976,14 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
+                    model,
                 } => {
                     Self::validate_static_step_coupling_contract(
                         netlist,
                         &element.name,
                         inductors,
                         *coefficient,
+                        model.as_deref(),
                     )?;
                 }
                 ElementKind::TransmissionLine {
@@ -53815,6 +53848,13 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             Self::parse_device_operating_point_probe(normalized)
             && parameter.eq_ignore_ascii_case("R")
             && Self::find_native_xyce_memristor_element(netlist, &element_name).is_some()
+        {
+            return Ok(());
+        }
+        if let Some((element_name, parameter)) =
+            Self::parse_device_operating_point_probe(normalized)
+            && Self::netlist_has_xyce_core_namespace(netlist, &element_name)
+            && matches!(parameter.to_ascii_lowercase().as_str(), "m" | "h" | "b")
         {
             return Ok(());
         }
@@ -54723,9 +54763,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         Self::evaluate_atomic_dc_probe(&normalized, netlist, dc, sweep_point, result, op_report)
     }
 
-    fn dc_node_voltage_index(
-        result: &crate::SimulationResult,
-    ) -> HashMap<String, Value> {
+    fn dc_node_voltage_index(result: &crate::SimulationResult) -> HashMap<String, Value> {
         result
             .node_names
             .iter()
@@ -55714,6 +55752,21 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 Self::xyce_memristor_resistance_store_name(netlist, &element_name)
         {
             return Self::transient_store_named(result, &store_name, time);
+        }
+
+        if let Some((element_name, parameter)) =
+            Self::parse_device_operating_point_probe(normalized)
+            && element_name.to_ascii_lowercase().starts_with("ymin!")
+        {
+            let waveform = result
+                .try_device_op_waveform_named(&element_name, &parameter)
+                .ok_or_else(|| {
+                    format!(
+                        "nonlinear-core operating-point waveform '{}:{}' is not present in the transient result",
+                        element_name, parameter
+                    )
+                })?;
+            return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
         }
 
         if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
@@ -57427,11 +57480,17 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             "gds" => Some("gds"),
             "gmb" | "gmbs" => Some("gmb"),
             "cd" => Some("cd"),
+            "m" => Some("m"),
+            "h" => Some("h"),
+            "b" => Some("b"),
             _ => None,
         }
     }
 
     fn netlist_has_device_op_instance(netlist: &Netlist, instance_name: &str) -> bool {
+        if Self::netlist_has_xyce_core_namespace(netlist, instance_name) {
+            return true;
+        }
         if netlist.elements.iter().any(|element| {
             Self::netlist_element_exports_device_op(element)
                 && Self::device_instance_names_match(&element.name, instance_name)
@@ -57445,6 +57504,31 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                     && Self::device_instance_names_match(&element.name, instance_name)
             })
         })
+    }
+
+    fn netlist_has_xyce_core_namespace(netlist: &Netlist, instance_name: &str) -> bool {
+        let normalized = Self::normalize_probe(instance_name);
+        let Some(core_name) = normalized.strip_prefix("ymin!") else {
+            return false;
+        };
+        let matches = |elements: &[crate::netlist::Element]| {
+            elements.iter().any(|element| {
+                element.name.eq_ignore_ascii_case(core_name)
+                    && matches!(
+                        &element.kind,
+                        ElementKind::Coupling {
+                            model: Some(_),
+                            inductors,
+                            ..
+                        } if inductors.len() == 1
+                    )
+            })
+        };
+        if matches(&netlist.elements) {
+            return true;
+        }
+        crate::netlist::flatten_netlist_with_models(netlist)
+            .is_ok_and(|flattened| matches(&flattened.elements))
     }
 
     fn netlist_supports_lead_current_probe(
@@ -60567,12 +60651,19 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
 
     fn netlist_element_exports_device_op(element: &crate::netlist::Element) -> bool {
         matches!(
-            element.kind,
+            &element.kind,
             ElementKind::Diode { .. }
                 | ElementKind::Bjt { .. }
                 | ElementKind::Mosfet { .. }
                 | ElementKind::Jfet { .. }
                 | ElementKind::Mesfet { .. }
+        ) || matches!(
+            &element.kind,
+            ElementKind::Coupling {
+                model: Some(_),
+                inductors,
+                ..
+            } if inductors.len() == 1
         )
     }
 
@@ -73880,7 +73971,15 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             return None;
         }
         let inner = &normalized[2..normalized.len() - 1];
-        let (element, parameter) = inner.rsplit_once(':')?;
+        let (element, parameter) = if let Some((element, parameter)) = inner.rsplit_once(':') {
+            (element, parameter)
+        } else {
+            let (element, parameter) = inner.rsplit_once('_')?;
+            if !element.to_ascii_lowercase().starts_with("ymin!") {
+                return None;
+            }
+            (element, parameter)
+        };
         if element.is_empty() || parameter.is_empty() {
             return None;
         }
@@ -88011,9 +88110,7 @@ R1 out 0 1k
             .and_then(Path::parent)
             .expect("workspace root")
             .join("tests/xyce");
-        let deck_path = root.join(
-            "Netlists/Certification_Tests/BUG_439/formerly-bad-vsrc.cir",
-        );
+        let deck_path = root.join("Netlists/Certification_Tests/BUG_439/formerly-bad-vsrc.cir");
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         let plan = runner
             .static_tran_plan_for_path_with_purpose(
@@ -90275,10 +90372,9 @@ Q1 c b 0 QN
             .expect_err("duplicate sensitivity parameters must fail closed");
         assert!(error.contains("duplicate parameter"), "{error}");
 
-        let continued = XyceTestRunner::parse_xyce_sensitivity_parameters(
-            "RB1:R, Q2N2222:bf, Q2N2222:is,",
-        )
-        .expect("comma-terminated continued PARAM fields are valid Xyce syntax");
+        let continued =
+            XyceTestRunner::parse_xyce_sensitivity_parameters("RB1:R, Q2N2222:bf, Q2N2222:is,")
+                .expect("comma-terminated continued PARAM fields are valid Xyce syntax");
         assert_eq!(
             continued,
             vec![

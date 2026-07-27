@@ -935,12 +935,14 @@ impl<'a> Flattener<'a> {
             ElementKind::Coupling {
                 inductors,
                 coefficient,
+                model,
             } => ElementKind::Coupling {
                 inductors: inductors
                     .iter()
                     .map(|name| self.remap_local_element_reference(name, prefix))
                     .collect(),
                 coefficient: *coefficient,
+                model: model.clone(),
             },
             ElementKind::Xspice {
                 model,
@@ -1643,6 +1645,20 @@ impl<'a> Flattener<'a> {
                     ))
                 })?,
                 initial_state: *initial_state,
+            },
+            ElementKind::Coupling {
+                inductors,
+                coefficient,
+                model,
+            } => ElementKind::Coupling {
+                inductors: inductors.clone(),
+                coefficient: *coefficient,
+                model: self.resolve_optional_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                )?,
             },
             ElementKind::TransmissionLine {
                 z0,
