@@ -52,8 +52,8 @@ impl RSpiceApp {
         match crate::workbench::recovery_checkpoint::write_checkpoint(&path, &self.state.schematic) {
             Ok(checkpoint) => {
                 self.state.log_buffer.log(
-                    crate::panels::LogSeverity::Debug,
-                    crate::panels::LogSource::System,
+                    crate::workbench::panels::LogSeverity::Debug,
+                    crate::workbench::panels::LogSource::System,
                     format!("Autosaved checkpoint: {}", checkpoint.display()),
                     None,
                 );

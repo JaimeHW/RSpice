@@ -26,7 +26,7 @@
 //! | 5 | `services` | DRC, licensing, and the per-analysis engine adapters |
 //! | 6 | `simulation` | Analysis plans, netlist generation, run orchestration |
 //! | 7 | `properties` | Component property editing |
-//! | 8 | `panels` | Docked auxiliary panels |
+
 //! | 9 | `schematic` | The schematic document engine |
 //! | 10 | `workbench` | The application shell: [`RSpiceApp`], state, dialogs, chrome, surfaces, commands, and the workflows that mutate them |
 
@@ -84,8 +84,6 @@ pub mod schematic;
 /// Simulation management - Controller, dialogs, netlist generation
 pub mod simulation;
 
-/// Side panels - Project browser and properties panel
-pub mod panels;
 
 /// Property editing - Component properties and design variables
 pub mod properties;

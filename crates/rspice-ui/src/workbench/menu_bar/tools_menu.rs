@@ -2,7 +2,7 @@
 //! `crate::workbench::chrome::title_bar`.
 
 use crate::workbench::app::{AppState, ConsoleMessage};
-use crate::panels::{LogSeverity, LogSource};
+use crate::workbench::panels::{LogSeverity, LogSource};
 use crate::services::drc::{DrcConfig, DrcSeverity};
 use crate::state::CellViewRef;
 

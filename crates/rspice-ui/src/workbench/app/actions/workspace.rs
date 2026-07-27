@@ -1,5 +1,5 @@
 use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
-use crate::panels::{LogAnchor, LogSeverity, LogSource};
+use crate::workbench::panels::{LogAnchor, LogSeverity, LogSource};
 use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::state::{
@@ -1645,7 +1645,7 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use crate::workbench::app::AppState;
-    use crate::panels::{LogAnchor, LogSource};
+    use crate::workbench::panels::{LogAnchor, LogSource};
     use crate::services::drc::{DrcLocation, DrcViolationType};
     use crate::state::{
         Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,

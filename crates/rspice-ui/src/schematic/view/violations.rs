@@ -37,7 +37,7 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
 
     // Owned snapshot of the anchored findings so the borrows drop before
     // the selection/viewport mutations below.
-    let mut anchored: Vec<(DrcSeverity, crate::panels::LogAnchor, String)> = result
+    let mut anchored: Vec<(DrcSeverity, crate::workbench::panels::LogAnchor, String)> = result
         .violations()
         .iter()
         .filter_map(|violation| {
@@ -80,14 +80,14 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
 pub(crate) fn finding_anchor(
     state: &AppState,
     violation: &DrcViolation,
-) -> Option<crate::panels::LogAnchor> {
+) -> Option<crate::workbench::panels::LogAnchor> {
     if let DrcLocation::SymbolPin {
         reference,
         pin_name,
         point,
     } = &violation.location
     {
-        return Some(crate::panels::LogAnchor::Symbol {
+        return Some(crate::workbench::panels::LogAnchor::Symbol {
             reference: reference.clone(),
             pin_name: pin_name.clone(),
             point: *point,
@@ -100,7 +100,7 @@ pub(crate) fn finding_anchor(
         DrcLocation::Wire { id } => (None, Some(*id)),
         _ => (None, None),
     };
-    Some(crate::panels::LogAnchor::Schematic {
+    Some(crate::workbench::panels::LogAnchor::Schematic {
         x: world.x,
         y: world.y,
         component,

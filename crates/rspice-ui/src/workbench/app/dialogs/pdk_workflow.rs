@@ -87,9 +87,9 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         poll_browser_model_imports(ctx, &mut self.state);
         let result =
-            crate::panels::render_pdk_settings_dialog(ctx, &mut self.state.pdk_settings_dialog);
+            crate::workbench::panels::render_pdk_settings_dialog(ctx, &mut self.state.pdk_settings_dialog);
         match result {
-            crate::panels::PdkSettingsDialogResult::Applied(config) => {
+            crate::workbench::panels::PdkSettingsDialogResult::Applied(config) => {
                 let load_result = self
                     .state
                     .model_library_manager
@@ -99,7 +99,7 @@ impl RSpiceApp {
                 }
                 emit_pdk_apply_messages(&mut self.state, load_result);
             }
-            crate::panels::PdkSettingsDialogResult::LoadFile(path) => {
+            crate::workbench::panels::PdkSettingsDialogResult::LoadFile(path) => {
                 match self
                     .state
                     .model_library_manager
@@ -123,7 +123,7 @@ impl RSpiceApp {
                     }
                 }
             }
-            crate::panels::PdkSettingsDialogResult::ImportBrowserFile => {
+            crate::workbench::panels::PdkSettingsDialogResult::ImportBrowserFile => {
                 #[cfg(target_arch = "wasm32")]
                 start_browser_model_import(ctx);
                 #[cfg(not(target_arch = "wasm32"))]
@@ -131,8 +131,8 @@ impl RSpiceApp {
                     "Browser model import is unavailable on this platform".to_owned(),
                 ));
             }
-            crate::panels::PdkSettingsDialogResult::Cancelled => {}
-            crate::panels::PdkSettingsDialogResult::None => {}
+            crate::workbench::panels::PdkSettingsDialogResult::Cancelled => {}
+            crate::workbench::panels::PdkSettingsDialogResult::None => {}
         }
     }
 }

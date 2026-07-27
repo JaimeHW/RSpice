@@ -32,7 +32,7 @@ mod tests {
         BodeData, EyeData, EyeTrace, FftData, FrequencyResponse, HistogramBuilder, NyquistData,
         PoleZeroData, WindowFunction,
     };
-    use crate::panels::{LogSeverity, LogSource};
+    use crate::workbench::panels::{LogSeverity, LogSource};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     fn seed_result_viewers(state: &mut AppState) {
@@ -282,7 +282,7 @@ impl AppState {
         self.ui.results.clear_project_scoped_state();
         self.dialogs.drc_results = None;
         self.dialogs.drc_cycle = None;
-        self.log_buffer.clear_source(crate::panels::LogSource::Drc);
+        self.log_buffer.clear_source(crate::workbench::panels::LogSource::Drc);
         self.clear_specialized_viewer_data();
     }
 

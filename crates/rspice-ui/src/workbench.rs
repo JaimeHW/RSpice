@@ -51,6 +51,7 @@ pub(crate) fn spawn_or_inline(work: impl FnOnce() + Send + 'static) {
     }
 }
 
+pub mod panels;
 pub(crate) mod account_organization;
 pub mod availability;
 pub mod browser_navigation;
@@ -466,7 +467,7 @@ pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
 }
 
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
-    use crate::panels::{LogSeverity, LogSource};
+    use crate::workbench::panels::{LogSeverity, LogSource};
     use crate::ui::widgets::{NotificationCategory, ToastKind};
 
     let revision = app.state.log_buffer.revision();
@@ -618,7 +619,7 @@ fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::panels::{LogSeverity, LogSource};
+    use crate::workbench::panels::{LogSeverity, LogSource};
     use crate::workbench::state::Drawer;
 
     #[test]

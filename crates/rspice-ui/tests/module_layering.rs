@@ -70,7 +70,6 @@ const LAYERS: &[(&str, u32)] = &[
     ("simulation", 6),
     // Editors and inspectors.
     ("properties", 7),
-    ("panels", 8),
     ("schematic", 9),
     // Application chrome and top-level navigation.
     ("workbench", 10),
@@ -105,10 +104,9 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 
     // Reaching up into the application shell for `RSpiceApp` rather than
     // taking the state actually used. Retired by narrowing those signatures.
-    ("schematic", "workbench", 120),
-    ("simulation", "workbench", 90),
-    ("io", "workbench", 16),
-    ("panels", "workbench", 5),
+    ("schematic", "workbench", 124),
+    ("simulation", "workbench", 87),
+    ("io", "workbench", 12),
     // The persisted model reaching up into orchestration and editors.
     ("state", "simulation", 26),
     ("state", "properties", 10),

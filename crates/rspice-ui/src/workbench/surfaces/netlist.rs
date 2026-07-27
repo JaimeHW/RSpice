@@ -215,7 +215,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                 .log_buffer
                 .entries()
                 .skip(previous_message_count)
-                .filter(|entry| entry.severity == crate::panels::LogSeverity::Error)
+                .filter(|entry| entry.severity == crate::workbench::panels::LogSeverity::Error)
                 .last()
                 .map(|entry| entry.message.clone())
                 .unwrap_or_else(|| "Netlist generation failed; review Problems.".to_owned());

@@ -301,9 +301,9 @@ pub struct AppState {
     /// Typed analysis configuration behind the Simulate view.
     pub(crate) sim_setup: SimSetupState,
     /// Structured log history buffer (ring-buffer, filterable).
-    pub(crate) log_buffer: crate::panels::LogBuffer,
+    pub(crate) log_buffer: crate::workbench::panels::LogBuffer,
     /// Scripting/Automation console state
-    pub(crate) script_console: crate::panels::ScriptConsoleState,
+    pub(crate) script_console: crate::workbench::panels::ScriptConsoleState,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Project/workspace model for active design context and open LCV views.
@@ -321,9 +321,9 @@ pub struct AppState {
     /// Property registry (component property schemas)
     pub(crate) property_registry: crate::state::PropertyRegistry,
     /// Calculator panel state
-    pub(crate) calculator_panel: crate::panels::calculator::CalculatorPanel,
+    pub(crate) calculator_panel: crate::workbench::panels::calculator::CalculatorPanel,
     /// PDK Settings dialog state
-    pub(crate) pdk_settings_dialog: crate::panels::PdkSettingsDialogState,
+    pub(crate) pdk_settings_dialog: crate::workbench::panels::PdkSettingsDialogState,
     /// PDK configuration (library paths, environment variables)
     pub(crate) pdk_config: crate::state::pdk_config::PdkConfig,
     /// Model library manager (PDK models, device libraries)
@@ -573,23 +573,23 @@ impl AppState {
         self.simulation.request_simulate_run_set();
     }
 
-    fn log_severity_for_console(level: ConsoleLevel) -> crate::panels::LogSeverity {
+    fn log_severity_for_console(level: ConsoleLevel) -> crate::workbench::panels::LogSeverity {
         match level {
-            ConsoleLevel::Info => crate::panels::LogSeverity::Info,
-            ConsoleLevel::Warning => crate::panels::LogSeverity::Warning,
-            ConsoleLevel::Error => crate::panels::LogSeverity::Error,
+            ConsoleLevel::Info => crate::workbench::panels::LogSeverity::Info,
+            ConsoleLevel::Warning => crate::workbench::panels::LogSeverity::Warning,
+            ConsoleLevel::Error => crate::workbench::panels::LogSeverity::Error,
         }
     }
 
     /// Push a legacy console message and mirror it into the structured log.
     pub fn push_console_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::panels::LogSource::System, message);
+        self.push_console_message_with_source(crate::workbench::panels::LogSource::System, message);
     }
 
     /// Push a console message with an explicit structured-log source.
     pub fn push_console_message_with_source(
         &mut self,
-        source: crate::panels::LogSource,
+        source: crate::workbench::panels::LogSource,
         message: ConsoleMessage,
     ) {
         let severity = Self::log_severity_for_console(message.level);
@@ -597,11 +597,11 @@ impl AppState {
     }
 
     pub fn push_user_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::panels::LogSource::User, message);
+        self.push_console_message_with_source(crate::workbench::panels::LogSource::User, message);
     }
 
     pub fn push_sim_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::panels::LogSource::Simulation, message);
+        self.push_console_message_with_source(crate::workbench::panels::LogSource::Simulation, message);
     }
 
     pub fn clear_primary_log(&mut self) {
@@ -1071,7 +1071,7 @@ impl RSpiceApp {
     fn render_frame_dialogs(&mut self, ctx: &Context) {
         self.synchronize_design_management_route();
         self.render_confirmation_dialog(ctx);
-        crate::panels::render_property_dialog(ctx, &mut self.state);
+        crate::workbench::panels::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);
         self.render_simulation_options_dialog(ctx);
         self.render_preferences_dialog(ctx);
