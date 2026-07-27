@@ -793,6 +793,7 @@ fn generated_workspace_resources(
         .into_iter()
         .chain(reactive_packed)
         .try_fold(0u128, |total, bytes| total.checked_add(bytes))
+        .and_then(|bytes| bytes.checked_mul(super::device::MAX_CACHED_SCRATCH_WORKSPACES as u128))
         .ok_or("generated packed workspace resource estimate overflowed u128")?;
     let stamp_state_payload = stamp_state_payload_bytes(ddt_state_count, idt_state_count);
     let stamp_state_heap_allocations = u64::from(stamp_state_payload != 0);
@@ -1671,7 +1672,7 @@ mod tests {
         assert_eq!(resources.reactive_active_node_rows, 1);
         assert_eq!(resources.reactive_active_branch_rows, 1);
         assert_eq!(resources.retained_workspace_bytes_per_instance, 0);
-        assert_eq!(resources.pooled_workspace_payload_bytes_per_thread, 568);
+        assert_eq!(resources.pooled_workspace_payload_bytes_per_thread, 1_136);
         assert_eq!(
             resources.legacy_dense_workspace_payload_bytes_per_instance,
             464

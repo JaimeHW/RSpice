@@ -682,6 +682,8 @@ const REACTIVE_BRANCH_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = [0
 use std::cell::RefCell;
 use std::thread::LocalKey;
 
+const MAX_CACHED_SCRATCH_WORKSPACES: usize = 2;
+
 struct ScratchLease<T: 'static> {
     value: Option<Box<T>>,
     pool: &'static LocalKey<RefCell<Vec<Box<T>>>>,
@@ -707,7 +709,11 @@ impl<T: 'static> Drop for ScratchLease<T> {
     #[inline]
     fn drop(&mut self) {
         if let Some(value) = self.value.take() {
-            self.pool.with_borrow_mut(|available| available.push(value));
+            self.pool.with_borrow_mut(|available| {
+                if available.len() < MAX_CACHED_SCRATCH_WORKSPACES {
+                    available.push(value);
+                }
+            });
         }
     }
 }

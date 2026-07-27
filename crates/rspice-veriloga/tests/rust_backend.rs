@@ -14222,6 +14222,11 @@ fn rust_backend_pools_transient_and_reactive_scratch_workspaces() {
         "{stamp}"
     );
     assert!(
+        stamp.contains("const MAX_CACHED_SCRATCH_WORKSPACES: usize = 2")
+            && stamp.contains("available.len() < MAX_CACHED_SCRATCH_WORKSPACES"),
+        "generated scratch pools must have a fixed retention bound:\n{stamp}"
+    );
+    assert!(
         !state.contains("KernelScratch") && !state.contains("scratch:"),
         "{state}"
     );

@@ -52,6 +52,7 @@ const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
 const MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES: usize = 3_700_000;
+pub(super) const MAX_CACHED_SCRATCH_WORKSPACES: usize = 2;
 const DERIVATIVE_ACTIVITY_MARKER: &str = "// __RSPICE_DERIVATIVE_ACTIVITY__\n";
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
@@ -675,11 +676,22 @@ fn inject_workspace_pool_support(source: String) -> String {
          \x20   #[inline]\n\
          \x20   fn drop(&mut self) {\n\
          \x20       if let Some(value) = self.value.take() {\n\
-         \x20           self.pool.with_borrow_mut(|available| available.push(value));\n\
+         \x20           self.pool.with_borrow_mut(|available| {\n\
+         \x20               if available.len() < MAX_CACHED_SCRATCH_WORKSPACES {\n\
+         \x20                   available.push(value);\n\
+         \x20               }\n\
+         \x20           });\n\
          \x20       }\n\
          \x20   }\n\
          }\n\n\
          thread_local! {\n",
+    );
+    support = support.replacen(
+        "struct ScratchLease",
+        &format!(
+            "const MAX_CACHED_SCRATCH_WORKSPACES: usize = {MAX_CACHED_SCRATCH_WORKSPACES};\n\nstruct ScratchLease"
+        ),
+        1,
     );
     if uses_transient {
         support.push_str(
