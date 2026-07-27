@@ -79,6 +79,51 @@ def validate_inputs(
         raise PackageError("source-date epoch must be on or after 1980-01-01")
 
 
+def model_tree_payloads() -> list[Payload]:
+    """Ship models/spice beside the executable.
+
+    The engine locates the tree relative to the binary (see
+    rspice-core's library::spice_packs), so the archive layout is the contract:
+    `models/spice/...` next to the executable is what `SpiceLibraryIndex`
+    discovers.
+
+    Everything under models/spice is shipped. That is safe because restricted
+    material never enters the repository in the first place — it is dropped at
+    the vendoring boundary by tools/models/sync_packs.py — so there is no
+    filtering decision left to make here. The licence audit gates that
+    invariant in CI, and the guard below refuses to build a release if it ever
+    fails.
+    """
+    spice_root = ROOT / "models" / "spice"
+    if not spice_root.is_dir():
+        raise PackageError(f"model tree missing: {spice_root}")
+
+    audit = spice_root / "LICENSE-AUDIT.tsv"
+    if not audit.exists():
+        raise PackageError(
+            "models/spice/LICENSE-AUDIT.tsv is missing; run "
+            "tools/models/license_audit.py before packaging"
+        )
+    for line in audit.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        fields = line.split("\t")
+        if len(fields) > 3 and fields[3] == "restricted":
+            raise PackageError(
+                f"refusing to package: {fields[0]}/{fields[1]} is marked "
+                f"restricted ({fields[2]}). Re-run tools/models/sync_packs.py "
+                f"to drop it from the tree."
+            )
+
+    payloads = []
+    for path in sorted(spice_root.rglob("*"), key=lambda p: p.as_posix()):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(ROOT).as_posix()
+        payloads.append(Payload(relative, path.read_bytes(), 0o644))
+    return payloads
+
+
 def release_payloads(binary: Path, target: str) -> list[Payload]:
     executable = "rspice.exe" if "windows" in target else "rspice"
     sources = [
@@ -91,6 +136,7 @@ def release_payloads(binary: Path, target: str) -> list[Payload]:
         ("Cargo.lock", ROOT / "Cargo.lock", 0o644),
     ]
     payloads = [Payload(name, source.read_bytes(), mode) for name, source, mode in sources]
+    payloads.extend(model_tree_payloads())
     payloads.sort(key=lambda payload: payload.path)
     return payloads
 
