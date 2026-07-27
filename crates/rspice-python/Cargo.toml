@@ -37,3 +37,6 @@ num-complex.workspace = true
 
 [build-dependencies]
 pyo3-build-config = { version = "0.29", features = ["resolve-config"] }
+
+[lints]
+workspace = true

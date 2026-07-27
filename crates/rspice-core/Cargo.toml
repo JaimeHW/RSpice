@@ -179,3 +179,6 @@ test = false
 name = "rspice-xyce-case-runner"
 path = "src/bin/xyce_case_runner.rs"
 test = false
+
+[lints]
+workspace = true

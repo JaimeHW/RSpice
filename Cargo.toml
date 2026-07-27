@@ -51,6 +51,16 @@ unicode-normalization = "0.1"
 # Internal crates
 rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
 
+# One lint policy for the whole workspace. Crates opt in with
+# `lints.workspace = true`, so tightening a rule is a single edit here rather
+# than seven. Everything below is currently clean tree-wide: these are
+# ratchets against regression, not a cleanup backlog.
+[workspace.lints.clippy]
+# Debugging scaffolding and unfinished code must never reach a release build.
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
 # Enable incremental compilation for faster rebuilds
 [profile.dev]
 incremental = true

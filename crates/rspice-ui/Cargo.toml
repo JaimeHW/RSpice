@@ -156,3 +156,6 @@ uuid = { version = "1", features = ["v4", "v5", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console"] }
 js-sys = "0.3"
+
+[lints]
+workspace = true
