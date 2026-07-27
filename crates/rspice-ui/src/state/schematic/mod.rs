@@ -40,6 +40,7 @@ mod symbol_gen;
 mod tool;
 mod undo_history;
 mod validated_revision;
+mod visibility;
 mod wire;
 
 // Re-export all public types for backwards compatibility
@@ -126,6 +127,11 @@ pub use validated_revision::{
     ValidatedRevisionDependency, ValidatedRevisionError, ValidatedRevisionJournal,
     ValidatedRevisionObjectDelta, ValidatedRevisionRequest, ValidatedRevisionSemanticDelta,
     ValidatedSchematicRevision, ValidatedSchematicRevisionId, ValidationFindingCounts,
+};
+pub use visibility::{
+    GridStyle, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
+    SchematicHierarchyVisibility, SchematicNetHighlighting, SchematicParameterLabelVisibility,
+    SchematicReviewMarkerVisibility, SchematicVisibilityPolicy, SchematicWireRoutingStyle,
 };
 pub use wire::{
     // Connection types

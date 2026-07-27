@@ -518,12 +518,12 @@ impl NetLabelPlacementDialogState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SchematicVisibilityDialogState {
     pub(crate) open: bool,
-    pub(crate) draft: crate::workbench::SchematicVisibilityPolicy,
-    pub(crate) original: crate::workbench::SchematicVisibilityPolicy,
+    pub(crate) draft: crate::state::SchematicVisibilityPolicy,
+    pub(crate) original: crate::state::SchematicVisibilityPolicy,
 }
 
 impl SchematicVisibilityDialogState {
-    pub(crate) fn open(&mut self, policy: crate::workbench::SchematicVisibilityPolicy) {
+    pub(crate) fn open(&mut self, policy: crate::state::SchematicVisibilityPolicy) {
         *self = Self {
             open: true,
             draft: policy,

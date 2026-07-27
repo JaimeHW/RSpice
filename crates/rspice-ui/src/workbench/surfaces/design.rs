@@ -307,7 +307,7 @@ fn breadcrumb(ctx: &Context, app: &RSpiceApp, content_rect: Rect) {
 }
 
 fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<String> {
-    use crate::workbench::SchematicHierarchyVisibility;
+    use crate::state::SchematicHierarchyVisibility;
 
     let active = &state.workspace.active_view;
     let visibility = if matches!(
@@ -472,7 +472,7 @@ fn check_note_content(state: &AppState) -> (String, CheckNoteTone) {
 /// operating point at all.
 fn historical_annotation_run(state: &AppState) -> Option<u64> {
     if state.ui.schematic_visibility.annotations
-        == crate::workbench::SchematicAnnotationVisibility::Hidden
+        == crate::state::SchematicAnnotationVisibility::Hidden
     {
         return None;
     }
@@ -553,14 +553,14 @@ mod tests {
         state.workspace.active_view = crate::state::CellViewRef::new("work", "bias", "schematic");
 
         state.ui.schematic_visibility.hierarchy =
-            crate::workbench::SchematicHierarchyVisibility::ActiveOnly;
+            crate::state::SchematicHierarchyVisibility::ActiveOnly;
         assert_eq!(
             hierarchy_breadcrumb_segments(&state),
             vec!["bias".to_owned(), "schematic".to_owned()]
         );
 
         state.ui.schematic_visibility.hierarchy =
-            crate::workbench::SchematicHierarchyVisibility::ActiveAndParent;
+            crate::state::SchematicHierarchyVisibility::ActiveAndParent;
         assert_eq!(
             hierarchy_breadcrumb_segments(&state),
             vec!["amp".to_owned(), "bias".to_owned(), "schematic".to_owned()]

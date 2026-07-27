@@ -430,7 +430,7 @@ fn write_component(
         // Component label
         if component
             .display_mode
-            .show_name(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+            .show_name(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
         {
             writeln!(
                 svg,
@@ -444,7 +444,7 @@ fn write_component(
 
         if component
             .display_mode
-            .show_value(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+            .show_value(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
             && !component.value.is_empty()
         {
             writeln!(

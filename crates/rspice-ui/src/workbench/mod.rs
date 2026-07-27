@@ -79,10 +79,7 @@ pub use preferences::{
 };
 pub use result_document::{ResultViewer, ResultsState};
 pub use session::{
-    GridStyle, InspectorEdit, SavedSelectionBulkFilter, SchematicAnnotationVisibility,
-    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
-    SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
-    SchematicWireRoutingStyle, SelectionBulkFilter, SelectionBulkFilterSession,
+    InspectorEdit, SavedSelectionBulkFilter, SelectionBulkFilter, SelectionBulkFilterSession,
     SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard, SymbolDocumentSnapshot,
     SymbolGridSpacing, SymbolSelection, SymbolTool, SymbolUiState, UiSessionState,
     UiSessionStateSer, mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about,

@@ -1,8 +1,8 @@
 use egui::{Painter, Rect, Stroke};
 
 use crate::common::app::{AppState, SchematicKeyboardFocus};
-use crate::state::{Component, DesignNote, DesignNoteKind, DesignReviewState, NetGraph, Point};
-use crate::workbench::{
+use crate::state::{
+    Component, DesignNote, DesignNoteKind, DesignReviewState, NetGraph, Point,
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
     SchematicReviewMarkerVisibility,
 };

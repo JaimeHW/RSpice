@@ -316,7 +316,7 @@ pub(super) fn draw_component(
     selected: bool,
     symbol_library: Option<&SymbolLibrary>,
     symbol_context: &SchematicSymbolContext,
-    parameter_labels: crate::workbench::SchematicParameterLabelVisibility,
+    parameter_labels: crate::state::SchematicParameterLabelVisibility,
 ) {
     // Component uses `pos` not `position`, `kind` not `component_type`
     let pos = viewport.schematic_to_screen(component.pos);
@@ -463,7 +463,7 @@ pub(super) fn draw_component(
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
     // terminals and component body, with name/value on opposite sides
     if resolved_cell_symbol.is_none()
-        && parameter_labels != crate::workbench::SchematicParameterLabelVisibility::Hidden
+        && parameter_labels != crate::state::SchematicParameterLabelVisibility::Hidden
     {
         draw_component_labels(painter, pos, scale, component, parameter_labels);
     }
@@ -773,7 +773,7 @@ fn draw_component_labels(
     pos: Pos2,
     scale: f32,
     component: &Component,
-    visibility: crate::workbench::SchematicParameterLabelVisibility,
+    visibility: crate::state::SchematicParameterLabelVisibility,
 ) {
     // Skip labels for Ground (too small, clutters schematic)
     if matches!(component.kind, crate::state::ComponentType::Ground) {

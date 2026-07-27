@@ -497,14 +497,14 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
     if !take_projected_tool_slot(ui, layout) {
         return;
     }
-    let grid_visible = app.state.ui.grid != crate::workbench::GridStyle::Off;
+    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
     let height = layout.toolbar_control_height;
     let response = ui.add(egui::Button::selectable(grid_visible, "").min_size(Vec2::splat(height)));
     if response.clicked() {
         Command::CycleGrid.execute(app);
     }
     response.context_menu(|ui| design_grid_and_snap_configuration(ui, app));
-    let grid_visible = app.state.ui.grid != crate::workbench::GridStyle::Off;
+    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
     let t = Tokens::get(ui.ctx());
     WorkbenchIcon::Grid.paint(
         ui.painter(),
@@ -529,7 +529,7 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
 fn design_grid_and_snap_configuration(ui: &mut egui::Ui, app: &mut RSpiceApp) {
     ui.set_min_width(236.0);
     toolbar_popover_heading(ui, "GRID DISPLAY");
-    for style in crate::workbench::GridStyle::ALL {
+    for style in crate::state::GridStyle::ALL {
         if toolbar_popover_option(ui, app.state.ui.grid == style, style.label()).clicked() {
             app.state.ui.set_grid_style(style);
         }
@@ -607,12 +607,12 @@ fn design_grid_and_snap_configuration(ui: &mut egui::Ui, app: &mut RSpiceApp) {
             app.state.ui.schematic_routing_mode = mode;
             app.state.ui.schematic_visibility.wire_routing = match mode {
                 WireRoutingMode::HorizontalFirst | WireRoutingMode::VerticalFirst => {
-                    crate::workbench::SchematicWireRoutingStyle::Orthogonal
+                    crate::state::SchematicWireRoutingStyle::Orthogonal
                 }
                 WireRoutingMode::FortyFiveDegree => {
-                    crate::workbench::SchematicWireRoutingStyle::FortyFiveDegree
+                    crate::state::SchematicWireRoutingStyle::FortyFiveDegree
                 }
-                WireRoutingMode::Diagonal => crate::workbench::SchematicWireRoutingStyle::FreeAngle,
+                WireRoutingMode::Diagonal => crate::state::SchematicWireRoutingStyle::FreeAngle,
             };
         }
     }

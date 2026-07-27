@@ -2927,7 +2927,7 @@ mod tests {
         app.state.workbench.workspace = Workspace::Design;
         app.state
             .ui
-            .set_grid_style(crate::workbench::GridStyle::Lines);
+            .set_grid_style(crate::state::GridStyle::Lines);
         app.state.schematic.snap_engine.enabled = true;
         app.state.schematic.snap_engine.snap_to_wire_segments = false;
         app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
@@ -2937,7 +2937,7 @@ mod tests {
 
         Command::CycleGrid.execute(&mut app);
 
-        assert_eq!(app.state.ui.grid, crate::workbench::GridStyle::Off);
+        assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
         assert!(!app.state.schematic.snap_engine.enabled);
         assert!(!app.state.ui.schematic_snap.enabled);
         assert!(
@@ -2947,7 +2947,7 @@ mod tests {
 
         Command::CycleGrid.execute(&mut app);
 
-        assert_eq!(app.state.ui.grid, crate::workbench::GridStyle::Lines);
+        assert_eq!(app.state.ui.grid, crate::state::GridStyle::Lines);
         assert!(app.state.schematic.snap_engine.enabled);
         assert!(app.state.ui.schematic_snap.enabled);
         assert!(!app.state.schematic.snap_engine.snap_to_wire_segments);

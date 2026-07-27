@@ -13,7 +13,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
-use crate::workbench::{
+use crate::state::{
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
     SchematicNetHighlighting, SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
     SchematicVisibilityPolicy, SchematicWireRoutingStyle,

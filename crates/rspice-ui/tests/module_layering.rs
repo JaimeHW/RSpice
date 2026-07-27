@@ -98,9 +98,9 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("workbench", "common", 294),
     // The persisted project model still reaches up for hardcopy source sets
     // and the netlist document. Each module that moves down lowers this
-    // count: it started at 39, `engineering_table` took it to 37, and the
-    // page-setup contract took it to 16.
-    ("state", "workbench", 16),
+    // count: it started at 39, `engineering_table` took it to 37, the
+    // page-setup contract to 16, and the schematic visibility policy to 9.
+    ("state", "workbench", 9),
     ("state", "simulation", 26),
     ("state", "properties", 10),
     ("state", "services", 7),

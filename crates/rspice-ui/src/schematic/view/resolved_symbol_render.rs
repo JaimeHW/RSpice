@@ -22,7 +22,7 @@ pub(crate) fn draw_resolved_symbol(
         component,
         symbol,
         stroke,
-        crate::workbench::SchematicParameterLabelVisibility::NamesAndValues,
+        crate::state::SchematicParameterLabelVisibility::NamesAndValues,
     );
 }
 
@@ -33,7 +33,7 @@ pub(crate) fn draw_resolved_symbol_with_visibility(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     stroke: Stroke,
-    parameter_labels: crate::workbench::SchematicParameterLabelVisibility,
+    parameter_labels: crate::state::SchematicParameterLabelVisibility,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
     draw_symbol_pins(painter, origin, scale, component, symbol, stroke.color);
@@ -174,7 +174,7 @@ fn draw_symbol_labels(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     color: Color32,
-    visibility: crate::workbench::SchematicParameterLabelVisibility,
+    visibility: crate::state::SchematicParameterLabelVisibility,
 ) {
     let font_size = (9.0 * scale).max(1.0);
     if font_size < 4.0 {
@@ -339,7 +339,7 @@ fn write_symbol_labels_svg(
 ) {
     if component
         .display_mode
-        .show_name(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+        .show_name(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
         && !component.name.is_empty()
     {
         let (x, y) = to_svg_symbol(component, symbol, symbol.document().name_anchor, config);
@@ -356,7 +356,7 @@ fn write_symbol_labels_svg(
     };
     if component
         .display_mode
-        .show_value(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+        .show_value(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
         && !value.is_empty()
     {
         let (x, y) = to_svg_symbol(component, symbol, symbol.document().value_anchor, config);

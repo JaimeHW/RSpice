@@ -20,7 +20,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
-use crate::workbench::SchematicHierarchyVisibility;
+use crate::state::SchematicHierarchyVisibility;
 
 use crate::common::app::{AppState, ConsoleMessage, RSpiceApp, SchematicEditAuthority};
 

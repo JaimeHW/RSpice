@@ -60,12 +60,12 @@ impl ComponentDisplayMode {
 
     pub const fn show_name(
         self,
-        inherited: crate::workbench::SchematicParameterLabelVisibility,
+        inherited: crate::state::SchematicParameterLabelVisibility,
     ) -> bool {
         match self {
             Self::Inherit => matches!(
                 inherited,
-                crate::workbench::SchematicParameterLabelVisibility::NamesAndValues
+                crate::state::SchematicParameterLabelVisibility::NamesAndValues
             ),
             Self::NameAndValue | Self::NameOnly => true,
             Self::ValueOnly | Self::Hidden => false,
@@ -74,12 +74,12 @@ impl ComponentDisplayMode {
 
     pub const fn show_value(
         self,
-        inherited: crate::workbench::SchematicParameterLabelVisibility,
+        inherited: crate::state::SchematicParameterLabelVisibility,
     ) -> bool {
         match self {
             Self::Inherit => !matches!(
                 inherited,
-                crate::workbench::SchematicParameterLabelVisibility::Hidden
+                crate::state::SchematicParameterLabelVisibility::Hidden
             ),
             Self::NameAndValue | Self::ValueOnly => true,
             Self::NameOnly | Self::Hidden => false,
@@ -718,15 +718,15 @@ mod tests {
         assert!(ComponentDisplayMode::parse("sometimes").is_none());
         assert!(
             !ComponentDisplayMode::Inherit
-                .show_name(crate::workbench::SchematicParameterLabelVisibility::ValuesOnly)
+                .show_name(crate::state::SchematicParameterLabelVisibility::ValuesOnly)
         );
         assert!(
             ComponentDisplayMode::Inherit
-                .show_value(crate::workbench::SchematicParameterLabelVisibility::ValuesOnly)
+                .show_value(crate::state::SchematicParameterLabelVisibility::ValuesOnly)
         );
         assert!(
             !ComponentDisplayMode::Hidden
-                .show_value(crate::workbench::SchematicParameterLabelVisibility::NamesAndValues)
+                .show_value(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
         );
     }
     use crate::state::{
