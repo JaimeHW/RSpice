@@ -326,6 +326,24 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (self.db[left_product_left][axis] * left_product_right_value + left_product_left_value * self.db[left_product_right][axis]) * left_scale + (self.db[right_product_left][axis] * right_product_right_value + right_product_left_value * self.db[right_product_right][axis]) * right_scale; }
     }
 
+    #[inline(never)]
+    pub(crate) fn store_add_scaled_sub_square_product_mixed_ia(&mut self, index: usize, sub_left: usize, sub_right: usize, square_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        self.mark_derivatives_dirty(index);
+        let sub_left_value = self.v[sub_left];
+        let sub_right_value = self.v[sub_right];
+        let sub_left_dn = self.dn[sub_left];
+        let sub_right_dn = self.dn[sub_right];
+        let sub_left_db = self.db[sub_left];
+        let sub_right_db = self.db[sub_right];
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        let sub_value = sub_left_value - sub_right_value;
+        let product_right_value = product_right.value;
+        self.v[index] = sub_value * sub_value * square_scale + product_left_value * product_right_value * product_scale;
+        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { let sub_derivative = sub_left_dn[axis] - sub_right_dn[axis]; self.dn[index][axis] = 2.0 * sub_value * sub_derivative * square_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { let sub_derivative = sub_left_db[axis] - sub_right_db[axis]; self.db[index][axis] = 2.0 * sub_value * sub_derivative * square_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
+    }
 
 
 
@@ -1212,6 +1230,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (left.dn[axis] + right.dn[axis]) * scale; }
         let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (left.db[axis] + right.db[axis]) * scale; }
     }
+
+    #[inline(never)]
+    pub(crate) fn store_scaled_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize, scale: f64) {
+        self.mark_derivatives_dirty(index);
+        self.v[index] = (self.v[left] + offset + self.v[right]) * scale;
+        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (self.dn[left][axis] + self.dn[right][axis]) * scale; }
+        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (self.db[left][axis] + self.db[right][axis]) * scale; }
+    }
+
 
     #[inline(never)]
     pub(crate) fn store_scaled_sub_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
@@ -2198,8 +2225,31 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
 
+    #[inline]
+    pub(crate) fn store_scaled_add_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64) {
+        self.store_scaled_add_sub_sqrt_square_offset_rhs(index, left, source, offset, scale, 1.0);
+    }
 
+    #[inline]
+    pub(crate) fn store_scaled_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64) {
+        self.store_scaled_add_sub_sqrt_square_offset_rhs(index, left, source, offset, scale, -1.0);
+    }
 
+    #[inline(never)]
+    pub(crate) fn store_scaled_add_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64, rhs_sign: f64) {
+        self.mark_derivatives_dirty(index);
+        let left_value = self.v[left];
+        let source_value = self.v[source];
+        let left_dn = self.dn[left];
+        let source_dn = self.dn[source];
+        let left_db = self.db[left];
+        let source_db = self.db[source];
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let rhs_derivative_scale = source_value / rhs_value;
+        self.v[index] = (left_value + rhs_sign * rhs_value) * scale;
+        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (left_dn[axis] + rhs_sign * source_dn[axis] * rhs_derivative_scale) * scale; }
+        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (left_db[axis] + rhs_sign * source_db[axis] * rhs_derivative_scale) * scale; }
+    }
 
     #[inline(never)]
     pub(crate) fn store_scaled_add_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
@@ -10539,19 +10589,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_add_scaled_square_product_mixed_aia(&mut self, index: usize, square_value: AdValue<NODE_COUNT, BRANCH_COUNT>, square_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let square_raw = square_value.value;
-        let product_left_value = self.v[product_left];
-        let product_right_value = product_right.value;
-        let square_term = square_raw * square_raw * square_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        let square_derivative_scale = 2.0 * square_raw * square_scale;
-        self.v[index] = square_term + product_term;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = square_value.dn[axis] * square_derivative_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = square_value.db[axis] * square_derivative_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
-    }
 
 
 
@@ -11066,6 +11103,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
+
+
     #[inline(never)]
     pub(crate) fn store_primal_scaled_mul_scale_offset_inputs(&mut self, index: usize, left: usize, left_scale: f64, left_offset: f64, right: usize, right_scale: f64, right_offset: f64, output_scale: f64) {
         let left_raw = self.v[left];
@@ -11396,7 +11435,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
+    #[inline]
+    pub(crate) fn store_primal_scaled_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64) {
+        self.store_primal_scaled_add_sub_sqrt_square_offset_rhs(index, left, source, offset, scale, -1.0);
+    }
 
+    #[inline]
+    pub(crate) fn store_primal_scaled_add_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64, rhs_sign: f64) {
+        let left_value = self.v[left];
+        let source_value = self.v[source];
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let rhs_derivative_scale = source_value / rhs_value;
+        self.v[index] = (left_value + rhs_sign * rhs_value) * scale;
+    }
 
     #[inline]
     pub(crate) fn store_primal_scaled_add_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
@@ -12561,10 +12612,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = (self.v[left] + right.value) * scale;
     }
 
-    #[inline]
-    pub(crate) fn store_primal_scaled_sub_mixed_ia(&mut self, index: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
-        self.v[index] = (self.v[left] - right.value) * scale;
-    }
 
 
 
@@ -14081,6 +14128,24 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (self.db[left_product_left][axis] * left_product_right_value + left_product_left_value * self.db[left_product_right][axis]) * left_scale + (self.db[right_product_left][axis] * right_product_right_value + right_product_left_value * self.db[right_product_right][axis]) * right_scale; }
     }
 
+    #[inline(never)]
+    pub(crate) fn store_add_scaled_sub_square_product_mixed_ia(&mut self, index: usize, sub_left: usize, sub_right: usize, square_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
+        self.mark_derivatives_dirty(index);
+        let sub_left_value = self.v[sub_left];
+        let sub_right_value = self.v[sub_right];
+        let sub_left_dn = self.dn[sub_left];
+        let sub_right_dn = self.dn[sub_right];
+        let sub_left_db = self.db[sub_left];
+        let sub_right_db = self.db[sub_right];
+        let product_left_value = self.v[product_left];
+        let product_left_dn = self.dn[product_left];
+        let product_left_db = self.db[product_left];
+        let sub_value = sub_left_value - sub_right_value;
+        let product_right_value = product_right.value;
+        self.v[index] = sub_value * sub_value * square_scale + product_left_value * product_right_value * product_scale;
+        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { let sub_derivative = sub_left_dn[axis] - sub_right_dn[axis]; self.dn[index][axis] = 2.0 * sub_value * sub_derivative * square_scale + (product_left_dn[axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
+        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { let sub_derivative = sub_left_db[axis] - sub_right_db[axis]; self.db[index][axis] = 2.0 * sub_value * sub_derivative * square_scale + (product_left_db[axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
+    }
 
 
 
@@ -14967,6 +15032,15 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (left.dn[axis] + right.dn[axis]) * scale; }
         let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (left.db[axis] + right.db[axis]) * scale; }
     }
+
+    #[inline(never)]
+    pub(crate) fn store_scaled_add_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize, scale: f64) {
+        self.mark_derivatives_dirty(index);
+        self.v[index] = (self.v[left] + offset + self.v[right]) * scale;
+        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (self.dn[left][axis] + self.dn[right][axis]) * scale; }
+        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (self.db[left][axis] + self.db[right][axis]) * scale; }
+    }
+
 
     #[inline(never)]
     pub(crate) fn store_scaled_sub_ad(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
@@ -15953,8 +16027,31 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
 
+    #[inline]
+    pub(crate) fn store_scaled_add_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64) {
+        self.store_scaled_add_sub_sqrt_square_offset_rhs(index, left, source, offset, scale, 1.0);
+    }
 
+    #[inline]
+    pub(crate) fn store_scaled_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64) {
+        self.store_scaled_add_sub_sqrt_square_offset_rhs(index, left, source, offset, scale, -1.0);
+    }
 
+    #[inline(never)]
+    pub(crate) fn store_scaled_add_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64, rhs_sign: f64) {
+        self.mark_derivatives_dirty(index);
+        let left_value = self.v[left];
+        let source_value = self.v[source];
+        let left_dn = self.dn[left];
+        let source_dn = self.dn[source];
+        let left_db = self.db[left];
+        let source_db = self.db[source];
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let rhs_derivative_scale = source_value / rhs_value;
+        self.v[index] = (left_value + rhs_sign * rhs_value) * scale;
+        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (left_dn[axis] + rhs_sign * source_dn[axis] * rhs_derivative_scale) * scale; }
+        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (left_db[axis] + rhs_sign * source_db[axis] * rhs_derivative_scale) * scale; }
+    }
 
     #[inline(never)]
     pub(crate) fn store_scaled_add_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
@@ -24294,19 +24391,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_add_scaled_square_product_mixed_aia(&mut self, index: usize, square_value: AdValue<NODE_COUNT, BRANCH_COUNT>, square_scale: f64, product_left: usize, product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, product_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let square_raw = square_value.value;
-        let product_left_value = self.v[product_left];
-        let product_right_value = product_right.value;
-        let square_term = square_raw * square_raw * square_scale;
-        let product_term = product_left_value * product_right_value * product_scale;
-        let square_derivative_scale = 2.0 * square_raw * square_scale;
-        self.v[index] = square_term + product_term;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = square_value.dn[axis] * square_derivative_scale + (self.dn[product_left][axis] * product_right_value + product_left_value * product_right.dn[axis]) * product_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = square_value.db[axis] * square_derivative_scale + (self.db[product_left][axis] * product_right_value + product_left_value * product_right.db[axis]) * product_scale; }
-    }
 
 
 
@@ -24821,6 +24905,8 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
+
+
     #[inline(never)]
     pub(crate) fn store_primal_scaled_mul_scale_offset_inputs(&mut self, index: usize, left: usize, left_scale: f64, left_offset: f64, right: usize, right_scale: f64, right_offset: f64, output_scale: f64) {
         let left_raw = self.v[left];
@@ -25151,7 +25237,19 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
+    #[inline]
+    pub(crate) fn store_primal_scaled_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64) {
+        self.store_primal_scaled_add_sub_sqrt_square_offset_rhs(index, left, source, offset, scale, -1.0);
+    }
 
+    #[inline]
+    pub(crate) fn store_primal_scaled_add_sub_sqrt_square_offset_rhs(&mut self, index: usize, left: usize, source: usize, offset: f64, scale: f64, rhs_sign: f64) {
+        let left_value = self.v[left];
+        let source_value = self.v[source];
+        let rhs_value = (source_value * source_value + offset).sqrt();
+        let rhs_derivative_scale = source_value / rhs_value;
+        self.v[index] = (left_value + rhs_sign * rhs_value) * scale;
+    }
 
     #[inline]
     pub(crate) fn store_primal_scaled_add_sqrt_square_offset_ad(&mut self, index: usize, source: AdValue<NODE_COUNT, BRANCH_COUNT>, offset: f64, scale: f64) {
@@ -26316,10 +26414,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         self.v[index] = (self.v[left] + right.value) * scale;
     }
 
-    #[inline]
-    pub(crate) fn store_primal_scaled_sub_mixed_ia(&mut self, index: usize, left: usize, right: AdValue<NODE_COUNT, BRANCH_COUNT>, scale: f64) {
-        self.v[index] = (self.v[left] - right.value) * scale;
-    }
 
 
 

@@ -88,7 +88,7 @@ impl Instance {
     ) {
         if s.b[2340] {s.store_mul(2082, 2077, 2073);s.store_add(2087, 2080, 2082);s.store_add_scaled_product_mixed_iia(2088, 2087, 1.0, 761, A::sqrt(s.ad_value(2087)), 1.0);s.store_add(2089, 2088, 2081);s.store_offset_div_scaled_inputs_sqrt_rhs(2090, 761, 1.0, 2087, 2.0, 1.0);s.store_div_from_scalar(2091, 1.0, 2090);s.store_sub(2092, 1880, 2089);}
         s.b[2341] = (s.v[2092] > (-12.0));s.store_scalar(2341, if s.b[2341] { 1.0 } else { 0.0 });
-        if (s.b[2340] && s.b[2341]) {s.store_offset_add(2093, 2092, 725, (-1.0));s.store_scaled_add_mixed_ia(2094, 2093, A::sqrt_square_offset(s.ad_value(2093), 10.0), 0.5);s.store_add_mixed_ai(2095, A::add_scaled_product(s.ad_value(2092), 1.0, s.ad_value(2090), A::ln(s.ad_value(2094)), (-1.0)), 725);s.store_scaled_add_mixed_ia(2096, 2095, A::sqrt_square_offset(s.ad_value(2095), 2.0), 0.5);}
+        if (s.b[2340] && s.b[2341]) {s.store_offset_add(2093, 2092, 725, (-1.0));s.store_scaled_add_sqrt_square_offset_rhs(2094, 2093, 2093, 10.0, 0.5);s.store_add_mixed_ai(2095, A::add_scaled_product(s.ad_value(2092), 1.0, s.ad_value(2090), A::ln(s.ad_value(2094)), (-1.0)), 725);s.store_scaled_add_sqrt_square_offset_rhs(2096, 2095, 2095, 2.0, 0.5);}
         s.b[2342] = ((s.v[2092] - s.v[2096]) < 230.25850929940458);s.store_scalar(2342, if s.b[2342] { 1.0 } else { 0.0 });
         if ((s.b[2340] && s.b[2341]) && s.b[2342]) {s.store_exp_sub(2097, 2092, 2096);}
         if ((s.b[2340] && s.b[2341]) && (!s.b[2342])) {s.store_scaled_softlimit_poly_offset_lhs_ad(2097, A::sub(s.ad_value(2092), s.ad_value(2096)), (-230.25850929940458), 0.3333333333333333, (((((-230.25850929940458)) * (0.3333333333333333))) + (1.0)), 0.5, 1.0, 1.0, 1e100);}
@@ -103,14 +103,14 @@ impl Instance {
         if (s.b[2340] && s.b[2344]) {s.store_mul_scale_offset_indices(1881, 2083, 2027, 1.0, (-1.0));s.store_add(2085, 1881, 2083);}
         if (s.b[2340] && (!s.b[2344])) {s.store_add(2087, 2080, 2084);s.store_add_scaled_product_mixed_iia(2088, 2087, 1.0, 761, A::sqrt(s.ad_value(2087)), 1.0);s.store_add(2089, 2088, 2081);s.store_offset_div_scaled_inputs_sqrt_rhs(2090, 761, 1.0, 2087, 2.0, 1.0);s.store_div_from_scalar(2091, 1.0, 2090);s.store_sub(2092, 1880, 2089);}
         s.b[2346] = (s.v[2092] > (-12.0));s.store_scalar(2346, if s.b[2346] { 1.0 } else { 0.0 });
-        if ((s.b[2340] && (!s.b[2344])) && s.b[2346]) {s.store_offset_add(2093, 2092, 725, (-1.0));s.store_scaled_add_mixed_ia(2094, 2093, A::sqrt_square_offset(s.ad_value(2093), 10.0), 0.5);}
+        if ((s.b[2340] && (!s.b[2344])) && s.b[2346]) {s.store_offset_add(2093, 2092, 725, (-1.0));s.store_scaled_add_sqrt_square_offset_rhs(2094, 2093, 2093, 10.0, 0.5);}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_42(
         s: &mut ReactiveScratch,
         p: &Parameters,
     ) {
-        if ((s.b[2340] && (!s.b[2344])) && s.b[2346]) {s.store_add_mixed_ai(2095, A::add_scaled_product(s.ad_value(2092), 1.0, s.ad_value(2090), A::ln(s.ad_value(2094)), (-1.0)), 725);s.store_scaled_add_mixed_ia(2096, 2095, A::sqrt_square_offset(s.ad_value(2095), 2.0), 0.5);}
+        if ((s.b[2340] && (!s.b[2344])) && s.b[2346]) {s.store_add_mixed_ai(2095, A::add_scaled_product(s.ad_value(2092), 1.0, s.ad_value(2090), A::ln(s.ad_value(2094)), (-1.0)), 725);s.store_scaled_add_sqrt_square_offset_rhs(2096, 2095, 2095, 2.0, 0.5);}
         s.b[2347] = ((s.v[2092] - s.v[2096]) < 230.25850929940458);s.store_scalar(2347, if s.b[2347] { 1.0 } else { 0.0 });
         if (((s.b[2340] && (!s.b[2344])) && s.b[2346]) && s.b[2347]) {s.store_exp_sub(2097, 2092, 2096);}
         if (((s.b[2340] && (!s.b[2344])) && s.b[2346]) && (!s.b[2347])) {s.store_scaled_softlimit_poly_offset_lhs_ad(2097, A::sub(s.ad_value(2092), s.ad_value(2096)), (-230.25850929940458), 0.3333333333333333, (((((-230.25850929940458)) * (0.3333333333333333))) + (1.0)), 0.5, 1.0, 1.0, 1e100);}
@@ -179,7 +179,7 @@ impl Instance {
     pub(super) fn stamp_reactive_block_45(
         s: &mut ReactiveScratch,
     ) {
-        if ((s.b[2547] && s.b[2548]) && s.b[2555]) {s.store_offset_mul(2427, 2424, 2426, (-1.0));s.store_scaled_add_mixed_ia(2027, 2427, A::sqrt_square_offset(s.ad_value(2427), 10.0), 0.5);s.store_sub_mixed_ia(2428, 2426, A::ln(s.ad_value(2027)));s.store_scaled_add_mixed_ia(2429, 2428, A::sqrt_square_offset(s.ad_value(2428), 2.0), 0.5);}
+        if ((s.b[2547] && s.b[2548]) && s.b[2555]) {s.store_offset_mul(2427, 2424, 2426, (-1.0));s.store_scaled_add_sqrt_square_offset_rhs(2027, 2427, 2427, 10.0, 0.5);s.store_sub_mixed_ia(2428, 2426, A::ln(s.ad_value(2027)));s.store_scaled_add_sqrt_square_offset_rhs(2429, 2428, 2428, 2.0, 0.5);}
         s.b[2556] = ((s.v[2426] - s.v[2429]) < 230.25850929940458);s.store_scalar(2556, if s.b[2556] { 1.0 } else { 0.0 });
         if (((s.b[2547] && s.b[2548]) && s.b[2555]) && s.b[2556]) {s.store_exp_sub(2027, 2426, 2429);}
         if (((s.b[2547] && s.b[2548]) && s.b[2555]) && (!s.b[2556])) {s.store_scaled_softlimit_poly_offset_lhs_ad(2027, A::sub(s.ad_value(2426), s.ad_value(2429)), (-230.25850929940458), 0.3333333333333333, (((((-230.25850929940458)) * (0.3333333333333333))) + (1.0)), 0.5, 1.0, 1.0, 1e100);}
@@ -293,7 +293,7 @@ impl Instance {
         if (((s.b[2547] && s.b[2575]) && s.b[2576]) && (!s.b[2577])) {s.store_scale(2029, 2027, 0.5);}
         if ((s.b[2547] && s.b[2575]) && s.b[2576]) {s.store_mul(2464, 2029, 2463);}
         s.b[2579] = ((s.v[706] > 0.0) && (s.v[707] > 0.0));s.store_scalar(2579, if s.b[2579] { 1.0 } else { 0.0 });
-        if (((s.b[2547] && s.b[2575]) && s.b[2576]) && s.b[2579]) {s.store_scaled_mul(2465, 2413, 2464, 0.475);s.store_add_scaled_product_indices(2027, 2450, 1.0, 2447, 2465, (-1.0));s.store_scaled_add_mixed_ia(2466, 2027, A::sqrt_square_offset(s.ad_value(2027), 1e-12), 0.5);}
+        if (((s.b[2547] && s.b[2575]) && s.b[2576]) && s.b[2579]) {s.store_scaled_mul(2465, 2413, 2464, 0.475);s.store_add_scaled_product_indices(2027, 2450, 1.0, 2447, 2465, (-1.0));s.store_scaled_add_sqrt_square_offset_rhs(2466, 2027, 2027, 1e-12, 0.5);}
     }
     #[inline(never)]
     pub(super) fn stamp_reactive_block_51(
