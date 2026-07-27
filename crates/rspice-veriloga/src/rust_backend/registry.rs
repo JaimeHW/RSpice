@@ -1,3 +1,16 @@
+//! Assigning each generated device its unique name in `registry.rs`.
+//!
+//! Model names are not unique across a corpus — the same compact model ships
+//! in several PDKs, sometimes at different revisions. When a public name is
+//! claimed more than once, every claimant is disambiguated by a prefix of its
+//! source digest, so a name never silently resolves to whichever copy was
+//! generated last.
+//!
+//! Disambiguation is applied to *all* colliding devices rather than to all but
+//! the first, and suffixed names are still checked against names already
+//! reserved by unique models, so the mapping stays stable when an unrelated
+//! model is added or removed.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::GeneratedRustDevice;

@@ -1,3 +1,14 @@
+//! The `manifest.txt` recording what was generated and from what.
+//!
+//! The manifest is the record `check-builtins` reads to decide whether the
+//! checked-in output is current: it pairs a digest of the model sources with
+//! the generator's own source digest, so a change to either side is detected.
+//! It also lists every emitted file and the backend tier each device took,
+//! which is what makes a regression off the scalar tier visible in review.
+//!
+//! Rendering and parsing are both here and both exact — an unparseable
+//! manifest is treated as stale rather than guessed at.
+
 use super::RustBackendSelection;
 
 pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 3;

@@ -119,7 +119,7 @@ impl LookupTable {
     }
 
     /// Binary search to find the interval containing x
-    /// Returns index i such that x_data[i] <= x < x_data[i+1]
+    /// Returns index `i` such that `x_data[i] <= x < x_data[i+1]`
     #[inline]
     fn find_interval(&self, x: f64) -> usize {
         // Binary search for the insertion point

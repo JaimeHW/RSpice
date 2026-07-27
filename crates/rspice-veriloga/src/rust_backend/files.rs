@@ -1,3 +1,15 @@
+//! Writing generated devices to disk without churning the working tree.
+//!
+//! [`write_text_file_if_changed`] compares before writing, so regenerating an
+//! unchanged corpus leaves mtimes alone and does not trigger a rebuild.
+//! [`cleanup_stale_generated_device_folders`] removes devices that are no
+//! longer generated — without it a renamed or dropped model would linger in
+//! `veriloga_generated/` and keep compiling.
+//!
+//! Paths are validated before anything is removed: generated folder names must
+//! be single, normal components, so a malformed name cannot direct a delete
+//! outside the generated root.
+
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 

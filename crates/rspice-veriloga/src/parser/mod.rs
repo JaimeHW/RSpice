@@ -410,7 +410,7 @@ impl<'a> Parser<'a> {
         Ok(branches)
     }
 
-    /// Parse port declaration: input/output/inout [discipline] names;
+    /// Parse port declaration: `input/output/inout [discipline] names;`
     fn parse_port_declaration(&mut self) -> Result<PortDeclaration, ParseError> {
         let start = self.current_span();
         let direction = match self.current().kind {
@@ -579,7 +579,7 @@ impl<'a> Parser<'a> {
         (description, units)
     }
 
-    /// Parse a single range bound: [lb:ub], (lb:ub), [lb:ub), (lb:ub]
+    /// Parse a single range bound: `[lb:ub]`, `(lb:ub)`, `[lb:ub)`, `(lb:ub]`
     fn parse_range_bound(&mut self) -> Result<RangeBound, ParseError> {
         let start = self.current_span();
 
@@ -772,7 +772,7 @@ impl<'a> Parser<'a> {
 
     /// Parse analog function declaration
     ///
-    /// Syntax: analog function [return_type] function_name;
+    /// Syntax: `analog function [return_type] function_name;`
     ///            input/output declarations;
     ///            variable declarations;
     ///            begin ... end

@@ -1,3 +1,14 @@
+//! Emitting the noise evaluation path for a generated device.
+//!
+//! Noise PSDs are evaluated at the operating point, so most of a device's
+//! statements are irrelevant to them. This module works backwards from the
+//! noise sources through a liveness index to select only the statements their
+//! powers actually depend on, then emits that reduced schedule — merged into
+//! the main schedule where the two overlap, so shared work is computed once.
+//!
+//! Selecting rather than re-running everything is what keeps `.noise` from
+//! paying the cost of a full device evaluation per frequency point.
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 

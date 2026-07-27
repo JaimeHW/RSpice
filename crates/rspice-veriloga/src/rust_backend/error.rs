@@ -1,3 +1,9 @@
+//! Errors raised while generating Rust from canonical IR.
+//!
+//! A [`RustBackendError`] always names the source file and module it came
+//! from, because generation runs over a whole corpus and an error that does
+//! not identify its device is not actionable.
+
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

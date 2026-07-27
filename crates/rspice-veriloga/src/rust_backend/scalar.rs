@@ -1,3 +1,16 @@
+//! The direct scalar emitter: OptIR as straight-line Rust.
+//!
+//! The preferred backend tier. Each OptIR value becomes a `let` binding, in
+//! schedule order, with derivative lanes emitted alongside — no interpreter,
+//! no indirection, nothing for LLVM to see through. On the models it can
+//! handle this produces the fastest generated devices by a wide margin.
+//!
+//! Its cost is code size, which is why emission is careful about what it
+//! repeats: values whose [`InvalidationClass`] makes them static are hoisted
+//! into a per-instance cache instead of being
+//! recomputed per Newton iteration, and long derivative chains are handed to
+//! [`super::compact`] to be folded into fused helper calls.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::opt::LIMEXP_MAX;

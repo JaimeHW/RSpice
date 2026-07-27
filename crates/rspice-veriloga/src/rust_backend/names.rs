@@ -1,3 +1,13 @@
+//! Turning Verilog-A module names into legal, stable Rust names.
+//!
+//! Verilog-A identifiers routinely collide with Rust keywords or contain
+//! characters Rust does not allow in a path, so every generated type, folder,
+//! and model name passes through [`sanitize_identifier`] first.
+//!
+//! Sanitization is deterministic, which matters more than readability: these
+//! names appear in checked-in file paths, so the same module must always
+//! produce the same name or every regeneration would churn the tree.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustDeviceNames {
     pub public_model_name: String,

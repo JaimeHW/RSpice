@@ -1,3 +1,15 @@
+//! Lowering canonical IR expressions to Rust expression text.
+//!
+//! Every emitter in this backend ultimately calls in here to turn an OptIR
+//! value into a Rust expression, together with the derivative lanes that value
+//! contributes to. A [`LoweredExpr`] therefore carries more than a string: it
+//! reports which scratch values and which state slots the expression needs, so
+//! the caller can declare them before use.
+//!
+//! Branch currents and `ddt` slots get dedicated handling because they are the
+//! two cases where an expression's value depends on solver state rather than
+//! on other emitted values.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::{

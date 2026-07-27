@@ -1,3 +1,15 @@
+//! Finding the Verilog-A sources in a model tree and how to preprocess them.
+//!
+//! [`discover_veriloga_sources`] scans for `.va` sources and reports the
+//! modules each declares. Two on-disk markers steer it: a directory holding
+//! `.rspice-veriloga-skip` is excluded entirely, and a
+//! `.rspice-veriloga-profile` file supplies the [`VerilogACompileProfile`] —
+//! the `defines`/`undefines` a source needs to preprocess at all, which for
+//! foundry releases is often not optional.
+//!
+//! Results are sorted, since discovery order determines generation order and
+//! generation has to be reproducible.
+
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 

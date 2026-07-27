@@ -1,3 +1,32 @@
+//! Offline Verilog-A-to-Rust backend for the generated built-in devices.
+//!
+//! Unlike the VM and the JIT, nothing here runs during a simulation. This
+//! backend takes canonical IR and emits Rust source, which is checked into
+//! `rspice-core/src/device/veriloga_generated/` and compiled as ordinary code
+//! by the `veriloga-builtins` feature — a build that uses generated built-ins
+//! does not link this crate at all. The [`crate`] README documents the
+//! `rspice-veriloga-gen` binary that drives it.
+//!
+//! ## Backend tiers
+//!
+//! [`RustBackendSelection`] records how a device was emitted. `ScalarOptIr` is
+//! the target: OptIR lowered to straight-line scalar Rust, which optimizes
+//! best. Models whose derivative structure makes that impractical fall back
+//! through sparse-local and structured kernels to the legacy device emitter,
+//! and every fallback is reported as a [`BuiltinBackendFallbackReason`] rather
+//! than silently taken. Setting `RSPICE_RUST_BACKEND_REQUIRE_SCALAR_BUILTINS`
+//! turns any fallback into a hard error.
+//!
+//! ## Determinism
+//!
+//! Generation must be reproducible, because staleness is detected by digest
+//! rather than by timestamp: the manifest pairs a digest of the model sources
+//! with `RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST`, computed in `build.rs` over
+//! this crate's own source, so editing the generator invalidates its output
+//! exactly as editing a model does. Emission is therefore ordered, writes are
+//! skipped when content is unchanged, and stale device folders are removed
+//! rather than left behind.
+
 mod builtins;
 mod compact;
 mod device;

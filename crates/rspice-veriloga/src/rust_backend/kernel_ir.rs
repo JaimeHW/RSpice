@@ -1,3 +1,15 @@
+//! Sizing a model to choose which backend tier can emit it.
+//!
+//! Before emission, the model is measured: how many scalar values and
+//! derivative entries it would expand to, how many control regions and runtime
+//! loops it contains, how wide its derivative lanes are. The resulting
+//! `RustKernelPlan` — in particular the scalar expansion ratio — is what
+//! decides between the direct scalar, sparse-local, and structured tiers.
+//!
+//! The measurement exists because the scalar tier is the fastest but expands
+//! superlinearly on models with dense derivative structure. Planning it up
+//! front turns "emit and hope it compiles" into a deliberate, reported choice.
+
 use std::collections::HashSet;
 
 use crate::canonical_ir::{

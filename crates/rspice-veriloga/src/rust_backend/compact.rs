@@ -1,3 +1,16 @@
+//! Peephole rewrites that shrink emitted derivative arithmetic.
+//!
+//! The scalar backend emits derivative terms one operation at a time, which
+//! produces long chains of multiply-add over scratch values. This module
+//! recognizes those chains in the already-emitted Rust text and folds them
+//! into the fused runtime helpers, so the generated file stays small enough to
+//! compile quickly.
+//!
+//! Matching on emitted text rather than on IR is deliberate: the patterns
+//! worth fusing only become apparent after emission has chosen scratch slots.
+//! It also means every rewrite must be conservative — anything not recognized
+//! exactly is left as-is.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CompactAdExpr<'a> {
     Scratch(usize),

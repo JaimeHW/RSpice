@@ -1,3 +1,16 @@
+//! Emission of a generated device: the module, its state, and its stamps.
+//!
+//! This is where a canonical IR model becomes the Rust type `rspice-core`
+//! instantiates — parameter table, per-instance state, and the evaluate/stamp
+//! entry points for each analysis. It also renders the shared runtime support
+//! module the generated devices call into, so that arithmetic common to every
+//! device lives in one place rather than being duplicated per model.
+//!
+//! By far the largest module in the backend, because a stamp plan has to be
+//! specialized per model: which terminals pair, which derivative lanes are
+//! live, and which helper signature fits determine the code emitted for every
+//! device individually.
+
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap, HashSet, VecDeque},

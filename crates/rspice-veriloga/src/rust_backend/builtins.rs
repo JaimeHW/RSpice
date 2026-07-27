@@ -1,3 +1,18 @@
+//! Whole-corpus generation: discover, compile, emit, write, manifest.
+//!
+//! The orchestration layer behind `rspice-veriloga-gen`. It walks a model
+//! tree, compiles each module to canonical IR, emits a device through the best
+//! available backend tier, writes the result, and records what happened in
+//! `manifest.txt`.
+//!
+//! Two properties matter more than speed here. Generation is *complete*: a
+//! full regeneration rewrites every device plus `registry.rs` and the
+//! manifest, which is why subset generation is a separate entry point that
+//! refuses to touch either. And it is *accountable*: every device that could
+//! not take the scalar backend surfaces a [`BuiltinBackendFallbackReason`],
+//! and `REQUIRE_SCALAR_BUILTINS_ENV` promotes those to errors so a silent
+//! regression off the fast tier cannot land.
+
 use std::collections::VecDeque;
 use std::env;
 use std::fmt::Write;
