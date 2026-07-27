@@ -1980,7 +1980,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 3412;
     pub const DDT_STATE_COUNT: usize = 21;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "d8763cb795a2b9b6e746c8042686c9209eeb4facbdd90bedf125a78645380ce0";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "e96d4d53afc27641d56ae2f7ee171da0287b894a3afee859198057e70110ac67";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 

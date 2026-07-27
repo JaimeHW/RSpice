@@ -603,7 +603,10 @@ fn generate_device_with_scalar_hybrid_plan(
             contents: stamp_files.stamp,
         },
     ];
-    files.push(super::noise::generate_noise_file(artifact, options)?);
+    let mut noise_file = super::noise::generate_noise_file(artifact, options)?;
+    noise_file.contents =
+        compact_generated_noise_surface(std::mem::take(&mut noise_file.contents));
+    files.push(noise_file);
     files.extend(stamp_files.helpers);
 
     Ok(GeneratedRustDevice {
@@ -4308,7 +4311,8 @@ mod compact_generated_stamp_surface_tests {
         StructuredDerivativeActivityPlane, bound_generated_scratch_helper_inlining,
         collapse_single_line_generated_if_blocks, compact_div_from_scalar_offset_denominator,
         compact_exp_div_scaled_inputs_expression, compact_generated_stamp_surface,
-        compact_generated_statement_runs, compact_generated_surface_lines,
+        compact_generated_noise_surface, compact_generated_statement_runs,
+        compact_generated_surface_lines,
         compact_generated_temporary_identifiers, compact_limited_exp_div_scaled_inputs_expression,
         compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
@@ -4588,6 +4592,33 @@ mod compact_generated_stamp_surface_tests {
 
         assert!(compacted.contains("        if locals.a > 0.0 {locals.b = 1.0;locals.c = 2.0;}\n"));
         assert!(compacted.contains("        if locals.a <= 0.0 {locals.d = 3.0;}\n"));
+    }
+
+    #[test]
+    fn noise_surface_merges_only_adjacent_matching_activity_guards() {
+        let compacted = compact_generated_noise_surface(
+            concat!(
+                "impl Instance {\n",
+                "    fn noise(&self, active: &[u128], w: &mut [f64]) {\n",
+                "        if (active[0] & 0xff) != 0 {\n",
+                "            w[0] = 1.0;\n",
+                "        }\n",
+                "        if (active[0] & 0xff) != 0 {\n",
+                "            w[1] = 2.0;\n",
+                "        }\n",
+                "        if (active[0] & 0x01) != 0 {\n",
+                "            w[2] = 3.0;\n",
+                "        }\n",
+                "    }\n",
+                "}\n",
+            )
+            .to_string(),
+        );
+
+        assert!(compacted.contains(
+            "        if (active[0] & 0xff) != 0 {w[0] = 1.0;w[1] = 2.0;}\n"
+        ));
+        assert!(compacted.contains("        if (active[0] & 0x01) != 0 {w[2] = 3.0;}\n"));
     }
 
     #[test]
@@ -35099,6 +35130,10 @@ fn compact_generated_surface_lines(source: String) -> String {
     merge_adjacent_single_line_generated_if_blocks(collapse_single_line_generated_if_blocks(
         compact_generated_statement_runs(source),
     ))
+}
+
+fn compact_generated_noise_surface(source: String) -> String {
+    compact_generated_surface_lines(source)
 }
 
 fn compactable_generated_statement(line: &str) -> Option<(&str, &str)> {
