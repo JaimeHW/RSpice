@@ -100,15 +100,17 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Mixed-signal | XSPICE-style analog/digital elements, tri-state drivers, A/D–D/A bridges |
 | Verilog-A | Compiled behavioral modules (below) |
 
-CMC compact-model families that ship redistributable Verilog-A sources under
-`models/veriloga/` are no longer planned as hand-maintained native ports. The
-product path for those devices is generated Rust from the upstream Verilog-A
-source, compiled through the product entry crates' explicit
-`veriloga-builtins` enablement and materialized under
-`crates/rspice-core/src/device/veriloga_generated/`.
-Historical hand-native CMC experiments should be treated as compatibility or
-reference work only; generated devices are the canonical model implementation
-when a bundled source is available.
+CMC compact-model families with redistributable Verilog-A sources under
+[models/veriloga/cmc/](models/veriloga/cmc/) are not hand-ported. They are
+generated to Rust from the upstream source and checked in under
+`crates/rspice-core/src/device/veriloga_generated/` — 42 devices today, among
+them ASM-HEMT, BSIM-BULK, BSIM-CMG, BSIM-IMG, BSIM-SOI, DIODE_CMC, HICUM/L0
+and /L2, HiSIM-HV, HiSIM-SOI, JUNCAP200, L-UTSOI, MEXTRAM 505, MVSG-CMC,
+PSP104, and VBIC 1.3. A generated device is instantiated by its module name on
+an `X` line rather than through an `M`/`Q` `LEVEL` selector, and each compiles
+in only when its `veriloga-model-*` feature is enabled. Where a bundled source
+exists the generated device is the canonical implementation, and a hand-written
+native port of the same family serves the `LEVEL`-card decks that reach it.
 
 BSIM-class models fail with typed errors when a model card requests unported
 physics such as BSIM4 gate/body resistance networks, NQS, material-mode
@@ -116,8 +118,8 @@ effects, or unsupported mode selectors. BSIM4 `RDSMOD=0/1` source/drain
 resistance paths are native, including `RGEOMOD=1..8` implicit S/D resistance
 geometry when `NRD`/`NRS` are omitted. That is deliberate: a commercial simulator should
 reject unsupported physics rather than silently produce plausible but wrong
-currents. The GaN HEMT path is an in-tree physics-style model; CMC ASM-HEMT /
-MVSG qualification remains roadmap work.
+currents. The `Z`-device GaN HEMT is an in-tree physics-style model; generated
+ASM-HEMT and MVSG-CMC devices are present but not yet oracle-qualified.
 
 ### Netlist dialect
 
