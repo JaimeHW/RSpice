@@ -74,6 +74,10 @@ const LAYERS: &[(&str, u32)] = &[
     // Domain services over the persisted model.
     ("analysis", 4),
     ("automation_workflow", 4),
+    // What the application reports about itself. It is a value model and
+    // would sit lower, but a log entry may anchor to a schematic object, so
+    // it cannot sit below `state`.
+    ("diagnostics", 4),
     ("io", 4),
     ("services", 5),
     ("simulation", 6),
@@ -480,6 +484,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("browser_file_import", "app", 1),
     ("hardcopy_sources", "app", 1),
     ("project_checkpoint", "app", 1),
+    // Not new coupling: these were written `use crate::workbench::{A, B};`,
+    // and the first version of this table could not read a brace group, so
+    // it scored the whole import as zero edges. Expanding groups is what
+    // surfaced them.
+    ("code_workspace", "app", 2),
+    ("feature_availability", "app", 1),
     // `commands` is a dispatcher and a command vocabulary in one file.
     // Retired by dropping the vocabulary to `commands::registry` at rank 0.
     ("shortcut_artifacts", "commands", 11),
@@ -607,24 +617,49 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
         let mut rest = code.as_str();
         while let Some(index) = rest.find(PREFIX) {
             rest = &rest[index + PREFIX.len()..];
-            let end = rest
-                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                .unwrap_or(rest.len());
-            let name = &rest[..end];
-            rest = &rest[end..];
 
-            // A path names either a submodule directly or a type the root
-            // re-exports from one. Anything else is a function defined in
-            // `workbench.rs` itself, which belongs to the root, not a module.
-            let to = if declared.contains(&name) {
-                name.to_owned()
-            } else if let Some(owner) = reexports.get(name) {
-                owner.clone()
+            // `use crate::workbench::{A, b::C};` names two modules in one
+            // occurrence. Expanding the group keeps the metric on coupling
+            // rather than on whether the author happened to merge imports.
+            let names: Vec<&str> = if rest.starts_with('{') {
+                let Some(close) = rest.find('}') else {
+                    continue;
+                };
+                let group = &rest[1..close];
+                rest = &rest[close + 1..];
+                group
+                    .split(',')
+                    .map(|item| {
+                        let item = item.trim();
+                        let head = item.split("::").next().unwrap_or(item);
+                        head.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                    })
+                    .filter(|name| !name.is_empty())
+                    .collect()
             } else {
-                continue;
+                let end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                let name = &rest[..end];
+                rest = &rest[end..];
+                vec![name]
             };
-            if to != from {
-                *edges.entry((from.clone(), to)).or_default() += 1;
+
+            for name in names {
+                // A path names either a submodule directly or a type the root
+                // re-exports from one. Anything else is a function defined in
+                // `workbench.rs` itself, which belongs to the root, not a
+                // module.
+                let to = if declared.contains(&name) {
+                    name.to_owned()
+                } else if let Some(owner) = reexports.get(name) {
+                    owner.clone()
+                } else {
+                    continue;
+                };
+                if to != from {
+                    *edges.entry((from.clone(), to)).or_default() += 1;
+                }
             }
         }
     }
@@ -788,7 +823,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("io/project_io.rs", 8214),
     ("workbench/hardcopy_render.rs", 8095),
     ("state/workspace.rs", 7524),
-    ("workbench/visualization_studio.rs", 7600),
+    ("workbench/visualization_studio.rs", 7601),
     ("state/model_library/qualification.rs", 6924),
     ("workbench/surfaces/model_editor.rs", 6892),
     ("workbench/surfaces/verify.rs", 6794),
@@ -806,21 +841,21 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("state/model_library/correlation.rs", 4049),
     ("hardcopy/contract.rs", 4031),
     ("workbench/docks/inspector/design.rs", 3994),
-    ("workbench/surfaces/project.rs", 3992),
+    ("workbench/surfaces/project.rs", 3993),
     ("workbench/feature_availability_data.rs", 3872),
     ("workbench/project_lifecycle.rs", 3741),
     ("workbench/surfaces/model_correlation.rs", 3631),
     ("workbench/state.rs", 3507),
-    ("schematic/view/interaction.rs", 3490),
+    ("schematic/view/interaction.rs", 3491),
     ("workbench/app/actions/workspace.rs", 3400),
     ("workbench/hardcopy_print.rs", 3355),
     ("workbench/app/dialogs/hardcopy/render.rs", 3348),
     ("state/schematic/state/editor_ops/array_ops.rs", 3320),
-    ("simulation/controller.rs", 3213),
+    ("simulation/controller.rs", 3214),
     ("simulation/execution/snapshot.rs", 3068),
     ("workbench/project_lifecycle/persistence.rs", 3004),
-    ("workbench/feature_availability.rs", 2987),
-    ("workbench/project_launcher.rs", 2931),
+    ("workbench/feature_availability.rs", 2988),
+    ("workbench/project_launcher.rs", 2932),
     ("workbench/docks/navigator.rs", 2877),
     ("workbench/chrome/title_bar.rs", 2775),
     ("state/project_sources.rs", 2709),
@@ -829,8 +864,8 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("state/schematic/state/editor_ops/movement_ops.rs", 2629),
     ("workbench/shortcut_artifacts/merge.rs", 2597),
     ("state/netlist_document/document.rs", 2579),
-    ("workbench/app/dialogs/hardcopy/publish.rs", 2564),
-    ("workbench/app/dialogs/preferences/shortcut_preferences.rs", 2529),
+    ("workbench/app/dialogs/hardcopy/publish.rs", 2565),
+    ("workbench/app/dialogs/preferences/shortcut_preferences.rs", 2530),
 ];
 
 #[test]

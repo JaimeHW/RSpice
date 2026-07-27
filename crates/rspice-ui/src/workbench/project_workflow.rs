@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::project_lifecycle::DestinationAuthority;
 use crate::workbench::project_lifecycle::{PersistenceBinding, ProjectLifecycleError, SaveScope};

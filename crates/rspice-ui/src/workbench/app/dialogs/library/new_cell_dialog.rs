@@ -2,7 +2,8 @@
 //! description, and the views to seed the cell with.
 
 use super::shared::{DialogActionOutcome, validate_lcv_name};
-use super::{ConsoleMessage, Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, check_row, input_row};

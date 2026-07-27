@@ -9,12 +9,13 @@
 
 use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, RenameSelectionTarget};
+use crate::workbench::app::{AppState, RSpiceApp, RenameSelectionTarget};
 
 const EYEBROW: &str = "EDIT \u{00b7} STABLE IDENTITY";
 const TITLE: &str = "Rename selected object";

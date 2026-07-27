@@ -1,3 +1,4 @@
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp};
 
 impl RSpiceApp {
@@ -113,7 +114,7 @@ impl RSpiceApp {
                     }
                     crate::workbench::project_workflow::SaveRequestOutcome::CopyOnly => {
                         self.state.push_user_message(
-                            crate::workbench::app::ConsoleMessage::warning(
+                            crate::diagnostics::ConsoleMessage::warning(
                                 "Downloaded a copy, but no canonical save completed. The pending action was not authorized and unsaved work remains open."
                             ),
                         );
@@ -164,7 +165,7 @@ impl RSpiceApp {
                 .confirmation_dialog
                 .restore_continuation_for_review(pending);
             self.state.push_user_message(
-                crate::workbench::app::ConsoleMessage::warning(
+                crate::diagnostics::ConsoleMessage::warning(
                     "The requested snapshot was saved, but newer edits were made while the browser file surface was pending. Review and save those edits before continuing.",
                 ),
             );
@@ -175,7 +176,7 @@ impl RSpiceApp {
                 .restore_continuation_for_review(pending);
             if let Some(message) = event.failure_message() {
                 self.state
-                    .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                         message.to_owned(),
                     ));
             }
@@ -200,7 +201,7 @@ impl RSpiceApp {
             }
             crate::workbench::project_workflow::SaveRequestOutcome::CopyOnly => {
                 self.state.push_user_message(
-                    crate::workbench::app::ConsoleMessage::warning(
+                    crate::diagnostics::ConsoleMessage::warning(
                         "A project copy was downloaded, but canonical Save all did not complete. The project remains open with its working changes.",
                     ),
                 );
@@ -295,7 +296,7 @@ impl RSpiceApp {
     /// Entries whose file vanished are dropped from the list with a console
     /// note instead of failing silently.
     fn do_open_recent(&mut self, path: std::path::PathBuf, kind: crate::workbench::app::RecentKind) {
-        use crate::workbench::app::{ConsoleMessage, RecentKind};
+        use crate::workbench::app::RecentKind;
 
         if !path.exists() {
             self.state.recent_files.retain(|r| r.path != path);

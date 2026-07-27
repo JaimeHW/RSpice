@@ -1,3 +1,4 @@
+use crate::diagnostics::ConsoleMessage;
 use super::*;
 
 impl SimulationController {

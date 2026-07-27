@@ -9,6 +9,7 @@ pub(crate) mod workspace_layout_manager;
 
 use egui::{Context, Id};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::shortcut_artifacts::{
     ShortcutArtifactExportOutcome, ShortcutArtifactImportOutcome, ShortcutImportReceipt,
     apply_shortcut_import, export_shortcut_artifact, rollback_shortcut_import,
@@ -21,7 +22,7 @@ use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPort
 use crate::workbench::app::session::shortcut_library::{
     ShortcutLibraryPublication, ShortcutLibraryPublicationContinuation,
 };
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
+use crate::workbench::app::{AppState, RSpiceApp};
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
 pub(in crate::workbench::app) const ENGINEERING_PROFILE_HELP: &str = "Sets the discipline context reported by capability discovery and the availability matrix. Deep links and project documents remain available.";

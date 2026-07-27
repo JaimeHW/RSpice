@@ -7,8 +7,9 @@
 
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{ComponentType, LibraryCellInstance, Point};
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::workbench::app::AppState;
 
 /// Typed payload shared by component-shelf drag sources and the schematic
 /// canvas drop target.

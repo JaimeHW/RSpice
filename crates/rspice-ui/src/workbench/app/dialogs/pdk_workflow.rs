@@ -2,7 +2,8 @@ use std::path::Path;
 
 use egui::Context;
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::{AppState, RSpiceApp};
 
 #[cfg(target_arch = "wasm32")]
 type BrowserModelImport = Result<Option<(String, Vec<u8>)>, String>;

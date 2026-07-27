@@ -1,5 +1,6 @@
 use egui::{Align, Context, Frame, Layout, Margin, Rect, Response, Sense, Stroke, Ui, Vec2, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -12,7 +13,7 @@ use super::controller::{
 };
 use super::state::*;
 use crate::workbench::app::dialogs::review_primitives::{configure_field_validation, field_label};
-use crate::workbench::app::{ConsoleMessage, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
 
 impl RSpiceApp {
     pub(in crate::workbench::app) fn render_create_model_bound_symbol_dialog(

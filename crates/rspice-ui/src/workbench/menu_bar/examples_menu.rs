@@ -1,4 +1,5 @@
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::AppState;
 use crate::workbench::examples::{EXAMPLES, load_example_into_app};
 
 #[cfg(test)]

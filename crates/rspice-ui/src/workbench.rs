@@ -36,7 +36,7 @@ pub mod shortcut_library_persistence;
 pub mod shortcut_profile_workflow;
 pub mod simulation_analysis_tabs;
 
-pub use app::{AppState, ConsoleMessage, RSpiceApp};
+pub use app::{AppState, RSpiceApp};
 
 /// Run `work` on a background thread natively; inline on wasm32 for short UI
 /// tasks that are not routed through the browser simulation worker.
@@ -91,6 +91,7 @@ mod surfaces;
 pub(crate) mod visualization_family;
 pub(crate) mod visualization_studio;
 
+use crate::diagnostics::{LogSeverity, LogSource};
 pub use crate::quantity::{
     AngleDisplay, CopiedValueFormat, DecimalSeparatorInput, EngineeringSuffixPolicy,
     FrequencyDisplay, LayoutCoordinateDisplay, QuantityInputError, QuantityInputKind,
@@ -467,7 +468,6 @@ pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
 }
 
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
-    use crate::workbench::panels::{LogSeverity, LogSource};
     use crate::ui::widgets::{NotificationCategory, ToastKind};
 
     let revision = app.state.log_buffer.revision();
@@ -619,7 +619,6 @@ fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::panels::{LogSeverity, LogSource};
     use crate::workbench::state::Drawer;
 
     #[test]

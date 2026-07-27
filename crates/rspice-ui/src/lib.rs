@@ -22,7 +22,7 @@
 //! | 1 | `results`, `ui` | Versioned result documents; the design system (tokens, palette, widgets, plot engine) |
 //! | 2 | `hardcopy` | Persisted page setup, print mappings, and source-set records |
 //! | 3 | `state` | The persisted design, library, and project model |
-//! | 4 | `analysis`, `automation_workflow`, `io` | Viewer mathematics, the CI workflow language, file formats |
+//! | 4 | `analysis`, `automation_workflow`, `diagnostics`, `io` | Viewer mathematics, the CI workflow language, console/log model, file formats |
 //! | 5 | `services` | DRC, licensing, and the per-analysis engine adapters |
 //! | 6 | `simulation` | Analysis plans, netlist generation, run orchestration |
 //! | 7 | `properties` | Component property editing |
@@ -130,6 +130,10 @@ pub mod state;
 /// or leaving this module are always expressed in their documented SI base
 /// units; deck dialect and PDK database-unit semantics live elsewhere.
 pub mod quantity;
+
+/// Diagnostics the application reports about itself: the console message
+/// model and the structured, filterable application log.
+pub mod diagnostics;
 
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.

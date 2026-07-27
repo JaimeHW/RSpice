@@ -1,8 +1,6 @@
 use egui::Context;
 
-use crate::workbench::app::{
-    ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME, save_global_veriloga_library,
-};
+use crate::workbench::app::{RSpiceApp, VERILOGA_LIBRARY_NAME, save_global_veriloga_library};
 
 mod cell_ops_dialogs;
 mod new_cell_dialog;

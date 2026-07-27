@@ -8,7 +8,8 @@ use rspice_veriloga::{
     VirtualCompileLimits, VirtualSourceBundle, VirtualSourceFile,
 };
 
-use crate::workbench::{ConsoleMessage, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::RSpiceApp;
 use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ViewType,

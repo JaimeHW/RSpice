@@ -12,13 +12,14 @@ use egui::{
     pos2, vec2,
 };
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, Selection, Tool};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus};
 use crate::workbench::ResultViewer;
-use crate::workbench::app::{AppState, ConsoleMessage, ContextTarget};
+use crate::workbench::app::{AppState, ContextTarget};
 use crate::workbench::commands::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;

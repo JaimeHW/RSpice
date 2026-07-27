@@ -14,7 +14,8 @@ use egui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::workbench::{AppState, RSpiceApp, app::ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::{AppState, RSpiceApp};
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},

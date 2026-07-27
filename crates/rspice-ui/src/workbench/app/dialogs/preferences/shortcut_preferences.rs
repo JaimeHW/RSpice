@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use egui::{Context, Key, Modifiers, Response, Stroke, Ui, WidgetInfo, WidgetType};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
@@ -18,7 +19,7 @@ use crate::workbench::{
 use super::preferences_shell::{
     actionable_scope_strip, page_heading, right_aligned, section_label, setting_row,
 };
-use super::{AppState, ConsoleMessage, PreferencePageActions};
+use super::{AppState, PreferencePageActions};
 use crate::workbench::app::dialogs::state::{
     ShortcutCaptureTarget, ShortcutEditorContext, ShortcutEditorState,
 };

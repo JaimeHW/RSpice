@@ -1,5 +1,6 @@
 use egui::{Align, ComboBox, Context, Frame, Grid, Layout, Margin, Stroke, TextEdit, Ui, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDefinitionImport};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -10,7 +11,7 @@ use crate::ui::widgets::{
 use super::source_picker;
 use super::state::SymbolImportBindingChoice;
 use crate::workbench::app::publish_symbol_definition_candidate;
-use crate::workbench::{ConsoleMessage, RSpiceApp};
+use crate::workbench::RSpiceApp;
 
 const IMPORT_EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} VALIDATED INTERCHANGE";
 const IMPORT_TITLE: &str = "Import symbol definition";

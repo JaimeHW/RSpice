@@ -7,6 +7,7 @@
 
 use egui::{Context, Frame, Grid, RichText, ScrollArea, Stroke, TextEdit, Ui};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::model_library::ModelSourceAuthority;
 use crate::state::{
     ValidatedRevisionJournal, ValidatedRevisionObjectDelta, ValidatedRevisionSemanticDelta,
@@ -19,7 +20,7 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::section_header;
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
 
 const EYEBROW: &str = "PROJECT \u{00b7} SEMANTIC HISTORY \u{00b7} TRACEABILITY";
 const TITLE: &str = "Project revision and audit history";

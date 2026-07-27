@@ -1,4 +1,5 @@
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::AppState;
 use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
 
 const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =

@@ -1147,7 +1147,7 @@ fn edit_row_with_hint(
             Err(error) => {
                 app.state.workbench.verification.action_receipt = format!("Tune blocked: {error}");
                 app.state
-                    .push_user_message(crate::workbench::ConsoleMessage::warning(format!(
+                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                         "Could not tune {}: {error}",
                         component.name
                     )));

@@ -8,7 +8,8 @@
 
 use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::AppState;
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::state::Point;
 use crate::ui::theme::{self, FontWeight};
@@ -37,7 +38,7 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
 
     // Owned snapshot of the anchored findings so the borrows drop before
     // the selection/viewport mutations below.
-    let mut anchored: Vec<(DrcSeverity, crate::workbench::panels::LogAnchor, String)> = result
+    let mut anchored: Vec<(DrcSeverity, crate::diagnostics::LogAnchor, String)> = result
         .violations()
         .iter()
         .filter_map(|violation| {
@@ -80,14 +81,14 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
 pub(crate) fn finding_anchor(
     state: &AppState,
     violation: &DrcViolation,
-) -> Option<crate::workbench::panels::LogAnchor> {
+) -> Option<crate::diagnostics::LogAnchor> {
     if let DrcLocation::SymbolPin {
         reference,
         pin_name,
         point,
     } = &violation.location
     {
-        return Some(crate::workbench::panels::LogAnchor::Symbol {
+        return Some(crate::diagnostics::LogAnchor::Symbol {
             reference: reference.clone(),
             pin_name: pin_name.clone(),
             point: *point,
@@ -100,7 +101,7 @@ pub(crate) fn finding_anchor(
         DrcLocation::Wire { id } => (None, Some(*id)),
         _ => (None, None),
     };
-    Some(crate::workbench::panels::LogAnchor::Schematic {
+    Some(crate::diagnostics::LogAnchor::Schematic {
         x: world.x,
         y: world.y,
         component,

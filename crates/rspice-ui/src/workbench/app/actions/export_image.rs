@@ -10,7 +10,7 @@
 use egui::Context;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::app::ConsoleMessage;
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::RSpiceApp;
 
 impl RSpiceApp {
@@ -106,7 +106,7 @@ impl RSpiceApp {
                     ),
                 );
                 self.state
-                    .push_user_message(crate::workbench::app::ConsoleMessage::info(message));
+                    .push_user_message(crate::diagnostics::ConsoleMessage::info(message));
             }
             Err(error) => {
                 let message = format!("PNG export failed: {error}");
@@ -115,7 +115,7 @@ impl RSpiceApp {
                     .toasts
                     .error_with_title(ctx, "PNG export failed", error.to_string());
                 self.state
-                    .push_user_message(crate::workbench::app::ConsoleMessage::error(message));
+                    .push_user_message(crate::diagnostics::ConsoleMessage::error(message));
             }
         }
     }

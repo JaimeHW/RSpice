@@ -2003,7 +2003,7 @@ fn resolve_strip_exprs(
                 sample_selection.as_ref(),
             );
             if let Err(error) = &series {
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                     "expression `{}`: {}",
                     expr.text, error
                 )));
@@ -2032,7 +2032,7 @@ fn resolve_strip_exprs(
         };
         let Some(projections) = projected_selected_family_series(&x, &y, sample_selection.as_ref())
         else {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "expression `{}`: selected rows do not match the active family render plan",
                 expr.text
             )));

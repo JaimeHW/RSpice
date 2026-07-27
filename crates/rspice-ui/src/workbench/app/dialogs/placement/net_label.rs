@@ -6,6 +6,7 @@
 
 use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{NetLabel, NetNamingPolicy, Point};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -14,9 +15,7 @@ use crate::ui::widgets::{
 };
 
 use crate::workbench::app::dialogs::schematic_command::{field_label, read_only_value, snap_label};
-use crate::workbench::app::{
-    AppState, ConsoleMessage, NetLabelPlacementDialogState, RSpiceApp, SchematicEditAuthority,
-};
+use crate::workbench::app::{AppState, NetLabelPlacementDialogState, RSpiceApp, SchematicEditAuthority};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY";
 const TITLE: &str = "Place net label";

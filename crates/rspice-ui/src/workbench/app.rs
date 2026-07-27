@@ -24,6 +24,7 @@
 
 use egui::Context;
 
+use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
 use crate::state::{SchematicState, SimulationState};
 
 const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;
@@ -73,7 +74,6 @@ thread_local! {
 mod actions;
 mod active_viewer;
 mod command_palette;
-mod console;
 mod design_history;
 mod dialogs;
 mod interaction_state;
@@ -161,7 +161,6 @@ pub(crate) use dialogs::view_operations::{
 };
 pub(crate) use dialogs::window_session::open_window_workflow;
 
-pub use console::{ConsoleLevel, ConsoleMessage};
 
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
@@ -302,7 +301,7 @@ pub struct AppState {
     /// Typed analysis configuration behind the Simulate view.
     pub(crate) sim_setup: SimSetupState,
     /// Structured log history buffer (ring-buffer, filterable).
-    pub(crate) log_buffer: crate::workbench::panels::LogBuffer,
+    pub(crate) log_buffer: crate::diagnostics::LogBuffer,
     /// Scripting/Automation console state
     pub(crate) script_console: crate::workbench::panels::ScriptConsoleState,
     /// Library/Cell/View manager for design hierarchy
@@ -516,23 +515,23 @@ impl AppState {
         self.simulation.request_simulate_run_set();
     }
 
-    fn log_severity_for_console(level: ConsoleLevel) -> crate::workbench::panels::LogSeverity {
+    fn log_severity_for_console(level: ConsoleLevel) -> crate::diagnostics::LogSeverity {
         match level {
-            ConsoleLevel::Info => crate::workbench::panels::LogSeverity::Info,
-            ConsoleLevel::Warning => crate::workbench::panels::LogSeverity::Warning,
-            ConsoleLevel::Error => crate::workbench::panels::LogSeverity::Error,
+            ConsoleLevel::Info => crate::diagnostics::LogSeverity::Info,
+            ConsoleLevel::Warning => crate::diagnostics::LogSeverity::Warning,
+            ConsoleLevel::Error => crate::diagnostics::LogSeverity::Error,
         }
     }
 
     /// Push a legacy console message and mirror it into the structured log.
     pub fn push_console_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::workbench::panels::LogSource::System, message);
+        self.push_console_message_with_source(crate::diagnostics::LogSource::System, message);
     }
 
     /// Push a console message with an explicit structured-log source.
     pub fn push_console_message_with_source(
         &mut self,
-        source: crate::workbench::panels::LogSource,
+        source: crate::diagnostics::LogSource,
         message: ConsoleMessage,
     ) {
         let severity = Self::log_severity_for_console(message.level);
@@ -540,11 +539,11 @@ impl AppState {
     }
 
     pub fn push_user_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::workbench::panels::LogSource::User, message);
+        self.push_console_message_with_source(crate::diagnostics::LogSource::User, message);
     }
 
     pub fn push_sim_message(&mut self, message: ConsoleMessage) {
-        self.push_console_message_with_source(crate::workbench::panels::LogSource::Simulation, message);
+        self.push_console_message_with_source(crate::diagnostics::LogSource::Simulation, message);
     }
 
     pub fn clear_primary_log(&mut self) {

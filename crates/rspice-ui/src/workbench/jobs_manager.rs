@@ -11,7 +11,8 @@ use egui::{
 };
 use serde_json::json;
 
-use crate::workbench::{AppState, RSpiceApp, app::ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::{AppState, RSpiceApp};
 use crate::product::RunId;
 use crate::state::{
     AnalysisResultSourceDomain, ExecutionTarget, SimulationRun, SimulationRunLifecycle,

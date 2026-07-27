@@ -180,7 +180,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
         .navigate(route, RouteTransitionSource::User)
     {
         app.state
-            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 error.to_string(),
             ));
     }
@@ -189,7 +189,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
 pub(crate) fn save_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state
-            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 report_mutation_block_reason(&app.state),
             ));
         return;
@@ -202,7 +202,7 @@ pub(crate) fn save_document(app: &mut RSpiceApp) {
         .find_map(|document| document.validate().err());
     if let Some(error) = invalid {
         app.state
-            .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Report document save was blocked before publication: {error}"
             )));
         return;

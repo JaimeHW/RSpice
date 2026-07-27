@@ -7,8 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::ConsoleMessage;
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::state::model_library::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,

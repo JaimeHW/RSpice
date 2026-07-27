@@ -6,20 +6,20 @@ fn echo_measurements(state: &mut AppState, measurements: &[rspice_core::MeasureR
     if measurements.is_empty() {
         return;
     }
-    state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
         "Measurements ({}):",
         measurements.len()
     )));
     for m in measurements {
         match m.value {
             Some(value) => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "  {} = {:.6e}",
                     m.name, value
                 )));
             }
             None => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::warning(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
                     "  {} = FAILED ({})",
                     m.name,
                     m.error.as_deref().unwrap_or("unknown")
@@ -52,14 +52,14 @@ impl SimulationController {
                 const DC_OP_CONSOLE_ECHO_LIMIT: usize = 24;
                 if dc_result.node_voltages.len() <= DC_OP_CONSOLE_ECHO_LIMIT {
                     for (node, voltage) in &dc_result.node_voltages {
-                        state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "V({}) = {:.6} V",
                             node, voltage
                         )));
                     }
                 }
 
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "DC OP: {} node voltages computed",
                     dc_result.node_voltages.len()
                 )));
@@ -74,7 +74,7 @@ impl SimulationController {
                 self.invalidate_transient_post_views(state);
                 self.prime_transient_fft_source_selection(state);
 
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Transient: {} points, {} waveforms",
                     time.len(),
                     waveforms.len()
@@ -89,7 +89,7 @@ impl SimulationController {
             } => {
                 self.populate_ac_post_views(state, frequencies, waveforms);
 
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "AC: {} points, {} waveforms",
                     frequencies.len(),
                     waveforms.len()
@@ -103,7 +103,7 @@ impl SimulationController {
                 waveforms,
                 measurements,
             } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "DC Sweep ({}): {} points, {} waveforms",
                     sweep_var,
                     sweep_values.len(),
@@ -119,7 +119,7 @@ impl SimulationController {
             } => {
                 // Calculate integrated noise
                 let integrated: f64 = output_noise.iter().sum::<f64>().sqrt();
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Noise: {} points, integrated output: {:.3e} V/sqrt(Hz)",
                     frequencies.len(),
                     integrated
@@ -129,7 +129,7 @@ impl SimulationController {
             SimulationResult::PoleZero { poles, zeros, gain } => {
                 // The immutable retained result is the sole plot authority.
                 // Console output is a secondary execution log only.
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Pole-Zero Analysis: DC gain = {:.4}",
                     gain
                 )));
@@ -138,7 +138,7 @@ impl SimulationController {
                     if im.abs() < 1e-10 {
                         // Real pole
                         let freq = re.abs() / (2.0 * std::f64::consts::PI);
-                        state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "  Pole {}: {:.3e} rad/s ({:.3e} Hz)",
                             i + 1,
                             re,
@@ -146,7 +146,7 @@ impl SimulationController {
                         )));
                     } else {
                         // Complex pole
-                        state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "  Pole {}: {:.3e} +/- j{:.3e} rad/s",
                             i + 1,
                             re,
@@ -157,13 +157,13 @@ impl SimulationController {
 
                 for (i, (re, im)) in zeros.iter().enumerate() {
                     if im.abs() < 1e-10 {
-                        state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "  Zero {}: {:.3e} rad/s",
                             i + 1,
                             re
                         )));
                     } else {
-                        state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "  Zero {}: {:.3e} +/- j{:.3e} rad/s",
                             i + 1,
                             re,
@@ -179,7 +179,7 @@ impl SimulationController {
                 ..
             } => {
                 // Sensitivity: Display in console as table
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Sensitivity Analysis: {} parameters",
                     sensitivities.len()
                 )));
@@ -194,7 +194,7 @@ impl SimulationController {
 
                 for (param, norm_sens) in sorted.iter().take(10) {
                     if let Some(sens) = sensitivities.get(*param) {
-                        state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "  {}: dV/d{} = {:.3e}, norm = {:.2}%",
                             param,
                             param,
@@ -213,7 +213,7 @@ impl SimulationController {
                 output_resistance,
                 ..
             } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Transfer function: {} -> {}",
                     input_source, output_expression
                 )));
@@ -234,7 +234,7 @@ impl SimulationController {
                                 "-infinity".to_owned()
                             }
                         };
-                        state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "  {label} = {rendered}"
                         )));
                     }
@@ -251,13 +251,13 @@ impl SimulationController {
             } => {
                 self.populate_monte_carlo_histograms(state, variables);
 
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Monte Carlo: {}/{} runs converged ({} failed), seed={}, all_converged={}",
                     runs_completed, runs_requested, num_failures, seed, all_converged
                 )));
 
                 for var in variables.iter().take(8) {
-                    state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                         "  {}: mean={:.6e}, sigma={:.6e}, min={:.6e}, max={:.6e}",
                         var.name, var.mean, var.std_dev, var.min, var.max
                     )));
@@ -270,7 +270,7 @@ impl SimulationController {
                 waveforms,
                 num_failures,
             } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Parametric ({}): {} points, {} waveforms, {} failed points",
                     target,
                     sweep_values.len(),
@@ -285,7 +285,7 @@ impl SimulationController {
                 num_failures,
                 ..
             } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Corner sweep: {} points, {} waveforms, {} failed corners",
                     x_values.len(),
                     waveforms.len(),
@@ -298,7 +298,7 @@ impl SimulationController {
                 waveforms: _,
                 device_results,
             } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Reliability: {} lifetime points, {} devices analyzed",
                     years.len(),
                     device_results.len()
@@ -312,14 +312,14 @@ impl SimulationController {
                 best_variables,
                 converged,
             } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "Optimization: {} iterations, best cost {:.6e}, converged={}",
                     iterations.len(),
                     best_cost,
                     converged
                 )));
                 for (name, value) in best_variables.iter().take(8) {
-                    state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                    state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                         "  {} = {:.6e}",
                         name, value
                     )));
@@ -332,7 +332,7 @@ impl SimulationController {
                 violations,
                 ..
             } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "SOA: {} sampled points, {} violations",
                     time.len(),
                     violations.len()
@@ -340,7 +340,7 @@ impl SimulationController {
             }
 
             SimulationResult::MeasurementsOnly { .. } => {
-                state.push_sim_message(crate::workbench::app::ConsoleMessage::info(
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(
                     "Analysis complete (scalar result evidence retained)".to_string(),
                 ));
             }

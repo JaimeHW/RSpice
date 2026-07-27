@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::AppState;
 use crate::io::SchematicIoError;
 use crate::state::{SchematicState, ViewType};
 

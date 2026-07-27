@@ -7,6 +7,7 @@
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::WireRoutingMode;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -19,7 +20,7 @@ use crate::state::{
     SchematicVisibilityPolicy, SchematicWireRoutingStyle,
 };
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
+use crate::workbench::app::{AppState, RSpiceApp};
 
 const EYEBROW: &str = "VIEW \u{00b7} DISPLAY ONLY";
 const TITLE: &str = "Hierarchy and annotation visibility";

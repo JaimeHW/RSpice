@@ -2,8 +2,9 @@
 
 use egui::{Response, Ui};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement};
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::workbench::app::AppState;
 
 use super::SchematicSymbolContext;
 use super::coordinates::screen_to_grid;

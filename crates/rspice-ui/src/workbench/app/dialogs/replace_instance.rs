@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use egui::{Align, Context, Frame, Layout, Margin, Popup, ScrollArea, Ui, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
 use crate::state::{
     Component, ComponentType, Point, Rotation, SchematicReplacementAuthority,
@@ -24,9 +25,7 @@ use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_
 use crate::workbench::app::schematic::instance_catalog::{
     InstanceCatalogEntry, instance_catalog, resolve_instance_catalog_entry,
 };
-use crate::workbench::app::{
-    AppState, ConsoleMessage, RSpiceApp, ReplaceInstanceOpen, SchematicEditAuthority,
-};
+use crate::workbench::app::{AppState, RSpiceApp, ReplaceInstanceOpen, SchematicEditAuthority};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} MODEL/SYMBOL COMPATIBILITY";
 const TITLE: &str = "Replace selected instance";

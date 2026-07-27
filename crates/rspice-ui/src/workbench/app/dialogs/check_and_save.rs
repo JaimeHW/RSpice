@@ -2,6 +2,7 @@
 
 use egui::{Align, Align2, Context, Frame, Layout, Margin, Sense, Stroke, Ui, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
 use crate::state::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionJournal,
@@ -20,7 +21,7 @@ use crate::workbench::app::dialogs::operation_primitives::{
 };
 use crate::workbench::app::dialogs::review_primitives::{input_field, purpose_line, read_only_field};
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
+use crate::workbench::app::{AppState, RSpiceApp};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} TRANSACTIONAL VALIDATION";
 const TITLE: &str = "Check and save schematic";

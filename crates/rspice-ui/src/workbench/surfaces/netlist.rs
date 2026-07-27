@@ -6,7 +6,8 @@
 
 use egui::{Align, Layout, Ui, vec2};
 
-use crate::workbench::{AppState, ConsoleMessage, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::{AppState, RSpiceApp};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -215,7 +216,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                 .log_buffer
                 .entries()
                 .skip(previous_message_count)
-                .filter(|entry| entry.severity == crate::workbench::panels::LogSeverity::Error)
+                .filter(|entry| entry.severity == crate::diagnostics::LogSeverity::Error)
                 .last()
                 .map(|entry| entry.message.clone())
                 .unwrap_or_else(|| "Netlist generation failed; review Problems.".to_owned());

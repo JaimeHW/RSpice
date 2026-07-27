@@ -8,7 +8,8 @@
 
 use egui::{Context, Ui};
 
-use super::{ConsoleMessage, RSpiceApp};
+use super::RSpiceApp;
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::SimSetupState;
 use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,

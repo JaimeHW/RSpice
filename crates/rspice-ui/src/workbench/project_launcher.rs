@@ -12,8 +12,9 @@ use egui::{
     Sense, Stroke, Ui, UiKind, Vec2, WidgetInfo, WidgetType, vec2,
 };
 
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::{ConsoleMessage, RecentFile, RecentKind};
+use crate::workbench::app::{RecentFile, RecentKind};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};

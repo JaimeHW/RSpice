@@ -9,7 +9,8 @@
 use sha2::{Digest as _, Sha256};
 
 use super::HardcopyWorkflow;
-use crate::workbench::app::{ConsoleMessage, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::RSpiceApp;
 
 thread_local! {
     static REPAINT_CONTEXT: std::cell::RefCell<Option<egui::Context>> =

@@ -354,7 +354,7 @@ pub fn prepare(state: &mut AppState) {
     if state.ui.netlist.rerun_queued && !state.simulation.is_running {
         state.ui.netlist.rerun_queued = false;
         if let Some(reason) = state.manual_deck_run_block_reason() {
-            state.push_user_message(crate::workbench::ConsoleMessage::warning(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Queued netlist re-run cancelled: {reason}"
             )));
         } else {
@@ -375,7 +375,7 @@ pub fn prepare(state: &mut AppState) {
 
 pub(super) fn request_run(state: &mut AppState) {
     if let Some(reason) = state.manual_deck_run_block_reason() {
-        state.push_user_message(crate::workbench::ConsoleMessage::warning(format!(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
             "Netlist run blocked: {reason}"
         )));
     } else {

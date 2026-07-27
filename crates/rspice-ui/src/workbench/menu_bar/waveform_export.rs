@@ -18,7 +18,7 @@ pub(crate) fn action_export_csv_with_io(
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &typed),
             EngineeringExportFormat::TouchstoneWhereCompatible => state.push_user_message(
-                crate::workbench::app::ConsoleMessage::warning(
+                crate::diagnostics::ConsoleMessage::warning(
                     "Touchstone export is not compatible with the active typed result; select CSV export."
                         .to_owned(),
                 ),
@@ -33,13 +33,13 @@ pub(crate) fn action_export_csv_with_io(
     let prepared = match prepare_waveform_dataset(state) {
         Ok(prepared) => prepared,
         Err(message) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(message));
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
             return;
         }
     };
 
     for warning in &prepared.warnings {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(warning.clone()));
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(warning.clone()));
     }
 
     match export_format {
@@ -492,7 +492,7 @@ fn export_typed_result_csv(
                 io.write_text_file_observed(&destination, &prepared.contents)
             });
             match export {
-                Ok(()) => state.push_user_message(crate::workbench::app::ConsoleMessage::info(
+                Ok(()) => state.push_user_message(crate::diagnostics::ConsoleMessage::info(
                     crate::workbench::export_workflow::export_completion_message(
                         "CSV",
                         &path,
@@ -500,13 +500,13 @@ fn export_typed_result_csv(
                         io,
                     ),
                 )),
-                Err(error) => state.push_user_message(crate::workbench::app::ConsoleMessage::error(
+                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
                     format!("CSV export failed: {error}"),
                 )),
             }
         }
         Ok(None) => {}
-        Err(error) => state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
             "CSV export failed: {error}"
         ))),
     }
@@ -536,7 +536,7 @@ fn export_csv(
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.push_user_message(crate::workbench::app::ConsoleMessage::info(
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
                         crate::workbench::export_workflow::export_completion_message(
                             "CSV",
                             &path,
@@ -546,7 +546,7 @@ fn export_csv(
                     ));
                 }
                 Err(e) => {
-                    state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                         "CSV export failed: {}",
                         e
                     )));
@@ -557,7 +557,7 @@ fn export_csv(
             // User cancelled - no message needed
         }
         Err(e) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "CSV export failed: {}",
                 e
             )));
@@ -577,7 +577,7 @@ fn export_touchstone(
     {
         Ok(contents) => contents,
         Err(error) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Touchstone export is not compatible with the active result: {error}"
             )));
             return;
@@ -607,7 +607,7 @@ fn export_touchstone(
                         dataset.signal_count(),
                         dataset.point_count()
                     );
-                    state.push_user_message(crate::workbench::app::ConsoleMessage::info(
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
                         crate::workbench::export_workflow::export_completion_message(
                             "Touchstone",
                             &path,
@@ -616,13 +616,13 @@ fn export_touchstone(
                         ),
                     ));
                 }
-                Err(error) => state.push_user_message(crate::workbench::app::ConsoleMessage::error(
+                Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(
                     format!("Touchstone export failed: {error}"),
                 )),
             }
         }
         Ok(None) => {}
-        Err(error) => state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+        Err(error) => state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
             "Touchstone export failed: {error}"
         ))),
     }

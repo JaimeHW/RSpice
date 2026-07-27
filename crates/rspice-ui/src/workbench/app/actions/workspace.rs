@@ -1,5 +1,5 @@
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
-use crate::workbench::panels::{LogAnchor, LogSeverity, LogSource};
+use crate::diagnostics::{ConsoleMessage, LogAnchor, LogSeverity, LogSource};
+use crate::workbench::app::{AppState, RSpiceApp};
 use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::state::{
@@ -872,7 +872,7 @@ impl AppState {
                 .workspace
                 .assign_unowned_objects_to_active_sheet(&active, &self.schematic)
             {
-                self.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+                self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                     "Sheet membership could not be updated: {error}"
                 )));
             }
@@ -1662,8 +1662,8 @@ fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
 
 #[cfg(test)]
 mod tests {
+    use crate::diagnostics::{LogAnchor, LogSource};
     use crate::workbench::app::AppState;
-    use crate::workbench::panels::{LogAnchor, LogSource};
     use crate::services::drc::{DrcLocation, DrcViolationType};
     use crate::state::{
         Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,

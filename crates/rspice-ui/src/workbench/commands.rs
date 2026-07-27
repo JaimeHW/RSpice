@@ -1346,14 +1346,14 @@ impl Command {
             && self.blocked_by_project_operation()
         {
             app.state
-                .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Wait for the current project operation to finish before starting another.",
                 ));
             return;
         }
         if self.requires_open_project() && !app.state.project_lifecycle.project_open {
             app.state
-                .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Open a project before using this command.",
                 ));
             return;
@@ -1449,7 +1449,7 @@ impl Command {
                     let anchor = app.state.schematic_paste_anchor();
                     if !app.state.schematic.paste_at(anchor) {
                         app.state.push_user_message(
-                            crate::workbench::app::ConsoleMessage::warning(
+                            crate::diagnostics::ConsoleMessage::warning(
                                 "Paste could not be completed at the current canvas target",
                             ),
                         );
@@ -1507,7 +1507,7 @@ impl Command {
                     .navigate(route, super::RouteTransitionSource::User)
                 {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             error.to_string(),
                         ));
                 }
@@ -1663,7 +1663,7 @@ impl Command {
                 let count =
                     crate::workbench::chrome::document_bar::close_other_documents(&mut app.state);
                 app.state
-                    .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
+                    .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
                         "Closed {count} other document presentation(s); project data was retained"
                     )));
             }
@@ -1671,7 +1671,7 @@ impl Command {
                 let count =
                     crate::workbench::chrome::document_bar::close_all_documents(&mut app.state);
                 app.state
-                    .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
+                    .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
                         "Closed {count} document presentation(s); pinned project data was retained"
                     )));
             }
@@ -1786,7 +1786,7 @@ impl Command {
                     Ok(_) => crate::workbench::app::open_design_management_dialog(&mut app.state),
                     Err(error) => {
                         app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                                 error.to_string(),
                             ))
                     }
@@ -1916,7 +1916,7 @@ impl Command {
                 ) {
                     Ok(true) => {
                         app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::info(
+                            .push_user_message(crate::diagnostics::ConsoleMessage::info(
                                 format!(
                                     "{} completed as one undoable transaction.",
                                     command.label()
@@ -1925,13 +1925,13 @@ impl Command {
                     }
                     Ok(false) => {
                         app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::info(
+                            .push_user_message(crate::diagnostics::ConsoleMessage::info(
                                 format!("{} produced no geometry change.", command.label()),
                             ))
                     }
                     Err(error) => {
                         app.state
-                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                                 format!("{} was not applied: {error}.", command.label()),
                             ))
                     }
@@ -1997,13 +1997,13 @@ impl Command {
                 if stop_simulation_enabled(app.state.simulation.is_running) {
                     if let Err(error) = app.state.simulation.request_abort_active_run() {
                         app.state
-                            .push_sim_message(crate::workbench::app::ConsoleMessage::warning(
+                            .push_sim_message(crate::diagnostics::ConsoleMessage::warning(
                                 error,
                             ));
                     }
                 } else if app.state.simulation.is_running {
                     app.state.push_sim_message(
-                        crate::workbench::app::ConsoleMessage::warning(
+                        crate::diagnostics::ConsoleMessage::warning(
                             "This execution target cannot yet guarantee cancellation; the active run was left intact",
                         ),
                     );
@@ -2041,7 +2041,7 @@ impl Command {
                     || app.state.simulation.is_running
                 {
                     app.state
-                        .push_sim_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_sim_message(crate::diagnostics::ConsoleMessage::warning(
                         "Result history cannot be cleared while a simulation execution owns a run"
                             .to_owned(),
                     ));
@@ -2062,7 +2062,7 @@ impl Command {
                         super::result_document::viewer_unavailability_reason(&app.state, viewer)
                             .unwrap_or("the active dataset is incompatible with this viewer");
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             format!("{} cannot be opened: {reason}.", viewer.label()),
                         ));
                 }
@@ -2074,7 +2074,7 @@ impl Command {
             }
             Self::VerificationPage(VerificationPage::Drc) => {
                 app.state.push_user_message(
-                    crate::workbench::app::ConsoleMessage::warning(
+                    crate::diagnostics::ConsoleMessage::warning(
                         "Physical DRC is unavailable until a retained layout source, qualified rule deck, and immutable marker database are integrated.",
                     ),
                 );
@@ -2100,7 +2100,7 @@ impl Command {
                         super::model_editor::open_project_model(app, &library_name, &model_name)
                     {
                         app.state.push_user_message(
-                            crate::workbench::app::ConsoleMessage::warning(format!(
+                            crate::diagnostics::ConsoleMessage::warning(format!(
                                 "Cannot open device model editor: {error}"
                             )),
                         );
@@ -2108,7 +2108,7 @@ impl Command {
                 }
                 Err(reason) => {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                             "Cannot open device model editor: {reason}."
                         )))
                 }
@@ -2120,7 +2120,7 @@ impl Command {
                         super::RouteTransitionSource::User,
                     ) {
                         app.state.push_user_message(
-                            crate::workbench::app::ConsoleMessage::warning(format!(
+                            crate::diagnostics::ConsoleMessage::warning(format!(
                                 "Cannot open measurement correlation: {error}"
                             )),
                         );
@@ -2128,7 +2128,7 @@ impl Command {
                 }
                 Err(reason) => {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                             "Cannot open measurement correlation: {reason}."
                         )))
                 }
@@ -2136,7 +2136,7 @@ impl Command {
             Self::ModelSaveRevision => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::SaveRevision) {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             "Model revision cannot be reviewed: no project-owned candidate is open",
                         ));
                 }
@@ -2144,7 +2144,7 @@ impl Command {
             Self::ModelValidate => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate) {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                         "Model validation cannot be reviewed: no project-owned candidate is open",
                     ));
                 }
@@ -2152,7 +2152,7 @@ impl Command {
             Self::ModelRunQualificationTests => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::RunQualification) {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             "Qualification cannot be reviewed: no project-owned candidate is open",
                         ));
                 }
@@ -2207,7 +2207,7 @@ impl Command {
                     .navigate(route, super::RouteTransitionSource::User)
                 {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             error.to_string(),
                         ));
                 }
@@ -2222,7 +2222,7 @@ impl Command {
                     .navigate(route, super::RouteTransitionSource::User)
                 {
                     app.state
-                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             error.to_string(),
                         ));
                 }

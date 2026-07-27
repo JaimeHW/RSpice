@@ -74,7 +74,7 @@ pub(in crate::workbench::app) fn default_app_state() -> AppState {
         project_design_history: Default::default(),
         dialogs: DialogState::default(),
         sim_setup,
-        log_buffer: crate::workbench::panels::LogBuffer::default(),
+        log_buffer: crate::diagnostics::LogBuffer::default(),
         script_console: crate::workbench::panels::ScriptConsoleState::default(),
         library_manager,
         workspace,

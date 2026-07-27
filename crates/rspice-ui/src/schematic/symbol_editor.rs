@@ -4,7 +4,8 @@ use egui::{
     Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::workbench::{AppState, ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::AppState;
 use crate::schematic::view::resolved_symbol_render::draw_resolved_symbol;
 use crate::state::{
     Component, ComponentType, LibraryCellInstance, PinSummary, Point, PortDirection, PortSpec,

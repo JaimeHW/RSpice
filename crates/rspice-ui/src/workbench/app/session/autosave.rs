@@ -10,7 +10,8 @@
 
 use egui::Context;
 
-use crate::workbench::app::{ConsoleMessage, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::file_workflow;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -52,8 +53,8 @@ impl RSpiceApp {
         match crate::workbench::recovery_checkpoint::write_checkpoint(&path, &self.state.schematic) {
             Ok(checkpoint) => {
                 self.state.log_buffer.log(
-                    crate::workbench::panels::LogSeverity::Debug,
-                    crate::workbench::panels::LogSource::System,
+                    crate::diagnostics::LogSeverity::Debug,
+                    crate::diagnostics::LogSource::System,
                     format!("Autosaved checkpoint: {}", checkpoint.display()),
                     None,
                 );

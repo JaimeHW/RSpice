@@ -1,3 +1,3 @@
-use crate::workbench::app::{ConsoleMessage, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
 
 mod options_dialog;

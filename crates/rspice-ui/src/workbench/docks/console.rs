@@ -2,8 +2,9 @@
 
 use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
 
+use crate::diagnostics::LogSeverity;
 use crate::workbench::RSpiceApp;
-use crate::workbench::panels::{ConsoleHistoryItem, LogSeverity};
+use crate::workbench::panels::ConsoleHistoryItem;
 use crate::simulation::automation::CommandOutput;
 use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
@@ -1239,7 +1240,7 @@ fn run_lifecycle_presentation(
     }
 }
 
-fn log_row(ui: &mut Ui, entry: &crate::workbench::panels::LogEntry) {
+fn log_row(ui: &mut Ui, entry: &crate::diagnostics::LogEntry) {
     let t = Tokens::get(ui.ctx());
     let tone = log_tone(entry.severity);
     let source_color = tone_color(&t, tone);
@@ -1493,7 +1494,7 @@ fn muted(ui: &mut Ui, text: &str) {
 mod tests {
     use super::*;
     use crate::workbench::AppState;
-    use crate::workbench::panels::LogSource;
+    use crate::diagnostics::LogSource;
     use crate::services::drc::{DrcResult, DrcSeverity};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
     use crate::workbench::state::WorkbenchState;

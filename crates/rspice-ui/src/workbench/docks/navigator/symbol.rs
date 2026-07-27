@@ -117,7 +117,7 @@ fn pins_section(
                 Ok(()) => app.state.ui.symbol.select_pin(name),
                 Err(error) => app
                     .state
-                    .push_user_message(crate::workbench::ConsoleMessage::warning(error)),
+                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
             }
         }
     });

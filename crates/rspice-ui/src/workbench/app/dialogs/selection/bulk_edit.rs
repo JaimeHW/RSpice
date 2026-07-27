@@ -9,6 +9,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     Component, ComponentDisplayMode, ComponentType, SchematicSnapshot, SchematicState,
     format_replacement_parameters, parse_replacement_parameters_strict,
@@ -24,7 +25,7 @@ use crate::workbench::design_system::{
 };
 use crate::workbench::{SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind};
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} FILTERED SELECTION \u{00b7} EXACT DIFFERENCE";
 const TITLE: &str = "Selection and bulk property editing";

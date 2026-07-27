@@ -3,6 +3,7 @@
 use egui::{Align, Context, Frame, Layout, Margin, TextEdit, Ui, vec2};
 use sha2::{Digest as _, Sha256};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     CellViewRef, ConfigurationBlackBoxPolicy, ConfigurationCloneScope, ConfigurationModelProfile,
     ConfigurationPlatform, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetId,
@@ -15,7 +16,7 @@ use crate::workbench::design_system::{
 };
 
 use crate::workbench::app::dialogs::review_primitives::{input_field, purpose_line, read_only_field};
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
+use crate::workbench::app::{AppState, RSpiceApp};
 
 const MANAGER_TITLE: &str = "Testbench configuration sets";
 const MANAGER_EYEBROW: &str = "DESIGN · HIERARCHY · VIEW BINDING";

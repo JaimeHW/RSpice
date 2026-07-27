@@ -6,6 +6,7 @@
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -13,10 +14,7 @@ use crate::ui::widgets::{
 };
 use crate::state::SchematicHierarchyVisibility;
 
-use crate::workbench::app::{
-    AppState, ConsoleMessage, HierarchyDescendEditMode, HierarchyParentContext, RSpiceApp,
-    SchematicEditAuthority,
-};
+use crate::workbench::app::{AppState, HierarchyDescendEditMode, HierarchyParentContext, RSpiceApp, SchematicEditAuthority};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} EDIT CONTEXT";
 const TITLE: &str = "Descend into hierarchy";

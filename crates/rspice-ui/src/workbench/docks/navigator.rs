@@ -902,7 +902,7 @@ fn locate_on_schematic_menu(response: &egui::Response, app: &mut RSpiceApp, sign
                 Ok(net) => {
                     Command::OpenWorkspace(Workspace::Design).execute(app);
                     app.state
-                        .push_user_message(crate::workbench::ConsoleMessage::info(format!(
+                        .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
                             "Selected conductor {net} from {signal}."
                         )));
                 }
@@ -914,7 +914,7 @@ fn locate_on_schematic_menu(response: &egui::Response, app: &mut RSpiceApp, sign
                         message.clone(),
                     );
                     app.state
-                        .push_user_message(crate::workbench::ConsoleMessage::warning(message));
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
                 }
             }
             ui.close();
@@ -2222,7 +2222,7 @@ fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_line: usize) 
                 app.state.schematic.selection.clear();
                 app.state.schematic.selection.select_component(component_id);
                 app.state
-                    .push_user_message(crate::workbench::ConsoleMessage::info(format!(
+                    .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
                         "Cross-probed generated line {active_line} to component {component_id}."
                     )));
             }

@@ -2,7 +2,8 @@
 //! library/cell context, a view name, and the view type as chips.
 
 use super::shared::{DialogActionOutcome, validate_lcv_name};
-use super::{ConsoleMessage, Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, chip, input_row, kv_row};

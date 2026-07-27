@@ -14,7 +14,8 @@ mod state;
 
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
-use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::AppState;
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, ViewType};
 
 pub(crate) fn open_symbol_import_dialog(state: &mut AppState) {

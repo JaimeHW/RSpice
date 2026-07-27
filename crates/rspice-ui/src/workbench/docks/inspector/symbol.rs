@@ -77,7 +77,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .store_active_symbol_editor_bundle(&document, &metadata)
     {
         app.state
-            .push_user_message(crate::workbench::ConsoleMessage::warning(error));
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
     }
 }
 

@@ -1,8 +1,8 @@
 //! Design-check actions (Check menu). Rendering lives in
 //! `crate::workbench::chrome::title_bar`.
 
-use crate::workbench::app::{AppState, ConsoleMessage};
-use crate::workbench::panels::{LogSeverity, LogSource};
+use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
+use crate::workbench::app::AppState;
 use crate::services::drc::{DrcConfig, DrcSeverity};
 use crate::state::CellViewRef;
 

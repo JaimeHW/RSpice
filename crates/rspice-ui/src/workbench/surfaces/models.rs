@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use egui::{Align, Align2, Color32, Key, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 use sha2::{Digest as _, Sha256};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::ConsoleMessage;
 use crate::workbench::app::{
     open_create_model_bound_symbol_dialog, open_symbol_import_dialog,
     open_symbol_parameter_form_dialog,

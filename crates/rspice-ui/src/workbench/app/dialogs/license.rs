@@ -8,12 +8,13 @@
 
 use egui::Context;
 
+use crate::diagnostics::ConsoleMessage;
 use crate::services::license::{self, LicenseInfo};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
-use crate::workbench::app::{ConsoleMessage, LicensePhase, RSpiceApp};
+use crate::workbench::app::{LicensePhase, RSpiceApp};
 
 #[cfg(any(test, rspice_development_build))]
 const DEVELOPMENT_SAMPLE_ACTION_LABEL: Option<&str> = Some("Paste sample key");

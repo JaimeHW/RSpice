@@ -1,4 +1,5 @@
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::{AppState, RSpiceApp};
 use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);

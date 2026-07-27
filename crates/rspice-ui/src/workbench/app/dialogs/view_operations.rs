@@ -7,9 +7,8 @@
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
-use crate::workbench::app::{
-    AppState, ConsoleMessage, FullScreenPanels, FullScreenScope, RSpiceApp, ViewOperation,
-};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::{AppState, FullScreenPanels, FullScreenScope, RSpiceApp, ViewOperation};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{

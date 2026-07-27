@@ -1,4 +1,5 @@
-use super::{ConsoleMessage, RSpiceApp, save_global_veriloga_library};
+use crate::diagnostics::ConsoleMessage;
+use super::{RSpiceApp, save_global_veriloga_library};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DialogActionOutcome {

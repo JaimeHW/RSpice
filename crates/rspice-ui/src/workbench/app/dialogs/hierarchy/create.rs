@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 use egui::{Align, Context, Frame, Label, Layout, Margin, Sense, Stroke, Ui, UiBuilder, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::{DrcConfig, DrcViolation, run_drc_check_with_hierarchy_and_config};
 use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
@@ -30,7 +31,7 @@ use crate::workbench::app::design_history::{
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::dialogs::state::{CreateHierarchyDialogState, CreateHierarchyPortDraft};
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CELL / VIEW CONTRACT";
 const TITLE: &str = "Create hierarchical cell";

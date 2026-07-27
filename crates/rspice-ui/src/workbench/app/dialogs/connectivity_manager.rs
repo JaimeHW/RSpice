@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui, Vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::services::drc::{
     DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
     run_drc_check_with_hierarchy_and_config,
@@ -30,7 +31,7 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::section_header;
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} ELECTRICAL INTENT \u{00b7} CROSS-SHEET RESOLUTION";
 const TITLE: &str = "Connectivity, buses and signal bundles";

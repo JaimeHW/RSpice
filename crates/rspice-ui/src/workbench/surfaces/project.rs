@@ -9,7 +9,8 @@ use egui::{
     vec2,
 };
 
-use crate::workbench::{RSpiceApp, app::ConsoleMessage};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::RSpiceApp;
 use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};

@@ -2,7 +2,8 @@ use egui::{
     Align, ComboBox, Context, Frame, Grid, Layout, Margin, ScrollArea, Stroke, TextEdit, Ui, vec2,
 };
 
-use crate::workbench::{ConsoleMessage, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::RSpiceApp;
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, ParameterInheritance, PropertyType,
     SymbolParameterConstraints, SymbolParameterDefault, SymbolParameterField, SymbolParameterForm,

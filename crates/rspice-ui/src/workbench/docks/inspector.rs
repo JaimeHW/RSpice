@@ -867,7 +867,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             format!("{signal} cross-probed to {net}."),
                         );
                         app.state
-                            .push_user_message(crate::workbench::ConsoleMessage::info(format!(
+                            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
                                 "Selected conductor {net} from {signal}."
                             )));
                     }
@@ -878,7 +878,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             message.clone(),
                         );
                         app.state
-                            .push_user_message(crate::workbench::ConsoleMessage::warning(message));
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
                     }
                 }
             }

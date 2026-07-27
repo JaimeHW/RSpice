@@ -46,14 +46,14 @@ pub(super) fn action_export_svg_with_io(
                 .and_then(|destination| io.write_text_file_observed(&destination, &svg_content));
             match export {
                 Ok(()) => {
-                    state.push_user_message(crate::workbench::app::ConsoleMessage::info(
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
                         crate::workbench::export_workflow::export_completion_message(
                             "SVG", &path, None, io,
                         ),
                     ));
                 }
                 Err(e) => {
-                    state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                         "SVG export failed: {}",
                         e
                     )));
@@ -64,7 +64,7 @@ pub(super) fn action_export_svg_with_io(
             // User cancelled - no message needed
         }
         Err(e) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "SVG export failed: {}",
                 e
             )));
@@ -80,7 +80,7 @@ pub(crate) fn action_export_netlist_with_io(
     let netlist_content =
         if state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
             if state.ui.netlist.generated_source.is_empty() {
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "No retained generated artifact is available to export.",
                 ));
                 return;
@@ -89,7 +89,7 @@ pub(crate) fn action_export_netlist_with_io(
                 || state.ui.netlist.generated_input_digest
                     != state.ui.netlist.current_generation_input_digest
             {
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Generated export is blocked because the retained artifact is stale.",
                 ));
                 return;
@@ -104,7 +104,7 @@ pub(crate) fn action_export_netlist_with_io(
             }
         } else {
             if state.schematic.components.is_empty() {
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "No circuit to export. Add components first.",
                 ));
                 return;
@@ -146,7 +146,7 @@ pub(crate) fn action_export_netlist_with_io(
             });
             match export {
                 Ok(()) => {
-                    state.push_user_message(crate::workbench::app::ConsoleMessage::info(
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::info(
                         crate::workbench::export_workflow::export_completion_message(
                             filter_name,
                             &path,
@@ -156,7 +156,7 @@ pub(crate) fn action_export_netlist_with_io(
                     ));
                 }
                 Err(e) => {
-                    state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+                    state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                         "Netlist export failed: {}",
                         e
                     )));
@@ -167,7 +167,7 @@ pub(crate) fn action_export_netlist_with_io(
             // User cancelled - no message needed
         }
         Err(e) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Netlist export failed: {}",
                 e
             )));
@@ -183,7 +183,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
     let Some(document) = state.ui.netlist.generated_document.as_ref() else {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
             "No retained generated artifact is available to export.",
         ));
         return false;
@@ -194,25 +194,25 @@ pub(crate) fn action_export_generated_netlist_with_options(
             != state.ui.netlist.current_generation_input_digest
         || state.ui.netlist.generated_input_digest != Some(artifact.provenance().input().digest())
     {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
             "Generated export is blocked because the retained artifact is stale or inconsistent with its authenticated inputs.",
         ));
         return false;
     }
     if include_source_map && !bundle_dependencies {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
             "Source-map export requires a self-contained bundle.",
         ));
         return false;
     }
     if include_source_map && format != crate::io::NetlistFormat::Spice {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
             "Generated source maps identify exact SPICE lines and cannot be attached to a translated dialect.",
         ));
         return false;
     }
     if !bundle_dependencies && !artifact.dependencies().is_empty() {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
             "Generated decks with project or external source dependencies must be exported as a self-contained bundle.",
         ));
         return false;
@@ -224,7 +224,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     let bundle = match build_generated_bundle(&artifact, format, include_source_map) {
         Ok(bundle) => bundle,
         Err(error) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Generated bundle export failed: {error}"
             )));
             return false;
@@ -243,7 +243,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Generated bundle export failed: {error}"
             )));
             return false;
@@ -257,7 +257,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     });
     match result {
         Ok(()) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::info(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
                 crate::workbench::export_workflow::export_completion_message(
                     "Generated netlist bundle",
                     &path,
@@ -268,7 +268,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
             true
         }
         Err(error) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Generated bundle export failed: {error}"
             )));
             false
@@ -303,7 +303,7 @@ fn publish_generated_source(
     }) {
         Ok(path) => path,
         Err(error) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Generated netlist export failed: {error}"
             )));
             return false;
@@ -317,7 +317,7 @@ fn publish_generated_source(
         .and_then(|destination| io.write_text_file_observed(&destination, &source));
     match result {
         Ok(()) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::info(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::info(
                 crate::workbench::export_workflow::export_completion_message(
                     filter_name,
                     &path,
@@ -328,7 +328,7 @@ fn publish_generated_source(
             true
         }
         Err(error) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Generated netlist export failed: {error}"
             )));
             false
@@ -787,7 +787,7 @@ fn push_u32(output: &mut Vec<u8>, value: u32) {
 
 pub(crate) fn action_view_netlist(state: &mut AppState) {
     if state.schematic.components.is_empty() {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
             "No circuit to generate netlist. Add components first.",
         ));
         return;
@@ -803,7 +803,7 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
     let preview = preview_lines.join("\n");
     let total_lines = netlist_content.lines().count();
 
-    state.push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
+    state.push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
         "Generated netlist ({} lines):\n{}{}",
         total_lines,
         preview,
@@ -822,7 +822,7 @@ pub(crate) fn build_menu_netlist(
     ) {
         Ok(projection) => projection,
         Err(error) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(error.to_string()));
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(error.to_string()));
             return None;
         }
     };
@@ -849,13 +849,13 @@ pub(crate) fn build_menu_netlist(
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
     else {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::error(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(
             "Netlist export requires a stable active simulation plan.",
         ));
         return None;
     };
     let Some(plan_payload) = state.workspace.active_plan_data(plan_id) else {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
             "Simulation plan {plan_id} has no plan-owned configuration payload."
         )));
         return None;
@@ -873,13 +873,13 @@ pub(crate) fn build_menu_netlist(
 
     if !generation.errors.is_empty() {
         for err in generation.errors {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(err));
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(err));
         }
         return None;
     }
 
     for warning in generation.warnings {
-        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(warning));
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(warning));
     }
 
     let spice_netlist = state

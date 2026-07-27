@@ -185,7 +185,7 @@ impl RSpiceApp {
             WindowSessionAction::CloseWindow(window) => {
                 if let Ok(documents) = self.state.workbench.window_session.close_window(window) {
                     self.state.push_user_message(
-                        crate::workbench::app::ConsoleMessage::info(format!(
+                        crate::diagnostics::ConsoleMessage::info(format!(
                             "Closed application window {}; {} document presentation(s) returned to the main window",
                             window.value(),
                             documents.len()

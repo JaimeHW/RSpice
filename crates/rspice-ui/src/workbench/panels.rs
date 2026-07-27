@@ -5,12 +5,10 @@
 //! console.
 
 pub mod calculator;
-pub mod log_panel;
 pub mod pdk_settings_dialog;
 pub mod properties_panel;
 pub mod script_console;
 
-pub use log_panel::{LogAnchor, LogBuffer, LogEntry, LogSeverity, LogSource};
 pub use pdk_settings_dialog::{
     PdkSettingsDialogResult, PdkSettingsDialogState, render_pdk_settings_dialog,
 };

@@ -1,7 +1,7 @@
 //! Tests for workspace-view and symbol-document actions.
 
+use crate::diagnostics::{LogAnchor, LogSource};
 use crate::workbench::app::AppState;
-use crate::workbench::panels::{LogAnchor, LogSource};
 use crate::services::drc::{DrcLocation, DrcViolationType};
 use crate::workbench::state::Workspace;
 use crate::state::{

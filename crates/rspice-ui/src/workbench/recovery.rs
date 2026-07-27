@@ -16,7 +16,8 @@ use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use serde::Serialize;
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, RecentKind};
+use crate::diagnostics::ConsoleMessage;
+use crate::workbench::app::{AppState, RSpiceApp, RecentKind};
 use crate::workbench::file_workflow::FileWorkflowIo;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 #[cfg(not(target_arch = "wasm32"))]

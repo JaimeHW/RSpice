@@ -1062,7 +1062,7 @@ impl RSpiceApp {
             }
             if let Err(error) = entry.execute(self) {
                 self.state
-                    .push_user_message(crate::workbench::app::ConsoleMessage::warning(error));
+                    .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
             }
         }
     }

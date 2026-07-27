@@ -5,6 +5,7 @@ pub(in crate::workbench::app) mod workspace;
 
 use egui::{Context, Popup};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{Point, SymbolDocument, SymbolShape};
 use crate::workbench::commands::Command as ShortcutCommand;
@@ -14,7 +15,7 @@ use crate::workbench::{
 };
 
 use crate::workbench::app::{
-    AppState, ConsoleMessage, RSpiceApp,
+    AppState, RSpiceApp,
     session::shortcuts::{
         ShortcutEnvironment, ShortcutInputSnapshot, engineering_canvas_has_focus,
         runtime_command_platform,

@@ -9,6 +9,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
 use crate::state::{
@@ -22,7 +23,7 @@ use crate::ui::widgets::{
 };
 use crate::state::SchematicHierarchyVisibility;
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum SelectionWorkflowKind {

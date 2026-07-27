@@ -6,6 +6,7 @@
 
 use egui::{Align, Context, Frame, Layout, RichText, ScrollArea, Stroke, TextEdit, Ui, Vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{DesignNote, DesignNoteKind, DesignReviewMutation, DesignReviewState, Point};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -14,7 +15,7 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::section_header;
 
-use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
 
 const EYEBROW: &str = "COLLABORATION \u{00b7} ANCHORED REVIEW \u{00b7} RESOLUTION";
 const TITLE: &str = "Design review comments";

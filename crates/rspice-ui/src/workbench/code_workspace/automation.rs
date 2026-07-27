@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::automation_workflow::{
     ArtifactKind, AutomationPlan, CheckEvidence, CheckOutcome, CompletedEvidence, DiagnosticSet,
     compare_governed_waveforms, compile_workflow, render_requested_artifacts,
 };
 use crate::workbench::export_workflow::SaveDialogConfig;
-use crate::workbench::{ConsoleMessage, RSpiceApp};
+use crate::workbench::RSpiceApp;
 use crate::product::{ContentDigest, RunId, SimulationPlanId};
 use crate::state::{AnalysisResultSourceDomain, ProjectSourceLanguage, SimulationRun, SpecEntry};
 

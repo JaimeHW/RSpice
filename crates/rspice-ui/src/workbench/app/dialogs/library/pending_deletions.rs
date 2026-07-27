@@ -1,4 +1,6 @@
-use super::{ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use crate::diagnostics::ConsoleMessage;
+
+use super::{RSpiceApp, VERILOGA_LIBRARY_NAME};
 
 impl RSpiceApp {
     pub(in crate::workbench::app) fn process_pending_library_deletions(&mut self) {

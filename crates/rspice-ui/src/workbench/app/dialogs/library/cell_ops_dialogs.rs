@@ -3,7 +3,8 @@
 //! deep; the semantics live in `AppState::copy_cell` / `rename_cell`.
 
 use super::shared::validate_lcv_name;
-use super::{ConsoleMessage, Context, RSpiceApp};
+use super::{Context, RSpiceApp};
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};

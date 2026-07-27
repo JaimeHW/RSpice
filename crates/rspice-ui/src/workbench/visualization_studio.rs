@@ -14,8 +14,9 @@ use egui::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::analysis::calculator;
-use crate::workbench::{AppState, RSpiceApp, app::ConsoleMessage};
+use crate::workbench::{AppState, RSpiceApp};
 use crate::product::{DatasetBinding, DatasetId};
 use crate::results::plot_export_preset::{
     ColorProfile, DeterministicNamingTemplate, ExportBackground, ExportPageSize,

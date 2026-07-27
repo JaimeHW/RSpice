@@ -2,6 +2,7 @@
 
 use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::export_workflow::{ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -10,10 +11,7 @@ use crate::state::{
     EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy, SortDirection,
 };
 
-use crate::workbench::app::{
-    AppState, ConsoleMessage, EngineeringTableDialogPage, EngineeringTableExportFormat,
-    EngineeringTableExportScope, RSpiceApp,
-};
+use crate::workbench::app::{AppState, EngineeringTableDialogPage, EngineeringTableExportFormat, EngineeringTableExportScope, RSpiceApp};
 
 const EYEBROW: &str = "VIEW \u{00b7} UNIVERSAL DATA-GRID CONTRACT";
 

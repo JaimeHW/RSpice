@@ -465,7 +465,7 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
                                     reason: error.to_string(),
                                 });
                         }
-                        state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                             format!(
                                 "Canonical native project was not restored: {error}. The remembered file was left untouched; open it explicitly or save an independent project copy"
                             ),
@@ -482,12 +482,12 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
                         canonical_path,
                         reason: reason.clone(),
                     });
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                     "Canonical native project was not restored because {reason}; open it explicitly to accept its current bytes"
                 )));
             }
             (None, Some(_)) => {
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Ignored a native binding receipt without its exact restored pathname",
                 ));
             }
@@ -500,7 +500,7 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
             let project_id = state.workspace.project.id().to_string();
             if receipt.project_id != project_id {
                 state.browser_project_binding_receipt = None;
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Ignored a stale browser binding receipt for a different project identity",
                 ));
             } else {
@@ -535,14 +535,14 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
     match completion.result {
         persistence::BrowserRestoreResult::Missing => {
             state.browser_project_binding_receipt = None;
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 "The browser canonical-binding receipt has no matching restoration record; choose Save to establish a new canonical binding",
             ));
         }
         persistence::BrowserRestoreResult::Restored { baseline, binding } => {
             if baseline.workspace.project.id() != state.workspace.project.id() {
                 release_browser_binding_handle(&binding);
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Ignored a stale browser project binding for a different project identity",
                 ));
                 return;
@@ -557,7 +557,7 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
         }
         persistence::BrowserRestoreResult::ReconnectRequired { binding } => {
             state.project_lifecycle.browser_reconnect_binding = Some(binding);
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 "The canonical browser project needs permission again. Choose Save to reconnect under browser user activation; no bytes will be overwritten unless the accepted digest still matches.",
             ));
         }
@@ -570,23 +570,23 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
                 binding,
                 observed_digest,
             });
-            state.push_user_message(crate::workbench::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Canonical browser project conflict: {reason}. Ordinary Save is blocked; reopen it or save an independent project copy"
             )));
         }
         persistence::BrowserRestoreResult::Evicted(reason) => {
             state.browser_project_binding_receipt = None;
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Canonical browser project binding was removed: {reason}. Choose Save to select a canonical file again; download fallback remains copy-only."
             )));
         }
         persistence::BrowserRestoreResult::Retryable(reason) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Canonical browser project could not be restored yet: {reason}. Its restoration record was retained"
             )));
         }
         persistence::BrowserRestoreResult::Unsupported(reason) => {
-            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Canonical browser saves are unavailable: {reason}"
             )));
         }
@@ -1596,7 +1596,7 @@ fn revert_document_in_place(
                 .map_err(ProjectLifecycleError::InvalidState)?;
             state.model_library_manager = manager;
             for warning in warnings {
-                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(warning));
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(warning));
             }
         }
         ProjectDocumentId::ResultHistory => {

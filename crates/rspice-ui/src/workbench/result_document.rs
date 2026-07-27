@@ -1409,7 +1409,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
                     state.ui.results.spec_drafts = None;
                 }
                 if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
-                    state.push_sim_message(crate::workbench::app::ConsoleMessage::warning(
+                    state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
                         "Specs not applied — fix the invalid bound first",
                     ));
                 }
@@ -1488,7 +1488,7 @@ fn compact_result_actions(ui: &mut Ui, state: &mut AppState) {
                     }
                     if ui.button("Apply specification edits").clicked() {
                         if !specs::apply_drafts(state) {
-                            state.push_sim_message(crate::workbench::app::ConsoleMessage::warning(
+                            state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
                                 "Specs not applied — fix the invalid bound first",
                             ));
                         } else {

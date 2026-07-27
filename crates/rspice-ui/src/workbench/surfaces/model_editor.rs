@@ -2125,7 +2125,7 @@ fn save_revision_workflow(
             match super::super::model_editor::save_open_candidate(app) {
                 Ok(revision) => {
                     app.state.push_user_message(
-                        crate::workbench::app::ConsoleMessage::info(format!(
+                        crate::diagnostics::ConsoleMessage::info(format!(
                             "Model revision r{} was saved with its exact source and qualification state.",
                             revision.get()
                         )),

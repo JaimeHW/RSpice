@@ -1437,13 +1437,13 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
                                 {
                                     match commit_reference_pvt(app, process, temperature) {
                                         Ok(true) => app.state.push_user_message(
-                                            crate::workbench::app::ConsoleMessage::info(format!(
+                                            crate::diagnostics::ConsoleMessage::info(format!(
                                                 "Reference PVT changed to {label}"
                                             )),
                                         ),
                                         Ok(false) => {}
                                         Err(error) => app.state.push_user_message(
-                                            crate::workbench::app::ConsoleMessage::warning(format!(
+                                            crate::diagnostics::ConsoleMessage::warning(format!(
                                                 "Reference PVT was not changed: {error}"
                                             )),
                                         ),

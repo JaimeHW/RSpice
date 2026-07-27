@@ -326,7 +326,7 @@ fn code_pane(
                 Ok(false) => {}
                 Err(error) => app
                     .state
-                    .push_user_message(crate::workbench::ConsoleMessage::error(format!(
+                    .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                         "Could not update {}: {error}",
                         document.file_name()
                     ))),
