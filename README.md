@@ -162,8 +162,11 @@ physics-style model, not a CMC one.
 handling and scoped parameters. `.PARAM`/`.CSPARAM` and `.FUNC` evaluate through
 a bytecode expression VM that also backs B-sources; `.IF`/`.ELSEIF`/`.ELSE`/`.ENDIF`
 select at parse time. `.INCLUDE`, `.LIB`, and `.MODEL` bring in model cards —
-starter `.lib` libraries for diodes, MOSFETs, transistors, and op-amps ship under
-[crates/rspice-core/models/spice/](crates/rspice-core/models/spice/). `.GLOBAL`,
+the model library ships under [models/spice/](models/spice/), where four open
+foundry PDKs sit alongside academic, community and manufacturer packs for some
+191,000 model cards, and a starter set for diodes, MOSFETs, transistors and
+op-amps is compiled into the binary from
+[models/spice/builtin/](models/spice/builtin/). `.GLOBAL`,
 `.IC`, `.NODESET`, `.SAVE`/`.PROBE`, `.PRINT`/`.PLOT`, `.OPTIONS`, and `.TEMP`
 behave as expected, and the usual engineering suffixes are accepted. Unrecognized
 dot-commands surface as diagnostics rather than being silently dropped.

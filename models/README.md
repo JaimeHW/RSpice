@@ -2,9 +2,22 @@
 
 Device model libraries bundled with the repository.
 
-The built-in SPICE `.lib` model cards are owned and packaged by
-[`rspice-core`](../crates/rspice-core/models/spice). They provide starter
-libraries of common discrete parts and op-amps for examples and tests.
+## `spice/`
+
+SPICE model packs, organized by origin and indexed by license. See
+[`spice/README.md`](spice/README.md) for the layout, the licensing tiers and the
+tooling.
+
+Four open foundry PDKs (SkyWater SKY130, GlobalFoundries GF180MCU, IHP SG13G2
+and ASAP7) sit alongside academic, community and manufacturer libraries, for
+roughly 191,000 model cards and 68,000 subcircuits in total. Every pack records
+its upstream commit or artifact hash, its license, and whether RSpice may
+redistribute it; `spice/MANIFEST.toml` is the index a packaging step reads, and
+`spice/CATALOG.tsv` indexes every individual part.
+
+`spice/builtin/` is the one pack compiled into the binary. It is the starter set
+available on every platform, including the browser build, and is the only pack
+whose redistribution terms must be unconditionally clear.
 
 ## `veriloga/`
 

@@ -194,7 +194,65 @@ RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
   https://scripts.sil.org/OFL
 
 -------------------------------------------------------------------------------
-6. Rust crate dependencies
+6. Vendored SPICE model packs (models/spice/)
+-------------------------------------------------------------------------------
+
+The repository vendors third-party SPICE model libraries under models/spice/.
+Each pack keeps its upstream files verbatim under its own `upstream/` directory
+together with the upstream license text (or, where upstream ships none, a
+`LICENSE-NOTE.md` recording the terms as found). Per-pack license files remain
+authoritative; models/spice/MANIFEST.toml is the machine-readable index and
+records, for every pack, its license tier and whether RSpice may redistribute
+it.
+
+Redistributable under permissive terms:
+
+  - SkyWater SKY130 primitive device models (Apache-2.0)
+    Copyright SkyWater Technology Foundry and Google LLC.
+    https://github.com/google/skywater-pdk-libs-sky130_fd_pr
+  - GlobalFoundries GF180MCU primitive device models (Apache-2.0)
+    Copyright GlobalFoundries and Google LLC.
+    https://github.com/google/globalfoundries-pdk-libs-gf180mcu_fd_pr
+  - IHP SG13G2 SiGe BiCMOS device models (Apache-2.0)
+    Copyright IHP GmbH — Leibniz Institute for High Performance
+    Microelectronics. Includes the PDK's own copies of the PSP 103, MOSVAR and
+    R3 Verilog-A sources, which carry the CMC notices described in section 3.
+    https://github.com/IHP-GmbH/IHP-Open-PDK
+  - ASAP7 7 nm predictive FinFET models (BSD-3-Clause)
+    Copyright Arizona State University and Arm Limited.
+    https://github.com/The-OpenROAD-Project/asap7_pdk_r1p7
+  - MOSIS wafer-test BSIM model collections (BSD-3-Clause)
+    Copyright 2019 Czech Technical University in Prague, Digital Design and
+    Dependability Research Group.
+    https://github.com/DDD-FIT-CTU/CMOS-SPICE-Model-Collections
+  - SJTU BSIM and PTM model collection (declared CC-BY-4.0)
+    Copyright Yongfu Li Research Group, Shanghai Jiao Tong University.
+    https://github.com/SJTU-YONGFU-RESEARCH-GRP/spice_model_collections
+
+Vendored without an established redistribution grant. These packs are published
+for free download and carry no license text and no redistribution prohibition;
+they are recorded in MANIFEST.toml with tier `ambiguous` and
+`redistributable = false`, and a distributed build must not include them until
+their terms are confirmed:
+
+  - Micro-Cap 12 model library, ngspice port. Originating with Spectrum
+    Software and the individual part manufacturers. The library states that
+    most models may be freely used and distributed but that some carry a
+    restricted commercial-use license, without identifying which.
+  - ngspice basic model set, University of Granada legacy collection,
+    74-series logic collections, and special-function IC models, as
+    redistributed by the ngspice project.
+  - Diodes Incorporated complete SPICE model library.
+    Copyright Diodes Incorporated (including the former Zetex range).
+  - InterFET standard JFET model library. Copyright InterFET Corporation and
+    the manufacturers named in each card's MFG field.
+
+The RSpice built-in starter library (models/spice/builtin/) is authored by the
+RSpice project from published datasheet values and is covered by the repository
+LICENSE, not by any of the notices above.
+
+-------------------------------------------------------------------------------
+7. Rust crate dependencies
 -------------------------------------------------------------------------------
 
 RSpice links against open-source Rust crates. Most are dual-licensed
@@ -221,8 +279,12 @@ distributions on https://crates.io.
 
 The names of the University of California, the ngspice project, EPFL, Tiburon
 Design Automation, NXP, CEA, Delft University of Technology, Arizona State
-University, Silicon Integration Initiative, the Si2 Compact Model Coalition,
-IBM, National Technology & Engineering Solutions of Sandia, LLC, Sandia
-National Laboratories, Xyce, or any other copyright holders listed above may
-not be used to endorse or promote RSpice or products derived from it without
-their prior written permission.
+University, Arm Limited, Silicon Integration Initiative,
+the Si2 Compact Model Coalition, IBM,
+National Technology & Engineering Solutions of Sandia, LLC,
+Sandia National Laboratories, Xyce, SkyWater Technology Foundry, Google LLC,
+GlobalFoundries, IHP GmbH, the Czech Technical University in Prague, Shanghai
+Jiao Tong University, Spectrum Software, Diodes Incorporated, InterFET
+Corporation, or any other copyright holders listed above may not be used to
+endorse or promote RSpice or products derived from it without their prior
+written permission.
