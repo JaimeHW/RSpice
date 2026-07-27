@@ -1,3 +1,23 @@
+//! Generator CLI for the built-in Verilog-A devices.
+//!
+//! Drives [`rspice_veriloga::rust_backend`] over a tree of Verilog-A sources
+//! and writes the Rust that `rspice-core` compiles under its
+//! `veriloga-builtins` feature.
+//!
+//! ```text
+//! regenerate-builtins       rewrite every device, registry.rs and manifest.txt
+//! generate-builtins-subset  --filter one model into target/, for inspection
+//! check-builtins            verify the checked-in output is current; no writes
+//! ```
+//!
+//! Build it under `--profile generator`: the model corpus is large enough that
+//! an unoptimized generator is impractically slow.
+//!
+//! `--filter` is accepted only by the subset command. A partial rewrite would
+//! leave `registry.rs` and the manifest describing devices that are no longer
+//! there, so full regeneration rejects the flag rather than producing an
+//! inconsistent tree, and the subset command writes neither file.
+
 use std::env;
 use std::path::PathBuf;
 

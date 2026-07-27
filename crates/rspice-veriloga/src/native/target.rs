@@ -1,3 +1,11 @@
+//! Which architecture the JIT is compiling for.
+//!
+//! [`TargetSpec::host`] resolves the running architecture. Only
+//! [`Architecture::X64`] has an encoder; the `AArch64` variant exists so the
+//! dispatch is exhaustive and an unsupported host produces a named
+//! `UnsupportedTarget` error rather than a panic or a silent bytecode
+//! fallback.
+
 use smol_str::SmolStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

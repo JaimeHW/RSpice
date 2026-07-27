@@ -1,3 +1,11 @@
+//! Emitting bytecode programs from the device-equation IR.
+//!
+//! Walks the IR and produces the programs a [`CompiledModel`] is made of: the
+//! assignment program, a value and Jacobian program per stamp, the reactive
+//! (charge) programs, and the noise metadata. Derivatives are read off the
+//! shadow assignments the autodiff pass already produced, so nothing here
+//! differentiates — it schedules and serializes what exists.
+
 use super::*;
 use std::collections::HashMap;
 

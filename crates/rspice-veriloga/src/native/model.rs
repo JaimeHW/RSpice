@@ -1,3 +1,15 @@
+//! The compiled native image and the entry points into it.
+//!
+//! A [`NativeModel`] owns the [`ExecutableMemory`] holding the emitted code
+//! plus the offsets of each entry point within it, and hands out the typed
+//! `extern "C"` function pointers the device calls. Because those pointers
+//! borrow from memory the model owns, the model must outlive every evaluation
+//! — which is why it is held behind an `Arc` alongside the compiled model
+//! rather than being reconstructed per instance.
+//!
+//! It also records the storage each entry requires, so a caller cannot invoke
+//! compiled code with an undersized state frame.
+
 use super::runtime::ExecutableMemory;
 use super::{EvalContext, JitError, JitResult};
 use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};

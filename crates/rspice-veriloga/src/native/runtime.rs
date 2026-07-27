@@ -1,3 +1,15 @@
+//! Allocating and protecting the pages emitted code runs from.
+//!
+//! [`ExecutableMemory`] wraps the platform calls — `VirtualAlloc`/
+//! `VirtualProtect` on Windows, `mmap`/`mprotect` elsewhere — behind one owned
+//! allocation that unmaps on drop.
+//!
+//! Pages are written while writable and only then flipped to executable, never
+//! mapped both at once, and the instruction cache is flushed before the memory
+//! is called. This module is the whole of the crate's raw-pointer and page-
+//! permission surface by design: keeping it here is what lets the rest of the
+//! native backend be reviewed as ordinary code.
+
 use super::{JitError, JitResult};
 use std::ptr;
 

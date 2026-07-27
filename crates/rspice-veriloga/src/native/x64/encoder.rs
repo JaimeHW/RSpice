@@ -1,3 +1,13 @@
+//! Raw x86-64 instruction encoding.
+//!
+//! [`X64Encoder`] appends encoded instructions to a byte buffer: REX prefixes,
+//! ModRM/SIB addressing, and the SSE2 scalar-double opcodes the code generator
+//! needs. It knows nothing about Verilog-A, values, or programs — it is the
+//! assembler, and the sibling `codegen` module is the compiler.
+//!
+//! Jumps are emitted with placeholder displacements and patched once the
+//! target offset is known, so forward branches do not require a second pass.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum Gpr {

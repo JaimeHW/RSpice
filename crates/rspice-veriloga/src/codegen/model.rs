@@ -1,3 +1,13 @@
+//! The compiled bytecode artifact and its instruction set.
+//!
+//! Defines [`CompiledModel`] — the serializable result of compilation — along
+//! with [`Instruction`], the stack-machine opcodes, and the supporting stamp,
+//! parameter, and noise-source descriptions.
+//!
+//! The whole artifact is `Serialize`/`Deserialize`, which is what lets
+//! `rspice-core` cache compiled models on disk keyed by source digest instead
+//! of recompiling a foundry model on every run.
+
 use super::*;
 
 /// Code generator

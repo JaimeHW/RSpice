@@ -1,3 +1,14 @@
+//! The stack machine that executes compiled bytecode programs.
+//!
+//! [`super::Vm`] walks a [`BytecodeProgram`] against a
+//! [`super::VmContext`], pushing and popping f64 operands. Analog
+//! operators appear as single instructions that consult or update the
+//! context's state slots, so the executor itself holds no memory between
+//! programs — all of it lives in the context.
+//!
+//! This is the reference runtime: whatever the JIT and the generated Rust
+//! backend produce is expected to agree with it numerically.
+
 use super::{VmContext, VmError};
 use crate::codegen::{BytecodeProgram, Instruction};
 

@@ -1,3 +1,15 @@
+//! The x86-64 backend: canonical IR in, executable image out.
+//!
+//! Drives the architecture-neutral lowering in the crate-internal `expr`
+//! module, then hands the resulting programs to `codegen` for encoding and
+//! assembles the entry points into a [`super::NativeModel`].
+//! Noise sources are planned here too, since their evaluation schedule
+//! differs from the time-domain one.
+//!
+//! `compile_model_with_canonical_ir` is the production path.
+//! `compile_model`, which works from the bytecode model alone, exists only
+//! for the `native-bytecode-contract-tests` feature.
+
 pub(crate) mod codegen;
 pub mod encoder;
 

@@ -1,3 +1,11 @@
+//! Interpolation behind `$table_model`.
+//!
+//! Binary search into sorted x data, linear interpolation between points and
+//! linear extrapolation beyond the ends, plus the matching slope so the
+//! Jacobian stays consistent with the value. Degenerate tables — empty, single
+//! point, duplicate abscissae — are handled rather than left to produce
+//! infinities.
+
 use super::*;
 
 impl Default for LookupTable {

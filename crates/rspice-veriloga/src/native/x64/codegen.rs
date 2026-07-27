@@ -1,3 +1,17 @@
+//! Emitting x86-64 machine code for a lowered native program.
+//!
+//! Compiles each lowered `NativeProgram` into a
+//! function body: SSE2 scalar double arithmetic in XMM registers, spills to
+//! the stack frame when registers run out, and `call`s into the
+//! [`abi`](crate::native::abi) helpers for transcendentals and stateful
+//! operators.
+//!
+//! Constants cannot be materialized until the code's final address is known,
+//! so they are emitted as placeholders and recorded as patches to be applied
+//! once the image is laid out. Every function follows the platform calling
+//! convention exactly — the compiled code is entered by ordinary Rust
+//! `extern "C"` pointers, with no shim to absorb a mistake.
+
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
     rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,

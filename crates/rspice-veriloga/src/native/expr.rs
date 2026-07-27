@@ -1,3 +1,14 @@
+//! Architecture-independent lowering from canonical IR to native ops.
+//!
+//! The front half of the JIT: canonical IR becomes a [`NativeProgram`], a flat
+//! list of register-machine operations that an architecture backend can encode
+//! without knowing anything about Verilog-A. Stateful operators are resolved
+//! to concrete slot assignments here, and branch unknowns to runtime column
+//! mappings, so the encoder never has to reason about solver structure.
+//!
+//! Keeping this stage architecture-neutral is what makes a second backend a
+//! matter of writing an encoder rather than a second compiler.
+
 #![allow(dead_code)]
 
 use super::{JitError, JitResult};

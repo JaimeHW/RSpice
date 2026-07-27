@@ -1,3 +1,15 @@
+//! Stateful runtime primitives behind the time-domain analog operators.
+//!
+//! [`DelayBuffer`] backs `absdelay`, [`TransitionFilter`] and [`SlewFilter`]
+//! back `transition` and `slew`, and [`CrossDetector`] backs `cross`, `above`,
+//! `timer`, and `last_crossing`.
+//!
+//! All of them separate the candidate value from committed history, for the
+//! reason given in [`super::context`]: Newton revisits a timepoint many times
+//! and an operator that advanced its history on every evaluation would make
+//! the answer depend on iteration count. Each type therefore computes from the
+//! last accepted state and exposes a separate commit.
+
 /// Circular buffer for absdelay transport delay implementation.
 ///
 /// Stores a history of (time, value) pairs to enable looking up

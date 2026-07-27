@@ -1,3 +1,9 @@
+//! Failures raised while executing or constructing a model.
+//!
+//! Covers both bytecode execution faults and the construction-time failures
+//! that must not fall back — a requested native compilation that could not be
+//! satisfied surfaces here rather than quietly running the interpreter.
+
 /// VM execution errors.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmError {

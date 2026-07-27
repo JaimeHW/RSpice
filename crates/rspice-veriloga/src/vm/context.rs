@@ -1,3 +1,18 @@
+//! Per-instance runtime state for an executing model.
+//!
+//! [`VmContext`] holds everything that varies per device instance and per
+//! timepoint: terminal voltages, resolved parameters, operator state for
+//! `ddt`/`idt`, the filters and detectors in [`super::filters`], lookup
+//! tables, and the [`IntegrationCoefficients`] the engine installs each step.
+//! The compiled model stays shared and immutable; this is the only mutable
+//! half, which is what lets a thousand instances share one compilation.
+//!
+//! The state follows a candidate/commit discipline. Newton re-evaluates the
+//! same timepoint repeatedly, so evaluation computes from the last *accepted*
+//! state and never advances history; the engine commits only once a step is
+//! accepted. Any operator with memory must respect that or iteration count
+//! would change results.
+
 use super::error::VmError;
 use super::filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
 use crate::codegen::LookupTable;

@@ -1,3 +1,19 @@
+//! The boundary JIT-compiled code calls back across.
+//!
+//! [`EvalContext`] is the `#[repr(C)]` frame the generated code reads
+//! voltages, parameters, and state through; the `rspice_*_native` functions
+//! are the `extern "C"` helpers it calls for anything not worth emitting
+//! inline — transcendental math and the stateful operators.
+//!
+//! Errors cannot propagate across this boundary as a `Result`, so a helper
+//! that fails records the reason in a thread-local that the caller drains
+//! after the compiled entry point returns. Every entry point must therefore
+//! clear the slot before running and check it after, or a stale failure would
+//! be attributed to the wrong evaluation.
+//!
+//! This is an internal contract between this crate's compiler and its own
+//! generated code, not a stable ABI. It may change with any release.
+
 use std::cell::RefCell;
 
 use crate::vm::terminal_pair_current_index;

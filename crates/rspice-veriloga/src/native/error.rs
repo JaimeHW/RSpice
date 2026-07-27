@@ -1,3 +1,11 @@
+//! Typed failures from native compilation.
+//!
+//! Because native mode has no bytecode fallback, a [`JitError`] is the whole
+//! outcome of a failed compilation rather than a hint to try something else.
+//! The variants therefore identify the model and the specific construct that
+//! could not be lowered, so an unsupported model is an actionable report
+//! instead of a silent drop to a slower path.
+
 use smol_str::SmolStr;
 
 pub type JitResult<T> = Result<T, JitError>;
