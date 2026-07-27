@@ -8,10 +8,10 @@
 
 [summary]
 packs = 15
-files = 5705
-bytes = 147245620
-models = 191146
-subcircuits = 68867
+files = 5707
+bytes = 147260598
+models = 191153
+subcircuits = 68865
 redistributable_packs = 7
 tiers = { ambiguous = 9, own = 1, permissive = 5 }
 
@@ -71,10 +71,10 @@ redistributable = true
 devices = ["diode", "zener", "led", "bjt", "mosfet", "opamp"]
 corners = []
 entry = "lib/diode.lib"
-files = 4
-bytes = 27870
-models = 52
-subcircuits = 13
+files = 6
+bytes = 42848
+models = 59
+subcircuits = 11
 lib_sections = 0
 digest = ""
 

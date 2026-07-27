@@ -861,12 +861,11 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1N3911	model	diode	microcap-library	upstream/diode.lib	221
 1N3912	model	diode	microcap-library	upstream/diode.lib	225
 1N3913	model	diode	microcap-library	upstream/diode.lib	229
-1N4001	model	diode	builtin	lib/diode.lib	54
+1N4001	model	diode	builtin	lib/diode.lib	18
 1N4001	model	diode	microcap-library	upstream/diode.lib	233
 1N4001G	model	diode	microcap-library	upstream/DiodesInc.lib	10497
 1N4001GL	model	diode	microcap-library	upstream/DiodesInc.lib	11650
 1n4001rl	model	diode	microcap-library	upstream/on_rect.lib	632
-1N4002	model	diode	builtin	lib/diode.lib	69
 1N4002	model	diode	microcap-library	upstream/diode.lib	237
 1N4002G	model	diode	microcap-library	upstream/DiodesInc.lib	10501
 1N4002GL	model	diode	microcap-library	upstream/DiodesInc.lib	11654
@@ -875,7 +874,6 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1N4003G	model	diode	microcap-library	upstream/DiodesInc.lib	10493
 1N4003GL	model	diode	microcap-library	upstream/DiodesInc.lib	11658
 1n4003rl	model	diode	microcap-library	upstream/on_rect.lib	974
-1N4004	model	diode	builtin	lib/diode.lib	77
 1N4004	model	diode	microcap-library	upstream/diode.lib	245
 1N4004G	model	diode	microcap-library	upstream/DiodesInc.lib	10505
 1N4004GL	model	diode	microcap-library	upstream/DiodesInc.lib	11662
@@ -889,7 +887,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1N4006G	model	diode	microcap-library	upstream/DiodesInc.lib	10513
 1N4006GL	model	diode	microcap-library	upstream/DiodesInc.lib	11670
 1n4006rl	model	diode	microcap-library	upstream/on_rect.lib	1088
-1N4007	model	diode	builtin	lib/diode.lib	85
+1N4007	model	diode	builtin	lib/diode.lib	27
 1N4007	model	diode	microcap-library	upstream/diode.lib	257
 1N4007	subckt	subckt	ngspice-models-ugr	upstream/Diode_BJT_FET/GenSemi/GSdevices.lb5	2771
 1N4007G	model	diode	microcap-library	upstream/DiodesInc.lib	10517
@@ -901,7 +899,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1N4107	subckt	subckt	microcap-library	upstream/cs.lib	226
 1N4108	subckt	subckt	microcap-library	upstream/cs.lib	260
 1N4110	subckt	subckt	microcap-library	upstream/cs.lib	294
-1N4148	model	diode	builtin	lib/diode.lib	29
+1N4148	model	diode	builtin	lib/diode.lib	61
 1N4148	model	diode	microcap-library	upstream/On_Semi.lib	158059
 1N4148	model	diode	microcap-library	upstream/On_Semi.lib	158146
 1N4148	model	diode	microcap-library	upstream/On_Semi.lib	158199
@@ -974,10 +972,8 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1n4694	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/m_zener.lib	176
 1n4698	subckt	subckt	microcap-library	upstream/m_zener.lib	217
 1n4698	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/m_zener.lib	217
-1N4733A	model	diode	builtin	lib/diode.lib	153
 1N4735A	subckt	subckt	microcap-library	upstream/ph_diode.lib	367
 1N4735A	model	diode	microcap-library	upstream/ph_diode.lib	377
-1N4742A	model	diode	builtin	lib/diode.lib	161
 1n4750a_ON	subckt	subckt	microcap-library	upstream/onsemi.lib	84
 1n4750a_ON	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/onsemi.lib	84
 1N4760A	subckt	subckt	microcap-library	upstream/cs.lib	459
@@ -1004,10 +1000,8 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1n5231	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/m_zener.lib	258
 1n5231_ON	subckt	subckt	microcap-library	upstream/onsemi.lib	3920
 1n5231_ON	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/onsemi.lib	3920
-1N5231B	model	diode	builtin	lib/diode.lib	169
 1n5232b	subckt	subckt	microcap-library	upstream/On_Semi.lib	601
 1N5232B	subckt	subckt	ngspice-models-ugr	upstream/Diode_BJT_FET/GenSemi/GSdevices.lb5	2806
-1N5239B	model	diode	builtin	lib/diode.lib	177
 1N5242B	subckt	subckt	ngspice-models-ugr	upstream/Diode_BJT_FET/GenSemi/GSdevices.lb5	2811
 1N5248B	subckt	subckt	ngspice-models-ugr	upstream/Diode_BJT_FET/GenSemi/GSdevices.lb5	2816
 1n5252	subckt	subckt	microcap-library	upstream/m_zener.lib	299
@@ -1181,7 +1175,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1N5711W	model	diode	microcap-library	upstream/DiodesInc.lib	6
 1N5711WS	model	diode	microcap-library	upstream/DiodesInc.lib	10
 1N5712	model	diode	microcap-library	upstream/diode.lib	341
-1N5817	model	diode	builtin	lib/diode.lib	104
+1N5817	model	diode	builtin	lib/diode.lib	85
 1N5817	model	diode	microcap-library	upstream/diode.lib	345
 1N5817	subckt	subckt	ngspice-models-ugr	upstream/Diode_BJT_FET/GenSemi/GSdevices.lb5	2796
 1n5817	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/SemiGenSchottkyRect.lib	83
@@ -1190,7 +1184,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1N5818	model	diode	microcap-library	upstream/diode.lib	349
 1n5818_ON	model	diode	microcap-library	upstream/onsemi.lib	182
 1n5818_ON	model	diode	ngspice-models-ugr	upstream/spice_complete/onsemi.lib	182
-1N5819	model	diode	builtin	lib/diode.lib	119
+1N5819	model	diode	builtin	lib/diode.lib	99
 1N5819	model	diode	microcap-library	upstream/diode.lib	353
 1N5819	model	diode	ngspice-basic-models	upstream/diodes/1N5819.mod	7
 1n5819_ON	model	diode	microcap-library	upstream/onsemi.lib	200
@@ -1200,7 +1194,6 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1n5820rl	model	diode	microcap-library	upstream/on_diode.lib	8545
 1N5821	model	diode	microcap-library	upstream/diode.lib	361
 1n5821rl	model	diode	microcap-library	upstream/on_diode.lib	8791
-1N5822	model	diode	builtin	lib/diode.lib	127
 1N5822	model	diode	microcap-library	upstream/On_Semi.lib	126793
 1N5822	model	diode	microcap-library	upstream/diode.lib	365
 1N5822	subckt	subckt	ngspice-models-ugr	upstream/Diode_BJT_FET/GenSemi/GSdevices.lb5	2801
@@ -1281,10 +1274,8 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 1N661	model	diode	microcap-library	upstream/diode.lib	101
 1N6615	model	diode	microcap-library	upstream/vmi_diodes.lib	636
 1N6619	model	diode	microcap-library	upstream/vmi_diodes.lib	623
-1N751A	model	diode	builtin	lib/diode.lib	142
 1n752_ON	subckt	subckt	microcap-library	upstream/onsemi.lib	3961
 1n752_ON	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/onsemi.lib	3961
-1N914	model	diode	builtin	lib/diode.lib	44
 1N914	model	diode	microcap-library	upstream/cs.lib	890
 1N914	model	diode	microcap-library	upstream/diode.lib	105
 1N914A	model	diode	microcap-library	upstream/diode.lib	109
@@ -1715,11 +1706,10 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2n2102_ON	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/onsemi.lib	289
 2N2218A	model	bjt-npn	microcap-library	upstream/cs.lib	1247
 2N2219	model	bjt-npn	microcap-library	upstream/cs.lib	1296
-2N2222	model	bjt-npn	builtin	lib/transistor.lib	29
+2N2222	model	bjt-npn	builtin	lib/bjt.lib	17
 2N2222	model	bjt-npn	microcap-library	upstream/On_Semi.lib	158201
 2N2222	model	bjt-npn	microcap-library	upstream/cs.lib	1324
 2N2222	model	bjt-npn	ngspice-models-ugr	upstream/Diode_BJT_FET/IdealDiode.lib	17
-2N2222A	model	bjt-npn	builtin	lib/transistor.lib	60
 2n2222a	model	bjt-npn	microcap-library	upstream/cs.lib	1352
 2N2222A	model	bjt-npn	microcap-library	upstream/zetex.lib	1687
 2N2222A	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/zetex.lib	2663
@@ -1739,7 +1729,6 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2N2857	model	bjt-npn	microcap-library	upstream/cs.lib	1504
 2n2857UB	model	bjt-npn	microcap-library	upstream/cs.lib	1537
 2N2905A	model	bjt-pnp	microcap-library	upstream/cs.lib	1570
-2N2907	model	bjt-pnp	builtin	lib/transistor.lib	132
 2N2907A	model	bjt-pnp	microcap-library	upstream/cs.lib	1620
 2N2916	model	bjt-npn	microcap-library	upstream/cs.lib	1673
 2N3019	model	bjt-npn	microcap-library	upstream/cs.lib	1730
@@ -1831,6 +1820,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2N3791	model	bjt-pnp	microcap-library	upstream/mpbjt.lib	2403
 2N3792	model	bjt-pnp	microcap-library	upstream/mpbjt.lib	2410
 2N3799	model	bjt-pnp	microcap-library	upstream/cs.lib	2220
+2N3819	model	jfet-n	builtin	lib/jfet.lib	17
 2N3819	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	778
 2N3819	model	jfet-n	microcap-library	upstream/jfet.lib	53
 2N3819-VSH	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	9
@@ -1856,9 +1846,9 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2N3867	model	bjt-pnp	microcap-library	upstream/mpbjt.lib	2417
 2N3868	model	bjt-pnp	microcap-library	upstream/mpbjt.lib	2427
 2N3902	model	bjt-npn	microcap-library	upstream/mpbjt.lib	152
-2N3904	model	bjt-npn	builtin	lib/transistor.lib	72
+2N3904	model	bjt-npn	builtin	lib/bjt.lib	28
 2N3904	model	bjt-npn	microcap-library	upstream/cs.lib	2338
-2N3906	model	bjt-pnp	builtin	lib/transistor.lib	106
+2N3906	model	bjt-pnp	builtin	lib/bjt.lib	60
 2N3906	model	bjt-pnp	microcap-library	upstream/cs.lib	2388
 2N3921	model	jfet-n	microcap-library	upstream/jfet.lib	71
 2N3921-NSC	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	14
@@ -2145,6 +2135,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2N5452-NSC	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	88
 2N5453	model	jfet-n	microcap-library	upstream/jfet.lib	345
 2N5454	model	jfet-n	microcap-library	upstream/jfet.lib	348
+2N5457	model	jfet-n	builtin	lib/jfet.lib	24
 2N5457	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	789
 2N5457	model	jfet-n	microcap-library	upstream/jfet.lib	351
 2N5458	model	jfet-n	microcap-library	upstream/jfet.lib	355
@@ -2436,7 +2427,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2n6845_IR	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/irf.lib	22958
 2N6977	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/IGBT2.LIB	1535
 2N6978	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/IGBT2.LIB	1570
-2N7000	model	mosfet-n	builtin	lib/mosfet.lib	37
+2N7000	model	mosfet-n	builtin	lib/mosfet.lib	17
 2N7000	model	mosfet-n	microcap-library	upstream/supertex.lib	26
 2N7000	subckt	subckt	ngspice-models-ugr	upstream/ZMODELS.LIB	30
 2N7000	model	mosfet-n	ngspice-models-ugr	upstream/spice_complete/supertex.lib	26
@@ -2448,6 +2439,7 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2N7000P	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zmodels.lib	3790
 2N7000P_ZX	subckt	subckt	microcap-library	upstream/zetex.lib	4836
 2N7000P_ZX	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zetex.lib	5773
+2N7002	model	mosfet-n	builtin	lib/mosfet.lib	29
 2N7002	subckt	subckt	diodes-inc	upstream/diodes-spicemodels-all.txt	614
 2N7002	subckt	subckt	diodes-inc	upstream/diodes-spicemodels-all.txt	634
 2N7002	model	mosfet-n	diodes-inc	upstream/diodes-spicemodels-all.txt	4417
@@ -2822,8 +2814,10 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 2SD2704K	model	bjt-npn	microcap-library	upstream/Rohm_Transistor.lib	6521
 2SD2707	model	bjt-npn	microcap-library	upstream/Rohm_Transistor.lib	6550
 2SJ109-GEN	model	jfet-p	interfet-jfet	upstream/interfet-standard.jft	105
+2SJ74	model	jfet-p	builtin	lib/jfet.lib	34
 2SJ74	model	jfet-p	ngspice-basic-models	upstream/JFet/2SJ74.mod	4
 2SK118-GEN	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	106
+2SK170	model	jfet-n	builtin	lib/jfet.lib	47
 2SK170	model	jfet-n	ngspice-basic-models	upstream/JFet/2SK170.mod	4
 2SK2094	subckt	subckt	microcap-library	upstream/Rohm_Transistor.lib	23506
 2SK2503	subckt	subckt	microcap-library	upstream/Rohm_Transistor.lib	23558
@@ -8473,7 +8467,9 @@ $EKV_P	model	mosfet-p	microcap-library	upstream/utility2.lib	279
 76_ayumi	subckt	subckt	microcap-library	upstream/Ayumi_Triode.lib	3354
 77_ayumi	subckt	subckt	microcap-library	upstream/Ayumi_Pentode.lib	1918
 77T_ayumi	subckt	subckt	microcap-library	upstream/Ayumi_Triode.lib	3380
+7805	subckt	subckt	builtin	lib/ic.lib	18
 7805	subckt	subckt	ngspice-basic-models	upstream/Power-Regulators/7805_basic.lib	3
+7812	subckt	subckt	builtin	lib/ic.lib	32
 7812	subckt	subckt	ngspice-basic-models	upstream/Power-Regulators/7812_basic.lib	3
 78L05	subckt	subckt	ngspice-basic-models	upstream/Power-Regulators/78L05.lib	6
 78L12	subckt	subckt	ngspice-basic-models	upstream/Power-Regulators/78L12.lib	6
@@ -11894,8 +11890,6 @@ andnor	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/74fxx.lib	912
 ANDpwm	subckt	subckt	microcap-library	upstream/On_Semi.lib	214482
 andr	model	digital	ngspice-models-ugr	upstream/spice_complete/5400.LIB	2083
 andr	model	digital	ngspice-models-ugr	upstream/spice_complete/7400.LIB	2060
-AO3400	model	mosfet-n	builtin	lib/mosfet.lib	157
-AO3401	model	mosfet-p	builtin	lib/mosfet.lib	169
 AOL_ZO_0	subckt	subckt	microcap-library	upstream/ti.lib	207
 AOL_ZO_0_OPA1641	subckt	subckt	ngspice-basic-models	upstream/OpAmps/OPA1641.LIB	266
 AP0116	model	mosfet-p	microcap-library	upstream/mc_mosfet.lib	57
@@ -15685,6 +15679,7 @@ BAV74C_IN	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/infineon.lib	
 bav74lt1	model	diode	microcap-library	upstream/m_small.lib	33
 bav74lt1	model	diode	ngspice-models-ugr	upstream/spice_complete/m_small.lib	33
 BAV756DW	model	diode	microcap-library	upstream/DiodesInc.lib	9385
+BAV99	model	diode	builtin	lib/diode.lib	109
 BAV99	model	diode	microcap-library	upstream/On_Semi.lib	11211
 BAV99	model	diode	microcap-library	upstream/infineon.lib	3846
 BAV99	model	diode	microcap-library	upstream/zetex.lib	1926
@@ -16053,7 +16048,6 @@ BC308AP	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/zetex.lib	3108
 BC308AP	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/zmodels.lib	363
 BC308AP_ZX	subckt	subckt	microcap-library	upstream/zetex.lib	2134
 BC308AP_ZX	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zetex.lib	3104
-BC327	model	bjt-pnp	builtin	lib/transistor.lib	212
 BC327	model	bjt-pnp	microcap-library	upstream/infineon.lib	2414
 BC327	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/BJTP.LIB	218
 BC327	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/infineon.lib	2414
@@ -16072,7 +16066,6 @@ BC328/SIE	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/siemens.lib	4
 BC328C_IN	subckt	subckt	microcap-library	upstream/infineon.lib	2430
 BC328C_IN	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/infineon.lib	2430
 BC328s	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/S_AFBJT.LIB	461
-BC337	model	bjt-npn	builtin	lib/transistor.lib	201
 BC337	model	bjt-npn	microcap-library	upstream/infineon.lib	2622
 BC337	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/BJTN.LIB	142
 BC337	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/infineon.lib	2622
@@ -16142,6 +16135,7 @@ BC416AP_ZX	subckt	subckt	microcap-library	upstream/zetex.lib	2202
 BC416AP_ZX	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zetex.lib	3172
 BC516	subckt	subckt	microcap-library	upstream/On_Semi.lib	11358
 BC546	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/BJTN.LIB	156
+BC546B	model	bjt-npn	builtin	lib/bjt.lib	94
 BC546B	model	bjt-npn	ngspice-basic-models	upstream/bipolar/BC546.lib	3
 BC546BP	model	bjt-npn	microcap-library	upstream/zetex.lib	2217
 BC546BP	model	bjt-npn	ngspice-models-ugr	upstream/ZMODELS.LIB	359
@@ -16150,9 +16144,8 @@ BC546BP	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/zetex.lib	3187
 BC546BP	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/zmodels.lib	421
 BC546BP_ZX	subckt	subckt	microcap-library	upstream/zetex.lib	2213
 BC546BP_ZX	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zetex.lib	3183
-BC547	model	bjt-npn	builtin	lib/transistor.lib	148
+BC547	model	bjt-npn	builtin	lib/bjt.lib	104
 BC547	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/BJTN.LIB	163
-BC547B	model	bjt-npn	builtin	lib/transistor.lib	174
 BC547BP	model	bjt-npn	microcap-library	upstream/zetex.lib	2228
 BC547BP	model	bjt-npn	ngspice-models-ugr	upstream/ZMODELS.LIB	365
 BC547BP	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/BJTN.LIB	741
@@ -16194,8 +16187,9 @@ BC556AP	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/zetex.lib	3242
 BC556AP	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/zmodels.lib	461
 BC556AP_ZX	subckt	subckt	microcap-library	upstream/zetex.lib	2268
 BC556AP_ZX	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zetex.lib	3238
+BC556B	model	bjt-pnp	builtin	lib/bjt.lib	113
 BC556B	model	bjt-pnp	ngspice-basic-models	upstream/bipolar/BC556.lib	1
-BC557	model	bjt-pnp	builtin	lib/transistor.lib	185
+BC557	model	bjt-pnp	builtin	lib/bjt.lib	120
 BC557	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/BJTP.LIB	100
 BC557AP	model	bjt-pnp	microcap-library	upstream/zetex.lib	2283
 BC557AP	model	bjt-pnp	ngspice-models-ugr	upstream/ZMODELS.LIB	395
@@ -20042,7 +20036,6 @@ BS107	model	mosfet-n	ngspice-models-ugr	upstream/spice_complete/MOSFET.LIB	171
 BS107A	model	mosfet-n	ngspice-models-ugr	upstream/spice_complete/MOSFET.LIB	179
 BS107A_PH	subckt	subckt	microcap-library	upstream/ph_mos.lib	1
 BS107A_PH	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ph_mos.lib	1
-BS170	model	mosfet-n	builtin	lib/mosfet.lib	55
 BS170	subckt	subckt	microcap-library	upstream/On_Semi.lib	154891
 BS170	subckt	subckt	microcap-library	upstream/On_Semi.lib	155733
 BS170	subckt	subckt	ngspice-models-ugr	upstream/ZMODELS.LIB	620
@@ -20056,7 +20049,6 @@ BS170p	subckt	subckt	microcap-library	upstream/On_Semi.lib	208754
 BS170P	subckt	subckt	microcap-library	upstream/zetex.lib	8140
 BS170Z	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS2.LIB	3873
 BS208	model	mosfet-p	ngspice-models-ugr	upstream/spice_complete/MOSFET.LIB	187
-BS250	model	mosfet-p	builtin	lib/mosfet.lib	71
 BS250	model	mosfet-p	ngspice-models-ugr	upstream/spice_complete/MOSFET.LIB	195
 BS250_PH	subckt	subckt	microcap-library	upstream/ph_fet.lib	851
 BS250_PH	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ph_fet.lib	851
@@ -22952,6 +22944,7 @@ BZX79A75	model	diode	ngspice-models-ugr	upstream/spice_complete/DIODE.LIB	1017
 BZX79A91	model	diode	ngspice-models-ugr	upstream/spice_complete/DIODE.LIB	1022
 BZX79C6V8	model	diode	microcap-library	upstream/ph_diode.lib	200
 BZX79C6V8	model	diode	ngspice-models-ugr	upstream/spice_complete/ph_diode.lib	200
+BZX84-C15	model	diode	builtin	lib/diode.lib	136
 BZX84-C15	model	diode	ngspice-basic-models	upstream/diodes/BZX84-C15.mod	20
 BZX84-C51	model	diode	microcap-library	upstream/nxp.lib	16161
 BZX84-C56	model	diode	microcap-library	upstream/nxp.lib	16210
@@ -43120,11 +43113,17 @@ D_2V	model	diode	microcap-library	upstream/ti.lib	79581
 D_2V	model	diode	microcap-library	upstream/ti.lib	79876
 D_2V	model	diode	microcap-library	upstream/ti.lib	80171
 D_2V	model	diode	microcap-library	upstream/ti.lib	80466
+D_3V9_0	model	diode	builtin	lib/ic.lib	117
+D_3V9_0	model	diode	builtin	lib/ic.lib	209
 D_3V9_0	model	diode	ngspice-basic-models	upstream/Power-Regulators/7905.lib	74
 D_3V9_0	model	diode	ngspice-basic-models	upstream/Power-Regulators/7912.lib	73
 D_4_9V	model	diode	microcap-library	upstream/ti.lib	81072
+D_4V7_0	model	diode	builtin	lib/ic.lib	118
+D_4V7_0	model	diode	builtin	lib/ic.lib	210
 D_4V7_0	model	diode	ngspice-basic-models	upstream/Power-Regulators/7905.lib	75
 D_4V7_0	model	diode	ngspice-basic-models	upstream/Power-Regulators/7912.lib	74
+D_6V3_0	model	diode	builtin	lib/ic.lib	116
+D_6V3_0	model	diode	builtin	lib/ic.lib	208
 D_6V3_0	model	diode	ngspice-basic-models	upstream/Power-Regulators/7905.lib	73
 D_6V3_0	model	diode	ngspice-basic-models	upstream/Power-Regulators/7912.lib	72
 D_ABC	model	digital-behavioral	microcap-library	upstream/On_Semi.lib	89603
@@ -43474,6 +43473,7 @@ D_Z26V	subckt	subckt	microcap-library	upstream/ti.lib	79848
 D_Z26V	subckt	subckt	microcap-library	upstream/ti.lib	80143
 D_Z26V	subckt	subckt	microcap-library	upstream/ti.lib	80438
 D_ZV	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/dmod.lib	35
+DA	model	diode	builtin	lib/ic.lib	277
 DA	model	diode	microcap-library	upstream/Rohm_IC.lib	6102
 DA	model	diode	microcap-library	upstream/Rohm_IC.lib	6224
 DA	model	diode	microcap-library	upstream/Rohm_IC.lib	6346
@@ -54066,12 +54066,6 @@ DCL	model	diode	ngspice-models-ugr	upstream/spice_complete/harris.lib	874
 DCL	model	diode	ngspice-models-ugr	upstream/spice_complete/harris.lib	1130
 DCL	model	diode	ngspice-models-ugr	upstream/spice_complete/harris.lib	1468
 DCL2	model	diode	microcap-library	upstream/On_Semi.lib	209991
-DCLAMP	model	diode	builtin	lib/opamp.lib	39
-DCLAMP	model	diode	builtin	lib/opamp.lib	63
-DCLAMP	model	diode	builtin	lib/opamp.lib	97
-DCLAMP	model	diode	builtin	lib/opamp.lib	126
-DCLAMP	model	diode	builtin	lib/opamp.lib	156
-DCLAMP	model	diode	builtin	lib/opamp.lib	189
 Dclamp	model	diode	diodes-inc	upstream/diodes-spicemodels-all.txt	1016
 Dclamp	model	diode	diodes-inc	upstream/diodes-spicemodels-all.txt	1173
 Dclamp	model	diode	diodes-inc	upstream/diodes-spicemodels-all.txt	1308
@@ -58419,6 +58413,7 @@ DEN2	model	diode	ngspice-models-ugr	upstream/spice_complete/anlg_dev.lib	3671
 DEN2	model	diode	ngspice-models-ugr	upstream/spice_complete/anlg_dev.lib	3943
 DEN2	model	diode	ngspice-models-ugr	upstream/spice_complete/anlg_dev.lib	4215
 DEN2	model	diode	ngspice-models-ugr	upstream/spice_complete/anlg_dev.lib	4487
+DESD	model	diode	builtin	lib/opamp.lib	331
 DESD	model	diode	diodes-inc	upstream/diodes-spicemodels-all.txt	14676
 DESD	model	diode	diodes-inc	upstream/diodes-spicemodels-all.txt	14705
 DESD	model	diode	diodes-inc	upstream/diodes-spicemodels-all.txt	14737
@@ -63894,7 +63889,6 @@ DGRID	model	diode	ngspice-models-ugr	upstream/spice_complete/VACUUM.LIB	518
 DGRID	model	diode	ngspice-models-ugr	upstream/spice_complete/VACUUM.LIB	538
 DGRID	model	diode	ngspice-models-ugr	upstream/spice_complete/VACUUM.LIB	558
 DGRID	model	diode	ngspice-models-ugr	upstream/spice_complete/VACUUM.LIB	578
-DGROUND	model	diode	builtin	lib/opamp.lib	157
 Dgs_iv	model	diode	microcap-library	upstream/Silicon_Carbide.LIB	74
 Dgs_iv	model	diode	microcap-library	upstream/Silicon_Carbide.LIB	274
 Dgs_iv	model	diode	microcap-library	upstream/Silicon_Carbide.LIB	475
@@ -72603,6 +72597,7 @@ DLIM2	model	diode	ngspice-models-ugr	upstream/spice_complete/harris.lib	416
 DLIM2	model	diode	ngspice-models-ugr	upstream/spice_complete/harris.lib	551
 DLIM2	model	diode	ngspice-models-ugr	upstream/spice_complete/harris.lib	685
 DLIM2	model	diode	ngspice-models-ugr	upstream/spice_complete/harris.lib	820
+Dlimit	model	diode	builtin	lib/opamp.lib	30
 Dlimit	model	diode	ngspice-basic-models	upstream/OpAmps/generic_opamp.lib	14
 DLIMIT	model	diode	ngspice-models-ugr	upstream/spice_complete/OPTO.LIB	820
 Dlimit	model	diode	ngspice-special-models	upstream/LR8ng.lib	55
@@ -74789,6 +74784,7 @@ DM	model	diode	ngspice-models-ugr	upstream/spice_complete/rectifie.lib	709
 DM	model	diode	ngspice-models-ugr	upstream/spice_complete/rectifie.lib	722
 DM	model	diode	ngspice-models-ugr	upstream/spice_complete/rectifie.lib	735
 DM	model	diode	ngspice-models-ugr	upstream/spice_complete/rectifie.lib	748
+dm1	model	diode	builtin	lib/opamp.lib	391
 DM1	model	diode	microcap-library	upstream/LF155.MOD	67
 dm1	model	diode	microcap-library	upstream/elantec.lib	313
 DM1	model	diode	microcap-library	upstream/linear.lib	546
@@ -75555,6 +75551,7 @@ DM1	model	diode	ngspice-models-ugr	upstream/spice_complete/linear.lib	16300
 DM1	model	diode	ngspice-models-ugr	upstream/spice_complete/linear.lib	16348
 DM1	model	diode	ngspice-models-ugr	upstream/spice_complete/linear.lib	16394
 DM1	model	diode	ngspice-models-ugr	upstream/spice_complete/linear.lib	16440
+dm2	model	diode	builtin	lib/opamp.lib	392
 DM2	model	diode	microcap-library	upstream/LF155.MOD	68
 dm2	model	diode	microcap-library	upstream/elantec.lib	314
 DM2	model	diode	microcap-library	upstream/linear.lib	547
@@ -82020,6 +82017,7 @@ DN0150ADJ	model	bjt-npn	diodes-inc	upstream/diodes-spicemodels-all.txt	22551
 DN0150ALP4	model	bjt-npn	diodes-inc	upstream/diodes-spicemodels-all.txt	22576
 DN0150BDJ	model	bjt-npn	diodes-inc	upstream/diodes-spicemodels-all.txt	22601
 DN0150BLP4	model	bjt-npn	diodes-inc	upstream/diodes-spicemodels-all.txt	22625
+DN1	model	diode	builtin	lib/opamp.lib	332
 DN1	model	diode	microcap-library	upstream/On_Semi.lib	132099
 DN1	model	diode	microcap-library	upstream/On_Semi.lib	132290
 DN1	model	diode	microcap-library	upstream/On_Semi.lib	135010
@@ -91276,6 +91274,9 @@ DW2MOD	model	diode	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	436
 DW2MOD	model	diode	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	481
 DW2MOD	model	diode	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	525
 DW2MOD	model	diode	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	572
+DX	model	diode	builtin	lib/opamp.lib	154
+DX	model	diode	builtin	lib/opamp.lib	470
+dx	model	diode	builtin	lib/opamp.lib	518
 dx	model	diode	microcap-library	upstream/On_Semi.lib	53826
 dx	model	diode	microcap-library	upstream/On_Semi.lib	53839
 dx	model	diode	microcap-library	upstream/On_Semi.lib	53852
@@ -109315,6 +109316,7 @@ GEN3	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/SIGNAL.LIB	83
 GEN_DIODE	subckt	subckt	microcap-library	upstream/On_Semi.lib	174123
 generic12_4v	subckt	subckt	microcap-library	upstream/On_Semi.lib	181089
 generic12_4v	subckt	subckt	microcap-library	upstream/On_Semi.lib	181179
+genopa1	subckt	subckt	builtin	lib/opamp.lib	19
 genopa1	subckt	subckt	ngspice-basic-models	upstream/OpAmps/generic_opamp.lib	3
 gf1g	model	diode	microcap-library	upstream/vishaydiode.lib	688
 GH600	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/HSENSOR.LIB	814
@@ -113760,7 +113762,6 @@ irf530vt	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/i
 IRF531	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	2779
 IRF532	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	2804
 IRF533	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	2829
-IRF540	model	mosfet-n	builtin	lib/mosfet.lib	87
 IRF540	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS3.LIB	389
 irf540	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/MOS_3TEN/INTRNTL2.LIB	1203
 irf540	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/MOS_3TEN/INTRNTL2.LIB	7024
@@ -114415,7 +114416,6 @@ IRF832	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	2504
 irf8327spbf	subckt	subckt	microcap-library	upstream/irf.lib	63411
 irf8327spbft	subckt	subckt	microcap-library	upstream/irf.lib	63471
 IRF833	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	2529
-IRF840	model	mosfet-n	builtin	lib/mosfet.lib	129
 IRF840	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS2.LIB	3446
 irf840	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/MOS_3TEN/INTRNTL2.LIB	8224
 irf840	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/ir_lib/irf840.spi	1
@@ -114505,7 +114505,6 @@ IRF9530n_IR	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/irf.lib	180
 IRF9531	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	34
 IRF9532	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	60
 IRF9533	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	86
-IRF9540	model	mosfet-p	builtin	lib/mosfet.lib	104
 IRF9540	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS3.LIB	658
 IRF9540N	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/IR.LIB	4648
 irf9540n	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/ir_lib/irf9540n.spi	1
@@ -115100,7 +115099,6 @@ irfp140n_IR	subckt	subckt	microcap-library	upstream/irf.lib	6220
 irfp140n_IR	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/irf.lib	6220
 IRFP150	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS2.LIB	792
 IRFP150	model	mosfet-n	ngspice-models-ugr	upstream/spice_complete/other_models/MOS_3TEN/INTRNTL1.LIB	436
-IRFP150N	model	mosfet-n	builtin	lib/mosfet.lib	141
 irfp150n	subckt	subckt	microcap-library	upstream/irf.lib	37447
 irfp150n	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/ir_lib/irfp150n.spi	1
 IRFP151	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS2.LIB	820
@@ -115118,6 +115116,7 @@ irfp22n60k	subckt	subckt	microcap-library	upstream/irf.lib	37697
 irfp22n60kt	subckt	subckt	microcap-library	upstream/irf.lib	37756
 irfp23n50l	subckt	subckt	microcap-library	upstream/irf.lib	37767
 irfp23n50lt	subckt	subckt	microcap-library	upstream/irf.lib	37826
+IRFP240	model	mosfet-vdmos	builtin	lib/mosfet.lib	40
 IRFP240	model	mosfet-vdmos	ngspice-basic-models	upstream/MOS power/IRFP240_NVDMOS.mod	2
 IRFP240	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS2.LIB	904
 IRFP240	model	mosfet-n	ngspice-models-ugr	upstream/spice_complete/other_models/MOS_3TEN/INTRNTL1.LIB	469
@@ -115245,6 +115244,7 @@ irfp90n20dt	subckt	subckt	microcap-library	upstream/irf.lib	68831
 IRFP9140	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS3.LIB	3682
 irfp9140n	subckt	subckt	microcap-library	upstream/irf.lib	38391
 irfp9140n	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/ir_lib/irfp9140n.spi	1
+IRFP9240	model	mosfet-vdmos	builtin	lib/mosfet.lib	56
 IRFP9240	model	mosfet-vdmos	ngspice-basic-models	upstream/MOS power/IRFP9240_PVDMOS.mod	2
 IRFP9240	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWMOS.LIB	112
 irfp9240	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/ir_lib/irfp9240.spi	1
@@ -115583,7 +115583,6 @@ IRFZ44E	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/IR.LIB	8715
 irfz44e	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/ir_lib/irfz44e.spi	1
 irfz44e_IR	subckt	subckt	microcap-library	upstream/irf.lib	14638
 irfz44e_IR	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/irf.lib	14642
-IRFZ44N	model	mosfet-n	builtin	lib/mosfet.lib	117
 irfz44n	subckt	subckt	ngspice-models-ugr	upstream/Diode_BJT_FET/GenSemi/GSdevices.lb5	2735
 IRFZ44N	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/IR.LIB	8764
 irfz44n	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/other_models/MOS_3TEN/INTRNTL2.LIB	4443
@@ -117697,6 +117696,7 @@ J309-M	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	794
 J309-PLP	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	402
 J309/PLP	model	jfet-n	ngspice-models-ugr	upstream/spice_complete/phil_fet.lib	2071
 J309P	model	jfet-n	ngspice-models-ugr	upstream/spice_complete/JFET.LIB	198
+J310	model	jfet-n	builtin	lib/jfet.lib	58
 J310	model	jfet-n	microcap-library	upstream/jfet.lib	600
 J310	model	jfet-n	ngspice-models-ugr	upstream/spice_complete/JFET.LIB	830
 J310-H	model	jfet-n	interfet-jfet	upstream/interfet-standard.jft	798
@@ -117841,6 +117841,8 @@ J556	model	jfet-n	ngspice-models-ugr	upstream/spice_complete/DIODE.LIB	2233
 J557	subckt	subckt	microcap-library	upstream/On_Semi.lib	56529
 J557	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/DIODE.LIB	2241
 J557	model	jfet-n	ngspice-models-ugr	upstream/spice_complete/DIODE.LIB	2244
+J_2N3458_N	model	jfet-n	builtin	lib/ic.lib	113
+J_2N3458_N	model	jfet-n	builtin	lib/ic.lib	205
 J_2N3458_N	model	jfet-n	ngspice-basic-models	upstream/Power-Regulators/7905.lib	70
 J_2N3458_N	model	jfet-n	ngspice-basic-models	upstream/Power-Regulators/7912.lib	69
 Jbfr31lt1	model	jfet-n	microcap-library	upstream/On_Semi.lib	13034
@@ -118766,6 +118768,8 @@ JSST510	model	jfet-n	microcap-library	upstream/cur_regs.lib	588
 JSST510	model	jfet-n	ngspice-models-ugr	upstream/spice_complete/cur_regs.lib	588
 JSST511	model	jfet-n	microcap-library	upstream/cur_regs.lib	597
 JSST511	model	jfet-n	ngspice-models-ugr	upstream/spice_complete/cur_regs.lib	597
+JX	model	jfet-p	builtin	lib/opamp.lib	471
+jx	model	jfet-p	builtin	lib/opamp.lib	519
 jx	model	jfet-n	microcap-library	upstream/On_Semi.lib	55451
 jx	model	jfet-n	microcap-library	upstream/On_Semi.lib	55463
 jx	model	jfet-n	microcap-library	upstream/On_Semi.lib	55475
@@ -122407,10 +122411,6 @@ LED	model	diode	ngspice-models-ugr	upstream/spice_complete/m_ic.lib	416
 LED	model	diode	ngspice-models-ugr	upstream/spice_complete/m_ic.lib	871
 LED	model	diode	ngspice-models-ugr	upstream/spice_complete/onsemi.lib	3681
 LED	model	diode	ngspice-models-ugr	upstream/spice_complete/smps_cb.lib	694
-LED_BLU	model	diode	builtin	lib/diode.lib	208
-LED_GRN	model	diode	builtin	lib/diode.lib	200
-LED_RED	model	diode	builtin	lib/diode.lib	189
-LED_WHT	model	diode	builtin	lib/diode.lib	216
 LEDNOR	model	diode	ngspice-models-ugr	upstream/spice_complete/OPTO.LIB	930
 LEDNORC	model	diode	ngspice-models-ugr	upstream/spice_complete/OPTO.LIB	932
 legd	model	diode	microcap-library	upstream/gensemi.lib	18
@@ -123229,7 +123229,6 @@ LM318S8_LT	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/linear.lib	1
 LM318S8L	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/OPLTC.LIB	4477
 LM319	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	1567
 LM319S	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/SGS.LIB	245
-LM324	subckt	subckt	builtin	lib/opamp.lib	141
 LM324	subckt	subckt	microcap-library	upstream/On_Semi.lib	210495
 LM324	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	1443
 LM324	subckt	subckt	ngspice-models-ugr	upstream/ti/lm324.mod	10
@@ -123263,7 +123262,7 @@ LM348_MC	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/m_opamp.lib	59
 LM348_TI	subckt	subckt	microcap-library	upstream/ti.lib	3997
 LM348_TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ti.lib	3595
 LM348M	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/MOTOR.LIB	489
-LM358	subckt	subckt	builtin	lib/opamp.lib	164
+LM358	subckt	subckt	builtin	lib/opamp.lib	70
 LM358	subckt	subckt	microcap-library	upstream/On_Semi.lib	210560
 LM358	subckt	subckt	ngspice-models-ugr	upstream/ti/lm358.mod	10
 LM358/MC	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/motoramp.lib	376
@@ -123496,7 +123495,6 @@ LM7321	subckt	subckt	microcap-library	upstream/nation.lib	50261
 LM7332	subckt	subckt	microcap-library	upstream/nation.lib	50551
 LM7341	subckt	subckt	microcap-library	upstream/nation.lib	36498
 LM7372	subckt	subckt	microcap-library	upstream/nation.lib	172
-LM741	subckt	subckt	builtin	lib/opamp.lib	24
 LM741/NS	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/nat_semi.lib	8621
 LM741_NS	subckt	subckt	microcap-library	upstream/nation.lib	12485
 LM741_NS	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/nation.lib	9785
@@ -123504,8 +123502,10 @@ LM741N	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/NATBJT.LIB	1514
 LM7805C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	1740
 LM7812C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	1789
 LM7815C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	1838
+LM7905	subckt	subckt	builtin	lib/ic.lib	46
 LM7905	subckt	subckt	ngspice-basic-models	upstream/Power-Regulators/7905.lib	3
 LM7905C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	1967
+LM7912	subckt	subckt	builtin	lib/ic.lib	139
 LM7912	subckt	subckt	ngspice-basic-models	upstream/Power-Regulators/7912.lib	3
 LM7912C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	2021
 LM7915C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	2075
@@ -131309,6 +131309,7 @@ MCP601	subckt	subckt	microcap-library	upstream/mc.lib	167
 MCP6021	subckt	subckt	microcap-library	upstream/mc.lib	343
 MCP6031	subckt	subckt	microcap-library	upstream/mc.lib	517
 MCP6031COMP	subckt	subckt	microcap-library	upstream/mc.lib	690
+MCP6041	subckt	subckt	builtin	lib/opamp.lib	165
 MCP6041	subckt	subckt	microcap-library	upstream/mc.lib	861
 MCP6041	subckt	subckt	ngspice-basic-models	upstream/OpAmps/MCP6041.mod	1
 MCP6041COMP	subckt	subckt	microcap-library	upstream/mc.lib	1031
@@ -157150,7 +157151,6 @@ MPSA20	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/zetex.lib	4443
 MPSA20	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/zmodels.lib	1555
 MPSA20_ZX	subckt	subckt	microcap-library	upstream/zetex.lib	3484
 MPSA20_ZX	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zetex.lib	4439
-MPSA42	model	bjt-npn	builtin	lib/transistor.lib	255
 MPSA42	model	bjt-npn	microcap-library	upstream/cs.lib	28747
 MPSA42	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/BJTN.LIB	423
 MPSA42	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/other_models/BJT_NPN/TOSHIBA.LIB	2088
@@ -157172,7 +157172,6 @@ MPSA63	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/BJTDAR.LIB	747
 MPSA77	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zmodels.lib	3113
 MPSA77_ZX	subckt	subckt	microcap-library	upstream/zetex.lib	5493
 MPSA77_ZX	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/zetex.lib	6835
-MPSA92	model	bjt-pnp	builtin	lib/transistor.lib	266
 MPSA92	model	bjt-pnp	microcap-library	upstream/cs.lib	28848
 MPSA92	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/other_models/BJT_PNP/TOSHIBA.LIB	2094
 MPSA92/SIE	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/siemens.lib	5885
@@ -162990,7 +162989,6 @@ NE46134/CEL	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cel.lib	224
 NE461x	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/NEC.LIB	92
 NE46314	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/RF.LIB	1067
 NE527	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/COMPARE.LIB	230
-NE5532	subckt	subckt	builtin	lib/opamp.lib	111
 NE5534	subckt	subckt	ngspice-models-ugr	upstream/ti/ne5534.mod	11
 NE5534_TI	subckt	subckt	microcap-library	upstream/ti.lib	4394
 NE5534_TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ti.lib	3992
@@ -164187,6 +164185,7 @@ NMH1212_NP	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/np_dcdc.lib	
 NMH1215	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/NewPDCDC.LIB	331
 NMH1215_NP	subckt	subckt	microcap-library	upstream/np_dcdc.lib	427
 NMH1215_NP	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/np_dcdc.lib	427
+NMI	model	mosfet-n	builtin	lib/opamp.lib	330
 NMI	model	mosfet-n	microcap-library	upstream/On_Semi.lib	132097
 NMI	model	mosfet-n	microcap-library	upstream/On_Semi.lib	132288
 NMI	model	mosfet-n	microcap-library	upstream/On_Semi.lib	135008
@@ -169663,7 +169662,6 @@ nmos_level2	model	mosfet-n	sjtu-bsim-ptm	upstream/bsim/nmos_level2.hspice	7
 nmos_level2	model	mosfet-n	sjtu-bsim-ptm	upstream/bsim/nmos_level2.ngspice	7
 nmos_level3	model	mosfet-n	sjtu-bsim-ptm	upstream/bsim/nmos_level3.hspice	7
 nmos_level3	model	mosfet-n	sjtu-bsim-ptm	upstream/bsim/nmos_level3.ngspice	7
-NMOS_LOGIC	model	mosfet-n	builtin	lib/mosfet.lib	196
 nmos_lvt	model	mosfet-n	asap7	upstream/models/hspice/7nm_FF_160803.pm	35
 nmos_lvt	model	mosfet-n	asap7	upstream/models/hspice/7nm_SS_160803.pm	35
 nmos_lvt	model	mosfet-n	asap7	upstream/models/hspice/7nm_TT_160803.pm	35
@@ -174886,6 +174884,7 @@ OP05E_LT	subckt	subckt	microcap-library	upstream/linear.lib	15562
 OP05E_LT	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/linear.lib	15668
 OP05EL	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/OPLTC.LIB	4713
 OP05L	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/OPLTC.LIB	694
+OP07	subckt	subckt	builtin	lib/opamp.lib	351
 OP07	subckt	subckt	ngspice-basic-models	upstream/OpAmps/Op07.mod	11
 OP07	subckt	subckt	ngspice-models-ugr	upstream/SubCircuits/LinearTech/LTC.lib	24867
 OP07	subckt	subckt	ngspice-models-ugr	upstream/oamp/Op07.mod	11
@@ -175273,7 +175272,6 @@ OP260_AD	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/analog.lib	344
 OP260A	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/AD2.LIB	2529
 OP262_AD	subckt	subckt	microcap-library	upstream/analog.lib	52900
 OP262_AD	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/analog.lib	53007
-OP27	subckt	subckt	builtin	lib/opamp.lib	82
 OP27	subckt	subckt	microcap-library	upstream/Op27.lib	15
 OP27	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/NONLIN.LIB	1639
 OP27	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/Op27.lib	15
@@ -175441,7 +175439,6 @@ OP297FA	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/AD2.LIB	3643
 OP297G_AD	subckt	subckt	microcap-library	upstream/analog.lib	38184
 OP297G_AD	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/analog.lib	38291
 OP297GA	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/AD2.LIB	3767
-OP37	subckt	subckt	builtin	lib/opamp.lib	101
 OP37_AD	subckt	subckt	microcap-library	upstream/analog.lib	38295
 OP37_AD	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/analog.lib	38402
 OP37A	subckt	subckt	ngspice-models-ugr	upstream/SubCircuits/LinearTech/LTC.lib	23701
@@ -175859,7 +175856,6 @@ OPA132/BB	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/burr-brn.lib	
 OPA132_BB	subckt	subckt	microcap-library	upstream/burrbn.lib	476
 OPA132_BB	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/burrbn.lib	476
 OPA132B	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/BB3.LIB	1328
-OPA134	subckt	subckt	builtin	lib/opamp.lib	193
 OPA134/BB	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/burr-brn.lib	8819
 OPA134_BB	subckt	subckt	microcap-library	upstream/burrbn.lib	643
 OPA134_BB	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/burrbn.lib	643
@@ -175912,7 +175908,6 @@ OPA2131EB	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/BB3.LIB	1473
 OPA2132_BB	subckt	subckt	microcap-library	upstream/burrbn.lib	531
 OPA2132_BB	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/burrbn.lib	531
 OPA2132B	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/BB3.LIB	1554
-OPA2134	subckt	subckt	builtin	lib/opamp.lib	174
 OPA2234_BB	subckt	subckt	microcap-library	upstream/burrbn.lib	814
 OPA2234_BB	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/burrbn.lib	814
 OPA2234B	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/BB3.LIB	1599
@@ -176506,7 +176501,6 @@ OpAmp_Hs2_MAX9615	subckt	subckt	microcap-library	upstream/maxim.lib	51445
 OpAmp_Hs2_MAX9622	subckt	subckt	microcap-library	upstream/maxim.lib	51781
 OpAmp_Hs2_MAX9632	subckt	subckt	microcap-library	upstream/maxim.lib	51911
 OpAmp_Hs2_MAX9633	subckt	subckt	microcap-library	upstream/maxim.lib	52029
-OPAMP_IDEAL	subckt	subckt	builtin	lib/opamp.lib	201
 OPAMPL	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/LIN.LIB	62
 OPAMPX321	subckt	subckt	microcap-library	upstream/maxim.lib	33355
 OPAMPX324	subckt	subckt	microcap-library	upstream/maxim.lib	33516
@@ -186267,7 +186261,6 @@ pmos_6p0_sab	subckt	subckt	gf180mcu	upstream/models/xyce/sm141064.xyce	37919
 pmos_6p0_sab	subckt	subckt	gf180mcu	upstream/models/xyce/sm141064.xyce	46780
 pmos_bsim3v3	model	mosfet-p	sjtu-bsim-ptm	upstream/bsim/pmos_bsim3v3.hspice	3
 pmos_bsim3v3	model	mosfet-p	sjtu-bsim-ptm	upstream/bsim/pmos_bsim3v3.ngspice	3
-PMOS_LOGIC	model	mosfet-p	builtin	lib/mosfet.lib	207
 pmos_lvt	model	mosfet-p	asap7	upstream/models/hspice/7nm_FF_160803.pm	291
 pmos_lvt	model	mosfet-p	asap7	upstream/models/hspice/7nm_SS_160803.pm	291
 pmos_lvt	model	mosfet-p	asap7	upstream/models/hspice/7nm_TT_160803.pm	291
@@ -191830,15 +191823,23 @@ Q_NMOS	model	mosfet-n	microcap-library	upstream/ti.lib	80270
 Q_NMOS	model	mosfet-n	microcap-library	upstream/ti.lib	80565
 Q_NMOS_Out	model	mosfet-n	microcap-library	upstream/ti.lib	81343
 Q_NMOS_Out_L1	model	mosfet-n	microcap-library	upstream/ti.lib	81002
+Q_NPN_0	model	bjt-npn	builtin	lib/ic.lib	121
+Q_NPN_0	model	bjt-npn	builtin	lib/ic.lib	213
 Q_NPN_0	model	bjt-npn	ngspice-basic-models	upstream/Power-Regulators/7905.lib	78
 Q_NPN_0	model	bjt-npn	ngspice-basic-models	upstream/Power-Regulators/7912.lib	77
+Q_NPN_1	model	bjt-npn	builtin	lib/ic.lib	123
+Q_NPN_1	model	bjt-npn	builtin	lib/ic.lib	215
 Q_NPN_1	model	bjt-npn	ngspice-basic-models	upstream/Power-Regulators/7905.lib	80
 Q_NPN_1	model	bjt-npn	ngspice-basic-models	upstream/Power-Regulators/7912.lib	79
+Q_NPN_2	model	bjt-npn	builtin	lib/ic.lib	125
+Q_NPN_2	model	bjt-npn	builtin	lib/ic.lib	217
 Q_NPN_2	model	bjt-npn	ngspice-basic-models	upstream/Power-Regulators/7905.lib	82
 Q_NPN_2	model	bjt-npn	ngspice-basic-models	upstream/Power-Regulators/7912.lib	81
 Q_PMOS	model	mosfet-p	microcap-library	upstream/ti.lib	81268
 Q_PMOS_Out	model	mosfet-p	microcap-library	upstream/ti.lib	81316
 Q_PMOS_Out_L1	model	mosfet-p	microcap-library	upstream/ti.lib	81290
+Q_PNP_0	model	bjt-pnp	builtin	lib/ic.lib	119
+Q_PNP_0	model	bjt-pnp	builtin	lib/ic.lib	211
 Q_PNP_0	model	bjt-pnp	ngspice-basic-models	upstream/Power-Regulators/7905.lib	76
 Q_PNP_0	model	bjt-pnp	ngspice-basic-models	upstream/Power-Regulators/7912.lib	75
 QA	model	bjt-npn	microcap-library	upstream/ti.lib	72304
@@ -194124,6 +194125,7 @@ QLPA	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/apex.lib	732
 QLPA	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/apex.lib	799
 QM	model	bjt-npn	microcap-library	upstream/apex.lib	6214
 QM	model	bjt-npn	ngspice-models-ugr	upstream/ASTABLE.CIR	26
+qm1	model	bjt-npn	builtin	lib/opamp.lib	389
 QM1	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	174343
 QM1	model	bjt-npn	microcap-library	upstream/linear.lib	544
 QM1	model	bjt-npn	microcap-library	upstream/linear.lib	590
@@ -194677,6 +194679,7 @@ QM1	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/linear.lib	15752
 QM1	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/linear.lib	16346
 QM1	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/linear.lib	16392
 QM1	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/linear.lib	16438
+qm2	model	bjt-npn	builtin	lib/opamp.lib	390
 QM2	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	174344
 QM2	model	bjt-npn	microcap-library	upstream/linear.lib	545
 QM2	model	bjt-npn	microcap-library	upstream/linear.lib	591
@@ -196841,6 +196844,7 @@ QMULT	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/comlinr.lib	5394
 QMV	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/ECL3.LIB	429
 QMX	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/ECL3.LIB	174
 QMY	model	bjt-npn	ngspice-models-ugr	upstream/spice_complete/ECL3.LIB	378
+QN	model	bjt-npn	builtin	lib/ic.lib	280
 QN	model	bjt-npn	microcap-library	upstream/On_Semi.lib	212758
 QN	model	bjt-npn	microcap-library	upstream/On_Semi.lib	212863
 QN	model	bjt-npn	microcap-library	upstream/On_Semi.lib	212945
@@ -200694,6 +200698,7 @@ QOUTP4	model	bjt-pnp	microcap-library	upstream/comlin.lib	590
 QOUTP4	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/COMLNR.LIB	349
 QOUTP4	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/comlin.lib	590
 QOUTP4	model	bjt-pnp	ngspice-models-ugr	upstream/spice_complete/comlinr.lib	821
+QP	model	bjt-pnp	builtin	lib/ic.lib	278
 QP	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	212757
 QP	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	212862
 QP	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	212944
@@ -203753,6 +203758,7 @@ QWLAS2B1	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	392
 QWLAS2B2	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	442
 QWLAS2B3	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	487
 QWLAS2B4	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/LASER.LIB	531
+QX	model	bjt-pnp	builtin	lib/opamp.lib	155
 qx	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	135064
 QX	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	210530
 QX	model	bjt-pnp	microcap-library	upstream/On_Semi.lib	210597
@@ -210495,6 +210501,7 @@ RET1	model	bjt-npn	microcap-library	upstream/nxp.lib	1573
 RET1	model	bjt-npn	microcap-library	upstream/nxp.lib	1682
 RET1	model	bjt-npn	microcap-library	upstream/nxp.lib	12279
 RET2	model	bjt-pnp	microcap-library	upstream/nxp.lib	12331
+REXP	model	resistor	builtin	lib/opamp.lib	333
 REXP	model	resistor	microcap-library	upstream/On_Semi.lib	132100
 REXP	model	resistor	microcap-library	upstream/On_Semi.lib	132291
 REXP	model	resistor	microcap-library	upstream/On_Semi.lib	135011
@@ -229639,7 +229646,6 @@ SA50_AM	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/apexpwm.lib	498
 SA50TOOL_AM	subckt	subckt	microcap-library	upstream/apexpwm.lib	4004
 SA51_AM	subckt	subckt	microcap-library	upstream/apexpwm.lib	4139
 SA51_AM	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/apexpwm.lib	651
-SA5532	subckt	subckt	builtin	lib/opamp.lib	130
 SA56	subckt	subckt	microcap-library	upstream/apexpwm.lib	6424
 SA56TOOL	subckt	subckt	microcap-library	upstream/apexpwm.lib	7026
 sa5_0a	subckt	subckt	microcap-library	upstream/vishaydiode.lib	3128
@@ -231479,7 +231485,6 @@ Si1970DH	subckt	subckt	microcap-library	upstream/vishaymosfet.lib	20602
 Si1972DH	subckt	subckt	microcap-library	upstream/vishaymosfet.lib	20638
 Si1988DH	subckt	subckt	microcap-library	upstream/vishaymosfet.lib	20674
 SI1M	model	switch	microcap-library	upstream/apexpwm.lib	219
-SI2301	model	mosfet-p	builtin	lib/mosfet.lib	181
 Si2301BDS	subckt	subckt	microcap-library	upstream/vishaymosfet.lib	2243
 SI2301p	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/SILICONX.LIB	1960
 si2301p_SI	subckt	subckt	microcap-library	upstream/vishay.lib	12
@@ -241728,6 +241733,7 @@ SN7407	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/7400.LIB	2798
 SN7422	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/7400.LIB	2818
 SN8	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ALS.LIB	1440
 SN9	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ALS.LIB	1451
+SNAPLED150	model	diode	builtin	lib/diode.lib	159
 SNCM	model	switch	microcap-library	upstream/analog.lib	59910
 SNCM	model	switch	microcap-library	upstream/analog.lib	60290
 SNCM	model	switch	microcap-library	upstream/analog.lib	60543
@@ -250614,7 +250620,7 @@ tip31a	model	bjt-npn	microcap-library	upstream/on_bjt.lib	645
 TIP31A	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWBJT.LIB	2588
 tip31b	model	bjt-npn	microcap-library	upstream/on_bjt.lib	1875
 TIP31B	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWBJT.LIB	2602
-TIP31C	model	bjt-npn	builtin	lib/transistor.lib	228
+TIP31C	model	bjt-npn	builtin	lib/bjt.lib	129
 TIP31C	model	bjt-npn	microcap-library	upstream/cs.lib	29091
 tip31c	model	bjt-npn	microcap-library	upstream/m_powbjt.lib	411
 TIP31C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWBJT.LIB	2616
@@ -250628,7 +250634,6 @@ tip32a	model	bjt-pnp	microcap-library	upstream/on_bjt.lib	673
 TIP32A	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWBJT.LIB	668
 tip32b	model	bjt-pnp	microcap-library	upstream/on_bjt.lib	2468
 TIP32B	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWBJT.LIB	682
-TIP32C	model	bjt-pnp	builtin	lib/transistor.lib	239
 TIP32C	model	bjt-pnp	microcap-library	upstream/cs.lib	29141
 tip32c	model	bjt-pnp	microcap-library	upstream/on_bjt.lib	1524
 TIP32C	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/POWBJT.LIB	696
@@ -250818,7 +250823,6 @@ TL070	subckt	subckt	ngspice-models-ugr	upstream/ti/tl070.mod	11
 TL070_TI	subckt	subckt	microcap-library	upstream/ti.lib	4964
 TL070_TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ti.lib	4562
 TL070T	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/TIA.LIB	546
-TL071	subckt	subckt	builtin	lib/opamp.lib	72
 TL071	subckt	subckt	ngspice-models-ugr	upstream/ti/tl071.mod	10
 TL071/301/TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/tex_inst.lib	1129
 TL071_MC	subckt	subckt	microcap-library	upstream/m_opamp.lib	2468
@@ -250828,7 +250832,7 @@ TL071_TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ti.lib	6045
 TL071M	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/MOTOR.LIB	2406
 TL071S	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/SGS2.LIB	605
 TL071T	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/TIA.LIB	589
-TL072	subckt	subckt	builtin	lib/opamp.lib	48
+TL072	subckt	subckt	builtin	lib/opamp.lib	440
 TL072	subckt	subckt	ngspice-basic-models	upstream/OpAmps/Tl072.mod	10
 TL072	subckt	subckt	ngspice-models-ugr	upstream/oamp/Tl072.mod	10
 TL072	subckt	subckt	ngspice-models-ugr	upstream/ti/tl072.mod	10
@@ -250836,7 +250840,6 @@ TL072/301/TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/tex_inst.l
 TL072_TI	subckt	subckt	microcap-library	upstream/ti.lib	6489
 TL072_TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ti.lib	6087
 TL072T	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/TIA.LIB	633
-TL074	subckt	subckt	builtin	lib/opamp.lib	67
 TL074	subckt	subckt	ngspice-models-ugr	upstream/ti/tl074.mod	10
 TL074/301/TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/tex_inst.lib	1215
 TL074_TI	subckt	subckt	microcap-library	upstream/ti.lib	6531
@@ -250860,6 +250863,7 @@ TL081_TI	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/ti.lib	6171
 TL081M	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/MOTOR.LIB	2453
 TL081S	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/SGS2.LIB	653
 TL081T	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/TIA.LIB	809
+TL082	subckt	subckt	builtin	lib/opamp.lib	488
 TL082	subckt	subckt	ngspice-basic-models	upstream/OpAmps/Tl082.mod	10
 TL082	subckt	subckt	ngspice-models-ugr	upstream/oamp/Tl082.mod	10
 TL082	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/cadlab.lib	1400
@@ -253548,6 +253552,7 @@ U6SBA60_SH	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/shinden.lib	
 U6SBA60A	model	diode	microcap-library	upstream/shinden.lib	176
 U6SBA60A	model	diode	ngspice-models-ugr	upstream/spice_complete/shinden.lib	176
 U6SBA60A	model	diode	ngspice-models-ugr	upstream/spice_complete/shindngn.lib	608
+UA555	subckt	subckt	builtin	lib/ic.lib	228
 UA555	subckt	subckt	ngspice-basic-models	upstream/others/UA555.mod	3
 UA555	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/IC.LIB	79
 UA709	subckt	subckt	ngspice-models-ugr	upstream/spice_complete/NONLIN.LIB	2035

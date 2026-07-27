@@ -77,14 +77,46 @@ Currently **5 packs are permissive** (the four PDKs plus `mosis-bsim`) and
 **9 are ambiguous**. Packs whose terms explicitly forbid redistribution are not
 vendored at all and must not be added.
 
-Two ambiguous packs deserve specific attention before any release that ships
-model data:
+### Per-file restrictions
 
-- `microcap-library` states upstream that most models may be freely
-  distributed but that *some carry a restricted commercial-use license*, without
-  identifying which. It needs per-model review, not a blanket decision.
-- `diodes-inc` and `interfet-jfet` are published for direct download with no
-  agreement and no license header — no grant, and no prohibition.
+Pack granularity is the wrong unit for the aggregated collections. Micro-Cap's
+own `about.txt` warns that *some* of its models carry a restricted commercial
+licence without saying which, and the Granada collection is a similar mixture.
+
+```bash
+python tools/models/license_audit.py
+```
+
+scans every vendored file for restriction language and writes
+`LICENSE-AUDIT.tsv`, one row per finding. Packaging should exclude on that
+table, not on the pack.
+
+The current result: **733 files carrying 59,810 model and subcircuit
+definitions are marked `restricted`** — 23% of the tree.
+
+| Marker | Files | What it is |
+| --- | --- | --- |
+| `commercial-use-restricted` | 732 | Symmetry/MODPEX generated cards. The header asserts unpublished licensed software containing proprietary information and restricts commercial use or resale under an agreement RSpice does not hold |
+| `confidential` | 2 | `nation.lib` and `nichicon.LIB` are marked confidential by their originators |
+
+The restricted set is concentrated in exactly the mainstream vendor libraries:
+`On_Semi.lib` (21,923 definitions), `irf.lib` (7,333),
+`Rohm_Transistor.lib` (4,713), `nation.lib` (2,785), `on_fet.lib` (2,461),
+`vishaydiode.lib` (1,589). 706 of the 1,828 files in `ngspice-models-ugr` are
+affected, against 27 of 181 in `microcap-library`.
+
+A free-of-charge product tier does not clear these. The restricted axis is
+commercial *use*, not sale, and a free tier inside a commercial product is still
+commercial use.
+
+The remainder is unaffected: `diodes-inc` (6,927 models), `interfet-jfet` (898),
+`ngspice-basic-models`, the logic packs and the special-function models carry no
+restriction marker at all. That is where the built-in library draws from, and
+`tools/models/build_builtin.py` fails rather than reading a restricted file.
+
+`diodes-inc` and `interfet-jfet` remain `ambiguous` for a different reason: they
+are published for direct download with no agreement and no licence header — no
+grant, and no prohibition.
 
 ## Working with the tree
 
