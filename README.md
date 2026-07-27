@@ -55,12 +55,12 @@ Run it:
 
 ```console
 $ target/release/rspice run rc_lowpass.sp --meas
-✓ Transient complete: 1053 time points computed
+✓ Transient complete: 1029 time points computed
   Measurement Results (TRAN, 2):
     VPEAK = 4.999773e+00
-    RISETIME = 2.197215e-04
+    RISETIME = 2.197211e-04
 
-Simulation complete in 0.001s.
+Simulation complete in 0.003s.
 ```
 
 Results can be written to a file instead — SPICE raw, CSV, TSV, JSON, or HDF5:
