@@ -21,7 +21,7 @@ impl SimulationController {
         let input_options = state.analysis.fft_state.input_options_for_waveform(time);
 
         if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
-            let eye_data = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
+            let eye_data = crate::analysis::eye_diagram::EyeDataBuilder::new()
                 .bit_period(bit_period)
                 .ui_count(2)
                 .skip_initial(2)
@@ -291,7 +291,7 @@ impl SimulationController {
 
         let threshold = (v_min + v_max) * 0.5;
         let edges =
-            crate::analysis::eye_diagram::data::find_edges(&time[..n], &signal[..n], threshold);
+            crate::analysis::eye_diagram::find_edges(&time[..n], &signal[..n], threshold);
         if edges.len() < 3 {
             return None;
         }

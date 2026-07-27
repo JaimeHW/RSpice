@@ -1,5 +1,5 @@
-use super::super::data::EyeData;
-use super::super::measurements::EyeMeasurements;
+use super::super::EyeData;
+use super::super::EyeMeasurements;
 use super::{
     ColorMap, EYE_MAX_MARKERS, EYE_VIEW_TIME_DIVISIONS, EYE_VIEW_VOLTAGE_DIVISIONS, EyeCursorState,
     EyeDisplayMode, EyeMask, EyePersistenceCache, EyeViewRange,
@@ -112,7 +112,7 @@ impl EyeDiagramState {
 
     /// Recalculate measurements from current data
     pub fn recalculate_measurements(&mut self) {
-        self.measurements = super::super::measurements::calculate_eye_measurements(&self.data);
+        self.measurements = super::super::calculate_eye_measurements(&self.data);
     }
 
     /// Run mask test

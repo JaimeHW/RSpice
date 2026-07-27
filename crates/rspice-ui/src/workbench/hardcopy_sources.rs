@@ -4175,7 +4175,7 @@ fn quick_eye_plot(
         "eye source waveform",
     )?;
     let bit_period = retained_eye_bit_period(&waveform.x, &waveform.y)?;
-    let data = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
+    let data = crate::analysis::eye_diagram::EyeDataBuilder::new()
         .bit_period(bit_period)
         .ui_count(2)
         .skip_initial(2)
@@ -4398,7 +4398,7 @@ fn retained_eye_bit_period(time: &[f64], values: &[f64]) -> Result<f64, Hardcopy
         ));
     }
     let threshold = (minimum + maximum) * 0.5;
-    let edges = crate::analysis::eye_diagram::data::find_edges(
+    let edges = crate::analysis::eye_diagram::find_edges(
         &time[..sample_count],
         &values[..sample_count],
         threshold,
@@ -7678,7 +7678,7 @@ mod tests {
         state.analysis.eye_diagram_state.load_data(stale_eye);
 
         let period = retained_eye_bit_period(&time, &selected).unwrap();
-        let expected = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
+        let expected = crate::analysis::eye_diagram::EyeDataBuilder::new()
             .bit_period(period)
             .ui_count(2)
             .skip_initial(2)

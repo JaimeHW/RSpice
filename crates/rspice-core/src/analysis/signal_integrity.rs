@@ -15,6 +15,14 @@
 use crate::Value;
 use std::f64::consts::PI;
 
+mod eye_data;
+mod eye_measurements;
+
+pub use eye_data::{
+    AmplitudeStats, Edge, EyeData, EyeDataBuilder, EyeTrace, calculate_edge_rate, find_edges,
+};
+pub use eye_measurements::{EyeMeasurements, calculate_eye_measurements};
+
 //=============================================================================
 // Eye Diagram Configuration
 //=============================================================================

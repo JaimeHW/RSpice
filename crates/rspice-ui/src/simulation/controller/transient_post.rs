@@ -1,5 +1,5 @@
 use super::*;
-use crate::analysis::eye_diagram::data::{EyeData, EyeDataBuilder};
+use crate::analysis::eye_diagram::{EyeData, EyeDataBuilder};
 use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
 use crate::common::app::ActiveViewer;
 use crate::common::app::AppState;

@@ -3,7 +3,7 @@
 //! Commercial-grade signal integrity measurements from eye diagrams.
 //! Includes eye opening, jitter, rise/fall times, and bit error rate estimation.
 
-use super::data::{EyeData, calculate_edge_rate};
+use super::eye_data::{EyeData, calculate_edge_rate};
 use std::f64::consts::PI;
 
 // =============================================================================

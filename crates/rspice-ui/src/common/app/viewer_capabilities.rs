@@ -300,7 +300,7 @@ impl AppState {
         self.analysis.fft_state.clear();
         self.analysis
             .eye_diagram_state
-            .load_data(crate::analysis::eye_diagram::data::EyeData::default());
+            .load_data(crate::analysis::eye_diagram::EyeData::default());
     }
 
     /// Clear all specialized (non-waveform) viewer data caches.

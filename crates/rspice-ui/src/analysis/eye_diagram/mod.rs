@@ -2,6 +2,16 @@
 //!
 //! Commercial-grade eye diagram visualization for signal integrity analysis.
 //!
+//! # Where the engine lives
+//!
+//! Eye construction and measurement are simulation mathematics, not
+//! presentation, so they live in `rspice_core::analysis::signal_integrity`
+//! next to the jitter decomposition and bathtub curves that consume the same
+//! crossings. This module owns only what the viewer adds on top: display
+//! mode, colour map, cursors, mask polygons, and the persistence cache.
+//!
+//! The engine types are re-exported here so viewer code keeps one import path.
+//!
 //! # Features
 //!
 //! - Overlay of signal transitions aligned to bit period
@@ -16,12 +26,12 @@
 //!
 //! Follows Cadence-style signal integrity analysis workflow.
 
-pub mod data;
-pub mod measurements;
 pub mod state;
 
-pub use data::{EyeData, EyeTrace};
-pub use measurements::EyeMeasurements;
+pub use rspice_core::analysis::signal_integrity::{
+    AmplitudeStats, Edge, EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, calculate_edge_rate,
+    calculate_eye_measurements, find_edges,
+};
 pub use state::{EyeDiagramState, EyeDisplayMode};
 
 // =============================================================================
