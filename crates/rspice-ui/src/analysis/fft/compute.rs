@@ -4,7 +4,7 @@
 
 use super::data::FftData;
 use super::pipeline::{MIN_FFT_SAMPLES, prepare_fft_input};
-use super::window::{WindowFunction, apply_window, generate_window};
+use super::window::WindowFunction;
 
 /// FFT result containing frequency and magnitude data
 #[derive(Debug, Clone, PartialEq)]
