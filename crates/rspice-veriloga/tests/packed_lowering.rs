@@ -168,3 +168,41 @@ fn primal_graph_carries_no_derivatives_for_a_production_model() {
         "a MOSFET must read at least one node potential"
     );
 }
+
+#[test]
+fn report_how_much_of_the_graph_is_newton_loop_work() {
+    // The existing backends hoist instance- and temperature-static values out
+    // of the Newton loop and cache them, so their measured per-iteration cost
+    // excludes all the parameter and geometry preprocessing. A packed body that
+    // emits everything in one pass is not comparable to that number.
+    use rspice_veriloga::canonical_ir::{InvalidationClass, OptOp};
+    let shape = shape_of(
+        &["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"],
+        "bsimbulk",
+    );
+
+    let mut per_class = std::collections::BTreeMap::new();
+    for schedule in &shape.primal.schedules {
+        let computed = schedule
+            .ops
+            .iter()
+            .filter(|op| matches!(op, OptOp::ComputeValue { .. }))
+            .count();
+        *per_class
+            .entry(format!("{:?}", schedule.invalidation))
+            .or_insert(0usize) += computed;
+    }
+    let total: usize = per_class.values().sum();
+    for (class, count) in &per_class {
+        eprintln!(
+            "{class:<20} {count:>7}  ({:.1}%)",
+            *count as f64 * 100.0 / total as f64
+        );
+    }
+    eprintln!("scheduled total       {total:>7} of {} values", shape.primal.values.len());
+
+    assert!(
+        per_class.contains_key(&format!("{:?}", InvalidationClass::NewtonIteration)),
+        "a model must have per-iteration work"
+    );
+}

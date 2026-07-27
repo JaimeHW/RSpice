@@ -928,6 +928,33 @@ endmodule
                 assert!(body.derivative_bindings > 0);
                 if let Ok(path) = std::env::var("RSPICE_PACKED_DUMP") {
                     std::fs::write(&path, &body.source).expect("dump packed body");
+                    // Every equation root, so a harness can keep the whole
+                    // model live. Consuming one value lets the optimizer delete
+                    // most of it, which reads as a very fast device.
+                    use crate::canonical_ir::{InvalidationClass, OptOp};
+                    let mut roots = Vec::new();
+                    for schedule in &opt.schedules {
+                        if schedule.invalidation != InvalidationClass::NewtonIteration {
+                            continue;
+                        }
+                        let mut last = None;
+                        for op in &schedule.ops {
+                            match op {
+                                OptOp::ComputeValue { value } => last = Some(*value),
+                                OptOp::EvaluateEquation { .. } => {
+                                    if let Some(value) = last.take() {
+                                        roots.push(usize::from(value));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let listing = roots
+                        .iter()
+                        .map(|root| root.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    std::fs::write(format!("{path}.roots"), listing).expect("dump roots");
                 }
                 assert!(
                     body.derivative_bindings < body.primal_bindings,
