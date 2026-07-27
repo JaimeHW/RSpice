@@ -2560,6 +2560,29 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct StructuredStaticState<const INSTANCE_VALUES: usize, const TEMPERATURE_VALUES: usize> {
+    pub(crate) instance_values: [f64; INSTANCE_VALUES],
+    pub(crate) temperature_values: [f64; TEMPERATURE_VALUES],
+    pub(crate) instance_valid: bool,
+    pub(crate) temperature_valid: bool,
+    pub(crate) temperature: f64,
+    pub(crate) thermal_voltage: f64,
+}
+
+impl<const INSTANCE_VALUES: usize, const TEMPERATURE_VALUES: usize> StructuredStaticState<INSTANCE_VALUES, TEMPERATURE_VALUES> {
+    fn new_shared() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            instance_values: [0.0; INSTANCE_VALUES],
+            temperature_values: [0.0; TEMPERATURE_VALUES],
+            instance_valid: false,
+            temperature_valid: false,
+            temperature: 0.0,
+            thermal_voltage: 0.0,
+        })
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 17],
     pub branches: [usize; 14],
@@ -2570,6 +2593,7 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+    pub(crate) structured_static: std::sync::Arc<StructuredStaticState<757, 0>>,
 }
 
 impl Clone for Instance {
@@ -2585,6 +2609,7 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
+            structured_static: self.structured_static.clone(),
         }
     }
 }
@@ -2600,7 +2625,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 1631;
     pub const DDT_STATE_COUNT: usize = 16;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "55133f97f873cf073fa1712ea0837a2f1f176cb089aaa6d3eff76fbe84c890be";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "e1ae282298d8eddf3c9170943a14689f66c1028f9e1180ef6856c3e6328fca18";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -2618,6 +2643,7 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+            structured_static: StructuredStaticState::new_shared(),
         }
     }
 
@@ -2751,7 +2777,11 @@ impl Instance {
     #[inline]
     fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
-        let _ = invalidates_caches;
+        if invalidates_caches {
+            let cache = std::sync::Arc::make_mut(&mut self.structured_static);
+            cache.instance_valid = false;
+            cache.temperature_valid = false;
+        }
     }
 
     #[inline]

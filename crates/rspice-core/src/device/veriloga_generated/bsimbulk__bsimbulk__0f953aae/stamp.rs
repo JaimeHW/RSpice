@@ -352,6 +352,17 @@ const REACTIVE_NODE_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = {
     masks
 };
 const REACTIVE_BRANCH_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = [0; Instance::VARIABLE_COUNT];
+fn capture_structured_static_values(s: &Scratch, values: &mut [f64], targets: &[usize]) {
+    debug_assert_eq!(values.len(), targets.len());
+    for (value, &target) in values.iter_mut().zip(targets) { *value = s.v[target]; }
+}
+#[inline]
+fn restore_structured_static_values(s: &mut Scratch, values: &[f64], targets: &[usize]) {
+    debug_assert_eq!(values.len(), targets.len());
+    for (&value, &target) in values.iter().zip(targets) {
+        s.store_scalar(target, value);s.b[target] = value != 0.0;
+    }
+}
 use std::cell::RefCell;
 use std::thread::LocalKey;
 
@@ -423,6 +434,8 @@ mod stamp_blocks_10;
 mod stamp_blocks_11;
 #[path = "stamp_blocks_12.rs"]
 mod stamp_blocks_12;
+#[path = "stamp_blocks_13.rs"]
+mod stamp_blocks_13;
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 #[inline]
 fn eval_ddt<const STATE_COUNT: usize>(
@@ -501,7 +514,50 @@ impl Instance {
         let p = Box::as_ref(&self.params);let nodes = &(*self).nodes;let branches = &(*self).branches;let param_given = self.param_given.as_ref();let multiplicity = (*self).multiplicity;let timestep = (*self).timestep;let stamp_state = self.stamp_state.as_mut();let ddt_state_current = &mut stamp_state.ddt_current;let ddt_state_previous = &mut stamp_state.ddt_previous;let ddt_state_older = &mut stamp_state.ddt_older;let ddt_state_initialized = &mut stamp_state.ddt_initialized;let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;let ddt_active = self.ddt_coefficients.active;let ddt_scale = self.ddt_coefficients.derivative_scale;let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let mut scratch_lease = ScratchLease::acquire(&TRANSIENT_SCRATCH_POOL, || Scratch::new_box_with_activity(&TRANSIENT_NODE_DERIVATIVE_ACTIVITY, &TRANSIENT_BRANCH_DERIVATIVE_ACTIVITY));
         let s = scratch_lease.get_mut();
-        Self::stamp_transient_block_0(s, p);Self::stamp_transient_block_1(s, p, param_given);Self::stamp_transient_block_2(s, p);Self::stamp_transient_block_3(s, p);Self::stamp_transient_block_4(s, p);Self::stamp_transient_block_5(s, p, param_given);Self::stamp_transient_block_6(s, p);Self::stamp_transient_block_7(s, p);Self::stamp_transient_block_8(s, p);Self::stamp_transient_block_9(s, p);Self::stamp_transient_block_10(s, p, param_given);Self::stamp_transient_block_11(s, p);Self::stamp_transient_block_12(s, p);Self::stamp_transient_block_13(s, p);Self::stamp_transient_block_14(s, p);Self::stamp_transient_block_15(s, p, param_given);Self::stamp_transient_block_16(s, p);Self::stamp_transient_block_17(ctx, s, p, nodes);Self::stamp_transient_block_18(s, p);Self::stamp_transient_block_19(s, p);Self::stamp_transient_block_20(s, p);Self::stamp_transient_block_21(s);Self::stamp_transient_block_22(s, p);Self::stamp_transient_block_23(s, p);Self::stamp_transient_block_24(s, p);Self::stamp_transient_block_25(s, p);Self::stamp_transient_block_26(s, p);Self::stamp_transient_block_27(s, p, param_given);Self::stamp_transient_block_28(s, p);Self::stamp_transient_block_29(ctx, s, p);Self::stamp_transient_block_30(ctx, s, p, nodes, param_given);Self::stamp_transient_block_31(ctx, s, p, nodes);Self::stamp_transient_block_32(s, p);Self::stamp_transient_block_33(s);Self::stamp_transient_block_34(s);Self::stamp_transient_block_35(s, p);Self::stamp_transient_block_36(s, p);Self::stamp_transient_block_37(s, p);Self::stamp_transient_block_38(s);Self::stamp_transient_block_39(s, p);Self::stamp_transient_block_40(s);Self::stamp_transient_block_41(s);Self::stamp_transient_block_42(s, p);Self::stamp_transient_block_43(s, p);Self::stamp_transient_block_44(ctx, s, p, nodes);Self::stamp_transient_block_45(s, p);Self::stamp_transient_block_46(ctx, s, p, nodes);Self::stamp_transient_block_47(ctx, s, p, nodes);Self::stamp_transient_block_48(s, p);Self::stamp_transient_block_49(s);Self::stamp_transient_block_50(s);Self::stamp_transient_block_51(ctx, s, p, nodes);Self::stamp_transient_block_52(s);Self::stamp_transient_block_53(s, p);Self::stamp_transient_block_54(s, p);Self::stamp_transient_block_55(ctx, s, p, nodes);Self::stamp_transient_block_56(s, p);Self::stamp_transient_block_57(s, p);Self::stamp_transient_block_58(s, p);Self::stamp_transient_block_59(s, p);Self::stamp_transient_block_60(s, p);Self::stamp_transient_block_61(s, p);Self::stamp_transient_block_62(s, p);Self::stamp_transient_block_63(s, p);Self::stamp_transient_block_64(s, p);Self::stamp_transient_block_65(ctx, s, p, nodes);Self::stamp_transient_block_66(s);Self::stamp_transient_block_67(s);Self::stamp_transient_block_68(s, p);Self::stamp_transient_block_69(s, p);Self::stamp_transient_block_70(s, p);Self::stamp_transient_block_71(s, p);Self::stamp_transient_block_72(s, p);Self::stamp_transient_block_73(s, p);Self::stamp_transient_block_74(s, p);Self::stamp_transient_block_75(s, p);Self::stamp_transient_block_76(s, p);Self::stamp_transient_block_77(s);Self::stamp_transient_block_78(s, p, param_given);Self::stamp_transient_block_79(ctx, s, p, nodes);Self::stamp_transient_block_80(s, p);Self::stamp_transient_block_81(s);Self::stamp_transient_block_82(s);Self::stamp_transient_block_83(s);Self::stamp_transient_block_84(s, p);Self::stamp_transient_block_85(s, p);Self::stamp_transient_block_86(ctx, s, p, nodes);
+        const STRUCTURED_INSTANCE_STATIC_TARGETS: [usize; 757] = [485,466,535,505,512,510,467,649,661,669,606,610,616,620,624,628,634,638,780,491,540,414,400,406,501,650,670,607,613,617,621,625,631,635,639,762,421,518,498,515,509,410,688,690,671,608,614,618,622,626,632,636,759,763,460,165,398,402,404,461,689,605,609,615,619,623,627,633,637,761,629,630,247,246,249,248,782,783,372,371,374,373,67,71,750,147,178,183,416,552,557,760,859,187,26,27,46,47,860,229,99,101,98,456,100,457,458,459,39,463,464,465,40,30,29,43,44,34,33,45,35,469,470,472,473,474,475,471,466,872,873,467,874,875,462,41,468,42,32,31,878,476,477,478,482,549,480,481,550,479,483,488,484,487,116,117,118,119,120,121,494,495,538,489,490,493,496,497,504,508,507,511,514,539,542,531,530,526,543,527,529,528,532,533,534,517,520,521,522,523,524,525,537,500,164,503,544,545,546,547,548,551,554,578,579,580,559,560,561,562,563,564,565,566,567,568,569,570,577,571,572,573,574,575,576,604,581,582,583,584,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,601,602,603,454,455,453,148,149,151,152,606,612,686,616,620,624,634,638,640,641,642,879,485,505,512,535,12,13,880,881,882,883,884,885,886,887,888,889,890,891,892,893,894,895,555,556,600,896,897,898,899,900,901,902,903,923,924,925,926,927,928,929,930,931,932,746,933,934,359,701,703,700,702,705,704,236,238,237,935,239,936,937,938,939,940,941,942,943,944,945,946,947,948,949,950,951,952,953,954,955,956,957,958,960,961,962,963,965,966,967,968,969,971,972,973,974,976,977,978,979,980,981,983,984,985,986,988,989,990,991,992,994,995,996,997,999,1000,1001,1002,1003,1004,1006,1007,1008,1009,1011,1012,1013,1014,1015,1017,1018,1019,1020,1022,1023,1024,1025,1026,1027,1029,1030,1031,1032,1034,1035,1036,1037,1038,1040,1041,1042,1043,1045,1046,1047,1048,1049,1050,1052,1053,1054,1055,1057,1058,1059,1060,1061,1062,1064,1065,1066,1067,1069,1070,1071,1072,1073,1074,1075,1077,1078,1079,1080,1082,1083,1084,1085,1086,1087,1088,1090,1091,1092,1093,1095,1096,1097,1098,1099,1100,1101,1103,240,1104,1105,1106,1107,1108,1109,1110,1111,1112,1113,1114,1115,1116,1117,1118,1119,1120,1121,1122,1123,1124,1125,1126,1128,1129,1130,1131,1133,1134,1135,1136,1137,1139,1140,1141,1142,1144,1145,1146,1147,1148,1149,1151,1152,1153,1154,1156,1157,1158,1159,1160,1162,1163,1164,1165,1167,1168,1169,1170,1171,1172,1174,1175,1176,1177,1179,1180,1181,1182,1183,1185,1186,1187,1188,1190,1191,1192,1193,1194,1195,1197,1198,1199,1200,1202,1203,1204,1205,1206,1208,1209,1210,1211,1213,1214,1215,1216,1217,1218,1220,1221,1222,1223,1225,1226,1227,1228,1229,1230,1232,1233,1234,1235,1237,1238,1239,1240,1241,1242,1243,1245,1246,1247,1248,1250,1251,1252,1253,1254,1255,1256,1258,1259,1260,1261,1263,1264,1265,1266,1267,1268,1269,1271,1272,1273,1274,1275,1276,1277,1278,1279,1280,1281,1282,271,272,273,274,275,276,1283,256,257,258,259,268,270,269,266,267,1284,1285,1286,1287,262,263,264,265,1288,260,261,1289,1290,1291,1292,1293,1294,1295,1296,1297,1298,1299,1300,1301,1302,302,252,1303,14,298,299,294,295,296,297,38,1305,747,748,1306,392,1320,1321,701,703,700,702,1322,12,13,14,0,1,2,3,4,5,6,7,8,9,10,11,1323,1324,1325,1326,1327,1328,1329,1330,1331,1332,1333,248,249,246,247,1334,250,1335,1336,251,1337,1338,1339,300,1340,1341,1342,301,1343,283,284,285,286,287,290,291,1459,313,1496,314,316,1497,317,319,1498,320,322,1513,323,325,1514,326,328,1515,329];let recompute_structured_instance_static = !self.structured_static.instance_valid;
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_0(s);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[0..19], &STRUCTURED_INSTANCE_STATIC_TARGETS[0..19]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[0..19], &STRUCTURED_INSTANCE_STATIC_TARGETS[0..19]);
+        }
+        Self::stamp_transient_block_1(s);
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_2(s, p, param_given);Self::stamp_transient_block_3(s, p);Self::stamp_transient_block_4(s, p);Self::stamp_transient_block_5(s, p);Self::stamp_transient_block_6(s, p);Self::stamp_transient_block_7(s, p, param_given);Self::stamp_transient_block_8(s, p);Self::stamp_transient_block_9(s, p);Self::stamp_transient_block_10(s, p);Self::stamp_transient_block_11(s, p);Self::stamp_transient_block_12(s, p, param_given);Self::stamp_transient_block_13(s, p);Self::stamp_transient_block_14(s, p);Self::stamp_transient_block_15(s, p);Self::stamp_transient_block_16(s, p);Self::stamp_transient_block_17(s, p, param_given);Self::stamp_transient_block_18(s, p);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[19..680], &STRUCTURED_INSTANCE_STATIC_TARGETS[19..680]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[19..680], &STRUCTURED_INSTANCE_STATIC_TARGETS[19..680]);
+        }
+        Self::stamp_transient_block_19(ctx, s, p, nodes);Self::stamp_transient_block_20(s, p);Self::stamp_transient_block_21(s, p);Self::stamp_transient_block_22(s, p);Self::stamp_transient_block_23(s);Self::stamp_transient_block_24(s, p);Self::stamp_transient_block_25(s, p);Self::stamp_transient_block_26(s, p);Self::stamp_transient_block_27(s, p);
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_28(s, p);Self::stamp_transient_block_29(s, p, param_given);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[680..731], &STRUCTURED_INSTANCE_STATIC_TARGETS[680..731]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[680..731], &STRUCTURED_INSTANCE_STATIC_TARGETS[680..731]);
+        }
+        Self::stamp_transient_block_30(s, p);Self::stamp_transient_block_31(s, p);Self::stamp_transient_block_32(ctx, s, p, param_given);Self::stamp_transient_block_33(ctx, s, p, nodes);Self::stamp_transient_block_34(s, p);Self::stamp_transient_block_35(s, p);Self::stamp_transient_block_36(s);Self::stamp_transient_block_37(s);Self::stamp_transient_block_38(s, p);Self::stamp_transient_block_39(s, p);Self::stamp_transient_block_40(s);Self::stamp_transient_block_41(s, p);Self::stamp_transient_block_42(s);Self::stamp_transient_block_43(s);Self::stamp_transient_block_44(s);Self::stamp_transient_block_45(s, p);Self::stamp_transient_block_46(ctx, s, p, nodes);Self::stamp_transient_block_47(s, p);Self::stamp_transient_block_48(ctx, s, p, nodes);Self::stamp_transient_block_49(ctx, s, p, nodes);Self::stamp_transient_block_50(s, p);Self::stamp_transient_block_51(s, p);Self::stamp_transient_block_52(s);Self::stamp_transient_block_53(ctx, s, p, nodes);Self::stamp_transient_block_54(ctx, s, nodes);Self::stamp_transient_block_55(s);Self::stamp_transient_block_56(s, p);Self::stamp_transient_block_57(ctx, s, p, nodes);Self::stamp_transient_block_58(ctx, s, p, nodes);
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_59(s, p);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[731..739], &STRUCTURED_INSTANCE_STATIC_TARGETS[731..739]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[731..739], &STRUCTURED_INSTANCE_STATIC_TARGETS[731..739]);
+        }
+        Self::stamp_transient_block_60(s, p);Self::stamp_transient_block_61(s, p);Self::stamp_transient_block_62(s, p);Self::stamp_transient_block_63(s, p);Self::stamp_transient_block_64(s, p);Self::stamp_transient_block_65(s, p);
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_66(s, p);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[739..748], &STRUCTURED_INSTANCE_STATIC_TARGETS[739..748]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[739..748], &STRUCTURED_INSTANCE_STATIC_TARGETS[739..748]);
+        }
+        Self::stamp_transient_block_67(s, p);Self::stamp_transient_block_68(s, p);
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_69(s, p);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[748..757], &STRUCTURED_INSTANCE_STATIC_TARGETS[748..757]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[748..757], &STRUCTURED_INSTANCE_STATIC_TARGETS[748..757]);
+        }
+        Self::stamp_transient_block_70(s, p);Self::stamp_transient_block_71(ctx, s, p, nodes);Self::stamp_transient_block_72(ctx, s, p, nodes);Self::stamp_transient_block_73(s);Self::stamp_transient_block_74(s);Self::stamp_transient_block_75(s, p);Self::stamp_transient_block_76(s, p);Self::stamp_transient_block_77(s, p);Self::stamp_transient_block_78(s, p);Self::stamp_transient_block_79(s, p);Self::stamp_transient_block_80(s, p);Self::stamp_transient_block_81(s, p);Self::stamp_transient_block_82(s, p);Self::stamp_transient_block_83(s, p);Self::stamp_transient_block_84(s);Self::stamp_transient_block_85(s, p, param_given);Self::stamp_transient_block_86(ctx, s, p, nodes);Self::stamp_transient_block_87(s, p);Self::stamp_transient_block_88(s);Self::stamp_transient_block_89(s);Self::stamp_transient_block_90(s);Self::stamp_transient_block_91(s, p);Self::stamp_transient_block_92(ctx, s, p, nodes);Self::stamp_transient_block_93(ctx, s, p, nodes);
+        if recompute_structured_instance_static { std::sync::Arc::make_mut(&mut self.structured_static).instance_valid = true; }
         stamper.stamp_potential_branch_local(
             Some(4),
             None,

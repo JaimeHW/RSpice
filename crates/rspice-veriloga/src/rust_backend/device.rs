@@ -14,6 +14,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    fmt::Write as _,
     sync::OnceLock,
 };
 
@@ -51,6 +52,8 @@ const MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES: usize = 4096;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
+const MIN_STRUCTURED_STATIC_CACHE_ASSIGNMENTS: usize = 8;
+const MIN_STRUCTURED_STATIC_SEGMENT_VALUES: usize = 8;
 pub(super) const MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES: usize = 3_700_000;
 pub(super) const MAX_CACHED_SCRATCH_WORKSPACES: usize = 2;
 const DERIVATIVE_ACTIVITY_MARKER: &str = "// __RSPICE_DERIVATIVE_ACTIVITY__\n";
@@ -106,6 +109,54 @@ impl ScalarHybridStampPlan {
     fn has_reactive_equation(&self, equation: EquationId) -> bool {
         self.ddt_roots.contains_key(&equation)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StructuredStaticClass {
+    Instance,
+    Temperature,
+    Dynamic,
+}
+
+impl StructuredStaticClass {
+    fn combine(self, other: Self) -> Self {
+        self.max(other)
+    }
+
+    fn is_cacheable(self) -> bool {
+        !matches!(self, Self::Dynamic)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StructuredStatementInvalidation {
+    class: StructuredStaticClass,
+    target: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct StructuredStaticCacheLayout {
+    instance_values: usize,
+    temperature_values: usize,
+}
+
+impl StructuredStaticCacheLayout {
+    fn is_empty(self) -> bool {
+        self.instance_values == 0 && self.temperature_values == 0
+    }
+}
+
+#[derive(Debug)]
+struct AssignmentChunk {
+    source: String,
+    invalidation: StructuredStatementInvalidation,
+}
+
+#[derive(Debug)]
+struct AssignmentChunkGroup {
+    class: StructuredStaticClass,
+    sources: Vec<String>,
+    targets: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -561,15 +612,26 @@ fn generate_device_with_scalar_hybrid_plan(
         )?,
         &derivative_activity,
     );
-    let state = if let Some(plan) = scalar_hybrid_plan
+    let mut state_extensions = if let Some(plan) = scalar_hybrid_plan
         .filter(|plan| !plan.static_cache.is_empty() || !scalar_limit_slots.is_empty())
     {
-        let extensions = super::scalar::scalar_state_extensions(
+        super::scalar::scalar_state_extensions(
             artifact,
             &parameter_fields,
             &plan.static_cache,
             &scalar_limit_slots,
-        )?;
+        )?
+    } else {
+        StateFileExtensions::default()
+    };
+    extend_structured_static_cache_state(
+        &mut state_extensions,
+        stamp_files.structured_static_cache_layout,
+    );
+    let state = if scalar_hybrid_plan
+        .is_some_and(|plan| !plan.static_cache.is_empty() || !scalar_limit_slots.is_empty())
+        || !stamp_files.structured_static_cache_layout.is_empty()
+    {
         generate_state_file_with_extensions(
             artifact,
             options,
@@ -577,7 +639,7 @@ fn generate_device_with_scalar_hybrid_plan(
             ddt_slots.len(),
             ddt_slots.idt_len(),
             potential_branch_slots.len(),
-            &extensions,
+            &state_extensions,
         )?
     } else {
         generate_state_file(
@@ -604,8 +666,7 @@ fn generate_device_with_scalar_hybrid_plan(
         },
     ];
     let mut noise_file = super::noise::generate_noise_file(artifact, options)?;
-    noise_file.contents =
-        compact_generated_noise_surface(std::mem::take(&mut noise_file.contents));
+    noise_file.contents = compact_generated_noise_surface(std::mem::take(&mut noise_file.contents));
     files.push(noise_file);
     files.extend(stamp_files.helpers);
 
@@ -4308,21 +4369,22 @@ mod compact_generated_stamp_surface_tests {
     use super::{
         GeneratedKernelComplexity, GeneratedRustFile, MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES,
         MAX_STAMP_HELPER_OPERATIONS, StructuredDerivativeActivity,
-        StructuredDerivativeActivityPlane, bound_generated_scratch_helper_inlining,
-        collapse_single_line_generated_if_blocks, compact_div_from_scalar_offset_denominator,
-        compact_exp_div_scaled_inputs_expression, compact_generated_stamp_surface,
-        compact_generated_noise_surface, compact_generated_statement_runs,
-        compact_generated_surface_lines,
+        StructuredDerivativeActivityPlane, StructuredStaticClass,
+        bound_generated_scratch_helper_inlining, collapse_single_line_generated_if_blocks,
+        compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
+        compact_generated_noise_surface, compact_generated_stamp_surface,
+        compact_generated_statement_runs, compact_generated_surface_lines,
         compact_generated_temporary_identifiers, compact_limited_exp_div_scaled_inputs_expression,
         compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
         compact_stamp_local_frame_identifiers, duplicate_hoistable_derivative_rhs,
         emit_structured_derivative_activity_array, generate_ad_value_struct,
-        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
-        render_runtime_support_module, render_runtime_support_module_for_generated_sources,
+        generate_scratch_operation_helpers, generate_structured_kernel_device,
+        is_hoistable_generated_derivative_rhs, render_runtime_support_module,
+        render_runtime_support_module_for_generated_sources,
         reuse_duplicate_derivative_locals_in_helper_block, rewrite_inactive_derivative_store_calls,
         scratch_operation_runtime, should_cache_compact_condition,
-        sparse_local_device_source_is_bounded,
+        sparse_local_device_source_is_bounded, structured_statement_invalidations,
     };
 
     #[test]
@@ -4615,10 +4677,136 @@ mod compact_generated_stamp_surface_tests {
             .to_string(),
         );
 
-        assert!(compacted.contains(
-            "        if (active[0] & 0xff) != 0 {w[0] = 1.0;w[1] = 2.0;}\n"
-        ));
+        assert!(
+            compacted.contains("        if (active[0] & 0xff) != 0 {w[0] = 1.0;w[1] = 2.0;}\n")
+        );
         assert!(compacted.contains("        if (active[0] & 0x01) != 0 {w[2] = 3.0;}\n"));
+    }
+
+    #[test]
+    fn structured_static_classification_tracks_procedural_dependencies() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module structured_static_dependencies(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real instance_value, temperature_value, combined_value, dynamic_value, late_instance;
+    analog begin
+        instance_value = gain * gain;
+        temperature_value = $temperature;
+        combined_value = sqrt(instance_value + temperature_value);
+        dynamic_value = V(p, n);
+        late_instance = gain + 1.0;
+        I(p, n) <+ combined_value + dynamic_value + late_instance;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+        let invalidations = structured_statement_invalidations(&artifact);
+        let assignments = artifact
+            .hir
+            .statements
+            .iter()
+            .zip(invalidations)
+            .filter_map(|(statement, invalidation)| match statement {
+                crate::canonical_ir::HirStatement::Assignment(assignment) => {
+                    Some((assignment.target_name.as_str(), invalidation.class))
+                }
+                crate::canonical_ir::HirStatement::Loop(_) => None,
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(
+            assignments["instance_value"],
+            StructuredStaticClass::Instance
+        );
+        assert_eq!(
+            assignments["temperature_value"],
+            StructuredStaticClass::Temperature
+        );
+        assert_eq!(
+            assignments["combined_value"],
+            StructuredStaticClass::Temperature
+        );
+        assert_eq!(assignments["dynamic_value"], StructuredStaticClass::Dynamic);
+        assert_eq!(
+            assignments["late_instance"],
+            StructuredStaticClass::Instance
+        );
+    }
+
+    #[test]
+    fn structured_devices_own_copy_on_write_static_boundary_caches() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module structured_static_cache(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real a, b, c, d, e, f, g, h, i, drive;
+    analog begin
+        a = gain + 1.0;
+        b = a + 1.0;
+        c = b + 1.0;
+        d = c + 1.0;
+        e = d + 1.0;
+        f = e + 1.0;
+        g = f + 1.0;
+        h = g + 1.0;
+        i = h + 1.0;
+        drive = V(p, n) * i;
+        I(p, n) <+ drive;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+        let generated = generate_structured_kernel_device(
+            &artifact,
+            &super::super::RustTranspileOptions::default(),
+        )
+        .expect("structured device");
+        let state = generated
+            .files
+            .iter()
+            .find(|file| file.relative_path == "state.rs")
+            .expect("state source")
+            .contents
+            .as_str();
+        let stamp = generated
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp source")
+            .contents
+            .as_str();
+
+        assert!(
+            state.contains(
+                "pub(crate) structured_static: std::sync::Arc<StructuredStaticState<9, 0>>"
+            ),
+            "{state}"
+        );
+        assert!(
+            state.contains("structured_static: self.structured_static.clone()"),
+            "{state}"
+        );
+        assert!(
+            stamp.contains("let recompute_structured_instance_static"),
+            "{stamp}"
+        );
+        assert!(
+            stamp.contains("capture_structured_static_values"),
+            "{stamp}"
+        );
+        assert!(
+            stamp.contains("restore_structured_static_values"),
+            "{stamp}"
+        );
     }
 
     #[test]
@@ -15640,6 +15828,32 @@ impl Default for StateFileExtensions {
     }
 }
 
+fn extend_structured_static_cache_state(
+    extensions: &mut StateFileExtensions,
+    layout: StructuredStaticCacheLayout,
+) {
+    if layout.is_empty() {
+        return;
+    }
+    let instance_values = layout.instance_values;
+    let temperature_values = layout.temperature_values;
+    extensions.support_types.push_str(&format!(
+        "#[derive(Clone)]\npub(crate) struct StructuredStaticState<const INSTANCE_VALUES: usize, const TEMPERATURE_VALUES: usize> {{\n    pub(crate) instance_values: [f64; INSTANCE_VALUES],\n    pub(crate) temperature_values: [f64; TEMPERATURE_VALUES],\n    pub(crate) instance_valid: bool,\n    pub(crate) temperature_valid: bool,\n    pub(crate) temperature: f64,\n    pub(crate) thermal_voltage: f64,\n}}\n\nimpl<const INSTANCE_VALUES: usize, const TEMPERATURE_VALUES: usize> StructuredStaticState<INSTANCE_VALUES, TEMPERATURE_VALUES> {{\n    fn new_shared() -> std::sync::Arc<Self> {{\n        std::sync::Arc::new(Self {{\n            instance_values: [0.0; INSTANCE_VALUES],\n            temperature_values: [0.0; TEMPERATURE_VALUES],\n            instance_valid: false,\n            temperature_valid: false,\n            temperature: 0.0,\n            thermal_voltage: 0.0,\n        }})\n    }}\n}}\n\n"
+    ));
+    extensions.instance_fields.push_str(&format!(
+        "    pub(crate) structured_static: std::sync::Arc<StructuredStaticState<{instance_values}, {temperature_values}>>,\n"
+    ));
+    extensions
+        .clone_fields
+        .push_str("            structured_static: self.structured_static.clone(),\n");
+    extensions
+        .new_initializers
+        .push_str("            structured_static: StructuredStaticState::new_shared(),\n");
+    extensions.set_parameter_hook.push_str(
+        "let cache = std::sync::Arc::make_mut(&mut self.structured_static);\ncache.instance_valid = false;\ncache.temperature_valid = false;\n",
+    );
+}
+
 pub(super) fn generate_state_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
@@ -17592,7 +17806,7 @@ fn generate_stamp_file(
     if scalar_hybrid_shared_plan.is_some() {
         out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
     }
-    emit_stamp_body(
+    let structured_static_cache_layout = emit_stamp_body(
         artifact,
         parameter_fields,
         variable_fields,
@@ -17619,7 +17833,7 @@ fn generate_stamp_file(
         if scalar_hybrid_shared_plan.is_some() {
             out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
         }
-        emit_stamp_body(
+        let _ = emit_stamp_body(
             artifact,
             parameter_fields,
             variable_fields,
@@ -17691,15 +17905,28 @@ fn generate_stamp_file(
         &mut rendered_activity,
     );
     out = out.replacen(DERIVATIVE_ACTIVITY_MARKER, &rendered_activity, 1);
+    if !structured_static_cache_layout.is_empty() {
+        out = out.replacen(
+            "const LIMEXP_MAX",
+            &format!("{}const LIMEXP_MAX", structured_static_cache_support()),
+            1,
+        );
+    }
     Ok(StampFiles {
         stamp: out,
         helpers,
+        structured_static_cache_layout,
     })
 }
 
 struct StampFiles {
     stamp: String,
     helpers: Vec<GeneratedRustFile>,
+    structured_static_cache_layout: StructuredStaticCacheLayout,
+}
+
+fn structured_static_cache_support() -> &'static str {
+    "fn capture_structured_static_values(s: &Scratch, values: &mut [f64], targets: &[usize]) {\n    debug_assert_eq!(values.len(), targets.len());\n    for (value, &target) in values.iter_mut().zip(targets) { *value = s.v[target]; }\n}\n\n#[inline]\nfn restore_structured_static_values(s: &mut Scratch, values: &[f64], targets: &[usize]) {\n    debug_assert_eq!(values.len(), targets.len());\n    for (&value, &target) in values.iter().zip(targets) {\n        s.store_scalar(target, value);\n        s.b[target] = value != 0.0;\n    }\n}\n\n"
 }
 
 fn generate_scratch_struct() -> String {
@@ -31420,9 +31647,9 @@ fn emit_stamp_body(
     native_local_storage: bool,
     helper_modules: &mut StampHelperModules,
     out: &mut String,
-) -> Result<(), RustBackendError> {
+) -> Result<StructuredStaticCacheLayout, RustBackendError> {
     if reactive && ddt_slots.len() == 0 {
-        return Ok(());
+        return Ok(StructuredStaticCacheLayout::default());
     }
     if !reactive
         && scalar_hybrid_plan.is_some()
@@ -31757,29 +31984,46 @@ fn emit_stamp_body(
         reactive,
         reactive_liveness,
     )?;
-    if use_local_variables {
+    let structured_static_cache_layout = if use_local_variables {
         let local_names = local_variable_storage_names(&variables);
         emit_chunked_local_variable_stamp_helpers(
             helper_prefix,
             reactive,
-            assignment_chunks,
+            assignment_chunks
+                .into_iter()
+                .map(|chunk| chunk.source)
+                .collect(),
             common_usage,
             operator_usage,
             &local_names,
             helper_modules,
             out,
         );
-    } else {
-        emit_chunked_stamp_helpers(
+        StructuredStaticCacheLayout::default()
+    } else if !reactive && !native_local_storage && scalar_hybrid_plan.is_none() {
+        emit_structured_cached_assignment_chunks(
             helper_prefix,
-            reactive,
             assignment_chunks,
             common_usage,
             operator_usage,
             helper_modules,
             out,
+        )
+    } else {
+        emit_chunked_stamp_helpers(
+            helper_prefix,
+            reactive,
+            assignment_chunks
+                .into_iter()
+                .map(|chunk| chunk.source)
+                .collect(),
+            common_usage,
+            operator_usage,
+            helper_modules,
+            out,
         );
-    }
+        StructuredStaticCacheLayout::default()
+    };
 
     if !reactive {
         let scalarized_potential_slots =
@@ -32344,7 +32588,7 @@ fn emit_stamp_body(
             out.push_str("        // __rspice_equation_chunk_end\n");
         }
     }
-    Ok(())
+    Ok(structured_static_cache_layout)
 }
 
 fn should_emit_dense_stamp(node_derivatives: &[String], branch_derivatives: &[String]) -> bool {
@@ -35799,6 +36043,186 @@ fn emit_variable_initializers(
     variables
 }
 
+fn structured_statement_invalidations(
+    artifact: &CanonicalIrArtifact,
+) -> Vec<StructuredStatementInvalidation> {
+    let mut variable_classes = vec![StructuredStaticClass::Instance; artifact.hir.variables.len()];
+    artifact
+        .hir
+        .statements
+        .iter()
+        .map(|statement| {
+            structured_statement_invalidation(artifact, statement, &mut variable_classes)
+        })
+        .collect()
+}
+
+fn structured_statement_invalidation(
+    artifact: &CanonicalIrArtifact,
+    statement: &HirStatement,
+    variable_classes: &mut [StructuredStaticClass],
+) -> StructuredStatementInvalidation {
+    match statement {
+        HirStatement::Assignment(assignment) => {
+            let target = usize::from(assignment.target);
+            let class = if assignment.index.is_none() {
+                structured_expr_invalidation(
+                    artifact,
+                    assignment.expr.id,
+                    variable_classes,
+                    &mut HashSet::new(),
+                )
+            } else {
+                StructuredStaticClass::Dynamic
+            };
+            if let Some(target_class) = variable_classes.get_mut(target) {
+                *target_class = class;
+            }
+            StructuredStatementInvalidation {
+                class,
+                target: assignment.index.is_none().then_some(target),
+            }
+        }
+        HirStatement::Loop(loop_statement) => {
+            mark_structured_statement_targets_dynamic(&loop_statement.body, variable_classes);
+            StructuredStatementInvalidation {
+                class: StructuredStaticClass::Dynamic,
+                target: None,
+            }
+        }
+    }
+}
+
+fn mark_structured_statement_targets_dynamic(
+    statements: &[HirStatement],
+    variable_classes: &mut [StructuredStaticClass],
+) {
+    for statement in statements {
+        match statement {
+            HirStatement::Assignment(assignment) => {
+                if let Some(class) = variable_classes.get_mut(usize::from(assignment.target)) {
+                    *class = StructuredStaticClass::Dynamic;
+                }
+            }
+            HirStatement::Loop(loop_statement) => {
+                mark_structured_statement_targets_dynamic(&loop_statement.body, variable_classes);
+            }
+        }
+    }
+}
+
+fn structured_expr_invalidation(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    variable_classes: &[StructuredStaticClass],
+    visited: &mut HashSet<ExprId>,
+) -> StructuredStaticClass {
+    if !visited.insert(id) {
+        return StructuredStaticClass::Dynamic;
+    }
+    let Some(expression) = artifact.mir.expressions.get(usize::from(id)) else {
+        return StructuredStaticClass::Dynamic;
+    };
+    match &expression.kind {
+        HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => {
+            StructuredStaticClass::Instance
+        }
+        HirExprKind::Identifier { name } => {
+            if artifact
+                .mir
+                .parameters
+                .iter()
+                .any(|parameter| parameter.name.as_str() == name)
+            {
+                StructuredStaticClass::Instance
+            } else {
+                artifact
+                    .hir
+                    .variables
+                    .iter()
+                    .find(|variable| variable.name.as_str() == name)
+                    .and_then(|variable| variable_classes.get(usize::from(variable.id)))
+                    .copied()
+                    .unwrap_or(StructuredStaticClass::Dynamic)
+            }
+        }
+        HirExprKind::Unary { operand, .. } => {
+            structured_expr_invalidation(artifact, *operand, variable_classes, &mut HashSet::new())
+        }
+        HirExprKind::Binary { left, right, .. } => {
+            structured_expr_invalidation(artifact, *left, variable_classes, &mut HashSet::new())
+                .combine(structured_expr_invalidation(
+                    artifact,
+                    *right,
+                    variable_classes,
+                    &mut HashSet::new(),
+                ))
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => structured_expr_invalidation(
+            artifact,
+            *condition,
+            variable_classes,
+            &mut HashSet::new(),
+        )
+        .combine(structured_expr_invalidation(
+            artifact,
+            *then_expr,
+            variable_classes,
+            &mut HashSet::new(),
+        ))
+        .combine(structured_expr_invalidation(
+            artifact,
+            *else_expr,
+            variable_classes,
+            &mut HashSet::new(),
+        )),
+        HirExprKind::Call { name, args } if expr_is_intrinsic_name(name.as_str()) => args
+            .iter()
+            .copied()
+            .fold(StructuredStaticClass::Instance, |class, child| {
+                class.combine(structured_expr_invalidation(
+                    artifact,
+                    child,
+                    variable_classes,
+                    &mut HashSet::new(),
+                ))
+            }),
+        HirExprKind::SystemFunction { name, args } => match name.to_ascii_lowercase().as_str() {
+            "$temperature" => StructuredStaticClass::Temperature,
+            "$vt" | "$thermal_vt" => {
+                args.iter()
+                    .copied()
+                    .fold(StructuredStaticClass::Temperature, |class, child| {
+                        class.combine(structured_expr_invalidation(
+                            artifact,
+                            child,
+                            variable_classes,
+                            &mut HashSet::new(),
+                        ))
+                    })
+            }
+            "$param_given" | "$port_connected" => StructuredStaticClass::Instance,
+            _ => StructuredStaticClass::Dynamic,
+        },
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Limexp { expr },
+        } => structured_expr_invalidation(artifact, *expr, variable_classes, &mut HashSet::new()),
+        HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. }
+        | HirExprKind::ArrayAccess { .. }
+        | HirExprKind::ArrayLiteral { .. }
+        | HirExprKind::Call { .. }
+        | HirExprKind::AnalogOperator { .. }
+        | HirExprKind::Laplace { .. }
+        | HirExprKind::Zi { .. }
+        | HirExprKind::NoiseSource { .. } => StructuredStaticClass::Dynamic,
+    }
+}
+
 fn emit_assignment_statement_chunks(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
@@ -35809,7 +36233,8 @@ fn emit_assignment_statement_chunks(
     transient_liveness: &TransientLiveness,
     reactive: bool,
     reactive_liveness: &ReactiveLiveness,
-) -> Result<Vec<String>, RustBackendError> {
+) -> Result<Vec<AssignmentChunk>, RustBackendError> {
+    let invalidations = structured_statement_invalidations(artifact);
     let mut chunks = Vec::new();
     for (index, statement) in artifact.hir.statements.iter().enumerate() {
         let statement_prefix = format!("assign{index}");
@@ -35831,7 +36256,10 @@ fn emit_assignment_statement_chunks(
         )?;
         if !chunk.is_empty() {
             chunk.push('\n');
-            chunks.push(chunk);
+            chunks.push(AssignmentChunk {
+                source: chunk,
+                invalidation: invalidations[index],
+            });
         }
     }
     Ok(chunks)
@@ -35846,6 +36274,32 @@ fn emit_chunked_stamp_helpers(
     helper_modules: &mut StampHelperModules,
     out: &mut String,
 ) {
+    let mut block_index = 0;
+    emit_chunked_stamp_helpers_with_index(
+        helper_prefix,
+        reactive,
+        chunks,
+        common_usage,
+        operator_usage,
+        helper_modules,
+        out,
+        &mut block_index,
+        false,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_chunked_stamp_helpers_with_index(
+    helper_prefix: &str,
+    reactive: bool,
+    chunks: Vec<String>,
+    common_usage: StampCommonUsage,
+    operator_usage: StampOperatorUsage,
+    helper_modules: &mut StampHelperModules,
+    out: &mut String,
+    block_index: &mut usize,
+    force_helpers: bool,
+) {
     if chunks.is_empty() {
         return;
     }
@@ -35854,14 +36308,13 @@ fn emit_chunked_stamp_helpers(
         .iter()
         .map(|chunk| GeneratedKernelComplexity::from_source(chunk))
         .sum::<GeneratedKernelComplexity>();
-    if total_complexity.is_bounded() {
+    if !force_helpers && total_complexity.is_bounded() {
         for chunk in chunks {
             out.push_str(&chunk);
         }
         return;
     }
 
-    let mut block_index = 0usize;
     let mut block = String::new();
     let mut block_complexity = GeneratedKernelComplexity::default();
     for chunk in chunks {
@@ -35876,7 +36329,7 @@ fn emit_chunked_stamp_helpers(
             emit_stamp_helper_method(
                 helper_prefix,
                 reactive,
-                block_index,
+                *block_index,
                 &block,
                 helper_common_usage,
                 helper_operator_usage,
@@ -35884,11 +36337,12 @@ fn emit_chunked_stamp_helpers(
             );
             let helper_args = stamp_helper_call_args(helper_common_usage, helper_operator_usage);
             out.push_str(&format!(
-                "        Self::{helper_prefix}_block_{block_index}({helper_args});\n"
+                "        Self::{helper_prefix}_block_{}({helper_args});\n",
+                *block_index
             ));
             block.clear();
             block_complexity = GeneratedKernelComplexity::default();
-            block_index += 1;
+            *block_index += 1;
         }
         block_complexity += chunk_complexity;
         block.push_str(&chunk);
@@ -35899,7 +36353,7 @@ fn emit_chunked_stamp_helpers(
         emit_stamp_helper_method(
             helper_prefix,
             reactive,
-            block_index,
+            *block_index,
             &block,
             helper_common_usage,
             helper_operator_usage,
@@ -35907,10 +36361,281 @@ fn emit_chunked_stamp_helpers(
         );
         let helper_args = stamp_helper_call_args(helper_common_usage, helper_operator_usage);
         out.push_str(&format!(
-            "        Self::{helper_prefix}_block_{block_index}({helper_args});\n"
+            "        Self::{helper_prefix}_block_{}({helper_args});\n",
+            *block_index
         ));
+        *block_index += 1;
     }
     out.push('\n');
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_structured_cached_assignment_chunks(
+    helper_prefix: &str,
+    chunks: Vec<AssignmentChunk>,
+    common_usage: StampCommonUsage,
+    operator_usage: StampOperatorUsage,
+    helper_modules: &mut StampHelperModules,
+    out: &mut String,
+) -> StructuredStaticCacheLayout {
+    let cacheable_assignments = chunks
+        .iter()
+        .filter(|chunk| {
+            chunk.invalidation.class.is_cacheable() && chunk.invalidation.target.is_some()
+        })
+        .count();
+    if cacheable_assignments < MIN_STRUCTURED_STATIC_CACHE_ASSIGNMENTS {
+        emit_chunked_stamp_helpers(
+            helper_prefix,
+            false,
+            chunks.into_iter().map(|chunk| chunk.source).collect(),
+            common_usage,
+            operator_usage,
+            helper_modules,
+            out,
+        );
+        return StructuredStaticCacheLayout::default();
+    }
+
+    let groups = select_beneficial_structured_static_groups(grouped_assignment_chunks(chunks));
+    let force_helpers = !groups
+        .iter()
+        .flat_map(|group| group.sources.iter())
+        .map(|source| GeneratedKernelComplexity::from_source(source))
+        .sum::<GeneratedKernelComplexity>()
+        .is_bounded();
+    let instance_targets = groups
+        .iter()
+        .filter(|group| group.class == StructuredStaticClass::Instance)
+        .flat_map(|group| group.targets.iter().copied())
+        .collect::<Vec<_>>();
+    let temperature_targets = groups
+        .iter()
+        .filter(|group| group.class == StructuredStaticClass::Temperature)
+        .flat_map(|group| group.targets.iter().copied())
+        .collect::<Vec<_>>();
+    let layout = StructuredStaticCacheLayout {
+        instance_values: instance_targets.len(),
+        temperature_values: temperature_targets.len(),
+    };
+    if layout.is_empty() {
+        emit_chunked_stamp_helpers(
+            helper_prefix,
+            false,
+            groups.into_iter().flat_map(|group| group.sources).collect(),
+            common_usage,
+            operator_usage,
+            helper_modules,
+            out,
+        );
+        return layout;
+    }
+
+    if !instance_targets.is_empty() {
+        writeln!(
+            out,
+            "        const STRUCTURED_INSTANCE_STATIC_TARGETS: [usize; {}] = [{}];",
+            instance_targets.len(),
+            joined_usize_literals(&instance_targets)
+        )
+        .expect("write structured instance-static targets");
+        out.push_str(
+            "        let recompute_structured_instance_static = !self.structured_static.instance_valid;\n",
+        );
+    }
+    if !temperature_targets.is_empty() {
+        writeln!(
+            out,
+            "        const STRUCTURED_TEMPERATURE_STATIC_TARGETS: [usize; {}] = [{}];",
+            temperature_targets.len(),
+            joined_usize_literals(&temperature_targets)
+        )
+        .expect("write structured temperature-static targets");
+        out.push_str(
+            "        let structured_static_temperature = ctx.temperature();\n        let structured_static_thermal_voltage = ctx.thermal_voltage();\n",
+        );
+        out.push_str(
+            "        let recompute_structured_temperature_static = !self.structured_static.temperature_valid\n            || self.structured_static.temperature.to_bits() != structured_static_temperature.to_bits()\n            || self.structured_static.thermal_voltage.to_bits() != structured_static_thermal_voltage.to_bits();\n",
+        );
+    }
+
+    let mut block_index = 0usize;
+    let mut instance_offset = 0usize;
+    let mut temperature_offset = 0usize;
+    for group in groups {
+        match group.class {
+            StructuredStaticClass::Dynamic => emit_chunked_stamp_helpers_with_index(
+                helper_prefix,
+                false,
+                group.sources,
+                common_usage,
+                operator_usage,
+                helper_modules,
+                out,
+                &mut block_index,
+                force_helpers,
+            ),
+            StructuredStaticClass::Instance => {
+                let start = instance_offset;
+                let end = start + group.targets.len();
+                emit_cached_structured_static_group(
+                    helper_prefix,
+                    group.sources,
+                    common_usage,
+                    operator_usage,
+                    helper_modules,
+                    out,
+                    &mut block_index,
+                    "recompute_structured_instance_static",
+                    "instance_values",
+                    "STRUCTURED_INSTANCE_STATIC_TARGETS",
+                    start,
+                    end,
+                    force_helpers,
+                );
+                instance_offset = end;
+            }
+            StructuredStaticClass::Temperature => {
+                let start = temperature_offset;
+                let end = start + group.targets.len();
+                emit_cached_structured_static_group(
+                    helper_prefix,
+                    group.sources,
+                    common_usage,
+                    operator_usage,
+                    helper_modules,
+                    out,
+                    &mut block_index,
+                    "recompute_structured_temperature_static",
+                    "temperature_values",
+                    "STRUCTURED_TEMPERATURE_STATIC_TARGETS",
+                    start,
+                    end,
+                    force_helpers,
+                );
+                temperature_offset = end;
+            }
+        }
+    }
+
+    if !instance_targets.is_empty() {
+        out.push_str(
+            "        if recompute_structured_instance_static { std::sync::Arc::make_mut(&mut self.structured_static).instance_valid = true; }\n",
+        );
+    }
+    if !temperature_targets.is_empty() {
+        out.push_str(
+            "        if recompute_structured_temperature_static {\n            let cache = std::sync::Arc::make_mut(&mut self.structured_static);\n            cache.temperature = structured_static_temperature;\n            cache.thermal_voltage = structured_static_thermal_voltage;\n            cache.temperature_valid = true;\n        }\n",
+        );
+    }
+    layout
+}
+
+fn grouped_assignment_chunks(chunks: Vec<AssignmentChunk>) -> Vec<AssignmentChunkGroup> {
+    let mut groups = Vec::<AssignmentChunkGroup>::new();
+    for chunk in chunks {
+        let class = if chunk.invalidation.target.is_some() {
+            chunk.invalidation.class
+        } else {
+            StructuredStaticClass::Dynamic
+        };
+        if groups.last().is_none_or(|group| group.class != class) {
+            groups.push(AssignmentChunkGroup {
+                class,
+                sources: Vec::new(),
+                targets: Vec::new(),
+            });
+        }
+        let group = groups
+            .last_mut()
+            .expect("assignment group was just created");
+        group.sources.push(chunk.source);
+        if let Some(target) = chunk.invalidation.target
+            && class.is_cacheable()
+            && !group.targets.contains(&target)
+        {
+            group.targets.push(target);
+        }
+    }
+    groups
+}
+
+fn select_beneficial_structured_static_groups(
+    groups: Vec<AssignmentChunkGroup>,
+) -> Vec<AssignmentChunkGroup> {
+    let mut selected = Vec::<AssignmentChunkGroup>::new();
+    for mut group in groups {
+        if group.class.is_cacheable() && group.targets.len() < MIN_STRUCTURED_STATIC_SEGMENT_VALUES
+        {
+            group.class = StructuredStaticClass::Dynamic;
+            group.targets.clear();
+        }
+        if let Some(previous) = selected.last_mut()
+            && previous.class == group.class
+        {
+            previous.sources.extend(group.sources);
+            if group.class.is_cacheable() {
+                for target in group.targets {
+                    if !previous.targets.contains(&target) {
+                        previous.targets.push(target);
+                    }
+                }
+            }
+        } else {
+            selected.push(group);
+        }
+    }
+    selected
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_cached_structured_static_group(
+    helper_prefix: &str,
+    sources: Vec<String>,
+    common_usage: StampCommonUsage,
+    operator_usage: StampOperatorUsage,
+    helper_modules: &mut StampHelperModules,
+    out: &mut String,
+    block_index: &mut usize,
+    recompute: &str,
+    values_field: &str,
+    targets: &str,
+    start: usize,
+    end: usize,
+    force_helpers: bool,
+) {
+    writeln!(out, "        if {recompute} {{").expect("write static cache recompute guard");
+    emit_chunked_stamp_helpers_with_index(
+        helper_prefix,
+        false,
+        sources,
+        common_usage,
+        operator_usage,
+        helper_modules,
+        out,
+        block_index,
+        force_helpers,
+    );
+    writeln!(
+        out,
+        "            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).{values_field}[{start}..{end}], &{targets}[{start}..{end}]);"
+    )
+    .expect("write structured static cache capture");
+    out.push_str("        } else {\n");
+    writeln!(
+        out,
+        "            restore_structured_static_values(s, &self.structured_static.{values_field}[{start}..{end}], &{targets}[{start}..{end}]);"
+    )
+    .expect("write structured static cache restore");
+    out.push_str("        }\n");
+}
+
+fn joined_usize_literals(values: &[usize]) -> String {
+    values
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -174,6 +174,17 @@ const REACTIVE_NODE_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = {
     masks
 };
 const REACTIVE_BRANCH_DERIVATIVE_ACTIVITY: [u128; Instance::VARIABLE_COUNT] = [0; Instance::VARIABLE_COUNT];
+fn capture_structured_static_values(s: &Scratch, values: &mut [f64], targets: &[usize]) {
+    debug_assert_eq!(values.len(), targets.len());
+    for (value, &target) in values.iter_mut().zip(targets) { *value = s.v[target]; }
+}
+#[inline]
+fn restore_structured_static_values(s: &mut Scratch, values: &[f64], targets: &[usize]) {
+    debug_assert_eq!(values.len(), targets.len());
+    for (&value, &target) in values.iter().zip(targets) {
+        s.store_scalar(target, value);s.b[target] = value != 0.0;
+    }
+}
 use std::cell::RefCell;
 use std::thread::LocalKey;
 
@@ -229,6 +240,8 @@ mod stamp_blocks_2;
 mod stamp_blocks_3;
 #[path = "stamp_blocks_4.rs"]
 mod stamp_blocks_4;
+#[path = "stamp_blocks_5.rs"]
+mod stamp_blocks_5;
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 #[inline]
 fn eval_ddt<const STATE_COUNT: usize>(
@@ -304,10 +317,36 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
 }
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = Box::as_ref(&self.params);let nodes = &(*self).nodes;let branches = &(*self).branches;let multiplicity = (*self).multiplicity;let timestep = (*self).timestep;let stamp_state = self.stamp_state.as_mut();let ddt_state_current = &mut stamp_state.ddt_current;let ddt_state_previous = &mut stamp_state.ddt_previous;let ddt_state_older = &mut stamp_state.ddt_older;let ddt_state_initialized = &mut stamp_state.ddt_initialized;let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;let ddt_active = self.ddt_coefficients.active;let ddt_scale = self.ddt_coefficients.derivative_scale;let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
+        let p = Box::as_ref(&self.params);let nodes = &(*self).nodes;let branches = &(*self).branches;let ctx_temp = ctx.temperature();let ctx_thermal_vt = ctx.thermal_voltage();let multiplicity = (*self).multiplicity;let timestep = (*self).timestep;let stamp_state = self.stamp_state.as_mut();let ddt_state_current = &mut stamp_state.ddt_current;let ddt_state_previous = &mut stamp_state.ddt_previous;let ddt_state_older = &mut stamp_state.ddt_older;let ddt_state_initialized = &mut stamp_state.ddt_initialized;let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;let ddt_active = self.ddt_coefficients.active;let ddt_scale = self.ddt_coefficients.derivative_scale;let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let mut scratch_lease = ScratchLease::acquire(&TRANSIENT_SCRATCH_POOL, || Scratch::new_box_with_activity(&TRANSIENT_NODE_DERIVATIVE_ACTIVITY, &TRANSIENT_BRANCH_DERIVATIVE_ACTIVITY));
         let s = scratch_lease.get_mut();
-        Self::stamp_transient_block_0(ctx, s, p, nodes);Self::stamp_transient_block_1(s, p);Self::stamp_transient_block_2(s, p);Self::stamp_transient_block_3(s, p);Self::stamp_transient_block_4(s, p);Self::stamp_transient_block_5(s, p);Self::stamp_transient_block_6(ctx, s, p, nodes);Self::stamp_transient_block_7(s, p);Self::stamp_transient_block_8(s, p);Self::stamp_transient_block_9(s, p);Self::stamp_transient_block_10(s, p);Self::stamp_transient_block_11(s, p);Self::stamp_transient_block_12(s, p);Self::stamp_transient_block_13(s, p);Self::stamp_transient_block_14(s, p);Self::stamp_transient_block_15(s, p);Self::stamp_transient_block_16(s, p);Self::stamp_transient_block_17(s, p);Self::stamp_transient_block_18(ctx, s, p);Self::stamp_transient_block_19(s, p);Self::stamp_transient_block_20(s, p);Self::stamp_transient_block_21(ctx, s, p, nodes);Self::stamp_transient_block_22(s, p);Self::stamp_transient_block_23(s, p);Self::stamp_transient_block_24(s, p);Self::stamp_transient_block_25(s, p);Self::stamp_transient_block_26(s, p);Self::stamp_transient_block_27(s, p);Self::stamp_transient_block_28(s, p);Self::stamp_transient_block_29(s, p);Self::stamp_transient_block_30(ctx, s, p, nodes);Self::stamp_transient_block_31(s, p);
+        const STRUCTURED_INSTANCE_STATIC_TARGETS: [usize; 70] = [2,3,6,7,276,277,56,88,89,90,91,92,77,78,79,76,80,81,82,278,280,171,172,176,177,174,173,281,175,282,223,244,283,243,234,284,285,286,232,287,229,230,288,225,226,227,228,231,508,509,510,511,512,513,514,515,516,517,518,519,520,525,526,527,528,529,530,531,532,533];let recompute_structured_instance_static = !self.structured_static.instance_valid;const STRUCTURED_TEMPERATURE_STATIC_TARGETS: [usize; 16] = [10,289,290,4,5,14,12,11,13,74,75,84,83,85,86,87];let structured_static_temperature = ctx_temp;let structured_static_thermal_voltage = ctx_thermal_vt;
+        let recompute_structured_temperature_static = !self.structured_static.temperature_valid
+            || self.structured_static.temperature.to_bits() != structured_static_temperature.to_bits()
+            || self.structured_static.thermal_voltage.to_bits() != structured_static_thermal_voltage.to_bits();
+        Self::stamp_transient_block_0(ctx, s, p, nodes);
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_1(s, p);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[0..48], &STRUCTURED_INSTANCE_STATIC_TARGETS[0..48]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[0..48], &STRUCTURED_INSTANCE_STATIC_TARGETS[0..48]);
+        }
+        if recompute_structured_temperature_static {
+        Self::stamp_transient_block_2(s, p);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).temperature_values[0..16], &STRUCTURED_TEMPERATURE_STATIC_TARGETS[0..16]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.temperature_values[0..16], &STRUCTURED_TEMPERATURE_STATIC_TARGETS[0..16]);
+        }
+        Self::stamp_transient_block_3(s, p);Self::stamp_transient_block_4(s, p);Self::stamp_transient_block_5(s, p);Self::stamp_transient_block_6(s, p);Self::stamp_transient_block_7(ctx, s, p, nodes);Self::stamp_transient_block_8(s, p);Self::stamp_transient_block_9(s, p);Self::stamp_transient_block_10(s, p);Self::stamp_transient_block_11(s, p);Self::stamp_transient_block_12(s, p);Self::stamp_transient_block_13(s, p);Self::stamp_transient_block_14(s, p);Self::stamp_transient_block_15(s, p);Self::stamp_transient_block_16(s, p);Self::stamp_transient_block_17(s, p);Self::stamp_transient_block_18(s, p);Self::stamp_transient_block_19(s, p);Self::stamp_transient_block_20(ctx, s, p);Self::stamp_transient_block_21(s, p);Self::stamp_transient_block_22(s, p);Self::stamp_transient_block_23(ctx, s, p, nodes);Self::stamp_transient_block_24(s, p);Self::stamp_transient_block_25(s, p);Self::stamp_transient_block_26(s, p);Self::stamp_transient_block_27(s, p);Self::stamp_transient_block_28(s, p);Self::stamp_transient_block_29(s, p);Self::stamp_transient_block_30(s, p);Self::stamp_transient_block_31(s, p);Self::stamp_transient_block_32(ctx, s, p, nodes);
+        if recompute_structured_instance_static {
+        Self::stamp_transient_block_33(s, p);
+            capture_structured_static_values(s, &mut std::sync::Arc::make_mut(&mut self.structured_static).instance_values[48..70], &STRUCTURED_INSTANCE_STATIC_TARGETS[48..70]);
+        } else {
+            restore_structured_static_values(s, &self.structured_static.instance_values[48..70], &STRUCTURED_INSTANCE_STATIC_TARGETS[48..70]);
+        }
+        Self::stamp_transient_block_34(s, p);
+        if recompute_structured_instance_static { std::sync::Arc::make_mut(&mut self.structured_static).instance_valid = true; }
+        if recompute_structured_temperature_static {let cache = std::sync::Arc::make_mut(&mut self.structured_static);cache.temperature = structured_static_temperature;cache.thermal_voltage = structured_static_thermal_voltage;cache.temperature_valid = true;}
         stamper.stamp_potential_branch_local(
             Some(7),
             Some(8),

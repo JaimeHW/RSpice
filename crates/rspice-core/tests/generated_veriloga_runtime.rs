@@ -1,3 +1,5 @@
+#[cfg(feature = "veriloga-model-hicuml2va")]
+use rspice_core::device::veriloga_generated::builtins::hicuml2_v320__hicuml2va__25e676cf as hicuml2;
 use rspice_core::device::veriloga_generated::{
     GeneratedAnalysisKind, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper,
     GeneratedStamper, GeneratedStaticStampCache,
@@ -7,6 +9,102 @@ use rspice_core::device::veriloga_generated::{builtins, instantiate_builtin};
 use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::{CircuitData, netlist::ParamContext};
+
+#[cfg(feature = "veriloga-model-hicuml2va")]
+fn stamp_hicuml2(instance: &mut hicuml2::Instance, temperature: f64) -> (Vec<u64>, Vec<u64>) {
+    const NODE_COUNT: usize = hicuml2::Instance::NODE_COUNT;
+    const BRANCH_COUNT: usize = hicuml2::Instance::BRANCH_COUNT;
+    let axis_count = NODE_COUNT + BRANCH_COUNT;
+    let triplets = (0..axis_count)
+        .flat_map(|row| (0..axis_count).map(move |column| (row, column, 0.0)))
+        .collect::<Vec<_>>();
+    let mut matrix =
+        StaticMatrix::from_triplets(axis_count, axis_count, &triplets).expect("dense test matrix");
+    let mut rhs = vec![0.0; axis_count];
+    let voltages = (0..axis_count)
+        .map(|index| (index as f64 - 7.0) * 1.0e-3)
+        .collect::<Vec<_>>();
+    let nodes = (1..=NODE_COUNT).collect::<Vec<_>>();
+    let branches = (1..=BRANCH_COUNT).collect::<Vec<_>>();
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, NODE_COUNT);
+    let context = GeneratedEvalContext::new(&voltages, temperature, NODE_COUNT);
+    let mut stamper = GeneratedStamper::new_with_static_cache(
+        &mut matrix,
+        &mut rhs,
+        &voltages,
+        NODE_COUNT,
+        &cache,
+    );
+    instance.stamp(&context, &mut stamper);
+
+    (
+        matrix
+            .values_mut()
+            .iter()
+            .map(|value| value.to_bits())
+            .collect(),
+        rhs.iter().map(|value| value.to_bits()).collect(),
+    )
+}
+
+#[cfg(feature = "veriloga-model-hicuml2va")]
+fn new_hicuml2() -> hicuml2::Instance {
+    let nodes = (1..=hicuml2::Instance::NODE_COUNT).collect::<Vec<_>>();
+    let branches = (1..=hicuml2::Instance::BRANCH_COUNT).collect::<Vec<_>>();
+    let mut instance = hicuml2::Instance::new(&nodes);
+    instance.set_branch_indices(&branches);
+    instance
+}
+
+#[cfg(feature = "veriloga-model-hicuml2va")]
+#[test]
+fn generated_structured_cache_preserves_temperature_and_parameter_semantics() {
+    let mut warmed = new_hicuml2();
+    let _ = stamp_hicuml2(&mut warmed, 300.15);
+    let warmed_same_temperature = stamp_hicuml2(&mut warmed, 300.15);
+
+    let mut cold = new_hicuml2();
+    let cold_same_temperature = stamp_hicuml2(&mut cold, 300.15);
+    assert_eq!(
+        warmed_same_temperature, cold_same_temperature,
+        "reusing structured static segments must preserve stamp results"
+    );
+
+    let warmed_new_temperature = stamp_hicuml2(&mut warmed, 350.15);
+    let mut cold_new_temperature = new_hicuml2();
+    assert_eq!(
+        warmed_new_temperature,
+        stamp_hicuml2(&mut cold_new_temperature, 350.15),
+        "temperature-static segments must be invalidated when temperature changes"
+    );
+
+    let mut original = new_hicuml2();
+    let _ = stamp_hicuml2(&mut original, 300.15);
+    let mut changed = original.clone();
+    changed
+        .set_parameter("flcomp", 299.0)
+        .expect("valid HICUM parameter override");
+
+    let changed_stamp = stamp_hicuml2(&mut changed, 300.15);
+    let mut cold_changed = new_hicuml2();
+    cold_changed
+        .set_parameter("flcomp", 299.0)
+        .expect("valid HICUM parameter override");
+    assert_eq!(
+        changed_stamp,
+        stamp_hicuml2(&mut cold_changed, 300.15),
+        "parameter changes must invalidate instance- and temperature-static segments"
+    );
+
+    let original_stamp = stamp_hicuml2(&mut original, 300.15);
+    let mut cold_original = new_hicuml2();
+    assert_eq!(
+        original_stamp,
+        stamp_hicuml2(&mut cold_original, 300.15),
+        "copy-on-write cache invalidation must not alter the cloned source instance"
+    );
+}
 
 #[cfg(feature = "veriloga-builtins")]
 #[test]
