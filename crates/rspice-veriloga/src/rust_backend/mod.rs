@@ -1046,7 +1046,9 @@ endmodule
         assert!(state.contains("let params = &mut *ptr;"), "{state}");
         assert!(state.contains("params.p2 = params.p0"), "{state}");
         assert!(
-            state.contains("fn finish_set_parameter(&mut self, index: usize)"),
+            state.contains(
+                "fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool)"
+            ),
             "{state}"
         );
         assert!(state.contains("const PARAMETER_NAME_LOOKUP"), "{state}");
@@ -1060,7 +1062,11 @@ endmodule
             "{state}"
         );
         assert!(
-            state.contains("self.finish_set_parameter(index);"),
+            state.contains("self.finish_set_parameter(index, value_changed || !was_given);"),
+            "{state}"
+        );
+        assert!(
+            state.contains("if invalidates_caches {\n            self.scalar_static.instance_dirty = true;"),
             "{state}"
         );
         assert!(
