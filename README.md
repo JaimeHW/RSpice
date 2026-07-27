@@ -123,7 +123,7 @@ ASM-HEMT and MVSG-CMC devices are present but not yet oracle-qualified.
 
 ### Netlist dialect
 
-`.SUBCKT` subcircuits (flattened during elaboration), `.PARAM` with expression evaluation, `.INCLUDE` and `.LIB`, `.OPTIONS`, `.TEMP`, and the usual engineering suffixes. Starter device libraries ship under [models/](models/).
+`.SUBCKT` subcircuits (flattened during elaboration), `.PARAM` with expression evaluation, `.INCLUDE` and `.LIB`, `.OPTIONS`, `.TEMP`, and the usual engineering suffixes. Starter `.lib` device libraries — diodes, MOSFETs, transistors, op-amps — ship under [crates/rspice-core/models/spice/](crates/rspice-core/models/spice/).
 
 ## Interfaces
 
@@ -263,7 +263,7 @@ exact source commit and payload hashes.
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
 | `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
-Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, and [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards.
+Beyond the crates: [models/](models/) holds the bundled Verilog-A sources (including the redistributable CMC packages), [tests/](tests/) contains vendored simulator corpora (`ngspice/` and `xyce/`) with corpus-local manifests and notices, and [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards.
 
 ## License
 
