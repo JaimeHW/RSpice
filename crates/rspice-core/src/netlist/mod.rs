@@ -815,7 +815,20 @@ pub struct VerilogAInclude {
 }
 
 impl Netlist {
-    /// Parse a netlist from a string
+    /// Parse a netlist from a string.
+    ///
+    /// Follows the SPICE convention that the **first line is the title** and
+    /// is never interpreted as an element. A deck whose first line is a real
+    /// element silently loses it:
+    ///
+    /// ```text
+    /// V1 1 0 10     <- consumed as the title, not a 10 V source
+    /// R1 1 0 1k
+    /// .end
+    /// ```
+    ///
+    /// Prepend a title line (blank is fine) when building decks
+    /// programmatically. [`Self::title`] reports what was consumed.
     pub fn parse(input: &str) -> Result<Self, ParseError> {
         finish_non_aborting_parse(Self::parse_with_abort(input, &NoAbort))
     }

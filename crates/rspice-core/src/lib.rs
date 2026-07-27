@@ -1,28 +1,75 @@
 //! # RSpice Core
 //!
-//! High-performance SPICE circuit simulation engine.
+//! The SPICE circuit simulation engine: netlist parsing, device models,
+//! sparse matrix assembly, Newton-Raphson solving, and the analysis
+//! algorithms. Every other crate in the workspace — the CLI, the GUI, the
+//! Python bindings, the WASM bindings — is a frontend over this one.
 //!
-//! ## Architecture
+//! ## Pipeline
 //!
-//! The simulation engine is organized into the following modules:
+//! A deck flows through four stages: [`netlist`] parses text into an AST,
+//! [`engine`]'s builder flattens subcircuits and constructs devices into
+//! [`circuit`]'s struct-of-arrays storage, [`solver`] freezes a sparsity
+//! pattern once and reuses it, and [`engine`] drives the Newton loop to
+//! produce [`analysis`] result types.
 //!
-//! - [`netlist`] - Parsing SPICE netlist format
-//! - [`device`] - Device models (resistors, capacitors, transistors, etc.)
-//! - [`circuit`] - Circuit representation with SoA storage
-//! - [`solver`] - Sparse LU solver and Newton-Raphson iteration
-//! - [`analysis`] - DC, AC, and Transient analysis engines
-//! - [`engine`] - Main simulation pipeline
+//! ## Modules
+//!
+//! - [`netlist`] — lexer, parser, AST, subcircuit flattening, `.include`
+//!   resolution, parameter scoping
+//! - [`circuit`] — [`CircuitData`] struct-of-arrays storage, stamping,
+//!   magnetic coupling, introspection
+//! - [`device`] — device models: passives, diodes, BJTs, the MOSFET/FET
+//!   family, sources, transmission lines, memristors, Verilog-A and FFI
+//!   extension points
+//! - [`solver`] — sparse LU (KLU-class and faer backends), Newton-Raphson,
+//!   convergence checking, damping, arc-length continuation
+//! - [`engine`] — the orchestrator: one driver per analysis family, matrix
+//!   assembly, configuration, convergence aids
+//! - [`analysis`] — analysis algorithms and result types, `.MEAS`
+//!   evaluation, post-processing, and result export
+//! - [`expr`] — expression parser, bytecode compiler, and VM for behavioral
+//!   sources and parameters
+//! - [`library`] — `.lib` model-library parsing and Verilog-A pack discovery
+//! - [`xspice`] — XSPICE code-model subsystem and bundled models
+//! - [`compat`] — compatibility readers (LTspice RAW)
+//! - [`constants`] — physical and simulation constants
+//! - [`abort_signal`] — cooperative cancellation for long runs
+//! - [`resource`] — resource limits for untrusted input
+//! - [`testing`] — the ngspice and Xyce conformance harnesses
+//! - [`time_compat`] — wall-clock shim (`wasm32` has no clock)
+//! - [`simd`] — SIMD kernels, with the `simd` feature
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use rspice_core::{Netlist, Engine};
+//! ```rust
+//! use rspice_core::{Engine, Netlist};
 //!
-//! let netlist = Netlist::parse("V1 1 0 10\nR1 1 0 1k\n.end")?;
-//! let engine = Engine::default();
-//! let result = engine.run_dc_op(&netlist)?;
-//! println!("V(1) = {}", result.voltage(1));
+//! // The first line of a SPICE deck is the title, never an element.
+//! let netlist = Netlist::parse("divider\nV1 1 0 10\nR1 1 0 1k\n.end")?;
+//! let result = Engine::default().run_dc_op(&netlist)?;
+//! assert_eq!(result.voltage(1), 10.0);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
+//!
+//! [`SimulationConfig`], [`ConvergenceConfig`], [`ConvergencePreset`], and
+//! [`DampingStrategy`] configure the engine. [`AbortSignal`] lets a frontend
+//! cancel a long transient or sweep cooperatively — this is what backs
+//! Ctrl-C in the CLI and `KeyboardInterrupt` in the Python bindings.
+//!
+//! ## Feature flags
+//!
+//! `parallel`, `simd`, and `faer-parallel` are on by default. Verilog-A
+//! support (`veriloga`, `veriloga-native`, the generated `veriloga-model-*`
+//! built-ins), `wasm`, and `ffi` are opt-in. See the crate README for the
+//! full table.
+//!
+//! ## Testing
+//!
+//! Unit tests are excluded from the default package test target by
+//! `[lib] test = false`; run them with `cargo test -p rspice-core --lib`.
+//! Doctests are likewise off (`doctest = false`), so examples here are
+//! checked by review rather than by `cargo test`.
 
 #![allow(
     clippy::approx_constant,
