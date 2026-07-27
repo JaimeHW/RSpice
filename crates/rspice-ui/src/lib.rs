@@ -20,15 +20,16 @@
 //! |-------|---------|------|
 //! | 0 | `product`, `quantity`, `utils` | Framework-independent contracts, typed identities, unit-safe presentation policy |
 //! | 1 | `results`, `ui` | Versioned result documents; the design system (tokens, palette, widgets, plot engine) |
-//! | 2 | `state` | The persisted design, library, and project model |
-//! | 3 | `analysis`, `automation_workflow`, `io`, `waveform` | Viewer mathematics, the CI workflow language, file formats |
-//! | 4 | `services` | DRC, licensing, and the per-analysis engine adapters |
-//! | 5 | `simulation` | Analysis plans, netlist generation, run orchestration |
-//! | 6 | `properties` | Component property editing |
-//! | 7 | `panels` | Docked auxiliary panels |
-//! | 8 | `schematic` | The schematic document engine |
-//! | 9 | `workbench` | Application chrome, surfaces, navigation, commands |
-//! | 10 | `common` | The application root: [`RSpiceApp`], dialogs, workflows |
+//! | 2 | `hardcopy` | Persisted page setup, print mappings, and source-set records |
+//! | 3 | `state` | The persisted design, library, and project model |
+//! | 4 | `analysis`, `automation_workflow`, `io`, `waveform` | Viewer mathematics, the CI workflow language, file formats |
+//! | 5 | `services` | DRC, licensing, and the per-analysis engine adapters |
+//! | 6 | `simulation` | Analysis plans, netlist generation, run orchestration |
+//! | 7 | `properties` | Component property editing |
+//! | 8 | `panels` | Docked auxiliary panels |
+//! | 9 | `schematic` | The schematic document engine |
+//! | 10 | `workbench` | Application chrome, surfaces, navigation, commands |
+//! | 11 | `common` | The application root: [`RSpiceApp`], dialogs, workflows |
 //!
 //! Known departures from this order are recorded, counted, and ratcheted
 //! down in that test's `ALLOWED_VIOLATIONS` table. Adding to it is not a way

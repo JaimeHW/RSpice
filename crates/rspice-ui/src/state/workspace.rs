@@ -2461,7 +2461,7 @@ pub struct ProjectWorkspace {
     /// named print-set publication. Every member pins its document revision
     /// and content digest; stale members fail closed when resolved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    hardcopy_source_sets: Vec<crate::workbench::hardcopy_sources::HardcopySourceSet>,
+    hardcopy_source_sets: Vec<crate::hardcopy::sources::HardcopySourceSet>,
     /// Project-owned, versioned engineering report sources. Rendered review
     /// artifacts are derived from these documents and are never represented
     /// here unless a publication writer has produced and verified them.
@@ -2567,7 +2567,7 @@ impl Default for ProjectWorkspace {
 }
 
 fn validate_hardcopy_source_set_catalog(
-    source_sets: &[crate::workbench::hardcopy_sources::HardcopySourceSet],
+    source_sets: &[crate::hardcopy::sources::HardcopySourceSet],
 ) -> Result<(), HardcopySourceSetPersistenceError> {
     if source_sets.len() > MAX_PROJECT_HARDCOPY_SOURCE_SETS {
         return Err(HardcopySourceSetPersistenceError::CatalogFull);
@@ -5435,7 +5435,7 @@ impl ProjectWorkspace {
     }
 
     #[must_use]
-    pub fn hardcopy_source_sets(&self) -> &[crate::workbench::hardcopy_sources::HardcopySourceSet] {
+    pub fn hardcopy_source_sets(&self) -> &[crate::hardcopy::sources::HardcopySourceSet] {
         &self.hardcopy_source_sets
     }
 
@@ -5443,7 +5443,7 @@ impl ProjectWorkspace {
     pub fn hardcopy_source_set(
         &self,
         source_key: &str,
-    ) -> Option<&crate::workbench::hardcopy_sources::HardcopySourceSet> {
+    ) -> Option<&crate::hardcopy::sources::HardcopySourceSet> {
         self.hardcopy_source_sets
             .iter()
             .find(|source_set| source_set.source_key() == source_key)
@@ -5453,7 +5453,7 @@ impl ProjectWorkspace {
     /// validated transaction. This never clones the rest of the project.
     pub fn save_hardcopy_source_set(
         &mut self,
-        source_set: crate::workbench::hardcopy_sources::HardcopySourceSet,
+        source_set: crate::hardcopy::sources::HardcopySourceSet,
     ) -> Result<bool, HardcopySourceSetPersistenceError> {
         source_set
             .validate()
@@ -7694,7 +7694,7 @@ mod tests {
     #[test]
     fn hardcopy_source_sets_persist_validate_and_use_project_dirty_lifecycle() {
         use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
-        use crate::workbench::hardcopy_sources::{HardcopySourceSet, HardcopySourceSetMember};
+        use crate::hardcopy::sources::{HardcopySourceSet, HardcopySourceSetMember};
 
         let member_id =
             HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x4853_4d45_4d42_4552))
@@ -7741,7 +7741,7 @@ mod tests {
     #[test]
     fn hardcopy_source_set_catalog_rejects_case_folded_duplicate_names() {
         use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
-        use crate::workbench::hardcopy_sources::{HardcopySourceSet, HardcopySourceSetMember};
+        use crate::hardcopy::sources::{HardcopySourceSet, HardcopySourceSetMember};
 
         let build_set = |seed: u128, name: &str| {
             let member_id = HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(seed)).unwrap();

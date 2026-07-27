@@ -50,31 +50,33 @@ const LAYERS: &[(&str, u32)] = &[
     ("product", 0),
     ("quantity", 0),
     ("utils", 0),
-    // Presentation-independent result contracts, the design system, and the
-    // persisted page-setup contract. Hardcopy *rendering* needs the schematic
-    // symbol library and the analysis viewers, so it stays up in `workbench`;
-    // only what a project persists about printing lives down here, where
-    // `state` can reach it.
-    ("hardcopy", 1),
+    // Presentation-independent result contracts, and the design system.
     ("results", 1),
     ("ui", 1),
+    // What a project persists about printing: page setup, print mappings, and
+    // the digest-authenticated source-set records. Hardcopy *rendering* needs
+    // the schematic symbol library and the analysis viewers, so it stays up in
+    // `workbench`; only the persisted contract lives down here, where `state`
+    // can reach it. It sits above `results` because a source-set error can
+    // name an unauthenticated report block.
+    ("hardcopy", 2),
     // The persisted design and project model.
-    ("state", 2),
+    ("state", 3),
     // Domain services over the persisted model.
-    ("analysis", 3),
-    ("automation_workflow", 3),
-    ("io", 3),
-    ("waveform", 3),
-    ("services", 4),
-    ("simulation", 5),
+    ("analysis", 4),
+    ("automation_workflow", 4),
+    ("io", 4),
+    ("waveform", 4),
+    ("services", 5),
+    ("simulation", 6),
     // Editors and inspectors.
-    ("properties", 6),
-    ("panels", 7),
-    ("schematic", 8),
+    ("properties", 7),
+    ("panels", 8),
+    ("schematic", 9),
     // Application chrome and top-level navigation.
-    ("workbench", 9),
+    ("workbench", 10),
     // The application root: `RSpiceApp`, dialogs, and workflows.
-    ("common", 10),
+    ("common", 11),
 ];
 
 /// Layer-order violations present in the tree today, with exact counts.
@@ -96,11 +98,11 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // and the `Command` enum) out of `workbench` into `state`, then convert
     // `workbench` signatures from `&mut RSpiceApp` to `&mut AppState`.
     ("workbench", "common", 294),
-    // The persisted project model still reaches up for hardcopy source sets
-    // and the netlist document. Each module that moves down lowers this
-    // count: it started at 39, `engineering_table` took it to 37, the
-    // page-setup contract to 16, and the schematic visibility policy to 9.
-    ("state", "workbench", 9),
+    // The persisted project model still reaches up for the netlist document.
+    // Each module that moves down lowers this count: it started at 39,
+    // `engineering_table` took it to 37, the page-setup contract to 16, the
+    // schematic visibility policy to 9, and the source-set records to 2.
+    ("state", "workbench", 2),
     ("state", "simulation", 26),
     ("state", "properties", 10),
     ("state", "services", 7),

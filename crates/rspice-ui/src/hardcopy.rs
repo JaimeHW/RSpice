@@ -26,8 +26,13 @@
 
 pub mod contract;
 pub mod mappings;
+pub mod sources;
 
 pub use contract::*;
+pub use sources::{
+    HARDCOPY_SOURCE_SET_SCHEMA_VERSION, HardcopySourceError, HardcopySourceIdentity,
+    HardcopySourceSet, HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS,
+};
 pub use mappings::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
     PrintMappingSaveDisposition, PrintMappingSaveReceipt,
