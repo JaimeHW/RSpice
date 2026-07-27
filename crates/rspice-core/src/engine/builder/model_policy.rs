@@ -105,20 +105,17 @@ pub(super) fn add_xyce_core_inductor_element(
         core.set_initial_current(ic);
     }
 
-    let effective_l = core.effective_inductance();
-    let runtime_l = if effective_l.is_finite() && effective_l > 0.0 {
-        effective_l
-    } else if core.nominal_inductance().is_finite() && core.nominal_inductance() > 0.0 {
-        // Xyce's zero-field no-gap constitutive denominator can be negative;
-        // its Q-vector nevertheless starts from the positive vacuum
-        // inductance until the first accepted magnetic state is available.
-        core.nominal_inductance()
-    } else {
+    // MutIndNonLin's Q vector is the authored vacuum inductance.  The
+    // constitutive `mid` factor belongs only to F and its Jacobian; using the
+    // nonlinear effective value as the ordinary MNA companion coefficient
+    // would make the Core cancellation state-dependent and double-count Q.
+    let runtime_l = core.nominal_inductance();
+    if !runtime_l.is_finite() || runtime_l <= 0.0 {
         return Err(SimulationError::Circuit(format!(
             "Xyce Core winding '{}' produced invalid initial inductance {}",
-            element.name, effective_l
+            element.name, runtime_l
         )));
-    };
+    }
     if let Some(ic) = initial_current {
         circuit
             .inductors

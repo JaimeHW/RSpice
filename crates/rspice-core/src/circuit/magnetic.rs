@@ -1036,19 +1036,6 @@ impl CircuitData {
             binding
                 .device
                 .commit_xyce_core_solution(solution, dt, one_step_order2);
-            if let Some(slot) = self.inductors.inductances.get_mut(binding.inductor_index) {
-                let l_eff = binding.device.effective_inductance();
-                // A negative Xyce mid-factor is a valid constitutive state,
-                // but the native companion cannot safely switch polarity
-                // after an accepted step.  Retain the last positive Q
-                // coefficient until the constitutive factor becomes usable.
-                if l_eff.is_finite()
-                    && (l_eff > 0.0 || binding.device.is_xyce_core_level2())
-                    && l_eff.abs() > 1.0e-18
-                {
-                    *slot = l_eff;
-                }
-            }
         }
         for group in &mut self.xyce_core_groups {
             if !group.device.is_xyce_core() || group.windings.len() < 2 {
@@ -1086,21 +1073,6 @@ impl CircuitData {
                 dt,
                 one_step_order2,
             );
-            let mid = group.device.xyce_core_accepted_mid();
-            for winding in &group.windings {
-                let index = winding.inductor_index;
-                let l_eff = group.device.xyce_core_vacuum_mutual_inductance(
-                    winding.turns,
-                    winding.turns,
-                    1.0,
-                ) * mid;
-                if let Some(slot) = self.inductors.inductances.get_mut(index)
-                    && l_eff.is_finite()
-                    && l_eff.abs() > 1.0e-18
-                {
-                    *slot = l_eff;
-                }
-            }
         }
     }
 
