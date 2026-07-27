@@ -133,7 +133,7 @@ impl DrcChecker {
         net_labels: &[NetLabelInfo],
         junctions: &[JunctionInfo],
     ) -> DrcResult {
-        let start = crate::common::time_compat::Instant::now();
+        let start = crate::time_compat::Instant::now();
         self.next_id = 0;
         let mut result = DrcResult::new();
 

@@ -8,7 +8,7 @@
 use csv::{Terminator, WriterBuilder};
 use sha2::{Digest as _, Sha256};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision, RunId};
 use crate::state::model_library::{
     CorrelationAggregation, CorrelationAlignmentPolicy, CorrelationCalculation,
@@ -1107,7 +1107,7 @@ fn parse_positive_u64(label: &str, value: &str) -> Result<u64, String> {
 }
 
 fn unix_time_ms() -> Result<u64, String> {
-    let millis = crate::common::time_compat::unix_epoch().as_millis();
+    let millis = crate::time_compat::unix_epoch().as_millis();
     let millis = u64::try_from(millis)
         .map_err(|_| "Current wall-clock timestamp exceeds the supported range".to_owned())?;
     if millis == 0 {

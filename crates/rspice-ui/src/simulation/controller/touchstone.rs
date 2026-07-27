@@ -5,7 +5,7 @@ impl SimulationController {
         &self,
         state: &mut AppState,
         result: &crate::simulation::SimulationResult,
-        export_io: &(impl crate::common::export_workflow::ExportWorkflowIo + ?Sized),
+        export_io: &(impl crate::workbench::export_workflow::ExportWorkflowIo + ?Sized),
         run_id: u64,
     ) {
         let Some(crate::simulation::multi_run::AnalysisSpec::SParameter { z0, ports, .. }) =

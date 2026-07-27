@@ -1,6 +1,6 @@
 use egui::{Align2, Color32, Context, FontId, Id, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
-use crate::common::{ConsoleMessage, RSpiceApp};
+use crate::workbench::{ConsoleMessage, RSpiceApp};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::commands::Command;

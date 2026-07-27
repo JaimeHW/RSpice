@@ -49,6 +49,7 @@ const LAYERS: &[(&str, u32)] = &[
     // Framework-independent contracts. These depend on nothing.
     ("product", 0),
     ("quantity", 0),
+    ("time_compat", 0),
     // Presentation-independent result contracts, and the design system.
     ("results", 1),
     ("ui", 1),
@@ -74,7 +75,6 @@ const LAYERS: &[(&str, u32)] = &[
     // Application chrome and top-level navigation.
     ("workbench", 10),
     // The application root: `RSpiceApp`, dialogs, and workflows.
-    ("common", 11),
 ];
 
 /// Layer-order violations present in the tree today, with exact counts.
@@ -82,49 +82,42 @@ const LAYERS: &[(&str, u32)] = &[
 /// Sorted by remediation phase. Do not add entries to unblock new code —
 /// a new violation means the code is in the wrong module.
 const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
-    // Phase 1 — break the `common` <-> `workbench` cycle.
+    // The `common` <-> `workbench` cycle is retired.
     //
-    // The cycle is not fixed by moving the application root up: `workbench`
-    // reaches for `RSpiceApp` 861 times and `AppState` 356 times, so hoisting
-    // `common/app` to `crate::app` would only rename this edge. It is fixed by
-    // pushing state *down*. Inside `workbench`, `app.state.` appears 2679
-    // times while `RSpiceApp`'s non-state fields appear about 30 times, so
-    // nearly all of the coupling is really to `AppState`.
+    // It could not be broken by moving a module. `workbench` reached for
+    // `RSpiceApp` 861 times and `AppState` 356 times, and the workflows in
+    // `common` reached back for `AppState` just as hard (project_lifecycle
+    // 109, menu_bar 90, project_workflow 62). Hoisting the application root
+    // would only have renamed the edge; pushing state down was blocked because
+    // `UiSessionState` aggregates the document engines' own session state.
     //
-    // The plan: move the egui-free state modules (`state.rs`, `session.rs`,
-    // `preferences.rs`, `engineering_table.rs`, `hardcopy.rs`, `shortcuts/`,
-    // and the `Command` enum) out of `workbench` into `state`, then convert
-    // `workbench` signatures from `&mut RSpiceApp` to `&mut AppState`.
-    ("workbench", "common", 294),
-    // `state -> workbench` is retired. It started at 39 and was cleared by
-    // moving what the project actually persists down out of the UI shell:
-    // the engineering-table views (39 -> 37), the page-setup contract and
-    // print mappings (-> 16), the schematic visibility policy (-> 9), the
-    // hardcopy source-set records (-> 2), and the netlist document (-> 0).
-    // The persisted project model no longer reaches up into chrome to
-    // describe its own saved data. Do not reintroduce this edge.
+    // The boundary was not describing a real seam, so the two modules were
+    // merged: `workbench` is now the whole application shell. 294 upward
+    // references became internal. Do not recreate the split.
+    //
+    // `state -> workbench` is also retired. It started at 39 and was cleared
+    // by moving what the project actually persists out of the shell: the
+    // engineering-table views (39 -> 37), the page-setup contract and print
+    // mappings (-> 16), the schematic visibility policy (-> 9), the hardcopy
+    // source-set records (-> 2), and the netlist document (-> 0). The merge
+    // briefly reintroduced three via the wasm clock shim, which now sits at
+    // layer 0 as `crate::time_compat`.
+
+    // Reaching up into the application shell for `RSpiceApp` rather than
+    // taking the state actually used. Retired by narrowing those signatures.
+    ("schematic", "workbench", 120),
+    ("simulation", "workbench", 90),
+    ("io", "workbench", 16),
+    ("panels", "workbench", 5),
+    // The persisted model reaching up into orchestration and editors.
     ("state", "simulation", 26),
     ("state", "properties", 10),
     ("state", "services", 7),
     ("state", "io", 5),
-    ("state", "common", 3),
     ("state", "schematic", 2),
     ("state", "analysis", 1),
-    // Phase 3 — core boundary.
     // `analysis` is viewer mathematics and must not reach into orchestration.
     ("analysis", "simulation", 1),
-    // Phase 4 — narrow the application god object.
-    // These modules reach up for `RSpiceApp` rather than taking the state
-    // they actually use.
-    ("schematic", "common", 71),
-    ("simulation", "common", 48),
-    ("io", "common", 16),
-    ("services", "common", 5),
-    ("panels", "common", 4),
-    ("schematic", "workbench", 61),
-    ("simulation", "workbench", 42),
-    ("panels", "workbench", 1),
-    // Phase 5 — module placement.
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     ("simulation", "properties", 31),

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use egui::Ui;
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::state::{SharedWaveformValues, ac_bode_summary_for_selection};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use crate::ui::theme::{self, FontWeight};

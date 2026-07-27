@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
@@ -1790,7 +1790,7 @@ fn saved_output_dialog(ctx: &egui::Context, app: &mut RSpiceApp, mut draft: Save
 }
 
 fn validate_clone_plan_draft(app: &RSpiceApp, draft: &ClonePlanDraft) -> Result<(), String> {
-    let name = crate::common::app::SimulationPlanName::new(draft.name.clone())
+    let name = crate::workbench::app::SimulationPlanName::new(draft.name.clone())
         .map_err(|error| error.to_string())?;
     let key = name.as_str().to_lowercase();
     if app
@@ -1827,7 +1827,7 @@ fn commit_clone_plan(app: &mut RSpiceApp, draft: &ClonePlanDraft) -> Result<Stri
     let mut workspace = app.state.workspace.clone();
     let source_plan_id = setup.stable_analysis_plan()?.id();
     workspace.migrate_active_plan_data(source_plan_id);
-    let options = crate::common::app::SimulationPlanCloneOptions {
+    let options = crate::workbench::app::SimulationPlanCloneOptions {
         copy_analyses: draft.copy_analyses_options,
         copy_advanced_options: draft.copy_analyses_options,
         copy_variables_outputs_and_specifications: draft.copy_variables_outputs_specs,
@@ -5125,7 +5125,7 @@ mod tests {
     #[test]
     fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_document() {
         let mut app = RSpiceApp::test_instance();
-        crate::common::examples::load_example("CMOS Inverter", &mut app.state.schematic);
+        crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
         app.state.simulation.netlist_content =
             "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
 

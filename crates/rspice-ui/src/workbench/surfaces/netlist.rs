@@ -6,7 +6,7 @@
 
 use egui::{Align, Layout, Ui, vec2};
 
-use crate::common::{AppState, ConsoleMessage, RSpiceApp};
+use crate::workbench::{AppState, ConsoleMessage, RSpiceApp};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -123,7 +123,7 @@ fn reconcile_documents(app: &mut RSpiceApp) {
 
 fn refresh_generated_artifact(app: &mut RSpiceApp) {
     let input_digest =
-        match crate::common::project_lifecycle::generated_netlist_input_digest(&app.state) {
+        match crate::workbench::project_lifecycle::generated_netlist_input_digest(&app.state) {
             Ok(digest) => digest,
             Err(error) => {
                 app.state.ui.netlist.current_generation_input_digest = None;
@@ -161,7 +161,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
     }
 
     let previous_message_count = app.state.log_buffer.len();
-    let generated = crate::common::menu_bar::build_menu_netlist(
+    let generated = crate::workbench::menu_bar::build_menu_netlist(
         &mut app.state,
         crate::io::NetlistFormat::Spice,
     );
@@ -882,7 +882,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             open_ownership_dialog(&mut app.state, strategy);
         }
         Some(NetlistToolbarAction::Validate) => {
-            crate::common::netlist_workflow::validate_visible_netlist_source(app);
+            crate::workbench::netlist_workflow::validate_visible_netlist_source(app);
         }
         Some(NetlistToolbarAction::Save) => {
             app.state.ui.netlist.save_dialog.open = true;
@@ -1370,14 +1370,14 @@ fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         });
     match choice {
         DialogChoice::Primary => {
-            if crate::common::netlist_workflow::save_owned_netlist_source(
+            if crate::workbench::netlist_workflow::save_owned_netlist_source(
                 &mut app.state,
                 &app.simulation_controller,
                 app.export_workflow_io.as_ref(),
                 false,
                 &dialog.message,
             ) {
-                crate::common::netlist_workflow::validate_visible_netlist_source(app);
+                crate::workbench::netlist_workflow::validate_visible_netlist_source(app);
                 dialog.open = false;
                 dialog.error = None;
                 dialog.message = "Update owned SPICE source".to_owned();
@@ -1540,7 +1540,7 @@ fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         });
     match choice {
         DialogChoice::Primary => {
-            if crate::common::menu_bar::action_export_generated_netlist_with_options(
+            if crate::workbench::menu_bar::action_export_generated_netlist_with_options(
                 &mut app.state,
                 dialog.format,
                 dialog.bundle_dependencies,

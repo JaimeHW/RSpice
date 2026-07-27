@@ -4,7 +4,7 @@ use egui::{
     Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::common::{AppState, ConsoleMessage};
+use crate::workbench::{AppState, ConsoleMessage};
 use crate::schematic::view::resolved_symbol_render::draw_resolved_symbol;
 use crate::state::{
     Component, ComponentType, LibraryCellInstance, PinSummary, Point, PortDirection, PortSpec,
@@ -55,7 +55,7 @@ fn symbol_canvas_accessibility_label(
         + selection.attributes.len()
         + selection.texts.len();
     let edit_state = if read_only { "Read only." } else { "Editable." };
-    let shortcuts = crate::common::app::accessibility_shortcut_summary(
+    let shortcuts = crate::workbench::app::accessibility_shortcut_summary(
         state.ui.preferences.shortcuts(),
         platform,
         operating_system,
@@ -148,7 +148,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         changed |=
             handle_canvas_interaction(state, &mut document, &mut editor, viewport, &response);
         draw_canvas(ui, viewport, &document, &editor, &ports, state);
-        let shortcut_platform = crate::common::app::runtime_command_platform(ui.ctx());
+        let shortcut_platform = crate::workbench::app::runtime_command_platform(ui.ctx());
         let operating_system = ui.ctx().os();
         response.widget_info(|| {
             WidgetInfo::labeled(
@@ -166,7 +166,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Canvas);
         });
-        crate::common::app::report_engineering_canvas_focus(
+        crate::workbench::app::report_engineering_canvas_focus(
             &response,
             state.workspace.active_view_type(),
         );

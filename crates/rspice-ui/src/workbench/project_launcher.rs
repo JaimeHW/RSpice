@@ -12,8 +12,8 @@ use egui::{
     Sense, Stroke, Ui, UiKind, Vec2, WidgetInfo, WidgetType, vec2,
 };
 
-use crate::common::RSpiceApp;
-use crate::common::app::{ConsoleMessage, RecentFile, RecentKind};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::{ConsoleMessage, RecentFile, RecentKind};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -387,7 +387,7 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
             LauncherAction::Close => dismiss_launcher(app),
             LauncherAction::EmptyWorkbench => {
                 if app.state.project_lifecycle.project_open {
-                    crate::common::project_workflow::request_close_project_to_empty_workbench(
+                    crate::workbench::project_workflow::request_close_project_to_empty_workbench(
                         &mut app.state,
                     );
                 } else {
@@ -2505,7 +2505,7 @@ fn recent_age(opened_at_unix_ms: u64) -> String {
     if opened_at_unix_ms == 0 {
         return "unknown".to_owned();
     }
-    let now = crate::common::time_compat::unix_epoch()
+    let now = crate::time_compat::unix_epoch()
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX);

@@ -2,7 +2,7 @@
 
 use egui::{Response, Ui};
 
-use crate::common::app::{AppState, ConsoleMessage};
+use crate::workbench::app::{AppState, ConsoleMessage};
 use crate::state::{Point, StretchTarget};
 
 use super::SchematicSymbolContext;
@@ -20,11 +20,11 @@ pub(super) fn handle_armed_stretch_selection(
     grid_size: i32,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if let Err(message) = crate::common::app::armed_stretch_selection_authority(state) {
+    if let Err(message) = crate::workbench::app::armed_stretch_selection_authority(state) {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Stretch selection cancelled: {message}"
         )));
-        crate::common::app::cancel_armed_stretch_selection(state);
+        crate::workbench::app::cancel_armed_stretch_selection(state);
         return;
     }
 
@@ -142,7 +142,7 @@ fn update_preview_delta(
 ) {
     match requested {
         Ok(requested) => {
-            let delta = crate::common::app::stretch_delta_for_policy(
+            let delta = crate::workbench::app::stretch_delta_for_policy(
                 requested,
                 target,
                 state.dialogs.stretch_selection.policy,
@@ -271,11 +271,11 @@ fn stretch_target_at(
 }
 
 fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
-    if let Err(message) = crate::common::app::armed_stretch_selection_authority(state) {
+    if let Err(message) = crate::workbench::app::armed_stretch_selection_authority(state) {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Stretch selection cancelled: {message}"
         )));
-        crate::common::app::cancel_armed_stretch_selection(state);
+        crate::workbench::app::cancel_armed_stretch_selection(state);
         return;
     }
     if let Some(message) = state.dialogs.stretch_selection.preview_error.clone() {
@@ -300,7 +300,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
             "Stretch selection finished without changing geometry; no undo record was created."
                 .to_owned(),
         ));
-        crate::common::app::cancel_armed_stretch_selection(state);
+        crate::workbench::app::cancel_armed_stretch_selection(state);
         return;
     }
 
@@ -326,7 +326,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
                     "geometry was unchanged"
                 }
             )));
-            crate::common::app::cancel_armed_stretch_selection(state);
+            crate::workbench::app::cancel_armed_stretch_selection(state);
         }
         Ok(false) => {
             state.schematic.cancel_operation();
@@ -334,7 +334,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
                 "Stretch selection produced no geometry change; no undo record was created."
                     .to_owned(),
             ));
-            crate::common::app::cancel_armed_stretch_selection(state);
+            crate::workbench::app::cancel_armed_stretch_selection(state);
         }
         Err(error) => {
             state.schematic.cancel_operation();
@@ -372,7 +372,7 @@ mod tests {
     }
 
     fn arm_test_stretch(state: &mut AppState) {
-        crate::common::app::open_stretch_selection_dialog(state);
+        crate::workbench::app::open_stretch_selection_dialog(state);
         assert!(state.dialogs.stretch_selection.open);
         state.dialogs.stretch_selection.arm();
         crate::workbench::commands::arm_schematic_tool(
@@ -489,7 +489,7 @@ mod tests {
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.preview_delta = Point::new(0, 10);
 
-        crate::common::app::cancel_armed_stretch_selection(&mut state);
+        crate::workbench::app::cancel_armed_stretch_selection(&mut state);
 
         assert_eq!(state.schematic.wires[0], baseline);
         assert!(state.schematic.selection.has_wire_segment(7, 1));

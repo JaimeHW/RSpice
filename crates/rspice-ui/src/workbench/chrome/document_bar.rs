@@ -4,7 +4,7 @@
 use egui::containers::menu::MenuButton;
 use egui::{Context, Frame, Layout, Sense, TopBottomPanel, Vec2};
 
-use crate::common::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -609,7 +609,7 @@ fn close_document(
             if !activate_document(state, document) {
                 return false;
             }
-            crate::common::project_workflow::close_active_document(state)
+            crate::workbench::project_workflow::close_active_document(state)
         }
         _ => {
             state.workbench.documents.close(document);

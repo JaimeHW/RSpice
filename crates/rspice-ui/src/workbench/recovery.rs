@@ -16,8 +16,8 @@ use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use serde::Serialize;
 
-use crate::common::app::{AppState, ConsoleMessage, RSpiceApp, RecentKind};
-use crate::common::file_workflow::FileWorkflowIo;
+use crate::workbench::app::{AppState, ConsoleMessage, RSpiceApp, RecentKind};
+use crate::workbench::file_workflow::FileWorkflowIo;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
@@ -28,7 +28,7 @@ use crate::state::{
 use super::state::{LocalSafeModeOptions, Workspace};
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::common::recovery_checkpoint::{
+use crate::workbench::recovery_checkpoint::{
     CheckpointBinding, CheckpointInspection, CheckpointOwnership, SourceSnapshotRelation,
     discard_bound_checkpoint, inspect_checkpoint, read_bound_checkpoint, read_source_snapshot,
 };
@@ -225,7 +225,7 @@ fn discover_candidates(
     let mut candidates = sources
         .into_iter()
         .flat_map(|original| {
-            crate::common::recovery_checkpoint::checkpoint_paths_for_source(&original)
+            crate::workbench::recovery_checkpoint::checkpoint_paths_for_source(&original)
                 .into_iter()
                 .filter_map(move |checkpoint| discover_candidate(original.clone(), checkpoint, io))
         })
@@ -448,7 +448,7 @@ fn checkpoint_age(modified: std::time::SystemTime) -> String {
 fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let expected = crate::common::file_workflow::autosave_checkpoint_path(&candidate.original);
+        let expected = crate::workbench::file_workflow::autosave_checkpoint_path(&candidate.original);
         if expected != candidate.checkpoint {
             return Err(
                 "Recovery checkpoint identity no longer matches its saved source".to_owned(),
@@ -514,9 +514,9 @@ fn matches_documented_pristine_plan(
 
 fn pristine_execution_context(
     project_id: crate::product::ProjectId,
-    identity_source: &crate::common::app::SimSetupState,
+    identity_source: &crate::workbench::app::SimSetupState,
 ) -> Result<ProjectExecutionContext, String> {
-    let mut pristine = crate::common::app::SimSetupState::new();
+    let mut pristine = crate::workbench::app::SimSetupState::new();
     let source_plan = identity_source.stable_analysis_plan().ok();
     let documented_plan = pristine.stable_analysis_plan().ok();
     if source_plan
@@ -531,7 +531,7 @@ fn pristine_execution_context(
     ProjectExecutionContext::from_state(
         project_id,
         &pristine,
-        &crate::common::app::default_model_library_manager(),
+        &crate::workbench::app::default_model_library_manager(),
     )
     .map_err(|error| format!("pristine simulation/model state is invalid: {error}"))
 }
@@ -674,8 +674,8 @@ pub(crate) fn open_comparison(
     app.state.workspace = comparison.workspace;
     app.state.schematic = comparison.active;
     app.state.bump_active_schematic_epoch();
-    app.state.sim_setup = crate::common::app::SimSetupState::new();
-    app.state.model_library_manager = crate::common::app::default_model_library_manager();
+    app.state.sim_setup = crate::workbench::app::SimSetupState::new();
+    app.state.model_library_manager = crate::workbench::app::default_model_library_manager();
     app.state.workbench.activate(Workspace::Design);
     app.state.push_user_message(ConsoleMessage::warning(format!(
         "Opened recovery comparison for '{}'; the saved source and checkpoint remain unchanged",
@@ -853,7 +853,7 @@ pub(crate) fn start_local_safe_mode(
         app.state
             .workbench
             .begin_project_close(super::state::ProjectCloseDestination::EmptyWorkbench);
-        if !crate::common::project_workflow::close_project_discard(&mut app.state) {
+        if !crate::workbench::project_workflow::close_project_discard(&mut app.state) {
             return Err("The current project could not be isolated safely".to_owned());
         }
     } else if options.isolate_prior_documents {
@@ -1221,7 +1221,7 @@ mod tests {
         let root = unique_temp_dir("recovery-project-boundary");
         let project_path = root.join("guard.rspiceproj");
         let mut state = AppState::default();
-        assert!(crate::common::project_workflow::save_project_to_path(
+        assert!(crate::workbench::project_workflow::save_project_to_path(
             &mut state,
             &project_path
         ));
@@ -1258,13 +1258,13 @@ mod tests {
         let root = unique_temp_dir("recovery-discovery");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
-        let checkpoint = crate::common::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint = crate::workbench::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&checkpoint, "not schematic json").expect("write malformed checkpoint");
 
         let candidates = discover_candidates(
             &[source.clone()],
             &[],
-            &crate::common::file_workflow::NativeFileWorkflowIo,
+            &crate::workbench::file_workflow::NativeFileWorkflowIo,
         );
         assert_eq!(candidates.len(), 1);
         assert!(matches!(
@@ -1281,7 +1281,7 @@ mod tests {
         let root = unique_temp_dir("recovery-generations");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
-        let legacy = crate::common::file_workflow::autosave_checkpoint_path(&source);
+        let legacy = crate::workbench::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&legacy, "not schematic json").expect("write malformed legacy point");
         let mut generated_name = legacy.as_os_str().to_owned();
         generated_name.push(format!(".generation-{}", uuid::Uuid::new_v4()));
@@ -1295,7 +1295,7 @@ mod tests {
         let candidates = discover_candidates(
             &[source.clone()],
             &[source],
-            &crate::common::file_workflow::NativeFileWorkflowIo,
+            &crate::workbench::file_workflow::NativeFileWorkflowIo,
         );
 
         assert_eq!(candidates.len(), 2);

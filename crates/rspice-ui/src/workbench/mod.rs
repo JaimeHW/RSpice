@@ -6,6 +6,51 @@
 
 use std::time::Duration;
 
+// Absorbed from the former `common` module. The application root, its
+// dialogs, its chrome, and the workflows that mutate application state were
+// mutually recursive with the workbench across a module boundary that did not
+// describe a real seam: the workflows reach for `AppState`, and `AppState`
+// reaches back for the workflows. They are one layer, so they are one module.
+pub mod app;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod browser_accessibility;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod browser_download;
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) mod browser_file_import;
+pub mod examples;
+pub(crate) mod export_workflow;
+pub(crate) mod file_actions;
+pub(crate) mod file_workflow;
+pub(crate) mod hardcopy_print;
+pub mod logging;
+pub mod menu_bar;
+pub(crate) mod netlist_workflow;
+pub(crate) mod project_checkpoint;
+pub(crate) mod project_lifecycle;
+pub(crate) mod project_workflow;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod recovery_checkpoint;
+pub mod shortcut_artifacts;
+pub mod shortcut_library_persistence;
+pub mod shortcut_profile_workflow;
+pub mod simulation_analysis_tabs;
+
+pub use app::{AppState, ConsoleMessage, RSpiceApp};
+
+/// Run `work` on a background thread natively; inline on wasm32 for short UI
+/// tasks that are not routed through the browser simulation worker.
+pub(crate) fn spawn_or_inline(work: impl FnOnce() + Send + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::spawn(work);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        work();
+    }
+}
+
 pub(crate) mod account_organization;
 pub mod availability;
 pub mod browser_navigation;
@@ -106,7 +151,6 @@ pub use window_session::{
 
 use egui::{CentralPanel, Context, Frame};
 
-use crate::common::RSpiceApp;
 use crate::ui::tokens::Tokens;
 
 use layout::LayoutSpec;
@@ -114,13 +158,13 @@ use state::Workspace;
 
 pub(crate) fn enter_full_screen_presentation(
     app: &mut RSpiceApp,
-    scope: crate::common::app::FullScreenScope,
-    panels: crate::common::app::FullScreenPanels,
+    scope: crate::workbench::app::FullScreenScope,
+    panels: crate::workbench::app::FullScreenPanels,
 ) {
-    let platform_full_screen = scope == crate::common::app::FullScreenScope::ApplicationWindow;
+    let platform_full_screen = scope == crate::workbench::app::FullScreenScope::ApplicationWindow;
     app.state.workbench.full_screen_presentation = true;
     app.state.workbench.full_screen_hide_context_panels =
-        panels == crate::common::app::FullScreenPanels::HideNavigatorAndInspector;
+        panels == crate::workbench::app::FullScreenPanels::HideNavigatorAndInspector;
     app.state.workbench.full_screen = platform_full_screen;
     if platform_full_screen {
         app.state.ui.request_full_screen(true);
@@ -260,7 +304,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
     if std::mem::take(&mut app.state.ui.export_csv_requested) {
-        crate::common::menu_bar::action_export_csv_with_io(
+        crate::workbench::menu_bar::action_export_csv_with_io(
             &mut app.state,
             app.export_workflow_io.as_ref(),
         );
@@ -318,7 +362,7 @@ fn show_full_screen_presentation(ctx: &Context, app: &mut RSpiceApp, layout: Lay
     }
 
     if std::mem::take(&mut app.state.ui.export_csv_requested) {
-        crate::common::menu_bar::action_export_csv_with_io(
+        crate::workbench::menu_bar::action_export_csv_with_io(
             &mut app.state,
             app.export_workflow_io.as_ref(),
         );
@@ -597,8 +641,8 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         enter_full_screen_presentation(
             &mut app,
-            crate::common::app::FullScreenScope::ActiveCanvasOnly,
-            crate::common::app::FullScreenPanels::HideNavigatorAndInspector,
+            crate::workbench::app::FullScreenScope::ActiveCanvasOnly,
+            crate::workbench::app::FullScreenPanels::HideNavigatorAndInspector,
         );
 
         assert!(app.state.workbench.full_screen_presentation);
@@ -617,8 +661,8 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         enter_full_screen_presentation(
             &mut app,
-            crate::common::app::FullScreenScope::ApplicationWindow,
-            crate::common::app::FullScreenPanels::KeepCurrent,
+            crate::workbench::app::FullScreenScope::ApplicationWindow,
+            crate::workbench::app::FullScreenPanels::KeepCurrent,
         );
 
         assert!(app.state.workbench.full_screen_presentation);

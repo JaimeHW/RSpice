@@ -1,6 +1,6 @@
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
-use crate::common::app::AppState;
+use crate::workbench::app::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, Point, PortDirection, SchematicProbe, Wire,
 };

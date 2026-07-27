@@ -12,7 +12,7 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::analysis::calculator;
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::results::visualization_document::AccessibleColorPalette;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
@@ -1255,7 +1255,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
         let hint = if state.simulation.active_run().is_none() {
             let shortcut = state.ui.preferences.shortcuts().resolved_label(
                 crate::workbench::commands::Command::RunSimulation,
-                crate::common::app::runtime_command_platform(ui.ctx()),
+                crate::workbench::app::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
             if shortcut.is_empty() {
@@ -2003,7 +2003,7 @@ fn resolve_strip_exprs(
                 sample_selection.as_ref(),
             );
             if let Err(error) = &series {
-                state.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
                     "expression `{}`: {}",
                     expr.text, error
                 )));
@@ -2032,7 +2032,7 @@ fn resolve_strip_exprs(
         };
         let Some(projections) = projected_selected_family_series(&x, &y, sample_selection.as_ref())
         else {
-            state.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+            state.push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
                 "expression `{}`: selected rows do not match the active family render plan",
                 expr.text
             )));

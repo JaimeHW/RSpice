@@ -9,7 +9,7 @@
 
 use egui::{Align, Color32, Frame, Layout, Margin, RichText, Sense, Stroke, Ui, Vec2, vec2};
 
-use crate::common::{AppState, RSpiceApp, app::ConsoleMessage};
+use crate::workbench::{AppState, RSpiceApp, app::ConsoleMessage};
 use crate::services::license::LicenseInfo;
 use crate::ui::{
     theme::{self, FontWeight},

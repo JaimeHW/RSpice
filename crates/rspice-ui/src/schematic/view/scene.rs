@@ -1,6 +1,6 @@
 use egui::{Painter, Rect, Stroke};
 
-use crate::common::app::{AppState, SchematicKeyboardFocus};
+use crate::workbench::app::{AppState, SchematicKeyboardFocus};
 use crate::state::{
     Component, DesignNote, DesignNoteKind, DesignReviewState, NetGraph, Point,
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
@@ -1019,7 +1019,7 @@ fn empty_hint_estimated_width(line: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::app::AppState;
+    use crate::workbench::app::AppState;
     use crate::state::{
         AnalysisResult, AnalysisType, ComponentType, DcOpResult, Junction, OperatingPointValue,
         PortDirection, PortSpec, ResolvedCellSymbol, SimulationRun, SymbolDocument, SymbolPin,

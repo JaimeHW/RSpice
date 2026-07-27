@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Color32, Ui};
 
-use crate::common::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp};
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::simulation::netlist_gen::{
     DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
@@ -441,7 +441,7 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
             )
         });
         if response.double_clicked() && !app.state.active_view_read_only() {
-            crate::common::app::open_property_editor(&mut app.state, component_id);
+            crate::workbench::app::open_property_editor(&mut app.state, component_id);
         }
         theme::paint_focus_ring(ui, &response, rect);
         response.on_hover_text("Double-click to edit component properties");
@@ -1147,7 +1147,7 @@ fn edit_row_with_hint(
             Err(error) => {
                 app.state.workbench.verification.action_receipt = format!("Tune blocked: {error}");
                 app.state
-                    .push_user_message(crate::common::ConsoleMessage::warning(format!(
+                    .push_user_message(crate::workbench::ConsoleMessage::warning(format!(
                         "Could not tune {}: {error}",
                         component.name
                     )));
@@ -1295,7 +1295,7 @@ fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
     let editable = !app.state.active_view_read_only() && !app.state.schematic.read_only;
     let properties = schematic_section_header_action(ui, "Identity", "Properties…", editable);
     if properties.clicked() {
-        crate::common::app::open_property_editor(&mut app.state, component.id);
+        crate::workbench::app::open_property_editor(&mut app.state, component.id);
     }
     properties.on_disabled_hover_text("the active document is read-only");
     let instance_rejection = edit_row(ui, app, component, InlineEditField::Instance, "Instance");

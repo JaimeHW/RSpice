@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use egui::{Color32, Ui};
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::properties::engineering::{format_engineering_value, parse_engineering_value};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale};
 use crate::ui::theme::{self, FontWeight};

@@ -2,7 +2,7 @@
 
 use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::panels::{ConsoleHistoryItem, LogSeverity};
 use crate::simulation::automation::CommandOutput;
 use crate::state::SimulationState;
@@ -1492,7 +1492,7 @@ fn muted(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::AppState;
+    use crate::workbench::AppState;
     use crate::panels::LogSource;
     use crate::services::drc::{DrcResult, DrcSeverity};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun};

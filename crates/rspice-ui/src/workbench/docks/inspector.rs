@@ -5,7 +5,7 @@ mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::common::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp};
 use crate::state::{Component, ComponentType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -867,7 +867,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             format!("{signal} cross-probed to {net}."),
                         );
                         app.state
-                            .push_user_message(crate::common::ConsoleMessage::info(format!(
+                            .push_user_message(crate::workbench::ConsoleMessage::info(format!(
                                 "Selected conductor {net} from {signal}."
                             )));
                     }
@@ -878,7 +878,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             message.clone(),
                         );
                         app.state
-                            .push_user_message(crate::common::ConsoleMessage::warning(message));
+                            .push_user_message(crate::workbench::ConsoleMessage::warning(message));
                     }
                 }
             }

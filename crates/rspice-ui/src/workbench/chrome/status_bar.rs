@@ -2,7 +2,7 @@
 
 use egui::{Align, Context, Frame, Layout, Sense, TopBottomPanel, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::state::SchematicGridPitch;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};

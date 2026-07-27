@@ -4,7 +4,7 @@
 
 use egui::{Align, Frame, Margin, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
-use crate::common::{AppState, RSpiceApp, app::ConsoleMessage};
+use crate::workbench::{AppState, RSpiceApp, app::ConsoleMessage};
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{

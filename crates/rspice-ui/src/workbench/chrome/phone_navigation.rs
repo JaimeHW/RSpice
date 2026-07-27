@@ -3,7 +3,7 @@
 
 use egui::{Align2, Context, Frame, TopBottomPanel, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 

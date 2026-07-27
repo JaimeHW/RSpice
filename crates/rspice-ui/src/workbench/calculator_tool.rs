@@ -7,7 +7,7 @@
 
 use egui::{Context, Ui};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn plotting_keeps_the_tool_open_and_never_duplicates_a_trace() {
-        let mut app = crate::common::RSpiceApp::test_instance();
+        let mut app = crate::workbench::RSpiceApp::test_instance();
         let ctx = egui::Context::default();
         app.state.dialogs.waveform_calculator_dialog = true;
         app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn an_empty_expression_plots_nothing() {
-        let mut app = crate::common::RSpiceApp::test_instance();
+        let mut app = crate::workbench::RSpiceApp::test_instance();
         let ctx = egui::Context::default();
         app.state.calculator_panel.expression = "   ".to_owned();
 

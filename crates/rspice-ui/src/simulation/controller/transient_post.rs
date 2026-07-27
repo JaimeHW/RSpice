@@ -1,8 +1,8 @@
 use super::*;
 use crate::analysis::eye_diagram::{EyeData, EyeDataBuilder};
 use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
-use crate::common::app::ActiveViewer;
-use crate::common::app::AppState;
+use crate::workbench::app::ActiveViewer;
+use crate::workbench::app::AppState;
 use crate::state::{AnalysisType, SharedWaveformValues};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -315,7 +315,7 @@ impl SimulationController {
         let task_cancel_flag = Arc::clone(&cancel_flag);
         let task_source = source.clone();
 
-        crate::common::spawn_or_inline(move || {
+        crate::workbench::spawn_or_inline(move || {
             let payload = match view {
                 DerivedViewKind::EyeDiagram => {
                     let eye_data = build_eye_diagram_data(&task_source, &task_cancel_flag);

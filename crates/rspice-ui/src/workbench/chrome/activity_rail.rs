@@ -2,7 +2,7 @@
 
 use egui::{Context, Frame, Sense, SidePanel, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
@@ -79,7 +79,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                 let command = Command::OpenWorkspace(workspace);
                 let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
                     command,
-                    crate::common::app::runtime_command_platform(ui.ctx()),
+                    crate::workbench::app::runtime_command_platform(ui.ctx()),
                     ui.ctx().os(),
                 );
                 let response = ui

@@ -28,8 +28,8 @@
 //! | 7 | `properties` | Component property editing |
 //! | 8 | `panels` | Docked auxiliary panels |
 //! | 9 | `schematic` | The schematic document engine |
-//! | 10 | `workbench` | Application chrome, surfaces, navigation, commands |
-//! | 11 | `common` | The application root: [`RSpiceApp`], dialogs, workflows |
+//! | 10 | `workbench` | The application shell: [`RSpiceApp`], state, dialogs, chrome, surfaces, commands, and the workflows that mutate them |
+
 //!
 //! Known departures from this order are recorded, counted, and ratcheted
 //! down in that test's `ALLOWED_VIOLATIONS` table. Adding to it is not a way
@@ -90,9 +90,6 @@ pub mod panels;
 /// Property editing - Component properties and design variables
 pub mod properties;
 
-/// Common UI components - Menu bar, status bar, theme, main app
-pub mod common;
-
 /// The RSpice design system - tokens, palettes, fonts, icons, widgets
 pub mod ui;
 
@@ -135,6 +132,10 @@ pub mod state;
 /// units; deck dialect and PDK database-unit semantics live elsewhere.
 pub mod quantity;
 
+/// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
+/// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
+pub mod time_compat;
+
 /// Shared output specification helpers for analysis/sensitivity paths
 pub(crate) mod output_spec;
 
@@ -143,7 +144,7 @@ pub(crate) mod output_spec;
 // =============================================================================
 
 /// Re-export the main application type
-pub use common::RSpiceApp;
+pub use workbench::RSpiceApp;
 
 #[cfg(target_arch = "wasm32")]
 pub fn run_rspice_ui_worker_request(
@@ -163,5 +164,5 @@ pub fn run_rspice_ui_veriloga_compile_request(
 pub fn run_rspice_ui_hardcopy_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    common::app::run_hardcopy_worker_request_value(value)
+    workbench::app::run_hardcopy_worker_request_value(value)
 }

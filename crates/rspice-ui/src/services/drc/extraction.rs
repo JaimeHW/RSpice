@@ -416,7 +416,7 @@ fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue
 /// }
 /// ```
 pub fn run_drc_check(schematic: &crate::state::SchematicState) -> DrcResult {
-    let start = crate::common::time_compat::Instant::now();
+    let start = crate::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) = extract_drc_data_with_junctions(schematic);
     let mut checker = DrcChecker::new();
     checker.set_net_naming_policy(schematic.document_policy.net_naming);
@@ -433,7 +433,7 @@ pub fn run_drc_check_with_hierarchy(
     schematic: &crate::state::SchematicState,
     hierarchy: &HierarchySource<'_>,
 ) -> DrcResult {
-    let start = crate::common::time_compat::Instant::now();
+    let start = crate::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) =
         extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
     let mut checker = DrcChecker::new();
@@ -451,7 +451,7 @@ pub fn run_drc_check_with_config(
     schematic: &crate::state::SchematicState,
     config: DrcConfig,
 ) -> DrcResult {
-    let start = crate::common::time_compat::Instant::now();
+    let start = crate::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) = extract_drc_data_with_junctions(schematic);
     let severity_overrides = config.severity_overrides.clone();
     let mut checker = DrcChecker::with_config(config);
@@ -470,7 +470,7 @@ pub fn run_drc_check_with_hierarchy_and_config(
     hierarchy: &HierarchySource<'_>,
     config: DrcConfig,
 ) -> DrcResult {
-    let start = crate::common::time_compat::Instant::now();
+    let start = crate::time_compat::Instant::now();
     let (components, wires, net_labels, junctions) =
         extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
     let severity_overrides = config.severity_overrides.clone();

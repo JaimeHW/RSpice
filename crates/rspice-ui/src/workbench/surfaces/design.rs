@@ -2,7 +2,7 @@
 
 use egui::{Align2, Context, Id, Order, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::common::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
         let mut app = RSpiceApp::test_instance();
-        assert!(crate::common::netlist_workflow::apply_imported_netlist(
+        assert!(crate::workbench::netlist_workflow::apply_imported_netlist(
             &mut app.state,
             "V1 out 0 1\n.op\n.end\n".to_owned(),
             None,

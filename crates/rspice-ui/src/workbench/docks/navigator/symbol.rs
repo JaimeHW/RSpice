@@ -7,7 +7,7 @@
 
 use egui::{ScrollArea, Ui};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::state::{
     PortDirection, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
     SymbolElectricalType, SymbolPin, SymbolPinSide, SymbolShape,
@@ -117,7 +117,7 @@ fn pins_section(
                 Ok(()) => app.state.ui.symbol.select_pin(name),
                 Err(error) => app
                     .state
-                    .push_user_message(crate::common::ConsoleMessage::warning(error)),
+                    .push_user_message(crate::workbench::ConsoleMessage::warning(error)),
             }
         }
     });

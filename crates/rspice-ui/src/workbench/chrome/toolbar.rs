@@ -4,7 +4,7 @@
 use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, TopBottomPanel, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::state::{SchematicGridPitch, Tool, ViewType, WireRoutingMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1079,7 +1079,7 @@ fn toolbar_command(
     };
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
         command,
-        crate::common::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let label = if shortcut.is_empty() {
@@ -1197,7 +1197,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             };
             let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
                 command,
-                crate::common::app::runtime_command_platform(ui.ctx()),
+                crate::workbench::app::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
             let accessibility_label = if shortcut.is_empty() {
@@ -1349,7 +1349,7 @@ fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
     let enabled = command.is_enabled(app);
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
         command,
-        crate::common::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let label = if shortcut.is_empty() {
@@ -1437,13 +1437,13 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
                                 {
                                     match commit_reference_pvt(app, process, temperature) {
                                         Ok(true) => app.state.push_user_message(
-                                            crate::common::app::ConsoleMessage::info(format!(
+                                            crate::workbench::app::ConsoleMessage::info(format!(
                                                 "Reference PVT changed to {label}"
                                             )),
                                         ),
                                         Ok(false) => {}
                                         Err(error) => app.state.push_user_message(
-                                            crate::common::app::ConsoleMessage::warning(format!(
+                                            crate::workbench::app::ConsoleMessage::warning(format!(
                                                 "Reference PVT was not changed: {error}"
                                             )),
                                         ),

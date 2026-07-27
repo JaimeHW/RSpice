@@ -8,8 +8,8 @@ use crate::automation_workflow::{
     ArtifactKind, AutomationPlan, CheckEvidence, CheckOutcome, CompletedEvidence, DiagnosticSet,
     compare_governed_waveforms, compile_workflow, render_requested_artifacts,
 };
-use crate::common::export_workflow::SaveDialogConfig;
-use crate::common::{ConsoleMessage, RSpiceApp};
+use crate::workbench::export_workflow::SaveDialogConfig;
+use crate::workbench::{ConsoleMessage, RSpiceApp};
 use crate::product::{ContentDigest, RunId, SimulationPlanId};
 use crate::state::{AnalysisResultSourceDomain, ProjectSourceLanguage, SimulationRun, SpecEntry};
 

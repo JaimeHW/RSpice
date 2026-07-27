@@ -8,7 +8,7 @@
 
 use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 
-use crate::common::app::{AppState, ConsoleMessage};
+use crate::workbench::app::{AppState, ConsoleMessage};
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::state::Point;
 use crate::ui::theme::{self, FontWeight};

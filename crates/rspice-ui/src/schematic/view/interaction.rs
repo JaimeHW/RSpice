@@ -1,6 +1,6 @@
 use egui::{Response, Ui};
 
-use crate::common::app::{AppState, ConsoleMessage, DragType};
+use crate::workbench::app::{AppState, ConsoleMessage, DragType};
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
 use crate::state::{
     ComponentType, NetGraph, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
@@ -185,7 +185,7 @@ pub(super) fn handle_tool_interactions(
                     symbol_context,
                     screen_to_wire_grid(viewport, grid_size, pos),
                 );
-                crate::common::app::open_net_label_placement(state, anchor);
+                crate::workbench::app::open_net_label_placement(state, anchor);
             }
         }
     }
@@ -321,11 +321,11 @@ fn handle_armed_move_selection(
     grid_size: i32,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if let Err(message) = crate::common::app::armed_move_selection_authority(state) {
+    if let Err(message) = crate::workbench::app::armed_move_selection_authority(state) {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Move selection cancelled: {message}"
         )));
-        crate::common::app::cancel_armed_move_selection(state);
+        crate::workbench::app::cancel_armed_move_selection(state);
         return;
     }
 
@@ -498,11 +498,11 @@ fn pointer_is_in_frozen_move_selection(
 }
 
 fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
-    if let Err(message) = crate::common::app::armed_move_selection_authority(state) {
+    if let Err(message) = crate::workbench::app::armed_move_selection_authority(state) {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Move selection cancelled: {message}"
         )));
-        crate::common::app::cancel_armed_move_selection(state);
+        crate::workbench::app::cancel_armed_move_selection(state);
         return;
     }
     let delta = state.dialogs.move_selection.preview_delta;
@@ -512,7 +512,7 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
             "Move selection finished without changing geometry; no undo record was created."
                 .to_owned(),
         ));
-        crate::common::app::cancel_armed_move_selection(state);
+        crate::workbench::app::cancel_armed_move_selection(state);
         return;
     }
     state.schematic.begin_operation("move selection");
@@ -545,7 +545,7 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
                     "geometry was unchanged"
                 }
             )));
-            crate::common::app::cancel_armed_move_selection(state);
+            crate::workbench::app::cancel_armed_move_selection(state);
         }
         Ok(false) => {
             state.schematic.cancel_operation();
@@ -553,7 +553,7 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
                 "Move selection produced no geometry change; no undo record was created."
                     .to_owned(),
             ));
-            crate::common::app::cancel_armed_move_selection(state);
+            crate::workbench::app::cancel_armed_move_selection(state);
         }
         Err(error) => {
             state.schematic.cancel_operation();
@@ -2085,7 +2085,7 @@ fn open_object_properties(
         }
         Some(PointerTarget::Junction(_)) | Some(PointerTarget::Wire(_)) | None => return,
     }
-    crate::common::app::open_selected_object_properties(state);
+    crate::workbench::app::open_selected_object_properties(state);
 }
 
 #[cfg(test)]
@@ -2117,7 +2117,7 @@ mod tests {
     }
 
     fn arm_test_move(state: &mut AppState, mode: crate::state::MoveSelectionMode) {
-        crate::common::app::open_move_selection_dialog(state);
+        crate::workbench::app::open_move_selection_dialog(state);
         state.dialogs.move_selection.mode = mode;
         state.dialogs.move_selection.arm();
         crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::MoveSelection);
@@ -2696,7 +2696,7 @@ mod tests {
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
         state.dialogs.move_selection.preview_delta = Point::new(40, 10);
 
-        crate::common::app::cancel_armed_move_selection(&mut state);
+        crate::workbench::app::cancel_armed_move_selection(&mut state);
 
         assert_eq!(state.schematic.components[0].pos, Point::origin());
         assert!(state.schematic.selection.has_component(1));
@@ -3278,7 +3278,7 @@ mod tests {
         assert_eq!(state.schematic.selection.single_bus_tap(), Some(21));
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::common::app::ObjectPropertiesDraft::BusTap(_))
+            Some(crate::workbench::app::ObjectPropertiesDraft::BusTap(_))
         ));
     }
 
@@ -3329,7 +3329,7 @@ mod tests {
         assert!(state.dialogs.object_properties.open);
         assert!(matches!(
             state.dialogs.object_properties.draft.as_ref(),
-            Some(crate::common::app::ObjectPropertiesDraft::NetLabel(draft))
+            Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(draft))
                 if draft.original.id == label.id
         ));
 

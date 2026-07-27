@@ -6,8 +6,8 @@
 
 use egui::{Align2, Color32, Context, Frame, Margin, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::common::RSpiceApp;
-use crate::common::app::{AppState, ConsoleMessage};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::{AppState, ConsoleMessage};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
@@ -116,7 +116,7 @@ impl IssueTableGeometry {
 /// the operator on the current surface, matching the mockup workflow.
 pub(crate) fn run(app: &mut RSpiceApp) {
     app.state.sync_active_schematic_to_workspace();
-    crate::common::menu_bar::run_design_rule_check(&mut app.state);
+    crate::workbench::menu_bar::run_design_rule_check(&mut app.state);
     let mut report = collect_report(&app.state);
     if report.blockers.is_empty() {
         match app
@@ -1466,7 +1466,7 @@ mod tests {
         let transient_id = plan.instances()[0].id();
         plan.set_enabled(transient_id, false)
             .expect("the sole analysis disables");
-        crate::common::menu_bar::run_design_rule_check(&mut state);
+        crate::workbench::menu_bar::run_design_rule_check(&mut state);
 
         let report = collect_report(&state);
         let (topology_root, topology_revision, topology_closure) =
@@ -1495,7 +1495,7 @@ mod tests {
     #[test]
     fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
         let mut state = AppState::default();
-        crate::common::menu_bar::run_design_rule_check(&mut state);
+        crate::workbench::menu_bar::run_design_rule_check(&mut state);
 
         let report = collect_report(&state);
 
@@ -1655,7 +1655,7 @@ mod tests {
                 .is_empty(),
             "fixture must remain unsynchronized to exercise the live overlay"
         );
-        crate::common::menu_bar::run_design_rule_check(&mut state);
+        crate::workbench::menu_bar::run_design_rule_check(&mut state);
 
         let report = collect_report(&state);
 

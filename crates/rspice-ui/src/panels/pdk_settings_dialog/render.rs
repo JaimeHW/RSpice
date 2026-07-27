@@ -1050,7 +1050,7 @@ fn scan_summary(state: &PdkSettingsDialogState) -> String {
         .filter_map(|entry| entry.last_scanned)
         .max()
     {
-        let now = crate::common::time_compat::unix_epoch().as_secs();
+        let now = crate::time_compat::unix_epoch().as_secs();
         line.push_str(&format!(
             "scanned {} · ",
             fmt_ago(now.saturating_sub(scanned))

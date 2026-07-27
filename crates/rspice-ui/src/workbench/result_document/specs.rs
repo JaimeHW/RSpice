@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use egui::Ui;
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::properties::engineering::parse_engineering_value;
 use crate::state::{SimulationRun, SpecEntry};
 use crate::ui::plot::fmt_si;
@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn applying_drafts_commits_the_active_plan_owned_specification() {
-        let mut state = crate::common::AppState::default();
+        let mut state = crate::workbench::AppState::default();
         let plan_id = state
             .sim_setup
             .stable_analysis_plan()

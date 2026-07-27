@@ -11,7 +11,7 @@ use egui::{
 };
 use serde_json::json;
 
-use crate::common::{AppState, RSpiceApp, app::ConsoleMessage};
+use crate::workbench::{AppState, RSpiceApp, app::ConsoleMessage};
 use crate::product::RunId;
 use crate::state::{
     AnalysisResultSourceDomain, ExecutionTarget, SimulationRun, SimulationRunLifecycle,
@@ -1185,7 +1185,7 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
         }
     };
     let default_name = format!("rspice-run-{sequence}-manifest.json");
-    let config = crate::common::export_workflow::SaveDialogConfig {
+    let config = crate::workbench::export_workflow::SaveDialogConfig {
         title: "Export Run Manifest",
         default_name: &default_name,
         filter_name: "RSpice Run Manifest",
@@ -1203,13 +1203,13 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
     }) else {
         return;
     };
-    crate::common::file_actions::ensure_file_extension(&mut path, "json");
+    crate::workbench::file_actions::ensure_file_extension(&mut path, "json");
     let result = io
         .observe_destination(&path)
         .and_then(|destination| io.write_text_file_observed(&destination, &payload));
     match result {
         Ok(()) => app.state.push_user_message(ConsoleMessage::info(
-            crate::common::export_workflow::export_completion_message(
+            crate::workbench::export_workflow::export_completion_message(
                 "Run manifest",
                 &path,
                 None,
@@ -1308,7 +1308,7 @@ fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
     serde_json::to_string_pretty(&json!({
         "product": "RSpice Workbench",
         "schema": "rspice.run-manifest/1.0",
-        "exported_at_epoch_seconds": crate::common::time_compat::unix_epoch().as_secs_f64(),
+        "exported_at_epoch_seconds": crate::time_compat::unix_epoch().as_secs_f64(),
         "manifest": {
             "job_id": run.job_id.map(|id| id.to_string()),
             "run_id": run.run_id.to_string(),

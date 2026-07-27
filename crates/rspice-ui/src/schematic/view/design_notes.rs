@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
-use crate::common::app::AppState;
+use crate::workbench::app::AppState;
 use crate::state::{DesignNote, DesignNoteKind, DesignNoteRenderContext, Point};
 use crate::ui::theme::{self, FontWeight};
 

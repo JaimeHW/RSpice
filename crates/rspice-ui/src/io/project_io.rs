@@ -290,7 +290,7 @@ impl ProjectFile {
                             .inactive_plans()
                             .iter()
                             .find(|plan| plan.id() == plan_id)
-                            .map(crate::common::app::StoredSimulationPlan::analysis_plan)
+                            .map(crate::workbench::app::StoredSimulationPlan::analysis_plan)
                     })
             })
         };
@@ -431,7 +431,7 @@ impl ProjectFile {
 
     pub(crate) fn validate_result_plan_references_for(
         simulation_results: &ProjectSimulationResults,
-        simulation_plan: Option<&crate::common::app::SimSetupState>,
+        simulation_plan: Option<&crate::workbench::app::SimSetupState>,
         project_revision: ObjectRevision,
     ) -> Result<(), String> {
         let has_plan_receipt = simulation_results.runs.iter().any(|run| {
@@ -3752,7 +3752,7 @@ pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), Proje
 
     #[cfg(target_arch = "wasm32")]
     {
-        crate::common::browser_download::download_text_file(path, &contents)
+        crate::workbench::browser_download::download_text_file(path, &contents)
             .map_err(ProjectIoError::Io)?;
         Ok(())
     }
@@ -3780,7 +3780,7 @@ pub(crate) fn suggested_project_save_path(default_name: Option<&str>) -> PathBuf
             .filter(|name| !name.trim().is_empty())
             .unwrap_or("untitled.rspiceproj"),
     );
-    crate::common::file_actions::ensure_file_extension(&mut path, "rspiceproj");
+    crate::workbench::file_actions::ensure_file_extension(&mut path, "rspiceproj");
     path
 }
 
@@ -4224,7 +4224,7 @@ mod tests {
     }
 
     fn project_with_execution_context() -> ProjectFile {
-        use crate::common::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
+        use crate::workbench::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
         use crate::simulation::dialog::{DampingStrategy, IntegrationMethod, MatrixSolver};
         use crate::state::model_library::{
             DeviceModel, ModelLibrary, ModelLibraryManager, ModelType,
@@ -4233,7 +4233,7 @@ mod tests {
         let mut design_libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut design_libraries);
 
-        let mut setup = crate::common::app::SimSetupState::new();
+        let mut setup = crate::workbench::app::SimSetupState::new();
         setup.enabled.extend([TAB_AC, TAB_NOISE]);
         setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
         setup.listed.extend([TAB_AC, TAB_NOISE]);

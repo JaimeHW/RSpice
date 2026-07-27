@@ -1,6 +1,6 @@
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
-use crate::common::app::AppState;
+use crate::workbench::app::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
     ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool,
@@ -345,7 +345,7 @@ fn draw_array_selection_preview(
             return;
         }
     };
-    let plan = match crate::common::app::armed_array_selection_plan(state, placement) {
+    let plan = match crate::workbench::app::armed_array_selection_plan(state, placement) {
         Ok(plan) => plan,
         Err(message) => {
             state.dialogs.array_selection.preview_error = Some(message.clone());
@@ -372,7 +372,7 @@ fn draw_array_selection_preview(
                 |component| symbol_context.component_bounds_tuple(component),
             )
             .map_err(|error| error.to_string());
-        cache = Some(crate::common::app::ArraySelectionPreviewCache {
+        cache = Some(crate::workbench::app::ArraySelectionPreviewCache {
             plan,
             library_revision,
             symbol_revision,

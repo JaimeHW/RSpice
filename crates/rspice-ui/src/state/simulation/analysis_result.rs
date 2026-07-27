@@ -1511,7 +1511,7 @@ impl AnalysisResult {
 
     /// Get current timestamp as Unix epoch seconds
     fn current_timestamp() -> f64 {
-        crate::common::time_compat::unix_epoch().as_secs_f64()
+        crate::time_compat::unix_epoch().as_secs_f64()
     }
 
     /// Check if this analysis has any viewable data

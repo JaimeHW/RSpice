@@ -12,7 +12,7 @@ use egui::{
     pos2, vec2,
 };
 
-use crate::common::app::{AppState, ConsoleMessage, ContextTarget};
+use crate::workbench::app::{AppState, ConsoleMessage, ContextTarget};
 use crate::state::{Point, Selection, Tool};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -502,7 +502,7 @@ fn render_context_contents(
                         .map_or_else(String::new, |product_command| {
                             state.ui.preferences.shortcuts().resolved_label(
                                 product_command,
-                                crate::common::app::runtime_command_platform(ui.ctx()),
+                                crate::workbench::app::runtime_command_platform(ui.ctx()),
                                 ui.ctx().os(),
                             )
                         });
@@ -991,7 +991,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     let writable = !state.schematic.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
-            crate::common::app::selected_object_properties_available(state),
+            crate::workbench::app::selected_object_properties_available(state),
             "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
@@ -1031,7 +1031,7 @@ fn execute_context_action(
     retain_selection_on_active_sheet(state);
     match action {
         ContextAction::Properties => {
-            crate::common::app::open_selected_object_properties(state);
+            crate::workbench::app::open_selected_object_properties(state);
         }
         ContextAction::Rotate => with_hidden_wire_topology_preserved(state, |schematic| {
             schematic
@@ -1045,13 +1045,13 @@ fn execute_context_action(
             state.copy_active_schematic_selection();
         }
         ContextAction::Duplicate => {
-            crate::common::app::open_duplicate_selection_dialog_at(
+            crate::workbench::app::open_duplicate_selection_dialog_at(
                 state,
                 click_pos + Point::new(2, 2),
             );
         }
         ContextAction::Delete => {
-            crate::common::app::open_delete_selection_dialog(state);
+            crate::workbench::app::open_delete_selection_dialog(state);
         }
         ContextAction::Probe => {
             crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::Probe)
@@ -1914,7 +1914,7 @@ mod tests {
         assert!(!state.dialogs.rename_selection.open);
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::common::app::ObjectPropertiesDraft::NetLabel(ref draft))
+            Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(ref draft))
                 if draft.original == label
         ));
     }
@@ -1958,7 +1958,7 @@ mod tests {
         });
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::common::app::ObjectPropertiesDraft::DesignNote(ref draft))
+            Some(crate::workbench::app::ObjectPropertiesDraft::DesignNote(ref draft))
                 if draft.original == note
         ));
     }
@@ -2005,7 +2005,7 @@ mod tests {
         });
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::common::app::ObjectPropertiesDraft::DocumentationShape(ref draft))
+            Some(crate::workbench::app::ObjectPropertiesDraft::DocumentationShape(ref draft))
                 if draft.original == shape
         ));
     }

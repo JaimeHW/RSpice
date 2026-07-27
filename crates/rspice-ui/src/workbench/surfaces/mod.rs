@@ -16,7 +16,7 @@ mod veriloga;
 
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::ui::tokens::Tokens;
 
 use super::state::Workspace;

@@ -773,7 +773,7 @@ impl<'a> NetlistGenerator<'a> {
 }
 fn chrono_lite_timestamp() -> String {
     // Use system time for a basic timestamp
-    format!("{}", crate::common::time_compat::unix_epoch().as_secs())
+    format!("{}", crate::time_compat::unix_epoch().as_secs())
 }
 
 //=============================================================================
@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn net_label_names_the_node() {
         let mut state = SchematicState::default();
-        crate::common::examples::load_example("RC Lowpass Filter", &mut state);
+        crate::workbench::examples::load_example("RC Lowpass Filter", &mut state);
 
         let result = generate_netlist(&state);
         assert!(
@@ -1071,7 +1071,7 @@ mod tests {
     #[test]
     fn design_notes_never_change_generated_spice_or_connectivity() {
         let mut baseline = SchematicState::default();
-        crate::common::examples::load_example("RC Lowpass Filter", &mut baseline);
+        crate::workbench::examples::load_example("RC Lowpass Filter", &mut baseline);
         let expected = generate_netlist(&baseline);
         let mut documented = baseline;
         documented.design_notes.push(
@@ -1101,7 +1101,7 @@ mod tests {
     #[test]
     fn all_documentation_shapes_leave_spice_and_connectivity_byte_for_byte_unchanged() {
         let mut baseline = SchematicState::default();
-        crate::common::examples::load_example("RC Lowpass Filter", &mut baseline);
+        crate::workbench::examples::load_example("RC Lowpass Filter", &mut baseline);
         let expected = generate_netlist(&baseline);
         let mut documented = baseline;
         documented.documentation_shapes = [

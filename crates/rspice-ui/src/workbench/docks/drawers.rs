@@ -2,7 +2,7 @@
 
 use egui::{Area, Context, FocusDirection, Frame, Id, Order, Sense, UiKind, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Mode;
 use crate::ui::tokens::{self, Tokens};

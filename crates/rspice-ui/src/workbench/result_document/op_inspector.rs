@@ -7,7 +7,7 @@
 
 use egui::Ui;
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};

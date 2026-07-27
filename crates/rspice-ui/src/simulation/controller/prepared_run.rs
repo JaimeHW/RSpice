@@ -142,7 +142,7 @@ impl SimulationController {
                     "Validate the exact current netlist before running; manual decks are never auto-authorized",
                 ));
             }
-            crate::common::menu_bar::run_design_rule_check(state);
+            crate::workbench::menu_bar::run_design_rule_check(state);
             let snapshot = self.build_prepared_snapshot(state, intent)?;
             self.authorize_snapshot(snapshot)?;
         }
@@ -448,7 +448,7 @@ impl SimulationController {
         }
 
         let owned_materialized = if owned_active {
-            crate::common::netlist_workflow::compose_owned_netlist_execution_source(state, source)
+            crate::workbench::netlist_workflow::compose_owned_netlist_execution_source(state, source)
                 .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?
         } else {
             source.to_owned()
@@ -1774,7 +1774,7 @@ mod tests {
 
     fn runnable_state() -> AppState {
         let mut state = AppState::default();
-        crate::common::examples::load_example("Voltage Divider", &mut state.schematic);
+        crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
         let mut drc = DrcResult::new();
         drc.completed = true;
         state.dialogs.drc_results = Some(drc);

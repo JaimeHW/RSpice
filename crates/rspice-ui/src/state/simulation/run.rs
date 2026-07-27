@@ -381,7 +381,7 @@ impl SimulationRun {
 
     /// Get current timestamp as Unix epoch seconds
     fn current_timestamp() -> f64 {
-        crate::common::time_compat::unix_epoch().as_secs_f64()
+        crate::time_compat::unix_epoch().as_secs_f64()
     }
 
     /// Format timestamp as human-readable time string (e.g., "1:04:01 PM")

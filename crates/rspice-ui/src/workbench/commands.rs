@@ -4,8 +4,8 @@
 //! command is omitted from a menu when its behavior is not implemented; the
 //! UI does not advertise speculative or placeholder capability.
 
-use crate::common::RSpiceApp;
-use crate::common::menu_bar::{FileMenuAction, dispatch_file_menu_action};
+use crate::workbench::RSpiceApp;
+use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{ComponentType, Tool};
 use std::cell::RefCell;
@@ -895,7 +895,7 @@ impl Command {
 
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
-        if crate::common::project_lifecycle::operation_in_progress(state)
+        if crate::workbench::project_lifecycle::operation_in_progress(state)
             && self.blocked_by_project_operation()
         {
             return false;
@@ -915,15 +915,15 @@ impl Command {
             Self::SaveAs => state.project_lifecycle.project_open,
             Self::SaveAll => {
                 state.project_lifecycle.project_open
-                    && crate::common::project_lifecycle::has_unsaved_changes(state)
+                    && crate::workbench::project_lifecycle::has_unsaved_changes(state)
             }
             Self::RevertActiveDocument => {
                 state.project_lifecycle.accepted().is_some()
-                    && crate::common::project_lifecycle::active_document_is_dirty(state)
+                    && crate::workbench::project_lifecycle::active_document_is_dirty(state)
                     && !state.simulation.is_running
             }
             Self::CloseActiveDocument => {
-                crate::common::project_lifecycle::can_close_active_document(state)
+                crate::workbench::project_lifecycle::can_close_active_document(state)
             }
             Self::CloseProject => state.project_lifecycle.project_open,
             Self::PageSetup | Self::ExportActiveView => {
@@ -997,7 +997,7 @@ impl Command {
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
             Self::RenameSelection => {
                 active_schematic_editor(app)
-                    && crate::common::app::rename_selection_available(state)
+                    && crate::workbench::app::rename_selection_available(state)
             }
             Self::RotateSelection
             | Self::MirrorSelectionHorizontal
@@ -1048,11 +1048,11 @@ impl Command {
             }
             Self::ReplaceInstance => {
                 active_schematic_editor(app)
-                    && crate::common::app::replace_instance_available(state)
+                    && crate::workbench::app::replace_instance_available(state)
             }
             Self::CreateHierarchy => {
                 active_schematic_editor(app)
-                    && crate::common::app::create_hierarchy_available(state)
+                    && crate::workbench::app::create_hierarchy_available(state)
             }
             Self::ConnectivityManager => {
                 active_schematic_editor(app) && state.project_lifecycle.project_open
@@ -1076,7 +1076,7 @@ impl Command {
                     selection.pins.len() + selection.shapes.len() == 1
                 } else {
                     active_schematic_editor(app)
-                        && crate::common::app::selected_object_properties_available(state)
+                        && crate::workbench::app::selected_object_properties_available(state)
                 }
             }
             Self::ZoomFit => {
@@ -1342,18 +1342,18 @@ impl Command {
     }
 
     pub fn execute(self, app: &mut RSpiceApp) {
-        if crate::common::project_lifecycle::operation_in_progress(&app.state)
+        if crate::workbench::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
             app.state
-                .push_user_message(crate::common::app::ConsoleMessage::warning(
+                .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                     "Wait for the current project operation to finish before starting another.",
                 ));
             return;
         }
         if self.requires_open_project() && !app.state.project_lifecycle.project_open {
             app.state
-                .push_user_message(crate::common::app::ConsoleMessage::warning(
+                .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                     "Open a project before using this command.",
                 ));
             return;
@@ -1399,24 +1399,24 @@ impl Command {
                     app.state.ui.netlist.export_dialog.format = format;
                     app.state.ui.netlist.export_dialog.error = None;
                 } else {
-                    crate::common::menu_bar::action_export_netlist_with_io(
+                    crate::workbench::menu_bar::action_export_netlist_with_io(
                         &mut app.state,
                         format,
                         app.export_workflow_io.as_ref(),
                     );
                 }
             }
-            Self::PageSetup => crate::common::app::open_hardcopy_workflow(
+            Self::PageSetup => crate::workbench::app::open_hardcopy_workflow(
                 app,
-                crate::common::app::HardcopyWorkflow::PageSetup,
+                crate::workbench::app::HardcopyWorkflow::PageSetup,
             ),
-            Self::PrintHardcopy => crate::common::app::open_hardcopy_workflow(
+            Self::PrintHardcopy => crate::workbench::app::open_hardcopy_workflow(
                 app,
-                crate::common::app::HardcopyWorkflow::Print,
+                crate::workbench::app::HardcopyWorkflow::Print,
             ),
-            Self::ExportActiveView => crate::common::app::open_hardcopy_workflow(
+            Self::ExportActiveView => crate::workbench::app::open_hardcopy_workflow(
                 app,
-                crate::common::app::HardcopyWorkflow::Export,
+                crate::workbench::app::HardcopyWorkflow::Export,
             ),
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => app.action_edit_undo(),
@@ -1425,7 +1425,7 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(true);
                 } else {
-                    crate::common::app::open_cut_selection_dialog(&mut app.state);
+                    crate::workbench::app::open_cut_selection_dialog(&mut app.state);
                 }
             }
             Self::Copy => {
@@ -1449,7 +1449,7 @@ impl Command {
                     let anchor = app.state.schematic_paste_anchor();
                     if !app.state.schematic.paste_at(anchor) {
                         app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                                 "Paste could not be completed at the current canvas target",
                             ));
                     }
@@ -1460,32 +1460,32 @@ impl Command {
                     app.copy_selected_symbol_shape();
                     app.paste_symbol_shape();
                 } else {
-                    crate::common::app::open_duplicate_selection_dialog(&mut app.state);
+                    crate::workbench::app::open_duplicate_selection_dialog(&mut app.state);
                 }
             }
             Self::Delete => {
                 if active_symbol_editor(app) {
                     app.delete_selected_symbol_item(false);
                 } else {
-                    crate::common::app::open_delete_selection_dialog(&mut app.state);
+                    crate::workbench::app::open_delete_selection_dialog(&mut app.state);
                 }
             }
             Self::SelectAll => {
                 if active_symbol_editor(app) {
                     app.select_all_symbol_items();
                 } else {
-                    crate::common::app::open_select_all_dialog(&mut app.state);
+                    crate::workbench::app::open_select_all_dialog(&mut app.state);
                 }
             }
             Self::RenameSelection => {
-                crate::common::app::open_selected_object_rename(&mut app.state);
+                crate::workbench::app::open_selected_object_rename(&mut app.state);
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     app.state.workbench.inspector_visible = true;
                     app.state.workbench.drawer = Some(super::state::Drawer::Inspector);
                 } else {
-                    crate::common::app::open_selected_object_properties(&mut app.state);
+                    crate::workbench::app::open_selected_object_properties(&mut app.state);
                 }
             }
             Self::FindInDesign => {
@@ -1506,7 +1506,7 @@ impl Command {
                     .navigate(route, super::RouteTransitionSource::User)
                 {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                             error.to_string(),
                         ));
                 }
@@ -1544,22 +1544,22 @@ impl Command {
             }
             Self::CycleGrid => toggle_canvas_grid_and_snap(app),
             Self::VisibilityOptions => {
-                crate::common::app::open_schematic_visibility_options(&mut app.state);
+                crate::workbench::app::open_schematic_visibility_options(&mut app.state);
             }
             Self::ToggleFullScreen => {
                 if app.state.workbench.full_screen_presentation {
                     crate::workbench::exit_full_screen_presentation(app);
                 } else {
-                    crate::common::app::open_full_screen_workflow(&mut app.state);
+                    crate::workbench::app::open_full_screen_workflow(&mut app.state);
                 }
             }
             Self::ResetActiveView => {
                 if reset_active_view_available(app.state.workbench.workspace) {
-                    crate::common::app::open_reset_active_view_workflow(&mut app.state);
+                    crate::workbench::app::open_reset_active_view_workflow(&mut app.state);
                 }
             }
             Self::EngineeringTableView => {
-                crate::common::app::open_engineering_table_dialog(&mut app.state);
+                crate::workbench::app::open_engineering_table_dialog(&mut app.state);
             }
             Self::ToggleNavigator => {
                 if app.state.workbench.navigator_visible {
@@ -1628,29 +1628,29 @@ impl Command {
                 }
             }
             Self::ResetLayout => app.state.workbench.reset_layout(),
-            Self::NewApplicationWindow => crate::common::app::open_window_workflow(
+            Self::NewApplicationWindow => crate::workbench::app::open_window_workflow(
                 app,
-                crate::common::app::WindowWorkflow::NewApplicationWindow,
+                crate::workbench::app::WindowWorkflow::NewApplicationWindow,
             ),
-            Self::DetachDocument => crate::common::app::open_window_workflow(
+            Self::DetachDocument => crate::workbench::app::open_window_workflow(
                 app,
-                crate::common::app::WindowWorkflow::DetachDocument,
+                crate::workbench::app::WindowWorkflow::DetachDocument,
             ),
-            Self::MoveDocumentToWindow => crate::common::app::open_window_workflow(
+            Self::MoveDocumentToWindow => crate::workbench::app::open_window_workflow(
                 app,
-                crate::common::app::WindowWorkflow::MoveDocument,
+                crate::workbench::app::WindowWorkflow::MoveDocument,
             ),
-            Self::ReattachDocument => crate::common::app::open_window_workflow(
+            Self::ReattachDocument => crate::workbench::app::open_window_workflow(
                 app,
-                crate::common::app::WindowWorkflow::ReattachDocument,
+                crate::workbench::app::WindowWorkflow::ReattachDocument,
             ),
-            Self::ConsolidateWindows => crate::common::app::open_window_workflow(
+            Self::ConsolidateWindows => crate::workbench::app::open_window_workflow(
                 app,
-                crate::common::app::WindowWorkflow::ConsolidateWindows,
+                crate::workbench::app::WindowWorkflow::ConsolidateWindows,
             ),
-            Self::MonitorRecovery => crate::common::app::open_window_workflow(
+            Self::MonitorRecovery => crate::workbench::app::open_window_workflow(
                 app,
-                crate::common::app::WindowWorkflow::MonitorRecovery,
+                crate::workbench::app::WindowWorkflow::MonitorRecovery,
             ),
             Self::PreviousDocument => {
                 crate::workbench::chrome::document_bar::cycle_document(&mut app.state, true);
@@ -1662,7 +1662,7 @@ impl Command {
                 let count =
                     crate::workbench::chrome::document_bar::close_other_documents(&mut app.state);
                 app.state
-                    .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                    .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
                         "Closed {count} other document presentation(s); project data was retained"
                     )));
             }
@@ -1670,7 +1670,7 @@ impl Command {
                 let count =
                     crate::workbench::chrome::document_bar::close_all_documents(&mut app.state);
                 app.state
-                    .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                    .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
                         "Closed {count} document presentation(s); pinned project data was retained"
                     )));
             }
@@ -1688,7 +1688,7 @@ impl Command {
                 .state
                 .dialogs
                 .window_session
-                .open(crate::common::app::WindowSessionPage::Windows),
+                .open(crate::workbench::app::WindowSessionPage::Windows),
             Self::PreviousWorkspace => app.state.workbench.cycle_workspace(true),
             Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
             Self::SelectTool => {
@@ -1758,22 +1758,22 @@ impl Command {
                 );
             }
             Self::MoveSelection => {
-                crate::common::app::open_move_selection_dialog(&mut app.state);
+                crate::workbench::app::open_move_selection_dialog(&mut app.state);
             }
             Self::StretchSelection => {
-                crate::common::app::open_stretch_selection_dialog(&mut app.state);
+                crate::workbench::app::open_stretch_selection_dialog(&mut app.state);
             }
             Self::ArraySelection => {
-                crate::common::app::open_array_selection_dialog(&mut app.state);
+                crate::workbench::app::open_array_selection_dialog(&mut app.state);
             }
             Self::ReplaceInstance => {
-                crate::common::app::open_replace_instance_dialog(&mut app.state);
+                crate::workbench::app::open_replace_instance_dialog(&mut app.state);
             }
             Self::CreateHierarchy => {
-                crate::common::app::open_create_hierarchy_dialog(&mut app.state);
+                crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
             }
             Self::ConnectivityManager => {
-                crate::common::app::open_connectivity_manager(&mut app.state);
+                crate::workbench::app::open_connectivity_manager(&mut app.state);
             }
             Self::DesignManagement => {
                 let route = super::SurfaceRoute::surface(super::SurfaceId::DesignManagement);
@@ -1782,26 +1782,26 @@ impl Command {
                     .workbench
                     .navigate(route, super::RouteTransitionSource::User)
                 {
-                    Ok(_) => crate::common::app::open_design_management_dialog(&mut app.state),
+                    Ok(_) => crate::workbench::app::open_design_management_dialog(&mut app.state),
                     Err(error) => {
                         app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                                 error.to_string(),
                             ))
                     }
                 }
             }
             Self::SelectionBulkEdit => {
-                crate::common::app::open_selection_bulk_edit_dialog(&mut app.state);
+                crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
             }
             Self::ConfigurationSets => {
-                crate::common::app::open_configuration_sets_dialog(&mut app.state);
+                crate::workbench::app::open_configuration_sets_dialog(&mut app.state);
             }
             Self::ReviewComments => {
-                crate::common::app::open_design_review_comments(&mut app.state);
+                crate::workbench::app::open_design_review_comments(&mut app.state);
             }
             Self::RevisionHistory => {
-                crate::common::app::open_project_revision_history(&mut app.state);
+                crate::workbench::app::open_project_revision_history(&mut app.state);
             }
             Self::SymbolPinTool => {
                 app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
@@ -1915,21 +1915,21 @@ impl Command {
                 ) {
                     Ok(true) => {
                         app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                            .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
                                 "{} completed as one undoable transaction.",
                                 command.label()
                             )))
                     }
                     Ok(false) => {
                         app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::info(format!(
+                            .push_user_message(crate::workbench::app::ConsoleMessage::info(format!(
                                 "{} produced no geometry change.",
                                 command.label()
                             )))
                     }
                     Err(error) => {
                         app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                                 format!("{} was not applied: {error}.", command.label()),
                             ))
                     }
@@ -1939,11 +1939,11 @@ impl Command {
                 if app.state.dialogs.descend_hierarchy.open {
                     app.state.dialogs.descend_hierarchy.close();
                 } else if app.state.dialogs.move_selection.armed {
-                    crate::common::app::cancel_armed_move_selection(&mut app.state);
+                    crate::workbench::app::cancel_armed_move_selection(&mut app.state);
                 } else if app.state.dialogs.stretch_selection.armed {
-                    crate::common::app::cancel_armed_stretch_selection(&mut app.state);
+                    crate::workbench::app::cancel_armed_stretch_selection(&mut app.state);
                 } else if app.state.dialogs.array_selection.armed {
-                    crate::common::app::cancel_armed_array_selection(&mut app.state);
+                    crate::workbench::app::cancel_armed_array_selection(&mut app.state);
                 } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
                 } else if app.state.dialogs.object_properties.open {
@@ -1962,7 +1962,7 @@ impl Command {
                 app.state.ascend_workspace_level();
             }
             Self::DescendHierarchy => {
-                crate::common::app::open_descend_hierarchy_dialog(&mut app.state);
+                crate::workbench::app::open_descend_hierarchy_dialog(&mut app.state);
             }
             Self::DescendHierarchyDirect => {
                 app.state.open_selected_instance_master();
@@ -1970,9 +1970,9 @@ impl Command {
             Self::RunChecks if active_symbol_editor(app) => {
                 app.state.run_active_symbol_pin_checks();
             }
-            Self::RunChecks => crate::common::menu_bar::run_design_rule_check(&mut app.state),
+            Self::RunChecks => crate::workbench::menu_bar::run_design_rule_check(&mut app.state),
             Self::CheckAndSave => {
-                crate::common::app::open_check_and_save_dialog(&mut app.state);
+                crate::workbench::app::open_check_and_save_dialog(&mut app.state);
             }
             Self::ClearChecks => app.state.dialogs.drc_results = None,
             Self::NextViolation => {
@@ -1995,11 +1995,11 @@ impl Command {
                 if stop_simulation_enabled(app.state.simulation.is_running) {
                     if let Err(error) = app.state.simulation.request_abort_active_run() {
                         app.state
-                            .push_sim_message(crate::common::app::ConsoleMessage::warning(error));
+                            .push_sim_message(crate::workbench::app::ConsoleMessage::warning(error));
                     }
                 } else if app.state.simulation.is_running {
                     app.state.push_sim_message(
-                        crate::common::app::ConsoleMessage::warning(
+                        crate::workbench::app::ConsoleMessage::warning(
                             "This execution target cannot yet guarantee cancellation; the active run was left intact",
                         ),
                     );
@@ -2008,15 +2008,15 @@ impl Command {
             Self::JobsManager => super::jobs_manager::open(app),
             Self::PreflightChecks => super::preflight::run(app),
             Self::SimulationOptions => {
-                crate::common::menu_bar::open_simulation_options(&mut app.state)
+                crate::workbench::menu_bar::open_simulation_options(&mut app.state)
             }
             Self::GenerateNetlist => {
-                crate::common::menu_bar::action_view_netlist(&mut app.state);
+                crate::workbench::menu_bar::action_view_netlist(&mut app.state);
                 activate_workspace(app, Workspace::Netlist);
             }
             Self::FindCodeDocument => app.state.ui.netlist.find.open = true,
             Self::ValidateCodeDocument => {
-                crate::common::netlist_workflow::validate_visible_netlist_source(app);
+                crate::workbench::netlist_workflow::validate_visible_netlist_source(app);
             }
             Self::CompareGeneratedRevisions => {
                 app.state.ui.netlist.comparison_dialog.open = true;
@@ -2037,7 +2037,7 @@ impl Command {
                     || app.state.simulation.is_running
                 {
                     app.state
-                        .push_sim_message(crate::common::app::ConsoleMessage::warning(
+                        .push_sim_message(crate::workbench::app::ConsoleMessage::warning(
                         "Result history cannot be cleared while a simulation execution owns a run"
                             .to_owned(),
                     ));
@@ -2058,7 +2058,7 @@ impl Command {
                         super::result_document::viewer_unavailability_reason(&app.state, viewer)
                             .unwrap_or("the active dataset is incompatible with this viewer");
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
                             "{} cannot be opened: {reason}.",
                             viewer.label()
                         )));
@@ -2071,7 +2071,7 @@ impl Command {
             }
             Self::VerificationPage(VerificationPage::Drc) => {
                 app.state.push_user_message(
-                    crate::common::app::ConsoleMessage::warning(
+                    crate::workbench::app::ConsoleMessage::warning(
                         "Physical DRC is unavailable until a retained layout source, qualified rule deck, and immutable marker database are integrated.",
                     ),
                 );
@@ -2097,14 +2097,14 @@ impl Command {
                         super::model_editor::open_project_model(app, &library_name, &model_name)
                     {
                         app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                                 format!("Cannot open device model editor: {error}"),
                             ));
                     }
                 }
                 Err(reason) => {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
                             "Cannot open device model editor: {reason}."
                         )))
                 }
@@ -2116,14 +2116,14 @@ impl Command {
                         super::RouteTransitionSource::User,
                     ) {
                         app.state
-                            .push_user_message(crate::common::app::ConsoleMessage::warning(
+                            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                                 format!("Cannot open measurement correlation: {error}"),
                             ));
                     }
                 }
                 Err(reason) => {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
                             "Cannot open measurement correlation: {reason}."
                         )))
                 }
@@ -2131,7 +2131,7 @@ impl Command {
             Self::ModelSaveRevision => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::SaveRevision) {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                             "Model revision cannot be reviewed: no project-owned candidate is open",
                         ));
                 }
@@ -2139,7 +2139,7 @@ impl Command {
             Self::ModelValidate => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate) {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                         "Model validation cannot be reviewed: no project-owned candidate is open",
                     ));
                 }
@@ -2147,7 +2147,7 @@ impl Command {
             Self::ModelRunQualificationTests => {
                 if !request_model_editor_workflow(app, ModelEditorWorkflow::RunQualification) {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                             "Qualification cannot be reviewed: no project-owned candidate is open",
                         ));
                 }
@@ -2202,7 +2202,7 @@ impl Command {
                     .navigate(route, super::RouteTransitionSource::User)
                 {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                             error.to_string(),
                         ));
                 }
@@ -2217,7 +2217,7 @@ impl Command {
                     .navigate(route, super::RouteTransitionSource::User)
                 {
                     app.state
-                        .push_user_message(crate::common::app::ConsoleMessage::warning(
+                        .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                             error.to_string(),
                         ));
                 }
@@ -2226,32 +2226,32 @@ impl Command {
                 .state
                 .dialogs
                 .help_center
-                .open(crate::common::app::HelpCenterPage::Help),
+                .open(crate::workbench::app::HelpCenterPage::Help),
             Self::ReleaseNotes => app
                 .state
                 .dialogs
                 .help_center
-                .open(crate::common::app::HelpCenterPage::ReleaseNotes),
+                .open(crate::workbench::app::HelpCenterPage::ReleaseNotes),
             Self::MigrationGuide => app
                 .state
                 .dialogs
                 .help_center
-                .open(crate::common::app::HelpCenterPage::MigrationGuide),
+                .open(crate::workbench::app::HelpCenterPage::MigrationGuide),
             Self::SystemDiagnostics => app
                 .state
                 .dialogs
                 .help_center
-                .open(crate::common::app::HelpCenterPage::Diagnostics),
+                .open(crate::workbench::app::HelpCenterPage::Diagnostics),
             Self::SupportBundle => app
                 .state
                 .dialogs
                 .help_center
-                .open(crate::common::app::HelpCenterPage::SupportBundle),
+                .open(crate::workbench::app::HelpCenterPage::SupportBundle),
             Self::LegalPrivacy => app
                 .state
                 .dialogs
                 .help_center
-                .open(crate::common::app::HelpCenterPage::LegalPrivacy),
+                .open(crate::workbench::app::HelpCenterPage::LegalPrivacy),
             Self::About => app.state.dialogs.about = true,
         }
     }
@@ -3374,7 +3374,7 @@ mod tests {
         assert!(app.state.dialogs.rename_selection.open);
         assert!(matches!(
             app.state.dialogs.rename_selection.target.as_ref(),
-            Some(crate::common::app::RenameSelectionTarget::Component(component))
+            Some(crate::workbench::app::RenameSelectionTarget::Component(component))
                 if component.id == id
         ));
     }
@@ -3562,7 +3562,7 @@ mod tests {
         Command::ObjectProperties.execute(&mut app);
         assert!(matches!(
             app.state.dialogs.object_properties.draft,
-            Some(crate::common::app::ObjectPropertiesDraft::Bus(_))
+            Some(crate::workbench::app::ObjectPropertiesDraft::Bus(_))
         ));
         app.state.dialogs.object_properties.close();
 
@@ -3570,7 +3570,7 @@ mod tests {
         Command::ObjectProperties.execute(&mut app);
         assert!(matches!(
             app.state.dialogs.object_properties.draft,
-            Some(crate::common::app::ObjectPropertiesDraft::BusTap(_))
+            Some(crate::workbench::app::ObjectPropertiesDraft::BusTap(_))
         ));
         app.state.dialogs.object_properties.close();
 
@@ -3596,7 +3596,7 @@ mod tests {
         Command::ObjectProperties.execute(&mut app);
         assert!(matches!(
             app.state.dialogs.object_properties.draft,
-            Some(crate::common::app::ObjectPropertiesDraft::NetLabel(ref draft))
+            Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(ref draft))
                 if draft.original.id == id
         ));
         app.state.dialogs.object_properties.close();
@@ -4662,7 +4662,7 @@ mod tests {
         assert!(app.state.dialogs.view_operation.open);
         assert_eq!(
             app.state.dialogs.view_operation.operation,
-            crate::common::app::ViewOperation::FullScreen
+            crate::workbench::app::ViewOperation::FullScreen
         );
         assert!(app.state.dialogs.application_modal_open());
         assert!(!app.state.workbench.full_screen_presentation);
@@ -4679,7 +4679,7 @@ mod tests {
         assert!(app.state.dialogs.view_operation.open);
         assert_eq!(
             app.state.dialogs.view_operation.operation,
-            crate::common::app::ViewOperation::ResetActiveView
+            crate::workbench::app::ViewOperation::ResetActiveView
         );
         assert_eq!(
             app.state.dialogs.view_operation.workspace,

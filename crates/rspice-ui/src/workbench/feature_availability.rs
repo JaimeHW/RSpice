@@ -10,7 +10,7 @@ use egui::{
     WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::common::{RSpiceApp, app::ConsoleMessage};
+use crate::workbench::{RSpiceApp, app::ConsoleMessage};
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::io::ProjectSimulationResults;
 use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId};
 use crate::results::report_document::{

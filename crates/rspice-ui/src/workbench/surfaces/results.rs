@@ -2,7 +2,7 @@
 
 use egui::Ui;
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // The result viewers are document engines (plotting, cursors, FFT, RF,

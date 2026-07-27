@@ -8,7 +8,7 @@
 
 use egui::Ui;
 
-use crate::common::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp};
 use crate::state::{
     PinSummary, Point, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
     SymbolPinElectricalKind, SymbolPinSide, SymbolShape,
@@ -77,7 +77,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .store_active_symbol_editor_bundle(&document, &metadata)
     {
         app.state
-            .push_user_message(crate::common::ConsoleMessage::warning(error));
+            .push_user_message(crate::workbench::ConsoleMessage::warning(error));
     }
 }
 
@@ -740,7 +740,7 @@ fn definition_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorM
     )
     .clicked()
     {
-        crate::common::app::open_symbol_parameter_form_dialog(&mut app.state);
+        crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);
     }
 }
 

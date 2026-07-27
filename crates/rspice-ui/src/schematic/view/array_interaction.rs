@@ -2,7 +2,7 @@
 
 use egui::{Response, Ui};
 
-use crate::common::app::{AppState, ConsoleMessage};
+use crate::workbench::app::{AppState, ConsoleMessage};
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement};
 
 use super::SchematicSymbolContext;
@@ -20,11 +20,11 @@ pub(super) fn handle_armed_array_selection(
     grid_size: i32,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if let Err(message) = crate::common::app::armed_array_selection_authority(state) {
+    if let Err(message) = crate::workbench::app::armed_array_selection_authority(state) {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Create array cancelled: {message}"
         )));
-        crate::common::app::cancel_armed_array_selection(state);
+        crate::workbench::app::cancel_armed_array_selection(state);
         return;
     }
 
@@ -204,16 +204,16 @@ fn consume_keyboard(ui: &Ui, canvas_has_focus: bool, grid_size: i32) -> (Point, 
 }
 
 fn commit_armed_array_selection(state: &mut AppState, symbol_context: &SchematicSymbolContext) {
-    if let Err(message) = crate::common::app::armed_array_selection_authority(state) {
+    if let Err(message) = crate::workbench::app::armed_array_selection_authority(state) {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Create array cancelled: {message}"
         )));
-        crate::common::app::cancel_armed_array_selection(state);
+        crate::workbench::app::cancel_armed_array_selection(state);
         return;
     }
     let plan = match array_placement(state)
         .map_err(str::to_owned)
-        .and_then(|placement| crate::common::app::armed_array_selection_plan(state, placement))
+        .and_then(|placement| crate::workbench::app::armed_array_selection_plan(state, placement))
     {
         Ok(plan) => plan,
         Err(message) => {
@@ -236,7 +236,7 @@ fn commit_armed_array_selection(state: &mut AppState, symbol_context: &Schematic
                 "Created {} new array members; one undo record committed.",
                 impact.replicas,
             )));
-            crate::common::app::cancel_armed_array_selection(state);
+            crate::workbench::app::cancel_armed_array_selection(state);
         }
         Err(error) => {
             state.dialogs.array_selection.preview_error = Some(error.to_string());
@@ -283,7 +283,7 @@ mod tests {
         state.schematic.selection.select_only_component(1);
         state.schematic.recalculate_runtime_state();
         state.schematic.clear_undo_history();
-        crate::common::app::open_array_selection_dialog(&mut state);
+        crate::workbench::app::open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.preview_delta = Point::new(100, 0);
         crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::ArraySelection);
@@ -311,7 +311,7 @@ mod tests {
         state.schematic.selection.select_only_component(1);
         state.schematic.recalculate_runtime_state();
         state.schematic.clear_undo_history();
-        crate::common::app::open_array_selection_dialog(&mut state);
+        crate::workbench::app::open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.preview_delta = Point::new(1, 0);
         crate::workbench::commands::arm_schematic_tool(&mut state.schematic, Tool::ArraySelection);

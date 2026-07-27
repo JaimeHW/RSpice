@@ -2,7 +2,7 @@
 
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
@@ -336,7 +336,7 @@ fn source_editor(
                 Ok(false) => {}
                 Err(error) => app
                     .state
-                    .push_user_message(crate::common::ConsoleMessage::error(format!(
+                    .push_user_message(crate::workbench::ConsoleMessage::error(format!(
                         "Could not update {}: {error}",
                         active_path
                     ))),

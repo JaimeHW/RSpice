@@ -2,7 +2,7 @@
 
 use egui::Ui;
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::state::{
     AnalysisResultPayload, TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,

@@ -5,7 +5,7 @@
 
 use egui::{Event, InputState, Key, Popup, Response};
 
-use crate::common::app::{AppState, SchematicKeyboardFocus};
+use crate::workbench::app::{AppState, SchematicKeyboardFocus};
 use crate::state::Point;
 use crate::workbench::TogglePreference;
 
@@ -45,7 +45,7 @@ pub(super) fn handle_keyboard_object_navigation(
         .input_mut(|input| consume_unmodified_key(input, Key::Backspace))
     {
         if !state.schematic.read_only && !state.active_view_read_only() {
-            crate::common::app::open_delete_selection_dialog(state);
+            crate::workbench::app::open_delete_selection_dialog(state);
         }
         return true;
     }

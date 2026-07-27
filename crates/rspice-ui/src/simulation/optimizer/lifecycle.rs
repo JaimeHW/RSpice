@@ -1,4 +1,4 @@
-use crate::common::time_compat::Instant;
+use crate::time_compat::Instant;
 use std::collections::HashMap;
 
 use super::*;

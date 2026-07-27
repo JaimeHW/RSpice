@@ -592,7 +592,7 @@ fn wrap_line(line: &str, max_len: usize, continuation: &str) -> String {
 
 /// Simple timestamp without chrono dependency
 fn chrono_lite_now() -> String {
-    let secs = crate::common::time_compat::unix_epoch().as_secs();
+    let secs = crate::time_compat::unix_epoch().as_secs();
     format!("{}", secs)
 }
 

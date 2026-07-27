@@ -13,7 +13,7 @@ use egui::{
     WidgetType,
 };
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::product::{ObjectRevision, ProjectId};
 use crate::state::model_library::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,

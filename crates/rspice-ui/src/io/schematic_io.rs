@@ -131,7 +131,7 @@ impl SchematicFile {
 
     /// Create with metadata
     pub fn with_metadata(schematic: SchematicState, title: impl Into<String>) -> Self {
-        let now = crate::common::time_compat::unix_epoch().as_secs();
+        let now = crate::time_compat::unix_epoch().as_secs();
 
         Self {
             version: SchematicVersion::current(),
@@ -312,7 +312,7 @@ pub fn save_schematic(schematic: &SchematicState, path: &Path) -> Result<(), Sch
     let mut file = SchematicFile::new(schematic.clone());
 
     // Update metadata timestamp
-    let now = crate::common::time_compat::unix_epoch().as_secs();
+    let now = crate::time_compat::unix_epoch().as_secs();
     file.metadata.modified_at = Some(now);
 
     // Extract title from filename
@@ -330,7 +330,7 @@ pub fn save_schematic_file(file: &SchematicFile, path: &Path) -> Result<(), Sche
     #[cfg(target_arch = "wasm32")]
     {
         let contents = serialize_schematic_file(file)?;
-        crate::common::browser_download::download_text_file(path, &contents)
+        crate::workbench::browser_download::download_text_file(path, &contents)
             .map_err(SchematicIoError::Io)?;
         Ok(())
     }
@@ -368,7 +368,7 @@ pub(crate) fn suggested_schematic_save_path(default_name: Option<&str>) -> PathB
             .filter(|name| !name.trim().is_empty())
             .unwrap_or("untitled.rsch"),
     );
-    crate::common::file_actions::ensure_file_extension(&mut path, "rsch");
+    crate::workbench::file_actions::ensure_file_extension(&mut path, "rsch");
     path
 }
 

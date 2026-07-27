@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use egui::{Key, Modifiers, Response, ScrollArea, Ui};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::schematic::view::SchematicShelfDragPayload;
 use crate::schematic::{ComponentPaletteEntry, component_palette};
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
@@ -1260,7 +1260,7 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     }
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
         crate::workbench::commands::Command::PlaceInstance,
-        crate::common::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     shelf_section_header(

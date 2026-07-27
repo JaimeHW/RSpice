@@ -8,7 +8,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
-use crate::common::app::AppState;
+use crate::workbench::app::AppState;
 use crate::state::{
     Component, ComponentType, Point, ResolvedCellSymbol, SchematicState, SymbolResolver,
 };
@@ -568,7 +568,7 @@ fn schematic_accessibility_description(
     } else {
         schematic.tool.display_name().to_owned()
     };
-    let shortcuts = crate::common::app::accessibility_shortcut_summary(
+    let shortcuts = crate::workbench::app::accessibility_shortcut_summary(
         state.ui.preferences.shortcuts(),
         platform,
         operating_system,
@@ -680,9 +680,9 @@ fn schematic_keyboard_navigation_has_objects(state: &AppState) -> bool {
 
 fn schematic_keyboard_focus_label(
     state: &AppState,
-    focus: crate::common::app::SchematicKeyboardFocus,
+    focus: crate::workbench::app::SchematicKeyboardFocus,
 ) -> String {
-    use crate::common::app::SchematicKeyboardFocus;
+    use crate::workbench::app::SchematicKeyboardFocus;
     let id = match focus {
         SchematicKeyboardFocus::Component(id)
         | SchematicKeyboardFocus::Wire(id)
@@ -1468,7 +1468,7 @@ pub fn render_schematic_view(
         .map(|cursor| to_grid_units(cursor, state));
     state.ui.canvas_view_center = Some(to_grid_units(available.center(), state));
 
-    let shortcut_platform = crate::common::app::runtime_command_platform(ui.ctx());
+    let shortcut_platform = crate::workbench::app::runtime_command_platform(ui.ctx());
     let operating_system = ui.ctx().os();
     let accessibility_label = schematic_accessibility_label();
     let accessibility_description =
@@ -1493,7 +1493,7 @@ pub fn render_schematic_view(
             node.set_label(selection_status);
             node.set_live(egui::accesskit::Live::Polite);
         });
-    crate::common::app::report_engineering_canvas_focus(
+    crate::workbench::app::report_engineering_canvas_focus(
         &response,
         state.workspace.active_view_type(),
     );

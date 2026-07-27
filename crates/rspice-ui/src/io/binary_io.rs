@@ -39,7 +39,7 @@ impl PsfHeader {
             version: Self::VERSION,
             num_traces,
             num_points,
-            timestamp: crate::common::time_compat::unix_epoch().as_secs(),
+            timestamp: crate::time_compat::unix_epoch().as_secs(),
         }
     }
 }

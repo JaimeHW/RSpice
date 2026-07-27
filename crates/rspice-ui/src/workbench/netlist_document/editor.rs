@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use egui::Ui;
 use rspice_core::abort_signal::{AbortSignal, NoAbort};
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 
@@ -490,7 +490,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     let buffer = state.simulation.netlist_content.clone();
     let materialized =
         if state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
-            crate::common::netlist_workflow::compose_owned_netlist_execution_source(state, &buffer)
+            crate::workbench::netlist_workflow::compose_owned_netlist_execution_source(state, &buffer)
         } else {
             Ok(buffer.clone())
         };

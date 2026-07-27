@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::product::ContentDigest;
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
 use crate::workbench::TogglePreference;

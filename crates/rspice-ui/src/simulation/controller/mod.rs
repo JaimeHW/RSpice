@@ -17,8 +17,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(test)]
 use std::path::PathBuf;
 
-use crate::common::app::{AppState, ConsoleMessage};
-use crate::common::export_workflow::ExportWorkflowIo;
+use crate::workbench::app::{AppState, ConsoleMessage};
+use crate::workbench::export_workflow::ExportWorkflowIo;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
 use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
@@ -1503,7 +1503,7 @@ impl SimulationController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+    use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
     use crate::simulation::plan::AnalysisKind;
     use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};
@@ -1568,7 +1568,7 @@ mod tests {
 
     fn state_with_current_clean_drc() -> AppState {
         let mut state = AppState::default();
-        crate::common::examples::load_example("Voltage Divider", &mut state.schematic);
+        crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
         let mut result = DrcResult::new();
         result.completed = true;
         state.dialogs.drc_results = Some(result);
@@ -1778,7 +1778,7 @@ mod tests {
             );
         controller.abort();
 
-        let project = crate::common::project_lifecycle::snapshot(&state)
+        let project = crate::workbench::project_lifecycle::snapshot(&state)
             .expect("production snapshot accepts controller run");
         let json = crate::io::project_io::serialize_project_file(&project)
             .expect("controller plan run serializes");
@@ -3008,7 +3008,7 @@ mod tests {
             );
         controller.abort();
 
-        let project = crate::common::project_lifecycle::snapshot(&state)
+        let project = crate::workbench::project_lifecycle::snapshot(&state)
             .expect("production snapshot accepts controller manual run");
         let json = crate::io::project_io::serialize_project_file(&project)
             .expect("controller manual run serializes");

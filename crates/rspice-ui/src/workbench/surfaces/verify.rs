@@ -5,7 +5,7 @@ mod tuning;
 use egui::{ScrollArea, Ui};
 use sha2::{Digest as _, Sha256};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::state::SpecEntry;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -3958,7 +3958,7 @@ fn regression_ci_documents(
 }
 
 fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) {
-    use crate::common::export_workflow::SaveDialogConfig;
+    use crate::workbench::export_workflow::SaveDialogConfig;
 
     let result: Result<Option<(std::path::PathBuf, bool)>, String> = (|| {
         let Some(path) = app.export_workflow_io.show_save_dialog(SaveDialogConfig {
@@ -3970,7 +3970,7 @@ fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) {
         else {
             return Ok(None);
         };
-        let package = crate::common::export_workflow::deterministic_stored_zip(&[
+        let package = crate::workbench::export_workflow::deterministic_stored_zip(&[
             ("rspice-golden-regression.xml", junit.as_bytes()),
             ("rspice-golden-regression.tap", tap.as_bytes()),
         ])?;
@@ -5481,7 +5481,7 @@ mod tests {
     fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
         let mut app = RSpiceApp::test_instance();
         app.state.workspace.project_sources = Default::default();
-        crate::common::examples::load_example("Voltage Divider", &mut app.state.schematic);
+        crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
         let variable_id = add_tuning_variable(&mut app);
         let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
         let source_plan_revision = app
@@ -5564,7 +5564,7 @@ mod tests {
     fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
         let mut app = RSpiceApp::test_instance();
         app.state.workspace.project_sources = Default::default();
-        crate::common::examples::load_example("Voltage Divider", &mut app.state.schematic);
+        crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
         let component_id = app
             .state
             .schematic

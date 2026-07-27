@@ -1,6 +1,6 @@
 use egui::{Pos2, Rect};
 
-use crate::common::app::AppState;
+use crate::workbench::app::AppState;
 use crate::state::Point;
 
 use super::viewport::Viewport;

@@ -5,7 +5,7 @@ mod symbol;
 
 use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::state::{CellViewRef, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -902,7 +902,7 @@ fn locate_on_schematic_menu(response: &egui::Response, app: &mut RSpiceApp, sign
                 Ok(net) => {
                     Command::OpenWorkspace(Workspace::Design).execute(app);
                     app.state
-                        .push_user_message(crate::common::ConsoleMessage::info(format!(
+                        .push_user_message(crate::workbench::ConsoleMessage::info(format!(
                             "Selected conductor {net} from {signal}."
                         )));
                 }
@@ -914,7 +914,7 @@ fn locate_on_schematic_menu(response: &egui::Response, app: &mut RSpiceApp, sign
                         message.clone(),
                     );
                     app.state
-                        .push_user_message(crate::common::ConsoleMessage::warning(message));
+                        .push_user_message(crate::workbench::ConsoleMessage::warning(message));
                 }
             }
             ui.close();
@@ -1697,7 +1697,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 }
 
-fn active_netlist_artifact_name(state: &crate::common::AppState) -> String {
+fn active_netlist_artifact_name(state: &crate::workbench::AppState) -> String {
     match state.ui.netlist.active_document {
         super::super::netlist_document::ActiveNetlistDocument::Generated => {
             "generated.sp".to_owned()
@@ -1723,7 +1723,7 @@ fn active_netlist_artifact_name(state: &crate::common::AppState) -> String {
 }
 
 fn active_canonical_netlist_document(
-    state: &crate::common::AppState,
+    state: &crate::workbench::AppState,
 ) -> Option<&crate::state::NetlistDocument> {
     match state.ui.netlist.active_document {
         super::super::netlist_document::ActiveNetlistDocument::Generated => {
@@ -1736,7 +1736,7 @@ fn active_canonical_netlist_document(
     }
 }
 
-fn netlist_dependency_status(state: &crate::common::AppState) -> &'static str {
+fn netlist_dependency_status(state: &crate::workbench::AppState) -> &'static str {
     let Some(document) = active_canonical_netlist_document(state) else {
         return "unavailable";
     };
@@ -2222,7 +2222,7 @@ fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_line: usize) 
                 app.state.schematic.selection.clear();
                 app.state.schematic.selection.select_component(component_id);
                 app.state
-                    .push_user_message(crate::common::ConsoleMessage::info(format!(
+                    .push_user_message(crate::workbench::ConsoleMessage::info(format!(
                         "Cross-probed generated line {active_line} to component {component_id}."
                     )));
             }
@@ -2564,7 +2564,7 @@ mod tests {
         responsive_result_control_height, verification_coverage, verification_flow_label,
         verification_navigator_requires_scroll,
     };
-    use crate::common::RSpiceApp;
+    use crate::workbench::RSpiceApp;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::services::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,

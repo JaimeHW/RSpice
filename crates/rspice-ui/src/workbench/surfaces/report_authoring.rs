@@ -8,7 +8,7 @@ use std::borrow::Cow;
 
 use egui::{Align2, Color32, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::common::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp};
 use crate::results::report_document::{
     ReportBlockKind, ReportDocument, ReportEdit, ReportEntityRef, ReportPageId,
     ReportPageUpdatePolicy, ReportReferenceMode, ReportSourceId, ReportTemplate, TableCell,
@@ -180,7 +180,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
         .navigate(route, RouteTransitionSource::User)
     {
         app.state
-            .push_user_message(crate::common::app::ConsoleMessage::warning(
+            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                 error.to_string(),
             ));
     }
@@ -189,7 +189,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
 pub(crate) fn save_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state
-            .push_user_message(crate::common::app::ConsoleMessage::warning(
+            .push_user_message(crate::workbench::app::ConsoleMessage::warning(
                 report_mutation_block_reason(&app.state),
             ));
         return;
@@ -202,7 +202,7 @@ pub(crate) fn save_document(app: &mut RSpiceApp) {
         .find_map(|document| document.validate().err());
     if let Some(error) = invalid {
         app.state
-            .push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+            .push_user_message(crate::workbench::app::ConsoleMessage::warning(format!(
                 "Report document save was blocked before publication: {error}"
             )));
         return;
@@ -2018,7 +2018,7 @@ fn valid_document_title(title: &str) -> bool {
 fn report_mutation_allowed(state: &AppState) -> bool {
     state.project_lifecycle.project_open
         && !state.workbench.safe_mode.project_read_only()
-        && !crate::common::project_lifecycle::operation_in_progress(state)
+        && !crate::workbench::project_lifecycle::operation_in_progress(state)
 }
 
 fn report_mutation_block_reason(state: &AppState) -> &'static str {
@@ -2026,7 +2026,7 @@ fn report_mutation_block_reason(state: &AppState) -> &'static str {
         "Open a project before changing its report document."
     } else if state.workbench.safe_mode.project_read_only() {
         "Report changes are unavailable because the active project is read-only."
-    } else if crate::common::project_lifecycle::operation_in_progress(state) {
+    } else if crate::workbench::project_lifecycle::operation_in_progress(state) {
         "Wait for the current project operation to finish before changing the report."
     } else {
         "Report changes are unavailable in the current application state."
@@ -2086,7 +2086,7 @@ fn page_marker(index: usize, title: &str) -> &str {
 }
 
 fn timestamp_unix_ms() -> u64 {
-    u64::try_from(crate::common::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX)
+    u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

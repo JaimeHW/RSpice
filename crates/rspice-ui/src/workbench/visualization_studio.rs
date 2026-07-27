@@ -15,7 +15,7 @@ use egui::{
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::calculator;
-use crate::common::{AppState, RSpiceApp, app::ConsoleMessage};
+use crate::workbench::{AppState, RSpiceApp, app::ConsoleMessage};
 use crate::product::{DatasetBinding, DatasetId};
 use crate::results::plot_export_preset::{
     ColorProfile, DeterministicNamingTemplate, ExportBackground, ExportPageSize,
@@ -6711,7 +6711,7 @@ fn export_preset_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         },
         scope,
     };
-    let timestamp = crate::common::time_compat::unix_epoch().as_millis();
+    let timestamp = crate::time_compat::unix_epoch().as_millis();
     let timestamp = u64::try_from(timestamp).unwrap_or(u64::MAX);
     let result = match scope {
         PlotExportPresetScope::Project => {

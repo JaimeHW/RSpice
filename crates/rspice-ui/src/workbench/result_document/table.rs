@@ -13,7 +13,7 @@
 
 use egui::Ui;
 
-use crate::common::AppState;
+use crate::workbench::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, measurement_table, section_header};

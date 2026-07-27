@@ -4,7 +4,7 @@
 //! `PropertyRegistry`). Inline inspection lives in the workbench inspector
 //! (`crate::workbench::panels::schematic`).
 
-use crate::common::app::AppState;
+use crate::workbench::app::AppState;
 use crate::properties::{TabbedDialogResult, render_tabbed_property_dialog};
 
 /// Render the floating tabbed property dialog window
@@ -158,7 +158,7 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::app::open_property_editor;
+    use crate::workbench::app::open_property_editor;
     use crate::state::{
         CellViewRef, Component, ComponentType, Point, PropertyCommitPolicy, PropertyValue,
     };

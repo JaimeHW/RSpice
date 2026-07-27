@@ -19,7 +19,7 @@
 //! - Timestamp with sub-millisecond precision
 //! - Search/filter by text pattern
 
-use crate::common::time_compat::Instant;
+use crate::time_compat::Instant;
 use std::collections::VecDeque;
 use std::time::Duration;
 

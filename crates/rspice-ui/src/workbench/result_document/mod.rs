@@ -35,8 +35,8 @@ use std::collections::HashSet;
 use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
 
-use crate::common::app::ActiveViewer;
-use crate::common::{AppState, RSpiceApp};
+use crate::workbench::app::ActiveViewer;
+use crate::workbench::{AppState, RSpiceApp};
 use crate::product::DatasetId;
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
@@ -1135,7 +1135,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     if !app.state.simulation.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
             crate::workbench::commands::Command::RunSimulation,
-            crate::common::app::runtime_command_platform(ui.ctx()),
+            crate::workbench::app::runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );
         let hint = if shortcut.is_empty() {
@@ -1300,7 +1300,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Waves => {
             let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
                 crate::workbench::commands::Command::ToggleLinkedCursors,
-                crate::common::app::runtime_command_platform(ui.ctx()),
+                crate::workbench::app::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
             let results = &mut state.ui.results;
@@ -1409,7 +1409,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
                     state.ui.results.spec_drafts = None;
                 }
                 if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
-                    state.push_sim_message(crate::common::app::ConsoleMessage::warning(
+                    state.push_sim_message(crate::workbench::app::ConsoleMessage::warning(
                         "Specs not applied — fix the invalid bound first",
                     ));
                 }
@@ -1488,7 +1488,7 @@ fn compact_result_actions(ui: &mut Ui, state: &mut AppState) {
                     }
                     if ui.button("Apply specification edits").clicked() {
                         if !specs::apply_drafts(state) {
-                            state.push_sim_message(crate::common::app::ConsoleMessage::warning(
+                            state.push_sim_message(crate::workbench::app::ConsoleMessage::warning(
                                 "Specs not applied — fix the invalid bound first",
                             ));
                         } else {

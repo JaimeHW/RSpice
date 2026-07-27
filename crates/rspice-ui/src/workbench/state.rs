@@ -1828,7 +1828,7 @@ const fn default_console_height() -> f32 {
 }
 
 const fn default_analysis_index() -> usize {
-    crate::common::simulation_analysis_tabs::TAB_TRANSIENT
+    crate::workbench::simulation_analysis_tabs::TAB_TRANSIENT
 }
 
 impl Default for WorkbenchState {

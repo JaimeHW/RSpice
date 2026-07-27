@@ -9,7 +9,7 @@ use egui::Key;
 use serde::{Deserialize, Serialize};
 
 use super::Command;
-use crate::common::RSpiceApp;
+use crate::workbench::RSpiceApp;
 use crate::workbench::state::Workspace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -788,7 +788,7 @@ impl Command {
         if matches!(self, Self::PreviousWorkspace | Self::NextWorkspace) {
             return CommandAvailability::Hidden;
         }
-        if crate::common::project_lifecycle::operation_in_progress(&app.state)
+        if crate::workbench::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
             return CommandAvailability::Disabled("project operation is still in progress");
