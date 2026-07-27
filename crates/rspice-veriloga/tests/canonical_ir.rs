@@ -647,6 +647,53 @@ endmodule
     );
 }
 
+#[test]
+fn primal_lowering_omits_the_derivative_expansion() {
+    // Enough nonlinearity that the chain rule has real work to do: every
+    // operand of the product carries a node derivative, so the scalarized
+    // graph has to materialize a value per lane per intermediate.
+    let source = r#"
+module primal_only(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        real u, w;
+        u = exp(V(p, n) * 3.0) + V(p, n) * V(p, n);
+        w = u / (1.0 + u * u);
+        I(p, n) <+ w * V(p, n);
+    end
+endmodule
+"#;
+    let analyzed = analyze_fixture(source, "primal_only").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+
+    let scalarized = OptModel::from_hir_and_mir(&hir, &mir).expect("lower scalarized OptIR");
+    let primal = OptModel::primal_from_hir_and_mir(&hir, &mir).expect("lower primal OptIR");
+
+    assert!(
+        primal
+            .values
+            .iter()
+            .all(|value| value.derivatives.is_empty()),
+        "primal lowering must not expand the chain rule into the value graph"
+    );
+    assert!(
+        scalarized
+            .values
+            .iter()
+            .any(|value| !value.derivatives.is_empty()),
+        "scalarized lowering is the control and must still carry derivatives"
+    );
+    assert!(
+        primal.values.len() < scalarized.values.len(),
+        "primal graph should be the smaller of the two: {} vs {}",
+        primal.values.len(),
+        scalarized.values.len()
+    );
+}
+
 fn lower_fixture_parts(
     source: &'static str,
     module_name: &str,

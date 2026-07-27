@@ -70,6 +70,17 @@ const MAX_SCALAR_STRUCTURAL_EQUALITY_DEPTH: usize = 192;
 pub(crate) const LIMEXP_MAX: f64 = 5.54062238439351e34;
 pub(crate) const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 
+/// Whether graph construction expands derivatives into the value list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DerivativeExpansion {
+    /// Run the chain rule and append one value per live lane, which is what the
+    /// scalar and kernel backends read.
+    Scalarized,
+    /// Leave the graph primal. The consumer differentiates it itself, in
+    /// whatever form it wants to emit.
+    None,
+}
+
 fn opt_phase_trace_enabled() -> bool {
     std::env::var_os("RSPICE_VERILOGA_PHASE_TRACE").is_some()
         || std::env::var_os("RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE").is_some()
@@ -453,19 +464,42 @@ impl OptModel {
     pub fn from_mir(mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         mir.validate()?;
 
-        Self::from_validated_inputs(None, mir)
+        Self::from_validated_inputs(None, mir, DerivativeExpansion::Scalarized)
     }
 
     pub fn from_hir_and_mir(hir: &HirModel, mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         hir.validate()?;
         mir.validate()?;
 
-        Self::from_validated_inputs(Some(hir), mir)
+        Self::from_validated_inputs(Some(hir), mir, DerivativeExpansion::Scalarized)
+    }
+
+    /// Build the value graph without expanding derivatives into it.
+    ///
+    /// [`Self::from_hir_and_mir`] runs the chain rule over the graph and writes
+    /// the result back as more values in the same list, which is what the
+    /// scalar and kernel backends consume. That expansion is large — HiSIM-HV
+    /// goes from 10,065 values to 149,437 — and it is not reversible: the
+    /// compaction that follows dissolves the primal-to-lane links, leaving
+    /// almost nothing to tell the two apart.
+    ///
+    /// A backend that wants to emit derivatives in a packed form rather than
+    /// one value per lane therefore cannot start from the expanded graph. This
+    /// gives it the primal graph instead, and it differentiates that itself.
+    pub fn primal_from_hir_and_mir(
+        hir: &HirModel,
+        mir: &MirModel,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        hir.validate()?;
+        mir.validate()?;
+
+        Self::from_validated_inputs(Some(hir), mir, DerivativeExpansion::None)
     }
 
     fn from_validated_inputs(
         hir: Option<&HirModel>,
         mir: &MirModel,
+        derivatives: DerivativeExpansion,
     ) -> Result<Self, Vec<IrDiagnostic>> {
         let trace = opt_phase_trace_enabled();
         let trace_equations = opt_equation_trace_enabled();
@@ -518,16 +552,18 @@ impl OptModel {
             Some(phase_started.elapsed()),
             Some(builder.values.len()),
         );
-        trace_opt_phase(trace, &mir.module_name, "add derivatives", None, None);
-        let phase_started = web_time::Instant::now();
-        builder.add_sparse_derivatives();
-        trace_opt_phase(
-            trace,
-            &mir.module_name,
-            "add derivatives",
-            Some(phase_started.elapsed()),
-            Some(builder.values.len()),
-        );
+        if derivatives == DerivativeExpansion::Scalarized {
+            trace_opt_phase(trace, &mir.module_name, "add derivatives", None, None);
+            let phase_started = web_time::Instant::now();
+            builder.add_sparse_derivatives();
+            trace_opt_phase(
+                trace,
+                &mir.module_name,
+                "add derivatives",
+                Some(phase_started.elapsed()),
+                Some(builder.values.len()),
+            );
+        }
         trace_opt_phase(trace, &mir.module_name, "finish", None, None);
         let phase_started = web_time::Instant::now();
         let (values, runtime_loops) = builder.finish(&mut equation_values);
