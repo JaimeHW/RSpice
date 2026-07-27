@@ -49,7 +49,6 @@ const LAYERS: &[(&str, u32)] = &[
     // Framework-independent contracts. These depend on nothing.
     ("product", 0),
     ("quantity", 0),
-    ("utils", 0),
     // Presentation-independent result contracts, and the design system.
     ("results", 1),
     ("ui", 1),

@@ -18,7 +18,7 @@
 //!
 //! | Layer | Modules | Owns |
 //! |-------|---------|------|
-//! | 0 | `product`, `quantity`, `utils` | Framework-independent contracts, typed identities, unit-safe presentation policy |
+//! | 0 | `product`, `quantity` | Framework-independent contracts, typed identities, unit-safe presentation policy |
 //! | 1 | `results`, `ui` | Versioned result documents; the design system (tokens, palette, widgets, plot engine) |
 //! | 2 | `hardcopy` | Persisted page setup, print mappings, and source-set records |
 //! | 3 | `state` | The persisted design, library, and project model |
@@ -129,9 +129,6 @@ pub mod io;
 
 /// Application state management
 pub mod state;
-
-/// Utility functions and helpers
-pub mod utils;
 
 /// Unit-safe user presentation and UI quantity-input policy. Values entering
 /// or leaving this module are always expressed in their documented SI base

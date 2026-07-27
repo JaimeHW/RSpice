@@ -180,7 +180,7 @@ pub(super) fn fold_sideband_contributors_with_abort(
             "PNOISE contributor folding requires a positive sideband stride".to_string(),
         ));
     }
-    if !crate::utils::numeric::is_multiple_of(translated_results.len(), sideband_stride) {
+    if !translated_results.len().is_multiple_of(sideband_stride) {
         return Err(ServiceRunError::Failure(format!(
             "PNOISE contributor folding expected translated results to be divisible by sideband stride (len={}, stride={})",
             translated_results.len(),

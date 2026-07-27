@@ -150,7 +150,7 @@ impl PwlData {
 
         let tokens: Vec<&str> = s.split_whitespace().collect();
 
-        if !crate::utils::numeric::is_multiple_of(tokens.len(), 2) {
+        if !tokens.len().is_multiple_of(2) {
             return Err(PwlValidationError::ValueParseError {
                 index: tokens.len() / 2,
                 text: "Odd number of values - expected time-value pairs".to_string(),
