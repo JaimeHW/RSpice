@@ -20,7 +20,7 @@ pub(super) fn parse_model_definition(
     known_models: &[ModelDef],
     defer_expression_params: bool,
 ) -> Result<ModelDef, ParseError> {
-    let name = expect_ident(stream, line_num)?;
+    let name = expect_model_name(stream, line_num)?;
     let second = expect_ident(stream, line_num)?;
 
     // PSpice `AKO:` inheritance: `.model X AKO:BASE [type] (overrides)`.
