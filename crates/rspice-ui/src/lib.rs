@@ -98,6 +98,11 @@ pub mod common;
 /// The RSpice design system - tokens, palettes, fonts, icons, widgets
 pub mod ui;
 
+/// Persisted page-setup contracts and deterministic pagination. Document
+/// adapters, scene rendering, the platform print boundary, and the dialogs
+/// live in `workbench::hardcopy`; this is the layer `state` can persist.
+pub mod hardcopy;
+
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.
 pub mod workbench;

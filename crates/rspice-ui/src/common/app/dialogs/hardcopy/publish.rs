@@ -20,7 +20,7 @@ thread_local! {
 
 struct PendingPageSetup {
     opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
-    setup: crate::workbench::hardcopy::HardcopySetup,
+    setup: crate::hardcopy::HardcopySetup,
     staged_mapping: StagedPrintMappingPersistence,
 }
 
@@ -47,8 +47,8 @@ use crate::common::hardcopy_print::{
 use crate::common::hardcopy_print::{HardcopyCancellationToken, PrinterCapabilitySnapshot};
 use crate::product::ContentDigest;
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::hardcopy::HardcopyArtifactIdentity;
-use crate::workbench::hardcopy::{
+use crate::hardcopy::HardcopyArtifactIdentity;
+use crate::hardcopy::{
     DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan, HardcopyReceipt, Orientation,
     OutputFormat, PrinterJobSettings, PrinterMediaSource, ResolvedOrientation,
 };
@@ -82,7 +82,7 @@ struct ActiveBrowserSourceResolution {
     ticket: super::worker::HardcopyWorkerTicket,
     purpose: SourceResolutionPurpose,
     source_key: String,
-    scope: crate::workbench::hardcopy::HardcopyScope,
+    scope: crate::hardcopy::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
 }
 
@@ -190,7 +190,7 @@ struct ActiveSourceResolution {
     generation: u64,
     purpose: SourceResolutionPurpose,
     source_key: String,
-    scope: crate::workbench::hardcopy::HardcopyScope,
+    scope: crate::hardcopy::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     receiver: std::sync::mpsc::Receiver<Result<ResolvedHardcopyDocument, String>>,
@@ -253,7 +253,7 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
 pub(super) fn select_retained_source(
     app: &mut RSpiceApp,
     source_key: &str,
-    scope: crate::workbench::hardcopy::HardcopyScope,
+    scope: crate::hardcopy::HardcopyScope,
 ) {
     let prepared = match crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
         &app.state,
@@ -292,7 +292,7 @@ fn start_source_resolution(
     purpose: SourceResolutionPurpose,
     generation: u64,
     source_key: String,
-    scope: crate::workbench::hardcopy::HardcopyScope,
+    scope: crate::hardcopy::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
 ) -> Result<(), String> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
@@ -331,7 +331,7 @@ fn start_source_resolution(
     purpose: SourceResolutionPurpose,
     generation: u64,
     source_key: String,
-    scope: crate::workbench::hardcopy::HardcopyScope,
+    scope: crate::hardcopy::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
 ) -> Result<(), String> {
     let ticket = super::worker::start_source_resolution(
@@ -689,9 +689,9 @@ fn apply_selected_resolved(
 
 fn active_retained_source_selection(
     app: &RSpiceApp,
-) -> Result<(String, crate::workbench::hardcopy::HardcopyScope), String> {
+) -> Result<(String, crate::hardcopy::HardcopyScope), String> {
     use crate::workbench::SurfaceId;
-    use crate::workbench::hardcopy::HardcopyScope;
+    use crate::hardcopy::HardcopyScope;
 
     let candidates =
         crate::workbench::hardcopy_sources::enumerate_retained_hardcopy_sources(&app.state);
@@ -1111,21 +1111,21 @@ enum PublicationCompletion {
 enum StagedPrintMappingPersistence {
     Document,
     Project {
-        catalog: crate::workbench::PrintMappingPresetCatalog,
+        catalog: crate::hardcopy::PrintMappingPresetCatalog,
         changed: bool,
     },
-    Personal(crate::workbench::PrintMappingPresetCatalog),
+    Personal(crate::hardcopy::PrintMappingPresetCatalog),
 }
 
 fn stage_print_mapping_persistence(
     app: &RSpiceApp,
-    mapping: &crate::workbench::hardcopy::PrintMappingTable,
+    mapping: &crate::hardcopy::PrintMappingTable,
 ) -> Result<StagedPrintMappingPersistence, String> {
     match mapping.save_scope() {
-        crate::workbench::hardcopy::PrintMappingSaveScope::Document => {
+        crate::hardcopy::PrintMappingSaveScope::Document => {
             Ok(StagedPrintMappingPersistence::Document)
         }
-        crate::workbench::hardcopy::PrintMappingSaveScope::ProjectPrintSet(_) => {
+        crate::hardcopy::PrintMappingSaveScope::ProjectPrintSet(_) => {
             let mut catalog = app.state.workspace.project_print_mappings.clone();
             let receipt = catalog
                 .save(mapping.clone())
@@ -1133,10 +1133,10 @@ fn stage_print_mapping_persistence(
             Ok(StagedPrintMappingPersistence::Project {
                 catalog,
                 changed: receipt.disposition()
-                    != crate::workbench::PrintMappingSaveDisposition::Unchanged,
+                    != crate::hardcopy::PrintMappingSaveDisposition::Unchanged,
             })
         }
-        crate::workbench::hardcopy::PrintMappingSaveScope::PortablePersonalPreset(_) => {
+        crate::hardcopy::PrintMappingSaveScope::PortablePersonalPreset(_) => {
             let mut catalog = app
                 .state
                 .ui
@@ -1436,15 +1436,15 @@ fn finish_page_setup_authentication(
         .map_err(|error| error.to_string())?;
     commit_print_mapping_persistence(app, pending.staged_mapping)?;
     app.state.workspace.hardcopy_setups = staged_setups;
-    if outcome.disposition() != crate::workbench::hardcopy::SetupSaveDisposition::Unchanged {
+    if outcome.disposition() != crate::hardcopy::SetupSaveDisposition::Unchanged {
         app.state.workspace.hardcopy_setups_dirty = true;
     }
     Ok(format!(
         "Page setup {} for {}.",
         match outcome.disposition() {
-            crate::workbench::hardcopy::SetupSaveDisposition::Inserted => "saved",
-            crate::workbench::hardcopy::SetupSaveDisposition::Updated => "updated",
-            crate::workbench::hardcopy::SetupSaveDisposition::Unchanged => "already matched",
+            crate::hardcopy::SetupSaveDisposition::Inserted => "saved",
+            crate::hardcopy::SetupSaveDisposition::Updated => "updated",
+            crate::hardcopy::SetupSaveDisposition::Unchanged => "already matched",
         },
         source.authority().display_name()
     ))
@@ -2405,7 +2405,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         use crate::state::{Point, Wire};
-        use crate::workbench::hardcopy::{HardcopyOutcome, PrinterRasterGeometry};
+        use crate::hardcopy::{HardcopyOutcome, PrinterRasterGeometry};
         use crate::workbench::state::WorkspaceDocumentId;
 
         let mut app = RSpiceApp::test_instance();
@@ -2504,7 +2504,7 @@ mod tests {
 
     #[test]
     fn project_print_mapping_stage_is_transactional_until_publication_commit() {
-        use crate::workbench::hardcopy::{PrintMappingSaveScope, PrintMappingTable};
+        use crate::hardcopy::{PrintMappingSaveScope, PrintMappingTable};
 
         let mut app = RSpiceApp::test_instance();
         let before = app.state.workspace.project_print_mappings.clone();

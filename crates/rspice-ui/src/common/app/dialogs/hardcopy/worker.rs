@@ -10,7 +10,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::common::export_workflow::deterministic_stored_zip;
 use crate::product::ContentDigest;
-use crate::workbench::hardcopy::{
+use crate::hardcopy::{
     HardcopyArtifactIdentity, HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup,
     MAX_PREVIEW_PAGES, OutputFormat,
 };
@@ -762,7 +762,7 @@ mod browser {
     pub(crate) fn start_source_resolution(
         prepared: crate::workbench::hardcopy_sources::PreparedRetainedHardcopyResolution,
         source_key: String,
-        scope: crate::workbench::hardcopy::HardcopyScope,
+        scope: crate::hardcopy::HardcopyScope,
         epoch: u64,
         generation: u64,
         repaint: egui::Context,
@@ -780,7 +780,7 @@ mod browser {
     }
 
     pub(crate) fn start_preview(
-        plan: &crate::workbench::hardcopy::HardcopyPlan,
+        plan: &crate::hardcopy::HardcopyPlan,
         source: &crate::workbench::hardcopy_sources::ResolvedHardcopyDocument,
         metadata: crate::workbench::hardcopy_render::HardcopySceneMetadata,
         page_indices: Vec<usize>,
@@ -809,7 +809,7 @@ mod browser {
     }
 
     pub(crate) fn start_publication(
-        plan: &crate::workbench::hardcopy::HardcopyPlan,
+        plan: &crate::hardcopy::HardcopyPlan,
         source: &crate::workbench::hardcopy_sources::ResolvedHardcopyDocument,
         metadata: crate::workbench::hardcopy_render::HardcopySceneMetadata,
         package_multi_part: bool,
@@ -1168,7 +1168,7 @@ mod tests {
     use super::*;
     use crate::common::AppState;
     use crate::state::{Point, Wire};
-    use crate::workbench::hardcopy::{
+    use crate::hardcopy::{
         BackgroundMode, ColorMapping, FontPolicy, RenderSetup, RenderTarget, ScaleMode,
     };
     use crate::workbench::hardcopy_render::{HardcopyPreviewPage, RenderedHardcopyPublication};

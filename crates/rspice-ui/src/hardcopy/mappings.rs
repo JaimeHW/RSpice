@@ -9,7 +9,7 @@ use std::{collections::BTreeMap, error::Error, fmt};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::hardcopy::{PrintMappingSaveScope, PrintMappingTable};
+use super::contract::{PrintMappingSaveScope, PrintMappingTable};
 
 const PRINT_MAPPING_CATALOG_SCHEMA_VERSION: u16 = 1;
 const MAX_PRINT_MAPPING_PRESETS: usize = 256;

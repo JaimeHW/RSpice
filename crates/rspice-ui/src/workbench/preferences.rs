@@ -15,8 +15,8 @@ use crate::results::plot_export_preset::{
     PlotExportPresetMutationReceipt, PlotExportPresetScope,
 };
 
-use super::hardcopy::PrintMappingTable;
-use super::hardcopy_mapping_store::{
+use crate::hardcopy::PrintMappingTable;
+use crate::hardcopy::mappings::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
     PrintMappingSaveReceipt,
 };
@@ -1916,7 +1916,7 @@ mod tests {
     fn personal_print_mapping_presets_route_to_user_preferences() {
         let mut preferences = UserPreferences::default();
         let mapping = PrintMappingTable::try_new(
-            crate::workbench::hardcopy::PrintMappingSaveScope::PortablePersonalPreset(
+            crate::hardcopy::PrintMappingSaveScope::PortablePersonalPreset(
                 "bench-printer".to_owned(),
             ),
             Vec::new(),
@@ -1927,7 +1927,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             receipt.disposition(),
-            crate::workbench::PrintMappingSaveDisposition::Created
+            crate::hardcopy::PrintMappingSaveDisposition::Created
         );
 
         let encoded = serde_json::to_string(&preferences).unwrap();

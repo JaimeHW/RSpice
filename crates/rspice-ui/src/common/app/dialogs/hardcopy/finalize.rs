@@ -22,7 +22,7 @@ use crate::common::hardcopy_print::{
     HardcopyCancellationToken, HardcopyPrintError, discover_native_printers, spool_native_hardcopy,
 };
 use crate::product::ContentDigest;
-use crate::workbench::hardcopy::{
+use crate::hardcopy::{
     CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
     HardcopyPlan, OutputFormat, RenderTarget,
 };
@@ -839,7 +839,7 @@ mod tests {
     use std::sync::atomic::AtomicU64;
 
     use crate::product::ObjectRevision;
-    use crate::workbench::hardcopy::{
+    use crate::hardcopy::{
         ActiveHardcopySource, ContentExtent, HardcopyDocumentId, HardcopyDocumentKind,
         HardcopyScope, HardcopySetup, Length,
     };

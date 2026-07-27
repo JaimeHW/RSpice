@@ -25,7 +25,7 @@ use sha2::{Digest as _, Sha256};
 use tiff::encoder::{Compression, DeflateLevel, Rational, TiffEncoder, colortype};
 use tiff::tags::ResolutionUnit;
 
-use super::hardcopy::{
+use crate::hardcopy::{
     BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity,
     HardcopyDocumentId, HardcopyPlan, HardcopyPlanId, Length, OutputFormat, PageRect, PreviewPage,
     PrintColor, PrintMappingTable, PrintObjectKind, PrintRedundancy, RenderTarget,
@@ -6707,7 +6707,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::workbench::hardcopy::{
+    use crate::hardcopy::{
         ActiveHardcopySource, DecorationSetup, DuplexMode, FontPolicy, HardcopyContentSection,
         HardcopyDocumentKind, HardcopyScope, HardcopySetup, Orientation, PageMargins, PaperSize,
         PhysicalPageSetup, PrintMappingEntry, PrintMappingSaveScope, PrintMappingTable,
@@ -6787,7 +6787,7 @@ mod tests {
                 job: PrinterJobSettings::try_new(
                     digest(0x44),
                     "paper-letter",
-                    crate::workbench::hardcopy::PrinterRasterGeometry::try_new(
+                    crate::hardcopy::PrinterRasterGeometry::try_new(
                         792, 612, 0, 0, 792, 612,
                     )
                     .unwrap(),
@@ -6869,7 +6869,7 @@ mod tests {
                 job: PrinterJobSettings::try_new(
                     digest(0x44),
                     "paper-letter",
-                    crate::workbench::hardcopy::PrinterRasterGeometry::try_new(
+                    crate::hardcopy::PrinterRasterGeometry::try_new(
                         792, 612, 0, 0, 792, 612,
                     )
                     .unwrap(),

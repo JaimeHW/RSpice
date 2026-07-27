@@ -20,7 +20,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::product::ContentDigest;
-use crate::workbench::hardcopy::{
+use crate::hardcopy::{
     CancellationPhase, DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan,
     OutputFormat, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry, RenderTarget,
     ResolvedOrientation,
@@ -2762,7 +2762,7 @@ mod tests {
 
     use super::*;
     use crate::product::ObjectRevision;
-    use crate::workbench::hardcopy::{
+    use crate::hardcopy::{
         ActiveHardcopySource, BackgroundMode, Bleed, ColorMapping, ContentExtent, DecorationSetup,
         FontPolicy, HardcopyDocumentId, HardcopyDocumentKind, HardcopyPlanId, HardcopyScope,
         HardcopySetup, Length, Orientation, PageMargins, PaperSize, PhysicalPageSetup,

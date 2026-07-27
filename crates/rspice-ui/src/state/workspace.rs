@@ -2446,12 +2446,12 @@ pub struct ProjectWorkspace {
     /// symbol, result, and report hardcopy workflows. Publication artifacts
     /// and transient preview state are intentionally not persisted here.
     #[serde(default)]
-    pub hardcopy_setups: crate::workbench::hardcopy::HardcopySetupStore,
+    pub hardcopy_setups: crate::hardcopy::HardcopySetupStore,
     /// Reusable print-mapping sets owned by this project. Personal portable
     /// presets are persisted by `UserPreferences`; document mappings remain
     /// embedded in `hardcopy_setups` for reproducible publication.
     #[serde(default)]
-    pub project_print_mappings: crate::workbench::PrintMappingPresetCatalog,
+    pub project_print_mappings: crate::hardcopy::PrintMappingPresetCatalog,
     /// Project-owned named engineering-table views. Working and personal
     /// views are device preferences; only explicitly project-scoped views
     /// participate in project revisioning and collaboration.
@@ -2543,9 +2543,9 @@ impl Default for ProjectWorkspace {
             simulation_plan_payloads: Vec::new(),
             plot_export_presets:
                 crate::results::plot_export_preset::PlotExportPresetCatalog::default(),
-            hardcopy_setups: crate::workbench::hardcopy::HardcopySetupStore::default(),
-            project_print_mappings: crate::workbench::PrintMappingPresetCatalog::new(
-                crate::workbench::PrintMappingCatalogOwner::Project,
+            hardcopy_setups: crate::hardcopy::HardcopySetupStore::default(),
+            project_print_mappings: crate::hardcopy::PrintMappingPresetCatalog::new(
+                crate::hardcopy::PrintMappingCatalogOwner::Project,
             ),
             engineering_table_views: crate::state::EngineeringTableViewStore::default(),
             hardcopy_source_sets: Vec::new(),
@@ -5405,14 +5405,14 @@ impl ProjectWorkspace {
     /// an unsaved project change.
     pub fn save_hardcopy_setup(
         &mut self,
-        source: &crate::workbench::hardcopy::ActiveHardcopySource,
-        setup: crate::workbench::hardcopy::HardcopySetup,
+        source: &crate::hardcopy::ActiveHardcopySource,
+        setup: crate::hardcopy::HardcopySetup,
     ) -> Result<
-        crate::workbench::hardcopy::SetupSaveOutcome,
-        crate::workbench::hardcopy::HardcopyError,
+        crate::hardcopy::SetupSaveOutcome,
+        crate::hardcopy::HardcopyError,
     > {
         let outcome = self.hardcopy_setups.save(source, setup)?;
-        if outcome.disposition() != crate::workbench::hardcopy::SetupSaveDisposition::Unchanged {
+        if outcome.disposition() != crate::hardcopy::SetupSaveDisposition::Unchanged {
             self.hardcopy_setups_dirty = true;
         }
         Ok(outcome)
@@ -5422,13 +5422,13 @@ impl ProjectWorkspace {
     /// dirty lifecycle as document page setups.
     pub fn save_project_print_mapping(
         &mut self,
-        table: crate::workbench::hardcopy::PrintMappingTable,
+        table: crate::hardcopy::PrintMappingTable,
     ) -> Result<
-        crate::workbench::PrintMappingSaveReceipt,
-        crate::workbench::PrintMappingPersistenceError,
+        crate::hardcopy::PrintMappingSaveReceipt,
+        crate::hardcopy::PrintMappingPersistenceError,
     > {
         let outcome = self.project_print_mappings.save(table)?;
-        if outcome.disposition() != crate::workbench::PrintMappingSaveDisposition::Unchanged {
+        if outcome.disposition() != crate::hardcopy::PrintMappingSaveDisposition::Unchanged {
             self.project_print_mappings_dirty = true;
         }
         Ok(outcome)
@@ -7614,7 +7614,7 @@ mod tests {
 
     #[test]
     fn hardcopy_page_setup_persists_and_uses_project_dirty_lifecycle() {
-        use crate::workbench::hardcopy::{
+        use crate::hardcopy::{
             ActiveHardcopySource, HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope,
             HardcopySetup, SetupSaveDisposition,
         };
@@ -7655,8 +7655,8 @@ mod tests {
 
     #[test]
     fn project_print_mapping_routes_through_project_dirty_lifecycle() {
-        let mapping = crate::workbench::hardcopy::PrintMappingTable::try_new(
-            crate::workbench::hardcopy::PrintMappingSaveScope::ProjectPrintSet(
+        let mapping = crate::hardcopy::PrintMappingTable::try_new(
+            crate::hardcopy::PrintMappingSaveScope::ProjectPrintSet(
                 "documentation".to_owned(),
             ),
             Vec::new(),
@@ -7668,7 +7668,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             receipt.disposition(),
-            crate::workbench::PrintMappingSaveDisposition::Created
+            crate::hardcopy::PrintMappingSaveDisposition::Created
         );
         assert!(workspace.project_print_mappings_dirty);
         assert!(workspace.any_dirty());
@@ -7686,14 +7686,14 @@ mod tests {
         let unchanged = restored.save_project_print_mapping(mapping).unwrap();
         assert_eq!(
             unchanged.disposition(),
-            crate::workbench::PrintMappingSaveDisposition::Unchanged
+            crate::hardcopy::PrintMappingSaveDisposition::Unchanged
         );
         assert!(!restored.any_dirty());
     }
 
     #[test]
     fn hardcopy_source_sets_persist_validate_and_use_project_dirty_lifecycle() {
-        use crate::workbench::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+        use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
         use crate::workbench::hardcopy_sources::{HardcopySourceSet, HardcopySourceSetMember};
 
         let member_id =
@@ -7740,7 +7740,7 @@ mod tests {
 
     #[test]
     fn hardcopy_source_set_catalog_rejects_case_folded_duplicate_names() {
-        use crate::workbench::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+        use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
         use crate::workbench::hardcopy_sources::{HardcopySourceSet, HardcopySourceSetMember};
 
         let build_set = |seed: u128, name: &str| {

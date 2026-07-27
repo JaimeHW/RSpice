@@ -50,7 +50,12 @@ const LAYERS: &[(&str, u32)] = &[
     ("product", 0),
     ("quantity", 0),
     ("utils", 0),
-    // Presentation-independent result contracts, and the design system.
+    // Presentation-independent result contracts, the design system, and the
+    // persisted page-setup contract. Hardcopy *rendering* needs the schematic
+    // symbol library and the analysis viewers, so it stays up in `workbench`;
+    // only what a project persists about printing lives down here, where
+    // `state` can reach it.
+    ("hardcopy", 1),
     ("results", 1),
     ("ui", 1),
     // The persisted design and project model.
@@ -91,11 +96,11 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // and the `Command` enum) out of `workbench` into `state`, then convert
     // `workbench` signatures from `&mut RSpiceApp` to `&mut AppState`.
     ("workbench", "common", 294),
-    // The persisted project model still stores hardcopy, print-mapping, and
-    // netlist-document types that live in the UI shell. Each module that moves
-    // down lowers this count; `engineering_table` accounted for two of the
-    // original 39.
-    ("state", "workbench", 37),
+    // The persisted project model still reaches up for hardcopy source sets
+    // and the netlist document. Each module that moves down lowers this
+    // count: it started at 39, `engineering_table` took it to 37, and the
+    // page-setup contract took it to 16.
+    ("state", "workbench", 16),
     ("state", "simulation", 26),
     ("state", "properties", 10),
     ("state", "services", 7),

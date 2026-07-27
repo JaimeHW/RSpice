@@ -4,7 +4,7 @@
 //! to the project. Preview and publication are resolved from the same sealed
 //! plan so the dialog cannot preview one layout and emit another.
 
-use crate::workbench::hardcopy::{
+use crate::hardcopy::{
     ActiveHardcopySource, BackgroundMode, Bleed, ColorMapping, ContentExtent, CustomPaper,
     DecorationSetup, FontPolicy, HardcopyError, HardcopyPlan, HardcopyReceipt, HardcopySetup,
     Length, LengthUnit, Orientation, OutputFormat, PageMargins, PaperSize, PhysicalPageSetup,
@@ -12,7 +12,7 @@ use crate::workbench::hardcopy::{
     ScaleMode, StandardPaper, TilingMode, TilingSetup, Watermark,
 };
 #[cfg(test)]
-use crate::workbench::hardcopy::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
+use crate::hardcopy::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
 use crate::workbench::hardcopy_sources::ResolvedHardcopyDocument;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -862,7 +862,7 @@ fn format_length(value: Length, unit: LengthUnit) -> String {
 mod tests {
     use super::*;
     use crate::product::{ContentDigest, ObjectRevision};
-    use crate::workbench::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+    use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 
     fn source() -> ActiveHardcopySource {
         ActiveHardcopySource::try_new(

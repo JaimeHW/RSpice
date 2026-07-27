@@ -17,8 +17,6 @@ mod cross_probe;
 pub mod design_system;
 mod feature_availability;
 pub mod feature_availability_data;
-pub mod hardcopy;
-pub mod hardcopy_mapping_store;
 pub mod hardcopy_render;
 pub mod hardcopy_sources;
 pub mod model_correlation;
@@ -60,10 +58,6 @@ pub use capability_workflow::{
     CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
 };
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
-pub use hardcopy_mapping_store::{
-    PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
-    PrintMappingSaveDisposition, PrintMappingSaveReceipt,
-};
 pub use model_correlation::{
     CorrelationAggregationDraft, CorrelationCalculationDraft, CorrelationDatasetClassDraft,
     CorrelationDatasetDraft, CorrelationMetricDraft, CorrelationReleaseRoleDraft,

@@ -34,7 +34,7 @@ use crate::state::{
 };
 
 use super::SurfaceId;
-use super::hardcopy::{
+use crate::hardcopy::{
     ActiveHardcopySource, ContentExtent, HardcopyContentSection, HardcopyDocumentId,
     HardcopyDocumentKind, HardcopyScope, Length, PrintColor, PrintMappingEntry,
     PrintMappingSaveScope, PrintMappingTable, PrintObjectIdentity, PrintObjectKind,
