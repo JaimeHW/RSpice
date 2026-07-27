@@ -10,6 +10,15 @@
 //! This test is the substitute. It declares the intended layer order and
 //! fails when a module reaches sideways or upward through `crate::`.
 //!
+//! # Two levels
+//!
+//! [`LAYERS`] orders the crate's top-level modules. That alone is not enough:
+//! `workbench` is 283k lines across 254 files — about half the crate — so
+//! treating it as one unit left its entire interior unmeasured, and a cycle
+//! that an earlier refactor believed it had retired was in fact still there.
+//! [`WORKBENCH_LAYERS`] therefore orders `workbench`'s own submodules, and
+//! both orders ratchet the same way.
+//!
 //! # How it ratchets
 //!
 //! Every edge that violates the layer order today is recorded in
@@ -70,10 +79,11 @@ const LAYERS: &[(&str, u32)] = &[
     ("simulation", 6),
     // Editors and inspectors.
     ("properties", 7),
-    ("schematic", 9),
-    // Application chrome and top-level navigation.
-    ("workbench", 10),
-    // The application root: `RSpiceApp`, dialogs, and workflows.
+    ("schematic", 8),
+    // The application shell: `RSpiceApp`, chrome, dialogs, surfaces, and the
+    // workflows that mutate them. Its interior is ordered separately by
+    // [`WORKBENCH_LAYERS`] — see `workbench_references_respect_the_layer_order`.
+    ("workbench", 9),
 ];
 
 /// Layer-order violations present in the tree today, with exact counts.
@@ -333,6 +343,371 @@ fn module_references_respect_the_layer_order() {
         failures.push_str(&format!(
             "\nAllowlist entries for edges that no longer exist:\n{}\n\
              Delete them from ALLOWED_VIOLATIONS in \
+             tests/module_layering.rs.\n",
+            retired.join("\n")
+        ));
+    }
+    assert!(failures.is_empty(), "{failures}");
+}
+
+// =============================================================================
+// The interior of `workbench`
+// =============================================================================
+
+/// Intended order inside `workbench`, lowest first. Position is the rank.
+///
+/// [`LAYERS`] treats `workbench` as one unit, which left 283k lines — roughly
+/// half the crate — with no layering enforcement at all. The `common` merge in
+/// `7401cdcf0` did not retire the cycle it describes; it moved the boundary so
+/// the top-level test could no longer see it. Sixteen module pairs still
+/// reference each other in both directions, and `app` is in twelve of them.
+///
+/// Unlike [`LAYERS`], this order is total: a module may reference anything
+/// earlier in this list and nothing at or after it. Ties are what let a cycle
+/// hide inside a layer, and the whole point of this table is that one already
+/// did.
+const WORKBENCH_LAYERS: &[&str] = &[
+    // Contracts, routes, and policy. These describe the shell without
+    // operating it.
+    "state",
+    "surface_route",
+    "surface_catalog",
+    "availability",
+    "navigation",
+    "capability_workflow",
+    "logging",
+    "layout",
+    "shortcuts",
+    "preferences",
+    "feature_availability",
+    "feature_availability_data",
+    "design_system",
+    "visualization_family",
+    // Document engines and the interaction session they hang off.
+    "session",
+    "netlist_document",
+    "result_document",
+    "code_workspace",
+    "model_editor",
+    "model_correlation",
+    "window_session",
+    // Import, persistence, checkpointing, and recovery.
+    "browser_file_import",
+    "project_lifecycle",
+    "project_checkpoint",
+    "recovery",
+    "recovery_checkpoint",
+    "shortcut_library_persistence",
+    "shortcut_artifacts",
+    // Hardcopy adapters: resolve sources, then render, then print.
+    "hardcopy_sources",
+    "hardcopy_render",
+    "hardcopy_print",
+    // The application root. Everything above operates on it; everything below
+    // is operated on by it.
+    "app",
+    // Workflows that mutate application state.
+    "file_workflow",
+    "project_workflow",
+    "export_workflow",
+    "netlist_workflow",
+    "shortcut_profile_workflow",
+    "file_actions",
+    // Command dispatch.
+    "commands",
+    // Chrome, docks, surfaces, and the rest of the presentation layer.
+    "panels",
+    "chrome",
+    "docks",
+    "menu_bar",
+    "surfaces",
+    "visualization_studio",
+    "notification_center",
+    "project_launcher",
+    "specialist_tool_browser",
+    "jobs_manager",
+    "calculator_tool",
+    "preflight",
+    "examples",
+    "cross_probe",
+    "account_organization",
+    "simulation_analysis_tabs",
+    "browser_navigation",
+    "browser_download",
+    "browser_accessibility",
+];
+
+/// Order violations inside `workbench` today, with exact counts.
+///
+/// Same rules as [`ALLOWED_VIOLATIONS`]: a ceiling, never a target. 51 edges
+/// carrying 326 references, against 173 edges and 1409 references total — so
+/// 77% of the shell's interior coupling already runs downhill.
+///
+/// The concentration is the finding. `app` owns ten of the top twelve entries
+/// because it is both the data every module reads and the root that drives
+/// every module, and those two roles have to be separated before most of this
+/// list can move. Splitting `AppState` from `RSpiceApp` retires the first four
+/// entries outright.
+const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
+    // `app` is the application root and the application data at once. Retired
+    // by splitting `AppState` (data, low) from `RSpiceApp` (frame loop, top).
+    ("app", "commands", 48),
+    ("app", "project_workflow", 46),
+    ("app", "panels", 30),
+    ("result_document", "app", 23),
+    ("project_lifecycle", "app", 15),
+    ("app", "export_workflow", 14),
+    ("app", "chrome", 12),
+    ("app", "menu_bar", 12),
+    ("app", "file_workflow", 9),
+    ("app", "browser_navigation", 7),
+    ("app", "file_actions", 6),
+    ("netlist_document", "app", 6),
+    ("recovery", "app", 6),
+    ("app", "simulation_analysis_tabs", 3),
+    ("app", "browser_accessibility", 2),
+    ("app", "netlist_workflow", 2),
+    ("model_editor", "app", 2),
+    ("app", "browser_download", 1),
+    ("app", "calculator_tool", 1),
+    ("app", "cross_probe", 1),
+    ("browser_file_import", "app", 1),
+    ("hardcopy_sources", "app", 1),
+    ("project_checkpoint", "app", 1),
+    // `commands` is a dispatcher and a command vocabulary in one file.
+    // Retired by dropping the vocabulary to `commands::registry` at rank 0.
+    ("shortcut_artifacts", "commands", 11),
+    ("preferences", "commands", 3),
+    ("result_document", "commands", 3),
+    ("shortcut_profile_workflow", "commands", 2),
+    ("shortcuts", "commands", 2),
+    ("shortcut_library_persistence", "commands", 1),
+    // Dispatch and persistence reaching up into presentation.
+    ("commands", "chrome", 10),
+    ("commands", "menu_bar", 5),
+    ("chrome", "preflight", 1),
+    ("surfaces", "examples", 3),
+    ("menu_bar", "examples", 1),
+    ("surfaces", "preflight", 1),
+    // Browser import/download sitting above what needs it.
+    ("code_workspace", "browser_file_import", 7),
+    ("export_workflow", "browser_download", 3),
+    ("project_workflow", "browser_download", 1),
+    ("shortcut_artifacts", "browser_download", 1),
+    ("surfaces", "browser_download", 1),
+    // Recovery and checkpointing reaching sideways into the workflows.
+    ("recovery", "file_workflow", 6),
+    ("recovery", "project_workflow", 2),
+    ("recovery", "recovery_checkpoint", 2),
+    ("shortcut_artifacts", "shortcut_profile_workflow", 4),
+    ("browser_file_import", "shortcut_profile_workflow", 1),
+    ("shortcut_library_persistence", "shortcut_artifacts", 1),
+    ("code_workspace", "export_workflow", 1),
+    ("netlist_document", "netlist_workflow", 1),
+    // Contracts naming things above them.
+    ("state", "capability_workflow", 1),
+    ("state", "simulation_analysis_tabs", 1),
+    ("shortcuts", "result_document", 1),
+];
+
+fn workbench_dir() -> PathBuf {
+    src_dir().join("workbench")
+}
+
+fn workbench_rank(module: &str) -> usize {
+    WORKBENCH_LAYERS
+        .iter()
+        .position(|declared| *declared == module)
+        .unwrap_or_else(|| {
+            panic!(
+                "workbench module `{module}` has no declared rank.\n\
+                 Add it to WORKBENCH_LAYERS in tests/module_layering.rs, \
+                 placing it strictly after everything it may reference."
+            )
+        })
+}
+
+/// The `workbench` submodule that owns a file under `src/workbench/`.
+///
+/// `src/workbench/app.rs` and `src/workbench/app/dialogs/state.rs` both belong
+/// to `app`. `src/workbench.rs` is the module root and is not scanned: like
+/// the crate root, it is allowed to see everything it declares.
+fn workbench_owning_module(file: &Path) -> Option<String> {
+    let relative = file.strip_prefix(workbench_dir()).ok()?;
+    let first = relative.components().next()?.as_os_str().to_str()?;
+    Some(first.trim_end_matches(".rs").to_owned())
+}
+
+/// Map each name re-exported by `workbench.rs` back to the module that owns it.
+///
+/// Two thirds of the shell's public names are re-exported from its root, so
+/// `crate::workbench::ResultViewer` and `crate::workbench::result_document::
+/// ResultViewer` are the same edge written two ways — 239 references, 17% of
+/// the interior total, took the short form. Resolving them here keeps this
+/// test measuring coupling rather than import style, and means the re-export
+/// cleanup can happen without the numbers moving underneath it.
+fn workbench_reexports() -> BTreeMap<String, String> {
+    let source = fs::read_to_string(src_dir().join("workbench.rs")).expect("read workbench.rs");
+    let declared: Vec<&str> = WORKBENCH_LAYERS.to_vec();
+    let mut map = BTreeMap::new();
+
+    for statement in strip_line_comments(&source).split(';') {
+        let Some(rest) = statement
+            .trim_start()
+            .strip_prefix("pub")
+            .map(|rest| rest.trim_start().trim_start_matches("(crate)"))
+        else {
+            continue;
+        };
+        let Some(path) = rest.trim_start().strip_prefix("use ") else {
+            continue;
+        };
+        let path = path.trim_start();
+        let Some((module, names)) = path.split_once("::") else {
+            continue;
+        };
+        let module = module.trim();
+        if !declared.contains(&module) {
+            continue;
+        }
+        for name in names.replace(['{', '}'], " ").split(',') {
+            let name = name.trim();
+            // `pub use foo::bar::Baz;` re-exports through a nested path; the
+            // owning top-level module is still `foo`.
+            let leaf = name.rsplit("::").next().unwrap_or(name).trim();
+            if !leaf.is_empty() && leaf != "self" {
+                map.insert(leaf.to_owned(), module.to_owned());
+            }
+        }
+    }
+    map
+}
+
+/// Reference counts between `workbench` submodules, keyed `(from, to)`.
+fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
+    const PREFIX: &str = "crate::workbench::";
+    let reexports = workbench_reexports();
+    let declared: Vec<&str> = WORKBENCH_LAYERS.to_vec();
+    let mut edges: BTreeMap<(String, String), usize> = BTreeMap::new();
+
+    for file in rust_sources(&workbench_dir()) {
+        let Some(from) = workbench_owning_module(&file) else {
+            continue;
+        };
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+        let code = strip_line_comments(&source);
+
+        let mut rest = code.as_str();
+        while let Some(index) = rest.find(PREFIX) {
+            rest = &rest[index + PREFIX.len()..];
+            let end = rest
+                .find(|c: char| !c.is_alphanumeric() && c != '_')
+                .unwrap_or(rest.len());
+            let name = &rest[..end];
+            rest = &rest[end..];
+
+            // A path names either a submodule directly or a type the root
+            // re-exports from one. Anything else is a function defined in
+            // `workbench.rs` itself, which belongs to the root, not a module.
+            let to = if declared.contains(&name) {
+                name.to_owned()
+            } else if let Some(owner) = reexports.get(name) {
+                owner.clone()
+            } else {
+                continue;
+            };
+            if to != from {
+                *edges.entry((from.clone(), to)).or_default() += 1;
+            }
+        }
+    }
+    edges
+}
+
+#[test]
+fn every_workbench_module_declares_a_layer() {
+    let entries = fs::read_dir(workbench_dir()).expect("read src/workbench/");
+    let mut undeclared = Vec::new();
+    for entry in entries {
+        let path = entry.expect("directory entry").path();
+        let Some(name) = workbench_owning_module(&path) else {
+            continue;
+        };
+        if !WORKBENCH_LAYERS.contains(&name.as_str()) {
+            undeclared.push(name);
+        }
+    }
+    undeclared.sort();
+    undeclared.dedup();
+    assert!(
+        undeclared.is_empty(),
+        "new workbench modules without a declared rank: {undeclared:?}\n\
+         Add them to WORKBENCH_LAYERS in tests/module_layering.rs. The shell \
+         is half this crate; a module with no position in it is a module \
+         nobody decided the position of."
+    );
+}
+
+#[test]
+fn workbench_references_respect_the_layer_order() {
+    let edges = workbench_edge_counts();
+    let mut allowed: BTreeMap<(&str, &str), usize> = ALLOWED_WORKBENCH_VIOLATIONS
+        .iter()
+        .map(|(from, to, count)| ((*from, *to), *count))
+        .collect();
+    assert_eq!(
+        allowed.len(),
+        ALLOWED_WORKBENCH_VIOLATIONS.len(),
+        "ALLOWED_WORKBENCH_VIOLATIONS contains a duplicate (from, to) pair"
+    );
+
+    let mut new_violations = Vec::new();
+    let mut grown = Vec::new();
+
+    for ((from, to), count) in &edges {
+        if workbench_rank(from) > workbench_rank(to) {
+            continue;
+        }
+        match allowed.remove(&(from.as_str(), to.as_str())) {
+            None => new_violations.push(format!(
+                "  {from} -> {to} ({count} references, rank {} -> rank {})",
+                workbench_rank(from),
+                workbench_rank(to)
+            )),
+            Some(ceiling) if *count > ceiling => grown.push(format!(
+                "  {from} -> {to}: {count} references, ceiling is {ceiling}"
+            )),
+            Some(_) => {}
+        }
+    }
+
+    let retired: Vec<String> = allowed
+        .keys()
+        .map(|(from, to)| format!("  {from} -> {to}"))
+        .collect();
+
+    let mut failures = String::new();
+    if !new_violations.is_empty() {
+        failures.push_str(&format!(
+            "\nNew layer-order violations inside `workbench`:\n{}\n\
+             This code reaches sideways or upward through the shell. Move it \
+             below what needs it, or take the state it uses as a parameter \
+             instead of reaching for the module that holds it.\n",
+            new_violations.join("\n")
+        ));
+    }
+    if !grown.is_empty() {
+        failures.push_str(&format!(
+            "\nExisting workbench violations that grew:\n{}\n\
+             These edges are being retired, not extended.\n",
+            grown.join("\n")
+        ));
+    }
+    if !retired.is_empty() {
+        failures.push_str(&format!(
+            "\nAllowlist entries for workbench edges that no longer exist:\n{}\n\
+             Delete them from ALLOWED_WORKBENCH_VIOLATIONS in \
              tests/module_layering.rs.\n",
             retired.join("\n")
         ));

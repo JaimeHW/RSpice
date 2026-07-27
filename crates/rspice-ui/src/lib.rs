@@ -26,15 +26,17 @@
 //! | 5 | `services` | DRC, licensing, and the per-analysis engine adapters |
 //! | 6 | `simulation` | Analysis plans, netlist generation, run orchestration |
 //! | 7 | `properties` | Component property editing |
-
-//! | 9 | `schematic` | The schematic document engine |
-//! | 10 | `workbench` | The application shell: [`RSpiceApp`], state, dialogs, chrome, surfaces, commands, and the workflows that mutate them |
-
+//! | 8 | `schematic` | The schematic document engine |
+//! | 9 | `workbench` | The application shell: [`RSpiceApp`], state, dialogs, chrome, surfaces, commands, and the workflows that mutate them |
 //!
-//! Known departures from this order are recorded, counted, and ratcheted
-//! down in that test's `ALLOWED_VIOLATIONS` table. Adding to it is not a way
-//! to unblock new code — a fresh violation means the code is in the wrong
-//! module.
+//! `workbench` is about half the crate, so one position in this table does not
+//! describe it. Its own submodules are ordered by that test's
+//! `WORKBENCH_LAYERS`, on the same rules.
+//!
+//! Known departures from both orders are recorded, counted, and ratcheted
+//! down in the `ALLOWED_VIOLATIONS` and `ALLOWED_WORKBENCH_VIOLATIONS` tables.
+//! Adding to either is not a way to unblock new code — a fresh violation
+//! means the code is in the wrong module.
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
