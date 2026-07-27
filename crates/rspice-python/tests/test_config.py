@@ -48,7 +48,10 @@ class TestSimulationConfig:
             ({"max_iterations": 0}, "max_iterations", 0),
             ({"transient_max_iterations": 0}, "transient_max_iterations", 0),
             ({"min_timestep": -1e-12}, "min_timestep", -1e-12),
-            ({"max_timestep": math.inf}, "max_timestep", math.inf),
+            ({"min_timestep": math.inf}, "min_timestep", math.inf),
+            ({"max_timestep": math.nan}, "max_timestep", math.nan),
+            ({"max_timestep": -1.0}, "max_timestep", -1.0),
+            ({"max_timestep": -math.inf}, "max_timestep", -math.inf),
             ({"transient_trtol": -1.0}, "transient_trtol", -1.0),
         ],
     )
@@ -92,6 +95,24 @@ class TestSimulationConfig:
         config.min_timestep = 1.0
         assert config.min_timestep == 1.0
         assert math.isinf(config.max_timestep)
+
+    def test_max_timestep_ceiling_can_be_lifted_again(self):
+        # The default reads back as inf, so inf has to be writable: otherwise
+        # a ceiling is a one-way door and config round-tripping breaks.
+        config = rspice.SimulationConfig(max_timestep=math.inf)
+        assert math.isinf(config.max_timestep)
+
+        config.max_timestep = 1e-9
+        assert config.max_timestep == 1e-9
+
+        config.max_timestep = math.inf
+        assert math.isinf(config.max_timestep)
+
+    def test_config_round_trips_through_engine(self):
+        engine = rspice.Engine(rspice.SimulationConfig())
+        restored = rspice.SimulationConfig(max_timestep=engine.config.max_timestep)
+        assert math.isinf(restored.max_timestep)
+        assert rspice.Engine(restored).config.max_timestep == engine.config.max_timestep
 
     def test_nested_assignment_works(self):
         config = rspice.SimulationConfig()

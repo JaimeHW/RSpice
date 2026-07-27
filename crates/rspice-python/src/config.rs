@@ -41,6 +41,20 @@ fn validate_nonnegative(name: &str, value: f64) -> PyResult<f64> {
     }
 }
 
+/// Accept a positive finite value or `+inf`, which means "no hard cap".
+///
+/// Mirrors core's `validate_positive_or_unbounded` so a ceiling that reads
+/// back as `inf` can also be written back.
+fn validate_positive_or_unbounded(name: &str, value: f64) -> PyResult<f64> {
+    if value == f64::INFINITY || (value.is_finite() && value > 0.0) {
+        Ok(value)
+    } else {
+        Err(PyValueError::new_err(format!(
+            "{name} must be a positive finite number, or float('inf') for no cap, got {value}"
+        )))
+    }
+}
+
 fn validate_positive_usize(name: &str, value: usize) -> PyResult<usize> {
     if value > 0 {
         Ok(value)
@@ -769,8 +783,9 @@ impl PyResourceLimits {
 /// `config.convergence.verbose = True` mutates a temporary and is silently
 /// lost — assign a whole ConvergenceConfig instead.
 ///
-/// The default transient timestep ceiling is unbounded. Pass a finite
-/// `max_timestep` when the application requires a product-level ceiling.
+/// The default transient timestep ceiling is unbounded, and `max_timestep`
+/// reads back as `inf`. Pass a finite value when the application requires a
+/// product-level ceiling, and assign `float('inf')` to lift it again.
 #[pyclass(name = "SimulationConfig", module = "rspice", from_py_object)]
 #[derive(Clone)]
 pub struct PySimulationConfig {
@@ -789,7 +804,9 @@ impl PySimulationConfig {
     ///     max_iterations: Maximum DC Newton-Raphson iterations
     ///     transient_max_iterations: Newton budget per transient step (ITL4)
     ///     min_timestep: Preferred minimum transient timestep (seconds)
-    ///     max_timestep: Maximum transient timestep (seconds); None is unbounded
+    ///     max_timestep: Maximum transient timestep (seconds), or
+    ///                   float('inf') for no cap. Omitted keeps the
+    ///                   unbounded default.
     ///     temperature: Simulation temperature in Kelvin
     ///     integration_method: Transient integration scheme
     ///     transient_trtol: Truncation-error tolerance factor (TRTOL)
@@ -830,7 +847,7 @@ impl PySimulationConfig {
             inner.min_timestep = validate_positive("min_timestep", v)?;
         }
         if let Some(v) = max_timestep {
-            inner.max_timestep = validate_positive("max_timestep", v)?;
+            inner.max_timestep = validate_positive_or_unbounded("max_timestep", v)?;
         }
         if let Some(v) = temperature {
             inner.temperature = validate_positive("temperature", v)?;
@@ -905,7 +922,7 @@ impl PySimulationConfig {
         Ok(())
     }
 
-    /// Maximum timestep for transient analysis
+    /// Maximum timestep for transient analysis; `inf` means no cap
     #[getter]
     fn get_max_timestep(&self) -> f64 {
         self.inner.max_timestep
@@ -913,7 +930,7 @@ impl PySimulationConfig {
 
     #[setter]
     fn set_max_timestep(&mut self, value: f64) -> PyResult<()> {
-        let value = validate_positive("max_timestep", value)?;
+        let value = validate_positive_or_unbounded("max_timestep", value)?;
         validate_timestep_window(self.inner.min_timestep, value)?;
         self.inner.max_timestep = value;
         Ok(())

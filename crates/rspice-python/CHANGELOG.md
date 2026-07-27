@@ -74,6 +74,7 @@ Release numbers remain tied to the workspace version.
 - `SimulationConfig.max_timestep` defaults to unbounded, so a large
   `min_timestep` is no longer rejected against a built-in ceiling. Pass a
   finite `max_timestep` when the embedding application requires one.
+
 - NumPy result arrays have explicit owned-copy semantics so their lifetime is
   independent of the Rust result object.
 - Long simulations release the GIL and may share immutable Engine, Netlist,
@@ -81,6 +82,11 @@ Release numbers remain tied to the workspace version.
 
 ### Fixed
 
+- `SimulationConfig.max_timestep` now accepts `float('inf')` in both the
+  constructor and the setter. The getter already returned `inf` for the
+  unbounded default, so the value could be read but never written back: a
+  timestep ceiling was a one-way door and round-tripping a config through
+  `Engine.config` raised `ValueError`.
 - Normalized Windows extended-length paths before exposing source provenance
   through public exception and netlist-location attributes.
 - Isolated the validated fixed-BDF2 compatibility coefficients to native
