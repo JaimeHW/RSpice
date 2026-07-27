@@ -251,11 +251,13 @@ rspice info <NETLIST> [OPTIONS]
 
 | Flag | Description |
 | :--- | :--- |
-| `-d, --detailed` | Show detailed element information |
+| `-d, --detailed` | Show detailed element information (text output only) |
 | `--models` | Show model definitions |
 | `--hierarchy` | Show subcircuit hierarchy |
 | `--params` | Show parameter values |
 | `--json` | Output as JSON |
+
+The JSON document always carries the title, per-kind element counts, analysis and measurement counts, and any parser diagnostics; `--models`, `--params`, and `--hierarchy` add their arrays. `--detailed` has no JSON counterpart.
 
 ### `rspice check` — Validate Netlist
 
@@ -469,30 +471,7 @@ The exit status is the verification contract — a deck whose measurements fail,
 
 ## CI Integration
 
-`--report-format junit` produces JUnit XML, which most CI systems can ingest directly. Example with GitHub Actions:
-
-```yaml
-jobs:
-  analog-verification:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install RSpice
-        run: cargo install --path crates/rspice-cli
-
-      - name: Run simulations
-        run: rspice run circuits/amplifier.sp -q --report-format junit --report-file results.xml
-
-      - name: Regression check
-        run: rspice compare output.csv golden/expected.csv --abstol 1e-9
-
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: simulation-results
-          path: results.xml
-```
+`--report-format junit` writes JUnit XML that most CI systems ingest directly as test results: one test suite per run, holding a `simulation` case plus one case per `.MEAS` statement, so a missed goal shows up as a named failing test rather than a log line. `--report-format tap` reports the same content as TAP. Publish the file as a build artifact and the analog checks appear alongside the software tests.
 
 A typical verification pipeline:
 
