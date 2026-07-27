@@ -372,22 +372,22 @@ pub enum Instruction {
     Not, // Logical not
     /// State-based time derivative: ddt(expr) using state index
     /// Backward Euler: (current - prev) / dt; records current into state
-    /// Stack: [expr] -> [d(expr)/dt]
+    /// Stack: `[expr] -> [d(expr)/dt]`
     DdtState(usize),
     /// State-based integration: idt(expr, ic) using state index
     /// Backward Euler: prev + expr * dt; returns ic at DC
-    /// Stack: [expr, ic] -> [integral]
+    /// Stack: `[expr, ic] -> [integral]`
     IdtState(usize),
     /// Wrapped integration: idtmod(expr, ic, modulus, offset)
     /// The integral folds into [offset, offset + modulus)
-    /// Stack: [expr, ic, modulus, offset] -> [wrapped integral]
+    /// Stack: `[expr, ic, modulus, offset] -> [wrapped integral]`
     IdtModState(usize),
     /// Companion Jacobian factor for ddt: top-of-stack / dt (0 at DC)
     DdtJacobian,
     /// Companion Jacobian factor for idt: top-of-stack * dt (0 at DC)
     IdtJacobian,
     /// Slope of lookup table at the input point
-    /// Stack: [input] -> [dy/dx]
+    /// Stack: `[input] -> [dy/dx]`
     TableDerivative(usize),
     /// $limit function: bounds value change per iteration for convergence
     /// Uses state index to track previous value
@@ -400,37 +400,37 @@ pub enum Instruction {
     TableLookup(usize),
     /// Absolute delay: absdelay(expr, delay_time)
     /// Uses a circular buffer indexed by delay_id
-    /// Stack: [expr, delay_time] -> [delayed_value]
+    /// Stack: `[expr, delay_time] -> [delayed_value]`
     AbsDelayState(usize),
     /// Transition filter: piecewise-linear smoothing
-    /// Stack: [expr, delay, rise_time, fall_time] -> [filtered_value]
+    /// Stack: `[expr, delay, rise_time, fall_time] -> [filtered_value]`
     TransitionState(usize),
     /// Slew rate limiter
-    /// Stack: [expr, max_pos_slew, max_neg_slew] -> [limited_value]  
+    /// Stack: `[expr, max_pos_slew, max_neg_slew] -> [limited_value]`
     SlewState(usize),
     /// Cross (threshold crossing detection)
-    /// Stack: [expr, direction, time_tol, expr_tol, enable] -> [0 or 1]
+    /// Stack: `[expr, direction, time_tol, expr_tol, enable] -> [0 or 1]`
     CrossState(usize),
     /// Last zero-crossing time with linear interpolation.
-    /// Stack: [expr, direction] -> [time or -1]
+    /// Stack: `[expr, direction] -> [time or -1]`
     LastCrossingState(usize),
     /// White noise source (returns 0 in time domain, contributes to noise analysis)
-    /// Stack: [power] -> [0]
+    /// Stack: `[power] -> [0]`
     WhiteNoise,
     /// Flicker noise source (1/f noise)
-    /// Stack: [power, exponent] -> [0]
+    /// Stack: `[power, exponent] -> [0]`
     FlickerNoise,
     /// Analysis check: returns 1 if analysis matches, else 0
     /// Parameter: analysis type ID (0=dc, 1=ac, 2=tran, etc.)
     Analysis(u8),
     /// Above event: initial-positive and rising zero-crossing detection
-    /// Stack: [expr, time_tol, expr_tol, enable] -> [0 or 1]
+    /// Stack: `[expr, time_tol, expr_tol, enable] -> [0 or 1]`
     AboveState(usize),
     /// Timer event: one-shot or periodic time-based trigger
-    /// Stack: [start_time, period, time_tol, enable] -> [0 or 1]
+    /// Stack: `[start_time, period, time_tol, enable] -> [0 or 1]`
     TimerState(usize),
     /// Laplace filter with poles/zeros (state-space form)
-    /// Stack: [input] -> [filtered]
+    /// Stack: `[input] -> [filtered]`
     LaplaceState(usize),
     /// Conditional: if top is nonzero, use second, else third
     IfElse,

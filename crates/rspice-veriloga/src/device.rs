@@ -21,7 +21,8 @@
 //!
 //! Production circuit-builder flows that enable native Verilog-A carry the
 //! canonical IR artifact and construct devices through
-//! [`VerilogADevice::try_new_with_canonical_ir`]. The direct [`VerilogADevice::try_new`]
+//! `VerilogADevice::try_new_with_canonical_ir` (itself `native`-gated). The
+//! direct [`VerilogADevice::try_new`](crate::device::VerilogADevice::try_new)
 //! constructor has no canonical artifact to consume, so under normal `native`
 //! builds it fails closed instead of compiling from bytecode. Bytecode-native
 //! construction is available only behind the internal

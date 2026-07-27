@@ -324,7 +324,7 @@ pub struct IndirectContributionStmt {
     pub span: Span,
 }
 
-/// Branch access: V(a), V(a, b), I(a), I(a, b), I(<branch>)
+/// Branch access: `V(a)`, `V(a, b)`, `I(a)`, `I(a, b)`, `I(<branch>)`
 #[derive(Debug, Clone)]
 pub enum BranchAccess {
     /// Access by node(s): V(a) or V(a, b)
@@ -590,7 +590,7 @@ pub enum Expression {
     Call(CallExpr),
     /// Branch access: V(a, b), I(a, b)
     BranchAccess(BranchAccess),
-    /// Array access: arr[i]
+    /// Array access: `arr[i]`
     ArrayAccess(ArrayAccessExpr),
     /// Array/concatenation literal: {a, b, c}
     ArrayLiteral(ArrayLiteralExpr),

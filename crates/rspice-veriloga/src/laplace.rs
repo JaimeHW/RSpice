@@ -15,7 +15,10 @@
 //! ## Time Integration
 //!
 //! Backward Euler integration is used for numerical stability:
-//!   x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
+//!
+//! ```text
+//! x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
+//! ```
 //!
 //! where h is the timestep.
 
@@ -357,8 +360,12 @@ impl StateSpaceFilter {
 
     /// Evaluate an in-flight Backward Euler candidate.
     ///
-    /// This computes: x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
-    ///                y[n] = C*x[n] + D*u[n]
+    /// This computes:
+    ///
+    /// ```text
+    /// x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
+    /// y[n] = C*x[n] + D*u[n]
+    /// ```
     ///
     /// Repeated calls recompute from `state_prev`, which is the last accepted
     /// state. The simulator calls [`Self::commit`] only after accepting the

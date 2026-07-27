@@ -3,7 +3,9 @@
 //! The input samples every `period` seconds; on each sample instant the
 //! difference equation
 //!
-//!   y[n] = (b0·x[n] + b1·x[n-1] + ... - a1·y[n-1] - ...) / a0
+//! ```text
+//! y[n] = (b0·x[n] + b1·x[n-1] + ... - a1·y[n-1] - ...) / a0
+//! ```
 //!
 //! updates, and the output holds (zero-order hold) between samples.
 //! Coefficient arrays are ascending in z⁻¹ (b0, b1, ...), matching the

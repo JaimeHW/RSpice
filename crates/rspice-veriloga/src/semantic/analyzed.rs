@@ -43,7 +43,7 @@ pub struct AnalyzedModule {
 pub struct AnalyzedArray {
     /// First element's index in the variables list
     pub base: usize,
-    /// Declared lower bound (x[lo:hi] indexes from lo)
+    /// Declared lower bound (`x[lo:hi]` indexes from `lo`)
     pub lower: i64,
     /// Number of elements
     pub len: usize,
