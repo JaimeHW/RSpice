@@ -1030,7 +1030,15 @@ fn source_files_have_no_byte_order_mark() {
 /// Lowered 85 -> 77 when the two clusters above were deleted, then 77 -> 76
 /// with the `dc_sweep`/`noise`/`pole_zero` runner duplicates. The four
 /// inference entries are the only additions still standing.
-const MAX_LINT_SUPPRESSIONS: usize = 76;
+/// Raised 76 -> 77 for the one blanket allow on
+/// `workbench::simulation_analysis_tabs`. That module's constants name a
+/// *persisted* index space -- `SimSetup` stores analyses as bare `usize` and
+/// bounds them with `ANALYSIS_COUNT` -- so the unreferenced names are the
+/// decode table for numbers already in saved projects, not spare parts. One
+/// suppression buys back 26 warnings, and its removal condition is stated in
+/// the module header: it goes when plans persist an analysis kind instead of
+/// a tab index.
+const MAX_LINT_SUPPRESSIONS: usize = 77;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

@@ -1,7 +1,21 @@
-//! The analysis tab catalog.
+//! Names for the persisted analysis-index space.
 //!
-//! Every analysis the Simulate workspace offers as a tab, in the order they
-//! are shown.
+//! `SimSetup` stores which analyses a plan contains as bare `usize` indices
+//! and bounds them with [`ANALYSIS_COUNT`], so these numbers are on disk in
+//! saved projects. The constants below are what those numbers mean. Only a
+//! few are named in code today -- `TAB_TRANSIENT` and `ANALYSIS_COUNT` in
+//! `app_state::sim_setup`, plus `TAB_AC`/`TAB_NOISE` in tests -- but the rest
+//! are not spare parts: they are the decode table for a live encoding, and
+//! deleting them would leave `17` in a project file with nothing in the tree
+//! saying it is the transfer function.
+//!
+//! Hence the blanket allow. Its removal condition is the encoding, not the
+//! usage count: when plans persist an analysis *kind* rather than a tab index,
+//! this module and the allow go together. The Simulate workspace already
+//! builds its own catalog from `AnalysisKind`
+//! (`workbench::surfaces::simulate::catalog`), so that change is the natural
+//! next step rather than a hypothetical.
+#![allow(dead_code)]
 
 pub const TAB_DC_OP: usize = 0;
 pub const TAB_TRANSIENT: usize = 1;
@@ -30,78 +44,9 @@ pub const TAB_SOA: usize = 23;
 pub const TAB_DISTO: usize = 24;
 pub const ANALYSIS_COUNT: usize = TAB_DISTO + 1;
 
-pub type AnalysisCategory = (&'static str, &'static [(usize, &'static str)]);
-
-pub const SIMULATION_ANALYSIS_CATEGORIES: &[AnalysisCategory] = &[
-    (
-        "Time & Frequency Domain",
-        &[
-            (TAB_TRANSIENT, "Transient"),
-            (TAB_AC, "AC Analysis"),
-            (TAB_DC_SWEEP, "DC Sweep"),
-            (TAB_DC_OP, "DC Operating Point"),
-            (TAB_NOISE, "Noise"),
-        ],
-    ),
-    (
-        "Steady-State",
-        &[
-            (TAB_PSS, "PSS (Periodic)"),
-            (TAB_HARMONIC_BALANCE, "Harmonic Balance"),
-        ],
-    ),
-    (
-        "Periodic Small-Signal",
-        &[
-            (TAB_PAC, "PAC"),
-            (TAB_PNOISE, "PNoise"),
-            (TAB_PXF, "PXF"),
-            (TAB_PSTB, "PSTB"),
-        ],
-    ),
-    (
-        "Transfer & Stability",
-        &[
-            (TAB_POLE_ZERO, "Pole-Zero"),
-            (TAB_SENSITIVITY, "Sensitivity"),
-            (TAB_STB, "Stability (STB)"),
-            (TAB_TRANSFER_FUNCTION, "Transfer Func (XF)"),
-        ],
-    ),
-    ("RF & S-Parameters", &[(TAB_SPARAMETER, "S-Parameter")]),
-    (
-        "Statistical & Sweep",
-        &[
-            (TAB_MONTE_CARLO, "Monte Carlo"),
-            (TAB_TEMPERATURE, "Temperature"),
-            (TAB_CORNER, "Corner"),
-            (TAB_ENVELOPE, "Envelope"),
-            (TAB_FOURIER, "Fourier"),
-        ],
-    ),
-    (
-        "Advanced",
-        &[
-            (TAB_RELIABILITY, "Reliability"),
-            (TAB_OPTIMIZATION, "Optimization"),
-            (TAB_SOA, "Safety (SOA)"),
-            (TAB_DISTO, "DISTO"),
-        ],
-    ),
-];
-
-pub const QUICK_RUN_ANALYSES: &[(&str, usize)] = &[
-    ("DC Operating Point", TAB_DC_OP),
-    ("Transient", TAB_TRANSIENT),
-    ("AC Analysis", TAB_AC),
-    ("DISTO", TAB_DISTO),
-    ("DC Sweep", TAB_DC_SWEEP),
-    ("Noise", TAB_NOISE),
-    ("Pole-Zero", TAB_POLE_ZERO),
-    ("Sensitivity", TAB_SENSITIVITY),
-    ("Monte Carlo", TAB_MONTE_CARLO),
-    ("PSS", TAB_PSS),
-    ("Stability (STB)", TAB_STB),
-    ("Temperature Sweep", TAB_TEMPERATURE),
-    ("Reliability (Aging)", TAB_RELIABILITY),
-];
+// `SIMULATION_ANALYSIS_CATEGORIES` and `QUICK_RUN_ANALYSES` used to sit here:
+// two static tables grouping and labelling these indices for a menu. Unlike
+// the constants above they encoded nothing -- they were presentation data with
+// no reader. The Simulate workspace groups and labels from `AnalysisKind` in
+// `surfaces::simulate::catalog`, which stays in step with the analyses that
+// actually run; a second hand-maintained table could only drift out of it.
