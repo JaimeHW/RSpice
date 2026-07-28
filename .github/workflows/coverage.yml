@@ -42,11 +42,18 @@ jobs:
       - name: Prepare coverage output directory
         run: mkdir -p target/coverage
       - name: Generate lcov report
+        # rspice-conformance is excluded by crate rather than by test name.
+        # Its integration target is the 247-deck ngspice suite, which is far
+        # too slow to run under instrumentation, and its own unit tests cover
+        # harness code (tolerance model, directive classification) rather than
+        # the simulator, so excluding it makes the number more honest as well
+        # as faster. The previous `--skip test_ngspice_ --skip
+        # test_full_ngspice` did the same job but relied on test names.
         run: >-
           cargo llvm-cov --locked --workspace
           --exclude rspice-python --exclude rspice-wasm
+          --exclude rspice-conformance
           --lcov --output-path target/coverage/lcov.info
-          -- --skip test_ngspice_ --skip test_full_ngspice
       - name: Upload coverage report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

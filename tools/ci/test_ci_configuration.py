@@ -84,6 +84,97 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('&["-3"]', build_script)
         self.assertIn("query_python_base_prefix", build_script)
 
+    def test_conformance_crate_is_a_leaf_no_shipping_crate_depends_on_it(self) -> None:
+        """rspice-conformance may depend on rspice-core, never the reverse.
+
+        The conformance suites live outside rspice-core so the compiler
+        enforces that they can only see its public API — a suite able to
+        assert on private state would pass while the simulator a user gets
+        regressed. That guarantee only holds while the dependency stays
+        one-way, and a single `rspice-conformance = { path = ... }` line in a
+        shipping crate would quietly undo it.
+        """
+        offenders = []
+        for manifest in sorted((ROOT / "crates").rglob("Cargo.toml")):
+            if manifest.parent.name == "rspice-conformance":
+                continue
+            text = manifest.read_text(encoding="utf-8", errors="ignore")
+            # Ignore prose in comments; only a real dependency entry counts.
+            depends = [
+                line
+                for line in text.splitlines()
+                if re.match(r"\s*rspice-conformance\s*(=|\.)", line)
+            ]
+            if depends:
+                offenders.append(manifest.relative_to(ROOT).as_posix())
+
+        self.assertEqual(
+            offenders,
+            [],
+            "rspice-conformance must stay a leaf; these crates depend on it: "
+            + ", ".join(offenders),
+        )
+
+    def test_no_conformance_harness_remains_inside_rspice_core(self) -> None:
+        """rspice-core ships no test harness and no conformance corpus runner.
+
+        Both suites live in rspice-conformance. A harness back inside the
+        library would be compiled into every shipping frontend and, worse,
+        would regain access to `pub(crate)` internals — assertions on private
+        state survive real numerical regressions, because they never travel
+        the path a user's deck takes.
+        """
+        core_src = ROOT / "crates" / "rspice-core" / "src"
+        self.assertFalse(
+            (core_src / "testing").exists(),
+            "rspice-core/src/testing must not come back; suites belong in rspice-conformance",
+        )
+        self.assertNotIn(
+            "pub mod testing",
+            read_text("crates/rspice-core/src/lib.rs"),
+            "rspice-core must not re-declare a `testing` module",
+        )
+        self.assertNotRegex(
+            read_text("crates/rspice-core/Cargo.toml"),
+            r"(?m)^conformance = ",
+            "the transitional `conformance` feature is obsolete once the harness moved out",
+        )
+
+        offenders = [
+            path.relative_to(ROOT).as_posix()
+            for path in sorted(core_src.rglob("*.rs"))
+            if re.search(r"\b(xyce|ngspice)_runner\b", path.read_text(encoding="utf-8", errors="ignore"))
+        ]
+        self.assertEqual(offenders, [], "conformance runner code reappeared inside rspice-core")
+
+    def test_conformance_crate_forwards_core_features_it_branches_on(self) -> None:
+        """Every `feature = "x"` the suites test must be declared here too.
+
+        The suites branch on rspice-core features to decide whether a deck
+        should run or be marked unsupported. An unforwarded feature silently
+        reads `false` in this crate, so the suite takes the "unsupported"
+        branch and passes vacuously even when the models were compiled in —
+        a conformance suite quietly skipping cases is the one outcome it
+        must never have.
+        """
+        manifest = read_text("crates/rspice-conformance/Cargo.toml")
+        declared = set(re.findall(r"(?m)^([a-z0-9-]+) = \[", manifest))
+
+        # Only real gates count. A bare `feature = "..."` also occurs in prose
+        # inside doc comments, so require it to sit inside a `cfg(...)`.
+        gate = re.compile(r'cfg!?\([^)]*feature = "([a-z0-9-]+)"')
+        used = set()
+        for path in sorted((ROOT / "crates" / "rspice-conformance").rglob("*.rs")):
+            used.update(gate.findall(path.read_text(encoding="utf-8", errors="ignore")))
+
+        missing = sorted(used - declared)
+        self.assertEqual(
+            missing,
+            [],
+            "rspice-conformance branches on undeclared features (they read false): "
+            + ", ".join(missing),
+        )
+
     def test_native_jit_has_no_cranelift_dependency_or_source_references(self) -> None:
         active_paths = [ROOT / "Cargo.toml", ROOT / "Cargo.lock"]
         active_paths.extend((ROOT / "crates").rglob("Cargo.toml"))

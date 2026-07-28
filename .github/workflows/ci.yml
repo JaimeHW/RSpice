@@ -77,15 +77,28 @@ jobs:
       - name: Clear check artifacts before tests
         run: cargo clean
       - name: Test core integration tests (fast tier)
-        # Skip only the vendored conformance suites (their test names start
-        # with test_ngspice_ / test_full_ngspice). A bare "ngspice" filter
-        # used to swallow seven oracle-pinned tests in unrelated files whose
-        # names merely mention ngspice.
-        run: >-
-          cargo test --locked -p rspice-core --tests
-          -- --skip test_ngspice_ --skip test_full_ngspice
+        # No feature flag and no name filter. Both conformance suites live in
+        # rspice-conformance now, so this target contains none of them. It
+        # previously read `-- --skip test_ngspice_ --skip test_full_ngspice`,
+        # which silently depended on 53 tests never being renamed — a rename
+        # would have either turned a multi-minute suite loose in the fast tier
+        # or disabled one meant to run. The crate boundary replaced it.
+        run: cargo test --locked -p rspice-core --tests
       - name: Core library unit tests
         run: cargo test --locked -p rspice-core --lib
+      - name: Conformance suite unit tests
+        # The ngspice runner's own unit tests — tolerance model, directive
+        # classification, reference-table decoding — used to run as part of
+        # `-p rspice-core --lib`, and the oracle-audit helper tests as part of
+        # `-p rspice-core --tests`. Both moved with the suite, so run them
+        # here; without this the move would silently drop 37 tests.
+        #
+        # Targets are named explicitly rather than using `--tests`: that would
+        # also pull in `ngspice_regression` and `xyce_regression`, the vendored
+        # deck corpora, which belong to nightly.
+        run: >-
+          cargo test --locked -p rspice-conformance --lib
+          --test ngspice_oracle_audit --test y_device_policy
       - name: Verilog-A harness unit tests
         # `device::veriloga_harness` sits behind `veriloga-builtins-base`, so the
         # featureless run above compiles the whole module — oracle included —

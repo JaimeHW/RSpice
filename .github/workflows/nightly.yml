@@ -31,11 +31,27 @@ jobs:
         with:
           key: nightly
       - name: Full test suite (release)
+        # rspice-conformance is excluded by crate, not by test name: the
+        # dedicated ngspice step below runs that suite properly (serial
+        # threads, logged, ratcheted) and running it twice would double the
+        # nightly. This previously read `-- --skip test_ngspice_ --skip
+        # test_full_ngspice`, which depended on test names never changing.
         run: >-
           cargo test --locked --workspace --exclude rspice-python --exclude rspice-wasm
-          --release -- --skip test_ngspice_ --skip test_full_ngspice
+          --exclude rspice-conformance --release
       - name: Core library unit tests (release)
         run: cargo test --locked -p rspice-core --lib --release
+      - name: Xyce conformance suite (release)
+        # The workspace run above excludes rspice-conformance wholesale, so
+        # the Xyce corpus needs its own step or it would silently vanish from
+        # nightly.
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test xyce_regression --test y_device_policy
+      - name: Conformance suite unit tests (release)
+        run: >-
+          cargo test --locked -p rspice-conformance --lib
+          --test ngspice_oracle_audit --release
       - name: ngspice conformance report
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner
@@ -43,7 +59,7 @@ jobs:
         # ratchet step below is the gate.
         continue-on-error: true
         run: >-
-          cargo test --locked -p rspice-core --release --test ngspice_regression
+          cargo test --locked -p rspice-conformance --release --test ngspice_regression
           -- --nocapture --test-threads 1 | tee conformance.log
       - name: Conformance ratchet
         # Accuracy can only move forward: fail the nightly when the full
