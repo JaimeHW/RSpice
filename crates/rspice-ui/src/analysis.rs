@@ -29,26 +29,13 @@ pub(crate) mod phase_noise;
 pub(crate) mod pole_zero;
 pub(crate) mod smith_chart;
 
-// Re-export main types for convenience (optional - users can also access via submodule)
-// Bode
-pub use bode::{BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse};
-
-// FFT
-pub use fft::{FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction};
-
-// Histogram
-pub use histogram::{
-    Histogram, HistogramBuilder, HistogramDisplayMode, HistogramState, HistogramStats,
-};
-
-// Nyquist
-pub use nyquist::{NyquistData, NyquistState};
-
-// Pole-Zero
-pub use pole_zero::{ComplexRoot, PoleZeroData, PoleZeroState, RootType};
-
-// Smith Chart
-pub use smith_chart::{Admittance, Complex, Impedance, SmithChartMode, SmithChartState};
-
-// Eye Diagram
-pub use eye_diagram::{EyeData, EyeDiagramState, EyeDisplayMode, EyeMeasurements, EyeTrace};
+// These re-exports were "for convenience (optional -- users can also access via
+// submodule)", and every caller took the submodule. Bode, Nyquist, Smith chart,
+// eye diagram, and pole-zero are all reached as `analysis::<module>::Type`, so
+// only the handful of names below were ever used flattened.
+pub use bode::{BodeData, FrequencyResponse};
+pub use eye_diagram::{EyeData, EyeTrace};
+pub use fft::{FftData, FftState, InputFidelity, WindowFunction};
+pub use histogram::{HistogramBuilder, HistogramDisplayMode};
+pub use nyquist::NyquistData;
+pub use pole_zero::PoleZeroData;
