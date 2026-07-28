@@ -6310,6 +6310,9 @@ endmodule
         eprintln!("native-x64-shipped-microbench iterations={iterations} samples={samples}");
 
         for (name, path, module) in cases {
+            if !shipped_model_filter_allows(name) {
+                continue;
+            }
             run_shipped_model_microbench_case(name, &path, module, iterations, samples);
         }
     }
@@ -6932,6 +6935,23 @@ endmodule
         sample_ns_per_sweep.sort_by(|left, right| left.total_cmp(right));
         let min_ns_per_sweep = sample_ns_per_sweep[0];
         let median_ns_per_sweep = sample_ns_per_sweep[sample_ns_per_sweep.len() / 2];
+        let p95_index = ((sample_ns_per_sweep.len() as f64 * 0.95).ceil() as usize)
+            .saturating_sub(1)
+            .min(sample_ns_per_sweep.len() - 1);
+        let p95_ns_per_sweep = sample_ns_per_sweep[p95_index];
+        let mean_ns_per_sweep =
+            sample_ns_per_sweep.iter().sum::<f64>() / sample_ns_per_sweep.len() as f64;
+        let standard_deviation = (sample_ns_per_sweep
+            .iter()
+            .map(|sample| {
+                let delta = sample - mean_ns_per_sweep;
+                delta * delta
+            })
+            .sum::<f64>()
+            / sample_ns_per_sweep.len() as f64)
+            .sqrt();
+        let relative_standard_deviation =
+            standard_deviation / mean_ns_per_sweep.max(f64::MIN_POSITIVE);
         let checksum = std::hint::black_box(checksum);
         assert!(
             checksum.is_finite(),
@@ -6939,9 +6959,11 @@ endmodule
         );
         let stats = native.plan_stats();
         eprintln!(
-            "native-x64-shipped-microbench model={name} compile_ms={:.3} native_compile_ms={:.3} dependencies={} params={} vars={} assignments={} stamps={} jacobians={} reactive_jacobians={} min_ns_per_sweep={min_ns_per_sweep:.3} median_ns_per_sweep={median_ns_per_sweep:.3} checksum={checksum:.17e}",
+            "native-x64-shipped-microbench model={name} compile_ms={:.3} native_compile_ms={:.3} code_bytes={} entry_points={} dependencies={} params={} vars={} assignments={} stamps={} jacobians={} reactive_jacobians={} min_ns_per_sweep={min_ns_per_sweep:.3} median_ns_per_sweep={median_ns_per_sweep:.3} p95_ns_per_sweep={p95_ns_per_sweep:.3} relative_standard_deviation={relative_standard_deviation:.6} checksum={checksum:.17e}",
             compile_elapsed.as_secs_f64() * 1000.0,
             native_compile_elapsed.as_secs_f64() * 1000.0,
+            native.code_size_bytes(),
+            stats.total_entry_points(),
             runtime.dependencies.len(),
             runtime.model.parameters.len(),
             runtime.model.num_variables,
