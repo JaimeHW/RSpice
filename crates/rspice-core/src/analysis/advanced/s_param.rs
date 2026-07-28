@@ -56,4 +56,6 @@ pub use network::{
 pub use noise_params::{TwoPortNoise, derive_two_port_noise};
 pub use ports::{PortError, SParameterPort, collect_ports, set_excitations};
 pub use stability::{GainAnalysis, StabilityAnalysis};
-pub use touchstone::{TouchstoneExporter, TouchstoneFormat, TouchstoneFreqUnit};
+pub use touchstone::{
+    TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, touchstone, touchstone_extension,
+};

@@ -1358,8 +1358,7 @@ fn solve_netlist_sparameters(
 
     for (excite_port, _) in ports.iter().enumerate() {
         let mut excited = ctx.netlist.clone();
-        s_param::set_excitations(&mut excited, &ports, excite_port)
-            .map_err(sparameter_error)?;
+        s_param::set_excitations(&mut excited, &ports, excite_port).map_err(sparameter_error)?;
         let ac_points = ctx
             .engine
             .run_ac(&excited, &frequencies)
@@ -1433,56 +1432,37 @@ fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> boo
     })
 }
 
+/// Write an N-port Touchstone v1 file through the shared core writer.
+///
+/// Formatting, the option line, and the mixed-reference-impedance refusal all
+/// live in `rspice_core`, so a deck exported here and through the Python
+/// bindings produces the same bytes.
 fn write_touchstone_nport(
     path: &std::path::Path,
     ports: &[s_param::SParameterPort],
     frequencies: &[f64],
     s: &[Vec<Vec<rspice_core::Complex64>>],
 ) -> Result<(), CliError> {
-    let Some(first_port) = ports.first() else {
+    if ports.is_empty() {
         return Ok(());
-    };
-    let common_z0 = ports
-        .iter()
-        .all(|port| (port.z0 - first_port.z0).abs() <= first_port.z0.abs().max(1.0) * 1e-12);
-    if !common_z0 {
-        return Err(CliError::InvalidArgument {
-            message: "Touchstone v1 export requires a common z0 across all .SP ports".to_string(),
-            suggestion: Some("use CSV, JSON, or HDF5 output for per-port z0 values".to_string()),
-        });
     }
-
-    use std::io::Write;
-    let mut file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
-    writeln!(file, "! {}-port S-parameters", ports.len())
-        .map_err(|e| CliError::output_error(path, e))?;
-    writeln!(file, "# HZ S RI R {}", first_port.z0).map_err(|e| CliError::output_error(path, e))?;
-    for (index, freq) in frequencies.iter().enumerate() {
-        write!(file, "{freq:.9e}").map_err(|e| CliError::output_error(path, e))?;
-        if ports.len() == 2 {
-            for (row, col) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                let value = s[row][col]
-                    .get(index)
-                    .copied()
-                    .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0));
-                write!(file, " {:.9e} {:.9e}", value.re, value.im)
-                    .map_err(|e| CliError::output_error(path, e))?;
-            }
-        } else {
-            for row_values in s.iter().take(ports.len()) {
-                for values in row_values.iter().take(ports.len()) {
-                    let value = values
-                        .get(index)
-                        .copied()
-                        .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0));
-                    write!(file, " {:.9e} {:.9e}", value.re, value.im)
-                        .map_err(|e| CliError::output_error(path, e))?;
-                }
-            }
-        }
-        writeln!(file).map_err(|e| CliError::output_error(path, e))?;
-    }
-    Ok(())
+    let reference_impedances: Vec<f64> = ports.iter().map(|port| port.z0).collect();
+    let comments = vec![format!("{}-port S-parameters", ports.len())];
+    let document = s_param::touchstone(
+        &s_param::TouchstoneInput {
+            frequencies,
+            parameters: s,
+            reference_impedances: &reference_impedances,
+            comments: &comments,
+        },
+        s_param::TouchstoneFormat::RealImaginary,
+        s_param::TouchstoneFrequencyUnit::Hz,
+    )
+    .map_err(|message| CliError::InvalidArgument {
+        message,
+        suggestion: Some("use CSV, JSON, or HDF5 output for per-port z0 values".to_string()),
+    })?;
+    std::fs::write(path, document).map_err(|error| CliError::output_error(path, error))
 }
 
 /// Two-port S-parameter extraction over the deck's `.AC` sweep.

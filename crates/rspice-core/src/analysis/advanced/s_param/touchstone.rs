@@ -1,185 +1,266 @@
-use super::*;
+//! Touchstone v1.1 serialization for N-port scattering results.
+//!
+//! One writer, shared by every front-end. The CLI previously emitted a
+//! fixed `# HZ S RI R <z0>` line of its own while the Python bindings carried
+//! this richer implementation, so the same result exported through two
+//! products produced two different files.
+//!
+//! A result whose ports do not all share one reference impedance is refused
+//! rather than written with a silently wrong `R`. Touchstone v1 has a single
+//! global `R` option and no way to express per-port normalization, so any
+//! value written for a mixed-impedance network would be a lie that reads as
+//! authoritative in whatever tool consumes the file.
 
+use std::fmt::Write as _;
+
+use crate::Complex64;
+
+/// Numeric field width used by every text writer.
+///
+/// 17 significant digits round-trips an IEEE-754 double exactly, so a written
+/// artifact reloads without loss.
+fn format_float(value: f64) -> String {
+    format!("{value:.17e}")
+}
+
+/// Reject an option value with the list of what is accepted.
+pub(crate) fn unknown_option(kind: &str, value: &str, accepted: &[&str]) -> String {
+    format!(
+        "unknown {kind} '{value}'; expected one of: {}",
+        accepted.join(", ")
+    )
+}
+
+/// Complex-value encoding in a Touchstone data line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TouchstoneFormat {
-    /// Magnitude-Angle (MA)
-    MagnitudeAngle,
-    /// Real-Imaginary (RI)
     RealImaginary,
-    /// dB-Angle (DB)
+    MagnitudeAngle,
     DecibelAngle,
 }
 
 impl TouchstoneFormat {
-    /// Get format string for Touchstone header
-    pub fn format_string(&self) -> &'static str {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.to_ascii_lowercase().as_str() {
+            "ri" | "real_imaginary" => Ok(Self::RealImaginary),
+            "ma" | "magnitude_angle" => Ok(Self::MagnitudeAngle),
+            "db" | "decibel_angle" => Ok(Self::DecibelAngle),
+            other => Err(unknown_option(
+                "Touchstone format",
+                other,
+                &["ri", "ma", "db"],
+            )),
+        }
+    }
+
+    fn keyword(self) -> &'static str {
         match self {
-            TouchstoneFormat::MagnitudeAngle => "MA",
-            TouchstoneFormat::RealImaginary => "RI",
-            TouchstoneFormat::DecibelAngle => "DB",
+            Self::RealImaginary => "RI",
+            Self::MagnitudeAngle => "MA",
+            Self::DecibelAngle => "DB",
+        }
+    }
+
+    /// Encode one S-parameter as the format's two real numbers.
+    ///
+    /// `DB` uses `20*log10|S|`; a zero magnitude therefore yields `-inf`,
+    /// which no Touchstone reader accepts, so it is floored at the smallest
+    /// representable magnitude instead of emitting a non-numeric token.
+    fn encode(self, value: Complex64) -> (f64, f64) {
+        match self {
+            Self::RealImaginary => (value.re, value.im),
+            Self::MagnitudeAngle => (value.norm(), value.arg().to_degrees()),
+            Self::DecibelAngle => {
+                let magnitude = value.norm();
+                let decibels = if magnitude > 0.0 {
+                    20.0 * magnitude.log10()
+                } else {
+                    -f64::MAX
+                };
+                (decibels, value.arg().to_degrees())
+            }
         }
     }
 }
 
-/// Touchstone file frequency unit
+/// Frequency unit written on the option line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TouchstoneFreqUnit {
+pub enum TouchstoneFrequencyUnit {
     Hz,
     KHz,
     MHz,
     GHz,
 }
 
-impl TouchstoneFreqUnit {
-    /// Get the multiplier to convert to Hz
-    pub fn multiplier(&self) -> Value {
+impl TouchstoneFrequencyUnit {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.to_ascii_lowercase().as_str() {
+            "hz" => Ok(Self::Hz),
+            "khz" => Ok(Self::KHz),
+            "mhz" => Ok(Self::MHz),
+            "ghz" => Ok(Self::GHz),
+            other => Err(unknown_option(
+                "Touchstone frequency unit",
+                other,
+                &["hz", "khz", "mhz", "ghz"],
+            )),
+        }
+    }
+
+    fn keyword(self) -> &'static str {
         match self {
-            TouchstoneFreqUnit::Hz => 1.0,
-            TouchstoneFreqUnit::KHz => 1e3,
-            TouchstoneFreqUnit::MHz => 1e6,
-            TouchstoneFreqUnit::GHz => 1e9,
+            Self::Hz => "HZ",
+            Self::KHz => "KHZ",
+            Self::MHz => "MHZ",
+            Self::GHz => "GHZ",
         }
     }
 
-    /// Get unit string for Touchstone header
-    pub fn unit_string(&self) -> &'static str {
+    fn divisor(self) -> f64 {
         match self {
-            TouchstoneFreqUnit::Hz => "HZ",
-            TouchstoneFreqUnit::KHz => "KHZ",
-            TouchstoneFreqUnit::MHz => "MHZ",
-            TouchstoneFreqUnit::GHz => "GHZ",
+            Self::Hz => 1.0,
+            Self::KHz => 1e3,
+            Self::MHz => 1e6,
+            Self::GHz => 1e9,
         }
     }
 }
 
-/// Touchstone file exporter
-pub struct TouchstoneExporter {
-    /// Data format
-    pub format: TouchstoneFormat,
-    /// Frequency unit
-    pub freq_unit: TouchstoneFreqUnit,
-    /// Reference impedance
-    pub z0: Value,
-    /// Comments to include in file
-    pub comments: Vec<String>,
+/// Everything a Touchstone file needs from an S-parameter result.
+pub struct TouchstoneInput<'a> {
+    pub frequencies: &'a [f64],
+    /// `[row][column][frequency_index]`, one-based ports in row/column order.
+    pub parameters: &'a [Vec<Vec<Complex64>>],
+    pub reference_impedances: &'a [f64],
+    pub comments: &'a [String],
 }
 
-impl Default for TouchstoneExporter {
-    fn default() -> Self {
-        Self {
-            format: TouchstoneFormat::RealImaginary,
-            freq_unit: TouchstoneFreqUnit::GHz,
-            z0: 50.0,
-            comments: Vec::new(),
+/// Touchstone v1 permits at most four complex pairs on one physical line.
+pub const MAX_PAIRS_PER_LINE: usize = 4;
+
+/// Render a Touchstone v1 document.
+pub fn touchstone(
+    input: &TouchstoneInput<'_>,
+    format: TouchstoneFormat,
+    unit: TouchstoneFrequencyUnit,
+) -> Result<String, String> {
+    let ports = input.parameters.len();
+    if ports == 0 {
+        return Err("Touchstone export requires at least one port".to_string());
+    }
+    if input.reference_impedances.len() != ports
+        || input.parameters.iter().any(|row| row.len() != ports)
+    {
+        return Err(
+            "malformed S-parameter result: port count does not match the scattering matrix"
+                .to_string(),
+        );
+    }
+    for row in input.parameters {
+        for series in row {
+            if series.len() != input.frequencies.len() {
+                return Err(format!(
+                    "malformed S-parameter result: a series has {} points for {} frequencies",
+                    series.len(),
+                    input.frequencies.len()
+                ));
+            }
         }
     }
-}
 
-impl TouchstoneExporter {
-    /// Create new exporter with default settings
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set data format
-    pub fn with_format(mut self, format: TouchstoneFormat) -> Self {
-        self.format = format;
-        self
-    }
-
-    /// Set frequency unit
-    pub fn with_freq_unit(mut self, unit: TouchstoneFreqUnit) -> Self {
-        self.freq_unit = unit;
-        self
-    }
-
-    /// Set reference impedance
-    pub fn with_z0(mut self, z0: Value) -> Self {
-        self.z0 = z0;
-        self
-    }
-
-    /// Add a comment line
-    pub fn with_comment(mut self, comment: &str) -> Self {
-        self.comments.push(comment.to_string());
-        self
-    }
-
-    /// Export S-parameter result to Touchstone format string
-    pub fn export(&self, result: &SParameterResult) -> String {
-        let mut output = String::new();
-
-        // Comments
-        for comment in &self.comments {
-            output.push_str(&format!("! {}\n", comment));
-        }
-
-        // Option line: # <freq_unit> S <format> R <z0>
-        output.push_str(&format!(
-            "# {} S {} R {:.1}\n",
-            self.freq_unit.unit_string(),
-            self.format.format_string(),
-            self.z0
+    // Touchstone v1 carries a single reference impedance on its option line.
+    // Writing one anyway for a mixed-impedance network would produce a file
+    // whose S-parameters mean something other than what was simulated.
+    let reference = input.reference_impedances[0];
+    if let Some((index, mismatched)) = input
+        .reference_impedances
+        .iter()
+        .enumerate()
+        .find(|(_, z0)| z0.to_bits() != reference.to_bits())
+    {
+        return Err(format!(
+            "Touchstone v1 supports one reference impedance, but port 1 uses {reference} ohm and \
+             port {} uses {mismatched} ohm; renormalize the ports before exporting",
+            index + 1
         ));
+    }
 
-        // Data lines
-        let freq_mult = self.freq_unit.multiplier();
+    let mut output = String::new();
+    for comment in input.comments {
+        for line in comment.lines() {
+            let _ = writeln!(output, "! {line}");
+        }
+    }
+    let _ = writeln!(
+        output,
+        "# {} S {} R {reference}",
+        unit.keyword(),
+        format.keyword()
+    );
 
-        for s in &result.data {
-            let freq = s.frequency / freq_mult;
+    let divisor = unit.divisor();
+    for (frequency_index, frequency) in input.frequencies.iter().enumerate() {
+        let pair = |row: usize, column: usize| {
+            format.encode(input.parameters[row][column][frequency_index])
+        };
+        let frequency_field = format_float(frequency / divisor);
 
-            match result.num_ports {
-                1 => {
-                    // 1-port: freq S11
-                    let s11 = s.get(1, 1);
-                    let (v1, v2) = self.format_complex(s11);
-                    output.push_str(&format!("{:.9e}\t{:.9e}\t{:.9e}\n", freq, v1, v2));
+        match ports {
+            // 1-port: freq S11
+            1 => {
+                let (first, second) = pair(0, 0);
+                let _ = writeln!(
+                    output,
+                    "{frequency_field}\t{}\t{}",
+                    format_float(first),
+                    format_float(second)
+                );
+            }
+            // 2-port: the format's historical S11 S21 S12 S22 ordering.
+            2 => {
+                let mut line = frequency_field;
+                for (row, column) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let (first, second) = pair(row, column);
+                    let _ = write!(line, "\t{}\t{}", format_float(first), format_float(second));
                 }
-                2 => {
-                    // 2-port: freq S11 S21 S12 S22
-                    let s11 = s.get(1, 1);
-                    let s21 = s.get(2, 1);
-                    let s12 = s.get(1, 2);
-                    let s22 = s.get(2, 2);
-
-                    let (s11_1, s11_2) = self.format_complex(s11);
-                    let (s21_1, s21_2) = self.format_complex(s21);
-                    let (s12_1, s12_2) = self.format_complex(s12);
-                    let (s22_1, s22_2) = self.format_complex(s22);
-
-                    output.push_str(&format!(
-                        "{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\n",
-                        freq, s11_1, s11_2, s21_1, s21_2, s12_1, s12_2, s22_1, s22_2
-                    ));
-                }
-                _ => {
-                    // N-port: more complex formatting (split across lines)
-                    output.push_str(&format!("{:.9e}", freq));
-                    for row in 1..=result.num_ports {
-                        for col in 1..=result.num_ports {
-                            let sij = s.get(row, col);
-                            let (v1, v2) = self.format_complex(sij);
-                            output.push_str(&format!("\t{:.9e}\t{:.9e}", v1, v2));
+                let _ = writeln!(output, "{line}");
+            }
+            // N-port: one matrix row per line block, row-major, wrapped at
+            // four pairs. The frequency leads the first line only.
+            _ => {
+                for row in 0..ports {
+                    let mut line = if row == 0 {
+                        frequency_field.clone()
+                    } else {
+                        String::new()
+                    };
+                    let mut pairs_on_line = 0;
+                    for column in 0..ports {
+                        if pairs_on_line == MAX_PAIRS_PER_LINE {
+                            let _ = writeln!(output, "{line}");
+                            line = String::new();
+                            pairs_on_line = 0;
                         }
+                        let (first, second) = pair(row, column);
+                        let _ = write!(
+                            line,
+                            "{}{}\t{}",
+                            if line.is_empty() { "" } else { "\t" },
+                            format_float(first),
+                            format_float(second)
+                        );
+                        pairs_on_line += 1;
                     }
-                    output.push('\n');
+                    let _ = writeln!(output, "{line}");
                 }
             }
         }
-
-        output
     }
 
-    /// Format complex number according to selected format
-    fn format_complex(&self, c: Complex) -> (Value, Value) {
-        match self.format {
-            TouchstoneFormat::RealImaginary => (c.re, c.im),
-            TouchstoneFormat::MagnitudeAngle => (c.magnitude(), c.phase_deg()),
-            TouchstoneFormat::DecibelAngle => (c.mag_db(), c.phase_deg()),
-        }
-    }
+    Ok(output)
 }
 
-//=============================================================================
-// Tests
-//=============================================================================
+/// Conventional Touchstone file extension for a port count.
+pub fn touchstone_extension(ports: usize) -> String {
+    format!("s{ports}p")
+}

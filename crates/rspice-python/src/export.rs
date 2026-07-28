@@ -10,10 +10,9 @@
 //!
 //! # Touchstone
 //!
-//! Touchstone v1.1 single-`R` option lines. A result whose ports do not all
-//! share one reference impedance is rejected rather than written with a
-//! silently wrong `R`, because the format has no way to express per-port
-//! normalization.
+//! Re-exported from `rspice_core`, which owns the single writer every
+//! front-end shares. It stays visible through this module so the result types
+//! reach all three formats through one path.
 //!
 //! # SPICE raw
 //!
@@ -28,25 +27,33 @@ use std::fmt::Write as _;
 
 use rspice_core::Complex64;
 
-//=============================================================================
-// Shared helpers
-//=============================================================================
+// The Touchstone writer lives in core so the CLI and the desktop runner emit
+// byte-identical files; the result types keep reaching it through this module.
+pub(crate) use rspice_core::analysis::advanced::s_param::{
+    TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, touchstone, touchstone_extension,
+};
 
-/// Numeric field width used by every text writer.
-///
-/// 17 significant digits round-trips an IEEE-754 double exactly, so a written
-/// artifact reloads without loss.
+/// Render a float the way every serializer here needs it: shortest round-trip
+/// form, with a `.0` kept on integral values so column types stay obvious.
 fn format_float(value: f64) -> String {
-    format!("{value:.17e}")
+    if value == value.trunc() && value.is_finite() {
+        format!("{value:.1}")
+    } else {
+        format!("{value}")
+    }
 }
 
-/// Reject an option value with the list of what is accepted.
+/// Uniform message for a rejected string-valued option.
 fn unknown_option(kind: &str, value: &str, accepted: &[&str]) -> String {
     format!(
-        "unknown {kind} '{value}'; expected one of: {}",
+        "unknown {kind} '{value}'; expected one of {}",
         accepted.join(", ")
     )
 }
+
+//=============================================================================
+// Shared helpers
+//=============================================================================
 
 /// asctime-style UTC timestamp, matching the header ngspice writes.
 ///
@@ -89,243 +96,6 @@ fn asctime_utc_now() -> String {
         WEEKDAYS[days.rem_euclid(7) as usize],
         MONTHS[(month - 1) as usize],
     )
-}
-
-//=============================================================================
-// Touchstone
-//=============================================================================
-
-/// Complex-value encoding in a Touchstone data line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TouchstoneFormat {
-    RealImaginary,
-    MagnitudeAngle,
-    DecibelAngle,
-}
-
-impl TouchstoneFormat {
-    pub(crate) fn parse(value: &str) -> Result<Self, String> {
-        match value.to_ascii_lowercase().as_str() {
-            "ri" | "real_imaginary" => Ok(Self::RealImaginary),
-            "ma" | "magnitude_angle" => Ok(Self::MagnitudeAngle),
-            "db" | "decibel_angle" => Ok(Self::DecibelAngle),
-            other => Err(unknown_option("Touchstone format", other, &["ri", "ma", "db"])),
-        }
-    }
-
-    fn keyword(self) -> &'static str {
-        match self {
-            Self::RealImaginary => "RI",
-            Self::MagnitudeAngle => "MA",
-            Self::DecibelAngle => "DB",
-        }
-    }
-
-    /// Encode one S-parameter as the format's two real numbers.
-    ///
-    /// `DB` uses `20*log10|S|`; a zero magnitude therefore yields `-inf`,
-    /// which no Touchstone reader accepts, so it is floored at the smallest
-    /// representable magnitude instead of emitting a non-numeric token.
-    fn encode(self, value: Complex64) -> (f64, f64) {
-        match self {
-            Self::RealImaginary => (value.re, value.im),
-            Self::MagnitudeAngle => (value.norm(), value.arg().to_degrees()),
-            Self::DecibelAngle => {
-                let magnitude = value.norm();
-                let decibels = if magnitude > 0.0 {
-                    20.0 * magnitude.log10()
-                } else {
-                    -f64::MAX
-                };
-                (decibels, value.arg().to_degrees())
-            }
-        }
-    }
-}
-
-/// Frequency unit written on the option line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TouchstoneFrequencyUnit {
-    Hz,
-    KHz,
-    MHz,
-    GHz,
-}
-
-impl TouchstoneFrequencyUnit {
-    pub(crate) fn parse(value: &str) -> Result<Self, String> {
-        match value.to_ascii_lowercase().as_str() {
-            "hz" => Ok(Self::Hz),
-            "khz" => Ok(Self::KHz),
-            "mhz" => Ok(Self::MHz),
-            "ghz" => Ok(Self::GHz),
-            other => Err(unknown_option(
-                "Touchstone frequency unit",
-                other,
-                &["hz", "khz", "mhz", "ghz"],
-            )),
-        }
-    }
-
-    fn keyword(self) -> &'static str {
-        match self {
-            Self::Hz => "HZ",
-            Self::KHz => "KHZ",
-            Self::MHz => "MHZ",
-            Self::GHz => "GHZ",
-        }
-    }
-
-    fn divisor(self) -> f64 {
-        match self {
-            Self::Hz => 1.0,
-            Self::KHz => 1e3,
-            Self::MHz => 1e6,
-            Self::GHz => 1e9,
-        }
-    }
-}
-
-/// Everything a Touchstone file needs from an S-parameter result.
-pub(crate) struct TouchstoneInput<'a> {
-    pub frequencies: &'a [f64],
-    /// `[row][column][frequency_index]`, one-based ports in row/column order.
-    pub parameters: &'a [Vec<Vec<Complex64>>],
-    pub reference_impedances: &'a [f64],
-    pub comments: &'a [String],
-}
-
-/// Touchstone v1 permits at most four complex pairs on one physical line.
-const MAX_PAIRS_PER_LINE: usize = 4;
-
-/// Render a Touchstone v1 document.
-pub(crate) fn touchstone(
-    input: &TouchstoneInput<'_>,
-    format: TouchstoneFormat,
-    unit: TouchstoneFrequencyUnit,
-) -> Result<String, String> {
-    let ports = input.parameters.len();
-    if ports == 0 {
-        return Err("Touchstone export requires at least one port".to_string());
-    }
-    if input.reference_impedances.len() != ports
-        || input.parameters.iter().any(|row| row.len() != ports)
-    {
-        return Err("malformed S-parameter result: port count does not match the scattering matrix"
-            .to_string());
-    }
-    for row in input.parameters {
-        for series in row {
-            if series.len() != input.frequencies.len() {
-                return Err(format!(
-                    "malformed S-parameter result: a series has {} points for {} frequencies",
-                    series.len(),
-                    input.frequencies.len()
-                ));
-            }
-        }
-    }
-
-    // Touchstone v1 carries a single reference impedance on its option line.
-    // Writing one anyway for a mixed-impedance network would produce a file
-    // whose S-parameters mean something other than what was simulated.
-    let reference = input.reference_impedances[0];
-    if let Some((index, mismatched)) = input
-        .reference_impedances
-        .iter()
-        .enumerate()
-        .find(|(_, z0)| z0.to_bits() != reference.to_bits())
-    {
-        return Err(format!(
-            "Touchstone v1 supports one reference impedance, but port 1 uses {reference} ohm and \
-             port {} uses {mismatched} ohm; renormalize the ports before exporting",
-            index + 1
-        ));
-    }
-
-    let mut output = String::new();
-    for comment in input.comments {
-        for line in comment.lines() {
-            let _ = writeln!(output, "! {line}");
-        }
-    }
-    let _ = writeln!(
-        output,
-        "# {} S {} R {reference}",
-        unit.keyword(),
-        format.keyword()
-    );
-
-    let divisor = unit.divisor();
-    for (frequency_index, frequency) in input.frequencies.iter().enumerate() {
-        let pair = |row: usize, column: usize| {
-            format.encode(input.parameters[row][column][frequency_index])
-        };
-        let frequency_field = format_float(frequency / divisor);
-
-        match ports {
-            // 1-port: freq S11
-            1 => {
-                let (first, second) = pair(0, 0);
-                let _ = writeln!(
-                    output,
-                    "{frequency_field}\t{}\t{}",
-                    format_float(first),
-                    format_float(second)
-                );
-            }
-            // 2-port: the format's historical S11 S21 S12 S22 ordering.
-            2 => {
-                let mut line = frequency_field;
-                for (row, column) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                    let (first, second) = pair(row, column);
-                    let _ = write!(
-                        line,
-                        "\t{}\t{}",
-                        format_float(first),
-                        format_float(second)
-                    );
-                }
-                let _ = writeln!(output, "{line}");
-            }
-            // N-port: one matrix row per line block, row-major, wrapped at
-            // four pairs. The frequency leads the first line only.
-            _ => {
-                for row in 0..ports {
-                    let mut line = if row == 0 {
-                        frequency_field.clone()
-                    } else {
-                        String::new()
-                    };
-                    let mut pairs_on_line = 0;
-                    for column in 0..ports {
-                        if pairs_on_line == MAX_PAIRS_PER_LINE {
-                            let _ = writeln!(output, "{line}");
-                            line = String::new();
-                            pairs_on_line = 0;
-                        }
-                        let (first, second) = pair(row, column);
-                        let _ = write!(
-                            line,
-                            "{}{}\t{}",
-                            if line.is_empty() { "" } else { "\t" },
-                            format_float(first),
-                            format_float(second)
-                        );
-                        pairs_on_line += 1;
-                    }
-                    let _ = writeln!(output, "{line}");
-                }
-            }
-        }
-    }
-
-    Ok(output)
-}
-
-/// Conventional Touchstone file extension for a port count.
-pub(crate) fn touchstone_extension(ports: usize) -> String {
-    format!("s{ports}p")
 }
 
 //=============================================================================
@@ -403,9 +173,7 @@ impl RawPlot {
         let _ = writeln!(
             header,
             "Date: {}",
-            self.timestamp
-                .clone()
-                .unwrap_or_else(asctime_utc_now)
+            self.timestamp.clone().unwrap_or_else(asctime_utc_now)
         );
         let _ = writeln!(header, "Plotname: {}", self.plot_name);
         let _ = writeln!(
@@ -667,7 +435,10 @@ mod tests {
                     kind: RawVariableKind::Voltage,
                 },
             ],
-            series: vec![series(&[(0.0, 0.0), (1e-6, 0.0)]), series(&[(0.0, 0.0), (2.5, 0.0)])],
+            series: vec![
+                series(&[(0.0, 0.0), (1e-6, 0.0)]),
+                series(&[(0.0, 0.0), (2.5, 0.0)]),
+            ],
             complex: false,
             timestamp: None,
         };
