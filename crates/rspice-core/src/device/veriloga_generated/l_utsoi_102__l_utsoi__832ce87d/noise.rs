@@ -9961,7 +9961,7 @@ impl Instance {
         } else {
             let psd = v13770;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 0, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -9973,7 +9973,7 @@ impl Instance {
         } else {
             let psd = v13772;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 1, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -9985,7 +9985,7 @@ impl Instance {
         } else {
             let psd = v13774;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 2, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -9997,7 +9997,7 @@ impl Instance {
         } else {
             let psd = v13776;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 3, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -10007,7 +10007,7 @@ impl Instance {
         {
             let psd = v13259;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 4, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -10017,7 +10017,7 @@ impl Instance {
         {
             let psd = v13185;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 5, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -10027,7 +10027,7 @@ impl Instance {
         {
             let psd = v13260;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 6, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = Some(v13261);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "exponent", value }); } }
             let table_operands = [];
@@ -10038,7 +10038,7 @@ impl Instance {
         {
             let psd = v13238;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 7, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -10048,7 +10048,7 @@ impl Instance {
         {
             let psd = v13243;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 8, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 8, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -10058,7 +10058,7 @@ impl Instance {
         {
             let psd = v13258;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 9, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 9, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;

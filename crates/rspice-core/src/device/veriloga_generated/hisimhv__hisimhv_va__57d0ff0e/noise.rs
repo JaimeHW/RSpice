@@ -28291,7 +28291,7 @@ impl Instance {
         {
             let psd = v21859;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 0, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = Some(v1429);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
             let table_operands = [];
@@ -28302,7 +28302,7 @@ impl Instance {
         {
             let psd = v21240;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 1, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -28312,7 +28312,7 @@ impl Instance {
         {
             let psd = v21862;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 2, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -28324,7 +28324,7 @@ impl Instance {
         } else {
             let psd = v21889;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 3, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -28336,7 +28336,7 @@ impl Instance {
         } else {
             let psd = v21891;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 4, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -28346,7 +28346,7 @@ impl Instance {
         {
             let psd = v21879;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 5, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -28356,7 +28356,7 @@ impl Instance {
         {
             let psd = v21882;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 6, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -28366,7 +28366,7 @@ impl Instance {
         {
             let psd = v21885;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "psd", value: psd }); }
-            if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 7, value: psd }); }
+            let psd = psd.abs();
             let exponent: Option<f64> = None;
             let table_operands = [];
             let psd = psd * self.multiplicity;

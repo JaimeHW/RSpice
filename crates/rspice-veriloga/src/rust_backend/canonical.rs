@@ -950,10 +950,23 @@ impl ModelPlan {
             // is bit-identical rather than merely close.
             let _ = writeln!(out, "            let psd = {};", values[source.psd]);
             emit_noise_check(&mut out, index, "psd", "psd");
-            let _ = writeln!(
-                out,
-                "            if psd < 0.0 {{ return Err(GeneratedNoiseEvaluationError::NegativePower {{ index: {index}, value: psd }}); }}"
-            );
+            // A noise power reaches us signed, and the magnitude is the spectral
+            // density. PSP104 is why: it clips its flicker density non-negative
+            // (`S_fl = CLIP_LOW(S_fl, 0.0)`) and then contributes
+            // `flicker_noise(sigVds * MULT_inst * MULT_FN * S_fl, ...)`, where
+            // `sigVds` is literally +-1.0 and goes negative whenever the device
+            // is operating in reverse. The sign is there to orient the branch
+            // against the model's own internal source/drain swap; it cannot mean
+            // anything about the density, because an independent noise source is
+            // zero-mean and its orientation is unobservable.
+            //
+            // Rejecting the negative -- which is what this did -- failed the
+            // whole evaluation for four models at ordinary reverse bias.
+            // Clamping to zero would be worse than the error: it would silently
+            // delete the flicker noise of every reversed PSP device, which is
+            // wrong physics rather than a loud stop. The magnitude is the one
+            // reading that is right in both directions.
+            let _ = writeln!(out, "            let psd = psd.abs();");
             match source.exponent {
                 Some(at) => {
                     let _ = writeln!(

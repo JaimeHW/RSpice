@@ -288,11 +288,10 @@ pub(super) fn generate_noise_file(
         };
         writeln!(out, "            let psd = {};", psd.value).expect("write noise PSD evaluation");
         emit_finite_check(&mut out, index, "psd", "psd", 12);
-        writeln!(
-            out,
-            "            if psd < 0.0 {{ return Err(GeneratedNoiseEvaluationError::NegativePower {{ index: {index}, value: psd }}); }}"
-        )
-        .expect("write nonnegative PSD validation");
+        // The magnitude is the spectral density; see the note on the same line in
+        // `canonical.rs`. PSP104 contributes `sigVds * ... * S_fl` with `sigVds`
+        // at -1.0 in reverse, and rejecting that failed four models outright.
+        writeln!(out, "            let psd = psd.abs();").expect("write PSD magnitude");
         writeln!(out, "            let exponent: Option<f64> = {exponent};")
             .expect("write noise exponent evaluation");
         emit_optional_finite_check(&mut out, index, "exponent", "exponent", 12);
