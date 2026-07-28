@@ -1190,6 +1190,36 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 )
             }
             XyceStaticTranComparisonMode::Pointwise => {
+                let has_solution_dependent_capacitor = netlist.elements.iter().any(|element| {
+                    matches!(
+                        &element.kind,
+                        ElementKind::Capacitor {
+                            value,
+                            value_expr: Some(_),
+                            ..
+                        } if !value.is_finite()
+                    )
+                });
+                if !has_solution_dependent_capacitor
+                    && Self::transient_print_requests_linear_capacitor_branch_quantity(
+                        netlist,
+                        &plan.print,
+                    )
+                {
+                    // Linear-capacitor lead currents are accepted-history
+                    // quantities. A harness sampling cap introduced solely
+                    // because the reference contains a tiny startup gap
+                    // creates extra accepted states and changes those
+                    // currents. Preserve Xyce's adaptive DELMAX contract for
+                    // these outputs and interpolate only at comparison time.
+                    return Self::transient_max_step_with_solver_ceiling(
+                        netlist,
+                        tran,
+                        None,
+                        Self::transient_oracle_solver_max_step_for_netlist(netlist, tran),
+                        false,
+                    );
+                }
                 Self::transient_max_step_for_reference(netlist, tran, reference)
             }
         }
