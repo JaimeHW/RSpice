@@ -19,7 +19,17 @@
 //! All of it outlives any particular backend: these observe devices through the
 //! public instance API and know nothing about how a stamp was emitted.
 
-#[cfg(feature = "veriloga-builtins-base")]
+// `bench` and `reference` are timing harnesses, and `std::time::Instant::now()`
+// aborts at runtime on `wasm32-unknown-unknown` — there is no clock in the bare
+// wasm ABI. `crate::time_compat` is the shim everywhere else in the crate, but
+// it is deliberately not the answer here: its `elapsed()` is always zero, which
+// is right for threshold-triggered diagnostics that should simply stay quiet,
+// and wrong for a benchmark, where it would report a fabricated `0.0 ns/stamp`
+// instead of failing. A measurement that cannot be taken must not be reported,
+// so these are compiled out of wasm entirely and a wasm caller gets a name
+// error rather than a plausible number. Their only consumer is `rspice-bench`,
+// which is native-only.
+#[cfg(all(feature = "veriloga-builtins-base", not(target_arch = "wasm32")))]
 pub mod bench;
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -28,5 +38,5 @@ pub mod fixture;
 #[cfg(feature = "veriloga-builtins-base")]
 pub mod golden;
 
-#[cfg(feature = "veriloga-builtins-base")]
+#[cfg(all(feature = "veriloga-builtins-base", not(target_arch = "wasm32")))]
 pub mod reference;
