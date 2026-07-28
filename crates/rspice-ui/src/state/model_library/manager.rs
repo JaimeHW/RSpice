@@ -643,11 +643,14 @@ impl ModelLibraryManager {
         self.spice_packs.as_deref()
     }
 
-    /// Definition count across the shipped packs, or zero when none were found.
+    /// Selectable parts across the shipped packs, or zero when none were found.
+    ///
+    /// The addressable count rather than the raw definition total: two thirds
+    /// of the definitions in the catalog are helper cards inside macromodel
+    /// bodies, and offering those as parts would be a promise the netlist
+    /// cannot keep.
     pub fn pack_definition_count(&self) -> usize {
-        self.spice_packs
-            .as_ref()
-            .map_or(0, |index| index.definition_count())
+        self.spice_packs.as_ref().map_or(0, |index| index.part_count())
     }
 
     /// Search the shipped packs for definitions whose name contains `query`.
@@ -655,7 +658,7 @@ impl ModelLibraryManager {
     /// Bounded by `limit` because a short query matches tens of thousands of
     /// rows; the catalogue view is a browser, not a dump. An empty query
     /// returns nothing rather than everything, so opening the tab does not
-    /// stream a 19 MB index off disk.
+    /// stream a 16 MB index off disk.
     pub fn search_pack_models(&self, query: &str, limit: usize) -> Vec<PackModelHit> {
         let trimmed = query.trim();
         if trimmed.is_empty() {

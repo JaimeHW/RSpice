@@ -1025,7 +1025,15 @@ fn repo_pack_manager() -> ModelLibraryManager {
 #[test]
 fn pack_search_finds_definitions_the_libraries_do_not_hold() {
     let manager = repo_pack_manager();
-    assert!(manager.pack_definition_count() > 100_000);
+    // Addressable parts, not raw definitions: `pack_definition_count` reports
+    // what a netlist can reference by name, which is roughly a third of the
+    // definitions in the tree because macromodel bodies carry helper cards.
+    // Core pins the definition total above 190_000; this is the smaller figure.
+    assert!(
+        manager.pack_definition_count() > 60_000,
+        "expected the shipped packs, counted {}",
+        manager.pack_definition_count()
+    );
 
     // Nothing is loaded, so a plain library search finds nothing...
     assert!(manager.search_models("2N3819").is_empty());
@@ -1040,7 +1048,7 @@ fn pack_search_finds_definitions_the_libraries_do_not_hold() {
 #[test]
 fn pack_search_is_bounded_and_ignores_an_empty_query() {
     let manager = repo_pack_manager();
-    // An empty query must not stream the whole 19 MB index.
+    // An empty query must not stream the whole 16 MB index.
     assert!(manager.search_pack_models("", 50).is_empty());
     assert!(manager.search_pack_models("   ", 50).is_empty());
 
