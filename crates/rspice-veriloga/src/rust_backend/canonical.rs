@@ -116,22 +116,30 @@ pub fn generate_device(
     })
 }
 
-/// One body's worth of pipeline output: the function to emit, the rows to write
-/// from it, and where each row's values sit in the emitted output list.
-struct Body {
-    function: CfgFunction,
+/// One matrix's worth of stamps: the rows to write, and where each row's values
+/// sit in the shared output list.
+struct Stamps {
     rows: Vec<StampRow>,
     /// Parallel to `rows`: `(residual, one per surviving derivative)`, as
-    /// indices into `outputs`.
+    /// indices into [`ModelPlan::outputs`].
     positions: Vec<(usize, Vec<usize>)>,
-    outputs: Vec<ValueId>,
 }
 
 struct ModelPlan {
-    conduction: Body,
-    /// Absent when no contribution stores charge, so there is nothing for the
-    /// reactive matrix and `stamp_reactive` has no work to do.
-    reactive: Option<Body>,
+    /// One body computing both matrices' worth of values.
+    ///
+    /// Not two, and the corpus is what settled it: separate simplifications and
+    /// separate emissions gave `hisimhv_va` 5.2 MB of stamp against a 2.2 MB
+    /// whole body, because the charge in a wide MOSFET depends on nearly
+    /// everything the conduction path computes and pruning has nothing to take
+    /// away. Sharing is close to free in the other direction — the conduction
+    /// Jacobian is `ddt_scale * d(q)/du`, so `d(q)/du` is already an operand it
+    /// holds, and asking for it costs one lane read.
+    function: CfgFunction,
+    outputs: Vec<ValueId>,
+    conduction: Stamps,
+    /// Empty when no contribution stores charge.
+    reactive: Stamps,
     /// The conduction body cut by invalidation class, or empty when the split
     /// was measured not to be worth taking for this model.
     stages: Vec<Stage>,
@@ -214,37 +222,47 @@ impl ModelPlan {
             })
             .collect();
 
-        let conduction = Body::build(
-            &differentiated.function,
-            artifact,
-            &residuals,
-            &conduction_rows,
-        );
-        let reactive = if charges.iter().any(Option::is_some) {
-            // A contribution with no `ddt` stores no charge. Its row stays in
-            // place so the two bodies remain parallel to `mir.equations`, with
-            // nothing in it to write.
-            let values: Vec<ValueId> = charges
-                .iter()
-                .zip(&residuals)
-                .map(|(charge, residual)| charge.unwrap_or(*residual))
-                .collect();
-            let mut body = Body::build(&differentiated.function, artifact, &values, &reactive_rows);
-            for (index, charge) in charges.iter().enumerate() {
-                if charge.is_none() {
-                    body.rows[index].derivatives.clear();
-                    body.positions[index].1.clear();
-                }
-            }
-            Some(body)
-        } else {
-            None
-        };
+        // A contribution with no `ddt` stores no charge. Its row is kept and
+        // emptied rather than dropped, so both row lists stay parallel to
+        // `mir.equations` and an equation's index means the same thing in each.
+        let charged = charges.iter().any(Option::is_some);
+        let charge_values: Vec<ValueId> = charges
+            .iter()
+            .zip(&residuals)
+            .map(|(charge, residual)| charge.unwrap_or(*residual))
+            .collect();
 
-        let schedule = schedule(&conduction.function);
-        let stages = split(&conduction.function, &schedule, &conduction.outputs)
+        let mut conduction = plan_stamps(artifact, &residuals, &conduction_rows);
+        let mut reactive = plan_stamps(artifact, &charge_values, &reactive_rows);
+        for (index, charge) in charges.iter().enumerate() {
+            if charge.is_none() {
+                reactive.rows[index].derivatives.clear();
+            }
+        }
+        if !charged {
+            reactive.rows.clear();
+        }
+
+        // One simplification over both, so what the two matrices share is
+        // computed once.
+        let mut wanted = conduction.wanted();
+        let reactive_wanted = reactive.wanted();
+        wanted.extend_from_slice(&reactive_wanted);
+        let (function, mapped) = optimize_cfg(&differentiated.function, &wanted);
+        conduction.remap(&mapped[..wanted.len() - reactive_wanted.len()]);
+        reactive.remap(&mapped[wanted.len() - reactive_wanted.len()..]);
+        conduction.drop_zeros(&function);
+        reactive.drop_zeros(&function);
+
+        // The output list both stamps read from, conduction first.
+        let mut outputs = Vec::new();
+        let conduction = Stamps::place(conduction, &mut outputs);
+        let reactive = Stamps::place(reactive, &mut outputs);
+
+        let schedule = schedule(&function);
+        let stages = split(&function, &schedule, &outputs)
             .map_err(|error| unsupported(artifact, format!("invalidation split: {error}")))?;
-        let (stages, slots) = if worth_splitting(&conduction.function, &stages) {
+        let (stages, slots) = if worth_splitting(&function, &stages) {
             let slots = stages
                 .iter()
                 .flat_map(|stage| stage.exports.iter().map(|(slot, _)| *slot as usize + 1))
@@ -270,6 +288,8 @@ impl ModelPlan {
             .collect();
 
         Ok(Self {
+            function,
+            outputs,
             conduction,
             reactive,
             stages,
@@ -281,45 +301,43 @@ impl ModelPlan {
     }
 }
 
-impl Body {
-    /// `values` is parallel to `mir.equations`, holding whichever quantity this
-    /// body stamps — the residual for conduction, the stored charge for the
-    /// reactive matrix.
-    fn build(
-        function: &CfgFunction,
-        artifact: &CanonicalIrArtifact,
-        values: &[ValueId],
-        rows: &[Vec<Option<ValueId>>],
-    ) -> Self {
-        let mut plan = StampPlan {
-            rows: Vec::with_capacity(artifact.mir.equations.len()),
-            structurally_absent: 0,
-            folded_to_zero: 0,
-        };
-        for (index, equation) in artifact.mir.equations.iter().enumerate() {
-            let row = rows.get(index).cloned().unwrap_or_default();
-            plan.structurally_absent += row.iter().filter(|entry| entry.is_none()).count();
-            plan.rows.push(StampRow {
-                pos: equation.branch.pos_node,
-                neg: equation.branch.neg_node,
-                kind: equation.kind,
-                residual: values[index],
-                derivatives: row
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(unknown, entry)| Some((unknown, entry?)))
-                    .collect(),
-            });
-        }
+/// The rows one matrix writes, before simplification has run.
+///
+/// `values` is parallel to `mir.equations`, holding whichever quantity this
+/// matrix stamps — the residual for conduction, the stored charge for the
+/// reactive one.
+fn plan_stamps(
+    artifact: &CanonicalIrArtifact,
+    values: &[ValueId],
+    rows: &[Vec<Option<ValueId>>],
+) -> StampPlan {
+    let mut plan = StampPlan {
+        rows: Vec::with_capacity(artifact.mir.equations.len()),
+        structurally_absent: 0,
+        folded_to_zero: 0,
+    };
+    for (index, equation) in artifact.mir.equations.iter().enumerate() {
+        let row = rows.get(index).cloned().unwrap_or_default();
+        plan.structurally_absent += row.iter().filter(|entry| entry.is_none()).count();
+        plan.rows.push(StampRow {
+            pos: equation.branch.pos_node,
+            neg: equation.branch.neg_node,
+            kind: equation.kind,
+            residual: values[index],
+            derivatives: row
+                .into_iter()
+                .enumerate()
+                .filter_map(|(unknown, entry)| Some((unknown, entry?)))
+                .collect(),
+        });
+    }
+    plan
+}
 
-        let wanted = plan.wanted();
-        let (function, mapped) = optimize_cfg(function, &wanted);
-        plan.remap(&mapped);
-        plan.drop_zeros(&function);
-
-        // The body computes exactly the values the stamps read, as one list, and
-        // each row records where its own landed.
-        let mut outputs = Vec::new();
+impl Stamps {
+    /// Append this matrix's values to the shared output list, recording where
+    /// each row's landed.
+    fn place(plan: StampPlan, outputs: &mut Vec<ValueId>) -> Self {
         let mut positions = Vec::with_capacity(plan.rows.len());
         for row in &plan.rows {
             let residual = outputs.len();
@@ -334,13 +352,18 @@ impl Body {
                 .collect();
             positions.push((residual, derivatives));
         }
-
         Self {
-            function,
             rows: plan.rows,
             positions,
-            outputs,
         }
+    }
+
+    /// How many cached values the reactive stamp reads.
+    fn width(&self) -> usize {
+        self.rows
+            .iter()
+            .map(|row| 1 + row.derivatives.len())
+            .sum()
     }
 }
 
@@ -371,7 +394,7 @@ impl ModelPlan {
             self.emit_cached_stage(artifact, stage, &mut out)?;
         }
         self.emit_stamp(artifact, &mut out)?;
-        self.emit_stamp_reactive(artifact, &mut out)?;
+        self.emit_stamp_reactive(&mut out)?;
 
         out.push_str("}\n");
         Ok(out)
@@ -467,7 +490,7 @@ impl ModelPlan {
             .stages
             .iter()
             .find(|stage| stage.class == InvalidationClass::Newton);
-        let function = newton.map_or(&self.conduction.function, |stage| &stage.function);
+        let function = newton.map_or(&self.function, |stage| &stage.function);
         let (body, values) = self.newton_outputs(artifact, newton)?;
         self.emit_prologue(artifact, function, 2, out)?;
         out.push_str(&indent(&body, 2));
@@ -477,56 +500,75 @@ impl ModelPlan {
             self.emit_row(
                 row,
                 &values[*residual],
-                &derivatives.iter().map(|at| values[*at].clone()).collect::<Vec<_>>(),
+                &derivatives
+                    .iter()
+                    .map(|at| values[*at].clone())
+                    .collect::<Vec<_>>(),
                 index,
                 Reactive::No,
                 out,
             )?;
         }
+
+        // The charge and its derivatives were computed here whether or not
+        // anything asked for them, so this is where they are kept.
+        for (index, (residual, derivatives)) in self.reactive.positions.iter().enumerate() {
+            let mut at = self.reactive_base(index);
+            let _ = writeln!(
+                out,
+                "        self.canonical_reactive[{at}] = {};",
+                values[*residual]
+            );
+            for position in derivatives {
+                at += 1;
+                let _ = writeln!(
+                    out,
+                    "        self.canonical_reactive[{at}] = {};",
+                    values[*position]
+                );
+            }
+        }
         out.push_str("    }\n\n");
         Ok(())
     }
 
-    fn emit_stamp_reactive(
-        &self,
-        artifact: &CanonicalIrArtifact,
-
-        out: &mut String,
-    ) -> Result<(), RustBackendError> {
+    /// The reactive matrix, written from what `stamp` already worked out.
+    ///
+    /// No body at all, and that is the design rather than a shortcut. Two
+    /// reasons it has to be this way:
+    ///
+    /// *Correctness.* An `eval_ddt` call reads and writes per-instance history,
+    /// so a second evaluation from here would advance the transient state a
+    /// second time for one solve. The tier being replaced avoids it by keeping
+    /// the `ddt` calls out of what it shares; keeping no body avoids it
+    /// outright.
+    ///
+    /// *Physics, and it agrees.* The reactive matrix is `d(charge)/d(unknown)`
+    /// at the operating point, and an AC sweep holds that point fixed across
+    /// every frequency. Recomputing it per point would produce the same numbers
+    /// more slowly.
+    fn emit_stamp_reactive(&self, out: &mut String) -> Result<(), RustBackendError> {
         out.push_str(
             "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
         );
-        let Some(reactive) = &self.reactive else {
-            out.push_str("    }\n");
+        if self.reactive.rows.is_empty() {
+            out.push_str("    }\n\n");
             return Ok(());
-        };
-        for stage in &self.stages {
-            if stage.class == InvalidationClass::Newton {
-                continue;
-            }
-            let _ = writeln!(out, "        self.{}(ctx);", stage_fn_name(stage.class));
         }
-
-        // The charge is bias-dependent, so the reactive body is the whole thing
-        // rather than a Newton slice — it runs once per AC point, not once per
-        // Newton iteration, and slicing it would buy nothing.
-        let (body, names) = emit_body(&reactive.function, &reactive.outputs, &bindings())
-            .map_err(|error| unsupported(artifact, format!("reactive body: {error}")))?;
-        self.emit_prologue(artifact, &reactive.function, 2, out)?;
-        out.push_str(&indent(&body, 2));
-
-        for (index, row) in reactive.rows.iter().enumerate() {
+        out.push_str("        let multiplicity = self.multiplicity;\n");
+        out.push_str("        let cached = &*self.canonical_reactive;\n");
+        for (index, row) in self.reactive.rows.iter().enumerate() {
             if row.derivatives.is_empty() {
                 continue;
             }
-            let (residual, derivatives) = &reactive.positions[index];
+            let base = self.reactive_base(index);
+            let derivatives: Vec<String> = (1..=row.derivatives.len())
+                .map(|offset| format!("cached[{}]", base + offset))
+                .collect();
             self.emit_row(
                 row,
-                &names[*residual],
-                &derivatives
-                    .iter()
-                    .map(|at| names[*at].clone())
-                    .collect::<Vec<_>>(),
+                &format!("cached[{base}]"),
+                &derivatives,
                 index,
                 Reactive::Yes,
                 out,
@@ -534,6 +576,14 @@ impl ModelPlan {
         }
         out.push_str("    }\n\n");
         Ok(())
+    }
+
+    /// Where equation `index`'s reactive values start in the cache.
+    fn reactive_base(&self, index: usize) -> usize {
+        self.reactive.rows[..index]
+            .iter()
+            .map(|row| 1 + row.derivatives.len())
+            .sum()
     }
 
     /// The Newton body, and an expression per conduction output.
@@ -547,8 +597,8 @@ impl ModelPlan {
     ) -> Result<(String, Vec<String>), RustBackendError> {
         let Some(newton) = newton else {
             let (body, names) = emit_body(
-                &self.conduction.function,
-                &self.conduction.outputs,
+                &self.function,
+                &self.outputs,
                 &bindings(),
             )
             .map_err(|error| unsupported(artifact, format!("body: {error}")))?;
@@ -568,7 +618,7 @@ impl ModelPlan {
         )
         .map_err(|error| unsupported(artifact, format!("newton stage: {error}")))?;
 
-        let mut values = vec![String::new(); self.conduction.outputs.len()];
+        let mut values = vec![String::new(); self.outputs.len()];
         for ((index, _), name) in owned.iter().zip(names) {
             values[*index] = name;
         }
@@ -834,20 +884,35 @@ impl ModelPlan {
 
     fn state_extensions(&self) -> device::StateFileExtensions {
         let mut extensions = device::StateFileExtensions::default();
+        if self.slots > 0 || self.reactive.width() > 0 {
+            extensions.support_types.push_str(
+                "fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {\n\
+                 \x20   // SAFETY: every slot is an f64, and all-zero bytes are 0.0.\n\
+                 \x20   let mut boxed = Box::<[f64; N]>::new_uninit();\n\
+                 \x20   unsafe {\n\
+                 \x20       std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n\
+                 \x20       boxed.assume_init()\n\
+                 \x20   }\n\
+                 }\n\n",
+            );
+        }
+        let reactive = self.reactive.width();
+        if reactive > 0 {
+            let _ = write!(
+                extensions.instance_fields,
+                "    pub(crate) canonical_reactive: Box<[f64; {reactive}]>,\n"
+            );
+            extensions
+                .clone_fields
+                .push_str("            canonical_reactive: self.canonical_reactive.clone(),\n");
+            extensions
+                .new_initializers
+                .push_str("            canonical_reactive: canonical_boxed_zero_f64(),\n");
+        }
         if self.slots == 0 {
             return extensions;
         }
         let slots = self.slots;
-        extensions.support_types.push_str(
-            "fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {\n\
-             \x20   // SAFETY: every slot is an f64, and all-zero bytes are 0.0.\n\
-             \x20   let mut boxed = Box::<[f64; N]>::new_uninit();\n\
-             \x20   unsafe {\n\
-             \x20       std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n\
-             \x20       boxed.assume_init()\n\
-             \x20   }\n\
-             }\n\n",
-        );
         let _ = write!(
             extensions.instance_fields,
             "    pub(crate) canonical_staged: Box<[f64; {slots}]>,\n\
