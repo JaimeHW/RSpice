@@ -29,7 +29,7 @@ pub(in crate::engine::builder) fn prepare_temperature_scaled_behavioral_expressi
         return Ok(prepared);
     }
 
-    let current_temp_c = crate::analysis::temperature::kelvin_to_celsius(temperature_kelvin);
+    let current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
     let scale = temperature_scale_factor(current_temp_c, tnom_c, tc1, tc2);
     Ok(format!("(({})*{})", prepared, scale))
 }

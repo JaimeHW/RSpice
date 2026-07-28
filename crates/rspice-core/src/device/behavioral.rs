@@ -149,7 +149,7 @@ impl BehavioralVoltageSource {
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
             linearized_affine: 0.0,
-            temperature: crate::analysis::temperature::kelvin_to_celsius(
+            temperature: crate::constants::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
             frequency: 0.0,
@@ -932,7 +932,7 @@ fn eval_behavioral_expr_with_derivative(
         Expr::Frequency => Some((context.frequency, 0.0)),
         Expr::Temperature => Some((context.temperature, 0.0)),
         Expr::ThermalVoltage => Some((
-            crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(
+            crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
                 context.temperature,
             )),
             0.0,
@@ -1603,7 +1603,7 @@ impl BehavioralCurrentSource {
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
             linearized_affine: 0.0,
-            temperature: crate::analysis::temperature::kelvin_to_celsius(
+            temperature: crate::constants::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
             frequency: 0.0,

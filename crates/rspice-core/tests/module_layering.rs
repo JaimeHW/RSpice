@@ -62,9 +62,9 @@ const LAYERS: &[(&str, u32)] = &[
     // Framework-independent leaves. These reference nothing above them, so
     // they may share a rank without concealing an edge.
     //
-    // `constants` is also the intended home of the unit conversions currently
-    // parked in `analysis::temperature` (Phase 2), and `resource` the home of
-    // the include-depth limit currently owned by `netlist`.
+    // `constants` holds the physical constants and the Celsius/Kelvin
+    // conversions that are arithmetic on them. `resource` is the intended
+    // home of the include-depth limit still owned by `netlist`.
     ("constants", 0),
     ("time_compat", 0),
     ("resource", 0),
@@ -104,10 +104,8 @@ const LAYERS: &[(&str, u32)] = &[
     // Analysis algorithms and result types. Phase 6 merges the `engine::X` /
     // `analysis::X` twins into one module per analysis.
     ("analysis", 9),
-    // Foreign-format IO. `compat` is a bag today: a 924-line LTspice RAW
-    // reader plus a 10-line ground-name predicate that eight modules call.
-    // Phase 2 splits the predicate down to a layer-0 `naming` leaf and leaves
-    // this rank to the reader, joined by `analysis::output`.
+    // Foreign-format IO: the LTspice RAW reader. `analysis::output` joins it
+    // here, which is what retires the last `analysis -> compat` edge.
     ("compat", 10),
     // The facade: configuration resolution, dispatch, health, abort plumbing.
     // Phase 3 moves `SimulationConfig` and friends out to their own low rank;
@@ -131,11 +129,14 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // `waveform_stream` reading an LTspice RAW file. It is retired by moving
     // `analysis::output` up beside the reader, not by moving anything down.
     ("analysis", "compat", 2),
-    // `expr -> analysis` and `resource -> netlist` are single references each:
-    // a temperature conversion and the default include depth, both of which
-    // belong in layer-0 leaves. The include-depth constant is defined in
-    // `netlist/include.rs`.
-    ("expr", "analysis", 3),
+    // `expr -> analysis` is retired: it was the Celsius/Kelvin conversions,
+    // which now live in `constants` beside the physical constants they are
+    // arithmetic on.
+    //
+    // `resource -> netlist` is a single reference to the default include
+    // depth, a limit that belongs in `resource` with the other limits. Left
+    // for now because `netlist/include.rs`, where the constant is defined, is
+    // being edited concurrently.
     ("resource", "netlist", 1),
     // ---------------------------------------------------------------------
     // Phase 3 — extract `config`.
@@ -158,15 +159,15 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // `TrigSpec` and the rest are parsed deck syntax. The parser reaches nine
     // layers up for them. Moving the types into `netlist::ast` — leaving the
     // evaluator in `analysis` — is the whole fix.
-    ("netlist", "analysis", 80),
+    ("netlist", "analysis", 77),
     // ---------------------------------------------------------------------
     // Phase 5 — numerics.
     //
     // `CompanionCoefficients` is an integration-method primitive that lives in
     // `analysis::core::transient`, so every module that stamps a companion
     // model reaches up for it.
-    ("circuit", "analysis", 11),
-    ("device", "analysis", 11),
+    ("circuit", "analysis", 10),
+    ("device", "analysis", 5),
     ("xspice", "analysis", 2),
     // ---------------------------------------------------------------------
     // Phase 6 — one module per analysis.

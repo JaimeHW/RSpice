@@ -1956,7 +1956,7 @@ fn apply_temperature_scalars(netlist: &mut Netlist, temp_c: Value, vt: Value) {
 }
 
 fn thermal_voltage_celsius(temp_c: Value) -> Value {
-    crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(temp_c))
+    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(temp_c))
 }
 
 fn step_point_error(

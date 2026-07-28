@@ -77,7 +77,7 @@ fn resolve_resistor_eval_context(
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
 ) -> Result<(crate::netlist::ParamContext, f64, f64), SimulationError> {
-    let mut current_temp_c = crate::analysis::temperature::kelvin_to_celsius(temperature_kelvin);
+    let mut current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
     if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
         current_temp_c = normalize_temperature_param_to_celsius(temp);
     } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
@@ -748,7 +748,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
 
     let reported_temp_c = instance_param(instance_params, &["TEMP"])
         .map(normalize_temperature_param_to_celsius)
-        .unwrap_or_else(|| crate::analysis::temperature::kelvin_to_celsius(temperature_kelvin));
+        .unwrap_or_else(|| crate::constants::kelvin_to_celsius(temperature_kelvin));
     let width = if let Some(width) = instance_param(instance_params, &["W", "WIDTH"]) {
         width
     } else if let Some(model_def) = model_def {
@@ -1060,7 +1060,7 @@ mod tests {
             value_expr.as_deref(),
             model.as_deref(),
             instance_params,
-            crate::analysis::temperature::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0)),
+            crate::constants::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0)),
             SpiceDialect::Xyce,
         )
         .expect("effective resistor parameters resolve")
@@ -1187,7 +1187,7 @@ R1 in 0 RMOD L=2 A=1 M=2
 
     #[test]
     fn resistor_tce_uses_xyce_percent_compounding_and_precedence() {
-        let temperature_kelvin = crate::analysis::temperature::celsius_to_kelvin(37.0);
+        let temperature_kelvin = crate::constants::celsius_to_kelvin(37.0);
         let expected_instance = 1.01_f64.powf(3.0 * 10.0);
         let expected_model = 1.01_f64.powf(4.0 * 10.0);
         let expected_override = 1.01_f64.powf(-6.0 * 10.0);

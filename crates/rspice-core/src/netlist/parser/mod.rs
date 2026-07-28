@@ -3414,7 +3414,7 @@ fn scan_temperature_option_line(
                 state.params.set(
                     "VT",
                     crate::constants::thermal_voltage(
-                        crate::analysis::temperature::celsius_to_kelvin(parsed),
+                        crate::constants::celsius_to_kelvin(parsed),
                     ),
                 );
             }

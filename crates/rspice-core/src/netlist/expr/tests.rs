@@ -1338,7 +1338,7 @@ fn xyce_runtime_specials_remain_live_through_ordinary_params_and_vm_context() {
     let actual = crate::expr::Vm::new().execute(&program, &context);
     let expected = 2.0
         + 50.0
-        + crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(50.0))
+        + crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(50.0))
         + 1.0e-6;
     assert!((actual - expected).abs() <= 1.0e-14, "{prepared}: {actual}");
 

@@ -34,7 +34,7 @@ impl Engine {
 
         // ngspice TNOM defaults to 27C; the model card may override it (Celsius).
         let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
-        let tnom_k = crate::analysis::temperature::celsius_to_kelvin(tnom_c);
+        let tnom_k = crate::constants::celsius_to_kelvin(tnom_c);
 
         let model = std::sync::Arc::new(
             B3SoiDdModel::try_from_params(params_map, is_pmos, tnom_k).map_err(|err| {
@@ -212,7 +212,7 @@ impl Engine {
         let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
         let temp_k = temperature_kelvin;
         let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
-        let tnom_k = crate::analysis::temperature::celsius_to_kelvin(tnom_c);
+        let tnom_k = crate::constants::celsius_to_kelvin(tnom_c);
 
         let model = std::sync::Arc::new(
             B3SoiFdModel::try_from_params(params_map, is_pmos, tnom_k).map_err(|err| {
@@ -357,7 +357,7 @@ impl Engine {
         let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
         let temp_k = temperature_kelvin;
         let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
-        let tnom_k = crate::analysis::temperature::celsius_to_kelvin(tnom_c);
+        let tnom_k = crate::constants::celsius_to_kelvin(tnom_c);
 
         let model = std::sync::Arc::new(
             B3SoiPdModel::try_from_params(params_map, is_pmos, tnom_k).map_err(|err| {
@@ -804,10 +804,10 @@ impl Engine {
         let tnom_kelvin = params_map
             .get("TNOM")
             .copied()
-            .map(crate::analysis::temperature::celsius_to_kelvin)
+            .map(crate::constants::celsius_to_kelvin)
             .unwrap_or(default_tnom_kelvin);
         let temp_kelvin = if let Some(temp_celsius) = instance_param(instance_params, &["TEMP"]) {
-            crate::analysis::temperature::celsius_to_kelvin(temp_celsius)
+            crate::constants::celsius_to_kelvin(temp_celsius)
         } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
             circuit_temperature_kelvin + dtemp
         } else {

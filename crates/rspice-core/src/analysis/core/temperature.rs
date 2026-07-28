@@ -35,8 +35,6 @@ pub const K_BOLTZMANN: Value = 1.380649e-23;
 pub const Q_ELECTRON: Value = 1.602176634e-19;
 /// Default nominal temperature (K) = 27°C
 pub const T_NOMINAL: Value = 300.15;
-/// Absolute zero offset (°C to K)
-pub const KELVIN_OFFSET: Value = 273.15;
 /// Silicon bandgap at 300K (eV)
 pub const EG_SILICON: Value = 1.12;
 /// Silicon bandgap temperature coefficient
@@ -48,17 +46,12 @@ pub const EG_BETA: Value = 1108.0;
 // Temperature Utilities
 //=============================================================================
 
-/// Convert Celsius to Kelvin
-#[inline]
-pub fn celsius_to_kelvin(celsius: Value) -> Value {
-    celsius + KELVIN_OFFSET
-}
-
-/// Convert Kelvin to Celsius
-#[inline]
-pub fn kelvin_to_celsius(kelvin: Value) -> Value {
-    kelvin - KELVIN_OFFSET
-}
+// `celsius_to_kelvin` and `kelvin_to_celsius` live in `crate::constants`.
+// They sit on the parse/evaluate boundary and are called from the parser,
+// the builder, the device models and the expression VM — layers that would
+// otherwise have to reach up into an analysis module for arithmetic on a
+// physical constant.
+use crate::constants::{celsius_to_kelvin, kelvin_to_celsius};
 
 /// Calculate thermal voltage Vt = kT/q
 #[inline]

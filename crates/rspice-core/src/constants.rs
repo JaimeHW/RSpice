@@ -187,6 +187,28 @@ pub const Q_ELECTRON: Value = 1.602176634e-19;
 /// Thermal voltage at reference temperature (kT/q)
 pub const VT_REFERENCE: Value = TEMP_REFERENCE * K_BOLTZMANN / Q_ELECTRON;
 
+/// Celsius-to-Kelvin offset (K).
+pub const KELVIN_OFFSET: Value = 273.15;
+
+/// Convert Celsius to Kelvin.
+///
+/// SPICE decks state temperatures in Celsius (`.TEMP`, `TNOM`, `.OPTIONS
+/// TEMP`) while every device equation works in Kelvin, so this conversion
+/// sits on the boundary between parsing and evaluation and is called from
+/// the parser, the builder, the device models and the expression VM alike.
+/// It lives here, with the other physical constants, rather than in an
+/// analysis module those layers would otherwise have to reach up into.
+#[inline]
+pub fn celsius_to_kelvin(celsius: Value) -> Value {
+    celsius + KELVIN_OFFSET
+}
+
+/// Convert Kelvin to Celsius.
+#[inline]
+pub fn kelvin_to_celsius(kelvin: Value) -> Value {
+    kelvin - KELVIN_OFFSET
+}
+
 //=============================================================================
 // Timeout Constants
 //=============================================================================

@@ -801,7 +801,7 @@ fn builtin_numeric_param(name: &str, temp_c: Value) -> Option<Value> {
     match name {
         "TEMP" | "TEMPER" => Some(temp_c),
         "VT" => Some(crate::constants::thermal_voltage(
-            crate::analysis::temperature::celsius_to_kelvin(temp_c),
+            crate::constants::celsius_to_kelvin(temp_c),
         )),
         _ => None,
     }

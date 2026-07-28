@@ -708,7 +708,7 @@ impl Engine {
                 swept.params.set(
                     "VT",
                     crate::constants::thermal_voltage(
-                        crate::analysis::temperature::celsius_to_kelvin(outer_value),
+                        crate::constants::celsius_to_kelvin(outer_value),
                     ),
                 );
                 swept
@@ -849,7 +849,7 @@ impl Engine {
                 swept.params.set(
                     "VT",
                     crate::constants::thermal_voltage(
-                        crate::analysis::temperature::celsius_to_kelvin(sweep_value),
+                        crate::constants::celsius_to_kelvin(sweep_value),
                     ),
                 );
                 let (result, device_op_report) =
@@ -1607,7 +1607,7 @@ RLOAD out 0 2
 "#;
         let netlist = Netlist::parse(deck).expect("deck parses");
         let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = crate::analysis::temperature::celsius_to_kelvin(37.0);
+        config.temperature = crate::constants::celsius_to_kelvin(37.0);
         let result = Engine::new(config)
             .run_dc_op(&netlist)
             .expect("modeled solution-dependent resistor solves");
@@ -1737,7 +1737,7 @@ D1 1 0 DXX
         );
 
         let vt = crate::constants::thermal_voltage(
-            crate::analysis::temperature::celsius_to_kelvin(25.0),
+            crate::constants::celsius_to_kelvin(25.0),
         );
         let expected = -1.0e-18 * ((1.2 / vt).exp() - 1.0);
         let current = result

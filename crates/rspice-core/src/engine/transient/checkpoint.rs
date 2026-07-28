@@ -341,7 +341,7 @@ fn model_string_is_pem_table_dependency(name: &str) -> bool {
 
 fn model_uses_xyce_pem_tables(netlist: &Netlist, model: &crate::netlist::ModelDef) -> bool {
     let temperature_kelvin =
-        crate::analysis::temperature::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0));
+        crate::constants::celsius_to_kelvin(netlist.options.temp.unwrap_or(27.0));
     matches!(
         crate::engine::builder::resolve_native_xyce_memristor_family(
             netlist,

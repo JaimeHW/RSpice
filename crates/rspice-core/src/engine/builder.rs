@@ -3519,7 +3519,7 @@ mod tests {
         )
         .expect("Xyce scoped generic-switch deck parses");
         let mut config = crate::engine::SimulationConfig::default();
-        config.temperature = crate::analysis::temperature::celsius_to_kelvin(80.0);
+        config.temperature = crate::constants::celsius_to_kelvin(80.0);
         config.convergence_config.junction_gmin_target = 9.0e-7;
         let engine = Engine::new(config).resolved_for_netlist(&netlist);
         assert_eq!(
@@ -4618,7 +4618,7 @@ impl Engine {
                     // own quirk); otherwise DTEMP is the offset directly.
                     let noise_dtemp = if let Some(temp) = instance_param(instance_params, &["TEMP"])
                     {
-                        let temp_k = crate::analysis::temperature::celsius_to_kelvin(temp);
+                        let temp_k = crate::constants::celsius_to_kelvin(temp);
                         let tnom_c = netlist.options.tnom.unwrap_or(27.0);
                         temp_k - self.config.temperature + tnom_c
                     } else {
@@ -4691,7 +4691,7 @@ impl Engine {
                                 self.config.resource_limits,
                             )
                             .map_err(SimulationError::Circuit)?;
-                        evaluator.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
+                        evaluator.set_temperature(crate::constants::kelvin_to_celsius(
                             self.config.temperature,
                         ));
                         evaluator.set_gmin(self.config.convergence_config.junction_gmin_target);
@@ -4958,11 +4958,11 @@ impl Engine {
                     // Junction temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; the model TNOM
                     // (or .options tnom) anchors the legacy SPICE scaling.
-                    let tnom_k = crate::analysis::temperature::celsius_to_kelvin(
+                    let tnom_k = crate::constants::celsius_to_kelvin(
                         netlist.options.tnom.unwrap_or(27.0),
                     );
                     let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
-                        crate::analysis::temperature::celsius_to_kelvin(t)
+                        crate::constants::celsius_to_kelvin(t)
                     } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
                         self.config.temperature + dt
                     } else {
@@ -5557,7 +5557,7 @@ impl Engine {
                             &device_model.string_params,
                         )?;
                         let model_key = device_model.name.clone();
-                        let tnom_default_k = crate::analysis::temperature::celsius_to_kelvin(
+                        let tnom_default_k = crate::constants::celsius_to_kelvin(
                             netlist.options.tnom.unwrap_or(27.0),
                         );
                         let bsim3_equation_set = if level == 9
@@ -5601,7 +5601,7 @@ impl Engine {
                             &device_model.string_params,
                         )?;
                         let model_key = device_model.name.clone();
-                        let tnom_default_k = crate::analysis::temperature::celsius_to_kelvin(
+                        let tnom_default_k = crate::constants::celsius_to_kelvin(
                             netlist.options.tnom.unwrap_or(27.0),
                         );
                         Self::build_bsim4v8(
@@ -5700,7 +5700,7 @@ impl Engine {
                             params_map,
                             instance_params,
                             self.config.temperature,
-                            crate::analysis::temperature::celsius_to_kelvin(
+                            crate::constants::celsius_to_kelvin(
                                 netlist.options.tnom.unwrap_or(27.0),
                             ),
                         )?;
@@ -5789,14 +5789,14 @@ impl Engine {
                         .as_ref()
                         .and_then(|params| params.get("TNOM").copied())
                         .filter(|v| v.is_finite())
-                        .map(crate::analysis::temperature::celsius_to_kelvin)
+                        .map(crate::constants::celsius_to_kelvin)
                         .unwrap_or_else(|| {
-                            crate::analysis::temperature::celsius_to_kelvin(
+                            crate::constants::celsius_to_kelvin(
                                 netlist.options.tnom.unwrap_or(27.0),
                             )
                         });
                     let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
-                        crate::analysis::temperature::celsius_to_kelvin(t)
+                        crate::constants::celsius_to_kelvin(t)
                     } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
                         self.config.temperature + dt
                     } else {
@@ -6332,7 +6332,7 @@ impl Engine {
                             self.config.resource_limits,
                         )
                         .map_err(SimulationError::Circuit)?;
-                    bvs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
+                    bvs.set_temperature(crate::constants::kelvin_to_celsius(
                         self.config.temperature,
                     ));
                     bvs.set_gmin(self.config.convergence_config.junction_gmin_target);
@@ -6371,7 +6371,7 @@ impl Engine {
                             self.config.resource_limits,
                         )
                         .map_err(SimulationError::Circuit)?;
-                    bcs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
+                    bcs.set_temperature(crate::constants::kelvin_to_celsius(
                         self.config.temperature,
                     ));
                     bcs.set_gmin(self.config.convergence_config.junction_gmin_target);
@@ -6613,7 +6613,7 @@ impl Engine {
                             )));
                         }
                         sw.set_expression_context(
-                            crate::analysis::temperature::kelvin_to_celsius(
+                            crate::constants::kelvin_to_celsius(
                                 self.config.temperature,
                             ),
                             self.config.convergence_config.junction_gmin_target,
@@ -6805,7 +6805,7 @@ impl Engine {
                         )));
                     }
                     sw.set_expression_context(
-                        crate::analysis::temperature::kelvin_to_celsius(self.config.temperature),
+                        crate::constants::kelvin_to_celsius(self.config.temperature),
                         self.config.convergence_config.junction_gmin_target,
                         netlist.params.expression_dialect(),
                     );

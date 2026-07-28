@@ -196,7 +196,7 @@ impl<'a> Context<'a> {
             currents,
             time: 0.0,
             frequency: 0.0,
-            temperature: crate::analysis::temperature::kelvin_to_celsius(
+            temperature: crate::constants::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
             gmin: crate::constants::GMIN,
@@ -211,7 +211,7 @@ impl<'a> Context<'a> {
             currents,
             time,
             frequency: 0.0,
-            temperature: crate::analysis::temperature::kelvin_to_celsius(
+            temperature: crate::constants::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
             gmin: crate::constants::GMIN,
@@ -296,7 +296,7 @@ impl Vm {
                 Instruction::PushTemperature => self.stack.push(ctx.temperature),
                 Instruction::PushThermalVoltage => {
                     self.stack.push(crate::constants::thermal_voltage(
-                        crate::analysis::temperature::celsius_to_kelvin(ctx.temperature),
+                        crate::constants::celsius_to_kelvin(ctx.temperature),
                     ))
                 }
                 Instruction::PushGmin => self.stack.push(ctx.gmin),

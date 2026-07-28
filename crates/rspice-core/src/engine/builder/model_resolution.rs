@@ -56,7 +56,7 @@ fn set_temperature_scalars(ctx: &mut crate::netlist::ParamContext, temp_c: f64, 
     ctx.set("TNOM", tnom_c);
     ctx.set(
         "VT",
-        crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(temp_c)),
+        crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(temp_c)),
     );
 }
 
@@ -79,7 +79,7 @@ fn resolve_passive_eval_context(
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
 ) -> Result<(crate::netlist::ParamContext, f64, f64), SimulationError> {
-    let mut current_temp_c = crate::analysis::temperature::kelvin_to_celsius(temperature_kelvin);
+    let mut current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
     if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
         current_temp_c = normalize_temperature_param_to_celsius(temp);
     } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {

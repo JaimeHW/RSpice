@@ -1188,7 +1188,7 @@ impl GenericSwitch {
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
             time_breakpoints,
-            temperature: crate::analysis::temperature::kelvin_to_celsius(
+            temperature: crate::constants::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
             gmin: crate::constants::GMIN,
@@ -1979,7 +1979,7 @@ mod tests {
 
         let expected =
             80.0 + crate::constants::thermal_voltage(
-                crate::analysis::temperature::celsius_to_kelvin(80.0),
+                crate::constants::celsius_to_kelvin(80.0),
             ) + 2.5e-8;
         let actual = switch.evaluate_control(0.0);
         assert!(

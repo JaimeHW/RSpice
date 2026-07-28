@@ -65,7 +65,7 @@ impl ThermalResistorState {
         context.set("TNOM", self.tnom_celsius);
         context.set(
             "VT",
-            crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(
+            crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
                 temperature_celsius,
             )),
         );
