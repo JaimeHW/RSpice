@@ -292,9 +292,15 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("Smoke Verilog-A native JIT benchmark gate (Linux x64)", workflow)
-        self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
+        self.assertRegex(
             workflow,
+            r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
+            r"--iterations 100000\s+"
+            r"--samples 9\s+"
+            r"--min-speedup 1\.10\s+"
+            r"--min-full-stamp-speedup 0\.40\s+"
+            r"--max-native-p95-ns-per-sweep 25000\s+"
+            r"--max-relative-stddev 0\.25",
         )
         self.assertIn("Test UI library (Linux)", workflow)
         self.assertIn("cargo test --locked -p rspice-ui --lib", workflow)
@@ -348,9 +354,15 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1",
             workflow,
         )
-        self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
+        self.assertRegex(
             workflow,
+            r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
+            r"--iterations 100000\s+"
+            r"--samples 9\s+"
+            r"--min-speedup 1\.10\s+"
+            r"--min-full-stamp-speedup 0\.40\s+"
+            r"--max-native-p95-ns-per-sweep 25000\s+"
+            r"--max-relative-stddev 0\.25",
         )
 
     def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:
