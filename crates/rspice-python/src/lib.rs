@@ -117,6 +117,9 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<engine::PyHealthReport>()?;
     m.add_class::<engine::PyEngine>()?;
     m.add_class::<engine::PyDcSweep>()?;
+    m.add_class::<engine::PyPssOperatingPoint>()?;
+    m.add_class::<engine::PyPssContinuationState>()?;
+    m.add_class::<engine::PyHbEnvelopeState>()?;
 
     // Configuration classes
     m.add_class::<config::PySimulationConfig>()?;
@@ -203,6 +206,9 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "HealthReport",
             "Engine",
             "DcSweep",
+            "PssOperatingPoint",
+            "PssContinuationState",
+            "HbEnvelopeState",
             "SimulationConfig",
             "ResourceLimits",
             "ConvergenceConfig",

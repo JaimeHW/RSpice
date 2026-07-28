@@ -39,6 +39,14 @@ Release numbers remain tied to the workspace version.
 - `RunReport.all_op`, `all_dc`, `all_tran`, `all_ac`, and `all_noise` retain
   every result when a deck carries more than one directive of a kind.
 - `MonteCarloResult.try_variable()`, `__getitem__`, and `__contains__`.
+- Periodic operating-point reuse and continuation: `run_pss_operating_point()`
+  produces a `PssOperatingPoint` that `run_pac(..., pss=)` and
+  `run_pnoise(..., pss=)` reuse instead of repeating the shooting solve;
+  `run_pss_continuation()` and `run_tran_from_pss()` start a transient from a
+  converged orbit; `run_hb_envelope()` and `run_tran_from_hb_envelope()` do
+  the same for harmonic balance. The envelope state carries the HB
+  configuration and frozen-source list that produced it, so a mismatched
+  continuation is rejected rather than silently accepted.
 - Two-port stability and gain figures on `SParameterResult`: Rollett `K`,
   Edwards-Sinsky `mu` and `mu_prime`, the scattering determinant `delta`, an
   `unconditionally_stable` verdict, MAG/MSG/Mason-U/transducer-gain/reverse

@@ -21,6 +21,9 @@ __all__ = [
     "HealthReport",
     "Engine",
     "DcSweep",
+    "PssOperatingPoint",
+    "PssContinuationState",
+    "HbEnvelopeState",
     "SimulationConfig",
     "ResourceLimits",
     "ConvergenceConfig",
@@ -211,6 +214,37 @@ class RSpiceTypeError(RSpiceError, TypeError):
 def ac_frequencies(
     variation: str, points: int, start_freq: float, stop_freq: float
 ) -> npt.NDArray[np.float64]: ...
+
+@final
+class PssOperatingPoint:
+    """A converged periodic operating point, reusable by PAC and PNoise."""
+
+    @property
+    def period(self) -> float: ...
+    @property
+    def frequency(self) -> float: ...
+    @property
+    def iterations(self) -> int: ...
+    @property
+    def period_detected(self) -> bool: ...
+
+@final
+class PssContinuationState:
+    """Phase-equivalent PSS state a transient can continue from."""
+
+    @property
+    def period(self) -> float: ...
+    @property
+    def time_origin(self) -> float: ...
+
+@final
+class HbEnvelopeState:
+    """Harmonic-balance envelope state a transient can continue from."""
+
+    @property
+    def frozen_sources(self) -> list[str]: ...
+    @property
+    def fundamental_frequency(self) -> float: ...
 
 @final
 class DcSweep:
@@ -1483,6 +1517,81 @@ class Engine:
     def run_dc_sweep_spec(
         self, netlist: Netlist, sweep: DcSweep, *, sweep2: DcSweep | None = None
     ) -> DcSweepResult: ...
+    def run_pss_operating_point(
+        self,
+        netlist: Netlist,
+        fundamental_frequency: float | None = None,
+        *,
+        harmonics: int = 9,
+        tstab: float = 0.0,
+        tstab_periods: int | None = None,
+        max_iterations: int = 100,
+        tolerance: float = 1e-6,
+        abstol: float = 1e-12,
+        damping: float = 1.0,
+        max_period_change: float = 0.1,
+        points_per_period: int = 256,
+        integration_method: IntegrationMethod | None = None,
+        autonomous: bool = False,
+        period_guess: float | None = None,
+        verbose: bool = False,
+    ) -> PssOperatingPoint: ...
+    def run_pss_continuation(
+        self,
+        netlist: Netlist,
+        fundamental_frequency: float | None = None,
+        *,
+        frozen_sources: Sequence[str] | None = None,
+        harmonics: int = 9,
+        tstab: float = 0.0,
+        tstab_periods: int | None = None,
+        max_iterations: int = 100,
+        tolerance: float = 1e-6,
+        abstol: float = 1e-12,
+        damping: float = 1.0,
+        max_period_change: float = 0.1,
+        points_per_period: int = 256,
+        integration_method: IntegrationMethod | None = None,
+        autonomous: bool = False,
+        period_guess: float | None = None,
+        verbose: bool = False,
+    ) -> tuple[PssResult, PssContinuationState]: ...
+    def run_tran_from_pss(
+        self,
+        netlist: Netlist,
+        state: PssContinuationState,
+        duration: float,
+        max_step: float | None = None,
+    ) -> tuple[TransientResult, TransientCheckpoint]: ...
+    def run_hb_envelope(
+        self,
+        netlist: Netlist,
+        fundamental_frequency: float,
+        *,
+        frozen_sources: Sequence[str] | None = None,
+        harmonics: int = 9,
+        tolerance: float = 1e-6,
+        max_iterations: int = 100,
+        damping: float = 1.0,
+        oversample: int = 2,
+        use_krylov: bool = False,
+        source_stepping: bool = False,
+        abstol: float = 1e-12,
+        min_damping: float = 0.1,
+        collocation_points: int | None = None,
+        max_mixing_order: int = 5,
+        gmres_restart: int = 30,
+        use_exact_jacobian: bool = True,
+        source_name: str | None = None,
+        verbose: bool = False,
+    ) -> tuple[HbResult, HbEnvelopeState]: ...
+    def run_tran_from_hb_envelope(
+        self,
+        netlist: Netlist,
+        state: HbEnvelopeState,
+        duration: float,
+        max_step: float | None = None,
+    ) -> tuple[TransientResult, TransientCheckpoint]: ...
     def run_ac(self, netlist: Netlist, frequencies: Sequence[float]) -> AcResult: ...
     def run_ac_data(self, netlist: Netlist, table_name: str) -> AcResult: ...
     def run_ac_sweep(
@@ -1600,6 +1709,7 @@ class Engine:
         reference_node: str | None = None,
         reltol: float = 1e-3,
         abstol: float = 1e-12,
+        pss: PssOperatingPoint | None = None,
     ) -> PacResult: ...
     def run_pnoise(
         self,
@@ -1611,6 +1721,7 @@ class Engine:
         reference_node: str | None = None,
         input_source: str | None = None,
         max_sideband: int = 6,
+        pss: PssOperatingPoint | None = None,
     ) -> PeriodicNoiseResult: ...
     def run_oscillator_noise(
         self,

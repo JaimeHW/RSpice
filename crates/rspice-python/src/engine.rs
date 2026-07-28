@@ -908,6 +908,221 @@ fn require_log_bounds(start: Option<f64>, stop: Option<f64>) -> PyResult<(f64, f
     Ok((start, stop))
 }
 
+/// Build and validate a shooting PSS configuration.
+///
+/// Shared by every PSS entry point so the driven/autonomous rules and the
+/// numerical bounds are stated once; a second copy would drift.
+#[allow(clippy::too_many_arguments)]
+fn pss_config(
+    fundamental_frequency: Option<f64>,
+    harmonics: usize,
+    tstab: f64,
+    tstab_periods: Option<usize>,
+    max_iterations: usize,
+    tolerance: f64,
+    abstol: f64,
+    damping: f64,
+    max_period_change: f64,
+    points_per_period: usize,
+    integration_method: Option<PyIntegrationMethod>,
+    autonomous: bool,
+    period_guess: Option<f64>,
+    verbose: bool,
+) -> PyResult<PssConfig> {
+    if harmonics == 0 {
+        return Err(crate::errors::value_error("harmonics must be at least 1"));
+    }
+    if let Some(frequency) = fundamental_frequency
+        && (!frequency.is_finite() || frequency <= 0.0)
+    {
+        return Err(crate::errors::value_error(format!(
+            "fundamental_frequency must be positive and finite, got {frequency}"
+        )));
+    }
+    if let Some(period) = period_guess
+        && (!period.is_finite() || period <= 0.0)
+    {
+        return Err(crate::errors::value_error(format!(
+            "period_guess must be positive and finite, got {period}"
+        )));
+    }
+    if !max_period_change.is_finite() || max_period_change <= 0.0 {
+        return Err(crate::errors::value_error(format!(
+            "max_period_change must be positive and finite, got {max_period_change}"
+        )));
+    }
+
+    let mut config = if autonomous {
+        PssConfig::autonomous()
+    } else {
+        let frequency = fundamental_frequency.ok_or_else(|| {
+            crate::errors::value_error("fundamental_frequency is required for driven PSS")
+        })?;
+        PssConfig::new(frequency)
+    };
+    if autonomous {
+        if let Some(period) = period_guess {
+            config.period_guess = period;
+            config.fundamental_freq = 1.0 / period;
+        } else if let Some(frequency) = fundamental_frequency {
+            config.period_guess = 1.0 / frequency;
+            config.fundamental_freq = frequency;
+        }
+    }
+    config.num_harmonics = harmonics;
+    config.tstab = tstab;
+    if let Some(periods) = tstab_periods {
+        config.tstab_periods = periods;
+    }
+    config.max_iterations = max_iterations;
+    config.tolerance = tolerance;
+    config.abstol = abstol;
+    config.damping_factor = damping;
+    config.max_period_change = max_period_change;
+    config.points_per_period = points_per_period;
+    config.integration_method = integration_method.map(Into::into);
+    config.verbose = verbose;
+    config.validate().map_err(|message| {
+        crate::errors::value_error(format!("invalid PSS configuration: {message}"))
+    })?;
+    Ok(config)
+}
+
+/// Validate a continuation window shared by the PSS and HB envelope runners.
+fn continuation_window(duration: f64, max_step: Option<f64>) -> PyResult<(f64, f64)> {
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(crate::errors::value_error(format!(
+            "duration must be a positive finite number of seconds, got {duration}"
+        )));
+    }
+    if let Some(step) = max_step
+        && (!step.is_finite() || step <= 0.0)
+    {
+        return Err(crate::errors::value_error(format!(
+            "max_step must be a positive finite number of seconds, got {step}"
+        )));
+    }
+    Ok((duration, max_step.unwrap_or(duration / 50.0)))
+}
+
+/// A converged periodic operating point, reusable by PAC and PNoise.
+///
+/// Small-signal periodic analyses linearize around a PSS solution. Solving
+/// that shooting problem once and passing this object to `run_pac` and
+/// `run_pnoise` replaces one full PSS solve per call, which dominates the
+/// cost of an RF sweep.
+///
+/// Opaque by design: it carries the exact shooting state and configuration
+/// that produced it, and reconstructing either from Python values would let a
+/// caller silently pair an operating point with a different circuit.
+#[pyclass(name = "PssOperatingPoint", module = "rspice", frozen)]
+pub struct PyPssOperatingPoint {
+    inner: rspice_core::engine::PssOperatingPoint,
+}
+
+#[pymethods]
+impl PyPssOperatingPoint {
+    /// Converged fundamental period in seconds.
+    #[getter]
+    fn period(&self) -> f64 {
+        self.inner.analysis().result.period
+    }
+
+    /// Converged fundamental frequency in Hz.
+    #[getter]
+    fn frequency(&self) -> f64 {
+        self.inner.analysis().result.frequency
+    }
+
+    /// Shooting iterations the solve required.
+    #[getter]
+    fn iterations(&self) -> usize {
+        self.inner.analysis().result.iterations
+    }
+
+    /// Whether a periodic orbit was detected.
+    #[getter]
+    fn period_detected(&self) -> bool {
+        self.inner.analysis().result.period_detected
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PssOperatingPoint(frequency={:.6e} Hz, iterations={})",
+            self.frequency(),
+            self.iterations()
+        )
+    }
+}
+
+/// Phase-equivalent PSS state a transient can continue from.
+///
+/// Starting a transient from a converged orbit skips the settling interval
+/// that a cold start has to integrate through, which is what makes long
+/// post-PSS envelope and modulation runs affordable.
+#[pyclass(name = "PssContinuationState", module = "rspice", frozen)]
+pub struct PyPssContinuationState {
+    inner: rspice_core::engine::PssContinuationState,
+}
+
+#[pymethods]
+impl PyPssContinuationState {
+    /// Converged fundamental period in seconds.
+    #[getter]
+    fn period(&self) -> f64 {
+        self.inner.period()
+    }
+
+    /// Absolute simulation time this phase-equivalent state represents.
+    #[getter]
+    fn time_origin(&self) -> f64 {
+        self.inner.time_origin()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PssContinuationState(period={:.6e} s, time_origin={:.6e} s)",
+            self.period(),
+            self.time_origin()
+        )
+    }
+}
+
+/// Harmonic-balance envelope state a transient can continue from.
+///
+/// Carries the harmonic-balance configuration and frozen-source list that
+/// produced it, so continuing cannot be paired with a different HB setup by
+/// accident; core validates the pairing and rejects a mismatch.
+#[pyclass(name = "HbEnvelopeState", module = "rspice", frozen)]
+pub struct PyHbEnvelopeState {
+    inner: rspice_core::engine::HbEnvelopeContinuationState,
+    config: HbConfig,
+    frozen_sources: Vec<String>,
+}
+
+#[pymethods]
+impl PyHbEnvelopeState {
+    /// Independent sources frozen at their time-zero values for the solve.
+    #[getter]
+    fn frozen_sources(&self) -> Vec<String> {
+        self.frozen_sources.clone()
+    }
+
+    /// Fundamental frequency of the harmonic-balance solution, in Hz.
+    #[getter]
+    fn fundamental_frequency(&self) -> f64 {
+        self.config.fundamental_freq
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "HbEnvelopeState(fundamental={:.6e} Hz, frozen_sources={:?})",
+            self.fundamental_frequency(),
+            self.frozen_sources
+        )
+    }
+}
+
 /// Outcome of `Engine.health_check()`
 ///
 /// Reports the wall-clock duration of the probe and the size of the circuit
@@ -2958,74 +3173,195 @@ impl PyEngine {
         period_guess: Option<f64>,
         verbose: bool,
     ) -> PyResult<PyPssResult> {
-        if harmonics == 0 {
-            return Err(crate::errors::value_error("harmonics must be at least 1"));
-        }
-        if let Some(frequency) = fundamental_frequency
-            && (!frequency.is_finite() || frequency <= 0.0)
-        {
-            return Err(crate::errors::value_error(format!(
-                "fundamental_frequency must be positive and finite, got {frequency}"
-            )));
-        }
-        if !autonomous && fundamental_frequency.is_none() {
-            return Err(crate::errors::value_error(
-                "fundamental_frequency is required for driven PSS",
-            ));
-        }
-        if let Some(period) = period_guess
-            && (!period.is_finite() || period <= 0.0)
-        {
-            return Err(crate::errors::value_error(format!(
-                "period_guess must be positive and finite, got {period}"
-            )));
-        }
-
-        let mut config = if autonomous {
-            PssConfig::autonomous()
-        } else if let Some(frequency) = fundamental_frequency {
-            PssConfig::new(frequency)
-        } else {
-            return Err(crate::errors::value_error(
-                "fundamental_frequency is required for driven PSS",
-            ));
-        };
-        if autonomous {
-            if let Some(period) = period_guess {
-                config.period_guess = period;
-                config.fundamental_freq = 1.0 / period;
-            } else if let Some(frequency) = fundamental_frequency {
-                config.period_guess = 1.0 / frequency;
-                config.fundamental_freq = frequency;
-            }
-        }
-        config.num_harmonics = harmonics;
-        config.tstab = tstab;
-        if let Some(periods) = tstab_periods {
-            config.tstab_periods = periods;
-        }
-        config.max_iterations = max_iterations;
-        config.tolerance = tolerance;
-        config.abstol = abstol;
-        config.damping_factor = damping;
-        if !max_period_change.is_finite() || max_period_change <= 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "max_period_change must be positive and finite, got {max_period_change}"
-            )));
-        }
-        config.max_period_change = max_period_change;
-        config.points_per_period = points_per_period;
-        config.integration_method = integration_method.map(Into::into);
-        config.verbose = verbose;
-        config.validate().map_err(|message| {
-            crate::errors::value_error(format!("invalid PSS configuration: {message}"))
-        })?;
-
+        let config = pss_config(
+            fundamental_frequency,
+            harmonics,
+            tstab,
+            tstab_periods,
+            max_iterations,
+            tolerance,
+            abstol,
+            damping,
+            max_period_change,
+            points_per_period,
+            integration_method,
+            autonomous,
+            period_guess,
+            verbose,
+        )?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pss_with_abort(&netlist.inner, config, abort)
         })?;
         Ok(PyPssResult::from_core(&result, harmonics))
+    }
+
+    /// Solve a periodic operating point once for reuse by PAC and PNoise
+    ///
+    /// Both small-signal periodic analyses linearize around a PSS solution.
+    /// Solving it once here and passing the result as `pss=` replaces one
+    /// full shooting solve per call, which dominates an RF sweep.
+    ///
+    /// Takes the same arguments as `run_pss`.
+    ///
+    /// Returns:
+    ///     PssOperatingPoint: Reusable converged periodic state
+    ///
+    /// Example:
+    ///     >>> op = engine.run_pss_operating_point(netlist, 1e9)
+    ///     >>> pac = engine.run_pac(netlist, 1e9, 1e3, 1e8, 20, "VRF", "out", pss=op)
+    ///     >>> pn = engine.run_pnoise(netlist, 1e9, [1e3, 1e4], "out", pss=op)
+    #[pyo3(signature = (netlist, fundamental_frequency=None, *, harmonics=9, tstab=0.0, tstab_periods=None, max_iterations=100, tolerance=1e-6, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, autonomous=false, period_guess=None, verbose=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_pss_operating_point(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        fundamental_frequency: Option<f64>,
+        harmonics: usize,
+        tstab: f64,
+        tstab_periods: Option<usize>,
+        max_iterations: usize,
+        tolerance: f64,
+        abstol: f64,
+        damping: f64,
+        max_period_change: f64,
+        points_per_period: usize,
+        integration_method: Option<PyIntegrationMethod>,
+        autonomous: bool,
+        period_guess: Option<f64>,
+        verbose: bool,
+    ) -> PyResult<PyPssOperatingPoint> {
+        let config = pss_config(
+            fundamental_frequency,
+            harmonics,
+            tstab,
+            tstab_periods,
+            max_iterations,
+            tolerance,
+            abstol,
+            damping,
+            max_period_change,
+            points_per_period,
+            integration_method,
+            autonomous,
+            period_guess,
+            verbose,
+        )?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let inner = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_pss_operating_point_with_abort(&netlist.inner, config, abort)
+        })?;
+        Ok(PyPssOperatingPoint { inner })
+    }
+
+    /// Run PSS and also return a state a transient can continue from
+    ///
+    /// Same arguments as `run_pss`, plus `frozen_sources`: independent
+    /// sources held at their exact time-zero values during the solve, which
+    /// is how a modulated carrier is separated from its envelope.
+    ///
+    /// Returns:
+    ///     tuple[PssResult, PssContinuationState]
+    ///
+    /// Example:
+    ///     >>> pss, state = engine.run_pss_continuation(netlist, 1e9)
+    ///     >>> tran, checkpoint = engine.run_tran_from_pss(netlist, state, 1e-6)
+    #[pyo3(signature = (netlist, fundamental_frequency=None, *, frozen_sources=None, harmonics=9, tstab=0.0, tstab_periods=None, max_iterations=100, tolerance=1e-6, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, autonomous=false, period_guess=None, verbose=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_pss_continuation(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        fundamental_frequency: Option<f64>,
+        frozen_sources: Option<Vec<String>>,
+        harmonics: usize,
+        tstab: f64,
+        tstab_periods: Option<usize>,
+        max_iterations: usize,
+        tolerance: f64,
+        abstol: f64,
+        damping: f64,
+        max_period_change: f64,
+        points_per_period: usize,
+        integration_method: Option<PyIntegrationMethod>,
+        autonomous: bool,
+        period_guess: Option<f64>,
+        verbose: bool,
+    ) -> PyResult<(PyPssResult, PyPssContinuationState)> {
+        let config = pss_config(
+            fundamental_frequency,
+            harmonics,
+            tstab,
+            tstab_periods,
+            max_iterations,
+            tolerance,
+            abstol,
+            damping,
+            max_period_change,
+            points_per_period,
+            integration_method,
+            autonomous,
+            period_guess,
+            verbose,
+        )?;
+        let frozen = frozen_sources.unwrap_or_default();
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let (result, state) = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_pss_with_frozen_source_continuation_state_abort(
+                &netlist.inner,
+                config,
+                &frozen,
+                abort,
+            )
+        })?;
+        Ok((
+            PyPssResult::from_core(&result, harmonics),
+            PyPssContinuationState { inner: state },
+        ))
+    }
+
+    /// Continue a transient from a converged PSS orbit
+    ///
+    /// Starts at the phase-equivalent state rather than from a cold start, so
+    /// the settling interval does not have to be integrated again.
+    ///
+    /// Args:
+    ///     netlist: The same netlist the PSS state came from
+    ///     state: State from `run_pss_continuation`
+    ///     duration: Length of the continued run in seconds
+    ///     max_step: Maximum timestep; defaults to duration / 50
+    ///
+    /// Returns:
+    ///     tuple[TransientResult, TransientCheckpoint]
+    ///
+    /// Raises:
+    ///     ValueError: If duration or max_step is not positive and finite
+    ///     SimulationError: If the state does not match this netlist
+    #[pyo3(signature = (netlist, state, duration, max_step=None))]
+    fn run_tran_from_pss(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        state: &PyPssContinuationState,
+        duration: f64,
+        max_step: Option<f64>,
+    ) -> PyResult<(PyTransientResult, PyTransientCheckpoint)> {
+        let (duration, max_step) = continuation_window(duration, max_step)?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let (result, checkpoint) = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_tran_from_pss_state_with_abort(
+                &netlist.inner,
+                &state.inner,
+                duration,
+                max_step,
+                abort,
+            )
+        })?;
+        Ok((
+            PyTransientResult::new(result),
+            PyTransientCheckpoint::new(checkpoint),
+        ))
     }
 
     /// Run single-tone harmonic-balance analysis.
@@ -3146,8 +3482,147 @@ impl PyEngine {
         Ok(PyHbResult::from_core(&result))
     }
 
+    /// Run harmonic balance and return an envelope continuation state
+    ///
+    /// Solves the carrier with the named sources frozen at their time-zero
+    /// values, then hands back a state a transient can continue from. That
+    /// pairing is how an envelope-following run separates a slowly modulated
+    /// envelope from the fast carrier the HB solve already resolved.
+    ///
+    /// Takes the same arguments as `run_hb`, plus:
+    ///     frozen_sources: Independent sources held at their time-zero values
+    ///
+    /// Returns:
+    ///     tuple[HbResult, HbEnvelopeState]
+    ///
+    /// Example:
+    ///     >>> hb, state = engine.run_hb_envelope(netlist, 1e9,
+    ///     ...                                    frozen_sources=["VMOD"])
+    ///     >>> tran, checkpoint = engine.run_tran_from_hb_envelope(
+    ///     ...     netlist, state, duration=1e-6)
+    #[pyo3(signature = (netlist, fundamental_frequency, *, frozen_sources=None, harmonics=9, tolerance=1e-6, max_iterations=100, damping=1.0, oversample=2, use_krylov=false, source_stepping=false, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=true, source_name=None, verbose=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_hb_envelope(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        fundamental_frequency: f64,
+        frozen_sources: Option<Vec<String>>,
+        harmonics: usize,
+        tolerance: f64,
+        max_iterations: usize,
+        damping: f64,
+        oversample: usize,
+        use_krylov: bool,
+        source_stepping: bool,
+        abstol: f64,
+        min_damping: f64,
+        collocation_points: Option<usize>,
+        max_mixing_order: usize,
+        gmres_restart: usize,
+        use_exact_jacobian: bool,
+        source_name: Option<&str>,
+        verbose: bool,
+    ) -> PyResult<(PyHbResult, PyHbEnvelopeState)> {
+        if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
+            return Err(crate::errors::value_error(format!(
+                "fundamental_frequency must be positive and finite, got {fundamental_frequency}"
+            )));
+        }
+        if harmonics == 0 {
+            return Err(crate::errors::value_error("harmonics must be at least 1"));
+        }
+        let source_names = source_name.map(|name| vec![name.to_string()]);
+        let mut config = hb_config_from_tones(
+            &[fundamental_frequency],
+            &[harmonics],
+            source_names.as_deref(),
+        )?;
+        configure_hb_numerics(
+            &mut config,
+            tolerance,
+            abstol,
+            max_iterations,
+            damping,
+            min_damping,
+            oversample,
+            collocation_points,
+            max_mixing_order,
+            use_krylov,
+            gmres_restart,
+            source_stepping,
+            use_exact_jacobian,
+            verbose,
+        )?;
+
+        let frozen = frozen_sources.unwrap_or_default();
+        // The continuation state is only valid against the configuration and
+        // frozen-source list that produced it, so both are retained on the
+        // returned object rather than left for the caller to re-supply.
+        let retained_config = config.clone();
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let (result, state) = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_hb_envelope_continuation_state_with_abort(
+                &netlist.inner,
+                config,
+                &frozen,
+                abort,
+            )
+        })?;
+        Ok((
+            PyHbResult::from_core(&result),
+            PyHbEnvelopeState {
+                inner: state,
+                config: retained_config,
+                frozen_sources: frozen,
+            },
+        ))
+    }
+
+    /// Continue a transient from a harmonic-balance envelope state
+    ///
+    /// Args:
+    ///     netlist: The same netlist the envelope state came from
+    ///     state: State from `run_hb_envelope`
+    ///     duration: Length of the continued run in seconds
+    ///     max_step: Maximum timestep; defaults to duration / 50
+    ///
+    /// Returns:
+    ///     tuple[TransientResult, TransientCheckpoint]
+    ///
+    /// Raises:
+    ///     ValueError: If duration or max_step is not positive and finite
+    ///     SimulationError: If the state does not match this netlist
+    #[pyo3(signature = (netlist, state, duration, max_step=None))]
+    fn run_tran_from_hb_envelope(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        state: &PyHbEnvelopeState,
+        duration: f64,
+        max_step: Option<f64>,
+    ) -> PyResult<(PyTransientResult, PyTransientCheckpoint)> {
+        let (duration, max_step) = continuation_window(duration, max_step)?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let (result, checkpoint) = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_tran_from_hb_envelope_state_with_abort(
+                &netlist.inner,
+                &state.config,
+                &state.frozen_sources,
+                &state.inner,
+                duration,
+                max_step,
+                abort,
+            )
+        })?;
+        Ok((
+            PyTransientResult::new(result),
+            PyTransientCheckpoint::new(checkpoint),
+        ))
+    }
+
     /// Run periodic small-signal AC analysis around an HB operating point.
-    #[pyo3(signature = (netlist, fundamental_frequency, start_frequency, stop_frequency, points, input_source, output_node, *, variation="dec", sideband_min=None, sideband_max=5, reference_node=None, reltol=1e-3, abstol=1e-12))]
+    #[pyo3(signature = (netlist, fundamental_frequency, start_frequency, stop_frequency, points, input_source, output_node, *, variation="dec", sideband_min=None, sideband_max=5, reference_node=None, reltol=1e-3, abstol=1e-12, pss=None))]
     #[allow(clippy::too_many_arguments)]
     fn run_pac(
         &self,
@@ -3165,6 +3640,7 @@ impl PyEngine {
         reference_node: Option<&str>,
         reltol: f64,
         abstol: f64,
+        pss: Option<&PyPssOperatingPoint>,
     ) -> PyResult<PyPacResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
             return Err(crate::errors::value_error(format!(
@@ -3206,14 +3682,22 @@ impl PyEngine {
             crate::errors::value_error(format!("invalid PAC configuration: {message}"))
         })?;
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_pac_with_abort(&netlist.inner, config, abort)
+        let result = run_interruptible(py, &self.active_runs, |abort| match pss {
+            // Reusing a converged orbit replaces the PSS solve this analysis
+            // would otherwise repeat for every call.
+            Some(operating_point) => engine.run_pac_from_pss_with_abort(
+                &netlist.inner,
+                config,
+                &operating_point.inner,
+                abort,
+            ),
+            None => engine.run_pac_with_abort(&netlist.inner, config, abort),
         })?;
         Ok(PyPacResult::from_core(&result))
     }
 
     /// Run driven periodic-noise analysis with sideband folding.
-    #[pyo3(signature = (netlist, fundamental_frequency, offsets, output_node, *, reference_node=None, input_source=None, max_sideband=6))]
+    #[pyo3(signature = (netlist, fundamental_frequency, offsets, output_node, *, reference_node=None, input_source=None, max_sideband=6, pss=None))]
     #[allow(clippy::too_many_arguments)]
     fn run_pnoise(
         &self,
@@ -3225,6 +3709,7 @@ impl PyEngine {
         reference_node: Option<&str>,
         input_source: Option<&str>,
         max_sideband: i32,
+        pss: Option<&PyPssOperatingPoint>,
     ) -> PyResult<PyPeriodicNoiseResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
             return Err(crate::errors::value_error(format!(
@@ -3244,8 +3729,18 @@ impl PyEngine {
             return Err(crate::errors::value_error("max_sideband must be at least 1"));
         }
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_pnoise_with_abort(
+        let result = run_interruptible(py, &self.active_runs, |abort| match pss {
+            Some(operating_point) => engine.run_pnoise_from_pss_with_abort(
+                &netlist.inner,
+                &offsets,
+                output_node,
+                reference_node,
+                input_source,
+                max_sideband,
+                &operating_point.inner,
+                abort,
+            ),
+            None => engine.run_pnoise_with_abort(
                 &netlist.inner,
                 fundamental_frequency,
                 &offsets,
@@ -3254,7 +3749,7 @@ impl PyEngine {
                 input_source,
                 max_sideband,
                 abort,
-            )
+            ),
         })?;
         Ok(PyPeriodicNoiseResult::from_core(&result))
     }

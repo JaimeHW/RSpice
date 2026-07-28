@@ -407,6 +407,19 @@ hb2 = engine.run_hb_multitone(
 )
 pac = engine.run_pac(netlist, 1e9, 1e3, 100e6, 20, "VRF", "out")
 pnoise = engine.run_pnoise(netlist, 1e9, [1e3, 10e3], "out")
+
+# Solve the periodic operating point once and reuse it: PAC and PNoise each
+# linearize around a PSS solution, which otherwise dominates an RF sweep.
+op = engine.run_pss_operating_point(netlist, 1e9)
+pac = engine.run_pac(netlist, 1e9, 1e3, 100e6, 20, "VRF", "out", pss=op)
+pnoise = engine.run_pnoise(netlist, 1e9, [1e3, 10e3], "out", pss=op)
+
+# Continue a transient from a converged orbit or an HB envelope, skipping
+# the settling interval a cold start has to integrate through.
+pss, state = engine.run_pss_continuation(netlist, 1e9)
+tran, checkpoint = engine.run_tran_from_pss(netlist, state, duration=1e-6)
+hb, envelope = engine.run_hb_envelope(netlist, 1e9, frozen_sources=["VMOD"])
+tran, checkpoint = engine.run_tran_from_hb_envelope(netlist, envelope, 1e-6)
 osc_noise = engine.run_oscillator_noise(
     oscillator_netlist,
     [1e3, 10e3, 100e3],
