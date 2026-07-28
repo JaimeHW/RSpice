@@ -1428,7 +1428,6 @@ mod tests {
 
         let mut bode = BodeData::new();
         bode.add_response(FrequencyResponse::from_arrays(
-            "old bode",
             &[1.0, 10.0],
             &[1.0, 0.1],
             &[0.0, -1.0],

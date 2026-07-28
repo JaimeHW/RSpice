@@ -72,7 +72,6 @@ impl SimulationController {
             }
 
             let response = crate::analysis::bode::data::FrequencyResponse::from_complex_arrays(
-                &name,
                 frequencies,
                 &waveform.y_values,
                 imag,
@@ -103,7 +102,6 @@ impl SimulationController {
         }
 
         if bode_data.response_count() > 0 {
-            bode_data.calculate_margins();
             state.analysis.bode_plot_state.load_data(bode_data);
         } else {
             state
