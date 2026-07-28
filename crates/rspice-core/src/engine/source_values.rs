@@ -3,7 +3,7 @@
 use crate::Value;
 use crate::netlist::SourceSpec;
 /// Extract DC value from a SourceSpec enum
-pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
+pub fn extract_dc_value(spec: &SourceSpec) -> Value {
     extract_dc_value_with_limits(spec, crate::resource::ResourceLimits::default())
 }
 
@@ -94,7 +94,7 @@ pub(crate) fn extract_dc_value_with_limits(
 /// own (vsrcacld.c stamps VSRCacGiven values exclusively). Harmonic
 /// balance, which does interpret SIN drives, falls back to the waveform
 /// specification separately through its periodic-source spectrum builder.
-pub(crate) fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
+pub fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
     match spec {
         SourceSpec::Distortion { inner, .. } => extract_ac_value(inner),
         SourceSpec::RfPort { inner, .. } => extract_ac_value(inner),

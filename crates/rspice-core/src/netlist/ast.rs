@@ -15,7 +15,12 @@ use super::expr::FunctionDef;
 /// Internal instance marker for Xyce resistor lines whose value field is
 /// omitted. Xyce parses those as zero and then applies a 1000 ohm default
 /// during resistor setup; explicit zero-ohm resistors must not use this path.
-pub(crate) const XYCE_DEFAULT_RESISTOR_VALUE_MARKER: &str = "__RSPICE_XYCE_DEFAULT_RESISTOR_VALUE";
+/// Sentinel value a Xyce-dialect resistor carries when its value is omitted.
+///
+/// Xyce accepts `R1 a b` with no value; the parser records this marker so a
+/// later stage can apply the dialect default instead of guessing whether the
+/// field was absent or genuinely zero.
+pub const XYCE_DEFAULT_RESISTOR_VALUE_MARKER: &str = "__RSPICE_XYCE_DEFAULT_RESISTOR_VALUE";
 
 //=============================================================================
 // Parametric Values

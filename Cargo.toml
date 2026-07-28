@@ -8,6 +8,7 @@ members = [
     "crates/rspice-python",
     "crates/rspice-wasm",
     "crates/rspice-bench",
+    "crates/rspice-conformance",
 ]
 
 [workspace.package]

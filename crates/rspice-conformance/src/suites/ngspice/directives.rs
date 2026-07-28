@@ -300,7 +300,7 @@ impl TestRunner {
     /// This keeps regression analysis directives aligned with production parsing
     /// (e.g. 1ns, 10us, 10ghz, 1nF, 1mH).
     pub(super) fn parse_spice_value(&self, s: &str) -> Option<Value> {
-        crate::netlist::lexer::parse_spice_value(s).ok()
+        rspice_core::netlist::lexer::parse_spice_value(s).ok()
     }
 
     /// Check if netlist uses unsupported features

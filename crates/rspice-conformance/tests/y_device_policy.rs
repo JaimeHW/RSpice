@@ -3,12 +3,16 @@
 //! RSpice uses `Y` for legacy lossy transmission lines. Xyce also has
 //! keyword-style Y devices such as `YDELAY` and `YLIN`; unsupported families
 //! must fail explicitly instead of parsing as shifted-node transmission lines.
+//!
+//! Uses the Xyce harness for deck fixtures, so it is gated behind
+//! `conformance` alongside it.
+
 
 use rspice_core::SpiceDialect;
 use rspice_core::analysis::IntegrationMethod;
 use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig};
 use rspice_core::netlist::{ElementKind, Netlist, flatten_netlist_with_models};
-use rspice_core::testing::{XyceRunnerConfig, XyceTestRunner};
+use rspice_conformance::suites::xyce::{XyceRunnerConfig, XyceTestRunner};
 use rspice_core::xspice::{register_data_file, unregister_data_file};
 use std::path::PathBuf;
 

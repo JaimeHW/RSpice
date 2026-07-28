@@ -1,6 +1,12 @@
 use super::*;
 
-pub(crate) const XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION: f64 = 0.0233;
+/// Xyce's default capacitor age-degradation coefficient.
+///
+/// Applied when a Xyce-dialect capacitor model omits the parameter. Public
+/// because it is part of the documented dialect contract: a caller comparing
+/// against Xyce needs the same constant rather than a transcribed copy that
+/// can silently drift.
+pub const XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION: f64 = 0.0233;
 
 /// Resolve the effective capacitance of a capacitor instance.
 ///

@@ -876,7 +876,8 @@ impl Engine {
         }
     }
 
-    pub(crate) fn step_netlists_for_command(
+    /// Expand a `.STEP` command into one netlist per sweep run.
+    pub fn step_netlists_for_command(
         &self,
         netlist: &Netlist,
         step_cmd: &StepCommand,

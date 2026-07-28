@@ -220,7 +220,12 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
 
 /// Validate the exact model-card subset implemented by the native scalar
 /// Xyce LTRA runtime before an external regression deck is oracle-qualified.
-pub(crate) fn validate_native_xyce_ltra_model_contract(
+/// Whether a model-backed LTRA element is supported by the native runtime.
+///
+/// A deck-validation probe: answers "can this model card be run?" without
+/// building or solving the circuit, so a caller can classify a deck as
+/// supported before committing to a run.
+pub fn validate_native_xyce_ltra_model_contract(
     netlist: &Netlist,
     model_name: &str,
 ) -> Result<(), SimulationError> {

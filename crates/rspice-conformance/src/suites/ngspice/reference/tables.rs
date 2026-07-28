@@ -1,7 +1,7 @@
 use super::*;
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn load_digital_eprint_reference(
+    pub(in crate::suites::ngspice) fn load_digital_eprint_reference(
         &self,
         cir_path: &Path,
     ) -> Result<Option<DigitalReferenceTable>, String> {
@@ -14,7 +14,7 @@ impl TestRunner {
         Ok(Self::parse_digital_eprint_table(&reference_output.content))
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_digital_eprint_table(
+    pub(in crate::suites::ngspice) fn parse_digital_eprint_table(
         content: &str,
     ) -> Option<DigitalReferenceTable> {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,7 +117,7 @@ impl TestRunner {
             && matches!(strength, 's' | 'S' | 'r' | 'R' | 'z' | 'Z' | 'u' | 'U')
     }
 
-    pub(in crate::testing::ngspice_runner) fn load_reference_table_for_axis(
+    pub(in crate::suites::ngspice) fn load_reference_table_for_axis(
         &self,
         cir_path: &Path,
         axis_candidates: &[&str],
@@ -157,7 +157,7 @@ impl TestRunner {
         self.load_live_raw_reference_table_for_axis(cir_path, axis_candidates)
     }
 
-    pub(in crate::testing::ngspice_runner) fn load_printed_reference_table_for_axis(
+    pub(in crate::suites::ngspice) fn load_printed_reference_table_for_axis(
         &self,
         cir_path: &Path,
         axis_candidates: &[&str],
@@ -232,7 +232,7 @@ impl TestRunner {
         )
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_ngspice_output_tables(
+    pub(in crate::suites::ngspice) fn parse_ngspice_output_tables(
         &self,
         content: &str,
     ) -> Result<Vec<ReferenceTable>, String> {
@@ -376,7 +376,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn looks_like_ascii_plot_axis_header(
+    pub(in crate::suites::ngspice) fn looks_like_ascii_plot_axis_header(
         axis: &str,
         vars: &[&str],
     ) -> bool {
@@ -393,17 +393,17 @@ impl TestRunner {
             .any(|token| Self::header_token_is_ascii_plot_tick(token))
     }
 
-    pub(in crate::testing::ngspice_runner) fn header_token_is_ascii_plot_tick(token: &str) -> bool {
+    pub(in crate::suites::ngspice) fn header_token_is_ascii_plot_tick(token: &str) -> bool {
         let normalized = Self::normalize_variable_name(token);
         if normalized.is_empty() {
             return true;
         }
 
         normalized.parse::<f64>().is_ok()
-            || crate::netlist::lexer::parse_spice_value(&normalized).is_ok()
+            || rspice_core::netlist::lexer::parse_spice_value(&normalized).is_ok()
     }
 
-    pub(in crate::testing::ngspice_runner) fn merge_contiguous_reference_tables(
+    pub(in crate::suites::ngspice) fn merge_contiguous_reference_tables(
         tables: Vec<ReferenceTable>,
     ) -> Vec<ReferenceTable> {
         let mut merged: Vec<ReferenceTable> = Vec::new();
@@ -426,7 +426,7 @@ impl TestRunner {
         merged
     }
 
-    pub(in crate::testing::ngspice_runner) fn can_merge_reference_tables(
+    pub(in crate::suites::ngspice) fn can_merge_reference_tables(
         a: &ReferenceTable,
         b: &ReferenceTable,
     ) -> bool {

@@ -170,15 +170,5 @@ blake3 = "1.5"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
-[[bin]]
-name = "rspice-ngspice-case-runner"
-path = "src/bin/ngspice_case_runner.rs"
-test = false
-
-[[bin]]
-name = "rspice-xyce-case-runner"
-path = "src/bin/xyce_case_runner.rs"
-test = false
-
 [lints]
 workspace = true

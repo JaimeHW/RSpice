@@ -1,7 +1,7 @@
 use super::*;
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn load_transfer_function_reference(
+    pub(in crate::suites::ngspice) fn load_transfer_function_reference(
         &self,
         cir_path: &Path,
         output: &str,
@@ -28,7 +28,7 @@ impl TestRunner {
             }))
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_transfer_function_references(
+    pub(in crate::suites::ngspice) fn parse_transfer_function_references(
         &self,
         content: &str,
     ) -> Vec<TransferFunctionReference> {
@@ -86,7 +86,7 @@ impl TestRunner {
         references
     }
 
-    pub(in crate::testing::ngspice_runner) fn load_pz_reference(
+    pub(in crate::suites::ngspice) fn load_pz_reference(
         &self,
         cir_path: &Path,
     ) -> Result<Option<PzReference>, String> {
@@ -96,7 +96,7 @@ impl TestRunner {
         Ok(self.parse_pz_reference(&reference_output.content))
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_pz_reference(
+    pub(in crate::suites::ngspice) fn parse_pz_reference(
         &self,
         content: &str,
     ) -> Option<PzReference> {
@@ -142,7 +142,7 @@ impl TestRunner {
                 let Ok(im) = im_token.parse::<f64>() else {
                     continue;
                 };
-                let value = crate::analysis::pole_zero::Complex::new(re, im);
+                let value = rspice_core::analysis::pole_zero::Complex::new(re, im);
                 if col.starts_with("pole(") {
                     reference.poles.push(value);
                 } else if col.starts_with("zero(") {
@@ -160,10 +160,10 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_pz_reference(
+    pub(in crate::suites::ngspice) fn compare_pz_reference(
         &self,
         cir_path: &Path,
-        result: &crate::analysis::PoleZeroResult,
+        result: &rspice_core::analysis::PoleZeroResult,
     ) -> Result<Vec<ValueMismatch>, String> {
         let Some(reference) = self.load_pz_reference(cir_path)? else {
             return Ok(Vec::new());
@@ -174,8 +174,8 @@ impl TestRunner {
         let compare_complex_lists =
             |runner: &Self,
              label: &str,
-             expected: &[crate::analysis::pole_zero::Complex],
-             actual: &[crate::analysis::pole_zero::Complex],
+             expected: &[rspice_core::analysis::pole_zero::Complex],
+             actual: &[rspice_core::analysis::pole_zero::Complex],
              mismatches: &mut Vec<ValueMismatch>| {
                 let n = expected.len().max(actual.len());
                 for idx in 0..n {
@@ -239,7 +239,7 @@ impl TestRunner {
         // opposite-sign near-conjugates with the positive-imaginary member
         // first — the order ngspice prints — making the index-wise
         // comparison independent of root-finder and table ordering.
-        fn canonical(values: &mut [crate::analysis::pole_zero::Complex]) {
+        fn canonical(values: &mut [rspice_core::analysis::pole_zero::Complex]) {
             values.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
             for i in 1..values.len() {
                 let (lo, hi) = (values[i - 1], values[i]);

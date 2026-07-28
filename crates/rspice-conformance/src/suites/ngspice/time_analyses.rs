@@ -29,7 +29,6 @@ impl TestRunner {
             }
         };
 
-        let mut engine = self.create_dynamic_engine();
         // The locked mode replays the reference's recorded time grid as the
         // exact accepted-step sequence (no adaptive points, no breakpoint
         // restarts, LTE off), isolating physics parity from step-control
@@ -43,7 +42,8 @@ impl TestRunner {
             self.validation_contract_for(cir_path),
             Some(ValidationContract::LockedGrid)
         );
-        if (locked_by_contract || std::env::var("RSPICE_GRID_LOCKED").as_deref() == Ok("1"))
+        let locked_time_grid = if (locked_by_contract
+            || std::env::var("RSPICE_GRID_LOCKED").as_deref() == Ok("1"))
             && let Ok(Some(reference)) = self.locked_grid_reference_table(cir_path, source)
             && let Some(series) = reference
                 .variables
@@ -51,8 +51,11 @@ impl TestRunner {
                 .max_by_key(|series| series.x.len())
             && series.x.len() >= 2
         {
-            engine.config.locked_time_grid = Some(std::sync::Arc::new(series.x.clone()));
-        }
+            Some(std::sync::Arc::new(series.x.clone()))
+        } else {
+            None
+        };
+        let engine = self.create_dynamic_engine_with_locked_grid(locked_time_grid);
         let max_step =
             tmax.unwrap_or_else(|| Self::default_transient_max_step(tstep, tstop, tstart));
 

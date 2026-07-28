@@ -6,7 +6,7 @@ impl TestRunner {
     // ═══════════════════════════════════════════════════════════════════════════
 
     #[inline]
-    pub(in crate::testing::ngspice_runner) fn optional_probe_node(name: &str) -> Option<String> {
+    pub(in crate::suites::ngspice) fn optional_probe_node(name: &str) -> Option<String> {
         let trimmed = name.trim();
         if trimmed.is_empty() || trimmed == "0" || trimmed.eq_ignore_ascii_case("gnd") {
             None
@@ -15,8 +15,8 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn resolve_circuit_node_index(
-        circuit: &crate::circuit::Circuit,
+    pub(in crate::suites::ngspice) fn resolve_circuit_node_index(
+        circuit: &rspice_core::circuit::Circuit,
         node: &str,
         role: &str,
     ) -> Result<usize, String> {
@@ -25,8 +25,8 @@ impl TestRunner {
             .ok_or_else(|| format!("Unknown {role} node '{node}'"))
     }
 
-    pub(in crate::testing::ngspice_runner) fn resolve_optional_circuit_node_index(
-        circuit: &crate::circuit::Circuit,
+    pub(in crate::suites::ngspice) fn resolve_optional_circuit_node_index(
+        circuit: &rspice_core::circuit::Circuit,
         node: Option<&str>,
         role: &str,
     ) -> Result<Option<usize>, String> {

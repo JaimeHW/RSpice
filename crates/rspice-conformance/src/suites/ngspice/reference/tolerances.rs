@@ -1,7 +1,7 @@
 use super::*;
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn interpolate_series(
+    pub(in crate::suites::ngspice) fn interpolate_series(
         x: &[f64],
         y: &[f64],
         x_query: f64,
@@ -70,7 +70,7 @@ impl TestRunner {
     ///
     /// This is the reference's own time resolution at that row: the larger of
     /// the two adjacent grid intervals.
-    pub(in crate::testing::ngspice_runner) fn local_axis_spacing(x: &[f64], idx: usize) -> f64 {
+    pub(in crate::suites::ngspice) fn local_axis_spacing(x: &[f64], idx: usize) -> f64 {
         let before = if idx > 0 {
             (x[idx] - x[idx - 1]).abs()
         } else {
@@ -85,7 +85,7 @@ impl TestRunner {
     }
 
     /// Steepest local slope of the reference trace around row `idx`.
-    pub(in crate::testing::ngspice_runner) fn local_reference_slope(
+    pub(in crate::suites::ngspice) fn local_reference_slope(
         x: &[f64],
         y: &[f64],
         idx: usize,
@@ -126,7 +126,7 @@ impl TestRunner {
     /// Smooth regions, operating points, and settled levels are unaffected
     /// and keep the strict pointwise tolerances.
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::testing::ngspice_runner) fn matches_within_time_jitter_window(
+    pub(in crate::suites::ngspice) fn matches_within_time_jitter_window(
         &self,
         x_sim: &[f64],
         actual_series: &[f64],
@@ -245,7 +245,7 @@ impl TestRunner {
     /// the simulated value lies inside the envelope of the reference's
     /// immediate neighborhood. Monotone regions and settled levels never
     /// qualify, so genuine level errors still fail pointwise.
-    pub(in crate::testing::ngspice_runner) fn matches_within_reference_envelope(
+    pub(in crate::suites::ngspice) fn matches_within_reference_envelope(
         &self,
         expected_series: &ReferenceSeries,
         idx: usize,
@@ -292,7 +292,7 @@ impl TestRunner {
         actual.is_finite() && actual >= lo - value_tolerance && actual <= hi + value_tolerance
     }
 
-    pub(in crate::testing::ngspice_runner) fn matches_within_event_step_window(
+    pub(in crate::suites::ngspice) fn matches_within_event_step_window(
         &self,
         x_sim: &[f64],
         actual_series: &[f64],
@@ -356,7 +356,7 @@ impl TestRunner {
             .any(|(&time, &value)| time >= lo && time <= hi && matches_expected(value))
     }
 
-    pub(in crate::testing::ngspice_runner) fn series_absolute_tolerance_floor(
+    pub(in crate::suites::ngspice) fn series_absolute_tolerance_floor(
         &self,
         var: &str,
         expected_series: &ReferenceSeries,
@@ -407,17 +407,17 @@ impl TestRunner {
         floor
     }
 
-    pub(in crate::testing::ngspice_runner) fn series_spans_zero(values: &[f64]) -> bool {
+    pub(in crate::suites::ngspice) fn series_spans_zero(values: &[f64]) -> bool {
         let has_positive = values.iter().any(|&value| value > 0.0);
         let has_negative = values.iter().any(|&value| value < 0.0);
         has_positive && has_negative
     }
 
-    pub(in crate::testing::ngspice_runner) fn dc_op_absolute_tolerance_floor(
+    pub(in crate::suites::ngspice) fn dc_op_absolute_tolerance_floor(
         &self,
         probe: &str,
         reference: &OpReference,
-        result: &crate::SimulationResult,
+        result: &rspice_core::SimulationResult,
     ) -> f64 {
         let mut floor = self.config.absolute_tolerance;
         if Self::parse_voltage_probe(probe).is_some() {
@@ -440,7 +440,7 @@ impl TestRunner {
         floor
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_values_with_abs_tol(
+    pub(in crate::suites::ngspice) fn compare_values_with_abs_tol(
         &self,
         expected: f64,
         actual: f64,
@@ -476,12 +476,12 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn wrap_phase_delta(delta: f64, period: f64) -> f64 {
+    pub(in crate::suites::ngspice) fn wrap_phase_delta(delta: f64, period: f64) -> f64 {
         let half_period = 0.5 * period;
         (delta + half_period).rem_euclid(period) - half_period
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_phase_values_with_abs_tol(
+    pub(in crate::suites::ngspice) fn compare_phase_values_with_abs_tol(
         &self,
         expected: f64,
         actual: f64,
@@ -522,7 +522,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_values(
+    pub(in crate::suites::ngspice) fn compare_values(
         &self,
         expected: f64,
         actual: f64,
@@ -533,7 +533,7 @@ impl TestRunner {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{TestRunner, TestRunnerConfig};
+    use crate::suites::ngspice::{TestRunner, TestRunnerConfig};
 
     fn runner() -> TestRunner {
         TestRunner::new(std::env::temp_dir(), TestRunnerConfig::default())
@@ -621,8 +621,8 @@ mod tests {
 
 #[cfg(test)]
 mod envelope_tests {
-    use crate::testing::ngspice_runner::ReferenceSeries;
-    use crate::testing::{TestRunner, TestRunnerConfig};
+    use crate::suites::ngspice::ReferenceSeries;
+    use crate::suites::ngspice::{TestRunner, TestRunnerConfig};
 
     fn runner() -> TestRunner {
         TestRunner::new(std::env::temp_dir(), TestRunnerConfig::default())
@@ -676,8 +676,8 @@ mod envelope_tests {
 
 #[cfg(test)]
 mod envelope_neighbor_tests {
-    use crate::testing::ngspice_runner::ReferenceSeries;
-    use crate::testing::{TestRunner, TestRunnerConfig};
+    use crate::suites::ngspice::ReferenceSeries;
+    use crate::suites::ngspice::{TestRunner, TestRunnerConfig};
 
     fn runner() -> TestRunner {
         TestRunner::new(std::env::temp_dir(), TestRunnerConfig::default())

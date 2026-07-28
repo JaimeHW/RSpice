@@ -45,7 +45,7 @@ enum RawBinaryEncoding {
 }
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn live_ngspice_reference_config(
+    pub(in crate::suites::ngspice) fn live_ngspice_reference_config(
         runner_config: &TestRunnerConfig,
     ) -> Result<Option<LiveNgspiceReferenceConfig>, String> {
         if let (Some(source_root), Some(ngspice_exe)) = (
@@ -128,7 +128,7 @@ impl TestRunner {
         })
     }
 
-    pub(in crate::testing::ngspice_runner) fn authoritative_circuit_path(
+    pub(in crate::suites::ngspice) fn authoritative_circuit_path(
         &self,
         cir_path: &Path,
     ) -> Result<PathBuf, String> {
@@ -138,7 +138,7 @@ impl TestRunner {
         self.source_circuit_path_for(config, cir_path)
     }
 
-    pub(in crate::testing::ngspice_runner) fn load_reference_output(
+    pub(in crate::suites::ngspice) fn load_reference_output(
         &self,
         cir_path: &Path,
     ) -> Result<Option<ReferenceOutput>, String> {
@@ -167,7 +167,7 @@ impl TestRunner {
         }))
     }
 
-    pub(in crate::testing::ngspice_runner) fn live_reference_config(
+    pub(in crate::suites::ngspice) fn live_reference_config(
         &self,
     ) -> Result<Option<&LiveNgspiceReferenceConfig>, String> {
         match &self.live_reference_config {
@@ -294,7 +294,7 @@ impl TestRunner {
         result
     }
 
-    pub(in crate::testing::ngspice_runner) fn load_live_raw_reference_tables(
+    pub(in crate::suites::ngspice) fn load_live_raw_reference_tables(
         &self,
         cir_path: &Path,
     ) -> Result<Option<Vec<ReferenceTable>>, String> {

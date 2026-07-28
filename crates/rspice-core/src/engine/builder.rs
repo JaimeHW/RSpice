@@ -34,7 +34,8 @@ use std::time::{Duration, Instant};
 
 mod model_resolution;
 use model_resolution::*;
-pub(crate) use model_resolution::{
+pub use model_resolution::{
+    ResolvedResistorParameters,
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
 };
 mod behavioral;
@@ -620,7 +621,7 @@ pub(crate) fn build_xyce_pem_memristor(
     )
 }
 
-pub(crate) fn build_native_xyce_memristor(
+pub fn build_native_xyce_memristor(
     netlist: &Netlist,
     model_def: &crate::netlist::ModelDef,
     element_name: &str,
@@ -4101,7 +4102,12 @@ set auto_bridge_parm_d = vdd
 }
 
 impl Engine {
-    pub(crate) fn resolved_resistor_parameters(
+    /// Effective resistor parameters after parameter substitution.
+    ///
+    /// Answers "what values did this device actually receive?" once `.PARAM`
+    /// expressions, model cards, and `.STEP` bindings have been applied — the
+    /// question a schematic inspector or a sweep report asks.
+    pub fn resolved_resistor_parameters(
         &self,
         netlist: &Netlist,
         resistor_name: &str,
@@ -4153,7 +4159,7 @@ impl Engine {
     /// Return a canonical effective resistor parameter suitable for device
     /// reporting. Parameters copied from the model are resolved through the
     /// same path used to construct the simulated resistor.
-    pub(crate) fn resolved_resistor_parameter(
+    pub fn resolved_resistor_parameter(
         &self,
         netlist: &Netlist,
         resistor_name: &str,
@@ -4172,7 +4178,8 @@ impl Engine {
         })
     }
 
-    pub(crate) fn resolved_inductor_value(
+    /// Effective inductance after parameter substitution.
+    pub fn resolved_inductor_value(
         &self,
         netlist: &Netlist,
         inductor_name: &str,
@@ -4219,7 +4226,8 @@ impl Engine {
         .map(Some)
     }
 
-    pub(crate) fn resolved_capacitor_value(
+    /// Effective capacitance after parameter substitution.
+    pub fn resolved_capacitor_value(
         &self,
         netlist: &Netlist,
         capacitor_name: &str,

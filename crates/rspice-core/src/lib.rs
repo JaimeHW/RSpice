@@ -36,7 +36,6 @@
 //! - [`constants`] — physical and simulation constants
 //! - [`abort_signal`] — cooperative cancellation for long runs
 //! - [`resource`] — resource limits for untrusted input
-//! - [`testing`] — the ngspice and Xyce conformance harnesses
 //! - [`time_compat`] — wall-clock shim (`wasm32` has no clock)
 //! - [`simd`] — SIMD kernels, with the `simd` feature
 //!
@@ -108,7 +107,6 @@ pub mod expr;
 pub mod library;
 pub mod netlist;
 pub mod solver;
-pub mod testing;
 pub mod time_compat;
 pub mod xspice;
 

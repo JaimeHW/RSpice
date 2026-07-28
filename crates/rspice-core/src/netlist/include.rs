@@ -1491,7 +1491,7 @@ fn windows_drive_relative_suffix(path: &str) -> Option<&str> {
 /// Convert a SPICE source-path literal to the current host's path syntax.
 /// Both slash styles are directive separators regardless of the host that is
 /// doing discovery; native absolute paths retain their prefix/root semantics.
-pub(crate) fn source_path_literal_to_host_path(path: &str) -> PathBuf {
+pub fn source_path_literal_to_host_path(path: &str) -> PathBuf {
     let path = path.trim().trim_matches('"').trim_matches('\'');
     let native = Path::new(path);
     if native.is_absolute() {

@@ -514,6 +514,20 @@ impl CircuitData {
         &self.inductors
     }
 
+    /// Read-only access to native diode storage.
+    ///
+    /// [`Self::diode_terminal_nodes`] answers the common topology question;
+    /// this exposes the resolved instances themselves, for callers that need
+    /// to see which model parameters a deck actually built into.
+    pub fn diode_storage(&self) -> &Diodes {
+        &self.diodes
+    }
+
+    /// Read-only access to resolved generic-switch instances.
+    pub fn generic_switch_storage(&self) -> &[crate::device::GenericSwitch] {
+        &self.generic_switches
+    }
+
     /// Get node names sorted by their node index (1, 2, 3, ...)
     /// Returns a Vec where index i contains the name of node (i+1)
     /// This is useful for waveform output labels like V(N001), V(N002)

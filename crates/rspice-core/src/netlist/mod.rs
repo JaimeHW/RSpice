@@ -47,7 +47,7 @@ pub(crate) use flattener::{
     flatten_netlist_with_models_config_with_abort, flatten_netlist_with_models_with_abort,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
-pub(crate) use include::source_path_literal_to_host_path;
+pub use include::source_path_literal_to_host_path;
 pub use include::{
     DEFAULT_MAX_INCLUDE_DEPTH, IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle,
     SealedSourceEdge, normalize_source_path_literal, parse_include_directive, parse_lib_directive,

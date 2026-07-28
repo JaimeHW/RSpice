@@ -7,13 +7,10 @@
 //! against the current local ngspice source tree and executable instead, set
 //! `RSPICE_NGSPICE_LIVE_REFERENCES=1`, `NGSPICE_SOURCE_ROOT`, and `NGSPICE_EXE`.
 
-use rspice_core::{
-    netlist::Netlist,
-    testing::{
-        TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics,
-        decode_test_result,
-    },
+use rspice_conformance::suites::ngspice::{
+    TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics, decode_test_result,
 };
+use rspice_core::netlist::Netlist;
 use std::{
     collections::{BTreeSet, HashMap},
     fs,
@@ -341,7 +338,7 @@ fn unique_case_result_path(cir_path: &Path) -> PathBuf {
 /// Get the path to the ngspice tests directory at the workspace root.
 /// Tests are located at workspace_root/tests/ngspice/, not crate/tests/.
 fn get_tests_dir() -> PathBuf {
-    // CARGO_MANIFEST_DIR points to crates/rspice-core/
+    // CARGO_MANIFEST_DIR points to crates/rspice-conformance/
     // We need to go up two levels to reach the workspace root
     let tests_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"))

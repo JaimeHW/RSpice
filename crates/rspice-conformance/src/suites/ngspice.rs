@@ -17,15 +17,16 @@
 //! ```
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-use crate::abort_signal::AbortSignal;
-use crate::engine::{ConvergenceConfig, SimulationConfig};
-use crate::{Complex64, Engine, Netlist, Value};
+use rspice_core::abort_signal::AbortSignal;
+use rspice_core::engine::{ConvergenceConfig, SimulationConfig};
+use rspice_core::{Complex64, Engine, Netlist, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+mod codec;
 mod dc_analyses;
 mod directives;
 mod discovery;
@@ -37,6 +38,12 @@ mod reference;
 mod suite;
 mod time_analyses;
 mod validation;
+
+// The result-file protocol spoken between `rspice-ngspice-case-runner` and
+// the parent suite. It encodes this module's [`TestResult`], so it lives with
+// the suite rather than at the crate root; the generic framing lifts out when
+// the Xyce suite arrives and there are two payloads to serve.
+pub use codec::{decode_test_result, encode_test_result};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Analysis Types
@@ -206,9 +213,9 @@ struct OpReference {
 
 #[derive(Debug, Clone, Default)]
 struct PzReference {
-    poles: Vec<crate::analysis::pole_zero::Complex>,
-    zeros: Vec<crate::analysis::pole_zero::Complex>,
-    all: Vec<crate::analysis::pole_zero::Complex>,
+    poles: Vec<rspice_core::analysis::pole_zero::Complex>,
+    zeros: Vec<rspice_core::analysis::pole_zero::Complex>,
+    all: Vec<rspice_core::analysis::pole_zero::Complex>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -459,7 +466,7 @@ impl TestRunner {
     fn parse_regression_source(
         source: &str,
         source_path: &Path,
-    ) -> Result<Netlist, crate::netlist::ParseError> {
+    ) -> Result<Netlist, rspice_core::netlist::ParseError> {
         Netlist::parse_with_path(source, source_path)
     }
 }

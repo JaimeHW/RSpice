@@ -39,11 +39,11 @@ impl TestRunner {
         Ok(None)
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_dc_sweep_reference(
+    pub(in crate::suites::ngspice) fn compare_dc_sweep_reference(
         &self,
         cir_path: &Path,
         netlist: &Netlist,
-        results: &[(Value, crate::SimulationResult)],
+        results: &[(Value, rspice_core::SimulationResult)],
     ) -> Result<Vec<ValueMismatch>, String> {
         let Some(reference) = self.reference_table_or_absence(cir_path, &["v-sweep"])? else {
             return Ok(Vec::new());
@@ -120,11 +120,11 @@ impl TestRunner {
         }))
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_transient_reference(
+    pub(in crate::suites::ngspice) fn compare_transient_reference(
         &self,
         cir_path: &Path,
         netlist: &Netlist,
-        result: &crate::engine::TransientResult,
+        result: &rspice_core::engine::TransientResult,
     ) -> Result<Vec<ValueMismatch>, String> {
         let mut mismatches = Vec::new();
         if let Some(reference) = self.load_digital_eprint_reference(cir_path)? {
@@ -178,7 +178,7 @@ impl TestRunner {
     fn compare_digital_eprint_reference(
         &self,
         reference: &DigitalReferenceTable,
-        result: &crate::engine::TransientResult,
+        result: &rspice_core::engine::TransientResult,
     ) -> Vec<ValueMismatch> {
         const TIME_EPSILON: f64 = 1.0e-15;
         let mut mismatches = Vec::new();
@@ -219,7 +219,7 @@ impl TestRunner {
     }
 
     fn resolve_transient_branch_index(
-        result: &crate::engine::TransientResult,
+        result: &rspice_core::engine::TransientResult,
         branch_name: &str,
     ) -> Option<usize> {
         let normalized_branch = Self::normalize_variable_name(branch_name);
@@ -266,11 +266,11 @@ impl TestRunner {
         Vec::new()
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_ac_reference(
+    pub(in crate::suites::ngspice) fn compare_ac_reference(
         &self,
         cir_path: &Path,
         netlist: &Netlist,
-        results: &[crate::analysis::AcResult],
+        results: &[rspice_core::analysis::AcResult],
     ) -> Result<Vec<ValueMismatch>, String> {
         let Some(reference) = self.reference_table_or_absence(cir_path, &["frequency"])? else {
             return Ok(Vec::new());
@@ -363,10 +363,10 @@ impl TestRunner {
         }))
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_noise_reference(
+    pub(in crate::suites::ngspice) fn compare_noise_reference(
         &self,
         cir_path: &Path,
-        results: &[crate::analysis::NoiseResult],
+        results: &[rspice_core::analysis::NoiseResult],
     ) -> Result<Vec<ValueMismatch>, String> {
         let Some(reference) = self.reference_table_or_absence(cir_path, &["frequency"])? else {
             return Ok(Vec::new());
@@ -413,8 +413,8 @@ impl TestRunner {
         }))
     }
 
-    pub(in crate::testing::ngspice_runner) fn transient_node_waveform(
-        result: &crate::engine::TransientResult,
+    pub(in crate::suites::ngspice) fn transient_node_waveform(
+        result: &rspice_core::engine::TransientResult,
         idx: usize,
     ) -> Vec<f64> {
         if idx == 0 {
@@ -428,10 +428,10 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn resolve_transient_device_series(
+    pub(in crate::suites::ngspice) fn resolve_transient_device_series(
         netlist: &Netlist,
         node_to_idx: &HashMap<String, usize>,
-        result: &crate::engine::TransientResult,
+        result: &rspice_core::engine::TransientResult,
         expr: &str,
     ) -> Option<Vec<f64>> {
         let normalized = Self::normalize_variable_name(expr);
@@ -461,14 +461,14 @@ impl TestRunner {
         )
     }
 
-    pub(in crate::testing::ngspice_runner) fn resolve_device_voltage_nodes(
+    pub(in crate::suites::ngspice) fn resolve_device_voltage_nodes(
         netlist: &Netlist,
-        element: &crate::netlist::Element,
+        element: &rspice_core::netlist::Element,
         quantity: &str,
     ) -> Option<(String, String)> {
         let quantity = Self::normalize_variable_name(quantity);
         match &element.kind {
-            crate::netlist::ElementKind::Mosfet { model, .. } => {
+            rspice_core::netlist::ElementKind::Mosfet { model, .. } => {
                 // BSIMSOI floating-body level-56 devices own an internal body
                 // node; their `vbs`/`vbd` are measured against that node, not the
                 // external back-gate (`nodes[3]`). A 5-terminal instance ties the
@@ -505,7 +505,7 @@ impl TestRunner {
     /// external node. Matches the builder's internal-node naming.
     fn bsimsoi_body_node_name(
         netlist: &Netlist,
-        element: &crate::netlist::Element,
+        element: &rspice_core::netlist::Element,
         model: &str,
     ) -> Option<String> {
         let level = netlist
@@ -528,7 +528,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn resolve_reference_series<F>(
+    pub(in crate::suites::ngspice) fn resolve_reference_series<F>(
         expr: &str,
         direct: &F,
     ) -> Option<Vec<f64>>
@@ -586,7 +586,7 @@ impl TestRunner {
         None
     }
 
-    pub(in crate::testing::ngspice_runner) fn split_reference_binary_expression(
+    pub(in crate::suites::ngspice) fn split_reference_binary_expression(
         expr: &str,
     ) -> Option<(&str, char, &str)> {
         let mut paren_depth = 0usize;
@@ -610,21 +610,21 @@ impl TestRunner {
         None
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_reference_scalar(expr: &str) -> Option<f64> {
-        crate::netlist::lexer::parse_spice_value(expr)
+    pub(in crate::suites::ngspice) fn parse_reference_scalar(expr: &str) -> Option<f64> {
+        rspice_core::netlist::lexer::parse_spice_value(expr)
             .ok()
             .or_else(|| expr.parse::<f64>().ok())
     }
 
-    pub(in crate::testing::ngspice_runner) fn is_voltage_probe_name(expr: &str) -> bool {
+    pub(in crate::suites::ngspice) fn is_voltage_probe_name(expr: &str) -> bool {
         Self::parse_voltage_probe(expr).is_some()
     }
 
-    pub(in crate::testing::ngspice_runner) fn is_current_probe_name(expr: &str) -> bool {
+    pub(in crate::suites::ngspice) fn is_current_probe_name(expr: &str) -> bool {
         Self::parse_current_probe(expr).is_some()
     }
 
-    pub(in crate::testing::ngspice_runner) fn reference_expr_contains_probe(
+    pub(in crate::suites::ngspice) fn reference_expr_contains_probe(
         expr: &str,
         is_probe_name: fn(&str) -> bool,
     ) -> bool {
@@ -661,21 +661,21 @@ impl TestRunner {
         false
     }
 
-    pub(in crate::testing::ngspice_runner) fn reference_expr_contains_voltage_probe(
+    pub(in crate::suites::ngspice) fn reference_expr_contains_voltage_probe(
         expr: &str,
     ) -> bool {
         let normalized = Self::normalize_variable_name(expr);
         Self::reference_expr_contains_probe(&normalized, Self::is_voltage_probe_name)
     }
 
-    pub(in crate::testing::ngspice_runner) fn reference_expr_contains_current_probe(
+    pub(in crate::suites::ngspice) fn reference_expr_contains_current_probe(
         expr: &str,
     ) -> bool {
         let normalized = Self::normalize_variable_name(expr);
         Self::reference_expr_contains_probe(&normalized, Self::is_current_probe_name)
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_reference_dataset<F>(
+    pub(in crate::suites::ngspice) fn compare_reference_dataset<F>(
         &self,
         reference: &ReferenceTable,
         x_sim: &[f64],
@@ -900,7 +900,7 @@ impl TestRunner {
     }
 
     #[inline]
-    pub(in crate::testing::ngspice_runner) fn is_monotonic_axis(x: &[f64]) -> bool {
+    pub(in crate::suites::ngspice) fn is_monotonic_axis(x: &[f64]) -> bool {
         if x.len() < 2 {
             return true;
         }

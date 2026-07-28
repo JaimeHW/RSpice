@@ -609,7 +609,11 @@ impl VoltageSources {
         log::warn!("{}", msg);
     }
 
-    pub(crate) fn evaluate_source_spec_at_time_with_dialect(
+    /// Value of an independent source at a point in time, under a dialect.
+    ///
+    /// Waveform previews and source inspectors need the engine's own
+    /// interpretation of `PULSE`/`SIN`/`PWL`, including dialect differences.
+    pub fn evaluate_source_spec_at_time_with_dialect(
         spec: &crate::netlist::SourceSpec,
         time: Value,
         tstep: Value,
@@ -726,7 +730,8 @@ impl VoltageSources {
     /// same edges the waveform actually produces.
     #[inline]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn resolve_pulse_timing_with_defaults(
+    /// `PULSE` timing with dialect defaults substituted for omitted fields.
+    pub fn resolve_pulse_timing_with_defaults(
         delay: Value,
         rise: Value,
         fall: Value,

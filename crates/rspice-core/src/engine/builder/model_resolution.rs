@@ -8,12 +8,13 @@ mod resistors;
 mod transmission;
 mod xspice;
 
-pub(crate) use capacitors::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
+pub use capacitors::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
 pub(super) use capacitors::*;
 pub(super) use inductors::*;
 pub(super) use magnetic::*;
 pub(super) use resistors::*;
-pub(crate) use transmission::validate_native_xyce_ltra_model_contract;
+pub use resistors::ResolvedResistorParameters;
+pub use transmission::validate_native_xyce_ltra_model_contract;
 pub(super) use transmission::*;
 pub(super) use xspice::*;
 

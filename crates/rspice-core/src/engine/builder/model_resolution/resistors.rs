@@ -577,7 +577,8 @@ fn resolve_level1_model_geometry_resistance(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ResolvedResistorParameters {
+/// Resistor parameters after `.PARAM`, model-card, and `.STEP` resolution.
+pub struct ResolvedResistorParameters {
     pub resistance: f64,
     /// Value reported by Xyce's `R:<name>` parameter probe.  Ordinary
     /// resistors report the effective branch resistance; LEVEL=2 thermal

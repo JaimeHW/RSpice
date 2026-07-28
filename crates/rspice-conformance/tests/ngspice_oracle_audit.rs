@@ -152,7 +152,7 @@ fn audit_config_from_env() -> Option<AuditConfig> {
         ngspice_exe.display()
     );
 
-    let tests_dir = workspace_tests_dir();
+    let tests_dir = workspace_ngspice_corpus_dir();
     let cases = audit_cases_from_env(&tests_dir);
     assert!(
         !cases.is_empty(),
@@ -199,13 +199,23 @@ fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, S
     Ok(ngspice_exe)
 }
 
-fn workspace_tests_dir() -> PathBuf {
+/// Root of the vendored ngspice corpus, as the sibling of the upstream tree.
+///
+/// Case paths are suite-relative (`resistance/res_simple.cir`) so the same
+/// string indexes both this corpus and `NGSPICE_SOURCE_ROOT/tests`. Upstream
+/// puts suites directly under `tests/`; the vendored copy nests them one level
+/// deeper under `tests/ngspice/` because `tests/xyce/` sits beside it. This
+/// must therefore include the `ngspice` component — without it every case
+/// resolved to a nonexistent `tests/<suite>/...` and the audit reported every
+/// deck as skipped rather than failing.
+fn workspace_ngspice_corpus_dir() -> PathBuf {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     PathBuf::from(manifest_dir)
         .parent()
         .and_then(Path::parent)
         .expect("could not find workspace root")
         .join("tests")
+        .join("ngspice")
 }
 
 fn audit_cases_from_env(tests_dir: &Path) -> Vec<String> {
@@ -414,7 +424,7 @@ fn env_bool(name: &str) -> bool {
 }
 
 fn run_audit(config: &AuditConfig) -> AuditReport {
-    let tests_dir = workspace_tests_dir();
+    let tests_dir = workspace_ngspice_corpus_dir();
     let source_tests_dir = config.source_root.join("tests");
     let mut report = AuditReport::default();
 
@@ -911,4 +921,26 @@ Index   time            v(out)
     assert_eq!(comparison.live_filtered_lines, 1);
     assert_eq!(comparison.diffs.len(), 1);
     assert_eq!(comparison.diffs[0].line_index, 1);
+}
+
+/// Pins the corpus root without needing a local ngspice build.
+///
+/// The audit above is `#[ignore]`d and opt-in, so when the vendored corpus was
+/// nested under `tests/ngspice/` the stale root went unnoticed: every case
+/// resolved to a path that did not exist, and the audit reported each deck as
+/// "no checked-in .out file" — skipped, never failed. A silent skip is the one
+/// outcome an oracle audit must not have, so this runs unconditionally.
+#[test]
+fn default_audit_case_resolves_inside_the_vendored_corpus() {
+    let deck = workspace_ngspice_corpus_dir().join(DEFAULT_CASE);
+    assert!(
+        deck.is_file(),
+        "default audit case must exist in the vendored corpus: {}",
+        deck.display()
+    );
+    assert!(
+        deck.with_extension("out").is_file(),
+        "default audit case must have a checked-in oracle beside it: {}",
+        deck.with_extension("out").display()
+    );
 }

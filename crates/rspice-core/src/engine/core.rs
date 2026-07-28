@@ -126,7 +126,12 @@ impl Engine {
     }
 
     #[inline]
-    pub(crate) fn ensure_analysis_points(&self, requested: usize) -> Result<(), SimulationError> {
+    /// Check a requested analysis-point count against the configured limit.
+    ///
+    /// Callers that materialise sweep points themselves — batch planners, UI
+    /// sweep editors — should pre-validate here so an oversized sweep is
+    /// rejected before the points are allocated rather than during the run.
+    pub fn ensure_analysis_points(&self, requested: usize) -> Result<(), SimulationError> {
         ResourceLimitError::ensure(
             ResourceKind::AnalysisPoints,
             requested,
@@ -146,7 +151,8 @@ impl Engine {
     }
 
     #[inline]
-    pub(crate) fn ensure_batch_runs(&self, requested: usize) -> Result<(), SimulationError> {
+    /// Check a requested batch-run count against the configured limit.
+    pub fn ensure_batch_runs(&self, requested: usize) -> Result<(), SimulationError> {
         ResourceLimitError::ensure(
             ResourceKind::BatchRuns,
             requested,
@@ -404,7 +410,12 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn node_lookup_candidates(netlist: &Netlist, node_name: &str) -> Vec<String> {
+    /// Node names a probe string may refer to, in the order they are tried.
+    ///
+    /// Frontends resolving a user-typed probe (`V(out)`, `v(x1.n3)`) need the
+    /// same candidate list the engine uses, so that a miss can be reported
+    /// against what was actually searched.
+    pub fn node_lookup_candidates(netlist: &Netlist, node_name: &str) -> Vec<String> {
         let canonical = netlist.ground_policy().canonical_node(node_name);
         if canonical == "0" {
             return vec![canonical.to_string()];
@@ -422,7 +433,11 @@ impl Engine {
         candidates
     }
 
-    pub(crate) fn resolve_hierarchical_node_name(
+    /// Resolve a hierarchical probe name against a flattened netlist.
+    ///
+    /// Returns the flattened node name, or `None` when nothing matches any
+    /// candidate from [`Self::node_lookup_candidates`].
+    pub fn resolve_hierarchical_node_name(
         netlist: &Netlist,
         node_name: &str,
     ) -> Option<String> {

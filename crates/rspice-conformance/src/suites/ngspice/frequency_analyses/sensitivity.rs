@@ -1,7 +1,7 @@
 use super::*;
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn run_sensitivity_test(
+    pub(in crate::suites::ngspice) fn run_sensitivity_test(
         &self,
         name: &str,
         source_path: &Path,

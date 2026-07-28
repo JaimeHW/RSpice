@@ -35,7 +35,7 @@
 mod ac;
 mod advanced;
 mod builder;
-pub(crate) use builder::{
+pub use builder::{
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor,
     validate_native_xyce_ltra_model_contract,
 };
@@ -80,8 +80,7 @@ pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
 };
 pub use core::Engine;
-pub use dc::DcSweepPointResult;
-pub(crate) use dc::bounded_dc_sweep_points;
+pub use dc::{DcSweepPointResult, bounded_dc_sweep_points, canonical_device_parameter_sweep_source};
 pub use error::{
     SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
 };
@@ -98,4 +97,9 @@ pub use result::{TransientDeviceOpTrace, TransientResult, TransientStoreTrace};
 pub use stb::StbAnalysisResult;
 pub use transient::{TransientCheckpoint, netlist_fingerprint};
 
-pub(crate) use source_values::{extract_ac_value, extract_dc_value, extract_dc_value_with_limits};
+/// Independent-source introspection: the DC and AC quantities a parsed
+/// [`SourceSpec`](crate::netlist::SourceSpec) carries, as the engine reads
+/// them. Frontends showing a source's operating value need the engine's own
+/// interpretation rather than a second parse of the same spec.
+pub use source_values::{extract_ac_value, extract_dc_value};
+pub(crate) use source_values::extract_dc_value_with_limits;

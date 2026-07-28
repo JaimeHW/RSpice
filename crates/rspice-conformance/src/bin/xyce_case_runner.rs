@@ -24,7 +24,7 @@
 //! `--test-dir`, `--circuit`, and `--result` are required; the rest default
 //! to [`XyceRunnerConfig::default`].
 
-use rspice_core::testing::{XyceRunnerConfig, XyceTestResult, XyceTestRunner};
+use rspice_conformance::suites::xyce::{XyceRunnerConfig, XyceTestResult, XyceTestRunner};
 use std::path::PathBuf;
 
 fn main() {

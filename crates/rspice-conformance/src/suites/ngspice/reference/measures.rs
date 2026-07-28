@@ -55,10 +55,10 @@ struct MeasureGate {
 }
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn compare_transient_measures(
+    pub(in crate::suites::ngspice) fn compare_transient_measures(
         &self,
         cir_path: &Path,
-        result: &crate::engine::TransientResult,
+        result: &rspice_core::engine::TransientResult,
     ) -> Result<Vec<ValueMismatch>, String> {
         let gates = Self::load_measure_gates(cir_path)?;
         if gates.is_empty() {

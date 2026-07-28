@@ -1,0 +1,62 @@
+[package]
+name = "rspice-conformance"
+description = "Regression conformance suites validating RSpice against reference simulators"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# This crate is a leaf: it depends on rspice-core and nothing depends on it.
+# That direction is the point. A conformance suite that can reach into engine
+# internals stops testing the simulator a user gets and starts testing the
+# implementation against itself, so the suites live outside rspice-core where
+# the compiler enforces that they only see the public API.
+#
+# `tools/ci/test_ci_configuration.py` asserts no shipping crate depends on this.
+
+[features]
+# Forwarded, not local. The ngspice suite marks decks that instantiate a
+# generated Verilog-A built-in as unsupported when those models are not
+# compiled in, and expects them to run when they are. That decision has to
+# track how `rspice-core` was actually built: if this crate had no matching
+# feature, `cfg!(feature = "veriloga-builtins-base")` would silently read
+# false here and the suite would skip decks it should be running. A
+# conformance suite that quietly skips cases is worse than one that fails.
+veriloga-builtins-base = ["rspice-core/veriloga-builtins-base"]
+# Same reasoning, one level up. The Xyce VANOISE decks assert the *opposite*
+# outcome depending on this feature: with the generated VBIC noise mechanisms
+# compiled in the deck must pass, without them it must fail closed as
+# `expected_unsupported`. An unforwarded feature reads false here, so the
+# suite would take the "unsupported" branch and pass vacuously even when the
+# models were built.
+veriloga-builtins = ["rspice-core/veriloga-builtins", "veriloga-builtins-base"]
+
+[lib]
+doctest = false
+
+[dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0" }
+blake3 = "1.5"
+log.workspace = true
+num-complex.workspace = true
+
+[[bin]]
+name = "rspice-ngspice-case-runner"
+path = "src/bin/ngspice_case_runner.rs"
+test = false
+
+[[bin]]
+name = "rspice-xyce-case-runner"
+path = "src/bin/xyce_case_runner.rs"
+test = false
+
+[[bin]]
+name = "rspice-xspice-ifspec-audit"
+path = "src/bin/xspice_ifspec_audit.rs"
+test = false
+
+[lints]
+workspace = true

@@ -88,7 +88,7 @@ impl TestRunner {
     /// directly from the operating-point solution.
     pub(super) fn compare_test_gold_nodes(
         &self,
-        result: &crate::SimulationResult,
+        result: &rspice_core::SimulationResult,
     ) -> Vec<ValueMismatch> {
         let mut mismatches = Vec::new();
 
@@ -247,7 +247,7 @@ impl TestRunner {
 
     #[inline]
     pub(super) fn is_recoverable_dc_convergence_error(
-        err: &crate::engine::SimulationError,
+        err: &rspice_core::engine::SimulationError,
     ) -> bool {
         let message = err.to_string().to_ascii_lowercase();
         !message.contains("aborted")
@@ -314,42 +314,42 @@ impl TestRunner {
                 continue;
             }
             match &mut element.kind {
-                crate::netlist::ElementKind::VoltageSource(spec)
-                | crate::netlist::ElementKind::CurrentSource(spec) => {
+                rspice_core::netlist::ElementKind::VoltageSource(spec)
+                | rspice_core::netlist::ElementKind::CurrentSource(spec) => {
                     match spec {
-                        crate::netlist::SourceSpec::Distortion { inner, .. } => {
+                        rspice_core::netlist::SourceSpec::Distortion { inner, .. } => {
                             **inner = std::mem::replace(
                                 inner.as_mut(),
-                                crate::netlist::SourceSpec::Dc(0.0),
+                                rspice_core::netlist::SourceSpec::Dc(0.0),
                             )
                             .with_dc_value(dc_value);
                         }
-                        crate::netlist::SourceSpec::RfPort { inner, .. } => {
+                        rspice_core::netlist::SourceSpec::RfPort { inner, .. } => {
                             **inner = std::mem::replace(
                                 inner.as_mut(),
-                                crate::netlist::SourceSpec::Dc(0.0),
+                                rspice_core::netlist::SourceSpec::Dc(0.0),
                             )
                             .with_dc_value(dc_value);
                         }
-                        crate::netlist::SourceSpec::Dc(v) => *v = dc_value,
-                        crate::netlist::SourceSpec::DcAc { dc_value: v, .. } => *v = dc_value,
-                        crate::netlist::SourceSpec::DcTransient { dc_value: v, .. } => {
+                        rspice_core::netlist::SourceSpec::Dc(v) => *v = dc_value,
+                        rspice_core::netlist::SourceSpec::DcAc { dc_value: v, .. } => *v = dc_value,
+                        rspice_core::netlist::SourceSpec::DcTransient { dc_value: v, .. } => {
                             *v = dc_value
                         }
-                        crate::netlist::SourceSpec::DcAcTransient { dc_value: v, .. } => {
+                        rspice_core::netlist::SourceSpec::DcAcTransient { dc_value: v, .. } => {
                             *v = dc_value
                         }
-                        crate::netlist::SourceSpec::Ac { .. }
-                        | crate::netlist::SourceSpec::Pulse { .. }
-                        | crate::netlist::SourceSpec::Sin { .. }
-                        | crate::netlist::SourceSpec::Pwl { .. }
-                        | crate::netlist::SourceSpec::PwlFile { .. }
-                        | crate::netlist::SourceSpec::Pat { .. }
-                        | crate::netlist::SourceSpec::Exp { .. }
-                        | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. }
-                        | crate::netlist::SourceSpec::TrNoise { .. } => {
-                            *spec = crate::netlist::SourceSpec::Dc(dc_value);
+                        rspice_core::netlist::SourceSpec::Ac { .. }
+                        | rspice_core::netlist::SourceSpec::Pulse { .. }
+                        | rspice_core::netlist::SourceSpec::Sin { .. }
+                        | rspice_core::netlist::SourceSpec::Pwl { .. }
+                        | rspice_core::netlist::SourceSpec::PwlFile { .. }
+                        | rspice_core::netlist::SourceSpec::Pat { .. }
+                        | rspice_core::netlist::SourceSpec::Exp { .. }
+                        | rspice_core::netlist::SourceSpec::Sffm { .. }
+                        | rspice_core::netlist::SourceSpec::Am { .. }
+                        | rspice_core::netlist::SourceSpec::TrNoise { .. } => {
+                            *spec = rspice_core::netlist::SourceSpec::Dc(dc_value);
                         }
                     }
                     return Ok(());
@@ -366,7 +366,7 @@ impl TestRunner {
     }
 
     pub(super) fn assign_ac_to_source_spec(
-        spec: &mut crate::netlist::SourceSpec,
+        spec: &mut rspice_core::netlist::SourceSpec,
         magnitude: Value,
         phase: Value,
     ) {
@@ -385,8 +385,8 @@ impl TestRunner {
                 continue;
             }
             match &mut element.kind {
-                crate::netlist::ElementKind::VoltageSource(spec)
-                | crate::netlist::ElementKind::CurrentSource(spec) => {
+                rspice_core::netlist::ElementKind::VoltageSource(spec)
+                | rspice_core::netlist::ElementKind::CurrentSource(spec) => {
                     Self::assign_ac_to_source_spec(spec, magnitude, phase);
                     return Ok(());
                 }
@@ -404,8 +404,8 @@ impl TestRunner {
     pub(super) fn clear_all_source_ac_values(&self, netlist: &mut Netlist) {
         for element in &mut netlist.elements {
             match &mut element.kind {
-                crate::netlist::ElementKind::VoltageSource(spec)
-                | crate::netlist::ElementKind::CurrentSource(spec) => {
+                rspice_core::netlist::ElementKind::VoltageSource(spec)
+                | rspice_core::netlist::ElementKind::CurrentSource(spec) => {
                     Self::assign_ac_to_source_spec(spec, 0.0, 0.0);
                 }
                 _ => {}
@@ -460,7 +460,7 @@ impl TestRunner {
         let primary_engine = self.create_dynamic_engine();
         let robust_engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
-        let mut merged_results: Vec<(Value, crate::SimulationResult)> = Vec::new();
+        let mut merged_results: Vec<(Value, rspice_core::SimulationResult)> = Vec::new();
 
         for outer_value in outer_points {
             let mut netlist = base_netlist.clone();

@@ -3,8 +3,13 @@
 //! The Xyce corpus is vendored under `tests/xyce`. These tests run the
 //! Rust-native RSpice adapter, not the upstream Perl/Bash harness. Upstream
 //! platform scripts are intentionally trimmed from this corpus.
+//!
+//! The harness is gated behind `conformance` while it is split and moved to
+//! the `rspice-conformance` crate, so this file compiles to nothing without
+//! `--features conformance`.
 
-use rspice_core::testing::{
+
+use rspice_conformance::suites::xyce::{
     XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner, XyceValueMismatch,
 };
 use std::collections::{BTreeSet, HashMap};

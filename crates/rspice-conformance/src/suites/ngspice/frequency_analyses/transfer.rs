@@ -1,9 +1,9 @@
 use super::*;
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn transfer_output_value_ac(
+    pub(in crate::suites::ngspice) fn transfer_output_value_ac(
         &self,
-        result: &crate::analysis::AcResult,
+        result: &rspice_core::analysis::AcResult,
         output: &str,
     ) -> Result<Value, String> {
         if let Some((pos, neg)) = Self::parse_voltage_probe(output) {
@@ -61,7 +61,7 @@ impl TestRunner {
         Err(format!("Unsupported .TF output probe '{}'", output))
     }
 
-    pub(in crate::testing::ngspice_runner) fn transfer_output_value_linearized(
+    pub(in crate::suites::ngspice) fn transfer_output_value_linearized(
         &self,
         netlist: &Netlist,
         output: &str,
@@ -110,7 +110,7 @@ impl TestRunner {
         Ok(Some(gain))
     }
 
-    pub(in crate::testing::ngspice_runner) fn get_source_dc_value(
+    pub(in crate::suites::ngspice) fn get_source_dc_value(
         &self,
         netlist: &Netlist,
         source_name: &str,
@@ -120,8 +120,8 @@ impl TestRunner {
                 continue;
             }
             match &element.kind {
-                crate::netlist::ElementKind::VoltageSource(spec)
-                | crate::netlist::ElementKind::CurrentSource(spec) => {
+                rspice_core::netlist::ElementKind::VoltageSource(spec)
+                | rspice_core::netlist::ElementKind::CurrentSource(spec) => {
                     return Ok(Self::get_source_dc_value_from_spec(spec));
                 }
                 _ => {
@@ -135,32 +135,32 @@ impl TestRunner {
         Err(format!("Transfer source '{}' not found", source_name))
     }
 
-    fn get_source_dc_value_from_spec(spec: &crate::netlist::SourceSpec) -> Value {
+    fn get_source_dc_value_from_spec(spec: &rspice_core::netlist::SourceSpec) -> Value {
         match spec {
-            crate::netlist::SourceSpec::Distortion { inner, .. } => {
+            rspice_core::netlist::SourceSpec::Distortion { inner, .. } => {
                 Self::get_source_dc_value_from_spec(inner)
             }
-            crate::netlist::SourceSpec::RfPort { inner, .. } => {
+            rspice_core::netlist::SourceSpec::RfPort { inner, .. } => {
                 Self::get_source_dc_value_from_spec(inner)
             }
-            crate::netlist::SourceSpec::Dc(v) => *v,
-            crate::netlist::SourceSpec::DcAc { dc_value, .. } => *dc_value,
-            crate::netlist::SourceSpec::DcTransient { dc_value, .. } => *dc_value,
-            crate::netlist::SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
-            crate::netlist::SourceSpec::Ac { .. }
-            | crate::netlist::SourceSpec::Pulse { .. }
-            | crate::netlist::SourceSpec::Sin { .. }
-            | crate::netlist::SourceSpec::Pwl { .. }
-            | crate::netlist::SourceSpec::PwlFile { .. }
-            | crate::netlist::SourceSpec::Pat { .. }
-            | crate::netlist::SourceSpec::Exp { .. }
-            | crate::netlist::SourceSpec::Sffm { .. }
-            | crate::netlist::SourceSpec::Am { .. }
-            | crate::netlist::SourceSpec::TrNoise { .. } => 0.0,
+            rspice_core::netlist::SourceSpec::Dc(v) => *v,
+            rspice_core::netlist::SourceSpec::DcAc { dc_value, .. } => *dc_value,
+            rspice_core::netlist::SourceSpec::DcTransient { dc_value, .. } => *dc_value,
+            rspice_core::netlist::SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
+            rspice_core::netlist::SourceSpec::Ac { .. }
+            | rspice_core::netlist::SourceSpec::Pulse { .. }
+            | rspice_core::netlist::SourceSpec::Sin { .. }
+            | rspice_core::netlist::SourceSpec::Pwl { .. }
+            | rspice_core::netlist::SourceSpec::PwlFile { .. }
+            | rspice_core::netlist::SourceSpec::Pat { .. }
+            | rspice_core::netlist::SourceSpec::Exp { .. }
+            | rspice_core::netlist::SourceSpec::Sffm { .. }
+            | rspice_core::netlist::SourceSpec::Am { .. }
+            | rspice_core::netlist::SourceSpec::TrNoise { .. } => 0.0,
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn run_transfer_function_test(
+    pub(in crate::suites::ngspice) fn run_transfer_function_test(
         &self,
         name: &str,
         cir_path: &Path,

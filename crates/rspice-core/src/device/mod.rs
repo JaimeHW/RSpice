@@ -97,7 +97,7 @@ use crate::Value;
 /// integrated by the circuit's private unity-capacitor state binding, so this
 /// cache contains only the nonlinear `F` contribution.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct XyceMemristorCache {
+pub struct XyceMemristorCache {
     pub current: Value,
     /// Xyce retains the previous typed-store value when a family does not
     /// define an incremental resistance at the current operating point.
@@ -108,7 +108,7 @@ pub(crate) struct XyceMemristorCache {
 
 /// Native Xyce memristor equation families supported by the engine.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum XyceMemristor {
+pub enum XyceMemristor {
     Team(XyceTeamMemristor),
     Pem(XycePemMemristor),
 }

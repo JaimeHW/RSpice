@@ -1,7 +1,7 @@
 use super::*;
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn normalize_op_reference_node(name: &str) -> String {
+    pub(in crate::suites::ngspice) fn normalize_op_reference_node(name: &str) -> String {
         let trimmed = name.trim();
         if trimmed.contains('(') {
             Self::normalize_variable_name(trimmed)
@@ -10,11 +10,11 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn normalize_op_reference_branch(name: &str) -> String {
+    pub(in crate::suites::ngspice) fn normalize_op_reference_branch(name: &str) -> String {
         Self::parse_current_probe(name).unwrap_or_else(|| name.trim().to_ascii_lowercase())
     }
 
-    pub(in crate::testing::ngspice_runner) fn load_dc_op_reference(
+    pub(in crate::suites::ngspice) fn load_dc_op_reference(
         &self,
         cir_path: &Path,
     ) -> Result<Option<OpReference>, String> {
@@ -24,7 +24,7 @@ impl TestRunner {
         Ok(self.parse_dc_op_reference(&reference_output.content))
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_dc_op_reference(
+    pub(in crate::suites::ngspice) fn parse_dc_op_reference(
         &self,
         content: &str,
     ) -> Option<OpReference> {
@@ -104,10 +104,10 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn compare_dc_op_reference(
+    pub(in crate::suites::ngspice) fn compare_dc_op_reference(
         &self,
         cir_path: &Path,
-        result: &crate::SimulationResult,
+        result: &rspice_core::SimulationResult,
     ) -> Result<Vec<ValueMismatch>, String> {
         let Some(reference) = self.load_dc_op_reference(cir_path)? else {
             return Ok(Vec::new());

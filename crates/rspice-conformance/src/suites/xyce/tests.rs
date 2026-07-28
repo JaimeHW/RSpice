@@ -1,0 +1,22356 @@
+//! Unit tests for the Xyce conformance suite.
+//!
+//! Split out of `xyce.rs`, which was a single 96,731-line file. These are
+//! the harness's own tests — contract classification, reference decoding,
+//! measurement parsing — not the vendored deck corpus, which is driven by
+//! `tests/xyce_regression.rs`.
+
+use super::*;
+
+#[test]
+fn hierarchical_team_resistance_probes_resolve_xyce_colon_aliases() {
+    let netlist = Netlist::parse(
+        "hierarchical TEAM store alias\n\
+             X1 in 0 cell\n\
+             .subckt cell p n\n\
+             .model local_team memristor level=2\n\
+             YMEMRISTOR state p n local_team\n\
+             .ends\n\
+             .end\n",
+    )
+    .expect("hierarchical TEAM alias fixture parses");
+    let probe = "N(X1:YMEMRISTOR!STATE:R)";
+    let canonical_store = "X1.YMEMRISTOR!STATE:R";
+
+    let transient = TransientResult {
+        time: vec![0.0, 1.0],
+        step_sizes: vec![0.0; 2],
+        voltages: Vec::new(),
+        branch_currents: Vec::new(),
+        num_nodes: 0,
+        node_names: Vec::new(),
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: vec![rspice_core::engine::TransientStoreTrace {
+            name: canonical_store.to_string(),
+            values: vec![50.0, 100.0],
+        }],
+    };
+    let tran_value = XyceTestRunner::evaluate_atomic_tran_probe(probe, &netlist, &transient, 0.5)
+        .expect("Xyce hierarchy alias resolves the canonical transient store");
+    assert_eq!(tran_value.to_bits(), 75.0f64.to_bits());
+
+    let mut dc_result = rspice_core::SimulationResult::new(0, 0);
+    dc_result
+        .dc_observables
+        .push((format!("N({canonical_store})"), 75.0));
+    let dc = XyceDcSweep {
+        source: "V1".to_string(),
+        start: 0.0,
+        stop: 0.0,
+        step: 1.0,
+        mode: rspice_core::netlist::DcSweepMode::Linear,
+        sweep2: None,
+    };
+    let dc_value = XyceTestRunner::evaluate_atomic_dc_probe(
+        probe,
+        &netlist,
+        &dc,
+        XyceDcSweepPoint {
+            primary: 0.0,
+            secondary: None,
+        },
+        &dc_result,
+        &rspice_core::circuit::DeviceOpReport::default(),
+    )
+    .expect("Xyce hierarchy alias resolves the canonical DC store");
+    assert_eq!(dc_value.to_bits(), 75.0f64.to_bits());
+}
+
+fn addresistors_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let root = std::env::temp_dir().join(format!(
+        "rspice-addresistors-oracle-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    for family_name in ["PREPROC_ADDRES", "REDUND_REMOVE"] {
+        let source_family = source_root.join("Netlists").join(family_name);
+        let family = root.join("Netlists").join(family_name);
+        fs::create_dir_all(&family).expect("create ADDRESISTORS fixture family");
+        for entry in fs::read_dir(&source_family).expect("read canonical family") {
+            let entry = entry.expect("read canonical family member");
+            fs::copy(entry.path(), family.join(entry.file_name()))
+                .expect("copy canonical family member");
+        }
+    }
+    let manifest = fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE))
+        .expect("read canonical harness manifest")
+        .lines()
+        .filter(|line| {
+            line.split('\t').next().is_some_and(|record| {
+                let record = XyceTestRunner::normalize_manifest_key(record);
+                record.starts_with(XYCE_ADDRESISTORS_PREPROC_FAMILY_PREFIX)
+                    || record.starts_with(XYCE_REMOVEUNUSED_FAMILY_PREFIX)
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(root.join(HARNESS_MANIFEST_FILE), format!("{manifest}\n"))
+        .expect("write ADDRESISTORS fixture manifest");
+    let owner = root.join("Netlists/PREPROC_ADDRES/nodcpath.cir");
+    (root, owner)
+}
+
+fn assert_addresistors_provenance_fails(root: &Path, owner: &Path, context: &str) {
+    let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: owner.to_path_buf(),
+        relative_path: "Netlists/PREPROC_ADDRES/nodcpath.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    assert!(
+        runner
+            .validate_addresistors_provenance(&deck, XyceAddResistorsKind::NoDcPath)
+            .is_err(),
+        "{context} must fail ADDRESISTORS provenance"
+    );
+}
+
+fn removeunused_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let source_family = source_root.join("Netlists/REDUND_REMOVE");
+    let root = std::env::temp_dir().join(format!(
+        "rspice-removeunused-oracle-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    let family = root.join("Netlists/REDUND_REMOVE");
+    fs::create_dir_all(&family).expect("create REMOVEUNUSED fixture family");
+    for entry in fs::read_dir(&source_family).expect("read canonical REDUND_REMOVE family") {
+        let entry = entry.expect("read canonical REDUND_REMOVE member");
+        fs::copy(entry.path(), family.join(entry.file_name()))
+            .expect("copy canonical REDUND_REMOVE member");
+    }
+    let manifest = fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE))
+        .expect("read canonical harness manifest")
+        .lines()
+        .filter(|line| {
+            line.split('\t').next().is_some_and(|record| {
+                XyceTestRunner::normalize_manifest_key(record)
+                    .starts_with(XYCE_REMOVEUNUSED_FAMILY_PREFIX)
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(root.join(HARNESS_MANIFEST_FILE), format!("{manifest}\n"))
+        .expect("write REMOVEUNUSED fixture manifest");
+    (root, family)
+}
+
+fn assert_removeunused_fixture_fails(root: &Path, family: &Path, context: &str) {
+    let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+    let result = runner.run_test(family.join("gnd_and_redund.cir"));
+    assert!(
+        !result.passed && !result.expected_unsupported,
+        "{context} must fail closed: {result:?}"
+    );
+    assert_eq!(result.contract, "removeunused_dynamic_gold_dc_wrapper");
+}
+
+fn xdm_replaceground_mutation_fixture(label: &str) -> (PathBuf, PathBuf) {
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let source_family = source_root.join("Netlists/XDM/HSPICE/OTHER_PARSING");
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xdm-replaceground-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    let family = root.join("Netlists/XDM/HSPICE/OTHER_PARSING");
+    fs::create_dir_all(&family).expect("create XDM REPLACEGROUND fixture family");
+    for entry in fs::read_dir(&source_family).expect("read canonical OTHER_PARSING family") {
+        let entry = entry.expect("read canonical OTHER_PARSING member");
+        fs::copy(entry.path(), family.join(entry.file_name()))
+            .expect("copy canonical OTHER_PARSING member");
+    }
+    let manifest = fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE))
+        .expect("read canonical harness manifest")
+        .lines()
+        .filter(|line| {
+            line.split('\t').next().is_some_and(|record| {
+                XyceTestRunner::normalize_manifest_key(record)
+                    .starts_with(XYCE_XDM_REPLACEGROUND_FAMILY_PREFIX)
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(root.join(HARNESS_MANIFEST_FILE), format!("{manifest}\n"))
+        .expect("write XDM REPLACEGROUND fixture manifest");
+    (root, family)
+}
+
+fn assert_xdm_replaceground_fixture_fails(root: &Path, family: &Path, context: &str) {
+    let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
+    let result = runner.run_test(family.join("gnd_node_symbol.cir"));
+    assert!(
+        !result.passed && !result.expected_unsupported,
+        "{context} must fail closed: {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "xdm_hspice_replaceground_dc_relational_wrapper"
+    );
+}
+
+fn xdm_replaceground_unit_source() -> String {
+    "$ ground alias fixture\n\
+         .PREPROCESS REPLACEGROUND TRUE\n\
+         .OPTIONS DEVICE TNOM=25\n\
+         VA 1 0 dc=0\n\
+         R1 1 2 10\n\
+         R2 2 gnd 10\n\
+         .DC VA 0 10 1\n\
+         .PRINT DC V(1) V(2)\n"
+        .to_string()
+}
+
+fn xdm_replaceground_unit_results() -> Vec<DcSweepPointResult> {
+    (0..=10)
+        .map(|sweep| DcSweepPointResult {
+            sweep_value: sweep as Value,
+            result: rspice_core::SimulationResult::new(0, 0),
+            device_op_report: rspice_core::circuit::DeviceOpReport::default(),
+        })
+        .collect()
+}
+
+fn xdm_replaceground_unit_table(axis_offset: Value, dependent: Value) -> XycePrnTable {
+    XycePrnTable {
+        columns: vec!["Index".to_string(), "V(1)".to_string(), "V(2)".to_string()],
+        rows: (0..=10)
+            .map(|index| vec![index as Value, index as Value + axis_offset, dependent])
+            .collect(),
+    }
+}
+
+#[test]
+fn removeunused_source_family_and_manifest_mutations_fail_closed() {
+    for (label, target, needle, replacement) in [
+        (
+            "candidate-content",
+            "gnd_and_redund.cir",
+            "R1 1 2 1",
+            "R1 1 2 2",
+        ),
+        (
+            "unrelated-content",
+            "gnd_subckt.cir",
+            "Test",
+            "Mutated test",
+        ),
+    ] {
+        let (root, family) = removeunused_mutation_fixture(label);
+        let path = family.join(target);
+        let source = fs::read_to_string(&path).expect("read REMOVEUNUSED mutation target");
+        assert!(source.contains(needle));
+        fs::write(&path, source.replacen(needle, replacement, 1))
+            .expect("write REMOVEUNUSED content mutation");
+        assert_removeunused_fixture_fails(&root, &family, label);
+        fs::remove_dir_all(root).expect("remove REMOVEUNUSED content fixture");
+    }
+
+    for (label, replacement) in [
+        ("manifest-owner-removed", ""),
+        (
+            "manifest-contract-changed",
+            "Netlists/REDUND_REMOVE/gnd_and_redund.cir\tchanged_contract\n",
+        ),
+    ] {
+        let (root, family) = removeunused_mutation_fixture(label);
+        let manifest_path = root.join(HARNESS_MANIFEST_FILE);
+        let manifest = fs::read_to_string(&manifest_path).expect("read fixture manifest");
+        let owner = "Netlists/REDUND_REMOVE/gnd_and_redund.cir\trequires_upstream_wrapper\n";
+        assert!(manifest.contains(owner));
+        fs::write(&manifest_path, manifest.replacen(owner, replacement, 1))
+            .expect("write REMOVEUNUSED manifest mutation");
+        assert_removeunused_fixture_fails(&root, &family, label);
+        fs::remove_dir_all(root).expect("remove REMOVEUNUSED manifest fixture");
+    }
+}
+
+#[test]
+fn addresistors_source_family_manifest_and_artifact_mutations_fail_closed() {
+    for (label, relative, needle, replacement) in [
+        (
+            "candidate-source",
+            "Netlists/PREPROC_ADDRES/nodcpath.cir",
+            "C1 1 2 0.5 IC=0",
+            "C1 1 2 0.6 IC=0",
+        ),
+        (
+            "other-family-source",
+            "Netlists/REDUND_REMOVE/gnd_subckt.cir",
+            "Test",
+            "Mutated test",
+        ),
+    ] {
+        let (root, owner) = addresistors_mutation_fixture(label);
+        let path = root.join(relative);
+        let source = fs::read_to_string(&path).expect("read ADDRESISTORS mutation target");
+        assert!(source.contains(needle));
+        fs::write(&path, source.replacen(needle, replacement, 1))
+            .expect("write ADDRESISTORS mutation");
+        assert_addresistors_provenance_fails(&root, &owner, label);
+        fs::remove_dir_all(root).expect("remove ADDRESISTORS fixture");
+    }
+
+    let (root, owner) = addresistors_mutation_fixture("manifest-owner");
+    let manifest_path = root.join(HARNESS_MANIFEST_FILE);
+    let manifest = fs::read_to_string(&manifest_path).expect("read fixture manifest");
+    let record = "Netlists/PREPROC_ADDRES/nodcpath.cir\trequires_upstream_wrapper\n";
+    assert!(manifest.contains(record));
+    fs::write(&manifest_path, manifest.replacen(record, "", 1))
+        .expect("remove ADDRESISTORS manifest owner");
+    assert_addresistors_provenance_fails(&root, &owner, "manifest owner removed");
+    fs::remove_dir_all(root).expect("remove manifest fixture");
+
+    let (root, owner) = addresistors_mutation_fixture("extra-family-member");
+    fs::write(
+        root.join("Netlists/PREPROC_ADDRES/unexpected.txt"),
+        "unexpected\n",
+    )
+    .expect("write extra ADDRESISTORS family member");
+    assert_addresistors_provenance_fails(&root, &owner, "extra family member");
+    fs::remove_dir_all(root).expect("remove family-shape fixture");
+
+    let (root, owner) = addresistors_mutation_fixture("output-artifact");
+    let output = root.join("OutputData/PREPROC_ADDRES");
+    fs::create_dir_all(&output).expect("create ADDRESISTORS OutputData family");
+    fs::write(output.join("nodcpath.cir.prn"), "forbidden\n")
+        .expect("write forbidden ADDRESISTORS artifact");
+    assert_addresistors_provenance_fails(&root, &owner, "candidate output artifact");
+    fs::remove_dir_all(root).expect("remove output fixture");
+}
+
+#[test]
+fn removeunused_family_shape_symlink_and_output_artifacts_fail_closed() {
+    let (root, family) = removeunused_mutation_fixture("extra-family-member");
+    fs::write(family.join("unexpected.txt"), "unexpected\n").expect("write extra family member");
+    assert_removeunused_fixture_fails(&root, &family, "extra family member");
+    fs::remove_dir_all(root).expect("remove extra-member fixture");
+
+    let (root, family) = removeunused_mutation_fixture("output-artifact");
+    let output = root.join("OutputData/REDUND_REMOVE");
+    fs::create_dir_all(&output).expect("create REMOVEUNUSED OutputData family");
+    fs::write(output.join("gnd_and_redund.cir.prn"), "forbidden oracle\n")
+        .expect("write forbidden REMOVEUNUSED artifact");
+    assert_removeunused_fixture_fails(&root, &family, "candidate OutputData artifact");
+    fs::remove_dir_all(root).expect("remove output-artifact fixture");
+
+    let (root, family) = removeunused_mutation_fixture("symlink-source");
+    let owner = family.join("gnd_and_redund.cir");
+    let target = family.join("just_redund.cir");
+    fs::remove_file(&owner).expect("remove regular owner before symlink mutation");
+    #[cfg(unix)]
+    let symlink_result = std::os::unix::fs::symlink(&target, &owner);
+    #[cfg(windows)]
+    let symlink_result = std::os::windows::fs::symlink_file(&target, &owner);
+    if symlink_result.is_ok() {
+        assert_removeunused_fixture_fails(&root, &family, "symlinked source");
+    }
+    fs::remove_dir_all(root).expect("remove symlink fixture");
+}
+
+#[test]
+fn removeunused_plan_topology_analytic_and_deadline_mutations_fail_closed() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/REDUND_REMOVE/gnd_and_redund.cir");
+    let source = fs::read_to_string(&corpus).expect("read REMOVEUNUSED corpus source");
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let plan = runner
+        .static_dc_plan_for_source_with_execution_dir(
+            &corpus,
+            source,
+            ExpressionDialect::Xyce,
+            None,
+        )
+        .expect("construct valid REMOVEUNUSED plan");
+    XyceTestRunner::validate_removeunused_plan(&plan, XyceRemoveUnusedKind::ReplaceGround)
+        .expect("baseline REMOVEUNUSED plan qualifies");
+
+    let mut sweep = plan.clone();
+    sweep.dc.stop = 0.9;
+    assert!(
+        XyceTestRunner::validate_removeunused_plan(&sweep, XyceRemoveUnusedKind::ReplaceGround)
+            .is_err()
+    );
+    let mut probe = plan.clone();
+    probe.print.probes[1] = "V(3)".to_string();
+    assert!(
+        XyceTestRunner::validate_removeunused_plan(&probe, XyceRemoveUnusedKind::ReplaceGround)
+            .is_err()
+    );
+
+    let (netlist, results) = runner
+        .run_static_dc_results(&plan, Instant::now())
+        .expect("baseline REMOVEUNUSED DC run succeeds");
+    XyceTestRunner::validate_removeunused_flattened_topology(
+        &netlist,
+        XyceRemoveUnusedKind::ReplaceGround,
+        false,
+    )
+    .expect("baseline topology qualifies");
+    for mutation in ["missing", "name", "node", "value"] {
+        let mut topology = netlist.clone();
+        match mutation {
+            "missing" => {
+                topology.elements.pop();
+            }
+            "name" => topology.elements[0].name = "V_COMMON_MODE".to_string(),
+            "node" => topology.elements[1].nodes[1] = "3".to_string(),
+            "value" => {
+                let ElementKind::Resistor { value, .. } = &mut topology.elements[1].kind else {
+                    panic!("REMOVEUNUSED fixture element 1 remains R1")
+                };
+                *value = 2.0;
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            XyceTestRunner::validate_removeunused_flattened_topology(
+                &topology,
+                XyceRemoveUnusedKind::ReplaceGround,
+                false,
+            )
+            .is_err(),
+            "exact topology must reject a {mutation} mutation"
+        );
+    }
+    let mut option_mutation = netlist.clone();
+    option_mutation.options.gmin = Some(1.0e-9);
+    assert!(
+        XyceTestRunner::validate_removeunused_netlist(
+            &option_mutation,
+            XyceRemoveUnusedKind::ReplaceGround,
+        )
+        .is_err(),
+        "unexpected effective options must fail closed"
+    );
+    let mut table = runner
+        .dc_results_to_prn_table(&plan, &netlist, &results)
+        .expect("build baseline REMOVEUNUSED table");
+    XyceTestRunner::validate_removeunused_analytic_table(
+        &table,
+        &results,
+        XyceRemoveUnusedKind::ReplaceGround,
+    )
+    .expect("baseline analytic table qualifies");
+    table.rows[10][2] += 0.1;
+    assert!(
+        XyceTestRunner::validate_removeunused_analytic_table(
+            &table,
+            &results,
+            XyceRemoveUnusedKind::ReplaceGround,
+        )
+        .is_err()
+    );
+
+    let (root, family) = removeunused_mutation_fixture("expired-deadline");
+    let timed_runner = XyceTestRunner::new(
+        &root,
+        XyceRunnerConfig {
+            max_time_per_test_ms: 0,
+            ..XyceRunnerConfig::default()
+        },
+    );
+    let result = timed_runner.run_test(family.join("gnd_and_redund.cir"));
+    assert!(!result.passed);
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("shared deadline expired"))
+    );
+    fs::remove_dir_all(root).expect("remove deadline fixture");
+}
+
+#[test]
+fn addresistors_policy_resistance_and_precedence_mutations_are_causal() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/PREPROC_ADDRES/nodcpath.cir");
+    let source = fs::read_to_string(&corpus).expect("read ADDRESISTORS corpus source");
+    let original = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
+        .expect("canonical ADDRESISTORS source parses");
+    let materialized = original
+        .materialize_xyce_add_resistors()
+        .expect("canonical ADDRESISTORS source materializes");
+    XyceTestRunner::validate_addresistors_report(
+        &materialized.report,
+        XyceAddResistorsKind::NoDcPath,
+    )
+    .expect("canonical report qualifies");
+    XyceTestRunner::validate_addresistors_materialized_netlist(
+        &materialized.netlist,
+        XyceAddResistorsKind::NoDcPath,
+    )
+    .expect("canonical copy clears policy and preserves options");
+    XyceTestRunner::validate_addresistors_flattened_topology(
+        &materialized.netlist,
+        XyceAddResistorsKind::NoDcPath,
+        true,
+    )
+    .expect("canonical generated topology qualifies");
+
+    let policy_off = source
+        .replace(
+            ".preprocess addresistors nodcpath 1",
+            "*.preprocess addresistors nodcpath 1",
+        )
+        .replace(
+            ".preprocess addresistors oneterminal 0.0001",
+            "*.preprocess addresistors oneterminal 0.0001",
+        );
+    let policy_off =
+        XyceTestRunner::parse_xyce_netlist(&policy_off, &corpus).expect("policy-off source parses");
+    assert!(
+        matches!(
+            policy_off.materialize_xyce_add_resistors(),
+            Err(rspice_core::netlist::XyceAddResistorsMaterializationError::MissingPolicy)
+        ),
+        "disabling both cards must causally prevent generation"
+    );
+
+    let wrong_resistance = source.replacen(
+        ".preprocess addresistors nodcpath 1",
+        ".preprocess addresistors nodcpath 2",
+        1,
+    );
+    let wrong_resistance = XyceTestRunner::parse_xyce_netlist(&wrong_resistance, &corpus)
+        .expect("wrong-resistance mutation parses")
+        .materialize_xyce_add_resistors()
+        .expect("wrong-resistance mutation materializes");
+    assert!(
+        XyceTestRunner::validate_addresistors_report(
+            &wrong_resistance.report,
+            XyceAddResistorsKind::NoDcPath,
+        )
+        .is_err(),
+        "changing the active resistance must fail the exact report"
+    );
+    assert!(
+        wrong_resistance
+            .report
+            .generated
+            .iter()
+            .all(|resistor| resistor.resistance.to_bits() == 2.0f64.to_bits())
+    );
+
+    let overlap_source = "ADDRESISTORS overlap precedence\n\
+                              V1 1 0 DC 1\n\
+                              C1 1 2 1 IC=0\n\
+                              .PREPROCESS ADDRESISTORS NODCPATH 2\n\
+                              .PREPROCESS ADDRESISTORS ONETERMINAL 3\n\
+                              .TRAN 1m 2\n\
+                              .PRINT TRAN V(2)\n\
+                              .END\n";
+    let overlap = XyceTestRunner::parse_xyce_netlist(overlap_source, Path::new("overlap.cir"))
+        .expect("overlap fixture parses")
+        .materialize_xyce_add_resistors()
+        .expect("overlap fixture materializes");
+    assert_eq!(overlap.report.one_terminal_candidates, ["2".to_string()]);
+    assert!(overlap.report.no_dc_path_candidates.is_empty());
+    assert_eq!(overlap.report.generated.len(), 1);
+    assert_eq!(overlap.report.generated[0].name, "RONETERM1");
+    assert_eq!(
+        overlap.report.generated[0].mode,
+        rspice_core::netlist::XyceAddResistorMode::OneTerminal
+    );
+    assert_eq!(overlap.report.generated[0].raw_resistance, "3");
+    assert_eq!(overlap.report.resolved_modes.len(), 1);
+    assert_eq!(
+        overlap.report.resolved_modes[0].mode,
+        rspice_core::netlist::XyceAddResistorMode::OneTerminal
+    );
+}
+
+#[test]
+fn addresistors_snapshot_layout_serialization_and_deadline_mutations_fail_closed() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/PREPROC_ADDRES/oneterm.cir");
+    let source = fs::read_to_string(&corpus).expect("read ADDRESISTORS corpus source");
+    let original = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
+        .expect("canonical ADDRESISTORS source parses");
+    let materialized = original
+        .materialize_xyce_add_resistors()
+        .expect("canonical ADDRESISTORS source materializes");
+
+    let mut value_mutation = materialized.netlist.clone();
+    let generated = value_mutation
+        .elements
+        .iter_mut()
+        .find(|element| {
+            matches!(
+                element.provenance,
+                rspice_core::netlist::ElementProvenance::GeneratedXyceAddResistor { .. }
+            )
+        })
+        .expect("generated resistor exists");
+    let ElementKind::Resistor { value, .. } = &mut generated.kind else {
+        panic!("generated element remains a resistor")
+    };
+    *value = 2.0;
+    assert!(
+        XyceTestRunner::validate_addresistors_flattened_topology(
+            &value_mutation,
+            XyceAddResistorsKind::OneTerminal,
+            true,
+        )
+        .is_err()
+    );
+
+    let mut provenance_mutation = materialized.netlist.clone();
+    provenance_mutation
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("RONETERM1"))
+        .expect("generated resistor exists")
+        .provenance = rspice_core::netlist::ElementProvenance::Authored;
+    assert!(
+        XyceTestRunner::validate_addresistors_flattened_topology(
+            &provenance_mutation,
+            XyceAddResistorsKind::OneTerminal,
+            true,
+        )
+        .is_err()
+    );
+
+    let mut option_mutation = materialized.netlist.clone();
+    option_mutation.options.gmin = Some(1.0e-9);
+    assert!(
+        XyceTestRunner::validate_addresistors_materialized_netlist(
+            &option_mutation,
+            XyceAddResistorsKind::OneTerminal,
+        )
+        .is_err()
+    );
+
+    let mut table = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(2)".to_string(),
+            "V(X1:2)".to_string(),
+        ],
+        rows: [1.0e-3, 1.0, 2.0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, time)| vec![index as Value, time, (-time).exp(), (-time).exp()])
+            .collect(),
+    };
+    XyceTestRunner::validate_addresistors_transient_schedule(&table)
+        .expect("baseline layout qualifies");
+    XyceTestRunner::validate_addresistors_exp_invariant(&table)
+        .expect("baseline exponential qualifies");
+    let gold = XyceTestRunner::addresistors_dynamic_gold_table(&table)
+        .expect("baseline dynamic gold serializes");
+    assert_eq!(
+        gold.rows[1][2].to_bits(),
+        XyceTestRunner::xyce_default_prn_roundtrip(
+            (-XyceTestRunner::xyce_default_prn_roundtrip(table.rows[1][1])
+                .expect("time serializes"))
+            .exp()
+        )
+        .expect("gold serializes")
+        .to_bits()
+    );
+    table.columns[3] = "V(WRONG)".to_string();
+    assert!(XyceTestRunner::validate_addresistors_transient_schedule(&table).is_err());
+    table.columns[3] = "V(X1:2)".to_string();
+    table.rows[1][2] = Value::NAN;
+    assert!(XyceTestRunner::validate_addresistors_transient_schedule(&table).is_err());
+
+    let expired = DeadlineAbort::new(Instant::now(), 0);
+    assert!(matches!(
+        original.materialize_xyce_add_resistors_with_abort(&expired),
+        Err(rspice_core::netlist::XyceAddResistorsMaterializationError::Aborted)
+    ));
+}
+
+#[test]
+fn xdm_replaceground_projection_only_injects_canonical_controls() {
+    let source = "$ ground alias fixture\n\
+                      * retained comment\n\
+                      VA 1 0 dc=0\n\
+                      R1 1 2 10\n\
+                      R2 2 gNd! 10\n\
+                      .DC VA 0 10 1\n\
+                      .PRINT DC V(1) V(2)\n";
+    let projected = XyceTestRunner::project_xdm_replaceground_hspice(source)
+        .expect("bounded HSPICE projection succeeds");
+    assert_eq!(
+        projected,
+        "$ ground alias fixture\n\
+             .PREPROCESS REPLACEGROUND TRUE\n\
+             .OPTIONS DEVICE TNOM=25\n\
+             * retained comment\n\
+             VA 1 0 dc=0\n\
+             R1 1 2 10\n\
+             R2 2 gNd! 10\n\
+             .DC VA 0 10 1\n\
+             .PRINT DC V(1) V(2)\n"
+    );
+    XyceTestRunner::validate_xdm_replaceground_directives(&projected, 1, true)
+        .expect("projection has one effective generated policy");
+    for mutation in [
+        source.replacen(
+            "VA 1 0 dc=0",
+            ".PREPROCESS REPLACEGROUND TRUE\nVA 1 0 dc=0",
+            1,
+        ),
+        source.replacen("VA 1 0 dc=0", ".OPTIONS DEVICE TNOM=30\nVA 1 0 dc=0", 1),
+        source.replace(".PRINT DC V(1) V(2)\n", ""),
+    ] {
+        assert!(
+            XyceTestRunner::project_xdm_replaceground_hspice(&mutation).is_err(),
+            "translation-control or output mutation must fail closed"
+        );
+    }
+}
+
+#[test]
+fn xdm_replaceground_exact_source_and_sidecar_mutations_fail_closed() {
+    for (label, suffix, needle, replacement) in [
+        ("canonical", "", "R=10", "R=11"),
+        ("hspice", ".hspice", "R2 2 gnd 10", "R2 2 floating 10"),
+    ] {
+        let (root, family) = xdm_replaceground_mutation_fixture(label);
+        let mut path = family.join("gnd_node_symbol.cir");
+        if !suffix.is_empty() {
+            let mut os = path.as_os_str().to_os_string();
+            os.push(suffix);
+            path = PathBuf::from(os);
+        }
+        let source = fs::read_to_string(&path).expect("read mutation target");
+        assert!(source.contains(needle));
+        fs::write(&path, source.replacen(needle, replacement, 1)).expect("write semantic mutation");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let result = runner.run_test(family.join("gnd_node_symbol.cir"));
+        assert!(
+            !result.passed && !result.expected_unsupported,
+            "{label} semantic mutation must fail closed: {result:?}"
+        );
+        assert_eq!(
+            result.contract,
+            "xdm_hspice_replaceground_dc_relational_wrapper"
+        );
+        assert!(
+            result.error.as_deref().is_some_and(|error| {
+                error.contains("identity changed") || error.contains("path+content census changed")
+            }),
+            "{label} semantic mutation should fail exact identity/content census: {result:?}"
+        );
+        fs::remove_dir_all(root).expect("remove XDM REPLACEGROUND mutation fixture");
+    }
+}
+
+#[test]
+fn xdm_replaceground_manifest_owner_mutations_fail_closed() {
+    for (label, mutate) in [
+        ("manifest-owner-removed", "remove"),
+        ("manifest-contract-changed", "contract"),
+    ] {
+        let (root, family) = xdm_replaceground_mutation_fixture(label);
+        let manifest_path = root.join(HARNESS_MANIFEST_FILE);
+        let manifest = fs::read_to_string(&manifest_path).expect("read fixture manifest");
+        let owner =
+            "Netlists/XDM/HSPICE/OTHER_PARSING/gnd_node_symbol.cir\trequires_upstream_wrapper\n";
+        assert!(manifest.contains(owner));
+        let mutated = if mutate == "remove" {
+            manifest.replacen(owner, "", 1)
+        } else {
+            manifest.replacen(
+                owner,
+                "Netlists/XDM/HSPICE/OTHER_PARSING/gnd_node_symbol.cir\tchanged_contract\n",
+                1,
+            )
+        };
+        fs::write(&manifest_path, mutated).expect("write manifest mutation");
+        assert_xdm_replaceground_fixture_fails(&root, &family, label);
+        fs::remove_dir_all(root).expect("remove manifest mutation fixture");
+    }
+}
+
+#[test]
+fn xdm_replaceground_missing_or_symlinked_pair_fails_closed() {
+    let (root, family) = xdm_replaceground_mutation_fixture("missing-pair");
+    let pair = family.join("gnd_node_symbol.cir.hspice");
+    fs::remove_file(&pair).expect("remove paired HSPICE source");
+    assert_xdm_replaceground_fixture_fails(&root, &family, "missing paired HSPICE source");
+    fs::remove_dir_all(root).expect("remove missing-pair fixture");
+
+    let (root, family) = xdm_replaceground_mutation_fixture("symlink-pair");
+    let pair = family.join("gnd_node_symbol.cir.hspice");
+    let target = family.join("ground_node_symbol.cir.hspice");
+    fs::remove_file(&pair).expect("remove regular pair before symlink mutation");
+    #[cfg(unix)]
+    let symlink_result = std::os::unix::fs::symlink(&target, &pair);
+    #[cfg(windows)]
+    let symlink_result = std::os::windows::fs::symlink_file(&target, &pair);
+    if symlink_result.is_ok() {
+        assert_xdm_replaceground_fixture_fails(&root, &family, "symlinked paired HSPICE source");
+    }
+    fs::remove_dir_all(root).expect("remove symlink-pair fixture");
+}
+
+#[test]
+fn xdm_replaceground_candidate_output_artifact_fails_closed() {
+    let (root, family) = xdm_replaceground_mutation_fixture("output-artifact");
+    let output = root.join("OutputData/XDM/HSPICE/OTHER_PARSING");
+    fs::create_dir_all(&output).expect("create candidate OutputData family");
+    fs::write(output.join("gnd_node_symbol.cir.prn"), "forbidden oracle\n")
+        .expect("write forbidden candidate artifact");
+    assert_xdm_replaceground_fixture_fails(&root, &family, "candidate OutputData artifact");
+    fs::remove_dir_all(root).expect("remove output-artifact fixture");
+}
+
+#[test]
+fn xdm_replaceground_policy_and_plan_mutations_fail_closed() {
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_directives(
+            ".PREPROCESS REPLACEGROUND FALSE\n",
+            1,
+            true,
+        )
+        .is_err(),
+        "FALSE must not satisfy an active generated-policy contract"
+    );
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_directives(
+            ".PREPROCESS REPLACEGROUND TRUE\n.PREPROCESS REPLACEGROUND TRUE\n",
+            1,
+            true,
+        )
+        .is_err(),
+        "duplicate active directives must fail closed"
+    );
+
+    let source = xdm_replaceground_unit_source();
+    let path = PathBuf::from("xdm-replaceground-plan.cir");
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let plan = runner
+        .static_dc_plan_for_source_with_execution_dir(
+            &path,
+            source.clone(),
+            ExpressionDialect::Xyce,
+            None,
+        )
+        .expect("construct valid bounded REPLACEGROUND plan");
+    XyceTestRunner::validate_xdm_replaceground_plan(
+        &plan,
+        XyceXdmReplaceGroundKind::Gnd,
+        "projected HSPICE",
+    )
+    .expect("baseline plan qualifies");
+
+    let mut extra_state = plan.clone();
+    extra_state.steps.push(StepCommand {
+        target: StepTarget::Param,
+        name: "X".to_string(),
+        param_name: None,
+        sweep: StepSweep::List(vec![1.0]),
+    });
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_plan(
+            &extra_state,
+            XyceXdmReplaceGroundKind::Gnd,
+            "projected HSPICE",
+        )
+        .is_err(),
+        "extra plan state must fail closed"
+    );
+
+    let mut probe = plan.clone();
+    probe.print.probes[1] = "V(3)".to_string();
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_plan(
+            &probe,
+            XyceXdmReplaceGroundKind::Gnd,
+            "projected HSPICE",
+        )
+        .is_err(),
+        "probe mutation must fail closed"
+    );
+
+    let mut sweep = plan.clone();
+    sweep.dc.stop = 9.0;
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_plan(
+            &sweep,
+            XyceXdmReplaceGroundKind::Gnd,
+            "projected HSPICE",
+        )
+        .is_err(),
+        "DC sweep mutation must fail closed"
+    );
+
+    let mut topology = XyceTestRunner::parse_xyce_netlist(&source, &path)
+        .expect("parse valid REPLACEGROUND topology");
+    topology.elements.pop();
+    assert!(
+        XyceTestRunner::xdm_replaceground_element_snapshot(
+            &topology,
+            XyceXdmReplaceGroundKind::Gnd,
+        )
+        .is_err(),
+        "topology mutation must fail closed"
+    );
+}
+
+#[test]
+fn xdm_replaceground_analytic_half_divider_mutation_fails_closed() {
+    let results = xdm_replaceground_unit_results();
+    let mut table = XycePrnTable {
+        columns: vec!["Index".to_string(), "V(1)".to_string(), "V(2)".to_string()],
+        rows: results
+            .iter()
+            .enumerate()
+            .map(|(index, point)| vec![index as Value, point.sweep_value, 0.5 * point.sweep_value])
+            .collect(),
+    };
+    XyceTestRunner::validate_xdm_replaceground_analytic_table(&table, &results)
+        .expect("baseline half-divider invariant qualifies");
+    table.rows[5][2] += 0.1;
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_analytic_table(&table, &results).is_err(),
+        "half-divider mutation must fail closed"
+    );
+}
+
+#[test]
+fn xdm_replaceground_effective_verifier_threshold_and_zero_clamp_are_exact() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let results = xdm_replaceground_unit_results();
+    let good = xdm_replaceground_unit_table(0.0, 1.0);
+
+    let within = xdm_replaceground_unit_table(0.0, 1.009);
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &within, &results, &results)
+            .expect("effective verifier comparison succeeds")
+            .is_empty(),
+        "0.9 normalized RMS must pass"
+    );
+
+    let beyond = xdm_replaceground_unit_table(0.0, 1.011);
+    let mismatches = runner
+        .compare_xdm_replaceground_tables(&good, &beyond, &results, &results)
+        .expect("effective verifier comparison produces typed mismatches");
+    assert_eq!(mismatches.len(), 1);
+    assert_eq!(mismatches[0].probe, "V(2)");
+    assert!(mismatches[0].relative_error > 1.0);
+
+    let zero_good = xdm_replaceground_unit_table(0.0, 5.0e-13);
+    let zero_test = xdm_replaceground_unit_table(0.0, -5.0e-13);
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&zero_good, &zero_test, &results, &results)
+            .expect("zero-clamped verifier comparison succeeds")
+            .is_empty()
+    );
+}
+
+#[test]
+fn xdm_replaceground_unrelated_family_content_mutation_fails_closed() {
+    let (root, family) = xdm_replaceground_mutation_fixture("unrelated-content");
+    let unrelated = family.join("special_variables.cir.hspice");
+    let source = fs::read_to_string(&unrelated).expect("read unrelated family member");
+    fs::write(&unrelated, format!("{source}\n* unrelated mutation\n"))
+        .expect("mutate unrelated family content");
+    assert_xdm_replaceground_fixture_fails(&root, &family, "unrelated family content mutation");
+    fs::remove_dir_all(root).expect("remove unrelated-content fixture");
+}
+
+#[test]
+fn xdm_replaceground_exact_authored_snapshots_reject_common_mode_mutations() {
+    let path = PathBuf::from("xdm-replaceground-authored.cir");
+    let baseline = XyceTestRunner::parse_xyce_netlist(&xdm_replaceground_unit_source(), &path)
+        .expect("parse authored snapshot fixture");
+    for mutation in ["name", "node", "value"] {
+        let mut canonical = baseline.clone();
+        let mut projected = baseline.clone();
+        for netlist in [&mut canonical, &mut projected] {
+            match mutation {
+                "name" => netlist.elements[1].name = "R_COMMON".to_string(),
+                "node" => netlist.elements[1].nodes[1] = "3".to_string(),
+                "value" => {
+                    let ElementKind::Resistor { value, .. } = &mut netlist.elements[1].kind else {
+                        panic!("fixture R1 remains a resistor")
+                    };
+                    *value = 11.0;
+                }
+                _ => unreachable!(),
+            }
+        }
+        for netlist in [&canonical, &projected] {
+            assert!(
+                XyceTestRunner::validate_xdm_replaceground_subcircuit_topology(
+                    netlist,
+                    XyceXdmReplaceGroundKind::Gnd,
+                )
+                .is_err(),
+                "common-mode authored {mutation} mutation must fail exact snapshot"
+            );
+        }
+    }
+
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../tests/xyce/Netlists/XDM/HSPICE/OTHER_PARSING/ground_node_synonym_in_subckt_instantiation.cir",
+        );
+    let source = fs::read_to_string(&corpus).expect("read subcircuit snapshot record");
+    let mut netlist = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
+        .expect("parse subcircuit snapshot record");
+    netlist.subcircuits[0].elements[1].name = "R_BODY_MUTATED".to_string();
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_subcircuit_topology(
+            &netlist,
+            XyceXdmReplaceGroundKind::SubcircuitInstantiation,
+        )
+        .is_err(),
+        "subcircuit body mutation must fail exact hierarchy snapshot"
+    );
+}
+
+#[test]
+fn xdm_replaceground_verifier_serialization_layout_and_axis_fail_closed() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let results = xdm_replaceground_unit_results();
+    let good = xdm_replaceground_unit_table(0.0, 1.000_000_000_1);
+    let rounded_same = xdm_replaceground_unit_table(0.0, 1.000_000_000_2);
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &rounded_same, &results, &results)
+            .expect("serialization-boundary comparison succeeds")
+            .is_empty(),
+        "values which round to the same 8-digit Xyce PRN token must compare equal"
+    );
+
+    let mut bad_index = good.clone();
+    bad_index.rows[3][0] = 4.0;
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &bad_index, &results, &results)
+            .is_err()
+    );
+    let mut bad_layout = good.clone();
+    bad_layout.rows[2].pop();
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &bad_layout, &results, &results)
+            .is_err()
+    );
+    let mut nonfinite = good.clone();
+    nonfinite.rows[2][1] = Value::NAN;
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &nonfinite, &results, &results)
+            .is_err()
+    );
+    let mut bad_good_axis = good.clone();
+    bad_good_axis.rows[4][1] = 4.5;
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&bad_good_axis, &good, &results, &results)
+            .is_err()
+    );
+
+    let mut zero_floor_good_axis = good.clone();
+    zero_floor_good_axis.rows[0][1] = 1.000_000_004e-12;
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&zero_floor_good_axis, &good, &results, &results,)
+            .expect("good V(1) at the serialized ZEROTOL/ABSDIFFTOL floor compares")
+            .is_empty(),
+        "ReadDataFile zero-clamps the serialized good axis before applying the strict greater-than ABSDIFFTOL check"
+    );
+    let mut above_zero_floor_good_axis = good.clone();
+    above_zero_floor_good_axis.rows[0][1] = 1.000_000_006e-12;
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(
+                &above_zero_floor_good_axis,
+                &good,
+                &results,
+                &results,
+            )
+            .is_err(),
+        "a serialized good-axis difference above ZEROTOL and ABSDIFFTOL must fail"
+    );
+
+    let mut shifted_test_axis = good.clone();
+    for row in &mut shifted_test_axis.rows {
+        row[1] *= 2.0;
+    }
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &shifted_test_axis, &results, &[])
+            .expect("test V(1) is an independent axis, not a dependent comparison")
+            .is_empty()
+    );
+    let mut zero_clamped_test_axis = good.clone();
+    zero_clamped_test_axis.rows[10][1] = 1.000_000_004e-12;
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &zero_clamped_test_axis, &results, &[],)
+            .is_err(),
+        "serialized TEST V(1) is zero-clamped before it defines the integration-axis span"
+    );
+
+    let mut localized_error = good.clone();
+    localized_error.rows[10][2] = 1.02;
+    assert!(
+        runner
+            .compare_xdm_replaceground_tables(&good, &localized_error, &results, &results)
+            .expect("uniform test-axis verifier comparison succeeds")
+            .is_empty()
+    );
+    localized_error.rows[10][1] = 100.0;
+    assert!(
+        !runner
+            .compare_xdm_replaceground_tables(&good, &localized_error, &results, &results)
+            .expect("test V(1) supplies errNorm integration widths")
+            .is_empty()
+    );
+}
+
+#[test]
+fn xdm_replaceground_options_policy_and_deadline_fail_closed() {
+    let source = xdm_replaceground_unit_source();
+    let path = PathBuf::from("xdm-replaceground-options.cir");
+    let mut netlist =
+        XyceTestRunner::parse_xyce_netlist(&source, &path).expect("parse exact options fixture");
+    XyceTestRunner::validate_xdm_replaceground_effective_options(&netlist.options, true, "test")
+        .expect("exact TNOM/policy options qualify");
+    netlist.options.tnom = Some(27.0);
+    assert!(
+        XyceTestRunner::validate_xdm_replaceground_effective_options(
+            &netlist.options,
+            true,
+            "test",
+        )
+        .is_err(),
+        "TNOM mutation must fail closed"
+    );
+
+    let (root, family) = xdm_replaceground_mutation_fixture("expired-deadline");
+    let runner = XyceTestRunner::new(
+        &root,
+        XyceRunnerConfig {
+            max_time_per_test_ms: 0,
+            ..XyceRunnerConfig::default()
+        },
+    );
+    let result = runner.run_test(family.join("gnd_node_symbol.cir"));
+    assert!(!result.passed);
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("shared deadline expired"))
+    );
+    fs::remove_dir_all(root).expect("remove expired-deadline fixture");
+}
+
+fn compare_generic_step_res_fixture(content: &str) -> Result<(), String> {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "rspice-step-res-reference-{}-{nonce}.res",
+        std::process::id()
+    ));
+    fs::write(&path, content).expect("write generic STEP .res fixture");
+
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let netlist = Netlist::default();
+    let steps = vec![StepCommand {
+        target: StepTarget::Param,
+        name: "RESVAL".to_string(),
+        param_name: None,
+        sweep: StepSweep::List(vec![1.0, 1.584_893_19, 2.511_886_43]),
+    }];
+    let step_runs = [1.0, 1.584_893_19, 2.511_886_43]
+        .into_iter()
+        .map(|value| XyceStepRun {
+            step_values: vec![value],
+            netlist: Netlist::default(),
+        })
+        .collect::<Vec<_>>();
+
+    let result = runner.compare_step_res_reference(&path, &netlist, &steps, &step_runs);
+    fs::remove_file(&path).expect("remove generic STEP .res fixture");
+    result
+}
+
+#[test]
+fn step_res_reference_accepts_exact_parameter_sweep_schema() {
+    let reference = "STEP              RESVAL\r\n\
+                         0       1.00000000e+00   \r\n\
+                         1       1.58489319e+00   \r\n\
+                         2       2.51188643e+00   \r\n\
+                         End of Xyce(TM) Parameter Sweep\r\n\r\n";
+
+    compare_generic_step_res_fixture(reference)
+        .expect("complete Xyce parameter-sweep .res shape is accepted");
+}
+
+#[test]
+fn step_res_reference_rejects_footer_and_schema_mutations() {
+    let reference = "STEP              RESVAL\n\
+                         0       1.00000000e+00   \n\
+                         1       1.58489319e+00   \n\
+                         2       2.51188643e+00   \n\
+                         End of Xyce(TM) Parameter Sweep\n";
+    let mutations = [
+        (
+            reference.replace("End of Xyce(TM) Parameter Sweep\n", ""),
+            "missing required footer",
+            "missing footer",
+        ),
+        (
+            reference.replace("Parameter Sweep", "Simulation"),
+            "must be exactly",
+            "wrong footer",
+        ),
+        (
+            format!("{reference}End of Xyce(TM) Parameter Sweep\n"),
+            "duplicates footer",
+            "duplicate footer",
+        ),
+        (
+            format!("{reference}unexpected result metadata\n"),
+            "nonblank content after footer",
+            "trailing content",
+        ),
+        (
+            reference.replacen("RESVAL", "OTHER", 1),
+            ".STEP column 1 is 'OTHER', expected 'RESVAL'",
+            "wrong header",
+        ),
+        (
+            reference.replacen("1       1.58489319e+00", "7       1.58489319e+00", 1),
+            "STEP index 7, expected 1",
+            "wrong row index",
+        ),
+        (
+            reference.replacen("1.58489319e+00", "9.58489319e+00", 1),
+            "STEP RESVAL expected",
+            "wrong row value",
+        ),
+    ];
+
+    for (mutated, expected_error, reason) in mutations {
+        let error = compare_generic_step_res_fixture(&mutated)
+            .expect_err(&format!("{reason} must be rejected"));
+        assert!(
+            error.contains(expected_error),
+            "{reason} produced unexpected error: {error}"
+        );
+    }
+}
+
+fn stepped_noise_fixture_root(label: &str, artifact_count: usize) -> (PathBuf, XyceDeck) {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-step-noise-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/MEASURE_NOISE/STEP/fixture.cir";
+    let deck_path = root.join(relative);
+    fs::create_dir_all(deck_path.parent().expect("fixture deck parent"))
+        .expect("create stepped NOISE netlist directory");
+    fs::create_dir_all(root.join("OutputData/MEASURE_NOISE/STEP"))
+        .expect("create stepped NOISE output directory");
+    fs::write(
+        &deck_path,
+        "stepped noise fixture\n\
+             V1 in 0 AC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .NOISE V(out) V1 LIN 2 1 2\n\
+             .STEP R2 LIST 1k 2k\n\
+             .PRINT NOISE VM(out)\n\
+             .MEASURE NOISE peak MAX VM(out)\n\
+             .END\n",
+    )
+    .expect("write stepped NOISE fixture");
+    for index in 0..artifact_count {
+        fs::write(
+            root.join(format!(
+                "OutputData/MEASURE_NOISE/STEP/fixture.cir.ma{index}"
+            )),
+            "PEAK = 0.0000000e+00\n",
+        )
+        .expect("write stepped NOISE measurement artifact");
+    }
+    let deck = XyceDeck {
+        path: deck_path,
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    (root, deck)
+}
+
+#[test]
+fn stepped_noise_plan_pairs_contiguous_measurement_artifacts_by_member_index() {
+    let (root, deck) = stepped_noise_fixture_root("artifact-order", 2);
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let plan = runner
+        .static_noise_plan_for_deck(&deck)
+        .expect("stepped NOISE measurement plan is supported");
+
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].name, "R2");
+    assert_eq!(plan.measurement_reference_paths.len(), 2);
+    assert_eq!(
+        plan.measurement_reference_paths[0]
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("fixture.cir.ma0")
+    );
+    assert_eq!(
+        plan.measurement_reference_paths[1]
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("fixture.cir.ma1")
+    );
+
+    fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+}
+
+#[test]
+fn stepped_noise_plan_accepts_a_contiguous_waveform_oracle_without_measurements() {
+    let (root, deck) = stepped_noise_fixture_root("waveform-only", 0);
+    let reference_path = root.join("OutputData/MEASURE_NOISE/STEP/fixture.cir.NOISE.prn");
+    fs::write(
+        &reference_path,
+        "Index FREQ VM(out)\n0 1 0\n1 2 0\n0 1 0\n1 2 0\nEnd of Xyce(TM) Parameter Sweep\n",
+    )
+    .expect("write stepped NOISE waveform artifact");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let plan = runner
+        .static_noise_plan_for_deck(&deck)
+        .expect("stepped NOISE waveform plan is supported");
+
+    assert_eq!(
+        plan.reference_path
+            .as_deref()
+            .expect("waveform reference path")
+            .canonicalize()
+            .expect("canonical plan reference path"),
+        reference_path
+            .canonicalize()
+            .expect("canonical fixture reference path")
+    );
+    assert!(plan.measurement_reference_paths.is_empty());
+    assert_eq!(plan.contract.result_contract(true), "static_prn_step_noise");
+
+    fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+}
+
+#[test]
+fn stepped_noise_waveform_batching_is_contiguous_and_fail_closed() {
+    let reference = XycePrnTable {
+        columns: vec!["Index".to_string(), "FREQ".to_string()],
+        rows: vec![vec![0.0, 1.0], vec![1.0, 2.0], vec![0.0, 1.0]],
+    };
+
+    let (first, offset) = XyceTestRunner::noise_step_reference_batch(&reference, 0, 2, 0)
+        .expect("first step batch exists");
+    let (second, offset) = XyceTestRunner::noise_step_reference_batch(&reference, offset, 1, 1)
+        .expect("second step batch exists");
+
+    assert_eq!(first.rows, reference.rows[..2]);
+    assert_eq!(second.rows, reference.rows[2..]);
+    assert_eq!(offset, reference.rows.len());
+    assert!(
+        XyceTestRunner::noise_step_reference_batch(&reference, offset, 1, 2)
+            .expect_err("an incomplete batch must fail")
+            .contains("ended before step 3")
+    );
+}
+
+#[test]
+fn stepped_noise_plan_does_not_invent_an_unretained_side_output_oracle() {
+    let (root, deck) = stepped_noise_fixture_root("side-output", 0);
+    let source = fs::read_to_string(&deck.path).expect("read stepped NOISE fixture");
+    fs::write(
+        &deck.path,
+        source.replace(
+            ".PRINT NOISE VM(out)\n",
+            ".PRINT NOISE VM(out)\n.PRINT NOISE FILE=side.prn VM(out)\n",
+        ),
+    )
+    .expect("add stepped NOISE side output");
+    fs::write(
+        root.join("OutputData/MEASURE_NOISE/STEP/fixture.cir.NOISE.prn"),
+        "Index FREQ VM(out)\n0 1 0\n1 2 0\n0 1 0\n1 2 0\nEnd of Xyce(TM) Parameter Sweep\n",
+    )
+    .expect("write retained primary stepped NOISE artifact");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let plan = runner
+        .static_noise_plan_for_deck(&deck)
+        .expect("declared output without a retained oracle uses the primary contract");
+
+    assert!(plan.side_references.is_empty());
+
+    fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+}
+
+#[test]
+fn stepped_noise_plan_collects_every_checked_in_side_output_artifact() {
+    let (root, deck) = stepped_noise_fixture_root("complete-side-output", 0);
+    let source = fs::read_to_string(&deck.path).expect("read stepped NOISE fixture");
+    fs::write(
+        &deck.path,
+        source.replace(
+            ".PRINT NOISE VM(out)\n",
+            ".PRINT NOISE VM(out)\n.PRINT NOISE FORMAT=SPLOT FILE=side.prn VM(out)\n",
+        ),
+    )
+    .expect("add stepped NOISE side output");
+    let side_path = root.join("OutputData/MEASURE_NOISE/STEP/side.prn");
+    fs::write(
+        &side_path,
+        "Index FREQ VM(out)\n0 1 0\n1 2 0\n0 1 0\n1 2 0\nEnd of Xyce(TM) Parameter Sweep\n",
+    )
+    .expect("write stepped NOISE side-output artifact");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let plan = runner
+        .static_noise_plan_for_deck(&deck)
+        .expect("complete stepped NOISE side output is supported");
+
+    assert!(plan.reference_path.is_none());
+    assert_eq!(plan.side_references.len(), 1);
+    assert_eq!(plan.side_references[0].file, "side.prn");
+    assert_eq!(
+        plan.side_references[0].contract,
+        XyceStaticNoiseContract::SplotPrn
+    );
+    assert_eq!(
+        plan.side_references[0]
+            .reference_path
+            .canonicalize()
+            .expect("canonical plan side path"),
+        side_path
+            .canonicalize()
+            .expect("canonical fixture side path")
+    );
+
+    fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+}
+
+#[test]
+fn stepped_noise_execution_rejects_incomplete_measurement_artifact_sets() {
+    let (root, deck) = stepped_noise_fixture_root("artifact-count", 1);
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let result = runner.run_test(&deck.path);
+
+    assert!(
+        !result.passed,
+        "incomplete oracle must not pass: {result:?}"
+    );
+    assert!(!result.expected_unsupported);
+    assert_eq!(result.contract, "wrapper_scalar_measure_step_noise");
+    assert!(
+        result.error.as_deref().is_some_and(|error| error.contains(
+            ".STEP expansion produced 2 batches but 1 contiguous measurement artifacts exist"
+        )),
+        "unexpected result: {result:?}"
+    );
+
+    fs::remove_dir_all(root).expect("remove stepped NOISE fixture");
+}
+
+#[test]
+fn static_noise_probe_rejects_unrelated_decks_before_parsing() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-non-noise-preflight-{}-{}.cir",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    std::fs::write(
+        &path,
+        "unrelated malformed stress fixture\n.this-would-not-parse\n.end\n",
+    )
+    .expect("write unrelated deck");
+    let deck = XyceDeck {
+        path: path.clone(),
+        relative_path: "Netlists/unrelated.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+    let error = runner
+        .static_noise_plan_for_deck(&deck)
+        .expect_err("a deck without .NOISE must fail during textual preflight");
+
+    assert_eq!(error, "deck has no .NOISE analysis");
+    std::fs::remove_file(path).expect("remove unrelated deck");
+}
+
+#[test]
+fn noise_print_expression_scanner_recognizes_dno_and_dni_calls() {
+    let expression = "log(DNO(R1))+sqrt(DNI(XTOP:M1,fn))";
+    let mut calls = Vec::new();
+    let mut call_value = |call: &str| {
+        calls.push(call.to_string());
+        Ok(1.0)
+    };
+    XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        expression,
+        rspice_core::netlist::ParamContext::new(),
+        &mut call_value,
+    )
+    .expect("DNO/DNI calls must be extracted as symbolic probes");
+    assert_eq!(calls, vec!["DNO(R1)", "DNI(XTOP:M1,fn)"]);
+}
+
+#[test]
+fn static_noise_output_contract_maps_xyce_format_fallbacks_explicitly() {
+    for format in [
+        None,
+        Some("STD"),
+        Some("NOINDEX"),
+        Some("PROBE"),
+        Some("RAW"),
+        Some("TOUCHSTONE"),
+        Some("TOUCHSTONE2"),
+        Some("GNUPLOT"),
+        Some("SPLOT"),
+    ] {
+        let contract = XyceStaticNoiseContract::for_format(format)
+            .expect("Xyce NOISE PRN-compatible format is typed");
+        assert_eq!(contract.reference_extension(), "NOISE.prn");
+        assert_eq!(contract.output_family(), XyceStaticNoiseOutputFamily::Prn);
+    }
+    let csv =
+        XyceStaticNoiseContract::for_format(Some("CSV")).expect("Xyce NOISE CSV format is typed");
+    assert_eq!(csv.reference_extension(), "NOISE.csv");
+    assert_eq!(csv.output_family(), XyceStaticNoiseOutputFamily::Csv);
+    let tecplot = XyceStaticNoiseContract::for_format(Some("TECPLOT"))
+        .expect("Xyce NOISE TECPLOT format is typed");
+    assert_eq!(tecplot.reference_extension(), "NOISE.dat");
+    assert_eq!(
+        tecplot.output_family(),
+        XyceStaticNoiseOutputFamily::Tecplot
+    );
+    assert_eq!(tecplot.result_contract(true), "static_tecplot_step_noise");
+}
+
+#[test]
+fn static_noise_tecplot_parser_preserves_zoned_rows_and_rejects_truncation() {
+    let reference = XyceTestRunner::parse_tecplot_reference_table(
+        "TITLE = \"fixture\",\n\
+             VARIABLES = \" FREQ\"\n\
+             \" Re(V(out))\"\n\
+             DATASETAUXDATA TEMP = \"2.70e+01\"\n\
+             ZONE F=POINT T=\"R1 = 1e3\"\n\
+             AUXDATA R1 = \"1e3\"\n\
+             1.0 2.0\n\
+             ZONE F=POINT T=\"R1 = 2e3\"\n\
+             AUXDATA R1 = \"2e3\"\n\
+             1.0 3.0\n\
+             End of Xyce(TM) Parameter Sweep\n",
+    )
+    .expect("valid zoned TECPLOT table");
+
+    assert_eq!(reference.table.columns, vec!["FREQ", "Re(V(out))"]);
+    assert_eq!(reference.table.rows, vec![vec![1.0, 2.0], vec![1.0, 3.0]]);
+    assert_eq!(reference.zones.len(), 2);
+    assert_eq!(reference.zones[0].row_start, 0);
+    assert_eq!(reference.zones[0].row_count, 1);
+    assert_eq!(reference.zones[1].row_start, 1);
+    assert_eq!(reference.zones[1].row_count, 1);
+    assert_eq!(reference.zones[1].auxdata["R1"].value, 2.0e3);
+    assert!(
+            XyceTestRunner::parse_tecplot_table(
+                "TITLE = \"fixture\"\nVARIABLES = \"FREQ\"\nZONE F=POINT T=\"R1 = 1e3\"\nAUXDATA R1 = \"1e3\"\n1.0\n"
+            )
+            .expect_err("truncated TECPLOT table must fail")
+            .contains("completion footer")
+        );
+    assert!(
+            XyceTestRunner::parse_tecplot_reference_table(
+                "TITLE = \"fixture\"\nVARIABLES = \"FREQ\"\nZONE F=POINT T=\"R1 = 2e3\"\nAUXDATA R1 = \"1e3\"\n1.0\nEnd of Xyce(TM) Parameter Sweep\n"
+            )
+            .expect_err("inconsistent zone metadata must fail")
+            .contains("AUXDATA binds")
+        );
+}
+
+#[test]
+fn static_noise_side_outputs_preserve_format_family_and_probe_schema() {
+    let primary = XycePrintOutputRequest {
+        format: Some("RAW".to_string()),
+        file: None,
+        probes: vec!["INOISE".to_string(), "ONOISE".to_string()],
+    };
+    let compatible = ".PRINT NOISE FORMAT=RAW INOISE ONOISE\n\
+                          .PRINT NOISE FORMAT=TOUCHSTONE FILE=side.prn INOISE ONOISE\n";
+    XyceTestRunner::validate_static_noise_output_destinations(
+        compatible,
+        &primary,
+        XyceStaticNoiseContract::RawFallbackPrn,
+    )
+    .expect("PRN-fallback side output preserves the primary schema");
+
+    let csv_side = compatible.replace("FORMAT=TOUCHSTONE", "FORMAT=CSV");
+    assert!(
+        XyceTestRunner::validate_static_noise_output_destinations(
+            &csv_side,
+            &primary,
+            XyceStaticNoiseContract::RawFallbackPrn,
+        )
+        .is_err()
+    );
+    let changed_probe = compatible.replace("INOISE ONOISE\n", "INOISE V(1)\n");
+    assert!(
+        XyceTestRunner::validate_static_noise_output_destinations(
+            &changed_probe,
+            &primary,
+            XyceStaticNoiseContract::RawFallbackPrn,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn csv_table_parser_handles_quoted_xyce_headers_and_escaped_quotes() {
+    let table = XyceTestRunner::parse_csv_table(
+        "\"FREQ\",\"Re(V(4))\",\"DNO(R\"\"1)\"\n\
+             1.0,2.0,3.0\n",
+    )
+    .expect("quoted Xyce CSV table parses");
+    assert_eq!(table.columns, ["FREQ", "Re(V(4))", "DNO(R\"1)"]);
+    assert_eq!(table.rows, [vec![1.0, 2.0, 3.0]]);
+
+    assert!(XyceTestRunner::parse_csv_table("\"FREQ\",\"V(1)\n1,2\n").is_err());
+    assert!(XyceTestRunner::parse_csv_table("\"FREQ\"junk,\"V(1)\"\n1,2\n").is_err());
+}
+
+#[test]
+fn named_vbic_noise_mechanisms_require_the_generated_device_route() {
+    let netlist = Netlist::parse(
+        "generated VBIC noise ownership\n\
+             Q1 c b e model\n\
+             .MODEL model NPN LEVEL=12\n\
+             .NOISE V(c) VIN LIN 1 1 1\n\
+             VIN b 0 AC 1\n\
+             .END\n",
+    )
+    .expect("VBIC noise ownership fixture parses");
+    let generated = XycePrintRequest {
+        probes: vec!["{sqrt(abs(DNO(Q1,white_bi_ei_ibei_shot_noise)))}".to_string()],
+    };
+    let aggregate = XycePrintRequest {
+        probes: vec!["{sqrt(abs(DNO(Q1)))}".to_string()],
+    };
+
+    assert_eq!(
+        XyceTestRunner::noise_print_requires_generated_vbic_mechanisms(&generated, &netlist),
+        Ok(true)
+    );
+    assert_eq!(
+        XyceTestRunner::noise_print_requires_generated_vbic_mechanisms(&aggregate, &netlist),
+        Ok(false)
+    );
+}
+
+#[test]
+fn noise_complex_reference_columns_preserve_real_and_imaginary_components() {
+    let real = XyceAcReferenceColumn::Probe {
+        name: "i(llp1)".to_string(),
+        component: XyceAcProbeComponent::Real,
+    };
+    let imaginary = XyceAcReferenceColumn::Probe {
+        name: "i(llp1)".to_string(),
+        component: XyceAcProbeComponent::Imaginary,
+    };
+
+    assert_eq!(
+        XyceTestRunner::noise_reference_signal_probe(&real).as_deref(),
+        Ok("IR(llp1)")
+    );
+    assert_eq!(
+        XyceTestRunner::noise_reference_signal_probe(&imaginary).as_deref(),
+        Ok("II(llp1)")
+    );
+}
+
+#[test]
+fn noise_measurement_output_traces_preserve_live_occurrence_state() {
+    let source = "live continuous measurement output\n\
+            .MEASURE NOISE_CONT suffix DERIV VM(d) WHEN VM(e)=0.5 CROSS=2 FROM=1.5\n\
+            .MEASURE NOISE_CONT last DERIV VM(d) WHEN VM(e)=0.5 CROSS=LAST\n\
+            .MEASURE NOISE rolling DERIV VM(d) WHEN VM(e)=0.5 CROSS=-2\n\
+            .END\n";
+    let netlist =
+        XyceTestRunner::parse_xyce_netlist(source, Path::new("live-continuous-measurement.cir"))
+            .expect("parse live continuous-measurement fixture");
+    let d = [0.0, 10.0, 40.0, 90.0];
+    let e = [0.0, 1.0, 0.0, 1.0];
+    let results = (0..d.len())
+        .map(|index| rspice_core::analysis::NoiseResult {
+            frequency: index as Value + 1.0,
+            node_names: vec!["d".to_string(), "e".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![
+                num_complex::Complex64::new(d[index], 0.0),
+                num_complex::Complex64::new(e[index], 0.0),
+            ],
+            currents: Vec::new(),
+            output_noise_density: 0.0,
+            input_referred_density: 0.0,
+            input_gain_squared: 1.0,
+            contribution_catalog: Vec::new(),
+            contributions: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let columns = ["suffix", "last", "rolling"]
+        .into_iter()
+        .map(|name| XyceAcReferenceColumn::Probe {
+            name: name.to_string(),
+            component: XyceAcProbeComponent::Scalar,
+        })
+        .collect::<Vec<_>>();
+
+    let traces = XyceTestRunner::noise_measurement_output_traces(&netlist, &results, &columns)
+        .expect("project live measurement state");
+
+    assert_eq!(traces["SUFFIX"], vec![(2.5, 30.0), (3.5, 50.0)]);
+    assert_eq!(traces["LAST"], vec![(1.5, 10.0), (2.5, 30.0), (3.5, 50.0)]);
+    assert_eq!(traces["ROLLING"], vec![(2.5, 10.0), (3.5, 30.0)]);
+}
+
+#[test]
+fn accepted_point_activation_follows_descending_nested_sweep_traversal() {
+    let axis = [3.0, 2.0, 1.0, 3.0, 2.0, 1.0];
+    let segment_starts = [3];
+    let first = rspice_core::analysis::ContinuousMeasureRecord {
+        value: 1.5,
+        event_axis: Some(1.5),
+        trigger_axis: None,
+        target_axis: None,
+    };
+    let second = first;
+    let delay = rspice_core::analysis::ContinuousMeasureRecord {
+        value: -1.0,
+        event_axis: None,
+        trigger_axis: Some(2.5),
+        target_axis: Some(1.5),
+    };
+
+    assert_eq!(
+        XyceTestRunner::continuous_record_activation_index(&axis, &segment_starts, &first, 0,),
+        Some(2)
+    );
+    assert_eq!(
+        XyceTestRunner::continuous_record_activation_index(&axis, &segment_starts, &second, 3,),
+        Some(5)
+    );
+    assert_eq!(
+        XyceTestRunner::continuous_record_activation_index(&axis, &segment_starts, &delay, 0,),
+        Some(2),
+        "trigger/target output activates at the later accepted traversal point"
+    );
+}
+
+#[test]
+fn generic_live_measurement_projection_preserves_scalar_continuous_and_rolling_state() {
+    let source = "generic live measurement output\n\
+            .MEASURE AC scalar WHEN VM(e)=0.5 CROSS=1\n\
+            .MEASURE AC_CONT continuous WHEN VM(e)=0.5 CROSS=1\n\
+            .MEASURE AC rolling WHEN VM(e)=0.5 CROSS=-2\n\
+            .END\n";
+    let netlist =
+        XyceTestRunner::parse_xyce_netlist(source, Path::new("generic-live-measurement.cir"))
+            .expect("parse generic live-measurement fixture");
+    let records = vec![
+        rspice_core::analysis::ContinuousMeasureRecord {
+            value: 10.0,
+            event_axis: Some(1.5),
+            trigger_axis: None,
+            target_axis: None,
+        },
+        rspice_core::analysis::ContinuousMeasureRecord {
+            value: 30.0,
+            event_axis: Some(2.5),
+            trigger_axis: None,
+            target_axis: None,
+        },
+        rspice_core::analysis::ContinuousMeasureRecord {
+            value: 50.0,
+            event_axis: Some(3.5),
+            trigger_axis: None,
+            target_axis: None,
+        },
+    ];
+
+    let traces = XyceTestRunner::measurement_output_traces(
+        &netlist,
+        &[1.0, 2.0, 3.0, 4.0],
+        ["scalar", "continuous", "rolling"],
+        "AC",
+        "AC_CONT",
+        &[],
+        |trace_netlist| {
+            trace_netlist
+                .measurements
+                .iter()
+                .filter(|statement| statement.analysis.eq_ignore_ascii_case("AC_CONT"))
+                .map(|statement| rspice_core::analysis::ContinuousMeasureResult {
+                    name: statement.name.clone(),
+                    records: records.clone(),
+                    failure: None,
+                    failure_metadata: None,
+                })
+                .collect()
+        },
+    )
+    .expect("project generic live measurement state");
+
+    assert_eq!(traces["SCALAR"], vec![(1, 10.0)]);
+    assert_eq!(traces["CONTINUOUS"], vec![(1, 10.0), (2, 30.0), (3, 50.0)]);
+    assert_eq!(traces["ROLLING"], vec![(2, 10.0), (3, 30.0)]);
+}
+
+#[test]
+fn generic_live_measurement_projection_rejects_semantic_failures() {
+    let run = |source: &str, requested: &str, failure: &str| {
+        let netlist =
+            XyceTestRunner::parse_xyce_netlist(source, Path::new("invalid-live-measurement.cir"))
+                .expect("parse invalid live-measurement fixture");
+        XyceTestRunner::measurement_output_traces(
+            &netlist,
+            &[0.0, 1.0],
+            [requested],
+            "TRAN",
+            "TRAN_CONT",
+            &[],
+            |trace_netlist| {
+                trace_netlist
+                    .measurements
+                    .iter()
+                    .filter(|statement| statement.analysis.eq_ignore_ascii_case("TRAN_CONT"))
+                    .map(|statement| rspice_core::analysis::ContinuousMeasureResult {
+                        name: statement.name.clone(),
+                        records: Vec::new(),
+                        failure: Some(failure.to_string()),
+                        failure_metadata: None,
+                    })
+                    .collect()
+            },
+        )
+    };
+
+    let unsupported = run(
+        "unsupported live measurement\n\
+             .MEASURE TRAN aggregate AVG V(out)\n\
+             .END\n",
+        "aggregate",
+        "continuous measures support only WHEN, FIND, DERIV, and TRIG/TARG",
+    );
+    assert!(
+        unsupported
+            .expect_err("aggregate measure must not become a zero trace")
+            .contains("support only")
+    );
+
+    let missing_signal = run(
+        "missing-signal live measurement\n\
+             .MEASURE TRAN crossing WHEN V(missing)=1\n\
+             .END\n",
+        "crossing",
+        "When signal 'V(missing)' not found",
+    );
+    assert!(
+        missing_signal
+            .expect_err("missing signal must not become a zero trace")
+            .contains("not found")
+    );
+
+    let uninitialized = run(
+        "valid uninitialized live measurement\n\
+             .MEASURE TRAN crossing WHEN V(out)=1\n\
+             .END\n",
+        "crossing",
+        "WHEN condition not found in measurement window",
+    )
+    .expect("a valid no-event measure remains an initialized-zero column");
+    assert!(uninitialized["CROSSING"].is_empty());
+
+    let equation_netlist = XyceTestRunner::parse_xyce_netlist(
+        "dedicated equation trace\n\
+             .MEASURE TRAN value EQN {TIME+1}\n\
+             .END\n",
+        Path::new("equation-live-measurement.cir"),
+    )
+    .expect("parse equation live-measurement fixture");
+    let equation_projection = XyceTestRunner::measurement_output_traces(
+        &equation_netlist,
+        &[0.0, 1.0],
+        ["value"],
+        "TRAN",
+        "TRAN_CONT",
+        &[],
+        |_| panic!("equation measure must use its dedicated trace evaluator"),
+    )
+    .expect("equation measure is excluded from point-event projection");
+    assert!(equation_projection.is_empty());
+}
+
+#[test]
+fn measurement_comparison_accounts_for_printed_decimal_quantization() {
+    let quantization = XyceTestRunner::measurement_literal_quantization("1.179157e+02")
+        .expect("scientific measurement literal has decimal precision");
+    assert!((quantization - 1.0e-4).abs() <= f64::EPSILON);
+
+    let tolerance = XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT;
+    assert!(XyceTestRunner::measurement_value_matches(
+        117.9157,
+        117.915749,
+        Some(quantization),
+        tolerance,
+    ));
+    assert!(!XyceTestRunner::measurement_value_matches(
+        117.9157,
+        117.915751,
+        Some(quantization),
+        tolerance,
+    ));
+}
+
+#[test]
+fn continuous_measurement_reference_preserves_repeated_rows_and_event_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-cont-measure-reference-{}-{}.ma0",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    fs::write(
+        &path,
+        "TRIGTARGCONT1 = -1.561486e-01 targ = 1.556897e-01 trig = 3.118383e-01\n\
+             TRIGTARGCONT1 = 1.488583e-01 targ = 5.461130e-01 trig = 3.972547e-01\n",
+    )
+    .expect("write continuous measurement reference");
+
+    let reference = XyceTestRunner::parse_continuous_measurement_reference_file(&path)
+        .expect("parse continuous measurement reference");
+
+    assert_eq!(reference.name, "TRIGTARGCONT1");
+    assert_eq!(reference.records.len(), 2);
+    assert!(matches!(
+        reference.records[0].value,
+        XyceMeasurementReferenceValue::Numeric { value, .. }
+            if (value + 1.561486e-1).abs() <= f64::EPSILON
+    ));
+    assert!(matches!(
+        reference.records[0].target_axis,
+        Some(XyceMeasurementReferenceValue::Numeric { value, .. })
+            if (value - 1.556897e-1).abs() <= f64::EPSILON
+    ));
+    assert!(matches!(
+        reference.records[0].trigger_axis,
+        Some(XyceMeasurementReferenceValue::Numeric { value, .. })
+            if (value - 3.118383e-1).abs() <= f64::EPSILON
+    ));
+
+    fs::remove_file(path).expect("remove continuous measurement reference");
+}
+
+#[test]
+fn continuous_measurement_reference_rejects_partial_event_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-cont-measure-partial-{}-{}.ma0",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    fs::write(&path, "TRACE = 1.0 targ = 2.0\n")
+        .expect("write malformed continuous measurement reference");
+
+    let error = XyceTestRunner::parse_continuous_measurement_reference_file(&path)
+        .expect_err("partial event metadata must fail closed");
+
+    assert!(error.contains("must be present as a pair"), "{error}");
+    fs::remove_file(path).expect("remove malformed continuous measurement reference");
+}
+
+#[test]
+fn continuous_measurement_comparison_checks_trigger_and_target_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-cont-measure-comparison-{}-{}.ma0",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    fs::write(
+        &path,
+        "DELAY = -1.500000e-01 targ = 2.500000e-01 trig = 4.000000e-01\n",
+    )
+    .expect("write continuous comparison reference");
+    let actual = rspice_core::analysis::ContinuousMeasureResult {
+        name: "delay".to_string(),
+        records: vec![rspice_core::analysis::ContinuousMeasureRecord {
+            value: -0.15,
+            event_axis: None,
+            trigger_axis: Some(0.4),
+            target_axis: Some(0.25),
+        }],
+        failure: None,
+        failure_metadata: None,
+    };
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+    let matching = runner
+        .compare_continuous_measurement_references(
+            std::slice::from_ref(&path),
+            std::slice::from_ref(&actual),
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+        )
+        .expect("compare all continuous fields");
+    assert!(matching.is_empty());
+
+    let mut wrong_trigger = actual;
+    wrong_trigger.records[0].trigger_axis = Some(0.5);
+    let mismatches = runner
+        .compare_continuous_measurement_references(
+            std::slice::from_ref(&path),
+            std::slice::from_ref(&wrong_trigger),
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+        )
+        .expect("metadata mismatch remains a numeric oracle mismatch");
+    assert_eq!(mismatches.len(), 1);
+    assert_eq!(mismatches[0].probe, "delay:trig");
+
+    fs::remove_file(path).expect("remove continuous comparison reference");
+}
+
+#[test]
+fn mixed_measurement_comparison_preserves_duplicate_names_and_omits_non_file_policies() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-mixed-measure-comparison-{}-{}.ma0",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    fs::write(&path, "DUP = 1.0\ndup = 2.0\nDUP = 3.0\n")
+        .expect("write mixed measurement reference");
+    let mut netlist = Netlist::parse(
+        "mixed measurement fixture\n\
+             V1 1 0 AC 1\n\
+             .NOISE V(1) V1 LIN 2 1 2\n\
+             .MEASURE NOISE scalar_name WHEN V(1)=0.1\n\
+             .MEASURE NOISE_CONT dup WHEN V(1)=0.2\n\
+             .MEASURE NOISE_CONT hidden WHEN V(1)=0.3 PRINT=STDOUT\n\
+             .END\n",
+    )
+    .expect("parse mixed measurement fixture");
+    netlist.measurements[0].name = "DUP".to_string();
+    let scalar = [rspice_core::analysis::MeasureResult::success("DUP", 1.0)];
+    let continuous = [
+        rspice_core::analysis::ContinuousMeasureResult {
+            name: "dup".to_string(),
+            records: vec![
+                rspice_core::analysis::ContinuousMeasureRecord {
+                    value: 2.0,
+                    event_axis: Some(2.0),
+                    trigger_axis: None,
+                    target_axis: None,
+                },
+                rspice_core::analysis::ContinuousMeasureRecord {
+                    value: 3.0,
+                    event_axis: Some(3.0),
+                    trigger_axis: None,
+                    target_axis: None,
+                },
+            ],
+            failure: None,
+            failure_metadata: None,
+        },
+        rspice_core::analysis::ContinuousMeasureResult {
+            name: "hidden".to_string(),
+            records: Vec::new(),
+            failure: Some("event not found".to_string()),
+            failure_metadata: None,
+        },
+    ];
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+    let mismatches = runner
+        .compare_mixed_measurement_references(
+            std::slice::from_ref(&path),
+            &scalar,
+            &continuous,
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            &netlist.measurements,
+            "NOISE",
+            "NOISE_CONT",
+        )
+        .expect("compare declaration-ordered mixed stream");
+
+    assert!(mismatches.is_empty());
+    fs::remove_file(path).expect("remove mixed measurement reference");
+}
+
+#[test]
+fn mixed_measurement_reference_accepts_failed_trig_targ_diagnostics() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-mixed-measure-failed-{}-{}.ma0",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    fs::write(
+        &path,
+        "MISSING = FAILED targ = not found trig = not found\n\
+             PARTIAL = FAILED targ = 6.375267e+01 trig = not found\n",
+    )
+    .expect("write failed mixed measurement reference");
+
+    let rows = XyceTestRunner::parse_mixed_measurement_reference_file(&path)
+        .expect("parse Xyce failed TRIG/TARG diagnostics");
+
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(
+        rows[0].trigger_axis,
+        Some(XyceMeasurementReferenceValue::Failed)
+    ));
+    assert!(matches!(
+        rows[1].target_axis,
+        Some(XyceMeasurementReferenceValue::Numeric { value, .. })
+            if (value - 63.75267).abs() <= f64::EPSILON
+    ));
+
+    let netlist = Netlist::parse(
+        "failed mixed delay fixture\n\
+             V1 out 0 0\n\
+             .TRAN 1 2\n\
+             .MEASURE TRAN_CONT missing TRIG AT=1 TARG AT=2\n\
+             .MEASURE TRAN_CONT partial TRIG AT=1 TARG AT=2\n\
+             .END\n",
+    )
+    .expect("parse failed mixed delay declarations");
+    let actual = [
+        rspice_core::analysis::ContinuousMeasureResult {
+            name: "missing".to_string(),
+            records: Vec::new(),
+            failure: Some("both endpoints missing".to_string()),
+            failure_metadata: Some(rspice_core::analysis::ContinuousMeasureFailureMetadata {
+                trigger_axis: None,
+                target_axis: None,
+            }),
+        },
+        rspice_core::analysis::ContinuousMeasureResult {
+            name: "partial".to_string(),
+            records: Vec::new(),
+            failure: Some("trigger missing".to_string()),
+            failure_metadata: Some(rspice_core::analysis::ContinuousMeasureFailureMetadata {
+                trigger_axis: None,
+                target_axis: Some(63.75267),
+            }),
+        },
+    ];
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let mismatches = runner
+        .compare_mixed_measurement_references(
+            std::slice::from_ref(&path),
+            &[],
+            &actual,
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            &netlist.measurements,
+            "TRAN",
+            "TRAN_CONT",
+        )
+        .expect("compare FAILED rows with partial endpoint provenance");
+    assert!(mismatches.is_empty());
+
+    fs::remove_file(path).expect("remove failed mixed measurement reference");
+}
+
+#[test]
+fn generic_continuous_sidecar_comparison_honors_print_policy() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-ac-cont-visible-{}-{}.ma0",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    fs::write(&path, "VISIBLE = 2.000000e+00\n").expect("write AC_CONT sidecar");
+    let netlist = rspice_core::netlist::parse_netlist(
+        "continuous AC print fixture\n\
+             V1 out 0 AC 1\n\
+             .AC LIN 2 1 2\n\
+             .MEASURE AC_CONT visible WHEN VM(out)=0.5\n\
+             .MEASURE AC_CONT hidden WHEN VM(out)=0.5 PRINT=STDOUT\n\
+             .END\n",
+    )
+    .expect("parse AC_CONT print fixture");
+    let continuous = [
+        rspice_core::analysis::ContinuousMeasureResult {
+            name: "visible".to_string(),
+            records: vec![rspice_core::analysis::ContinuousMeasureRecord {
+                value: 2.0,
+                event_axis: Some(2.0),
+                trigger_axis: None,
+                target_axis: None,
+            }],
+            failure: None,
+            failure_metadata: None,
+        },
+        rspice_core::analysis::ContinuousMeasureResult {
+            name: "hidden".to_string(),
+            records: Vec::new(),
+            failure: Some("event not found".to_string()),
+            failure_metadata: None,
+        },
+    ];
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+    let mismatches = runner
+        .compare_analysis_measurement_outputs(
+            &[],
+            std::slice::from_ref(&path),
+            &[],
+            &continuous,
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            None,
+            None,
+            true,
+            &netlist.measurements,
+            "AC",
+            "AC_CONT",
+        )
+        .expect("compare visible AC_CONT sidecar only");
+
+    assert!(mismatches.is_empty());
+    fs::remove_file(path).expect("remove AC_CONT sidecar");
+}
+
+#[test]
+fn noise_plan_claims_every_continuous_measurement_sidecar_in_declaration_order() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-cont-noise-plan-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/MEASURE_CONT/fixture.cir";
+    let deck_path = root.join(relative);
+    let output = root.join("OutputData/MEASURE_CONT");
+    fs::create_dir_all(deck_path.parent().expect("fixture deck parent"))
+        .expect("create continuous NOISE netlist directory");
+    fs::create_dir_all(&output).expect("create continuous NOISE output directory");
+    fs::write(
+        &deck_path,
+        "continuous noise fixture\n\
+             V1 in 0 AC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .NOISE V(out) V1 LIN 2 1 2\n\
+             .MEASURE NOISE_CONT second WHEN VM(out)=0.2\n\
+             .MEASURE NOISE_CONT first FIND VM(out) WHEN VM(out)=0.1\n\
+             .END\n",
+    )
+    .expect("write continuous NOISE fixture");
+    fs::write(output.join("fixture.cir_first.ma0"), "FIRST = 1.0\n")
+        .expect("write first continuous sidecar");
+    fs::write(output.join("fixture.cir_second.ma0"), "SECOND = 2.0\n")
+        .expect("write second continuous sidecar");
+    let deck = XyceDeck {
+        path: deck_path,
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+
+    let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+        .static_noise_plan_for_deck(&deck)
+        .expect("continuous NOISE plan is supported");
+
+    let file_names = plan
+        .continuous_measurement_reference_paths
+        .iter()
+        .map(|path| path.file_name().and_then(|name| name.to_str()).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        file_names,
+        ["fixture.cir_second.ma0", "fixture.cir_first.ma0"]
+    );
+    fs::remove_dir_all(root).expect("remove continuous NOISE fixture");
+}
+
+#[test]
+fn ac_plan_claims_continuous_only_aggregate_when_continuous_files_are_disabled() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-mixed-ac-plan-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/MEASURE_CONT/fixture.cir";
+    let deck_path = root.join(relative);
+    let output = root.join("OutputData/MEASURE_CONT");
+    fs::create_dir_all(deck_path.parent().expect("fixture deck parent"))
+        .expect("create continuous AC netlist directory");
+    fs::create_dir_all(&output).expect("create continuous AC output directory");
+    fs::write(
+        &deck_path,
+        "continuous-only aggregate AC fixture\n\
+             .OPTIONS MEASURE USE_CONT_FILES=0\n\
+             V1 in 0 AC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .AC LIN 2 1 2\n\
+             .PRINT AC VM(out)\n\
+             .MEASURE AC_CONT crossing WHEN VM(out)=0.5\n\
+             .END\n",
+    )
+    .expect("write continuous AC fixture");
+    fs::write(output.join("fixture.cir.ma0"), "CROSSING = 1.0\n")
+        .expect("write aggregate AC measurement artifact");
+    let deck = XyceDeck {
+        path: deck_path,
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+
+    let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+        .static_ac_plan_for_deck(&deck)
+        .expect("continuous-only aggregate AC plan is supported");
+
+    assert_eq!(plan.measurement_reference_paths.len(), 1);
+    assert!(plan.continuous_measurement_reference_paths.is_empty());
+    assert_eq!(
+        plan.measurement_reference_paths[0]
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("fixture.cir.ma0")
+    );
+    fs::remove_dir_all(root).expect("remove continuous AC fixture");
+}
+
+#[test]
+fn dc_wrapper_accepts_continuous_only_aggregate_but_not_split_or_implicit_output() {
+    let common = "V1 out 0 1\n\
+                      .DC V1 0 1 1\n\
+                      .PRINT DC V(out)\n\
+                      .MEASURE DC_CONT crossing WHEN V(out)=0.5\n";
+    let aggregate = format!(
+        "continuous-only aggregate DC fixture\n\
+             .OPTIONS MEASURE USE_CONT_FILES=0\n{common}.END\n"
+    );
+    XyceTestRunner::validate_scalar_dc_measurement_wrapper_source(&aggregate)
+        .expect("explicit aggregate DC_CONT output owns the ordinary .ms0 artifact");
+
+    for options in ["", ".OPTIONS MEASURE USE_CONT_FILES=1\n"] {
+        let source = format!("continuous-only split DC fixture\n{options}{common}.END\n");
+        let error = XyceTestRunner::validate_scalar_dc_measurement_wrapper_source(&source)
+            .expect_err("DC_CONT-only output must not claim an ordinary artifact implicitly");
+        assert!(
+            error.contains("explicit USE_CONT_FILES=0 aggregate"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn noise_derivative_tolerance_accounts_for_compound_secant_error() {
+    let expected = -2.186783;
+    let actual = -2.18677159;
+    assert!(!XyceTestRunner::measurement_value_matches(
+        expected,
+        actual,
+        None,
+        XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+    ));
+    assert!(XyceTestRunner::measurement_value_matches(
+        expected,
+        actual,
+        None,
+        XyceFileCompareTolerance::MEASURE_COMMON_DERIVATIVE,
+    ));
+}
+
+#[test]
+fn measurement_literal_quantization_rejects_unqualified_or_invalid_values() {
+    assert_eq!(XyceTestRunner::measurement_literal_quantization("42"), None);
+    assert_eq!(
+        XyceTestRunner::measurement_literal_quantization("1.2.3e+4"),
+        None
+    );
+    assert_eq!(
+        XyceTestRunner::measurement_literal_quantization("FAILED"),
+        None
+    );
+}
+
+#[test]
+fn failed_measurement_projection_honors_local_and_global_defaults() {
+    let netlist = Netlist::parse(
+        "measurement defaults\n\
+             V1 1 0 1\n\
+             .dc V1 0 1 1\n\
+             .measure dc local AVG V(1) FROM=2 DEFAULT_VAL=-9\n\
+             .end\n",
+    )
+    .expect("local measurement default parses");
+    let actual = [rspice_core::analysis::MeasureResult::failed(
+        "LOCAL",
+        "empty range",
+    )];
+    let path = std::env::temp_dir().join(format!(
+        "rspice-measure-default-{}-{}.ms0",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+
+    std::fs::write(&path, "LOCAL = -9.000000e+00\n").expect("write local-default artifact");
+    let local = runner
+        .compare_measurement_references(
+            std::slice::from_ref(&path),
+            &actual,
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            Some(false),
+            None,
+            "DC",
+            &netlist.measurements,
+        )
+        .expect("local default projects failed measurement");
+    assert!(local.is_empty());
+
+    std::fs::write(&path, "LOCAL = -1.000000e+01\n").expect("write global-default artifact");
+    let global = runner
+        .compare_measurement_references(
+            std::slice::from_ref(&path),
+            &actual,
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            Some(false),
+            Some(-10.0),
+            "DC",
+            &netlist.measurements,
+        )
+        .expect("global default overrides local default");
+    assert!(global.is_empty());
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn prn_parser_accepts_preamble_and_repeated_page_headers() {
+    let table = XyceTestRunner::parse_prn_table(
+        r#"Circuit: metadata line
+Date: metadata line
+
+--------------------------------------------------------------------------------
+Index   v-sweep         v(2)            v(1)
+--------------------------------------------------------------------------------
+0       0.000000e+00    0.000000e+00    2.000000e-01
+1       2.000000e-02    2.000000e-02    2.000000e-01
+
+Index   v-sweep         v(2)            v(1)
+--------------------------------------------------------------------------------
+2       4.000000e-02    4.000000e-02    2.000000e-01
+CPU time since last call: 0.110 seconds.
+Total CPU time: 0.110 seconds.
+"#,
+    )
+    .expect("parser accepts Xyce page headers");
+
+    assert_eq!(
+        table.columns,
+        ["Index", "v-sweep", "v(2)", "v(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(table.rows.len(), 3);
+    assert_eq!(table.rows[2], vec![2.0, 0.04, 0.04, 0.2]);
+}
+
+#[test]
+fn prn_parser_accepts_comma_delimited_dc_output() {
+    let table = XyceTestRunner::parse_prn_table(
+        r#"Index,V(2),V(1),I(VDS)
+0,0.00000000e+00,0.00000000e+00,0.00000000e+00
+1,5.00000000e-02,0.00000000e+00,-3.05537186e-09
+End of Xyce(TM) Simulation
+"#,
+    )
+    .expect("parser accepts comma-delimited Xyce PRN output");
+
+    assert_eq!(
+        table.columns,
+        ["Index", "V(2)", "V(1)", "I(VDS)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.rows[1], vec![1.0, 0.05, 0.0, -3.05537186e-9]);
+}
+
+#[test]
+fn prn_parser_accepts_trailing_commas_in_whitespace_fd_output() {
+    let table = XyceTestRunner::parse_prn_table(
+        r#"Index     FREQ           Re(V(1))         Im(V(1))
+0	1.000000e+00,		-9.998421e+02,	1.256439e+01
+1	1.258925e+00,		-9.997498e+02,	1.581616e+01
+End of Xyce(TM) Simulation
+"#,
+    )
+    .expect("parser accepts Xyce whitespace-delimited FD output with trailing commas");
+
+    assert_eq!(
+        table.columns,
+        ["Index", "FREQ", "Re(V(1))", "Im(V(1))"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.rows[0], vec![0.0, 1.0, -9.998421e2, 1.256439e1]);
+}
+
+#[test]
+fn prn_parser_preserves_braced_expression_headers() {
+    let table = XyceTestRunner::parse_prn_table(
+        r#"Index        TIME        {20.0 + V(30)}
+0       0.00000000e+00   2.00000000e+01
+1       5.00000000e-06   2.30901699e+01
+End of Xyce(TM) Simulation
+"#,
+    )
+    .expect("parser accepts whitespace-delimited braced expression headers");
+
+    assert_eq!(
+        table.columns,
+        ["Index", "TIME", "{20.0 + V(30)}"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.rows[1], vec![1.0, 5.0e-6, 23.0901699]);
+}
+
+#[test]
+fn raw_parser_accepts_ascii_repeated_plots() {
+    let table = XyceTestRunner::parse_raw_table(
+        br#"Title: RAW ASCII
+Date: today
+Plotname: Step 1
+Flags: real
+No. Variables: 3
+No. Points: 2
+Variables:
+    0   sweep   voltage
+    1   V(1)    voltage
+    2   V1#branch current
+Values:
+0   0.00000000e+00
+    0.00000000e+00
+    0.00000000e+00
+
+1   1.00000000e-01
+    1.00000000e-01
+    -1.00000000e-02
+
+Plotname: Step 2
+Flags: real
+No. Variables: 3
+No. Points: 2
+Variables:
+    0   sweep   voltage
+    1   V(1)    voltage
+    2   V1#branch current
+Values:
+0   0.00000000e+00
+    0.00000000e+00
+    0.00000000e+00
+
+1   1.00000000e-01
+    1.00000000e-01
+    -1.00000000e-02
+"#,
+    )
+    .expect("RAW ASCII parser accepts repeated plots");
+
+    assert_eq!(
+        table.columns,
+        ["sweep", "V(1)", "V1#branch"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(table.rows.len(), 4);
+    assert_eq!(table.rows[3], vec![0.1, 0.1, -0.01]);
+}
+
+#[test]
+fn raw_parser_accepts_binary_real_payload() {
+    let mut raw = b"Title: RAW binary\nVersion: test\nPlotname: DC\nFlags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n\t0\tsweep\tvoltage\n\t1\tV(1)\tvoltage\nBinary:\n".to_vec();
+    for value in [0.0_f64, 0.0, 0.1, 0.1] {
+        raw.extend_from_slice(&value.to_le_bytes());
+    }
+
+    let table = XyceTestRunner::parse_raw_table(&raw).expect("RAW parser accepts binary payload");
+
+    assert_eq!(
+        table.columns,
+        ["sweep", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(table.rows, vec![vec![0.0, 0.0], vec![0.1, 0.1]]);
+}
+
+#[test]
+fn print_output_requests_preserve_grouped_probe_fields() {
+    let requests = XyceTestRunner::print_output_requests(
+        r#".PRINT TRAN V( 1 , 0 ) {20.0 + V(30)} I(VSENSE)"#,
+        "TRAN",
+    )
+    .expect("grouped transient .PRINT probes parse");
+
+    assert_eq!(
+        requests,
+        vec![XycePrintOutputRequest {
+            format: None,
+            file: None,
+            probes: ["V( 1 , 0 )", "{20.0 + V(30)}", "I(VSENSE)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        }]
+    );
+
+    let requests = XyceTestRunner::print_output_requests(
+        r#".PRINT DC FORMAT = STD FILE = "out data.prn" V(1) {V(2) + 1.0}"#,
+        "DC",
+    )
+    .expect("spaced .PRINT options and braced DC probes parse");
+
+    assert_eq!(
+        requests,
+        vec![XycePrintOutputRequest {
+            format: Some("STD".to_string()),
+            file: Some("out data.prn".to_string()),
+            probes: ["V(1)", "{V(2) + 1.0}"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        }]
+    );
+}
+
+#[test]
+fn print_output_requests_canonicalize_only_whole_single_quoted_expressions() {
+    let request = XyceTestRunner::print_output_requests(
+        ".PRINT DC FILE='quoted-output.prn' '(abs(I(Vsense)))' V(1)",
+        "DC",
+    )
+    .expect("whole single-quoted print expression parses")
+    .pop()
+    .expect("one request");
+    assert_eq!(request.file.as_deref(), Some("quoted-output.prn"));
+    assert_eq!(request.probes, ["{(abs(I(Vsense)))}", "V(1)"]);
+    assert_eq!(
+        XyceTestRunner::print_expression_inner("{ abs(I(Vsense)) }"),
+        Some("abs(I(Vsense))")
+    );
+    assert_eq!(XyceTestRunner::print_expression_inner("'V(1)'"), None);
+    assert_eq!(XyceTestRunner::print_expression_inner("V(1)"), None);
+
+    for invalid in [
+        ".PRINT DC ''",
+        ".PRINT DC '{V(1)}'",
+        ".PRINT DC 'V(1)",
+        ".PRINT DC V(1)'",
+    ] {
+        assert!(
+            XyceTestRunner::print_output_requests(invalid, "DC").is_err(),
+            "invalid single-quoted print token must fail closed: {invalid}"
+        );
+    }
+
+    let double_quoted =
+        XyceTestRunner::print_output_requests(".PRINT DC FILE=\"double-output.prn\" V(1)", "DC")
+            .expect("double-quoted FILE remains an option")
+            .pop()
+            .expect("one request");
+    assert_eq!(double_quoted.file.as_deref(), Some("double-output.prn"));
+    assert_eq!(double_quoted.probes, ["V(1)"]);
+}
+
+#[test]
+fn static_hb_probe_classifier_distinguishes_voltage_accessors_from_currents() {
+    for probe in ["VI(1)", "VDB(1)", "{vi(1)}", "{abs(VI(1)) + 1.0}"] {
+        assert!(
+            !XyceTestRunner::static_hb_probe_is_unsupported(probe),
+            "voltage-only HB probe should be admitted: {probe}"
+        );
+    }
+
+    for probe in [
+        "I(V1)",
+        "IR(V1)",
+        "ID(M1)",
+        "P(V1)",
+        "N(M1:IDS)",
+        "{abs(I(V1))}",
+        "V(1)@mismatch",
+    ] {
+        assert!(
+            XyceTestRunner::static_hb_probe_is_unsupported(probe),
+            "branch/device probe should remain fail-closed: {probe}"
+        );
+    }
+}
+
+#[test]
+fn xyce_paramfile_variables_parse_dakota_values() {
+    let bindings = XyceTestRunner::parse_xyce_paramfile_variables(
+        "2 variables\n-10.0 dakota_VV1\n+5    dakota_VV2\n1 functions\n1 TimeAt2\n",
+        Path::new("paramfile.txt"),
+    )
+    .expect("Xyce PRF parameter variables parse");
+
+    assert_eq!(
+        bindings,
+        vec![
+            ("dakota_VV1".to_string(), -10.0),
+            ("dakota_VV2".to_string(), 5.0)
+        ]
+    );
+
+    let rebound = XyceTestRunner::source_with_param_bindings(
+        "bug1210\nVone n1 0 dakota_VV1\n.end\n",
+        &bindings,
+    );
+    assert_eq!(
+        rebound,
+        "bug1210\n.PARAM dakota_VV1=-1.00000000000000000e1\n.PARAM dakota_VV2=5.00000000000000000e0\nVone n1 0 dakota_VV1\n.end\n"
+    );
+}
+
+#[test]
+fn xyce_paramfile_rejects_duplicate_variables() {
+    let err = XyceTestRunner::parse_xyce_paramfile_variables(
+        "2 variables\n1 dakota_VV1\n2 DAKOTA_VV1\n",
+        Path::new("paramfile.txt"),
+    )
+    .expect_err("duplicate PRF variables must fail closed");
+
+    assert!(
+        err.contains("duplicate Xyce wrapper parameter"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn absolute_inc_lib_wrapper_binds_blank_placeholders_to_fixture_paths() {
+    let fixture = std::env::temp_dir().join(format!(
+        "rspice-xyce-abs-inc-lib-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let sub2 = fixture.join("sub1").join("sub2");
+    std::fs::create_dir_all(&sub2).expect("create absolute include/lib fixture");
+    std::fs::write(sub2.join("include2_abs_path"), "R2 2 0 1\n").expect("write include target");
+    std::fs::write(
+        sub2.join("lib2_abs_path"),
+        ".LIB LIB_ABS\n.PARAM RVAL=2\n.ENDL LIB_ABS\n",
+    )
+    .expect("write library target");
+
+    let source = "\
+absolute include wrapper
+.DC V1 1 5 1
+.PRINT DC V(1) V(2) I(R3)
+V1 1 0 1
+R1 1 2 1
+R3 1 0 {RVAL}
+.INC
+.LIB
+.END
+";
+    let deck_path = fixture.join("inc_lib_file_absolute_path.cir");
+
+    let rebound = XyceTestRunner::source_with_absolute_inc_lib_wrapper_bindings(source, &deck_path)
+        .expect("blank include/library placeholders bind to absolute fixture paths");
+
+    assert!(
+        rebound.contains(".INC \"") && rebound.contains("include2_abs_path\""),
+        "include placeholder should be rebound to an absolute quoted path: {rebound}"
+    );
+    assert!(
+        rebound.contains(".LIB \"")
+            && rebound.contains("lib2_abs_path\" LIB_ABS")
+            && !rebound
+                .lines()
+                .any(XyceTestRunner::is_blank_include_wrapper_directive)
+            && !rebound
+                .lines()
+                .any(XyceTestRunner::is_blank_lib_wrapper_directive),
+        "library placeholder should be rebound to LIB_ABS and no blank placeholders should remain: {rebound}"
+    );
+    assert!(
+        XyceTestRunner::source_has_absolute_inc_lib_wrapper_bindings(&rebound),
+        "rebound source should be recognized as an absolute include/library wrapper"
+    );
+
+    std::fs::remove_dir_all(&fixture).expect("remove absolute include/lib fixture");
+}
+
+#[test]
+fn print_output_requests_join_continuations_across_comment_lines() {
+    let requests = XyceTestRunner::print_output_requests(
+        r#"
+.PRINT AC
+*+ V(1)
+*+ V(2)
++ {0.001 + abs(VREAL - VR(1))}
++ {0.001 + abs(VIMAG - VI(1))}
+"#,
+        "AC",
+    )
+    .expect("comment-separated .PRINT AC continuations parse");
+
+    assert_eq!(
+        requests,
+        vec![XycePrintOutputRequest {
+            format: None,
+            file: None,
+            probes: [
+                "{0.001 + abs(VREAL - VR(1))}",
+                "{0.001 + abs(VIMAG - VI(1))}",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        }]
+    );
+}
+
+#[test]
+fn dc_print_precision_quantizes_only_matching_probe_columns() {
+    let source = ".PRINT DC WIDTH=6 PRECISION=1 V(1) {IC(Q1+)}\n";
+    assert_eq!(
+        XyceTestRunner::dc_print_precision_for_probe(source, "{IC(Q1+)}")
+            .expect("matching DC probe precision parses"),
+        Some(1)
+    );
+    assert_eq!(
+        XyceTestRunner::quantize_dc_print_value(source, "{IC(Q1+)}", -0.010568018981775439)
+            .expect("matching DC probe quantizes"),
+        -0.011
+    );
+    assert_eq!(
+        XyceTestRunner::dc_print_precision_for_probe(source, "V(2)")
+            .expect("unmatched DC probe has no local precision"),
+        None
+    );
+}
+
+#[test]
+fn dc_print_precisions_scale_to_certification_sized_probe_tables() {
+    let probes = (1..=50_000)
+        .map(|index| format!("V({index})"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let source = format!(".PRINT DC {probes}\n");
+
+    let precisions =
+        XyceTestRunner::dc_print_precisions(&source).expect("large precision map parses");
+
+    assert_eq!(precisions.len(), 50_000);
+    assert_eq!(
+        precisions.get(&XyceTestRunner::normalize_probe("V(50000)")),
+        Some(&XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION)
+    );
+}
+
+#[test]
+fn dc_voltage_fast_path_requires_one_complete_probe_call() {
+    assert!(XyceTestRunner::probe_call_covers_entire_expression("v(3)"));
+    assert!(!XyceTestRunner::probe_call_covers_entire_expression(
+        "v(3)-v(2)"
+    ));
+    assert!(!XyceTestRunner::probe_call_covers_entire_expression(
+        "v(2)/(1.0+scalar*v(cntl))"
+    ));
+}
+
+#[test]
+fn blank_print_lines_are_ignored_and_side_outputs_aggregate() {
+    let source = r#"
+.PRINT TRAN V(1) V(2)
+.PRINT TRAN
+.PRINT TRAN FILE=blank.prn
+.PRINT TRAN FILE=blank.prn V(3)
+.PRINT TRAN FILE=blank.prn v(4) V(5)
+"#;
+
+    let primary = XyceTestRunner::single_tran_print_output_request(source)
+        .expect("primary transient print survives inert blank .PRINT lines");
+    assert_eq!(
+        primary,
+        XycePrintOutputRequest {
+            format: None,
+            file: None,
+            probes: ["V(1)", "V(2)"].into_iter().map(str::to_string).collect(),
+        }
+    );
+
+    let side_outputs = XyceTestRunner::prn_compatible_tran_side_output_requests(source)
+        .expect("transient side-output requests aggregate by FILE target");
+    assert_eq!(
+        side_outputs,
+        vec![XycePrintOutputRequest {
+            format: None,
+            file: Some("blank.prn".to_string()),
+            probes: ["V(3)", "v(4)", "V(5)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        }]
+    );
+}
+
+#[test]
+fn transient_output_override_aggregates_primary_and_file_prints() {
+    let source = r#"
+.TRAN 0 1
+.PRINT TRAN FORMAT=CSV V(1)
+.PRINT TRAN FILE=nooverwriteFoo V(2)
+"#;
+
+    XyceTestRunner::validate_native_output_override_prn_tran_wrapper_contract(source)
+        .expect("output override TRAN wrapper contract validates");
+    let request = XyceTestRunner::output_override_print_output_request(source, "TRAN")
+        .expect("output override request parses")
+        .expect("output override has probes");
+
+    assert_eq!(
+        request,
+        XycePrintOutputRequest {
+            format: None,
+            file: None,
+            probes: ["V(1)", "V(2)"].into_iter().map(str::to_string).collect(),
+        }
+    );
+}
+
+#[test]
+fn transient_output_override_rejects_unrelated_print_analysis() {
+    let source = r#"
+.TRAN 0 1
+.PRINT TRAN V(1)
+.PRINT AC V(1)
+"#;
+
+    let err = XyceTestRunner::validate_native_output_override_prn_tran_wrapper_contract(source)
+        .expect_err("output override TRAN contract should reject mixed print analyses");
+    assert!(
+        err.contains(".PRINT AC"),
+        "unexpected validation error: {err}"
+    );
+}
+
+#[test]
+fn noise_output_override_aggregates_mixed_formats_into_forced_prn_schema() {
+    let source = r#"
+.NOISE V(out) V1 DEC 5 100 100MEG 1
+.PRINT NOISE FORMAT=NOINDEX DELIMITER=COMMA V(out) VR(out)
+.PRINT NOISE FORMAT=CSV FILE=noiseFoo VI(out) INOISE ONOISE
+"#;
+
+    XyceTestRunner::validate_native_output_override_prn_wrapper_contract(source, "NOISE")
+        .expect("output override NOISE wrapper contract validates");
+    let request = XyceTestRunner::output_override_print_output_request(source, "NOISE")
+        .expect("output override request parses")
+        .expect("output override has probes");
+
+    assert_eq!(
+        request,
+        XycePrintOutputRequest {
+            format: None,
+            file: None,
+            probes: ["V(out)", "VR(out)", "VI(out)", "INOISE", "ONOISE"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        }
+    );
+}
+
+#[test]
+fn reference_time_grid_uses_transient_prn_time_column() {
+    let table = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0],
+            vec![1.0, 1.0e-9, 2.0],
+            vec![2.0, 4.0e-9, 3.0],
+        ],
+    };
+
+    let grid =
+        XyceTestRunner::reference_time_grid(&table).expect("transient PRN time grid should parse");
+
+    assert_eq!(grid, vec![0.0, 1.0e-9, 4.0e-9]);
+}
+
+#[test]
+fn wrapper_tran_analysis_extends_to_reference_stop() {
+    let tran = XyceTranAnalysis {
+        step: 1.0e-9,
+        stop: 10.0e-9,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+
+    let wrapper = XyceTestRunner::tran_analysis_for_reference_stop(
+        XyceStaticTranContract::WrapperStatic,
+        tran,
+        &[0.0, 10.0e-9, 10.0e-6],
+    );
+    assert_eq!(wrapper.stop, 10.0e-6);
+
+    let plain = XyceTestRunner::tran_analysis_for_reference_stop(
+        XyceStaticTranContract::PlainStatic,
+        tran,
+        &[0.0, 10.0e-9, 10.0e-6],
+    );
+    assert_eq!(plain.stop, 10.0e-9);
+}
+
+#[test]
+fn xyce_default_transient_max_step_is_ten_percent_of_analysis_window() {
+    let mut tran = XyceTranAnalysis {
+        step: 0.0,
+        stop: 6.0e-3,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+
+    assert!(
+        (XyceTestRunner::xyce_default_transient_max_step(&tran) - 6.0e-4).abs() <= Value::EPSILON
+    );
+    tran.start = Some(1.0e-3);
+    assert!(
+        (XyceTestRunner::xyce_default_transient_max_step(&tran) - 5.0e-4).abs() <= Value::EPSILON
+    );
+
+    assert_eq!(
+        XyceTestRunner::xyce_transient_solver_max_step(&tran).to_bits(),
+        5.0e-4f64.to_bits()
+    );
+    assert_eq!(
+        XyceTestRunner::transient_oracle_solver_max_step(&tran).to_bits(),
+        5.0e-4f64.to_bits(),
+        "the oracle must preserve Xyce's native solver ceiling"
+    );
+
+    tran.max_step = Some(2.5e-5);
+    assert_eq!(
+        XyceTestRunner::xyce_transient_solver_max_step(&tran).to_bits(),
+        2.5e-5f64.to_bits()
+    );
+    assert_eq!(
+        XyceTestRunner::transient_oracle_solver_max_step(&tran).to_bits(),
+        2.5e-5f64.to_bits(),
+        "an authored DTMAX is authoritative for both execution paths"
+    );
+}
+
+#[test]
+fn integrated_rms_uses_solver_semantics_not_harness_source_resolution() {
+    let netlist = Netlist::parse_validated(
+        "integrated source-resolution policy\n\
+             I1 1 0 PULSE(0 5 0 1m 1m 10m 25m)\n\
+             L1 2 0 10m\n\
+             R1 1 2 1m\n\
+             .end\n",
+    )
+    .expect("source-resolution fixture validates");
+    let tran = XyceTranAnalysis {
+        step: 1.0e-4,
+        stop: 2.0e-2,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+    let solver_ceiling = XyceTestRunner::xyce_transient_solver_max_step(&tran);
+
+    let integrated = XyceTestRunner::transient_max_step_with_solver_ceiling(
+        &netlist,
+        &tran,
+        None,
+        solver_ceiling,
+        false,
+    )
+    .expect("integrated-RMS maximum step resolves");
+    let pointwise = XyceTestRunner::transient_max_step_with_solver_ceiling(
+        &netlist,
+        &tran,
+        None,
+        solver_ceiling,
+        true,
+    )
+    .expect("pointwise harness maximum step resolves");
+
+    assert_eq!(integrated.to_bits(), 2.0e-3f64.to_bits());
+    assert_eq!(pointwise.to_bits(), 5.0e-6f64.to_bits());
+}
+
+#[test]
+fn reference_time_grid_accepts_stepnum_transient_prn_metadata() {
+    let table = XycePrnTable {
+        columns: ["STEPNUM", "Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![2.0, 0.0, 0.0, 1.0],
+            vec![2.0, 1.0, 1.0e-9, 2.0],
+            vec![2.0, 2.0, 4.0e-9, 3.0],
+        ],
+    };
+
+    let layout = XyceTestRunner::transient_reference_layout(&table)
+        .expect("STEPNUM/Index/TIME layout should parse");
+    let grid =
+        XyceTestRunner::reference_time_grid(&table).expect("transient PRN time grid should parse");
+
+    assert_eq!(layout.stepnum_column, Some(0));
+    assert_eq!(layout.index_column, Some(1));
+    assert_eq!(layout.time_column, 2);
+    assert_eq!(layout.data_column_offset, 3);
+    assert_eq!(grid, vec![0.0, 1.0e-9, 4.0e-9]);
+}
+
+#[test]
+fn transient_reference_columns_accept_snapshot_extra_probes() {
+    let table = XycePrnTable {
+        columns: ["TIME", "{I(V1)}", "{V(1)}", "{V(2)}"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![vec![0.0, 0.0, 0.0, 0.0]],
+    };
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string(), "V(2)".to_string()],
+    };
+    let layout = XyceTestRunner::transient_reference_layout(&table)
+        .expect("TIME-prefixed transient reference should parse");
+    let netlist = Netlist::parse("reference columns\nR1 1 0 1k\n.end\n")
+        .expect("reference-column deck parses");
+
+    let data_columns = XyceTestRunner::reference_tran_data_columns(
+        &table,
+        &print,
+        &netlist,
+        layout.data_column_offset,
+    )
+    .expect("snapshot-added source current column should be accepted");
+
+    assert_eq!(data_columns, vec!["{I(V1)}", "V(1)", "V(2)"]);
+}
+
+#[test]
+fn reference_column_matching_preserves_braced_expressions() {
+    assert!(XyceTestRunner::reference_column_matches_probe(
+        "{R0}",
+        "{r0}",
+        rspice_core::netlist::GroundPolicy::NgspiceGnd,
+    ));
+    assert!(XyceTestRunner::reference_column_matches_probe(
+        "{V(1)}",
+        "V(1)",
+        rspice_core::netlist::GroundPolicy::NgspiceGnd,
+    ));
+    assert!(XyceTestRunner::reference_column_matches_probe(
+        "V(0,3)",
+        "V(GND,3)",
+        rspice_core::netlist::GroundPolicy::NgspiceGnd,
+    ));
+    assert!(XyceTestRunner::reference_column_matches_probe(
+        "N(0)",
+        "N(GND)",
+        rspice_core::netlist::GroundPolicy::NgspiceGnd,
+    ));
+    assert!(!XyceTestRunner::reference_column_matches_probe(
+        "V(0)",
+        "V(GND)",
+        rspice_core::netlist::GroundPolicy::OnlyZero,
+    ));
+    assert!(XyceTestRunner::reference_column_matches_probe(
+        "V(0)",
+        "V(GND!)",
+        rspice_core::netlist::GroundPolicy::XyceReplace,
+    ));
+}
+
+#[test]
+fn split_transient_step_reference_validates_stepnum_metadata() {
+    let table = XycePrnTable {
+        columns: ["STEPNUM", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0],
+            vec![0.0, 1.0e-9, 2.0],
+            vec![1.0, 0.0, 3.0],
+            vec![1.0, 1.0e-9, 4.0],
+        ],
+    };
+
+    let steps = XyceTestRunner::split_transient_step_reference(&table, 2)
+        .expect("STEPNUM/TIME transient reference should split");
+
+    assert_eq!(steps.len(), 2);
+    assert_eq!(
+        steps[0].rows,
+        vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0e-9, 2.0]]
+    );
+    assert_eq!(
+        steps[1].rows,
+        vec![vec![1.0, 0.0, 3.0], vec![1.0, 1.0e-9, 4.0]]
+    );
+}
+
+#[test]
+fn reference_time_grid_rejects_nonmonotonic_time() {
+    let table = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0],
+            vec![1.0, 2.0e-9, 2.0],
+            vec![2.0, 1.0e-9, 3.0],
+        ],
+    };
+
+    let err = XyceTestRunner::reference_time_grid(&table)
+        .expect_err("nonmonotonic transient PRN time grid must fail");
+
+    assert!(err.contains("not monotonic"), "unexpected error: {err}");
+}
+
+#[test]
+fn transient_max_step_ignores_infeasible_source_transition_oversampling() {
+    let netlist = Netlist::parse(
+        "\
+source transition envelope
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)
+.TRAN 1N 20U
+.PRINT TRAN V(1)
+.END
+",
+    )
+    .expect("test netlist parses");
+    let tran = XyceTranAnalysis {
+        step: 1.0e-9,
+        stop: 20.0e-6,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 1.0e-9, 0.0],
+            vec![2.0, 10.0000004e-6, 1.0],
+            vec![3.0, 20.0e-6, 1.0],
+        ],
+    };
+
+    let max_step = XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+        .expect("requested .TRAN step remains feasible");
+
+    assert_eq!(max_step, 1.0e-9);
+}
+
+#[test]
+fn transient_max_step_does_not_treat_expensive_print_step_as_tmax() {
+    let netlist = Netlist::parse(
+        "\
+long rc envelope
+V1 in 0 0
+R1 in out 1k
+C1 out 0 40u IC=1
+.TRAN 0.5U 400ms
+.PRINT TRAN V(out)
+.END
+",
+    )
+    .expect("test netlist parses");
+    let tran = XyceTranAnalysis {
+        step: 0.5e-6,
+        stop: 400.0e-3,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(out)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0],
+            vec![1.0, 0.5e-6, 1.0],
+            vec![2.0, 400.0e-3, 0.0],
+        ],
+    };
+
+    let max_step = XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+        .expect("long transient falls back to bounded native step count");
+
+    assert_eq!(max_step, (tran.stop - tran.start.unwrap_or(0.0)) / 1000.0);
+}
+
+#[test]
+fn explicit_dtmax_replaces_the_xyce_default_maximum_in_both_directions() {
+    let netlist = Netlist::parse(
+        "dtmax precedence\nV1 in 0 1\nR1 in 0 1k\n.TRAN 1m 1\n.PRINT TRAN V(in)\n.END\n",
+    )
+    .expect("test netlist parses");
+    let mut tran = XyceTranAnalysis {
+        step: 1.0e-3,
+        stop: 1.0,
+        start: None,
+        max_step: Some(0.5),
+        uic: false,
+    };
+
+    assert_eq!(
+        XyceTestRunner::transient_family_max_step(&netlist, &tran)
+            .expect("large explicit DTMAX resolves"),
+        0.5,
+        "explicit DTMAX above 0.1*TSTOP must not be reduced by the default"
+    );
+
+    tran.max_step = Some(0.01);
+    assert_eq!(
+        XyceTestRunner::transient_family_max_step(&netlist, &tran)
+            .expect("small explicit DTMAX resolves"),
+        0.01,
+        "explicit DTMAX below 0.1*TSTOP must remain authoritative"
+    );
+}
+
+#[test]
+fn transient_max_step_bounds_reference_oversampling_for_nonlinear_deck() {
+    let mut deck = String::from(
+        "isolated adaptive reference gap\nV1 c 0 5\nV2 b 0 PULSE(0 1 1n 1n 1n 10n 40n)\n.model qn NPN BF=50\n",
+    );
+    for index in 0..14 {
+        deck.push_str(&format!("Q{index} c b 0 qn\n"));
+    }
+    deck.push_str(".tran 1n 75n\n.print tran v(c)\n.end\n");
+
+    let netlist = Netlist::parse(&deck).expect("nonlinear test netlist parses");
+    let tran = XyceTranAnalysis {
+        step: 1.0e-9,
+        stop: 75.0e-9,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(c)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 5.0],
+            vec![1.0, 0.58e-12, 5.0],
+            vec![2.0, 75.0e-9, 5.0],
+        ],
+    };
+
+    let max_step = XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+        .expect("source cadence remains inside the nonlinear work envelope");
+
+    assert!((max_step - 105.0e-12).abs() <= 1.0e-24, "got {max_step}");
+}
+
+#[test]
+fn transient_max_step_rejects_oversized_flattened_work_envelope() {
+    let mut deck = String::from("oversized hierarchical transient\nV1 in 0 SIN(0 1 1)\n");
+    deck.push_str(".subckt ladder a b\n");
+    for index in 0..40 {
+        let pos = if index == 0 {
+            "a".to_string()
+        } else {
+            format!("n{index}")
+        };
+        let neg = if index == 39 {
+            "b".to_string()
+        } else {
+            format!("n{}", index + 1)
+        };
+        deck.push_str(&format!("R{index} {pos} {neg} 1\n"));
+    }
+    deck.push_str(".ends\n");
+    for index in 0..100 {
+        let input = if index == 0 {
+            "in".to_string()
+        } else {
+            format!("out{}", index - 1)
+        };
+        deck.push_str(&format!("X{index} {input} out{index} ladder\n"));
+    }
+    deck.push_str(".tran 1m 100\n.print tran v(out99)\n.end\n");
+
+    let netlist = Netlist::parse(&deck).expect("test netlist parses");
+    let tran = XyceTranAnalysis {
+        step: 1.0e-3,
+        stop: 100.0,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(out99)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 1.0e-3, 0.0],
+            vec![2.0, 100.0, 0.0],
+        ],
+    };
+
+    let err = XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+        .expect_err("oversized native transient work envelope should be unsupported");
+
+    assert!(
+        err.contains("transient harness execution envelope"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        err.contains("native element-step"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn transient_max_step_rejects_oversized_compact_device_work_envelope() {
+    let mut deck = String::from(
+        "\
+oversized compact-device transient
+VDD dd 0 1.8
+VIN gate 0 PULSE(0 1.8 0 1n 1n 5n 10n)
+.model nmod NMOS LEVEL=10 SOIMOD=0
+.subckt moscell d g s b
+M1 d g s b nmod W=1u L=0.18u
+.ends
+",
+    );
+    for index in 0..140 {
+        deck.push_str(&format!("X{index} d{index} gate 0 0 moscell\n"));
+    }
+    deck.push_str(".tran 1n 10n\n.print tran v(d139)\n.end\n");
+
+    let netlist = Netlist::parse(&deck).expect("test netlist parses");
+    let tran = XyceTranAnalysis {
+        step: 1.0e-9,
+        stop: 10.0e-9,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(d139)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.5e-12, 0.0],
+            vec![2.0, 10.0e-9, 0.0],
+        ],
+    };
+
+    let err = XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+        .expect_err("oversized native compact-device work envelope should be unsupported");
+
+    assert!(
+        err.contains("transient harness execution envelope"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        err.contains("native compact-device"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn reference_columns_accept_primary_sweep_and_branch_labels() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let netlist = Netlist::default();
+    let reference = XycePrnTable {
+        columns: ["Index", "v-sweep", "v(2)", "vds_branch", "vmon1#branch"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: Vec::new(),
+    };
+    let print = XycePrintRequest {
+        probes: ["v(2)", "i(vds)", "I(VMON1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    };
+
+    let columns = runner
+        .reference_data_columns(&reference, &print, &netlist, 1, true)
+        .expect("reference columns map to Xyce DC probes");
+
+    assert!(matches!(
+        &columns[0],
+        XyceReferenceColumn::PrimarySweep { name } if name == "v-sweep"
+    ));
+    assert!(matches!(
+        &columns[1],
+        XyceReferenceColumn::Probe { name } if name == "v(2)"
+    ));
+    assert!(matches!(
+        &columns[2],
+        XyceReferenceColumn::Probe { name } if name == "i(vds)"
+    ));
+    assert!(matches!(
+        &columns[3],
+        XyceReferenceColumn::Probe { name } if name == "I(VMON1)"
+    ));
+}
+
+#[test]
+fn reference_columns_omit_empty_wildcard_lead_current_probes() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let netlist = Netlist::default();
+    let reference = XycePrnTable {
+        columns: ["Index", "V(1)"].into_iter().map(str::to_string).collect(),
+        rows: Vec::new(),
+    };
+    let print = XycePrintRequest {
+        probes: ["V(1)", "ID(*)", "IG(*)", "IS(*)", "IB(*)", "IC(*)", "IE(*)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    };
+
+    let columns = runner
+        .reference_data_columns(&reference, &print, &netlist, 1, true)
+        .expect("empty Xyce wildcard lead-current probes are omitted from PRN output");
+
+    assert_eq!(columns.len(), 1);
+    assert!(matches!(
+        &columns[0],
+        XyceReferenceColumn::Probe { name } if name == "V(1)"
+    ));
+    for probe in &print.probes[1..] {
+        assert!(
+            XyceTestRunner::dc_probe_is_omitted_empty_wildcard(probe, &netlist),
+            "{probe} should be classified as an omitted empty wildcard"
+        );
+    }
+}
+
+#[test]
+fn uic_initial_current_source_probe_reports_zero() {
+    let netlist = Netlist::parse(
+        "uic current source probe\n\
+             I1 1 0 10\n\
+             R1 1 0 1\n\
+             .tran 1m 2m uic\n\
+             .end\n",
+    )
+    .expect("deck parses");
+    let result = TransientResult {
+        time: vec![0.0, 1.0e-3],
+        step_sizes: vec![0.0; 2],
+        voltages: vec![vec![0.0, -10.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["1".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+
+    let initial = XyceTestRunner::evaluate_tran_probe("i(i1)", &netlist, &result, 0.0)
+        .expect("initial current-source probe evaluates");
+    let running = XyceTestRunner::evaluate_tran_probe("i(i1)", &netlist, &result, 1.0e-3)
+        .expect("running current-source probe evaluates");
+
+    assert_eq!(initial, 0.0);
+    assert_eq!(running, 10.0);
+}
+
+#[test]
+fn transient_resistor_power_probe_uses_recorded_branch_current() {
+    let netlist = Netlist::parse(
+        "transient resistor power probe\n\
+             R1 out 0 100\n\
+             .tran 1m 1m\n\
+             .end\n",
+    )
+    .expect("deck parses");
+    let result = TransientResult {
+        time: vec![0.0, 1.0e-3],
+        step_sizes: vec![0.0; 2],
+        voltages: vec![vec![1.0, 3.0]],
+        branch_currents: vec![vec![0.01, 0.03]],
+        num_nodes: 1,
+        node_names: vec!["out".to_string()],
+        branch_names: vec!["R1".to_string()],
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+
+    XyceTestRunner::validate_tran_probe("P(R1)", &netlist)
+        .expect("resistor power is a supported transient probe");
+    let power = XyceTestRunner::evaluate_tran_probe("P(R1)", &netlist, &result, 1.0e-3)
+        .expect("resistor power evaluates from branch current and voltage drop");
+
+    assert!((power - 0.09).abs() <= 1.0e-15, "power was {power}");
+}
+
+#[test]
+fn transient_voltage_source_power_probe_uses_recorded_branch_current() {
+    let netlist = Netlist::parse(
+        "transient voltage source power probe\n\
+             V1 out 0 1\n\
+             .tran 1m 1m\n\
+             .end\n",
+    )
+    .expect("deck parses");
+    let result = TransientResult {
+        time: vec![0.0, 1.0e-3],
+        step_sizes: vec![0.0; 2],
+        voltages: vec![vec![2.0, 3.0]],
+        branch_currents: vec![vec![0.5, -0.25]],
+        num_nodes: 1,
+        node_names: vec!["out".to_string()],
+        branch_names: vec!["V1".to_string()],
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+
+    XyceTestRunner::validate_tran_probe("P(V1)", &netlist)
+        .expect("voltage-source power is a supported transient probe");
+    XyceTestRunner::validate_tran_probe("W(V1)", &netlist).expect("W is a Xyce power-probe alias");
+    XyceTestRunner::validate_tran_probe("{W(V1)}", &netlist)
+        .expect("braced W power expression validates through probe rewriting");
+
+    let direct = XyceTestRunner::evaluate_tran_probe("P(V1)", &netlist, &result, 1.0e-3)
+        .expect("P(V1) evaluates from branch current and voltage drop");
+    let alias = XyceTestRunner::evaluate_tran_probe("W(V1)", &netlist, &result, 1.0e-3)
+        .expect("W(V1) evaluates from branch current and voltage drop");
+    let braced = XyceTestRunner::evaluate_tran_probe("{W(V1)}", &netlist, &result, 1.0e-3)
+        .expect("{W(V1)} evaluates through expression rewriting");
+
+    assert!((direct + 0.75).abs() <= 1.0e-15, "power was {direct}");
+    assert_eq!(alias, direct);
+    assert_eq!(braced, direct);
+}
+
+#[test]
+fn nested_device_then_param_step_rebinds_source_expression() {
+    let netlist = Netlist::parse(
+        "nested mixed step source binding\n\
+             R1 a 0 10\n\
+             Va a 0 SIN(0 {v_amplitude} 1)\n\
+             .global_param v_amplitude=2\n\
+             .step R1 10 11 1\n\
+             .step v_amplitude 1 2 1\n\
+             .end\n",
+    )
+    .expect("deck parses");
+    let steps = XyceTestRunner::step_commands(&netlist).expect("steps parse");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &steps)
+        .expect("nested steps expand");
+
+    assert_eq!(runs.len(), 4);
+    for (run, (expected_r, expected_amp)) in
+        runs.iter()
+            .zip([(10.0, 1.0), (11.0, 1.0), (10.0, 2.0), (11.0, 2.0)])
+    {
+        let resistor = run
+            .netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .expect("R1 is present");
+        match &resistor.kind {
+            ElementKind::Resistor { value, .. } => assert_eq!(*value, expected_r),
+            other => panic!("unexpected R1 kind: {other:?}"),
+        }
+
+        let source = run
+            .netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("Va"))
+            .expect("Va is present");
+        match &source.kind {
+            ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Sin {
+                amplitude, ..
+            }) => assert_eq!(*amplitude, expected_amp),
+            other => panic!("unexpected Va kind: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn nested_step_shared_plan_preserves_data_metadata_and_combined_bindings() {
+    let netlist = Netlist::parse(
+        "nested DATA and parameter step\n\
+             .param gain=1 bias=1\n\
+             V1 out 0 {gain+bias}\n\
+             .data samples bias\n\
+             10\n\
+             20\n\
+             .enddata\n\
+             .step gain list 2 3\n\
+             .step data=samples\n\
+             .end\n",
+    )
+    .expect("deck parses");
+    let steps = XyceTestRunner::step_commands(&netlist).expect("steps parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &steps)
+        .expect("shared plan expands DATA and PARAM steps");
+
+    assert_eq!(runs.len(), 4);
+    for (run, (gain, row_index, bias)) in runs.iter().zip([
+        (2.0, 0.0, 10.0),
+        (3.0, 0.0, 10.0),
+        (2.0, 1.0, 20.0),
+        (3.0, 1.0, 20.0),
+    ]) {
+        assert_eq!(run.step_values, vec![gain, row_index]);
+        assert_eq!(run.netlist.params.get("gain"), Some(gain));
+        assert_eq!(run.netlist.params.get("bias"), Some(bias));
+        let source = run
+            .netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("V1"))
+            .expect("V1 exists");
+        match &source.kind {
+            ElementKind::VoltageSource(spec) => {
+                assert_eq!(extract_dc_value(spec), gain + bias);
+            }
+            other => panic!("unexpected V1 kind: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn nested_step_shared_plan_fails_closed_on_limits_and_cancellation() {
+    assert_eq!(XYCE_STEP_PLAN_MAX_RUNS, 4_096);
+    const { assert!(XYCE_STEP_PLAN_MAX_RUNS >= 21 * 195) };
+    let harness_limits = xyce_step_plan_limits();
+    assert_eq!(harness_limits.max_runs(), XYCE_STEP_PLAN_MAX_RUNS);
+
+    let netlist = Netlist::parse(
+        "nested step resource limits\n\
+             .param a=0 b=0\n\
+             .step a list 1 2\n\
+             .step b list 3 4\n\
+             .end\n",
+    )
+    .expect("deck parses");
+    let steps = XyceTestRunner::step_commands(&netlist).expect("steps parse");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let error = XyceTestRunner::nested_step_runs_for_commands_with_limits_and_abort(
+        &engine,
+        &netlist,
+        &steps,
+        StepPlanLimits::new(3, 2, 2, 4),
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .expect_err("four runs must exceed the explicit three-run harness limit");
+    assert!(error.to_string().contains("requests 4 run(s)"));
+
+    assert!(matches!(
+        XyceTestRunner::nested_step_runs_for_commands_with_limits_and_abort(
+            &engine,
+            &netlist,
+            &steps,
+            StepPlanLimits::new(4, 2, 2, 4),
+            &rspice_core::abort_signal::ImmediateAbort,
+        ),
+        Err(SimulationError::Aborted)
+    ));
+}
+
+#[test]
+fn stepped_solution_behavioral_source_rebinds_initial_condition_per_run() {
+    let netlist = Netlist::parse_with_options(
+        "stepped behavioral rebinding\n\
+             .global_param seed=1 gain=0.5\n\
+             B1 0 out I={gain*v(out)}\n\
+             C1 out 0 1\n\
+             .IC V(out)={seed}\n\
+             .TRAN 0 1 UIC\n\
+             .STEP seed LIST 1 2\n\
+             .END\n",
+        rspice_core::netlist::NetlistParseOptions {
+            statistical_mode: rspice_core::netlist::StatisticalParamMode::Sample,
+            expression_dialect: ExpressionDialect::Xyce,
+            parameter_redefinition_policy:
+                rspice_core::netlist::ParameterRedefinitionPolicy::UseLast,
+            ..rspice_core::netlist::NetlistParseOptions::default()
+        },
+    )
+    .expect("deck parses");
+    let steps = XyceTestRunner::step_commands(&netlist).expect("step parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &steps)
+        .expect("parameter steps reparse into fresh netlists");
+
+    assert_eq!(runs.len(), 2);
+    for (run, expected_seed) in runs.iter().zip([1.0, 2.0]) {
+        assert_eq!(run.netlist.params.get("seed"), Some(expected_seed));
+        assert_eq!(run.netlist.initial_conditions.len(), 1);
+        assert!(
+            run.netlist.initial_conditions[0]
+                .node
+                .eq_ignore_ascii_case("out")
+        );
+        assert_eq!(run.netlist.initial_conditions[0].voltage, expected_seed);
+        let source = run
+            .netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("B1"))
+            .expect("behavioral source remains present");
+        match &source.kind {
+            ElementKind::BehavioralCurrent { expression, .. } => {
+                let prepared = prepare_behavioral_expression(expression, &run.netlist.params)
+                    .expect("member expression prepares in its own parameter scope");
+                let ast = parse_expression_strict(&prepared)
+                    .expect("solution-dependent expression compiles per member");
+                assert!(XyceTestRunner::expression_depends_on_solution_quantity(
+                    &ast
+                ));
+            }
+            other => panic!("unexpected B1 kind: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn comp_tolerances_apply_zero_tolerance_to_matching_print_probe() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let columns = vec![XyceReferenceColumn::Probe {
+        name: "I(VIDS)".to_string(),
+    }];
+    let tolerances = runner
+        .comp_tolerances("*COMP I(VIDS) zerotol=1.0e-11\n", &columns)
+        .expect("COMP tolerance parses");
+    let tolerance = *tolerances
+        .get("i(vids)")
+        .expect("COMP tolerance keyed by normalized probe");
+
+    assert_eq!(tolerance.zero, Some(1.0e-11));
+    assert!(
+        runner.value_mismatch(1.0e-24, 1.8e-12, tolerance).is_none(),
+        "zerotol should accept near-zero values on both sides"
+    );
+}
+
+#[test]
+fn transient_comparison_accounts_for_printed_time_quantization() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let result = TransientResult {
+        time: vec![2.99999996, 3.0],
+        step_sizes: vec![0.0; 2],
+        voltages: vec![vec![1.7336955179822779e-3, 0.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["1".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+    let tolerance = runner.default_comparison_tolerance("v(1)");
+    let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(2.99999996);
+
+    assert!(
+        runner
+            .transient_probe_matches_within_time_quantization(
+                "V(1)",
+                &Netlist::default(),
+                &result,
+                2.99999996,
+                1.52218075e-3,
+                1.7336955179822779e-3,
+                tolerance,
+                time_tolerance,
+            )
+            .expect("time-window comparison should evaluate"),
+        "expected value falls inside the waveform interval induced by printed PRN time precision"
+    );
+}
+
+#[test]
+fn transient_comparison_uses_local_samples_inside_prn_time_neighborhood() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let time = 2.96913385e-6;
+    let result = TransientResult {
+        time: vec![time, 2.96913387e-6],
+        step_sizes: vec![0.0; 2],
+        voltages: vec![vec![3.984804681e-4, 0.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["3".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+    let tolerance = runner
+        .default_comparison_tolerance("v(3)")
+        .with_relative(0.02)
+        .with_absolute(1.0e-6);
+    let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(time);
+
+    assert!(
+        runner
+            .transient_probe_matches_within_time_quantization(
+                "V(3)",
+                &Netlist::default(),
+                &result,
+                time,
+                2.38339292e-4,
+                3.984804681e-4,
+                tolerance,
+                time_tolerance,
+            )
+            .expect("time-neighborhood comparison should evaluate"),
+        "expected value falls inside adjacent PRN-rounded transition samples"
+    );
+}
+
+#[test]
+fn transient_comparison_accepts_duplicate_reference_time_envelope() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![vec![0.0, 1.0e-9, 1.0], vec![1.0, 1.0e-9, 3.0]],
+    };
+    let tolerance = runner.default_comparison_tolerance("v(1)");
+
+    assert!(
+        runner.transient_probe_matches_reference_time_neighborhood(
+            &reference, 1, 0, 2, 2.0, tolerance, 0.0, 1.0,
+        ),
+        "actual value inside duplicate printed-time oracle envelope should be accepted"
+    );
+}
+
+#[test]
+fn transient_comparison_rejects_outside_duplicate_reference_time_envelope() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![vec![0.0, 1.0e-9, 1.0], vec![1.0, 1.0e-9, 3.0]],
+    };
+    let tolerance = runner.default_comparison_tolerance("v(1)");
+
+    assert!(
+        !runner.transient_probe_matches_reference_time_neighborhood(
+            &reference, 1, 0, 2, 4.0, tolerance, 0.0, 1.0,
+        ),
+        "actual value outside duplicate printed-time oracle envelope should be rejected"
+    );
+}
+
+#[test]
+fn transient_comparison_rejects_single_reference_time_row_neighborhood() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![vec![0.0, 1.0e-9, 1.0], vec![1.0, 2.0e-9, 3.0]],
+    };
+    let tolerance = runner.default_comparison_tolerance("v(1)");
+
+    assert!(
+        !runner.transient_probe_matches_reference_time_neighborhood(
+            &reference, 1, 0, 2, 2.0, tolerance, 0.0, 1.0,
+        ),
+        "a single oracle row must still fail normal comparison"
+    );
+}
+
+#[test]
+fn transient_comparison_accepts_rounded_reference_time_neighborhood() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let time = 2.83500038e-8;
+    let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(time);
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, time - time_tolerance, 0.017],
+            vec![1.0, time, 0.019],
+            vec![2.0, time + time_tolerance, 0.023],
+        ],
+    };
+    let tolerance = runner.default_comparison_tolerance("v(1)");
+
+    assert!(
+        runner.transient_probe_matches_reference_time_neighborhood(
+            &reference,
+            1,
+            1,
+            2,
+            0.020293594015632306,
+            tolerance,
+            time_tolerance,
+            1.0,
+        ),
+        "actual value inside rounded printed-time oracle envelope should be accepted"
+    );
+}
+
+#[test]
+fn transient_comparison_accepts_decimal_boundary_reference_time_neighborhood() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let time = 1.31654818e-7;
+    let neighbor_time = 1.31654820e-7;
+    let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(time);
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, time, 7.68303997e-3],
+            vec![1.0, neighbor_time, 1.14131863e-2],
+        ],
+    };
+    let tolerance = runner.default_comparison_tolerance("v(1)");
+
+    assert!(
+        runner.transient_probe_matches_reference_time_neighborhood(
+            &reference,
+            1,
+            0,
+            2,
+            8.189634498984992e-3,
+            tolerance,
+            time_tolerance,
+            1.0,
+        ),
+        "decimal timestamps at the PRN-neighborhood boundary should not fail due to binary roundoff"
+    );
+}
+
+#[test]
+fn output_initial_interval_parser_accepts_spaced_assignment() {
+    let interval = XyceTestRunner::output_initial_interval(
+        "\
+interval output
+.OPTIONS OUTPUT INITIAL_INTERVAL = 0.5ms
+.END
+",
+    )
+    .expect("output option parses")
+    .expect("initial interval is detected");
+
+    assert!((interval - 5.0e-4).abs() <= 1.0e-15);
+
+    let schedule = XyceTestRunner::output_interval_schedule(
+        "interval output\n.options output initial_interval=1ms 9ms .1ms 10ms 10us\n.end\n",
+    )
+    .expect("piecewise output schedule parses")
+    .expect("piecewise output schedule is present");
+    assert!((schedule.0 - 1.0e-3).abs() <= 1.0e-15);
+    assert_eq!(schedule.1.len(), 2);
+    assert!((schedule.1[0].0 - 9.0e-3).abs() <= 1.0e-15);
+    assert!((schedule.1[0].1 - 1.0e-4).abs() <= 1.0e-15);
+    assert!((schedule.1[1].0 - 10.0e-3).abs() <= 1.0e-15);
+    assert!((schedule.1[1].1 - 10.0e-6).abs() <= 1.0e-15);
+    assert!(
+        XyceTestRunner::output_interval_schedule(
+            "invalid output schedule\n.options output initial_interval=1ms 9ms\n.end\n"
+        )
+        .is_err(),
+        "an incomplete time/interval pair must fail closed"
+    );
+}
+
+#[test]
+fn tran_print_time_scale_factor_parser_accepts_spaced_assignment() {
+    let factor = XyceTestRunner::tran_print_time_scale_factor(
+        "\
+timescale output
+.PRINT TRAN TIMESCALEFACTOR = 10 V(1)
+.END
+",
+    )
+    .expect("TRAN print time scale factor parses");
+
+    assert!((factor - 10.0).abs() <= 1.0e-15);
+
+    let repeated = XyceTestRunner::tran_print_time_scale_factor(
+        "timescale output\n.PRINT TRAN TIMESCALEFACTOR=bogus TIMESCALEFACTOR=1 V(1)\n.END\n",
+    )
+    .expect("repeated TRAN print time scale factors use Xyce last-assignment semantics");
+    assert!((repeated - 1.0).abs() <= 1.0e-15);
+
+    let conflict = XyceTestRunner::tran_print_time_scale_factor(
+            "timescale output\n.PRINT TRAN TIMESCALEFACTOR=10 V(1)\n.PRINT TRAN FILE='side.prn' TIMESCALEFACTOR=1 V(2)\n.END\n",
+        )
+        .expect_err("independent TRAN output blocks must not share one effective time scale");
+    assert!(conflict.contains("different .PRINT TRAN output blocks"));
+
+    for source in [
+        "timescale output\n.PRINT TRAN TIMESCALEFACTOR=10 V(1)\n.PRINT TRAN FILE='side.prn' V(2)\n.END\n",
+        "timescale output\n.PRINT TRAN V(1)\n.PRINT TRAN FILE='side.prn' TIMESCALEFACTOR=10 V(2)\n.END\n",
+    ] {
+        assert!(
+            XyceTestRunner::tran_print_time_scale_factor(source).is_err(),
+            "an omitted TIMESCALEFACTOR contributes the effective default 1 for its own output block"
+        );
+    }
+
+    let after_probe = XyceTestRunner::tran_print_time_scale_factor(
+        "timescale output\n.PRINT TRAN V(1) TIMESCALEFACTOR=10\n.END\n",
+    )
+    .expect("assignment-like probes do not become leading PRINT options");
+    assert_eq!(after_probe.to_bits(), 1.0f64.to_bits());
+}
+
+#[test]
+fn tran_print_time_scale_factor_defaults_to_one() {
+    let factor = XyceTestRunner::tran_print_time_scale_factor(
+        "\
+default output
+.PRINT TRAN V(1)
+.END
+",
+    )
+    .expect("TRAN print line without a time scale factor parses");
+
+    assert!((factor - 1.0).abs() <= 1.0e-15);
+}
+
+#[test]
+fn output_snapshots_option_is_detected_for_csv_guardrails() {
+    assert!(
+        XyceTestRunner::line_declares_output_snapshots(
+            ".OPTIONS OUTPUT SNAPSHOTS=true INITIAL_INTERVAL=0.01"
+        )
+        .expect("snapshot option parses")
+    );
+    assert!(
+        !XyceTestRunner::line_declares_output_snapshots(
+            ".OPTIONS OUTPUT SNAPSHOTS = false INITIAL_INTERVAL=0.01"
+        )
+        .expect("disabled snapshot option parses")
+    );
+}
+
+#[test]
+fn transient_output_interval_corridor_uses_adjacent_reference_rows() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let reference = XycePrnTable {
+        columns: ["Index", "TIME", "V(1)"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0],
+            vec![1.0, 0.5, 0.75],
+            vec![2.0, 1.0, 0.0],
+        ],
+    };
+    let result = TransientResult {
+        time: vec![0.0, 0.25, 0.5, 0.75, 1.0],
+        step_sizes: vec![0.0; 5],
+        voltages: vec![vec![1.0, 0.75, 0.5, 0.25, 0.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["1".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+    let tolerance = runner.default_comparison_tolerance("v(1)");
+
+    assert!(
+        runner
+            .transient_probe_matches_output_interval_corridor(
+                "V(1)",
+                &Netlist::default(),
+                &result,
+                &reference,
+                1,
+                1,
+                0.75,
+                tolerance,
+                0.5,
+                1.0,
+            )
+            .expect("corridor comparison evaluates"),
+        "expected interval-interpolated value should be accepted inside adjacent output rows"
+    );
+    assert!(
+        !runner
+            .transient_probe_matches_output_interval_corridor(
+                "V(1)",
+                &Netlist::default(),
+                &result,
+                &reference,
+                1,
+                1,
+                1.5,
+                tolerance,
+                0.5,
+                1.0,
+            )
+            .expect("corridor comparison evaluates"),
+        "value outside the adjacent output-row envelope must not be accepted"
+    );
+}
+
+#[test]
+fn transient_interpolation_preserves_subpicosecond_samples() {
+    let times = [0.0, 5.0e-13, 1.0e-12];
+    let values = [1.1, 1.5, 2.0];
+
+    let exact = XyceTestRunner::interpolate_transient_waveform_at(&times, &values, 5.0e-13)
+        .expect("exact sub-picosecond sample interpolates");
+    let midpoint = XyceTestRunner::interpolate_transient_waveform_at(&times, &values, 2.5e-13)
+        .expect("interior sub-picosecond sample interpolates");
+
+    assert!(
+        (exact - 1.5).abs() <= 1.0e-15,
+        "exact sample collapsed to {exact:.12e}"
+    );
+    assert!(
+        (midpoint - 1.3).abs() <= 1.0e-15,
+        "midpoint sample collapsed to {midpoint:.12e}"
+    );
+}
+
+#[test]
+fn comp_tolerances_parse_case_and_spaced_assignments() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let columns = vec![XyceReferenceColumn::Probe {
+        name: "i(vds)".to_string(),
+    }];
+    let tolerances = runner
+        .comp_tolerances(
+            "*COMP i(vds) RELTOL = 0.25 abstol=1e-5 absdifftol=2e-5\n",
+            &columns,
+        )
+        .expect("COMP tolerances parse");
+    let tolerance = *tolerances
+        .get("i(vds)")
+        .expect("COMP tolerance keyed by normalized probe");
+
+    assert_eq!(tolerance.relative, 0.25);
+    assert_eq!(tolerance.absolute, 2.0e-5);
+}
+
+#[test]
+fn default_tolerances_are_unit_aware() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let voltage_tolerance = runner.default_comparison_tolerance("v(1)");
+    let magnitude_tolerance = runner.default_comparison_tolerance("vm(1)");
+    let phase_tolerance = runner.default_comparison_tolerance("vp(1)");
+    let current_tolerance = runner.default_comparison_tolerance("i(v1)");
+    let power_tolerance = runner.default_comparison_tolerance("p(l1)");
+    let braced_power_tolerance = runner.default_comparison_tolerance("{p(l1)}");
+
+    assert_eq!(voltage_tolerance.absolute, rspice_core::constants::VNTOL);
+    assert_eq!(magnitude_tolerance.absolute, rspice_core::constants::VNTOL);
+    assert_eq!(phase_tolerance.absolute, 1.0e-12);
+    assert_eq!(current_tolerance.absolute, 1.0e-12);
+    assert_eq!(current_tolerance.zero, Some(2.0e-12));
+    assert_eq!(power_tolerance.absolute, 1.0e-9);
+    assert_eq!(braced_power_tolerance.absolute, 1.0e-9);
+    assert!(
+        runner
+            .value_mismatch(3.98095099e-12, 0.0, voltage_tolerance)
+            .is_none(),
+        "picovolt-scale voltage differences should be inside default VNTOL"
+    );
+    assert!(
+        runner
+            .value_mismatch(1.27073881e-10, 6.193804438227198e-12, power_tolerance)
+            .is_none(),
+        "sub-nanowatt derived power differences should stay inside default power tolerance"
+    );
+    assert!(
+        runner
+            .value_mismatch(3.98095099e-12, 0.0, current_tolerance)
+            .is_some(),
+        "current differences keep the stricter ITOL-scale default"
+    );
+    assert!(
+        runner
+            .value_mismatch(1.87829126e-12, -5.0e-15, current_tolerance)
+            .is_none(),
+        "near-zero current residuals inside both simulators' ABSTOL budgets should compare equal"
+    );
+}
+
+#[test]
+fn source_directive_rejection_fails_closed_on_loca_continuation_options() {
+    let source = ".options nonlin continuation=1\n.options loca stepper=natural\n";
+
+    let err = XyceTestRunner::reject_unsupported_source_directives(source)
+        .expect_err("LOCA continuation options are outside the native contract");
+
+    assert!(
+        err.contains("LOCA continuation"),
+        "unexpected rejection message: {err}"
+    );
+}
+
+#[test]
+fn stateful_print_call_detection_is_token_aware() {
+    assert!(XyceTestRunner::print_expression_contains_named_call(
+        "SDT ( V(out) ) + 1",
+        "sdt"
+    ));
+    assert!(!XyceTestRunner::print_expression_contains_named_call(
+        "my_sdt(V(out)) + sdt_value",
+        "sdt"
+    ));
+    assert!(!XyceTestRunner::print_expression_contains_named_call(
+        "table(\"sdt(fake)\")",
+        "sdt"
+    ));
+}
+
+#[test]
+fn stateful_print_call_detection_follows_user_function_graph() {
+    let mut params = rspice_core::netlist::ParamContext::new();
+    params.define_function("square", vec!["x".to_string()], "x*x");
+    params.define_function("integral", vec!["x".to_string()], "sdt(square(x))");
+    params.define_function("wrapped", vec!["x".to_string()], "integral(x)+1");
+
+    assert!(XyceTestRunner::print_expression_contains_stateful_sdt(
+        "wrapped(I(v1))",
+        &params
+    ));
+    assert!(!XyceTestRunner::print_expression_contains_stateful_sdt(
+        "P(c1)+square(V(out))",
+        &params
+    ));
+}
+
+#[test]
+fn voltage_probe_parses_xyce_dc_accessors() {
+    assert_eq!(
+        XyceTestRunner::parse_voltage_probe("VR(A,B)"),
+        Some(XyceVoltageProbe {
+            accessor: XyceVoltageAccessor::Real,
+            node_pos: "a".to_string(),
+            node_neg: Some("b".to_string()),
+        })
+    );
+    assert_eq!(
+        XyceTestRunner::parse_voltage_probe(" vm( OUT ) "),
+        Some(XyceVoltageProbe {
+            accessor: XyceVoltageAccessor::Magnitude,
+            node_pos: "out".to_string(),
+            node_neg: None,
+        })
+    );
+    assert_eq!(
+        XyceTestRunner::parse_voltage_probe("VP(n1,n2)")
+            .expect("phase probe parses")
+            .accessor,
+        XyceVoltageAccessor::Phase
+    );
+    assert_eq!(
+        XyceTestRunner::parse_voltage_probe("VDB(out)")
+            .expect("dB probe parses")
+            .accessor,
+        XyceVoltageAccessor::Decibels
+    );
+    assert!(XyceTestRunner::parse_voltage_probe("VX(A)").is_none());
+    assert_eq!(
+        XyceTestRunner::parse_tran_voltage_probe("N(OUT)"),
+        Some(XyceVoltageProbe {
+            accessor: XyceVoltageAccessor::Value,
+            node_pos: "out".to_string(),
+            node_neg: None,
+        })
+    );
+    assert!(
+        XyceTestRunner::parse_tran_voltage_probe("N(M1:GM)").is_none(),
+        "transient N(...) node alias must not steal device operating-point probes"
+    );
+}
+
+#[test]
+fn subcircuit_node_probe_detection_accepts_period_hierarchy() {
+    assert!(
+        XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1.1.)"),
+        "Xyce/HSPICE period hierarchy should be recognized for subcircuit node probes"
+    );
+    assert!(
+        XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1..)"),
+        "subcircuit node names that are themselves periods remain hierarchy probes"
+    );
+    assert!(
+        XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1.x2.1.)"),
+        "nested period hierarchy should be recognized"
+    );
+    assert!(
+        XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1:x2::)"),
+        "existing colon hierarchy remains recognized"
+    );
+    assert!(
+        !XyceTestRunner::voltage_probe_targets_subcircuit_node("v(1.)"),
+        "top-level punctuation node names are not hierarchy probes"
+    );
+    assert!(
+        !XyceTestRunner::voltage_probe_targets_subcircuit_node("v(.)"),
+        "the top-level period node is not a hierarchy probe by itself"
+    );
+}
+
+#[test]
+fn ac_data_table_analysis_resolves_frequency_column() {
+    let netlist = Netlist::parse(
+        "\
+xyce ac data
+I1 1 0 AC 1
+R1 1 0 1k
+.AC DATA=eric
+.DATA eric
++ FREQ unused
++ 1 7
++ 10 8
++ 100 9
+.ENDDATA
+.PRINT AC V(1)
+.END
+",
+    )
+    .expect(".AC DATA deck should parse");
+
+    let ac = XyceTestRunner::single_ac_analysis(&netlist)
+        .expect(".AC DATA table should resolve to a frequency list");
+
+    assert_eq!(ac.frequencies(), vec![1.0, 10.0, 100.0]);
+    let data_points = ac.data_points().expect(".AC DATA rows are retained");
+    assert_eq!(data_points.len(), 3);
+    assert_eq!(
+        data_points[1].overrides,
+        vec![("FREQ".to_string(), 10.0), ("unused".to_string(), 8.0)]
+    );
+}
+
+#[test]
+fn noise_data_table_resolves_hertz_and_preserves_nonmonotonic_rows() {
+    let netlist = Netlist::parse(
+        "\
+xyce noise data
+.GLOBAL_PARAM mag=1 phase=0
+V1 in 0 AC {mag} {phase}
+R1 in out 1k
+R2 out 0 1k
+.NOISE V(out) V1 DATA=points
+.DATA points
++ mag phase HERTZ
++ 2 0.2 10
++ 3 0.3 100
++ 1 0.1 1
+.ENDDATA
+.PRINT NOISE V(out) INOISE ONOISE
+.END
+",
+    )
+    .expect(".NOISE DATA deck should parse");
+
+    let analysis = XyceTestRunner::noise_analysis_for_netlist(&netlist)
+        .expect(".NOISE DATA table should resolve");
+    assert_eq!(analysis.frequencies, vec![10.0, 100.0, 1.0]);
+    let rows = analysis.data_points.expect("DATA rows retained");
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[2].overrides,
+        vec![
+            ("mag".to_string(), 1.0),
+            ("phase".to_string(), 0.1),
+            ("HERTZ".to_string(), 1.0),
+        ]
+    );
+}
+
+#[test]
+fn frequency_data_table_rejects_ambiguous_or_nonpositive_axes() {
+    for (columns, values, expected) in [
+        ("FREQ HERTZ", "1 1", "ambiguous frequency columns"),
+        ("FREQ", "0", "frequency must be positive and finite"),
+    ] {
+        let source = format!(
+            "table validation\nV1 1 0 AC 1\nR1 1 0 1k\n.AC DATA=points\n.DATA points\n+ {columns}\n+ {values}\n.ENDDATA\n.PRINT AC V(1)\n.END\n"
+        );
+        let netlist = Netlist::parse(&source).expect("table syntax parses");
+        let error = XyceTestRunner::single_ac_analysis(&netlist)
+            .expect_err("invalid frequency axis must fail closed");
+        assert!(error.contains(expected), "unexpected error: {error}");
+    }
+}
+
+#[test]
+fn ac_frequency_bindings_allow_freq_dependent_global_params_to_parse() {
+    let source = "\
+xyce ac freq binding
+.GLOBAL_PARAM OMEGA={2*PI*FREQ}
+R1 a 0 {OMEGA}
+V1 a 0 AC 1
+.AC DEC 1 10 100
+.PRINT AC FREQ HERTZ R1:R
+.END
+";
+
+    let unbound = XyceTestRunner::parse_xyce_netlist(source, Path::new("freq.cir"))
+        .expect("plain parse retains FREQ-dependent global expressions");
+    assert_eq!(
+        unbound.params.get_global_expression("OMEGA"),
+        Some("2*PI*FREQ")
+    );
+    let resistor_expression = unbound
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("R1"))
+        .and_then(|element| match &element.kind {
+            ElementKind::Resistor { value_expr, .. } => value_expr.as_deref(),
+            _ => None,
+        });
+    assert_eq!(
+        resistor_expression,
+        Some("OMEGA"),
+        "the unbound resistor value remains deferred until AC frequency binding"
+    );
+
+    let rebound = XyceTestRunner::source_with_ac_frequency_bindings(source, 10.0);
+    let netlist = XyceTestRunner::parse_xyce_netlist(&rebound, Path::new("freq.cir"))
+        .expect("frequency-bound source parses");
+    let ac = XyceTestRunner::single_ac_analysis(&netlist)
+        .expect("AC analysis is still detected after frequency binding");
+
+    let frequencies = ac.frequencies();
+    assert_eq!(frequencies.len(), 2);
+    assert!((frequencies[0] - 10.0).abs() < 1.0e-12);
+    assert!((frequencies[1] - 100.0).abs() < 1.0e-10);
+    assert!((netlist.params.get("FREQ").expect("FREQ bound") - 10.0).abs() < 1.0e-12);
+    assert!(
+        (netlist.params.get("OMEGA").expect("OMEGA evaluates") - 2.0 * std::f64::consts::PI * 10.0)
+            .abs()
+            < 1.0e-12
+    );
+}
+
+#[test]
+fn ac_frequency_error_fallback_scan_covers_all_parameter_directives() {
+    for directive in [
+        ".PARAM SCALE={FREQ+1}",
+        ".CSPARAM SCALE={HERTZ+1}",
+        ".GLOBAL_PARAM SCALE={2*PI*FREQ}",
+    ] {
+        assert!(
+            XyceTestRunner::source_has_ac_frequency_dependent_parameter(&format!(
+                "frequency parameter\n{directive}\n.end\n"
+            )),
+            "{directive} must request pointwise AC frequency binding"
+        );
+    }
+    assert!(
+        !XyceTestRunner::source_has_ac_frequency_dependent_parameter(
+            "frequency print only\n.PRINT AC FREQ HERTZ\n.end\n"
+        ),
+        "ordinary AC output columns do not require source rebinding"
+    );
+    assert!(
+        !XyceTestRunner::source_has_ac_frequency_dependent_parameter(
+            "explicit frequency params\n.PARAM FREQ=10 HERTZ=10\n.end\n"
+        ),
+        "explicit parameter definitions are bindings, not dependencies"
+    );
+}
+
+#[test]
+fn parsed_ac_frequency_detection_uses_retained_expression_structure() {
+    let parse = |source: &str| {
+        XyceTestRunner::parse_xyce_netlist(source, Path::new("frequency-detection.cir"))
+            .expect("frequency-dependency fixture parses")
+    };
+    for source in [
+        "direct global\n.GLOBAL_PARAM SCALE={FREQ+1}\n.end\n",
+        "nested function global\n.FUNC SCALE(x)={x*FREQ}\n.GLOBAL_PARAM VALUE={SCALE(2)}\n.end\n",
+    ] {
+        let netlist = parse(source);
+        assert!(
+            XyceTestRunner::parsed_netlist_has_ac_frequency_dependent_global(&netlist),
+            "retained frequency dependency must be detected: {source}"
+        );
+    }
+    for source in [
+        "constant-fed global\n.PARAM FREQ=5\n.GLOBAL_PARAM VALUE={FREQ+1}\n.end\n",
+        "constant HERTZ global\n.CSPARAM HERTZ=1000\n.GLOBAL_PARAM VALUE={HERTZ+1}\n.end\n",
+        "function formal\n.FUNC ID(FREQ)={FREQ+1}\n.GLOBAL_PARAM VALUE={ID(2)}\n.end\n",
+        "quoted text\n.GLOBAL_PARAM LABEL=\"FREQ\"\n.end\n",
+    ] {
+        let netlist = parse(source);
+        assert!(
+            !XyceTestRunner::parsed_netlist_has_ac_frequency_dependent_global(&netlist),
+            "names, formals, and quoted text are not frequency dependencies: {source}"
+        );
+    }
+}
+
+#[test]
+fn bug1212_static_ac_plan_binds_retained_frequency_globals_and_executes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Certification_Tests/BUG_1212_SON/bug1212.cir";
+    let path = root.join(relative);
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: path.clone(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+
+    let plan = runner
+        .static_ac_plan_for_deck(&deck)
+        .expect("BUG 1212 has a native frequency-bound AC plan");
+    assert!(
+        plan.frequency_bound,
+        "retained FREQ globals still require pointwise AC source binding"
+    );
+    assert!(plan.steps.is_empty());
+    assert!(plan.ac.data_points().is_none());
+
+    let result = runner.run_test(&path);
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "BUG 1212 must execute its checked-in AC oracle: {result:?}"
+    );
+    assert_eq!(result.contract, "wrapper_static_fd_prn_ac");
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn retained_frequency_globals_preserve_step_and_data_plan_guards() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-frequency-ac-guards-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows Unix epoch")
+            .as_nanos()
+    ));
+    let netlists = root.join("Netlists/FREQ_GUARDS");
+    fs::create_dir_all(&netlists).expect("create frequency-guard fixtures");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (file_name, source, expected_error) in [
+        (
+            "step.cir",
+            "frequency STEP guard\n\
+                 .GLOBAL_PARAM SCALE={FREQ+1}\n\
+                 V1 1 0 AC 1\n\
+                 R1 1 0 {SCALE}\n\
+                 .AC LIN 2 1 2\n\
+                 .STEP PARAM UNUSED 1 2 1\n\
+                 .PRINT AC V(1)\n\
+                 .END\n",
+            ".STEP combined with AC frequency-dependent parameters is not implemented in the native Xyce oracle",
+        ),
+        (
+            "data.cir",
+            "frequency DATA guard\n\
+                 .GLOBAL_PARAM SCALE={FREQ+1}\n\
+                 V1 1 0 AC 1\n\
+                 R1 1 0 {SCALE}\n\
+                 .AC DATA=TABLE1\n\
+                 .DATA TABLE1\n\
+                 + FREQ UNUSED\n\
+                 + 1 0\n\
+                 + 2 0\n\
+                 .ENDDATA\n\
+                 .PRINT AC V(1)\n\
+                 .END\n",
+            ".AC DATA combined with AC frequency-dependent parameters is not implemented in the native Xyce oracle",
+        ),
+    ] {
+        let path = netlists.join(file_name);
+        fs::write(&path, source).expect("write frequency-guard fixture");
+        let deck = XyceDeck {
+            path,
+            relative_path: format!("Netlists/FREQ_GUARDS/{file_name}"),
+            section: XyceDeckSection::Netlists,
+        };
+        let error = runner
+            .static_ac_plan_for_deck(&deck)
+            .expect_err("unsupported frequency-bound AC plan combination must fail");
+        assert_eq!(error, expected_error, "{file_name}");
+    }
+    fs::remove_dir_all(root).expect("remove frequency-guard fixtures");
+}
+
+#[test]
+fn ac_frequency_bindings_detect_indirect_parameter_dependencies() {
+    let source = "\
+xyce indirect ac freq binding
+.GLOBAL_PARAM MAG={LOG10(FREQ)+1}
+V1 a 0 AC {MAG}
+R1 a 0 1k
+.AC DEC 1 10 100
+.PRINT AC FREQ V(a)
+.END
+";
+
+    let err = XyceTestRunner::parse_xyce_netlist(source, Path::new("indirect-freq.cir"))
+        .expect_err("plain parse should reject the unresolved dependent parameter");
+    assert!(!XyceTestRunner::parse_error_is_undefined_ac_frequency_symbol(&err));
+    assert!(XyceTestRunner::parse_error_is_unbound_ac_frequency_dependency(source, &err));
+
+    let rebound = XyceTestRunner::source_with_ac_frequency_bindings(source, 10.0);
+    XyceTestRunner::parse_xyce_netlist(&rebound, Path::new("indirect-freq.cir"))
+        .expect("frequency binding should resolve the dependent source parameter");
+}
+
+#[test]
+fn ac_probe_evaluates_node_alias_and_current_accessors() {
+    let netlist = Netlist::parse(
+        "\
+ac accessor probes
+V1 a 0 AC 1
+R1 a b 1
+R2 b 0 2
+.AC DEC 1 1 10
+.PRINT AC N(B) IR(V1) II(V1) IM(V1) IP(V1) IDB(V1)
+.END
+",
+    )
+    .expect("AC accessor deck parses");
+    let result = AcResult {
+        frequency: 1.0,
+        node_names: vec!["a".to_string(), "b".to_string()],
+        branch_names: vec!["v1".to_string()],
+        voltages: vec![Complex64::new(1.0, 0.0), Complex64::new(3.0, 4.0)],
+        currents: vec![Complex64::new(-3.0, -4.0)],
+    };
+
+    assert_eq!(
+        XyceTestRunner::parse_ac_voltage_probe("N(B)"),
+        Some(XyceVoltageProbe {
+            accessor: XyceVoltageAccessor::Value,
+            node_pos: "b".to_string(),
+            node_neg: None,
+        })
+    );
+    assert!(
+        XyceTestRunner::parse_ac_voltage_probe("N(M1:GM)").is_none(),
+        "AC N(...) voltage alias must not steal device operating-point probes"
+    );
+    assert_eq!(
+        XyceTestRunner::parse_ac_current_probe("IDB(V1)"),
+        Some(XyceAcCurrentProbe {
+            accessor: XyceCurrentAccessor::Decibels,
+            element_name: "v1".to_string(),
+        })
+    );
+
+    let n_b = XyceTestRunner::evaluate_ac_complex_probe("N(B)", &netlist, &result)
+        .expect("N(B) evaluates as an AC voltage alias");
+    assert_eq!(n_b, Complex64::new(3.0, 4.0));
+    assert_eq!(
+        XyceTestRunner::evaluate_ac_probe("IR(V1)", &netlist, &result, false)
+            .expect("real current accessor evaluates"),
+        -3.0
+    );
+    assert_eq!(
+        XyceTestRunner::evaluate_ac_probe("II(V1)", &netlist, &result, false)
+            .expect("imaginary current accessor evaluates"),
+        -4.0
+    );
+    assert_eq!(
+        XyceTestRunner::evaluate_ac_probe("IM(V1)", &netlist, &result, false)
+            .expect("magnitude current accessor evaluates"),
+        5.0
+    );
+    assert!(
+        (XyceTestRunner::evaluate_ac_probe("IP(V1)", &netlist, &result, false)
+            .expect("phase current accessor evaluates")
+            + 126.86989764584402)
+            .abs()
+            < 1.0e-12
+    );
+    assert!(
+        (XyceTestRunner::evaluate_ac_probe("IP(V1)", &netlist, &result, true)
+            .expect("radian phase current accessor evaluates")
+            + 2.214297435588181)
+            .abs()
+            < 1.0e-12
+    );
+    assert!(
+        (XyceTestRunner::evaluate_ac_probe("IDB(V1)", &netlist, &result, false)
+            .expect("decibel current accessor evaluates")
+            - 13.979400086720377)
+            .abs()
+            < 1.0e-12
+    );
+    assert!(
+        XyceTestRunner::validate_ac_complex_probe("IDB(V1)", &netlist)
+            .expect_err("scalar current accessor is not a complex probe")
+            .contains("complex I")
+    );
+}
+
+#[test]
+fn ac_print_expression_evaluates_voltage_component_accessors() {
+    let netlist = Netlist::parse(
+        "\
+ac expression accessor probes
+V1 a 0 AC 1
+R1 a 0 1
+.AC DEC 1 1 10
+.PRINT AC {0.001 + abs(2.0 - VR(A)) + abs(0.25 - VI(A))}
+.END
+",
+    )
+    .expect("AC expression accessor deck parses");
+    let result = AcResult {
+        frequency: 1.0,
+        node_names: vec!["a".to_string()],
+        branch_names: vec!["v1".to_string()],
+        voltages: vec![Complex64::new(2.0, 0.25)],
+        currents: vec![Complex64::new(-2.0, -0.25)],
+    };
+    let probe = "{0.001 + abs(2.0 - VR(A)) + abs(0.25 - VI(A))}";
+
+    XyceTestRunner::validate_ac_probe(probe, &netlist)
+        .expect("AC expression accepts scalar voltage component accessors");
+    assert!(
+        (XyceTestRunner::evaluate_ac_probe(probe, &netlist, &result, false)
+            .expect("AC expression evaluates scalar voltage component accessors")
+            - 0.001)
+            .abs()
+            < 1.0e-12
+    );
+}
+
+#[test]
+fn ac_probe_evaluates_independent_source_ac_parameters() {
+    let netlist = Netlist::parse(
+        "\
+ac source parameter probes
+I1 a 0 AC 2 45
+R1 a 0 1k
+.AC DEC 1 1 10
+.PRINT AC {I1:ACMAG} {I1:ACPHASE}
+.END
+",
+    )
+    .expect("AC source parameter deck parses");
+    let result = AcResult {
+        frequency: 1.0,
+        node_names: vec!["a".to_string()],
+        branch_names: Vec::new(),
+        voltages: vec![Complex64::new(0.0, 0.0)],
+        currents: Vec::new(),
+    };
+
+    XyceTestRunner::validate_ac_probe("{I1:ACMAG}", &netlist)
+        .expect("AC source magnitude parameter validates");
+    XyceTestRunner::validate_ac_probe("{I1:ACPHASE}", &netlist)
+        .expect("AC source phase parameter validates");
+    assert_eq!(
+        XyceTestRunner::evaluate_ac_probe("{I1:ACMAG}", &netlist, &result, false)
+            .expect("AC source magnitude parameter evaluates"),
+        2.0
+    );
+    assert!(
+        (XyceTestRunner::evaluate_ac_probe("{I1:ACPHASE}", &netlist, &result, false)
+            .expect("AC source phase parameter evaluates")
+            - 45.0)
+            .abs()
+            < 1.0e-12
+    );
+}
+
+#[test]
+fn ac_phase_output_radians_option_is_detected() {
+    assert!(XyceTestRunner::source_requests_ac_phase_output_radians(
+        ".OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=TRUE\n"
+    ));
+    assert!(!XyceTestRunner::source_requests_ac_phase_output_radians(
+        ".OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=TRUE\n\
+             .OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=FALSE\n"
+    ));
+}
+
+#[test]
+fn ac_csv_contract_selects_csv_oracle_extension() {
+    assert_eq!(
+        XyceTestRunner::static_ac_contract_for_print_format(true, Some("CSV"))
+            .expect("CSV wrapper contract is supported"),
+        XyceStaticAcContract::WrapperCsv
+    );
+    assert_eq!(
+        XyceStaticAcContract::WrapperCsv.reference_extension(),
+        "FD.csv"
+    );
+    assert_eq!(
+        XyceTestRunner::static_ac_contract_for_print_format(false, Some("CSV"))
+            .expect("plain CSV contract is supported"),
+        XyceStaticAcContract::PlainCsv
+    );
+}
+
+#[test]
+fn ac_probe_contract_selects_csd_oracle_extension() {
+    assert_eq!(
+        XyceTestRunner::static_ac_contract_for_print_format(true, Some("PROBE"))
+            .expect("PROBE wrapper contract is supported"),
+        XyceStaticAcContract::WrapperCsd
+    );
+    assert_eq!(
+        XyceStaticAcContract::WrapperCsd.reference_extension(),
+        "csd"
+    );
+    assert_eq!(
+        XyceTestRunner::static_ac_contract_for_print_format(false, Some("PROBE"))
+            .expect("plain PROBE contract is supported"),
+        XyceStaticAcContract::PlainCsd
+    );
+}
+
+#[test]
+fn tran_probe_contract_selects_csd_oracle_extension() {
+    assert_eq!(
+        XyceTestRunner::static_tran_contract_for_print_format(true, Some("PROBE"))
+            .expect("PROBE wrapper contract is supported"),
+        XyceStaticTranContract::WrapperCsd
+    );
+    assert_eq!(
+        XyceStaticTranContract::WrapperCsd.reference_extension(),
+        "csd"
+    );
+    assert_eq!(
+        XyceTestRunner::static_tran_contract_for_print_format(false, Some("PROBE"))
+            .expect("plain PROBE contract is supported"),
+        XyceStaticTranContract::PlainCsd
+    );
+}
+
+#[test]
+fn tran_csv_contract_selects_csv_oracle_extension() {
+    assert_eq!(
+        XyceTestRunner::static_tran_contract_for_print_format(true, Some("CSV"))
+            .expect("CSV wrapper contract is supported"),
+        XyceStaticTranContract::WrapperCsv
+    );
+    assert_eq!(
+        XyceStaticTranContract::WrapperCsv.reference_extension(),
+        "csv"
+    );
+    assert_eq!(
+        XyceTestRunner::static_tran_contract_for_print_format(false, Some("CSV"))
+            .expect("plain CSV contract is supported"),
+        XyceStaticTranContract::PlainCsv
+    );
+    let snapshots_source = "\
+snapshot CSV
+.OPTIONS OUTPUT SNAPSHOTS=true INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT=CSV V(1)
+.TRAN 0 1
+.END
+";
+    XyceTestRunner::validate_native_static_csv_tran_wrapper_contract(snapshots_source)
+        .expect("snapshot CSV validates through the native CSV wrapper contract");
+}
+
+#[test]
+fn tran_csv_wrapper_classifier_accepts_primary_csv_output() {
+    let source = "\
+CSV transient
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT= CSV V(1) V(2)
+.TRAN 0 1
+.END
+";
+
+    XyceTestRunner::validate_native_static_csv_tran_wrapper_contract(source)
+        .expect("primary transient CSV wrapper contract validates");
+    assert_eq!(
+        XyceTestRunner::native_static_prn_tran_wrapper_contract(
+            Path::new("tran-csv.cir"),
+            "Netlists/Output/TRAN/tran-csv.cir",
+            source,
+            true,
+        ),
+        Some(XyceStaticTranContract::WrapperCsv)
+    );
+}
+
+fn bug_61_noindex_header_source() -> &'static str {
+    "\
+BUG_61 NOINDEX header contract
+VIN 1 0 PULSE(0 1 10U 1U 1U 80U)
+R1 1 2 1K
+C1 2 0 20N
+.TRAN 0.5U 100U
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+.OPTIONS TIMEINT CONSTSTEP=1
+.END
+"
+}
+
+#[test]
+fn bug_61_noindex_header_wrapper_classifier_is_exactly_path_qualified() {
+    let source = bug_61_noindex_header_source();
+    assert_eq!(
+        XyceTestRunner::native_static_prn_tran_wrapper_contract(
+            Path::new("capacitor.cir"),
+            "Netlists/Certification_Tests/BUG_61/capacitor.cir",
+            source,
+            false,
+        ),
+        Some(XyceStaticTranContract::WrapperNoIndexHeader)
+    );
+    assert!(
+        XyceTestRunner::is_native_noindex_header_tran_wrapper_candidate(
+            "NETLISTS\\CERTIFICATION_TESTS\\BUG_61\\CAPACITOR.CIR",
+            source,
+        ),
+        "manifest-key normalization should preserve the exact adapter"
+    );
+    assert!(
+        !XyceTestRunner::is_native_noindex_header_tran_wrapper_candidate(
+            "Netlists/Certification_Tests/BUG_612/capacitor.cir",
+            source,
+        ),
+        "nearby bug numbers must not collide with BUG_61"
+    );
+    assert_ne!(
+        XyceTestRunner::native_static_prn_tran_wrapper_contract(
+            Path::new("capacitor.cir"),
+            "Netlists/Certification_Tests/BUG_612/capacitor.cir",
+            source,
+            false,
+        ),
+        Some(XyceStaticTranContract::WrapperNoIndexHeader),
+        "the same source at another path must not acquire BUG_61 wrapper semantics"
+    );
+
+    let indexed = source.replace("FORMAT=NOINDEX", "FORMAT=STD");
+    assert!(
+        XyceTestRunner::validate_native_noindex_header_tran_wrapper_contract(&indexed).is_err()
+    );
+    let file_only = source.replace("FORMAT=NOINDEX V(1)", "FORMAT=NOINDEX FILE=side.prn V(1)");
+    assert!(
+        XyceTestRunner::validate_native_noindex_header_tran_wrapper_contract(&file_only).is_err()
+    );
+    let multiple_primary = source.replace(
+        ".PRINT TRAN FORMAT=NOINDEX V(1) V(2)",
+        ".PRINT TRAN FORMAT=NOINDEX V(1) V(2)\n.PRINT TRAN FORMAT=NOINDEX V(1)",
+    );
+    assert!(
+        XyceTestRunner::validate_native_noindex_header_tran_wrapper_contract(&multiple_primary,)
+            .is_err()
+    );
+}
+
+#[test]
+fn noindex_transient_header_schema_matches_upstream_first_line_predicate() {
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string(), "V(2)".to_string()],
+    };
+    assert_eq!(
+        XyceTestRunner::transient_prn_header_columns(&print, false),
+        ["TIME", "V(1)", "V(2)"]
+    );
+    assert_eq!(
+        XyceTestRunner::transient_prn_header_columns(&print, true),
+        ["Index", "TIME", "V(1)", "V(2)"]
+    );
+
+    XyceTestRunner::validate_noindex_tran_prn_header("time   V(1)   V(2)")
+        .expect("TIME matching is case-insensitive");
+    assert!(
+        XyceTestRunner::validate_noindex_tran_prn_header("Index TIME V(1)").is_err(),
+        "an Index column must fail"
+    );
+    assert!(
+        XyceTestRunner::validate_noindex_tran_prn_header("TIME V(index)").is_err(),
+        "the upstream wrapper rejects Index text anywhere on the first line"
+    );
+    assert!(
+        XyceTestRunner::validate_noindex_tran_prn_header("V(1) V(2)").is_err(),
+        "a header without TIME must fail"
+    );
+    assert!(XyceTestRunner::validate_noindex_tran_prn_header(" ").is_err());
+}
+
+#[test]
+fn bug_61_noindex_header_wrapper_runs_without_reference_oracle() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-bug-61-header-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/Certification_Tests/BUG_61/capacitor.cir";
+    let deck_path = root.join(relative);
+    fs::create_dir_all(deck_path.parent().expect("deck parent")).expect("create BUG_61 fixture");
+    fs::write(&deck_path, bug_61_noindex_header_source()).expect("write BUG_61 fixture deck");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper provenance manifest");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path.clone(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let plan = runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("header-only wrapper plan does not require a numeric oracle");
+    assert_eq!(plan.contract, XyceStaticTranContract::WrapperNoIndexHeader);
+    assert!(!plan.reference_path.is_file());
+    assert!(!plan.contract.requires_reference_file());
+    assert_eq!(
+        plan.contract.result_contract(false),
+        "wrapper_static_prn_tran",
+        "the existing public result label remains stable"
+    );
+
+    let result = runner.run_test(&deck_path);
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "header-only wrapper should execute natively: {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+    assert_eq!(result.contract, "wrapper_static_prn_tran");
+
+    fs::remove_dir_all(&root).expect("remove BUG_61 fixture");
+}
+
+#[test]
+fn tran_prn_wrapper_classifier_ignores_simple_measure_side_outputs() {
+    let source = "\
+wrapper-origin transient with simple measure side output
+V1 1 0 1
+R1 1 0 1
+.MEASURE TRAN maxN1 MAX V(1)
+.PRINT TRAN V(1)
+.TRAN 0 1
+.END
+";
+
+    XyceTestRunner::validate_native_static_prn_tran_wrapper_contract(source)
+        .expect("simple transient MAX measure side output does not affect .prn contract");
+    assert_eq!(
+        XyceTestRunner::native_static_prn_tran_wrapper_contract(
+            Path::new("measure-side-output.cir"),
+            "Netlists/Certification_Tests/BUG_1210_SON/bug1210.cir",
+            source,
+            true,
+        ),
+        Some(XyceStaticTranContract::WrapperStatic)
+    );
+}
+
+#[test]
+fn tran_prn_wrapper_classifier_rejects_measure_file_outputs() {
+    let source = "\
+wrapper-origin transient with measure file output
+V1 1 0 1
+R1 1 0 1
+.MEASURE TRAN fit ERROR V(1) FILE=gold.prn COMP_FUNCTION=L2NORM
+.PRINT TRAN V(1)
+.TRAN 0 1
+.END
+";
+
+    let err = XyceTestRunner::validate_native_static_prn_tran_wrapper_contract(source)
+        .expect_err("measure file/error output is outside the .prn contract");
+    assert!(
+        err.contains(".MEASURE") || err.contains(".MEAS") || err.contains(".measure"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn tran_wrapper_accepts_primary_probe_format_prn_oracle_when_checked_prn_exists() {
+    let source = "\
+wrapper-origin hspice probe transient print with prn oracle
+VA 1 0 PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R1 1 2 10
+C1 2 0 1u
+.TRAN 10u 10ms 0 UIC
+.PRINT TRAN FORMAT=PROBE V(1) V(2)
+.END
+";
+
+    XyceTestRunner::validate_native_static_prn_tran_wrapper_contract(source)
+        .expect_err("strict transient PRN wrapper contract keeps PROBE as non-PRN");
+    XyceTestRunner::validate_native_static_prn_tran_wrapper_contract_with_format_mode(source, true)
+        .expect("wrapper transient PRN contract can normalize primary PROBE with a PRN oracle");
+    assert_eq!(
+        XyceTestRunner::native_static_prn_tran_wrapper_contract(
+            Path::new("subcircuit_node_delineation.cir"),
+            "Netlists/XDM/HSPICE/OTHER_PARSING/subcircuit_node_delineation.cir",
+            source,
+            true,
+        ),
+        Some(XyceStaticTranContract::WrapperStatic)
+    );
+    assert_eq!(
+        XyceTestRunner::native_static_prn_tran_wrapper_contract(
+            Path::new("subcircuit_node_delineation.cir"),
+            "Netlists/XDM/HSPICE/OTHER_PARSING/subcircuit_node_delineation.cir",
+            source,
+            false,
+        ),
+        None
+    );
+    assert_eq!(
+        XyceTestRunner::static_tran_contract_for_print_format(true, Some("PROBE"))
+            .expect("generic wrapper PROBE contract resolves"),
+        XyceStaticTranContract::WrapperCsd,
+        "generic PROBE output remains CSDF; only the wrapper-origin PRN classifier normalizes this case"
+    );
+}
+
+#[test]
+fn dc_csv_contract_selects_csv_oracle_extension() {
+    assert_eq!(
+        XyceTestRunner::static_dc_contract_for_print_format(true, Some("CSV"))
+            .expect("CSV wrapper contract is supported"),
+        XyceStaticDcContract::WrapperCsv
+    );
+    assert_eq!(
+        XyceStaticDcContract::WrapperCsv.reference_extension(),
+        "csv"
+    );
+    assert_eq!(
+        XyceTestRunner::static_dc_contract_for_print_format(false, Some("CSV"))
+            .expect("plain CSV contract is supported"),
+        XyceStaticDcContract::PlainCsv
+    );
+}
+
+#[test]
+fn dc_probe_contract_selects_csd_oracle_extension() {
+    assert_eq!(
+        XyceTestRunner::static_dc_contract_for_print_format(true, Some("PROBE"))
+            .expect("PROBE wrapper contract is supported"),
+        XyceStaticDcContract::WrapperCsd
+    );
+    assert_eq!(
+        XyceStaticDcContract::WrapperCsd.reference_extension(),
+        "csd"
+    );
+    assert_eq!(
+        XyceTestRunner::static_dc_contract_for_print_format(false, Some("PROBE"))
+            .expect("plain PROBE contract is supported"),
+        XyceStaticDcContract::PlainCsd
+    );
+    assert!(!XyceTestRunner::dc_print_format_is_prn_compatible("PROBE"));
+}
+
+#[test]
+fn csd_parser_reads_multisection_probe_tables() {
+    let table = XyceTestRunner::parse_csd_table(
+        "\
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='NO' NODES='2'
+#N
+'V(1)' 'I(V1)'
+#C 0.00000000e+00 2
+0.00000000e+00:1 -1.00000000e-01:2
+#;
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='NO' NODES='2'
+#N
+'V(1)' 'I(V1)'
+#C 1.00000000e+00 2
+1.00000000e+00:1 -2.00000000e-01:2
+#;
+",
+    )
+    .expect("CSDF table parses");
+
+    assert_eq!(table.columns, vec!["V(1)", "I(V1)"]);
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.rows[0], vec![0.0, -0.1]);
+    assert_eq!(table.rows[1], vec![1.0, -0.2]);
+}
+
+#[test]
+fn tran_csd_parser_injects_time_column() {
+    let table = XyceTestRunner::parse_tran_csd_table(
+        "\
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='NO' SWEEPVAR='Time'
+#N
+'V(1)' 'I(V1)'
+#C 2.00000000e-01 2
+2.00000000e-01:1 -2.00000000e-01:2
+#;
+",
+    )
+    .expect("transient CSDF table parses");
+
+    assert_eq!(table.columns, vec!["TIME", "V(1)", "I(V1)"]);
+    assert_eq!(table.rows, vec![vec![0.2, 0.2, -0.2]]);
+}
+
+#[test]
+fn transient_prn_reference_parser_accepts_legacy_probe_content() {
+    let table = XyceTestRunner::parse_tran_prn_or_legacy_probe_table(
+        "\
+#H
+SOURCE='Xyce' VERSION='1.1'
+COMPLEXVALUES='NO' SWEEPVAR='Time'
+#N
+'V(1)' 'V(2)'
+#C 1.00000000e-06 2
+5.00000000e-01:1 2.50000000e-01:2
+#;
+",
+    )
+    .expect("legacy FORMAT=PROBE content can be carried in a .prn oracle");
+
+    assert_eq!(table.columns, vec!["TIME", "V(1)", "V(2)"]);
+    assert_eq!(table.rows, vec![vec![1.0e-6, 0.5, 0.25]]);
+}
+
+#[test]
+fn ac_csd_parser_expands_complex_probe_values() {
+    let table = XyceTestRunner::parse_ac_csd_table(
+        "\
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='YES' SWEEPVAR='FREQ'
+#N
+'V(B)' 'VR(B)' 'I(V1)' 'VM(B)'
+#C 1.00000000e+02 4
+1.00000000e+00/2.00000000e+00:1 1.00000000e+00/0.00000000e+00:2
+-3.00000000e+00/4.00000000e+00:3 2.23606798e+00/0.00000000e+00:4
+#;
+",
+    )
+    .expect("AC CSDF table parses");
+
+    assert_eq!(
+        table.columns,
+        vec![
+            "FREQ",
+            "Re(V(B))",
+            "Im(V(B))",
+            "VR(B)",
+            "Re(I(V1))",
+            "Im(I(V1))",
+            "VM(B)"
+        ]
+    );
+    assert_eq!(table.rows.len(), 1);
+    assert_eq!(
+        table.rows[0],
+        vec![100.0, 1.0, 2.0, 1.0, -3.0, 4.0, 2.23606798]
+    );
+}
+
+#[test]
+fn dc_file_only_wrapper_detects_prn_side_output_contract() {
+    let source = "\
+R1 1 0 10
+V1 1 0 DC 0
+.PRINT DC FILE=out1.prn V(1)
+.PRINT DC FILE=out2.prn V(1) I(V1)
+.DC V1 0 1 1
+.END
+";
+
+    assert!(XyceTestRunner::is_native_file_only_prn_wrapper_candidate(
+        "Netlists/Output/DC/dc-multiprn.cir",
+        source
+    ));
+    XyceTestRunner::validate_file_only_prn_wrapper_source(source)
+        .expect("PRN-compatible file-only DC output validates");
+}
+
+#[test]
+fn ac_probe_evaluates_static_device_parameter() {
+    let netlist = Netlist::parse(
+        "\
+ac device parameter output
+V1 a 0 AC 1
+R1 a b 2
+R2 b 0 3
+.AC DEC 1 1 10
+.PRINT AC R1:R
+.END
+",
+    )
+    .expect("AC device parameter deck parses");
+    let result = AcResult {
+        frequency: 1.0,
+        node_names: vec!["a".to_string(), "b".to_string()],
+        branch_names: Vec::new(),
+        voltages: vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+        currents: Vec::new(),
+    };
+
+    XyceTestRunner::validate_ac_probe("R1:R", &netlist)
+        .expect("static resistor parameter validates for AC output");
+    assert_eq!(
+        XyceTestRunner::evaluate_ac_probe("R1:R", &netlist, &result, false)
+            .expect("static resistor parameter evaluates for AC output"),
+        2.0
+    );
+}
+
+#[test]
+fn native_legacy_diode_contract_accepts_ignored_expression_parameters() {
+    let source = "BUG45-compatible diode\n\
+V1 1 0 5\n\
+D1 1 0 DLEG\n\
+.MODEL DLEG D(IS=4E-10 N=1.48 RS=.105 BOGOPARAM={1+2})\n\
+.TRAN 1n 2n\n\
+.PRINT TRAN V(1)\n\
+.END\n";
+    let netlist =
+        XyceTestRunner::parse_xyce_netlist(source, Path::new("native_legacy_diode_contract.cir"))
+            .expect("legacy diode fixture parses");
+
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("ignored legacy-diode expression parameters remain oracle-qualified");
+}
+
+#[test]
+fn hierarchical_node_lookup_resolves_nested_sibling_subcircuit_definition() {
+    let netlist = Netlist::parse(
+        "\
+nested sibling subckt probe
+X2 4 5 IC_SubSubckt
+.SUBCKT IC_Subckt in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.SUBCKT IC_SubSubckt in out
+R1 in a 1
+X1 a b IC_Subckt
+R2 b out 1
+.ENDS
+.END
+",
+    )
+    .expect("test deck parses");
+
+    let candidates = XyceTestRunner::node_lookup_candidates(&netlist, "X2:X1:out");
+
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case("X2.B")),
+        "nested sibling subcircuit probe should resolve to flattened interface node, got {candidates:?}"
+    );
+}
+
+#[test]
+fn node_lookup_candidates_follow_effective_ground_policy() {
+    let ngspice = Netlist::parse("ngspice ground\nR1 1 0 1k\n.END\n").expect("ngspice deck parses");
+    assert_eq!(
+        XyceTestRunner::node_lookup_candidates(&ngspice, "GND"),
+        ["0"]
+    );
+    assert_ne!(
+        XyceTestRunner::node_lookup_candidates(&ngspice, "GND!"),
+        ["0"]
+    );
+
+    let xyce_options = rspice_core::netlist::NetlistParseOptions {
+        expression_dialect: rspice_core::netlist::ExpressionDialect::Xyce,
+        ..Default::default()
+    };
+    let xyce = Netlist::parse_with_options("Xyce ordinary GND\nR1 GND 0 1k\n.END\n", xyce_options)
+        .expect("Xyce deck without replacement parses");
+    assert_ne!(XyceTestRunner::node_lookup_candidates(&xyce, "GND"), ["0"]);
+
+    let replaced = Netlist::parse_with_options(
+        "Xyce replaced ground\nR1 1 GND! 1k\n.PREPROCESS REPLACEGROUND TRUE\n.END\n",
+        xyce_options,
+    )
+    .expect("Xyce replacement deck parses");
+    assert_eq!(
+        XyceTestRunner::node_lookup_candidates(&replaced, "GND!"),
+        ["0"]
+    );
+}
+
+#[test]
+fn native_transient_contract_accepts_multi_element_passive_subcircuit() {
+    let netlist = Netlist::parse(
+        "\
+multi-element passive subckt
+V1 1 0 PULSE(0 1 0 1n 1n 1u)
+X1 1 2 RC
+R2 2 0 10
+.SUBCKT RC in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.TRAN 0 1u
+.PRINT TRAN V(2)
+.END
+",
+    )
+    .expect("test deck parses");
+
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("flattened multi-element passive subcircuit should be supported");
+}
+
+fn analytic_rc_test_source() -> &'static str {
+    "renamed analytic RC fixture\n\
+Cx out 0 1u IC=1\n\
+Rload out source 1k\n\
+Vbias source 0 0\n\
+.PRINT TRAN V(out)\n\
+.TRAN 0 5m\n\
+.OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6\n\
+.END\n"
+}
+
+fn analytic_integer_dc_fixture(
+    label: &str,
+    relative: &str,
+    source: &str,
+) -> (PathBuf, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-analytic-integer-dc-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let deck_path = root.join(relative);
+    fs::create_dir_all(deck_path.parent().expect("fixture deck parent"))
+        .expect("create analytic integer DC fixture directory");
+    fs::write(&deck_path, source).expect("write analytic integer DC fixture");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write analytic integer DC wrapper provenance");
+    let deck = XyceDeck {
+        path: deck_path,
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, deck, runner)
+}
+
+const ANALYTIC_FMOD_DC_SOURCE: &str = "Test of nint\n\
+        *\n\
+        R1 1 0 1\n\
+        V1 1 0 1.0\n\
+        .print dc V(1) {fmod(99.5,V(1))}\n\
+        .DC V1 1.0 10.0 0.5\n\
+        .end\n";
+
+const ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE: &str = "* test B source with int/floor/ceil\n\
+        R1 1 0 1\n\
+        V1 1 0 DC 1\n\
+        Rint 2 0 1\n\
+        Bint 2 0 V={int(v(1))}\n\
+        Rfloor 3 0 1\n\
+        Bfloor 3 0 V={floor(v(1))}\n\
+        Rceil 4 0 1\n\
+        Bceil 4 0 V={ceil(v(1))}\n\
+        .DC V1 -1 1 .1\n\
+        .print DC V(1) v(2) v(3) v(4)\n\
+        .end\n";
+
+const RESISTOR_DTEMP_OWNER_SOURCE: &str = "resistor DTEMP owner\n\
+.param resDtemp = -82\n\
+.options device temp = 27.0\n\
+R1 1 0 1K RMODEL DTEMP='resDtemp'\n\
+V1 1 0 5V\n\
+.DC V1 0 5V 1V\n\
+.MODEL RMODEL R (TC1=0.0007325 TC2=-2.217E-07)\n\
+.PRINT DC V(1) I(V1)\n\
+.step resDtemp list -82 -2 45\n\
+.END\n";
+
+const RESISTOR_DTEMP_REFERENCE_SOURCE: &str = "resistor TEMP reference\n\
+R1 1 0 1K RMODEL\n\
+V1 1 0 5V\n\
+.DC V1 0 5V 1V\n\
+.MODEL RMODEL R (TC1=0.0007325 TC2=-2.217E-07)\n\
+.PRINT DC V(1) I(V1)\n\
+.step TEMP list -55 25 72\n\
+.END\n";
+
+const BUG647_RESISTOR_OWNER_SOURCE: &str = "Semiconductor Resistor Circuit Netlist\n\
+R1 2 0 RMOD L=1000U W=1U TC1=1e-2 TC2=1e-4\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1 TNOM=27 W=1u)\n\
+.step lin R1:W 1u 5u 1u\n\
+.step lin R1:TEMP 30 35 1\n\
+.step lin R1:TC1 1e-2 3e-2 1e-2\n\
+.step lin R1:TC2 1e-4 3e-4 1e-4\n\
+.PRINT DC V(1) I(VMON) R1:W R1:TC1 R1:TC2 R1:TEMP\n\
+.END\n";
+
+const BUG647_RESISTOR_REFERENCE_SOURCE: &str = "Semiconductor Resistor Circuit Netlist\n\
+R1 2 0 RMOD L=1000U\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1 TNOM=27 DEFW=1u TC1=1e-2 TC2=1e-4)\n\
+.step lin RMOD:DEFW 1u 5u 1u\n\
+.step lin TEMP 30 35 1\n\
+.step lin RMOD:TC1 1e-2 3e-2 1e-2\n\
+.step lin RMOD:TC2 1e-4 3e-4 1e-4\n\
+.PRINT DC V(1) I(VMON) R1:W R1:TC1 R1:TC2 R1:TEMP\n\
+.END\n";
+
+const BUG667_NODESET_OWNER_SOURCE: &str = "*Analysis directives:\n\
+.TRAN  0 10ms\n\
+.PRINT TRAN V(N15206) V(N15971) V(N15554) V(N15997)\n\
++  V(N16554) V(N16997)\n\
+\n\
+* RC Decay\n\
+R_R1         N15206 N15971  1k\n\
+R_R2         N15975 N15971  10\n\
+C_C1         N16095 N15975  1u\n\
+R_R3         N16095 0  10\n\
+V_V1         N15206 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+\n\
+*RC Decay with NODESET\n\
+V_V2         N15554 0\n\
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s\n\
+R_R4         N15554 N15997  1k\n\
+R_R5         N15967 N15997  10\n\
+C_C2         N16112 N15967  1u\n\
+R_R6         N16112 0  10\n\
+.NODESET     V(N15967) =0.5\n\
+\n\
+*RC Decay with NODESET in subcircuit\n\
+V_V3         N16554 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+R_R7         N16554 N16997  1k\n\
+X_X1         N16997 N17112  NODESET_Subckt params: vmid=0.5\n\
+R_R8         N17112 0 10\n\
+\n\
+.SUBCKT NODESET_Subckt in out params: vmid=5.0\n\
+R1          in  mid 10\n\
+C1          mid out 1u\n\
+.NODESET    V(mid)={vmid}\n\
+.ENDS\n\
+\n\
+.END\n";
+
+const BUG667_NODESET_REFERENCE_SOURCE: &str = "*Analysis directives:\n\
+.TRAN  0 10ms\n\
+.PRINT TRAN V(N15206) V(N15971) V(N15554) V(N15997)\n\
++  V(N16554) V(N16997)\n\
+\n\
+* RC Decay\n\
+R_R1         N15206 N15971  1k\n\
+R_R2         N15975 N15971  10\n\
+C_C1         N16095 N15975  1u\n\
+R_R3         N16095 0  10\n\
+V_V1         N15206 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+\n\
+*RC Decay with NODESET\n\
+V_V2         N15554 0\n\
++PULSE 0 1 0 1e-3 1e-3 5e-3 1s\n\
+R_R4         N15554 N15997  1k\n\
+R_R5         N15967 N15997  10\n\
+C_C2         N16112 N15967  1u\n\
+R_R6         N16112 0  10\n\
+.NODESET     V(N15967) =0.5\n\
+\n\
+*RC Decay with NODESET in subcircuit\n\
+V_V3         N16554 0  PULSE(0 1 0 1e-3 1e-3 5e-3 1s)\n\
+R_R7         N16554 N16997  1k\n\
+X_X1         N16997 N17112  NODESET_Subckt\n\
+R_R8         N17112 0 10\n\
+\n\
+.SUBCKT NODESET_Subckt in out\n\
+R1          in  mid 10\n\
+C1          mid out 1u\n\
+.ENDS\n\
+.NODESET    V(X_X1:mid )=0.5\n\
+\n\
+.END\n";
+
+fn bug662_header_sources() -> (String, String) {
+    let (short_title, continuation_body) = XYCE_BUG662_CANONICAL_LONG_TITLE.split_at(256);
+    let continuation = format!("*{continuation_body}");
+    let body = "*Analysis directives:\n\
+.TRAN 0 100ns 0\n\
+.PRINT TRAN V(N14950) V(N15037)\n\
+\n\
+* source TRANSMISSIONLINE\n\
+T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50\n\
+R_R1 N14553 N14950 TC=0,0 R=50\n\
+R_R2 N15037 0 TC=0,0 R=50\n\
+V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
+\n\
+\n\
+.END\n";
+    (
+        format!("{XYCE_BUG662_CANONICAL_LONG_TITLE}\n\n{body}"),
+        format!("{short_title}\n{continuation}\n\n{body}"),
+    )
+}
+
+fn bug662_header_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-bug662-header-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/Certification_Tests/BUG_662");
+    fs::create_dir_all(&family).expect("create BUG 662 fixture directory");
+    let owner_path = family.join("headerLineLengthMoreThan256.cir");
+    let reference_path = family.join("headerLineLengthLessThan256.cir");
+    fs::write(&owner_path, owner_source).expect("write BUG 662 long-header owner");
+    fs::write(&reference_path, reference_source).expect("write BUG 662 short-header reference");
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_662/headerLineLengthMoreThan256.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 662 wrapper provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/Certification_Tests/BUG_662/headerLineLengthMoreThan256.cir"
+            .to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/Certification_Tests/BUG_662/headerLineLengthLessThan256.cir"
+            .to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, owner, reference, runner)
+}
+
+fn bug647_resistor_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-bug647-resistor-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/Certification_Tests/BUG_647_SON");
+    fs::create_dir_all(&family).expect("create BUG 647 resistor fixture directory");
+    let owner_path = family.join("semic_resistor.cir");
+    let reference_path = family.join("semic_resistor_modpar.cir");
+    fs::write(&owner_path, owner_source).expect("write BUG 647 resistor owner");
+    fs::write(&reference_path, reference_source).expect("write BUG 647 resistor reference");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        "Netlists/Certification_Tests/BUG_647_SON/semic_resistor.cir\trequires_upstream_wrapper\n",
+    )
+    .expect("write BUG 647 resistor wrapper provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/Certification_Tests/BUG_647_SON/semic_resistor.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/Certification_Tests/BUG_647_SON/semic_resistor_modpar.cir"
+            .to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, owner, reference, runner)
+}
+
+const BUG655_DEBUG_EXECUTION_TIMEOUT_MS: u128 = 600_000;
+
+fn bug655_continuation_sources() -> (String, String) {
+    let owner = XYCE_BUG655_CANONICAL_OWNER_SOURCE.to_string();
+    let mut reference_lines = owner.lines().map(str::to_string).collect::<Vec<_>>();
+    for (line_index, spaces) in [(11usize, 2usize), (13, 1), (14, 3)] {
+        reference_lines[line_index] =
+            format!("{}{}", " ".repeat(spaces), reference_lines[line_index]);
+    }
+    (owner, format!("{}\n", reference_lines.join("\n")))
+}
+
+const BUG754_GLOBAL_PARAMETER_OWNER_SOURCE: &str = "* Shows bug in .dc sweep over source with global par usage\n\
+\n\
+.global_param vgi = 0.5\n\
+.global_param vdi = 1.0\n\
+M1 drain gate source 0 mlev1\n\
+* This produces INCORRECT DC sweep values if {vdi} used\n\
+*Vdrain drain 0  dc 1.0\n\
+Vdrain drain 0  dc {vdi}\n\
+Vgate gate 0 dc .5\n\
+Vsource source 0 dc {0}\n\
+\n\
+.dc vdrain 0 1 0.001 \n\
+.print dc v(drain) v(gate) I(vdrain)\n\
+\n\
+\n\
+.model mlev1 nmos level=1\n\
+\n\
+.end\n\
+\n";
+
+const BUG754_LITERAL_REFERENCE_SOURCE: &str = "* Baseline circuit not using global param\n\
+\n\
+M1 drain gate source 0 mlev1\n\
+Vdrain drain 0  dc 1.0\n\
+Vgate gate 0 dc .5\n\
+Vsource source 0 dc {0}\n\
+\n\
+.dc vdrain 0 1 0.001 \n\
+.print dc v(drain) v(gate) I(vdrain)\n\
+\n\
+.model mlev1 nmos level=1\n\
+\n\
+.end\n\
+\n";
+
+fn bug754_global_parameter_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-bug754-global-parameter-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/Certification_Tests/BUG_754_SON");
+    fs::create_dir_all(&family).expect("create BUG 754 fixture directory");
+    let owner_path = family.join("dcsweep_globalpar.cir");
+    let reference_path = family.join("dcsweep_nopar.cir");
+    fs::write(&owner_path, owner_source).expect("write BUG 754 owner");
+    fs::write(&reference_path, reference_source).expect("write BUG 754 reference");
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_754_SON/dcsweep_globalpar.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 754 wrapper provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/Certification_Tests/BUG_754_SON/dcsweep_globalpar.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/Certification_Tests/BUG_754_SON/dcsweep_nopar.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, owner, reference, runner)
+}
+
+fn bug655_continuation_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-bug655-continuation-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/Certification_Tests/BUG_655_SON");
+    fs::create_dir_all(&family).expect("create BUG 655 fixture directory");
+    let owner_path = family.join("contLine.cir");
+    let reference_path = family.join("contLine_with_spaces.cir");
+    fs::write(&owner_path, owner_source).expect("write BUG 655 owner");
+    fs::write(&reference_path, reference_source).expect("write BUG 655 spaced reference");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        "Netlists/Certification_Tests/BUG_655_SON/contLine.cir\trequires_upstream_wrapper\n",
+    )
+    .expect("write BUG 655 wrapper provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/Certification_Tests/BUG_655_SON/contLine.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/Certification_Tests/BUG_655_SON/contLine_with_spaces.cir"
+            .to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let mut config = XyceRunnerConfig::default();
+    // Each physical-role assertion below independently executes the paired
+    // oracle, for four debug Level-1 BJT sweeps in total. Under the fully
+    // parallel core suite, either paired execution can exceed the ordinary
+    // three-minute production deck budget solely from CPU contention.
+    config.max_time_per_test_ms = BUG655_DEBUG_EXECUTION_TIMEOUT_MS;
+    let runner = XyceTestRunner::new(&root, config);
+    (root, owner, reference, runner)
+}
+
+fn bug655_comparator_table(output: Value) -> XycePrnTable {
+    XycePrnTable {
+        columns: vec!["Index".into(), "I(I1)".into(), "V(3)".into()],
+        rows: (0..21)
+            .map(|row| vec![row as Value, -100.0e-6 + row as Value * 10.0e-6, output])
+            .collect(),
+    }
+}
+
+fn bug667_nodeset_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-bug667-nodeset-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/Certification_Tests/BUG_667_SON");
+    fs::create_dir_all(&family).expect("create BUG 667 NODESET fixture directory");
+    let owner_path = family.join("nodeset_in_subckt.cir");
+    let reference_path = family.join("nodeset_not_in_subckt.cir");
+    fs::write(&owner_path, owner_source).expect("write BUG 667 NODESET owner");
+    fs::write(&reference_path, reference_source).expect("write BUG 667 NODESET reference");
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_667_SON/nodeset_in_subckt.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write BUG 667 NODESET wrapper provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/Certification_Tests/BUG_667_SON/nodeset_in_subckt.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/Certification_Tests/BUG_667_SON/nodeset_not_in_subckt.cir"
+            .to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, owner, reference, runner)
+}
+
+fn resistor_dtemp_fixture(
+    label: &str,
+    owner_source: &str,
+    reference_source: &str,
+) -> (PathBuf, XyceDeck, XyceDeck, XyceTestRunner) {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-resistor-dtemp-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = root.join("Netlists/DTEMP");
+    fs::create_dir_all(&family).expect("create resistor DTEMP fixture directory");
+    let owner_path = family.join("res_dtemp.cir");
+    let reference_path = family.join("res_ref.cir");
+    fs::write(&owner_path, owner_source).expect("write resistor DTEMP owner fixture");
+    fs::write(&reference_path, reference_source).expect("write resistor DTEMP reference fixture");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        "Netlists/DTEMP/res_dtemp.cir\trequires_upstream_wrapper\n",
+    )
+    .expect("write resistor DTEMP wrapper provenance");
+    let owner = XyceDeck {
+        path: owner_path,
+        relative_path: "Netlists/DTEMP/res_dtemp.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let reference = XyceDeck {
+        path: reference_path,
+        relative_path: "Netlists/DTEMP/res_ref.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    (root, owner, reference, runner)
+}
+
+#[test]
+fn bug647_resistor_pair_is_manifest_owned_and_structurally_qualified() {
+    let (root, owner, reference, runner) = bug647_resistor_fixture(
+        "qualification",
+        BUG647_RESISTOR_OWNER_SOURCE,
+        BUG647_RESISTOR_REFERENCE_SOURCE,
+    );
+    let owner_contract = runner
+        .bug647_resistor_relational_contract(&owner)
+        .expect("owner is selected")
+        .expect("owner pair qualifies");
+    let reference_contract = runner
+        .bug647_resistor_relational_contract(&reference)
+        .expect("reference is selected")
+        .expect("reference pair qualifies");
+    assert_eq!(owner_contract.role, XyceBug647ResistorRole::Owner);
+    assert_eq!(
+        reference_contract.role,
+        XyceBug647ResistorRole::ModelParameterReference
+    );
+    assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+    assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+    fs::remove_dir_all(root).expect("remove BUG 647 resistor fixture");
+}
+
+#[test]
+fn bug647_resistor_pair_rejects_semantic_mutations() {
+    let mutations = [
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.replace("R1 2 0", "R1 3 0"),
+            BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+            "topology",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.replace("RMOD L=1000U", "RMOD 1K L=1000U"),
+            BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+            "value-less representation",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.replace("VIN 0 5V 1V", "VIN 0 6V 1V"),
+            BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+            "DC grid",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.replace("R1:W 1u 5u", "R1:W 2u 5u"),
+            BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+            "W sweep",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.replace("R1:TEMP", "R1:DTEMP"),
+            BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+            "temperature mapping",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.to_string(),
+            BUG647_RESISTOR_REFERENCE_SOURCE.replace("RMOD:DEFW", "RMOD:W"),
+            "model width ownership",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.to_string(),
+            BUG647_RESISTOR_REFERENCE_SOURCE.replace("TC1=1e-2", "TC1=2e-2"),
+            "model TC1",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.replace("R1:W R1:TC1", "R1:TC1 R1:W"),
+            BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+            "probe order",
+        ),
+        (
+            BUG647_RESISTOR_OWNER_SOURCE.replace(".END", ".OPTIONS GMIN=1e-9\n.END"),
+            BUG647_RESISTOR_REFERENCE_SOURCE.to_string(),
+            "statement envelope",
+        ),
+    ];
+    for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+        let (root, owner, _, runner) = bug647_resistor_fixture(
+            &format!("mutation-{index}"),
+            &owner_source,
+            &reference_source,
+        );
+        assert!(
+            runner
+                .bug647_resistor_relational_contract(&owner)
+                .expect("owner remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 647 resistor mutation fixture");
+    }
+}
+
+#[test]
+fn bug647_resistor_pair_requires_owner_only_wrapper_provenance() {
+    let (root, owner, _, _) = bug647_resistor_fixture(
+        "manifest",
+        BUG647_RESISTOR_OWNER_SOURCE,
+        BUG647_RESISTOR_REFERENCE_SOURCE,
+    );
+    for manifest in [
+        "",
+        "Netlists/Certification_Tests/BUG_647_SON/semic_resistor_modpar.cir\trequires_upstream_wrapper\n",
+        "Netlists/Certification_Tests/BUG_647_SON/semic_resistor.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_647_SON/semic_resistor_modpar.cir\trequires_upstream_wrapper\n",
+    ] {
+        fs::write(root.join(HARNESS_MANIFEST_FILE), manifest).expect("mutate BUG 647 provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            runner
+                .bug647_resistor_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "non-owner-only provenance must fail closed"
+        );
+    }
+    fs::remove_dir_all(root).expect("remove BUG 647 provenance fixture");
+}
+
+#[test]
+fn bug647_resistor_comparator_serializes_full_prn_and_reproduces_perl_predicate() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let rows = (0..1_620)
+        .map(|row| {
+            let index = (row % 6) as Value;
+            vec![index, index, 200.0, 1e-6, 1e-2, 1e-4, 30.0]
+        })
+        .collect::<Vec<_>>();
+    let reference = XycePrnTable {
+        columns: vec![
+            "Index".into(),
+            "V(1)".into(),
+            "I(VMON)".into(),
+            "R1:W".into(),
+            "R1:TC1".into(),
+            "R1:TC2".into(),
+            "R1:TEMP".into(),
+        ],
+        rows,
+    };
+    let tokens = XyceTestRunner::bug647_default_prn_token_lines(&reference)
+        .expect("canonical table serializes");
+    assert_eq!(tokens.len(), 1_622);
+    assert_eq!(tokens[0], reference.columns);
+    assert_eq!(
+        tokens[1_621],
+        ["End", "of", "Xyce(TM)", "Parameter", "Sweep"]
+    );
+    assert!(
+        runner
+            .compare_bug647_resistor_tables(&reference, &reference)
+            .expect("identical PRNs compare")
+            .is_empty()
+    );
+
+    let mut accepted_by_literal_phase_bug = reference.clone();
+    accepted_by_literal_phase_bug.rows[0][6] = 100.0;
+    assert!(
+        runner
+            .compare_bug647_resistor_tables(&reference, &accepted_by_literal_phase_bug)
+            .expect("literal Perl phase clause is evaluated")
+            .is_empty(),
+        "Release 7.10's missing outer abs accepts both magnitudes below 180"
+    );
+
+    let mut rejected = reference.clone();
+    rejected.rows[0][2] = 202.0;
+    assert_eq!(
+        runner
+            .compare_bug647_resistor_tables(&reference, &rejected)
+            .expect("out-of-tolerance values compare")
+            .len(),
+        1
+    );
+    let mut bad_index = reference.clone();
+    bad_index.rows[6][0] = 6.0;
+    assert!(
+        runner
+            .compare_bug647_resistor_tables(&reference, &bad_index)
+            .is_err()
+    );
+}
+
+#[test]
+fn bug647_resistor_candidate_census_is_exactly_two_records() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let discovered_by_path = discovered
+        .iter()
+        .map(|deck| {
+            (
+                XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                deck,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut independent_candidates = BTreeSet::new();
+    for owner in discovered.iter().filter(|deck| {
+        runner.requires_upstream_wrapper(&deck.relative_path)
+            && deck
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("semic_resistor.cir"))
+    }) {
+        let source = fs::read_to_string(&owner.path).expect("read BUG 647 candidate owner");
+        let normalized = XyceTestRunner::normalize_probe(&source);
+        if !normalized.contains(".steplinr1:w1u5u1u")
+            || !normalized.contains(".steplinr1:temp30351")
+            || !normalized.contains("r1:wr1:tc1r1:tc2r1:temp")
+        {
+            continue;
+        }
+        let reference_key = XyceTestRunner::normalize_manifest_key(
+            &runner.relative_key(&owner.path.with_file_name("semic_resistor_modpar.cir")),
+        );
+        let Some(reference) = discovered_by_path.get(&reference_key) else {
+            continue;
+        };
+        let reference_source =
+            fs::read_to_string(&reference.path).expect("read BUG 647 candidate reference");
+        let reference_normalized = XyceTestRunner::normalize_probe(&reference_source);
+        if reference_normalized.contains(".steplinrmod:defw1u5u1u")
+            && reference_normalized.contains(".steplintemp30351")
+            && reference_normalized.contains("r1:wr1:tc1r1:tc2r1:temp")
+        {
+            independent_candidates
+                .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+            independent_candidates.insert(reference_key);
+        }
+    }
+    let selected = discovered
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .bug647_resistor_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|err| {
+                        panic!("BUG 647 resistor candidate failed qualification: {err}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(independent_candidates, selected);
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_BUG647_RESISTOR_OWNER_RECORD.to_string(),
+            XYCE_BUG647_RESISTOR_REFERENCE_RECORD.to_string(),
+        ])
+    );
+}
+
+#[test]
+fn bug647_resistor_relational_pair_executes_both_roles() {
+    let (root, owner, reference, runner) = bug647_resistor_fixture(
+        "execution",
+        BUG647_RESISTOR_OWNER_SOURCE,
+        BUG647_RESISTOR_REFERENCE_SOURCE,
+    );
+    for (deck, expected_contract) in [
+        (owner, "bug647_resistor_relational_wrapper_owner"),
+        (
+            reference,
+            "bug647_resistor_relational_wrapper_model_reference",
+        ),
+    ] {
+        let result = runner.run_discovered_test(&deck);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG 647 resistor role must execute: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+    fs::remove_dir_all(root).expect("remove BUG 647 execution fixture");
+}
+
+#[test]
+fn netlist_parser_accepts_leading_space_continuation_lines() {
+    let (owner_source, reference_source) = bug655_continuation_sources();
+    let owner = XyceTestRunner::parse_xyce_netlist(
+        &owner_source,
+        Path::new("generic-column-zero-continuation.cir"),
+    )
+    .expect("column-zero continuation source parses");
+    let reference = XyceTestRunner::parse_xyce_netlist(
+        &reference_source,
+        Path::new("generic-leading-space-continuation.cir"),
+    )
+    .expect("leading-space continuation source parses");
+    assert_eq!(owner.models.len(), 1);
+    assert_eq!(owner.models[0].params.len(), 23);
+    assert_eq!(
+        XyceTestRunner::bug655_continuation_snapshot(&owner)
+            .expect("column-zero source has a canonical semantic snapshot"),
+        XyceTestRunner::bug655_continuation_snapshot(&reference)
+            .expect("spaced source has a canonical semantic snapshot")
+    );
+}
+
+#[test]
+fn bug655_continuation_pair_is_manifest_owned_and_semantically_identical() {
+    let (owner_source, reference_source) = bug655_continuation_sources();
+    let (root, owner, reference, runner) =
+        bug655_continuation_fixture("qualification", &owner_source, &reference_source);
+    let owner_contract = runner
+        .bug655_continuation_relational_contract(&owner)
+        .expect("owner path is selected")
+        .expect("owner pair qualifies");
+    let reference_contract = runner
+        .bug655_continuation_relational_contract(&reference)
+        .expect("reference path is selected")
+        .expect("reference pair qualifies");
+    assert_eq!(
+        owner_contract.role,
+        XyceBug655ContinuationRole::ColumnZeroOwner
+    );
+    assert_eq!(
+        reference_contract.role,
+        XyceBug655ContinuationRole::LeadingSpaceReference
+    );
+    assert_eq!(
+        XyceTestRunner::static_dc_contract_for_print_format(
+            true,
+            owner_contract.owner_plan.print_format.as_deref(),
+        )
+        .expect("owner DC format classifies"),
+        XyceStaticDcContract::WrapperDefault
+    );
+    assert_eq!(
+        XyceTestRunner::static_dc_contract_for_print_format(
+            false,
+            reference_contract.reference_plan.print_format.as_deref(),
+        )
+        .expect("reference DC format classifies"),
+        XyceStaticDcContract::PlainStatic
+    );
+    assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+    assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+    fs::remove_dir_all(root).expect("remove BUG 655 qualification fixture");
+}
+
+#[test]
+fn bug655_continuation_pair_rejects_source_and_semantic_mutations() {
+    let (owner_source, reference_source) = bug655_continuation_sources();
+    let mutations = [
+        (
+            owner_source.clone(),
+            reference_source.replacen("  + bf=100", " + bf=100", 1),
+            "line 12 two-space boundary",
+        ),
+        (
+            owner_source.clone(),
+            reference_source.replacen("\n+ cje=", "\n + cje=", 1),
+            "line 13 zero-space boundary",
+        ),
+        (
+            owner_source.clone(),
+            reference_source.replacen("\n + cjs=", "\n  + cjs=", 1),
+            "line 14 one-space boundary",
+        ),
+        (
+            owner_source.clone(),
+            reference_source.replacen("\n   + ikf=", "\n  + ikf=", 1),
+            "line 15 three-space boundary",
+        ),
+        (
+            owner_source.replacen("r1 1 3 5k", "r1 1 4 5k", 1),
+            reference_source.clone(),
+            "topology",
+        ),
+        (
+            owner_source.replacen("bf=100", "bf=101", 1),
+            reference_source.clone(),
+            "model parameter",
+        ),
+        (
+            owner_source.replacen("100uA 10uA", "100uA 20uA", 1),
+            reference_source.clone(),
+            "DC grid",
+        ),
+        (
+            owner_source.replacen("I(I1) V(3)", "V(3) I(I1)", 1),
+            reference_source.clone(),
+            "probe order",
+        ),
+        (
+            owner_source.replacen("q1 3 2 0", "q1 3 1 0", 1),
+            reference_source,
+            "BJT topology",
+        ),
+    ];
+    for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+        let (root, owner, _, runner) = bug655_continuation_fixture(
+            &format!("mutation-{index}"),
+            &owner_source,
+            &reference_source,
+        );
+        assert!(
+            runner
+                .bug655_continuation_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 655 mutation fixture");
+    }
+}
+
+#[test]
+fn bug655_continuation_pair_requires_owner_only_provenance() {
+    let (owner_source, reference_source) = bug655_continuation_sources();
+    let (root, owner, _, _) =
+        bug655_continuation_fixture("provenance", &owner_source, &reference_source);
+    for manifest in [
+        "",
+        "Netlists/Certification_Tests/BUG_655_SON/contLine_with_spaces.cir\trequires_upstream_wrapper\n",
+        "Netlists/Certification_Tests/BUG_655_SON/contLine.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_655_SON/contLine_with_spaces.cir\trequires_upstream_wrapper\n",
+    ] {
+        fs::write(root.join(HARNESS_MANIFEST_FILE), manifest).expect("mutate BUG 655 provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            runner
+                .bug655_continuation_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "non-owner-only BUG 655 provenance must fail closed"
+        );
+    }
+    fs::remove_dir_all(root).expect("remove BUG 655 provenance fixture");
+}
+
+#[test]
+fn bug655_continuation_pair_requires_exact_census_and_no_artifacts() {
+    let (owner_source, reference_source) = bug655_continuation_sources();
+    for (index, extra_name) in ["contLine.cir.prn", "unexpected.cir", "notes.txt"]
+        .into_iter()
+        .enumerate()
+    {
+        let (root, owner, _, runner) = bug655_continuation_fixture(
+            &format!("census-{index}"),
+            &owner_source,
+            &reference_source,
+        );
+        fs::write(
+            owner
+                .path
+                .parent()
+                .expect("BUG 655 fixture parent")
+                .join(extra_name),
+            "unexpected",
+        )
+        .expect("write unexpected BUG 655 directory entry");
+        assert!(
+            runner
+                .bug655_continuation_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "extra directory entry '{extra_name}' must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 655 census fixture");
+    }
+}
+
+#[test]
+fn bug655_continuation_comparator_reproduces_release_710_dc_boundaries() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let good = bug655_comparator_table(1.0);
+    assert!(
+        runner
+            .compare_bug655_continuation_tables(&good, &good)
+            .expect("identical BUG 655 tables compare")
+            .is_empty()
+    );
+
+    let rms_boundary = bug655_comparator_table(0.99);
+    assert!(
+        runner
+            .compare_bug655_continuation_tables(&good, &rms_boundary)
+            .expect("RMS boundary table compares")
+            .is_empty(),
+        "precision-8 normalized RMS at or below one must pass"
+    );
+    let above_rms_boundary = bug655_comparator_table(0.989_999_99);
+    let mismatches = runner
+        .compare_bug655_continuation_tables(&good, &above_rms_boundary)
+        .expect("above-boundary table compares");
+    assert_eq!(mismatches.len(), 1);
+    assert_eq!(mismatches[0].probe, "V(3)");
+    assert!(mismatches[0].relative_error > 1.0);
+
+    let mut wrong_axis = good.clone();
+    wrong_axis.rows[10][1] = 2.0e-12;
+    assert!(
+        runner
+            .compare_bug655_continuation_tables(&good, &wrong_axis)
+            .is_err(),
+        "precision-8 sweep coordinates must remain within ABSDIFFTOL"
+    );
+    let mut nonfinite = good.clone();
+    nonfinite.rows[10][2] = Value::NAN;
+    assert!(
+        runner
+            .compare_bug655_continuation_tables(&good, &nonfinite)
+            .is_err(),
+        "non-finite PRN values must fail closed"
+    );
+    let mut wrong_header = good.clone();
+    wrong_header.columns[2] = "V(OTHER)".into();
+    assert!(
+        runner
+            .compare_bug655_continuation_tables(&good, &wrong_header)
+            .is_err()
+    );
+    let mut missing_row = good.clone();
+    missing_row.rows.pop();
+    assert!(
+        runner
+            .compare_bug655_continuation_tables(&good, &missing_row)
+            .is_err()
+    );
+}
+
+#[test]
+fn bug655_continuation_candidate_census_is_exactly_two_records() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let discovered_by_path = discovered
+        .iter()
+        .map(|deck| {
+            (
+                XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                deck,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut independent_candidates = BTreeSet::new();
+    for owner in discovered.iter().filter(|deck| {
+        runner.requires_upstream_wrapper(&deck.relative_path)
+            && deck
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("contLine.cir"))
+    }) {
+        let reference_key = XyceTestRunner::normalize_manifest_key(
+            &runner.relative_key(&owner.path.with_file_name("contLine_with_spaces.cir")),
+        );
+        let Some(reference) = discovered_by_path.get(&reference_key) else {
+            continue;
+        };
+        let owner_source = fs::read_to_string(&owner.path).expect("read BUG 655 owner");
+        let reference_source = fs::read_to_string(&reference.path).expect("read BUG 655 reference");
+        let owner_lines = owner_source.lines().collect::<Vec<_>>();
+        let reference_lines = reference_source.lines().collect::<Vec<_>>();
+        if owner_lines.len() == 21
+            && reference_lines.len() == 21
+            && [11usize, 12, 13, 14]
+                .into_iter()
+                .all(|line| owner_lines[line].trim_start() == reference_lines[line].trim_start())
+            && [0usize, 0, 0, 0]
+                == [11usize, 12, 13, 14]
+                    .map(|line| owner_lines[line].len() - owner_lines[line].trim_start().len())
+            && [2usize, 0, 1, 3]
+                == [11usize, 12, 13, 14].map(|line| {
+                    reference_lines[line].len() - reference_lines[line].trim_start().len()
+                })
+        {
+            independent_candidates
+                .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+            independent_candidates.insert(reference_key);
+        }
+    }
+    let selected = discovered
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .bug655_continuation_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|err| {
+                        panic!("BUG 655 continuation candidate failed qualification: {err}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(independent_candidates, selected);
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_BUG655_CONTINUATION_OWNER_RECORD.to_string(),
+            XYCE_BUG655_CONTINUATION_REFERENCE_RECORD.to_string(),
+        ])
+    );
+}
+
+#[test]
+fn bug655_continuation_relational_pair_executes_both_roles() {
+    let (owner_source, reference_source) = bug655_continuation_sources();
+    let (root, owner, reference, runner) =
+        bug655_continuation_fixture("execution", &owner_source, &reference_source);
+    for (deck, expected_contract) in [
+        (owner, "bug655_continuation_relational_wrapper_owner"),
+        (
+            reference,
+            "bug655_continuation_relational_wrapper_spaced_reference",
+        ),
+    ] {
+        let result = runner.run_discovered_test(&deck);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG 655 continuation role must execute: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+    fs::remove_dir_all(root).expect("remove BUG 655 execution fixture");
+}
+
+#[test]
+fn bug662_header_pair_is_manifest_owned_and_structurally_qualified() {
+    let (owner_source, reference_source) = bug662_header_sources();
+    let (root, owner, reference, runner) =
+        bug662_header_fixture("qualification", &owner_source, &reference_source);
+    let owner_contract = runner
+        .bug662_long_header_relational_contract(&owner)
+        .expect("owner is selected")
+        .expect("owner pair qualifies");
+    let reference_contract = runner
+        .bug662_long_header_relational_contract(&reference)
+        .expect("reference is selected")
+        .expect("reference pair qualifies");
+    assert_eq!(owner_contract.role, XyceBug662HeaderRole::LongHeaderOwner);
+    assert_eq!(
+        reference_contract.role,
+        XyceBug662HeaderRole::ShortHeaderReference
+    );
+    assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+    assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+    fs::remove_dir_all(root).expect("remove BUG 662 qualification fixture");
+}
+
+#[test]
+fn bug662_header_pair_rejects_header_and_executable_mutations() {
+    let (owner_source, reference_source) = bug662_header_sources();
+    let mut short_boundary_mutation = reference_source.clone();
+    short_boundary_mutation.remove(255);
+    let mutations = [
+        (
+            owner_source.replacen("SCHEMATIC1", "SCHEMATIC", 1),
+            reference_source.clone(),
+            "owner over-256 boundary",
+        ),
+        (
+            owner_source.clone(),
+            short_boundary_mutation,
+            "reference 256-byte boundary",
+        ),
+        (
+            owner_source.replacen("SCHEMATIC1-bias", "SCHEMATIC1-baas", 1),
+            reference_source.replacen("SCHEMATIC1-bias", "SCHEMATIC1-baas", 1),
+            "same-length canonical title content",
+        ),
+        (
+            owner_source.replace("Z0=50", "Z0=75"),
+            reference_source.clone(),
+            "owner transmission-line value",
+        ),
+        (
+            owner_source.clone(),
+            reference_source.replace("V(N14950) V(N15037)", "V(N15037) V(N14950)"),
+            "reference probe order",
+        ),
+        (
+            owner_source.replace(".END", ".OPTIONS GMIN=1e-9\n.END"),
+            reference_source.clone(),
+            "statement envelope",
+        ),
+    ];
+    for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+        let (root, owner, _, runner) = bug662_header_fixture(
+            &format!("mutation-{index}"),
+            &owner_source,
+            &reference_source,
+        );
+        assert!(
+            runner
+                .bug662_long_header_relational_contract(&owner)
+                .expect("owner remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 662 mutation fixture");
+    }
+}
+
+#[test]
+fn bug662_header_pair_requires_owner_only_wrapper_provenance() {
+    let (owner_source, reference_source) = bug662_header_sources();
+    let (root, owner, _, _) = bug662_header_fixture("manifest", &owner_source, &reference_source);
+    for manifest in [
+        "",
+        "Netlists/Certification_Tests/BUG_662/headerLineLengthLessThan256.cir\trequires_upstream_wrapper\n",
+        "Netlists/Certification_Tests/BUG_662/headerLineLengthMoreThan256.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_662/headerLineLengthLessThan256.cir\trequires_upstream_wrapper\n",
+    ] {
+        fs::write(root.join(HARNESS_MANIFEST_FILE), manifest).expect("mutate BUG 662 provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            runner
+                .bug662_long_header_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "non-owner-only BUG 662 provenance must fail closed"
+        );
+    }
+    fs::remove_dir_all(root).expect("remove BUG 662 provenance fixture");
+}
+
+#[test]
+fn bug662_header_comparator_serializes_full_prn_and_uses_xyce_verify_defaults() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let reference = XycePrnTable {
+        columns: vec![
+            "Index".into(),
+            "TIME".into(),
+            "V(N14950)".into(),
+            "V(N15037)".into(),
+        ],
+        rows: vec![
+            vec![0.0, 0.0, 1.0, 0.0],
+            vec![1.0, 1.0, 1.0, 0.0],
+            vec![2.0, 2.0, 1.0, 0.0],
+        ],
+    };
+    let tokens = XyceTestRunner::bug662_default_prn_token_lines(&reference)
+        .expect("canonical BUG 662 PRN serializes");
+    assert_eq!(tokens.len(), 5);
+    assert_eq!(tokens[0], reference.columns);
+    assert_eq!(tokens[4], ["End", "of", "Xyce(TM)", "Simulation"]);
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &reference)
+            .expect("identical serialized PRNs compare")
+            .is_empty()
+    );
+
+    let mut within_default_rms = reference.clone();
+    within_default_rms.rows[1][2] += 1.0e-4;
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &within_default_rms)
+            .expect("default xyce_verify tolerance is evaluated")
+            .is_empty()
+    );
+    let duplicate_time = XycePrnTable {
+        columns: reference.columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0, 0.0],
+            vec![1.0, 1.0, 1.0, 0.0],
+            vec![2.0, 1.0, 1.0, 0.0],
+            vec![3.0, 2.0, 1.0, 0.0],
+        ],
+    };
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &duplicate_time)
+            .expect("Release 7.10 duplicate-time normalization is evaluated")
+            .is_empty()
+    );
+    let mut outside_default_rms = reference.clone();
+    outside_default_rms.rows[1][2] = 2.0;
+    assert_eq!(
+        runner
+            .compare_bug662_header_tables(&reference, &outside_default_rms)
+            .expect("out-of-tolerance waveform compares")
+            .len(),
+        1
+    );
+    let mut bad_index = reference.clone();
+    bad_index.rows[1][0] = 2.0;
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &bad_index)
+            .is_err()
+    );
+    let mut starts_before_reference = reference.clone();
+    starts_before_reference.rows[0][1] = -1.0;
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &starts_before_reference)
+            .is_err(),
+        "good data must cover the test start"
+    );
+    let mut ends_after_reference = reference.clone();
+    ends_after_reference.rows[2][1] = 3.0;
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &ends_after_reference)
+            .is_err(),
+        "good data must cover the test end"
+    );
+    let mut nonfinite = reference.clone();
+    nonfinite.rows[1][2] = Value::NAN;
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &nonfinite)
+            .is_err()
+    );
+    let mut changed_header = reference.clone();
+    changed_header.columns[2] = "V(OTHER)".into();
+    assert!(
+        runner
+            .compare_bug662_header_tables(&reference, &changed_header)
+            .is_err()
+    );
+    let mut changed_footer = tokens.clone();
+    changed_footer[4][3] = "Sweep".into();
+    assert!(XyceTestRunner::validate_bug662_default_prn_token_lines(&changed_footer, 3).is_err());
+}
+
+#[test]
+fn bug662_header_candidate_census_is_exactly_two_records() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let discovered_by_path = discovered
+        .iter()
+        .map(|deck| {
+            (
+                XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                deck,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut independent_candidates = BTreeSet::new();
+    for owner in discovered.iter().filter(|deck| {
+        runner.requires_upstream_wrapper(&deck.relative_path)
+            && deck
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("headerLineLengthMoreThan256.cir"))
+    }) {
+        let owner_source = fs::read_to_string(&owner.path).expect("read BUG 662 owner");
+        let owner_lines = owner_source.lines().collect::<Vec<_>>();
+        let reference_key = XyceTestRunner::normalize_manifest_key(
+            &runner.relative_key(&owner.path.with_file_name("headerLineLengthLessThan256.cir")),
+        );
+        let Some(reference) = discovered_by_path.get(&reference_key) else {
+            continue;
+        };
+        let reference_source = fs::read_to_string(&reference.path).expect("read BUG 662 reference");
+        let reference_lines = reference_source.lines().collect::<Vec<_>>();
+        if owner_lines.first().is_some_and(|line| line.len() == 312)
+            && reference_lines
+                .first()
+                .is_some_and(|line| line.len() == 256)
+            && reference_lines.get(1).is_some_and(|line| line.len() == 57)
+            && owner_source.contains(".TRAN 0 100ns 0")
+            && reference_source.contains(".TRAN 0 100ns 0")
+            && owner_source.contains("T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50")
+            && reference_source.contains("T_T1 N14950 0 N15037 0 TD=10e-9 Z0=50")
+        {
+            independent_candidates
+                .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+            independent_candidates.insert(reference_key);
+        }
+    }
+    let selected = discovered
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .bug662_long_header_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|err| {
+                        panic!("BUG 662 header candidate failed qualification: {err}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(independent_candidates, selected);
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_BUG662_LONG_HEADER_OWNER_RECORD.to_string(),
+            XYCE_BUG662_SHORT_HEADER_REFERENCE_RECORD.to_string(),
+        ])
+    );
+}
+
+#[test]
+fn bug662_header_relational_pair_executes_both_roles() {
+    let (owner_source, reference_source) = bug662_header_sources();
+    let (root, owner, reference, runner) =
+        bug662_header_fixture("execution", &owner_source, &reference_source);
+    for (deck, expected_contract) in [
+        (owner, "bug662_long_header_relational_wrapper_owner"),
+        (
+            reference,
+            "bug662_long_header_relational_wrapper_short_reference",
+        ),
+    ] {
+        let result = runner.run_discovered_test(&deck);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG 662 header role must execute: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+    fs::remove_dir_all(root).expect("remove BUG 662 execution fixture");
+}
+
+#[test]
+fn bug667_nodeset_pair_is_manifest_owned_and_semantically_equivalent() {
+    let (root, owner, reference, runner) = bug667_nodeset_fixture(
+        "qualification",
+        BUG667_NODESET_OWNER_SOURCE,
+        BUG667_NODESET_REFERENCE_SOURCE,
+    );
+    let owner_contract = runner
+        .bug667_nodeset_relational_contract(&owner)
+        .expect("owner is selected")
+        .expect("owner pair qualifies");
+    let reference_contract = runner
+        .bug667_nodeset_relational_contract(&reference)
+        .expect("reference is selected")
+        .expect("reference pair qualifies");
+    assert_eq!(owner_contract.role, XyceBug667NodesetRole::ScopedOwner);
+    assert_eq!(
+        reference_contract.role,
+        XyceBug667NodesetRole::ExplicitHierarchicalReference
+    );
+    assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+    assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+
+    let owner_netlist =
+        XyceTestRunner::parse_xyce_netlist(&owner_contract.owner_plan.source, &owner.path)
+            .expect("owner reparses");
+    let reference_netlist = XyceTestRunner::parse_xyce_netlist(
+        &reference_contract.reference_plan.source,
+        &reference.path,
+    )
+    .expect("reference reparses");
+    assert_eq!(
+        XyceTestRunner::bug667_effective_nodeset_map(&owner_netlist)
+            .expect("owner NODESET map materializes"),
+        BTreeMap::from([
+            ("n15967".to_string(), 0.5f64.to_bits()),
+            ("x_x1.mid".to_string(), 0.5f64.to_bits()),
+        ])
+    );
+    assert_eq!(
+        XyceTestRunner::bug667_effective_nodeset_map(&reference_netlist)
+            .expect("reference NODESET map materializes"),
+        BTreeMap::from([
+            ("n15967".to_string(), 0.5f64.to_bits()),
+            ("x_x1.mid".to_string(), 0.5f64.to_bits()),
+        ])
+    );
+    fs::remove_dir_all(root).expect("remove BUG 667 NODESET fixture");
+}
+
+#[test]
+fn bug667_nodeset_pair_rejects_semantic_mutations() {
+    let mutations = [
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace("vmid=5.0", "vmid=6.0"),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "subcircuit formal default",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace("vmid=0.5", "vmid=0.6"),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "instance override",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace("V(mid)={vmid}", "V(out)={vmid}"),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "local NODESET target",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.to_string(),
+            BUG667_NODESET_REFERENCE_SOURCE.replace("V(X_X1:mid )=0.5", "V(X_X1:mid )=0.6"),
+            "explicit hierarchical NODESET",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.to_string(),
+            BUG667_NODESET_REFERENCE_SOURCE.replace("V(X_X1:mid )=0.5", "V(X_BAD:mid )=0.5"),
+            "unresolvable hierarchical NODESET",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.to_string(),
+            BUG667_NODESET_REFERENCE_SOURCE.replace("V(N15967) =0.5", "V(N15967) =0.6"),
+            "common NODESET",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace(
+                "R_R7         N16554 N16997  1k",
+                "R_R7         N16554 N16998  1k",
+            ),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "topology",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace(
+                "PULSE(0 1 0 1e-3 1e-3 5e-3 1s)",
+                "PULSE(0 1 0 1e-3 1e-3 4e-3 1s)",
+            ),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "PULSE waveform",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace(".TRAN  0 10ms", ".TRAN  0 9ms"),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "transient domain",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace("V(N15206) V(N15971)", "V(N15971) V(N15206)"),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "probe order",
+        ),
+        (
+            BUG667_NODESET_OWNER_SOURCE.replace("\n.END\n", "\n.OPTIONS RELTOL=1e-5\n.END\n"),
+            BUG667_NODESET_REFERENCE_SOURCE.to_string(),
+            "extra directive",
+        ),
+    ];
+    for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+        let (root, owner, _, runner) = bug667_nodeset_fixture(
+            &format!("mutation-{index}"),
+            &owner_source,
+            &reference_source,
+        );
+        assert!(
+            runner
+                .bug667_nodeset_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 667 mutation fixture");
+    }
+}
+
+#[test]
+fn bug667_nodeset_pair_requires_exact_wrapper_provenance() {
+    let (root, owner, _, _) = bug667_nodeset_fixture(
+        "manifest",
+        BUG667_NODESET_OWNER_SOURCE,
+        BUG667_NODESET_REFERENCE_SOURCE,
+    );
+    for manifest in [
+        "",
+        "Netlists/Certification_Tests/BUG_667_SON/nodeset_not_in_subckt.cir\trequires_upstream_wrapper\n",
+        "Netlists/Certification_Tests/BUG_667_SON/nodeset_in_subckt.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_667_SON/nodeset_not_in_subckt.cir\trequires_upstream_wrapper\n",
+    ] {
+        fs::write(root.join(HARNESS_MANIFEST_FILE), manifest).expect("mutate BUG 667 provenance");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            runner
+                .bug667_nodeset_relational_contract(&owner)
+                .expect("exact owner path remains selected")
+                .is_err(),
+            "non-owner-only BUG 667 provenance must fail closed"
+        );
+    }
+    fs::remove_dir_all(root).expect("remove BUG 667 provenance fixture");
+}
+
+#[test]
+fn bug667_nodeset_comparator_reproduces_complete_default_prn_diff() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let columns = vec![
+        "Index".to_string(),
+        "TIME".to_string(),
+        "V(N15206)".to_string(),
+        "V(N15971)".to_string(),
+        "V(N15554)".to_string(),
+        "V(N15997)".to_string(),
+        "V(N16554)".to_string(),
+        "V(N16997)".to_string(),
+    ];
+    let baseline = XycePrnTable {
+        columns,
+        rows: vec![
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            vec![1.0, 1e-3, 0.5, 0.25, 0.5, 0.25, 0.5, 0.25],
+            vec![2.0, 10e-3, 1.0, 0.75, 1.0, 0.75, 1.0, 0.75],
+        ],
+    };
+    assert!(
+        runner
+            .compare_bug667_nodeset_tables(&baseline, &baseline)
+            .expect("identical complete PRNs compare")
+            .is_empty()
+    );
+
+    let mut changed_time_token = baseline.clone();
+    changed_time_token.rows[1][1] += 1e-10;
+    assert_eq!(
+        runner
+            .compare_bug667_nodeset_tables(&baseline, &changed_time_token)
+            .expect("TIME token mutation compares")
+            .len(),
+        1
+    );
+    let mut changed_probe_token = baseline.clone();
+    changed_probe_token.rows[1][4] += 1e-8;
+    assert_eq!(
+        runner
+            .compare_bug667_nodeset_tables(&baseline, &changed_probe_token)
+            .expect("probe token mutation compares")
+            .len(),
+        1
+    );
+    let mut changed_header = baseline.clone();
+    changed_header.columns[2] = "V(OTHER)".into();
+    assert!(
+        runner
+            .compare_bug667_nodeset_tables(&baseline, &changed_header)
+            .is_err()
+    );
+    let mut changed_index = baseline.clone();
+    changed_index.rows[1][0] = 2.0;
+    assert!(
+        runner
+            .compare_bug667_nodeset_tables(&baseline, &changed_index)
+            .is_err()
+    );
+    let mut changed_row_count = baseline.clone();
+    changed_row_count.rows.pop();
+    assert!(
+        runner
+            .compare_bug667_nodeset_tables(&baseline, &changed_row_count)
+            .is_err()
+    );
+}
+
+#[test]
+fn bug667_nodeset_candidate_census_is_exactly_two_records() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let discovered_by_path = discovered
+        .iter()
+        .map(|deck| {
+            (
+                XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                deck,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut independent_candidates = BTreeSet::new();
+    for owner in discovered.iter().filter(|deck| {
+        runner.requires_upstream_wrapper(&deck.relative_path)
+            && deck
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("nodeset_in_subckt.cir"))
+    }) {
+        let owner_source = fs::read_to_string(&owner.path).expect("read BUG 667 owner");
+        let reference_key = XyceTestRunner::normalize_manifest_key(
+            &runner.relative_key(&owner.path.with_file_name("nodeset_not_in_subckt.cir")),
+        );
+        let Some(reference) = discovered_by_path.get(&reference_key) else {
+            continue;
+        };
+        let reference_source = fs::read_to_string(&reference.path).expect("read BUG 667 reference");
+        if owner_source.contains(".NODESET    V(mid)={vmid}")
+            && owner_source.contains("params: vmid=0.5")
+            && reference_source.contains(".NODESET    V(X_X1:mid )=0.5")
+        {
+            independent_candidates
+                .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+            independent_candidates.insert(reference_key);
+        }
+    }
+    let selected = discovered
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .bug667_nodeset_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|err| {
+                        panic!("BUG 667 NODESET candidate failed qualification: {err}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(independent_candidates, selected);
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_BUG667_NODESET_OWNER_RECORD.to_string(),
+            XYCE_BUG667_NODESET_REFERENCE_RECORD.to_string(),
+        ])
+    );
+}
+
+#[test]
+fn bug667_nodeset_relational_pair_executes_both_roles() {
+    let (root, owner, reference, runner) = bug667_nodeset_fixture(
+        "execution",
+        BUG667_NODESET_OWNER_SOURCE,
+        BUG667_NODESET_REFERENCE_SOURCE,
+    );
+    for (deck, expected_contract) in [
+        (owner, "bug667_nodeset_relational_wrapper_owner"),
+        (
+            reference,
+            "bug667_nodeset_relational_wrapper_explicit_reference",
+        ),
+    ] {
+        let result = runner.run_discovered_test(&deck);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG 667 NODESET role must execute: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+    fs::remove_dir_all(root).expect("remove BUG 667 execution fixture");
+}
+
+#[test]
+fn bug754_global_parameter_pair_is_manifest_owned_and_semantically_identical() {
+    let (root, owner, reference, runner) = bug754_global_parameter_fixture(
+        "qualification",
+        BUG754_GLOBAL_PARAMETER_OWNER_SOURCE,
+        BUG754_LITERAL_REFERENCE_SOURCE,
+    );
+    let owner_contract = runner
+        .bug754_global_parameter_relational_contract(&owner)
+        .expect("owner is selected")
+        .expect("owner pair qualifies");
+    let reference_contract = runner
+        .bug754_global_parameter_relational_contract(&reference)
+        .expect("reference is selected")
+        .expect("reference pair qualifies");
+    assert_eq!(
+        owner_contract.role,
+        XyceBug754GlobalParameterRole::GlobalParameterOwner
+    );
+    assert_eq!(
+        reference_contract.role,
+        XyceBug754GlobalParameterRole::LiteralReference
+    );
+    assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+    assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+
+    let owner_netlist =
+        XyceTestRunner::parse_xyce_netlist(&owner_contract.owner_plan.source, &owner.path)
+            .expect("parse owner");
+    let reference_netlist =
+        XyceTestRunner::parse_xyce_netlist(&owner_contract.reference_plan.source, &reference.path)
+            .expect("parse reference");
+    assert_eq!(
+        XyceTestRunner::bug754_global_parameter_snapshot(
+            &owner_contract.owner_plan,
+            &owner_netlist,
+        )
+        .expect("owner snapshot"),
+        XyceTestRunner::bug754_global_parameter_snapshot(
+            &owner_contract.reference_plan,
+            &reference_netlist,
+        )
+        .expect("reference snapshot")
+    );
+    fs::remove_dir_all(root).expect("remove BUG 754 qualification fixture");
+}
+
+#[test]
+fn bug754_global_parameter_pair_rejects_source_and_semantic_mutations() {
+    let mutations = [
+        (
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen("vdi = 1.0", "vdi = 1.1", 1),
+            BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+            "changed effective global parameter",
+        ),
+        (
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                "Vdrain drain 0  dc {vdi}",
+                "Vdrain drain 0  dc 1.0",
+                1,
+            ),
+            BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+            "owner lost parameterized source representation",
+        ),
+        (
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.to_string(),
+            format!(".global_param vdi=1.0\n{}", BUG754_LITERAL_REFERENCE_SOURCE),
+            "reference gained parameter state",
+        ),
+        (
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                "M1 drain gate source 0",
+                "M1 drain gate source source",
+                1,
+            ),
+            BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+            "changed MOS bulk topology",
+        ),
+        (
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                ".dc vdrain 0 1 0.001",
+                ".dc vdrain 0 1 0.002",
+                1,
+            ),
+            BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+            "changed DC grid",
+        ),
+        (
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen(
+                "v(drain) v(gate) I(vdrain)",
+                "v(drain) I(vdrain)",
+                1,
+            ),
+            BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+            "changed ordered probes",
+        ),
+        (
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE.replacen("nmos level=1", "nmos level=2", 1),
+            BUG754_LITERAL_REFERENCE_SOURCE.to_string(),
+            "changed model level",
+        ),
+    ];
+    for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+        let (root, owner, _, runner) = bug754_global_parameter_fixture(
+            &format!("mutation-{index}"),
+            &owner_source,
+            &reference_source,
+        );
+        assert!(
+            matches!(
+                runner.bug754_global_parameter_relational_contract(&owner),
+                Some(Err(_))
+            ),
+            "{reason} must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 754 mutation fixture");
+    }
+}
+
+#[test]
+fn bug754_global_parameter_pair_rejects_provenance_census_and_artifacts() {
+    let mut normalized_names = BTreeSet::new();
+    XyceTestRunner::insert_bug754_family_member_name(
+        &mut normalized_names,
+        "dcsweep_globalpar.cir",
+    )
+    .expect("first physical spelling is admitted");
+    assert!(
+        XyceTestRunner::insert_bug754_family_member_name(
+            &mut normalized_names,
+            "DCSWEEP_GLOBALPAR.CIR",
+        )
+        .is_err(),
+        "case-colliding physical records must fail before normalized census comparison"
+    );
+
+    let assert_rejected = |label: &str, mutate: &dyn Fn(&Path, &XyceDeck, &XyceDeck)| {
+        let (root, owner, reference, _) = bug754_global_parameter_fixture(
+            label,
+            BUG754_GLOBAL_PARAMETER_OWNER_SOURCE,
+            BUG754_LITERAL_REFERENCE_SOURCE,
+        );
+        mutate(&root, &owner, &reference);
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            matches!(
+                runner.bug754_global_parameter_relational_contract(&owner),
+                Some(Err(_))
+            ),
+            "{label} must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove BUG 754 provenance fixture");
+    };
+
+    assert_rejected("missing-owner", &|root, _, _| {
+        fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove BUG 754 owner provenance");
+    });
+    assert_rejected("reference-wrapper", &|root, _, reference| {
+        fs::write(
+                root.join(HARNESS_MANIFEST_FILE),
+                format!(
+                    "Netlists/Certification_Tests/BUG_754_SON/dcsweep_globalpar.cir\trequires_upstream_wrapper\n{}\trequires_upstream_wrapper\n",
+                    reference.relative_path
+                ),
+            )
+            .expect("mark reference as wrapper-owned");
+    });
+    assert_rejected("extra-family-member", &|_, owner, _| {
+        fs::write(
+            owner
+                .path
+                .parent()
+                .expect("owner parent")
+                .join("dcsweep_extra.cir"),
+            "extra\n.end\n",
+        )
+        .expect("write extra BUG 754 family member");
+    });
+    assert_rejected("owner-artifact", &|root, owner, _| {
+        let output = root.join("OutputData/Certification_Tests/BUG_754_SON");
+        fs::create_dir_all(&output).expect("create BUG 754 OutputData");
+        fs::write(
+            output.join(format!(
+                "{}.prn",
+                owner.path.file_name().unwrap().to_string_lossy()
+            )),
+            "forbidden",
+        )
+        .expect("write owner output artifact");
+    });
+    assert_rejected("reference-artifact", &|root, _, reference| {
+        let output = root.join("OutputData/Certification_Tests/BUG_754_SON");
+        fs::create_dir_all(&output).expect("create BUG 754 OutputData");
+        fs::write(
+            output.join(format!(
+                "{}.PRN",
+                reference.path.file_name().unwrap().to_string_lossy()
+            )),
+            "forbidden",
+        )
+        .expect("write reference output artifact");
+    });
+}
+
+#[test]
+fn bug754_global_parameter_comparator_reproduces_bytewise_default_prn_diff() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let table = || XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "v(drain)".to_string(),
+            "v(gate)".to_string(),
+            "I(vdrain)".to_string(),
+        ],
+        rows: (0..=1_000)
+            .map(|row| {
+                let drain = row as Value * 0.001;
+                vec![row as Value, drain, 0.5, -drain * 1.0e-6]
+            })
+            .collect(),
+    };
+    let reference = table();
+    assert!(
+        runner
+            .compare_bug754_global_parameter_tables(&reference, &reference)
+            .expect("identical BUG 754 PRNs compare")
+            .is_empty()
+    );
+    let tokens = XyceTestRunner::bug754_default_prn_serialization_fingerprint(&reference)
+        .expect("canonical BUG 754 PRN serializes");
+    assert_eq!(tokens.len(), 1_003);
+    assert_eq!(tokens[0], reference.columns);
+    assert_eq!(tokens[1_002], ["End", "of", "Xyce(TM)", "Simulation"]);
+
+    let mut same_serialized_value = reference.clone();
+    same_serialized_value.rows[1_000][1] = 1.000_000_000_1;
+    assert!(
+        runner
+            .compare_bug754_global_parameter_tables(&reference, &same_serialized_value)
+            .expect("precision-8-identical values compare")
+            .is_empty(),
+        "upstream diff observes serialized PRN text rather than raw f64 bits"
+    );
+
+    let mut changed_value = reference.clone();
+    changed_value.rows[1_000][1] = 1.000_001;
+    assert_eq!(
+        runner
+            .compare_bug754_global_parameter_tables(&reference, &changed_value)
+            .expect("changed printed value compares")
+            .len(),
+        1
+    );
+    let mut changed_header = reference.clone();
+    changed_header.columns.swap(1, 2);
+    assert!(
+        runner
+            .compare_bug754_global_parameter_tables(&reference, &changed_header)
+            .is_err()
+    );
+    let mut changed_index = reference.clone();
+    changed_index.rows[10][0] = 11.0;
+    assert!(
+        runner
+            .compare_bug754_global_parameter_tables(&reference, &changed_index)
+            .is_err()
+    );
+    let mut missing_row = reference.clone();
+    missing_row.rows.pop();
+    assert!(
+        runner
+            .compare_bug754_global_parameter_tables(&reference, &missing_row)
+            .is_err()
+    );
+}
+
+#[test]
+fn bug754_global_parameter_candidate_census_is_exactly_two_records() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let discovered_by_path = discovered
+        .iter()
+        .map(|deck| {
+            (
+                XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                deck,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut independent_candidates = BTreeSet::new();
+    for owner in discovered.iter().filter(|deck| {
+        runner.requires_upstream_wrapper(&deck.relative_path)
+            && deck
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("dcsweep_globalpar.cir"))
+    }) {
+        let owner_source = fs::read_to_string(&owner.path).expect("read BUG 754 owner");
+        let reference_key = XyceTestRunner::normalize_manifest_key(
+            &runner.relative_key(&owner.path.with_file_name("dcsweep_nopar.cir")),
+        );
+        let Some(reference) = discovered_by_path.get(&reference_key) else {
+            continue;
+        };
+        let reference_source = fs::read_to_string(&reference.path).expect("read BUG 754 reference");
+        if XyceTestRunner::validate_bug754_source_pair(&owner_source, &reference_source).is_ok() {
+            independent_candidates
+                .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+            independent_candidates.insert(reference_key);
+        }
+    }
+    let selected = discovered
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .bug754_global_parameter_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|err| {
+                        panic!("BUG 754 candidate failed qualification: {err}")
+                    });
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(independent_candidates, selected);
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD.to_string(),
+            XYCE_BUG754_LITERAL_REFERENCE_RECORD.to_string(),
+        ])
+    );
+}
+
+#[test]
+fn bug754_global_parameter_relational_pair_executes_both_roles() {
+    let (root, owner, reference, runner) = bug754_global_parameter_fixture(
+        "execution",
+        BUG754_GLOBAL_PARAMETER_OWNER_SOURCE,
+        BUG754_LITERAL_REFERENCE_SOURCE,
+    );
+    for (deck, expected_contract) in [
+        (owner, "bug754_global_parameter_dc_relational_wrapper_owner"),
+        (
+            reference,
+            "bug754_global_parameter_dc_relational_wrapper_literal_reference",
+        ),
+    ] {
+        let result = runner.run_discovered_test(&deck);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG 754 role must execute exact default-PRN diff: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+    fs::remove_dir_all(root).expect("remove BUG 754 execution fixture");
+}
+
+#[test]
+fn resistor_dtemp_pair_is_manifest_owned_and_structurally_normalized() {
+    let (root, owner, reference, runner) = resistor_dtemp_fixture(
+        "qualification",
+        RESISTOR_DTEMP_OWNER_SOURCE,
+        RESISTOR_DTEMP_REFERENCE_SOURCE,
+    );
+    let owner_contract = runner
+        .resistor_dtemp_relational_contract(&owner)
+        .expect("owner is selected")
+        .expect("owner pair qualifies");
+    let reference_contract = runner
+        .resistor_dtemp_relational_contract(&reference)
+        .expect("reference is selected")
+        .expect("reference pair qualifies");
+    assert_eq!(owner_contract.role, XyceResistorDtempRole::Owner);
+    assert_eq!(reference_contract.role, XyceResistorDtempRole::Reference);
+    assert!(runner.requires_upstream_wrapper(&owner.relative_path));
+    assert!(!runner.requires_upstream_wrapper(&reference.relative_path));
+    fs::remove_dir_all(root).expect("remove resistor DTEMP fixture");
+}
+
+#[test]
+fn resistor_dtemp_pair_rejects_semantic_mutations() {
+    let mutations = [
+        (
+            RESISTOR_DTEMP_OWNER_SOURCE.replace("list -82 -2 45", "list -81 -2 45"),
+            RESISTOR_DTEMP_REFERENCE_SOURCE.to_string(),
+            "effective-temperature grid",
+        ),
+        (
+            RESISTOR_DTEMP_OWNER_SOURCE.replace("R1 1 0", "R1 2 0"),
+            RESISTOR_DTEMP_REFERENCE_SOURCE.to_string(),
+            "topology",
+        ),
+        (
+            RESISTOR_DTEMP_OWNER_SOURCE.replace("1K RMODEL", "2K RMODEL"),
+            RESISTOR_DTEMP_REFERENCE_SOURCE.to_string(),
+            "resistance",
+        ),
+        (
+            RESISTOR_DTEMP_OWNER_SOURCE.to_string(),
+            RESISTOR_DTEMP_REFERENCE_SOURCE.replace("TC1=0.0007325", "TC1=0.001"),
+            "model",
+        ),
+        (
+            RESISTOR_DTEMP_OWNER_SOURCE.to_string(),
+            RESISTOR_DTEMP_REFERENCE_SOURCE.replace("V(1) I(V1)", "I(V1) V(1)"),
+            "probe order",
+        ),
+        (
+            RESISTOR_DTEMP_OWNER_SOURCE.to_string(),
+            RESISTOR_DTEMP_REFERENCE_SOURCE.replace("list -55 25 72", "list -55 27 72"),
+            "reference TEMP grid",
+        ),
+    ];
+    for (index, (owner_source, reference_source, reason)) in mutations.into_iter().enumerate() {
+        let (root, owner, _, runner) = resistor_dtemp_fixture(
+            &format!("mutation-{index}"),
+            &owner_source,
+            &reference_source,
+        );
+        assert!(
+            runner
+                .resistor_dtemp_relational_contract(&owner)
+                .expect("owner remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove resistor DTEMP mutation fixture");
+    }
+}
+
+#[test]
+fn resistor_dtemp_pair_requires_exact_wrapper_provenance() {
+    let (root, owner, _, _runner) = resistor_dtemp_fixture(
+        "manifest",
+        RESISTOR_DTEMP_OWNER_SOURCE,
+        RESISTOR_DTEMP_REFERENCE_SOURCE,
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "")
+        .expect("remove resistor DTEMP wrapper provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        runner
+            .resistor_dtemp_relational_contract(&owner)
+            .expect("exact owner path remains selected")
+            .is_err(),
+        "missing wrapper provenance must fail closed"
+    );
+    fs::remove_dir_all(root).expect("remove resistor DTEMP manifest fixture");
+}
+
+#[test]
+fn resistor_dtemp_comparator_is_serialized_exact_and_segment_aware() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let rows = (0..18)
+        .map(|row| {
+            let index = (row % 6) as Value;
+            vec![index, index, -index / 1000.0]
+        })
+        .collect::<Vec<_>>();
+    let reference = XycePrnTable {
+        columns: vec!["Index".to_string(), "V(1)".to_string(), "I(V1)".to_string()],
+        rows,
+    };
+    assert!(
+        runner
+            .compare_resistor_dtemp_tables(&reference, &reference)
+            .expect("canonical identical stepped tables compare")
+            .is_empty()
+    );
+
+    let mut changed_value = reference.clone();
+    changed_value.rows[8][2] += 1.0e-7;
+    assert_eq!(
+        runner
+            .compare_resistor_dtemp_tables(&reference, &changed_value)
+            .expect("serialized value difference is a comparison mismatch")
+            .len(),
+        1,
+        "a numeric difference must not enter a tolerant fallback"
+    );
+
+    let mut changed_segment = reference.clone();
+    changed_segment.rows[6][0] = 6.0;
+    assert!(
+        runner
+            .compare_resistor_dtemp_tables(&reference, &changed_segment)
+            .is_err(),
+        "Index must reset at each independently simulated STEP segment"
+    );
+}
+
+#[test]
+fn resistor_dtemp_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let discovered_by_path = discovered
+        .iter()
+        .map(|deck| {
+            (
+                XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                deck,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut independent_candidates = BTreeSet::new();
+    for owner in discovered.iter().filter(|deck| {
+        runner.requires_upstream_wrapper(&deck.relative_path)
+            && deck
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("res_dtemp.cir"))
+    }) {
+        let source = fs::read_to_string(&owner.path).expect("read candidate owner");
+        let normalized = XyceTestRunner::normalize_probe(&source);
+        if !normalized.contains("dtemp='resdtemp'")
+            || !normalized.contains(".modelrmodelr(tc1=")
+            || !normalized.contains(".stepresdtemplist")
+        {
+            continue;
+        }
+        let reference_key = XyceTestRunner::normalize_manifest_key(
+            &runner.relative_key(&owner.path.with_file_name("res_ref.cir")),
+        );
+        if discovered_by_path.contains_key(&reference_key) {
+            independent_candidates
+                .insert(XyceTestRunner::normalize_manifest_key(&owner.relative_path));
+            independent_candidates.insert(reference_key);
+        }
+    }
+    let selected = discovered
+        .iter()
+        .filter_map(|deck| {
+            runner
+                .resistor_dtemp_relational_contract(deck)
+                .map(|contract| {
+                    contract.unwrap_or_else(|err| panic!("candidate failed qualification: {err}"));
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path)
+                })
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(independent_candidates, selected);
+    assert_eq!(
+        selected,
+        BTreeSet::from([
+            XYCE_RESISTOR_DTEMP_OWNER_RECORD.to_string(),
+            XYCE_RESISTOR_DTEMP_REFERENCE_RECORD.to_string(),
+        ])
+    );
+}
+
+#[test]
+fn resistor_dtemp_relational_pair_executes_both_roles() {
+    let (root, owner, reference, runner) = resistor_dtemp_fixture(
+        "execution",
+        RESISTOR_DTEMP_OWNER_SOURCE,
+        RESISTOR_DTEMP_REFERENCE_SOURCE,
+    );
+    for (deck, expected_contract) in [
+        (owner, "resistor_dtemp_relational_wrapper_owner"),
+        (reference, "resistor_dtemp_relational_wrapper_reference"),
+    ] {
+        let result = runner.run_discovered_test(&deck);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "resistor DTEMP role must execute: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+    fs::remove_dir_all(root).expect("remove resistor DTEMP execution fixture");
+}
+
+#[test]
+fn analytic_integer_dc_wrappers_are_manifest_owned_and_structurally_qualified() {
+    for (label, relative, source, expected_kind) in [
+        (
+            "fmod",
+            "Netlists/ABM_NINT_FMOD/fmod.cir",
+            ANALYTIC_FMOD_DC_SOURCE,
+            XyceAnalyticIntegerDcKind::Fmod,
+        ),
+        (
+            "int-floor-ceil",
+            "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir",
+            ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE,
+            XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
+        ),
+    ] {
+        let (root, deck, runner) = analytic_integer_dc_fixture(label, relative, source);
+        let contract = runner
+            .analytic_integer_dc_wrapper_contract(&deck)
+            .expect("record is selected by its exact manifest-owned adapter")
+            .expect("canonical structural contract qualifies");
+        assert_eq!(contract.kind, expected_kind);
+        fs::remove_dir_all(root).expect("remove analytic integer DC fixture");
+    }
+}
+
+#[test]
+fn analytic_fmod_dc_wrapper_rejects_semantic_mutations() {
+    let mutations = [
+        (
+            ANALYTIC_FMOD_DC_SOURCE.replace("fmod", "floor"),
+            "function name",
+        ),
+        (
+            ANALYTIC_FMOD_DC_SOURCE.replace("99.5", "99.25"),
+            "fixed oracle constant",
+        ),
+        (
+            ANALYTIC_FMOD_DC_SOURCE.replace("V1 1.0 10.0 0.5", "V1 1.0 9.0 0.5"),
+            "sweep stop",
+        ),
+        (
+            ANALYTIC_FMOD_DC_SOURCE.replace("dc V(1)", "dc V(0)"),
+            "probe mapping",
+        ),
+    ];
+    for (index, (source, reason)) in mutations.into_iter().enumerate() {
+        let (root, deck, runner) = analytic_integer_dc_fixture(
+            &format!("fmod-mutation-{index}"),
+            "Netlists/ABM_NINT_FMOD/fmod.cir",
+            &source,
+        );
+        assert!(
+            runner
+                .analytic_integer_dc_wrapper_contract(&deck)
+                .expect("exact manifest record remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove FMOD mutation fixture");
+    }
+}
+
+#[test]
+fn analytic_int_floor_ceil_dc_wrapper_rejects_semantic_mutations() {
+    let mutations = [
+        (
+            ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replacen("int(v(1))", "floor(v(1))", 1),
+            "function identity",
+        ),
+        (
+            ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replace(".DC V1 -1 1 .1", ".DC V1 -2 1 .1"),
+            "sweep mapping",
+        ),
+        (
+            ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replace(
+                ".print DC V(1) v(2) v(3) v(4)",
+                ".print DC V(1) v(3) v(2) v(4)",
+            ),
+            "probe ordering",
+        ),
+        (
+            ANALYTIC_INT_FLOOR_CEIL_DC_SOURCE.replace("Bceil 4 0", "Bceil 5 0"),
+            "behavioral topology",
+        ),
+    ];
+    for (index, (source, reason)) in mutations.into_iter().enumerate() {
+        let (root, deck, runner) = analytic_integer_dc_fixture(
+            &format!("int-floor-ceil-mutation-{index}"),
+            "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir",
+            &source,
+        );
+        assert!(
+            runner
+                .analytic_integer_dc_wrapper_contract(&deck)
+                .expect("exact manifest record remains selected")
+                .is_err(),
+            "{reason} mutation must fail closed"
+        );
+        fs::remove_dir_all(root).expect("remove INT/FLOOR/CEIL mutation fixture");
+    }
+}
+
+#[test]
+fn analytic_integer_dc_candidate_census_is_an_exact_manifest_bijection() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let discovered = runner.discover_tests();
+    let mut independent_candidates = discovered
+        .iter()
+        .filter_map(|deck| {
+            if !runner.requires_upstream_wrapper(&deck.relative_path) {
+                return None;
+            }
+            let source = fs::read_to_string(&deck.path).ok()?;
+            let body = source.split_once('\n').map_or("", |(_, body)| body);
+            let normalized = XyceTestRunner::logical_netlist_lines(body)
+                .iter()
+                .map(|line| XyceTestRunner::normalize_probe(line))
+                .collect::<Vec<_>>();
+            let dc_print = normalized.iter().any(|line| line.starts_with(".printdc"));
+            let fmod_print = normalized
+                .iter()
+                .any(|line| line.starts_with(".printdc") && line.contains("fmod("));
+            let behavioral_functions = ["int", "floor", "ceil"]
+                .into_iter()
+                .filter(|function| {
+                    normalized.iter().any(|line| {
+                        line.starts_with('b') && line.contains(&format!("v={{{function}(v("))
+                    })
+                })
+                .count();
+            (dc_print && (fmod_print || behavioral_functions == 3))
+                .then(|| XyceTestRunner::normalize_manifest_key(&deck.relative_path))
+        })
+        .collect::<Vec<_>>();
+    independent_candidates.sort();
+
+    let mut selected = discovered
+        .into_iter()
+        .filter_map(|deck| {
+            runner
+                .analytic_integer_dc_wrapper_contract(&deck)
+                .map(|contract| {
+                    contract
+                        .map(|_| XyceTestRunner::normalize_manifest_key(&deck.relative_path))
+                        .unwrap_or_else(|err| panic!("candidate failed qualification: {err}"))
+                })
+        })
+        .collect::<Vec<_>>();
+    selected.sort();
+    assert_eq!(
+        independent_candidates, selected,
+        "an independent semantic/provenance scan must biject the path-owned adapters"
+    );
+    assert_eq!(
+        selected,
+        vec![
+            XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD.to_string(),
+            XYCE_ANALYTIC_FMOD_DC_RECORD.to_string(),
+        ],
+        "the analytic adapters must own exactly the two Release 7.10 wrapper records"
+    );
+    assert!(
+        selected
+            .iter()
+            .all(|path| runner.requires_upstream_wrapper(path))
+    );
+}
+
+#[test]
+fn analytic_integer_dc_corpus_records_execute_exact_release_710_wrappers() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_root = workspace_root.join("tests/xyce");
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    for (relative, expected_contract) in [
+        (
+            "Netlists/ABM_NINT_FMOD/fmod.cir",
+            "analytic_fmod_dc_wrapper",
+        ),
+        (
+            "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil_bsrc.cir",
+            "analytic_int_floor_ceil_bsource_dc_wrapper",
+        ),
+    ] {
+        let result = runner.run_test(corpus_root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} did not pass its exact wrapper: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+}
+
+#[test]
+fn analytic_integer_dc_comparison_uses_printed_inputs_and_exact_numeric_equality() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let table = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "V(1)".to_string(),
+            "V(2)".to_string(),
+            "V(3)".to_string(),
+            "V(4)".to_string(),
+        ],
+        rows: vec![vec![0.0, -0.9, -0.0, -1.0, -0.0]],
+    };
+    assert!(
+        runner
+            .compare_analytic_integer_dc_table(
+                &table,
+                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
+            )
+            .expect("valid analytic table")
+            .is_empty(),
+        "Perl numeric equality treats signed zero as equal"
+    );
+
+    let rounded_to_integer = 0.999_999_999_6;
+    let int = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "V(1)".to_string(),
+            "INT".to_string(),
+            "FLOOR".to_string(),
+            "CEIL".to_string(),
+        ],
+        rows: vec![vec![0.0, rounded_to_integer, 1.0, 1.0, 1.0]],
+    };
+    assert!(
+        runner
+            .compare_analytic_integer_dc_table(
+                &int,
+                XyceAnalyticIntegerDcKind::IntFloorCeilBehavioralSources,
+            )
+            .expect("valid integer table")
+            .is_empty(),
+        "the oracle must consume the serialized input token"
+    );
+}
+
+fn analytic_rc_test_plan(source: &str) -> XyceStaticTranPlan {
+    XyceStaticTranPlan {
+        deck_path: PathBuf::from("renamed-analytic-rc.cir"),
+        reference_path: PathBuf::from("definitely-missing-analytic-rc-reference.prn"),
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 0.0,
+            stop: 5.0e-3,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::WrapperStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    }
+}
+
+fn analytic_rc_test_specification(source: &str) -> Result<XyceAnalyticRcSpecification, String> {
+    let source_contract = XyceTestRunner::analytic_rc_source_contract(source)?;
+    let plan = analytic_rc_test_plan(source);
+    XyceTestRunner::validate_analytic_rc_plan(&plan, &source_contract)?;
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, &plan.deck_path)
+        .map_err(|err| err.to_string())?;
+    XyceTestRunner::analytic_rc_specification(&netlist, &plan, &source_contract)
+}
+
+#[test]
+fn analytic_rc_source_contract_is_structural_and_fail_closed() {
+    let source = analytic_rc_test_source();
+    assert!(XyceTestRunner::is_analytic_rc_wrapper_candidate(source));
+    let contract = XyceTestRunner::analytic_rc_source_contract(source)
+        .expect("renamed direct RC source qualifies");
+    assert_eq!(contract.capacitor_name, "cx");
+    assert_eq!(contract.capacitor_nodes, ["out", "0"]);
+    assert_eq!(contract.resistor_name, "rload");
+    assert_eq!(contract.source_name, "vbias");
+    assert_eq!(contract.probe_node, "out");
+    assert_eq!(contract.tran_step_bits, 0.0f64.to_bits());
+    assert_eq!(contract.transient_lte_reference, None);
+
+    for malformed in [
+        source.replace("IC=1", "IC={1}"),
+        source.replace(
+            "Vbias source 0 0",
+            "Vbias source 0 PULSE(0 1 0 1n 1n 1u 2u)",
+        ),
+        source.replace("RELTOL=1e-6", "RELTOL={1e-6}"),
+        format!("{source}*COMP RELTOL=1e-3\n"),
+    ] {
+        assert!(
+            XyceTestRunner::is_analytic_rc_wrapper_candidate(&malformed),
+            "a near-shape candidate must reach strict qualification: {malformed}"
+        );
+        assert!(
+            XyceTestRunner::analytic_rc_source_contract(&malformed).is_err(),
+            "strict source qualification must reject: {malformed}"
+        );
+    }
+
+    let newlte = source.replace(
+        ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6",
+        ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=2",
+    );
+    assert!(
+        XyceTestRunner::is_analytic_rc_wrapper_candidate(&newlte),
+        "typed NEWLTE remains within the same generated analytic-oracle shape"
+    );
+    for (selector, reference) in [
+        (0, TransientLteReference::PointLocal),
+        (1, TransientLteReference::PointGlobal),
+        (2, TransientLteReference::SignalGlobal),
+        (3, TransientLteReference::SignalLocal),
+    ] {
+        let qualified = newlte.replace("NEWLTE=2", &format!("NEWLTE={selector}"));
+        let contract = XyceTestRunner::analytic_rc_source_contract(&qualified)
+            .expect("direct NEWLTE selector qualifies");
+        assert_eq!(contract.transient_lte_reference, Some(reference));
+    }
+    for invalid_newlte in ["-1", "1.0000000001", "4"] {
+        let malformed = newlte.replace("NEWLTE=2", &format!("NEWLTE={invalid_newlte}"));
+        assert!(
+            XyceTestRunner::is_analytic_rc_wrapper_candidate(&malformed),
+            "an invalid direct selector must reach strict typed qualification"
+        );
+        assert!(
+            XyceTestRunner::analytic_rc_source_contract(&malformed).is_err(),
+            "invalid NEWLTE selector must fail closed: {invalid_newlte}"
+        );
+    }
+    let formatted = source.replace(".PRINT TRAN V(out)", ".PRINT TRAN FORMAT=TECPLOT V(out)");
+    assert!(
+        !XyceTestRunner::is_analytic_rc_wrapper_candidate(&formatted),
+        "non-default output belongs to a distinct wrapper contract"
+    );
+    let extended_tran = source.replace(".TRAN 0 5m", ".TRAN 0 5m 1m 1u UIC");
+    assert!(
+        !XyceTestRunner::is_analytic_rc_wrapper_candidate(&extended_tran),
+        "START, MAXSTEP, and UIC are outside the generated-oracle shape"
+    );
+}
+
+#[test]
+fn analytic_rc_specification_matches_generator_values_and_topology() {
+    let source = analytic_rc_test_source();
+    let specification = analytic_rc_test_specification(source)
+        .expect("canonical generated-oracle specification qualifies");
+    assert_eq!(specification.output_node, "out");
+    assert_eq!(specification.source_value.to_bits(), 0.0f64.to_bits());
+    assert_eq!(specification.initial_voltage.to_bits(), 1.0f64.to_bits());
+    assert_eq!(specification.resistance.to_bits(), 1.0e3f64.to_bits());
+    assert_eq!(specification.capacitance.to_bits(), 1.0e-6f64.to_bits());
+    assert_eq!(
+        specification.time_constant.to_bits(),
+        XYCE_ANALYTIC_RC_ORACLE_TIME_CONSTANT.to_bits()
+    );
+
+    let newlte = source.replace(
+        ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6",
+        ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=2",
+    );
+    let newlte_specification = analytic_rc_test_specification(&newlte)
+        .expect("typed NEWLTE=2 uses the same exact generated exponential oracle");
+    assert_eq!(
+        newlte_specification.time_constant.to_bits(),
+        specification.time_constant.to_bits()
+    );
+    assert_eq!(
+        newlte_specification.initial_voltage.to_bits(),
+        specification.initial_voltage.to_bits()
+    );
+
+    for changed in [
+        source.replace("IC=1", "IC=2"),
+        source.replace("1u IC=1", "2u IC=1"),
+        source.replace("Vbias source 0 0", "Vbias source 0 0.5"),
+    ] {
+        let err = analytic_rc_test_specification(&changed)
+            .expect_err("deck values must match the generator's fixed analytic curve");
+        assert!(
+            err.contains("generated Release 7.10 oracle"),
+            "unexpected generated-oracle rejection: {err}"
+        );
+    }
+
+    let reversed_capacitor = source.replace("Cx out 0", "Cx 0 out");
+    let err = analytic_rc_test_specification(&reversed_capacitor)
+        .expect_err("capacitor IC polarity is part of the bounded topology");
+    assert!(err.contains("topology"), "unexpected topology error: {err}");
+
+    let aliased_ground = source.replace("Cx out 0", "Cx out GND");
+    let err = analytic_rc_test_specification(&aliased_ground)
+        .expect_err("literal ground provenance is required");
+    assert!(
+        err.contains("ground alias"),
+        "unexpected ground-provenance error: {err}"
+    );
+}
+
+#[test]
+fn analytic_rc_plan_rejects_unqualified_execution_state() {
+    let source = analytic_rc_test_source();
+    let source_contract = XyceTestRunner::analytic_rc_source_contract(source)
+        .expect("canonical source contract qualifies");
+    let plan = analytic_rc_test_plan(source);
+    XyceTestRunner::validate_analytic_rc_plan(&plan, &source_contract)
+        .expect("canonical analytic plan qualifies");
+
+    let mut uic = plan.clone();
+    uic.tran.uic = true;
+    assert!(XyceTestRunner::validate_analytic_rc_plan(&uic, &source_contract).is_err());
+
+    let mut stepped = plan.clone();
+    stepped.steps.push(StepCommand {
+        target: StepTarget::Param,
+        name: "gain".to_string(),
+        param_name: None,
+        sweep: StepSweep::List(vec![1.0]),
+    });
+    assert!(XyceTestRunner::validate_analytic_rc_plan(&stepped, &source_contract).is_err());
+
+    let mut conststep = plan.clone();
+    conststep.timeint_conststep = true;
+    assert!(XyceTestRunner::validate_analytic_rc_plan(&conststep, &source_contract).is_err());
+
+    let mut extra_probe = plan.clone();
+    extra_probe.print.probes.push("V(source)".to_string());
+    assert!(XyceTestRunner::validate_analytic_rc_plan(&extra_probe, &source_contract).is_err());
+
+    let mut changed_source = plan;
+    changed_source.source = source.replace("ABSTOL=1e-6", "ABSTOL=2e-6");
+    assert!(
+        XyceTestRunner::validate_analytic_rc_plan(&changed_source, &source_contract).is_err(),
+        "source provenance changes must not reuse a stale plan contract"
+    );
+}
+
+#[test]
+fn analytic_rc_reference_uses_printed_time_and_enforces_initial_sample() {
+    let specification = analytic_rc_test_specification(analytic_rc_test_source())
+        .expect("canonical analytic specification qualifies");
+    let raw_time = 1.000000004e-3;
+    let printed_time = XyceTestRunner::xyce_default_prn_roundtrip(raw_time)
+        .expect("default PRN time round trip succeeds");
+    assert_ne!(raw_time.to_bits(), printed_time.to_bits());
+    let actual = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ],
+        rows: vec![
+            vec![0.0, 0.0, 1.0],
+            vec![1.0, raw_time, 0.4],
+            vec![2.0, 5.0e-3, 0.01],
+        ],
+    };
+    XyceTestRunner::validate_analytic_rc_initial_sample(&actual, &specification)
+        .expect("serialized t=0 boundary condition is within the verifier bound");
+    XyceTestRunner::validate_analytic_rc_complete_time_domain(&actual, 5.0e-3)
+        .expect("serialized output spans the complete planned transient domain");
+    let mut rounded_initial = actual.clone();
+    rounded_initial.rows[0][2] = 0.999_999;
+    XyceTestRunner::validate_analytic_rc_initial_sample(&rounded_initial, &specification)
+        .expect("initial-sample hardening uses xyce_verify tolerance, not bit equality");
+    let reference = XyceTestRunner::analytic_rc_reference_table(&actual, &specification)
+        .expect("analytic reference builds on the actual time grid");
+    assert_eq!(reference.rows[1][1].to_bits(), printed_time.to_bits());
+    let expected = (-printed_time / XYCE_ANALYTIC_RC_ORACLE_TIME_CONSTANT).exp();
+    let raw_time_value = (-raw_time / XYCE_ANALYTIC_RC_ORACLE_TIME_CONSTANT).exp();
+    assert_eq!(reference.rows[1][2].to_bits(), expected.to_bits());
+    assert_ne!(reference.rows[1][2].to_bits(), raw_time_value.to_bits());
+
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&reference, &reference)
+            .expect("identical analytic tables compare")
+            .is_empty()
+    );
+    let mut wrong_waveform = reference.clone();
+    wrong_waveform.rows[1][2] = 0.9;
+    wrong_waveform.rows[2][2] = 0.9;
+    assert_eq!(
+        runner
+            .compare_xyce_verify_transient_tables(&reference, &wrong_waveform)
+            .expect("wrong analytic waveform remains structurally comparable")
+            .len(),
+        1
+    );
+
+    let mut wrong_initial = actual.clone();
+    wrong_initial.rows[0][2] = 0.5;
+    assert!(
+        XyceTestRunner::validate_analytic_rc_initial_sample(&wrong_initial, &specification)
+            .is_err(),
+        "an isolated wrong t=0 value must not be diluted by integrated RMS"
+    );
+    let mut missing_zero = actual;
+    missing_zero.rows[0][1] = 1.0e-12;
+    assert!(
+        XyceTestRunner::validate_analytic_rc_initial_sample(&missing_zero, &specification).is_err(),
+        "the first serialized sample must be at exactly zero time"
+    );
+    let mut truncated = missing_zero;
+    truncated.rows[0][1] = 0.0;
+    truncated.rows.pop();
+    assert!(
+        XyceTestRunner::validate_analytic_rc_complete_time_domain(&truncated, 5.0e-3).is_err(),
+        "a self-grid oracle must not accept a trace that stops before .TRAN stop"
+    );
+}
+
+#[test]
+fn analytic_rc_detector_is_path_independent_and_preserves_typed_failures() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-analytic-rc-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let family_dir = root.join("Netlists").join("RENAMED_ANALYTIC");
+    fs::create_dir_all(&family_dir).expect("create renamed analytic fixture");
+    let relative = "Netlists/RENAMED_ANALYTIC/curve.cir";
+    let deck_path = root.join(relative);
+    fs::write(&deck_path, analytic_rc_test_source()).expect("write renamed analytic deck");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper provenance manifest");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path.clone(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+
+    runner
+        .analytic_rc_wrapper_contract(&deck)
+        .expect("renamed source shape is detected")
+        .expect("renamed source shape qualifies without a path allowlist");
+
+    fs::write(
+        &deck_path,
+        analytic_rc_test_source().replace("IC=1", "IC=2"),
+    )
+    .expect("mutate analytic deck");
+    assert!(
+        matches!(runner.analytic_rc_wrapper_contract(&deck), Some(Err(_))),
+        "a malformed candidate must remain an executed qualification failure"
+    );
+
+    fs::write(
+        &deck_path,
+        analytic_rc_test_source().replace(
+            ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6",
+            ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=2",
+        ),
+    )
+    .expect("write typed NEWLTE sibling shape");
+    runner
+        .analytic_rc_wrapper_contract(&deck)
+        .expect("typed NEWLTE source shape is detected")
+        .expect("typed NEWLTE source shape qualifies without a path allowlist");
+
+    fs::write(
+        &deck_path,
+        analytic_rc_test_source().replace(
+            ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6",
+            ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=1.5",
+        ),
+    )
+    .expect("write invalid NEWLTE sibling shape");
+    assert!(
+        matches!(runner.analytic_rc_wrapper_contract(&deck), Some(Err(_))),
+        "an invalid typed selector must remain an executed qualification failure"
+    );
+
+    fs::remove_dir_all(&root).expect("remove renamed analytic fixture");
+}
+
+fn analytic_sinusoidal_rc_test_source() -> &'static str {
+    "renamed sinusoidal RC fixture\n\
+.TRAN 0 2.0e-4\n\
+.PRINT TRAN {v(out)+0.002}\n\
+.OPTIONS TIMEINT RELTOL=1.0e-4 ABSTOL=1.0e-4 METHOD=7\n\
+*COMP {v(out)+0.002} RELTOL=1.0e-6 ABSTOL=1.0e-6\n\
+Vdrive source 0 SIN 0 1V 1e5 0 0\n\
+Rload source out 1k\n\
+Cload out 0 2u\n\
+.END\n"
+}
+
+fn analytic_sinusoidal_rc_test_plan(source: &str) -> XyceStaticTranPlan {
+    XyceStaticTranPlan {
+        deck_path: PathBuf::from("renamed-analytic-sinusoidal-rc.cir"),
+        reference_path: PathBuf::from("definitely-missing-analytic-sinusoidal-rc-reference.prn"),
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["{v(out)+0.002}".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 0.0,
+            stop: 2.0e-4,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::WrapperStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    }
+}
+
+fn analytic_sinusoidal_rc_test_specification(
+    source: &str,
+) -> Result<XyceAnalyticSinusoidalRcSpecification, String> {
+    let source_contract = XyceTestRunner::analytic_sinusoidal_rc_source_contract(source)?;
+    let plan = analytic_sinusoidal_rc_test_plan(source);
+    XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&plan, &source_contract)?;
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, &plan.deck_path)
+        .map_err(|err| err.to_string())?;
+    XyceTestRunner::analytic_sinusoidal_rc_specification(&netlist, &plan, &source_contract)
+}
+
+#[test]
+fn analytic_sinusoidal_rc_source_and_semantic_contracts_are_fail_closed() {
+    let source = analytic_sinusoidal_rc_test_source();
+    assert!(XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(
+        source
+    ));
+    let contract = XyceTestRunner::analytic_sinusoidal_rc_source_contract(source)
+        .expect("renamed direct sinusoidal RC source qualifies");
+    assert_eq!(contract.capacitor_name, "cload");
+    assert_eq!(contract.resistor_name, "rload");
+    assert_eq!(contract.source_name, "vdrive");
+    assert_eq!(contract.probe_node, "out");
+    assert_eq!(
+        contract.verify_reltol_bits,
+        XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE.to_bits()
+    );
+
+    let specification = analytic_sinusoidal_rc_test_specification(source)
+        .expect("fixed generator values and low-pass topology qualify");
+    assert_eq!(specification.output_node, "out");
+    assert_eq!(
+        specification.resistance.to_bits(),
+        XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_RESISTANCE.to_bits()
+    );
+    assert_eq!(
+        specification.capacitance.to_bits(),
+        XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE.to_bits()
+    );
+
+    for malformed in [
+        source.replace("Rload source out 1k", "Rload source out 2k"),
+        source.replace("Cload out 0 2u", "Cload out 0 1u"),
+        source.replace("SIN 0 1V 1e5", "SIN 0 2V 1e5"),
+        source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 2e5 0 0"),
+        source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 1e5 1n 0"),
+        source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 1e5 0 1"),
+        source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 1e5 0 0 1"),
+        source.replace("{v(out)+0.002}", "{v(out)+0.003}"),
+        source.replace("{v(out)+0.002}", "{v(out) + 0.002}"),
+        source.replace("METHOD=7", "METHOD=8"),
+        source.replace("RELTOL=1.0e-4", "RELTOL=2.0e-4"),
+        source.replace("ABSTOL=1.0e-6", "ABSTOL=2.0e-6"),
+        source.replace(".TRAN 0 2.0e-4", ".TRAN 0 1.0e-4"),
+        source.replace("Cload out 0 2u", "Cload out 0 2u IC=0"),
+    ] {
+        assert!(
+            XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(&malformed),
+            "a near-shape candidate must reach strict qualification: {malformed}"
+        );
+        assert!(
+            XyceTestRunner::analytic_sinusoidal_rc_source_contract(&malformed).is_err(),
+            "fixed generator provenance must reject: {malformed}"
+        );
+    }
+
+    let missing_comp = source.replace("*COMP {v(out)+0.002} RELTOL=1.0e-6 ABSTOL=1.0e-6\n", "");
+    let duplicate_comp = format!("{source}*COMP {{v(out)+0.002}} RELTOL=1.0e-6 ABSTOL=1.0e-6\n");
+    for malformed in [missing_comp, duplicate_comp] {
+        assert!(
+            XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(&malformed),
+            "fixed circuit shape must route missing/duplicate comparison provenance to strict qualification"
+        );
+        assert!(
+            XyceTestRunner::analytic_sinusoidal_rc_source_contract(&malformed).is_err(),
+            "missing/duplicate *COMP must fail qualification"
+        );
+    }
+
+    let wrong_comp_probe = source.replacen("*COMP {v(out)+0.002}", "*COMP {v(source)+0.002}", 1);
+    assert!(
+        XyceTestRunner::analytic_sinusoidal_rc_source_contract(&wrong_comp_probe).is_err(),
+        "*COMP must name the exact printed expression"
+    );
+    let aliased_ground = source.replace("Cload out 0 2u", "Cload out GND 2u");
+    let err = analytic_sinusoidal_rc_test_specification(&aliased_ground)
+        .expect_err("literal ground provenance is required");
+    assert!(
+        err.contains("ground alias"),
+        "unexpected ground error: {err}"
+    );
+    let wrong_topology = source.replace("Rload source out 1k", "Rload source 0 1k");
+    let err = analytic_sinusoidal_rc_test_specification(&wrong_topology)
+        .expect_err("resistor must connect source and output");
+    assert!(err.contains("topology"), "unexpected topology error: {err}");
+    let extra_directive = source.replace(".END", ".NODESET V(out)=0\n.END");
+    assert!(
+        !XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(&extra_directive),
+        "additional directives belong to a distinct wrapper contract"
+    );
+}
+
+#[test]
+fn analytic_sinusoidal_rc_plan_rejects_unqualified_execution_state() {
+    let source = analytic_sinusoidal_rc_test_source();
+    let source_contract = XyceTestRunner::analytic_sinusoidal_rc_source_contract(source)
+        .expect("canonical sinusoidal source contract qualifies");
+    let plan = analytic_sinusoidal_rc_test_plan(source);
+    XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&plan, &source_contract)
+        .expect("canonical sinusoidal analytic plan qualifies");
+
+    let mut uic = plan.clone();
+    uic.tran.uic = true;
+    assert!(XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&uic, &source_contract).is_err());
+    let mut stepped = plan.clone();
+    stepped.steps.push(StepCommand {
+        target: StepTarget::Param,
+        name: "gain".to_string(),
+        param_name: None,
+        sweep: StepSweep::List(vec![1.0]),
+    });
+    assert!(
+        XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&stepped, &source_contract).is_err()
+    );
+    let mut conststep = plan.clone();
+    conststep.timeint_conststep = true;
+    assert!(
+        XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&conststep, &source_contract).is_err()
+    );
+    let mut extra_probe = plan.clone();
+    extra_probe.print.probes.push("V(source)".to_string());
+    assert!(
+        XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&extra_probe, &source_contract)
+            .is_err()
+    );
+    let mut changed_source = plan;
+    changed_source.source = source.replace("ABSTOL=1.0e-4", "ABSTOL=2.0e-4");
+    assert!(
+        XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&changed_source, &source_contract,)
+            .is_err(),
+        "source provenance changes must not reuse a stale plan contract"
+    );
+}
+
+#[test]
+fn analytic_sinusoidal_rc_reference_uses_serialized_time_and_fixed_pi() {
+    let specification =
+        analytic_sinusoidal_rc_test_specification(analytic_sinusoidal_rc_test_source())
+            .expect("canonical sinusoidal RC specification qualifies");
+    let tolerance = XyceVerifyTransientTolerance {
+        relative: XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE,
+        absolute: XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE,
+        zero: XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
+        absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+        offset: 0.0,
+    };
+    let raw_time = 1.000000004e-5;
+    let printed_time = XyceTestRunner::xyce_default_prn_roundtrip(raw_time)
+        .expect("default PRN time round trip succeeds");
+    assert_ne!(raw_time.to_bits(), printed_time.to_bits());
+    let actual = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "{v(out)+0.002}".to_string(),
+        ],
+        rows: vec![
+            vec![0.0, 0.0, 0.002],
+            vec![1.0, raw_time, 0.002],
+            vec![2.0, 2.0e-4, 0.002],
+        ],
+    };
+    XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+        &actual,
+        &specification,
+        2.0e-4,
+        tolerance,
+    )
+    .expect("self-grid oracle spans the exact serialized domain");
+    let reference = XyceTestRunner::analytic_sinusoidal_rc_reference_table(&actual, &specification)
+        .expect("fixed sinusoidal RC reference builds");
+    assert_eq!(reference.rows[1][1].to_bits(), printed_time.to_bits());
+
+    let a = -1.0
+        / (XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_RESISTANCE
+            * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE);
+    let s =
+        2.0 * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PI * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY;
+    let denominator = a * a + s * s;
+    let initial_coefficient = -a * s / denominator;
+    let expected = XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET
+        + initial_coefficient * (a * printed_time).exp()
+        + a * (a * (s * printed_time).sin() + s * (s * printed_time).cos()) / denominator;
+    assert_eq!(reference.rows[1][2].to_bits(), expected.to_bits());
+    assert_eq!(
+        reference.rows[1][2].to_bits(),
+        0.001996031059679484f64.to_bits(),
+        "fixed Release 7.10 sidecar value must not drift with the platform PI constant"
+    );
+    let true_pi_s = 2.0 * std::f64::consts::PI * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY;
+    let true_pi_denominator = a * a + true_pi_s * true_pi_s;
+    let true_pi_initial = -a * true_pi_s / true_pi_denominator;
+    let true_pi_value = XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET
+        + true_pi_initial * (a * printed_time).exp()
+        + a * (a * (true_pi_s * printed_time).sin() + true_pi_s * (true_pi_s * printed_time).cos())
+            / true_pi_denominator;
+    assert_ne!(
+        reference.rows[1][2].to_bits(),
+        true_pi_value.to_bits(),
+        "the upstream generator deliberately does not use full-precision PI"
+    );
+
+    let mut wrong_initial = actual.clone();
+    wrong_initial.rows[0][2] = 0.0;
+    assert!(
+        XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+            &wrong_initial,
+            &specification,
+            2.0e-4,
+            tolerance,
+        )
+        .is_err(),
+        "the exact initial expression value cannot be diluted by integrated RMS"
+    );
+    let mut close_initial = actual.clone();
+    close_initial.rows[0][2] = 0.0020005;
+    XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+        &close_initial,
+        &specification,
+        2.0e-4,
+        tolerance,
+    )
+    .expect("a non-bit-identical initial value within the authoritative verifier bound passes");
+    let mut truncated = actual;
+    truncated.rows.pop();
+    assert!(
+        XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+            &truncated,
+            &specification,
+            2.0e-4,
+            tolerance,
+        )
+        .is_err(),
+        "the self-grid oracle cannot accept a truncated trace"
+    );
+}
+
+#[test]
+fn xyce_verify_comp_tolerances_follow_release_probe_mapping_and_fail_closed() {
+    let columns = vec!["{V(4)+1}".to_string(), "{V(11)-0.5}".to_string()];
+    let source = "\
+*COMP V(11) reltol=0.02
+*COMP {V(4)+1} reltol=0.02 abstol=2e-12 zerotol=3e-12 absdifftol=4e-12 offset=-0.25
+";
+    let tolerances = XyceTestRunner::xyce_verify_comp_tolerances(source, &columns)
+        .expect("canonical Release 7.10 *COMP metadata parses");
+    assert_eq!(tolerances.len(), 2);
+    assert_eq!(tolerances[0].relative.to_bits(), 0.02f64.to_bits());
+    assert_eq!(tolerances[0].absolute.to_bits(), 2.0e-12f64.to_bits());
+    assert_eq!(tolerances[0].zero.to_bits(), 3.0e-12f64.to_bits());
+    assert_eq!(
+        tolerances[0].absolute_difference.to_bits(),
+        4.0e-12f64.to_bits()
+    );
+    assert_eq!(tolerances[0].offset.to_bits(), (-0.25f64).to_bits());
+    assert_eq!(
+        tolerances[1],
+        XyceVerifyTransientTolerance::release_7_10_default(),
+        "an unprinted *COMP probe remains harmless and does not retarget an affine expression"
+    );
+    let continued = XyceTestRunner::xyce_verify_comp_tolerances(
+        "*COMP {V(4)+1} reltol=0.02\n+ abstol=2e-12 zerotol=3e-12 absdifftol=4e-12 offset=-0.25",
+        &columns,
+    )
+    .expect("Release 7.10 *COMP continuation lines are joined before parsing");
+    assert_eq!(continued[0], tolerances[0]);
+    assert!(
+        XyceTestRunner::xyce_verify_comp_tolerances("*COMP V(unprinted) reltol=1", &columns)
+            .is_err(),
+        "an unreferenced *COMP comment alone must not select integrated-RMS comparison"
+    );
+
+    for malformed in [
+        "*COMP {V(4)+1} reltol=0.02 reltol=0.03",
+        "*COMP {V(4)+1} unknown=1",
+        "*COMP {V(4)+1} numfail=1",
+        "*COMP",
+    ] {
+        assert!(
+            XyceTestRunner::xyce_verify_comp_tolerances(malformed, &columns).is_err(),
+            "malformed or unsupported *COMP metadata must fail closed: {malformed}"
+        );
+    }
+    assert!(
+        XyceTestRunner::xyce_verify_comp_tolerances(
+            "*COMP {V(4)+1} reltol=0.02\n*COMP {V(4)+1} reltol=0.02",
+            &columns,
+        )
+        .is_err(),
+        "duplicate printed-probe tolerances must fail closed"
+    );
+}
+
+#[test]
+fn xyce_verify_masks_only_singular_quotients_with_separately_checked_divisors() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let columns = vec![
+        "Index".to_string(),
+        "TIME".to_string(),
+        "I(VMON)".to_string(),
+        "V(out)".to_string(),
+        "{V(out)/I(VMON)}".to_string(),
+    ];
+    let table = |current: Value, voltage: Value, quotient: Value| XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, current, voltage, quotient],
+            vec![1.0, 1.0, current, voltage, quotient],
+        ],
+    };
+
+    let singular_good = table(5.0e-13, 5.0e-13, 1.0);
+    let singular_test = table(5.0e-25, 5.0e-13, 1.0e12);
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&singular_good, &singular_test)
+            .expect("singular quotient tables compare")
+            .is_empty(),
+        "a quotient adds no information when its separately compared divisor is within ZEROTOL"
+    );
+    let inconsistent_singular_test = table(5.0e-25, 5.0e-13, 1.0);
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&singular_good, &inconsistent_singular_test,)
+            .is_err(),
+        "ill-conditioning must not hide a broken quotient-expression evaluation"
+    );
+
+    let absolute_floor_good = table(5.0e-11, 5.0e-11, 1.0);
+    let absolute_floor_test = table(5.1e-11, 5.0e-11, 5.0e-11 / 5.1e-11);
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&absolute_floor_good, &absolute_floor_test)
+            .expect("absolute-floor quotient tables compare")
+            .is_empty(),
+        "a quotient is ill-conditioned below ABSTOL/RELTOL even when its divisor exceeds ZEROTOL"
+    );
+
+    let two_sided_floor_good = table(1.5e-10, 1.5e-10, 1.0);
+    let two_sided_floor_test = table(1.51e-10, 1.5e-10, 1.5e-10 / 1.51e-10);
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&two_sided_floor_good, &two_sided_floor_test,)
+            .expect("two-sided-floor quotient tables compare")
+            .is_empty(),
+        "independent traces contribute two absolute-error bounds to quotient conditioning"
+    );
+
+    let conditioned_good = table(1.0e-6, 1.0e-6, 1.0);
+    let conditioned_test = table(0.991e-6, 1.009e-6, 1.009 / 0.991);
+    let conditioned_mismatches = runner
+        .compare_xyce_verify_transient_tables(&conditioned_good, &conditioned_test)
+        .expect("conditioned quotient tables compare");
+    assert_eq!(conditioned_mismatches.len(), 1);
+    assert_eq!(conditioned_mismatches[0].probe, "{V(out)/I(VMON)}");
+
+    let bad_divisor = table(5.0e-13, 5.0e-7, 1.0e6);
+    let divisor_mismatches = runner
+        .compare_xyce_verify_transient_tables(&conditioned_good, &bad_divisor)
+        .expect("bad divisor tables compare");
+    assert!(
+        divisor_mismatches
+            .iter()
+            .any(|mismatch| mismatch.probe == "I(VMON)"),
+        "masking a singular quotient must never mask the independently compared divisor"
+    );
+}
+
+#[test]
+fn xyce_verify_custom_transient_tolerance_preserves_release_boundaries() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let columns = vec![
+        "Index".to_string(),
+        "TIME".to_string(),
+        "V(out)".to_string(),
+    ];
+    let tolerance = XyceVerifyTransientTolerance {
+        relative: 1.0,
+        absolute: 1.0,
+        zero: 0.0,
+        absolute_difference: 1.0,
+        offset: 0.0,
+    };
+    assert_eq!(
+        XyceTestRunner::xyce_verify_normalized_error_with_tolerance(0.0, 1.0, tolerance,).to_bits(),
+        (-1.0f64).to_bits(),
+        "difference exactly equal to ABSDIFFTOL is not suppressed"
+    );
+    let offset_tolerance = XyceVerifyTransientTolerance {
+        relative: 0.25,
+        absolute: 0.0,
+        zero: 0.0,
+        absolute_difference: 0.0,
+        offset: 2.0,
+    };
+    assert_eq!(
+        XyceTestRunner::xyce_verify_normalized_error_with_tolerance(2.0, 2.25, offset_tolerance,)
+            .to_bits(),
+        (-0.5f64).to_bits(),
+        "normalized error receives both series after OFFSET has shifted them"
+    );
+    let good = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0, 0.0, 0.0], vec![1.0, 1.0, 0.0]],
+    };
+    let rms_equal_to_one = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0, 0.0, 1.000000004], vec![1.0, 1.0, 1.000000004]],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables_with_tolerance(
+                &good,
+                &rms_equal_to_one,
+                tolerance,
+            )
+            .expect("RMS boundary tables compare")
+            .is_empty(),
+        "serialized difference exactly equal to ABSDIFFTOL yields RMS=1 and passes"
+    );
+    let rms_above_one = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0, 0.0, 1.000000006], vec![1.0, 1.0, 1.000000006]],
+    };
+    let mismatches = runner
+        .compare_xyce_verify_transient_tables_with_tolerance(&good, &rms_above_one, tolerance)
+        .expect("above-boundary tables compare structurally");
+    assert_eq!(mismatches.len(), 1);
+    assert!(mismatches[0].relative_error > 1.0);
+
+    let zero_tolerance = XyceVerifyTransientTolerance {
+        relative: 1.0e-6,
+        absolute: 1.0e-4,
+        zero: 1.0e-3,
+        absolute_difference: 1.0e-12,
+        offset: 0.0,
+    };
+    let zero_good = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0e-3],
+            vec![1.0, 5.0e-13, 99.0],
+            vec![2.0, 1.0, 0.0],
+        ],
+    };
+    let zero_test = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, -1.0e-3],
+            vec![1.0, 5.0e-13, -99.0],
+            vec![2.0, 1.0, 0.0],
+        ],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables_with_tolerance(
+                &zero_good,
+                &zero_test,
+                zero_tolerance,
+            )
+            .expect("zero/duplicate tables compare")
+            .is_empty(),
+        "ZEROTOL equality zeroes the first values and duplicate rounded TIME keeps the first row"
+    );
+
+    let shifted_zero_tolerance = XyceVerifyTransientTolerance {
+        relative: 1.0,
+        absolute: 1.0e-12,
+        zero: 1.0,
+        absolute_difference: 0.0,
+        offset: 1.0,
+    };
+    let shifted_zero_good = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0, 0.0, -1.5], vec![1.0, 1.0, -1.5]],
+    };
+    let shifted_zero_test = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0, 0.0, -0.5], vec![1.0, 1.0, -0.5]],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables_with_tolerance(
+                &shifted_zero_good,
+                &shifted_zero_test,
+                shifted_zero_tolerance,
+            )
+            .expect("OFFSET/ZEROTOL crossing tables compare")
+            .is_empty(),
+        "Release 7.10 applies OFFSET to both series before ZEROTOL"
+    );
+
+    let interpolation_tolerance = XyceVerifyTransientTolerance {
+        relative: 1.0,
+        absolute: 1.0,
+        zero: 0.0,
+        absolute_difference: 0.0,
+        offset: 0.0,
+    };
+    let interpolation_good = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0, 0.0, 0.0], vec![1.0, 2.0, 2.0]],
+    };
+    let interpolation_test = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![
+            vec![0.0, 0.5, 0.5],
+            vec![1.0, 1.0, 4.0],
+            vec![2.0, 2.000000004, 2.0],
+        ],
+    };
+    let interpolation_mismatches = runner
+        .compare_xyce_verify_transient_tables_with_tolerance(
+            &interpolation_good,
+            &interpolation_test,
+            interpolation_tolerance,
+        )
+        .expect("interpolated test-domain RMS compares");
+    assert_eq!(interpolation_mismatches.len(), 1);
+    assert!(
+        (interpolation_mismatches[0].relative_error - 1.125f64.sqrt()).abs() <= 4.0 * f64::EPSILON,
+        "RMS must use trapezoidal weighting over the surviving test duration"
+    );
+    let mut uncovered = interpolation_test;
+    uncovered.rows[2][1] = 2.000000006;
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables_with_tolerance(
+                &interpolation_good,
+                &uncovered,
+                interpolation_tolerance,
+            )
+            .is_err(),
+        "serialized test endpoint beyond the good domain must fail coverage"
+    );
+
+    let multi_probe = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+            "V(source)".to_string(),
+        ],
+        rows: vec![vec![0.0, 0.0, 0.0, 0.0], vec![1.0, 1.0, 0.0, 0.0]],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables_with_tolerance(
+                &multi_probe,
+                &multi_probe,
+                interpolation_tolerance,
+            )
+            .is_err(),
+        "one custom trace tolerance must not be silently applied to multiple probes"
+    );
+}
+
+#[test]
+fn xyce_verify_transient_comparison_uses_selected_scientific_precision() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let columns = vec![
+        "Index".to_string(),
+        "TIME".to_string(),
+        "V(out)".to_string(),
+    ];
+    let good = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]],
+    };
+    let test = XycePrnTable {
+        columns,
+        rows: vec![vec![0.0, 0.0, 3.000000004], vec![1.0, 1.0, 3.000000004]],
+    };
+    let tolerance = XyceVerifyTransientTolerance {
+        relative: 1.0,
+        absolute: 1.0,
+        zero: 0.0,
+        absolute_difference: 0.0,
+        offset: 0.0,
+    };
+
+    assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_uniform_tolerance(
+                    &good, &test, tolerance, 8,
+                )
+                .expect("precision-8 comparison succeeds structurally")
+                .is_empty(),
+            "precision 8 rounds the normalized RMS exactly to the passing boundary"
+        );
+    let mismatches = runner
+        .compare_xyce_verify_transient_tables_with_uniform_tolerance(&good, &test, tolerance, 12)
+        .expect("precision-12 comparison succeeds structurally");
+    assert_eq!(mismatches.len(), 1);
+    assert!(mismatches[0].relative_error > 1.0);
+    assert!(
+        XyceTestRunner::xyce_prn_scientific_text(1.2345678901234, 0).is_err(),
+        "zero precision must fail closed"
+    );
+    assert!(
+        XyceTestRunner::xyce_prn_scientific_text(
+            1.2345678901234,
+            XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION + 1,
+        )
+        .is_err(),
+        "precision beyond the binary64 envelope must fail closed"
+    );
+}
+
+#[test]
+fn xyce_verify_transient_reference_requires_normal_completion_footer() {
+    let complete = "Index TIME V(out)\n0 0.0 1.0\n1 1.0 2.0\nEnd of Xyce(TM) Simulation\n";
+    let table = XyceTestRunner::parse_xyce_verify_tran_reference_table(complete)
+        .expect("normally completed xyce_verify reference parses");
+    assert_eq!(table.rows.len(), 2);
+    XyceTestRunner::parse_xyce_verify_tran_reference_table(&format!("\n\n{complete}"))
+        .expect("Release 7.10 skips exactly empty leading lines");
+
+    let truncated = complete.replace("End of Xyce(TM) Simulation\n", "");
+    let error = XyceTestRunner::parse_xyce_verify_tran_reference_table(&truncated)
+        .expect_err("truncated xyce_verify reference must fail closed");
+    assert!(error.contains("no normal 'End of Xyce' completion footer"));
+
+    let preheader_decoy = format!("End of Xyce(TM) Simulation\n{truncated}");
+    assert!(
+        XyceTestRunner::parse_xyce_verify_tran_reference_table(&preheader_decoy).is_err(),
+        "a completion marker before the PRN header must not authenticate truncated data"
+    );
+    let preamble = format!("unexpected preamble\n{complete}");
+    assert!(
+        XyceTestRunner::parse_xyce_verify_tran_reference_table(&preamble).is_err(),
+        "Release 7.10 classifies the first nonblank line and does not search ahead for a PRN header"
+    );
+    let whitespace_preamble = format!(" \t\n{complete}");
+    assert!(
+        XyceTestRunner::parse_xyce_verify_tran_reference_table(&whitespace_preamble).is_err(),
+        "Release 7.10 does not skip a whitespace-only classification line"
+    );
+    for noncanonical_index in ["index", "INDEX"] {
+        let noncanonical = complete.replacen("Index", noncanonical_index, 1);
+        assert!(
+            XyceTestRunner::parse_xyce_verify_tran_reference_table(&noncanonical).is_err(),
+            "Release 7.10 PRN classification requires case-sensitive Index metadata"
+        );
+    }
+}
+
+#[test]
+fn analytic_sinusoidal_rc_detector_is_path_independent_and_fail_closed() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-analytic-sinusoidal-rc-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let family_dir = root.join("Netlists").join("RENAMED_SINUSOIDAL_ANALYTIC");
+    fs::create_dir_all(&family_dir).expect("create renamed sinusoidal analytic fixture");
+    let relative = "Netlists/RENAMED_SINUSOIDAL_ANALYTIC/curve.cir";
+    let deck_path = root.join(relative);
+    fs::write(&deck_path, analytic_sinusoidal_rc_test_source())
+        .expect("write renamed sinusoidal analytic deck");
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper provenance manifest");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path.clone(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+
+    runner
+        .analytic_sinusoidal_rc_wrapper_contract(&deck)
+        .expect("renamed sinusoidal source shape is detected")
+        .expect("renamed sinusoidal source qualifies without a path allowlist");
+    fs::write(
+        &deck_path,
+        analytic_sinusoidal_rc_test_source().replace("Rload source out 1k", "Rload source out 2k"),
+    )
+    .expect("mutate sinusoidal analytic deck");
+    assert!(
+        matches!(
+            runner.analytic_sinusoidal_rc_wrapper_contract(&deck),
+            Some(Err(_))
+        ),
+        "a malformed candidate remains an executed qualification failure"
+    );
+    fs::remove_dir_all(&root).expect("remove renamed sinusoidal analytic fixture");
+}
+
+#[test]
+fn transient_plan_purpose_keeps_absolute_and_relational_requirements_distinct() {
+    assert!(XyceStaticTranPlanPurpose::AbsoluteOracle.requires_reference_file());
+    assert!(XyceStaticTranPlanPurpose::AbsoluteOracle.validates_absolute_device_contract());
+    assert!(XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle.requires_reference_file());
+    assert!(
+        XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle
+            .validates_absolute_device_contract()
+    );
+    assert!(XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle.admits_default_level9_bsim3());
+    assert!(!XyceStaticTranPlanPurpose::AbsoluteOracle.admits_default_level9_bsim3());
+    assert!(!XyceStaticTranPlanPurpose::AnalyticOracle.requires_reference_file());
+    assert!(XyceStaticTranPlanPurpose::AnalyticOracle.validates_absolute_device_contract());
+    assert!(!XyceStaticTranPlanPurpose::RelationalFamily.requires_reference_file());
+    assert!(!XyceStaticTranPlanPurpose::RelationalFamily.validates_absolute_device_contract());
+    assert!(
+        !XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily.requires_reference_file()
+    );
+    assert!(
+        !XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+            .validates_absolute_device_contract()
+    );
+    assert!(!XyceStaticTranPlanPurpose::ScopedModelRelationalFamily.requires_reference_file());
+    assert!(
+        !XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
+            .validates_absolute_device_contract()
+    );
+
+    let missing = Path::new("definitely-missing-transient-oracle.prn");
+    assert!(
+        XyceTestRunner::validate_static_tran_reference_requirement(
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            XyceStaticTranContract::PlainStatic,
+            missing,
+        )
+        .is_err(),
+        "absolute plans must reject a missing checked-in reference"
+    );
+    XyceTestRunner::validate_static_tran_reference_requirement(
+        XyceStaticTranPlanPurpose::RelationalFamily,
+        XyceStaticTranContract::PlainStatic,
+        missing,
+    )
+    .expect("relational plans use the freshly simulated baseline instead of a gold file");
+    XyceTestRunner::validate_static_tran_reference_requirement(
+        XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+        XyceStaticTranContract::WrapperStatic,
+        missing,
+    )
+    .expect("generated-reference wrappers use independently simulated sibling decks");
+    XyceTestRunner::validate_static_tran_reference_requirement(
+        XyceStaticTranPlanPurpose::AnalyticOracle,
+        XyceStaticTranContract::WrapperStatic,
+        missing,
+    )
+    .expect("analytic plans generate their qualified reference on the actual time grid");
+}
+
+#[test]
+fn scoped_model_family_contract_keeps_format_and_exact_comparison_boundaries() {
+    assert!(XyceTestRunner::baseline_family_tran_contracts_compatible(
+        XyceBaselineFamilyKind::ScopedModel,
+        XyceStaticTranContract::PlainStatic,
+        XyceStaticTranContract::WrapperStatic,
+    ));
+    assert!(!XyceTestRunner::baseline_family_tran_contracts_compatible(
+        XyceBaselineFamilyKind::ScopedModel,
+        XyceStaticTranContract::PlainStatic,
+        XyceStaticTranContract::PlainStatic,
+    ));
+    assert!(!XyceTestRunner::baseline_family_tran_contracts_compatible(
+        XyceBaselineFamilyKind::Subckt,
+        XyceStaticTranContract::PlainStatic,
+        XyceStaticTranContract::WrapperStatic,
+    ));
+
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let expected = XycePrnTable {
+        columns: vec!["Index".to_string(), "TIME".to_string(), "V(4)".to_string()],
+        rows: vec![vec![0.0, 0.0, 1.0], vec![1.0, 1.0e-6, 2.0]],
+    };
+    let raw_time = vec![0.0, 1.0e-6];
+    assert!(
+        runner
+            .compare_exact_prn_tables(&expected, &expected, &raw_time, &raw_time)
+            .expect("identical exact tables compare")
+            .is_empty()
+    );
+
+    let mut one_ulp = expected.clone();
+    one_ulp.rows[1][2] = f64::from_bits(one_ulp.rows[1][2].to_bits() + 1);
+    assert_eq!(
+        runner
+            .compare_exact_prn_tables(&expected, &one_ulp, &raw_time, &raw_time)
+            .expect("one-ULP table remains structurally comparable")
+            .len(),
+        1,
+        "exact comparison must not apply a tolerance"
+    );
+
+    let mut reordered = expected.clone();
+    reordered.columns.swap(1, 2);
+    assert!(
+        runner
+            .compare_exact_prn_tables(&expected, &reordered, &raw_time, &raw_time)
+            .is_err(),
+        "exact comparison must reject reordered probes"
+    );
+
+    let mut changed_raw_time = raw_time.clone();
+    changed_raw_time[1] = f64::from_bits(changed_raw_time[1].to_bits() + 1);
+    let raw_time_mismatches = runner
+        .compare_exact_prn_tables(&expected, &expected, &raw_time, &changed_raw_time)
+        .expect("raw time vectors remain structurally comparable");
+    assert_eq!(raw_time_mismatches.len(), 1);
+    assert_eq!(raw_time_mismatches[0].probe, "TIME");
+
+    let baseline_tran = XyceTranAnalysis {
+        step: 5.0e-6,
+        stop: 7.0e-3,
+        start: None,
+        max_step: None,
+        uic: false,
+    };
+    let mut changed_tran = baseline_tran;
+    changed_tran.step = f64::from_bits(changed_tran.step.to_bits() + 1);
+    assert!(!XyceTestRunner::tran_analyses_match_exactly(
+        &baseline_tran,
+        &changed_tran
+    ));
+}
+
+#[test]
+fn exact_dc_comparison_checks_raw_sweep_bits_and_rejects_nonfinite_values() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let expected = XycePrnTable {
+        columns: vec!["Index".to_string(), "V(4)".to_string()],
+        rows: vec![vec![0.0, 1.0], vec![1.0, 2.0]],
+    };
+    let raw_sweep = vec![1.0, 2.0];
+    assert!(
+        runner
+            .compare_exact_dc_prn_tables(&expected, &expected, &raw_sweep, &raw_sweep)
+            .expect("identical exact DC tables compare")
+            .is_empty()
+    );
+
+    let mut one_ulp = expected.clone();
+    one_ulp.rows[1][1] = f64::from_bits(one_ulp.rows[1][1].to_bits() + 1);
+    assert_eq!(
+        runner
+            .compare_exact_dc_prn_tables(&expected, &one_ulp, &raw_sweep, &raw_sweep)
+            .expect("one-ULP DC table remains structurally comparable")
+            .len(),
+        1
+    );
+
+    let mut changed_sweep = raw_sweep.clone();
+    changed_sweep[1] = f64::from_bits(changed_sweep[1].to_bits() + 1);
+    let sweep_mismatches = runner
+        .compare_exact_dc_prn_tables(&expected, &expected, &raw_sweep, &changed_sweep)
+        .expect("one-ULP raw sweep remains structurally comparable");
+    assert_eq!(sweep_mismatches.len(), 1);
+    assert_eq!(sweep_mismatches[0].probe, "DC_SWEEP");
+
+    let mut nonfinite_table = expected.clone();
+    nonfinite_table.rows[0][1] = f64::NAN;
+    assert!(
+            runner
+                .compare_exact_dc_prn_tables(
+                    &nonfinite_table,
+                    &nonfinite_table,
+                    &raw_sweep,
+                    &raw_sweep,
+                )
+                .is_err(),
+            "matching NaNs must never satisfy an exact relational oracle"
+        );
+    let nonfinite_axis = vec![1.0, f64::INFINITY];
+    assert!(
+        runner
+            .compare_exact_dc_prn_tables(&expected, &expected, &nonfinite_axis, &nonfinite_axis,)
+            .is_err(),
+        "matching infinite sweep samples must never satisfy an exact relational oracle"
+    );
+}
+
+#[test]
+fn exact_prn_comparison_matches_release_7_10_serialization() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let table = |value| XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ],
+        rows: vec![vec![0.0, 0.0, value]],
+    };
+    let baseline = table(1.0);
+    let same_printed_value = table(1.000000004);
+    assert!(
+        runner
+            .compare_serialized_default_prn_tables(&baseline, &same_printed_value)
+            .expect("precision-8 tables compare structurally")
+            .is_empty(),
+        "Release 7.10 byte diff compares the precision-8 serialized value, not raw f64 bits"
+    );
+
+    let changed_printed_value = table(1.000000006);
+    assert_eq!(
+        runner
+            .compare_serialized_default_prn_tables(&baseline, &changed_printed_value)
+            .expect("rounding-boundary tables compare structurally")
+            .len(),
+        1,
+        "crossing the precision-8 rounding boundary must change the PRN byte stream"
+    );
+
+    let positive_zero = table(0.0);
+    let negative_zero = table(-0.0);
+    assert_eq!(
+        runner
+            .compare_serialized_default_prn_tables(&positive_zero, &negative_zero)
+            .expect("signed-zero tables compare structurally")
+            .len(),
+        1,
+        "positive and negative zero serialize to different default-PRN tokens"
+    );
+
+    let nonfinite = table(f64::NAN);
+    assert!(
+        runner
+            .compare_serialized_default_prn_tables(&nonfinite, &nonfinite)
+            .is_err(),
+        "matching nonfinite values never satisfy an exact serialized oracle"
+    );
+    let mut reordered = baseline.clone();
+    reordered.columns.swap(1, 2);
+    assert!(
+        runner
+            .compare_serialized_default_prn_tables(&baseline, &reordered)
+            .is_err(),
+        "column order and spelling are byte-visible"
+    );
+    let mut case_only = baseline.clone();
+    case_only.columns = vec![
+        "index".to_string(),
+        "time".to_string(),
+        "v(OUT)".to_string(),
+    ];
+    assert!(
+        runner
+            .compare_serialized_default_prn_tables(&baseline, &case_only)
+            .is_err(),
+        "ordinary exact-PRN wrappers retain case-sensitive headers"
+    );
+    assert!(
+        runner
+            .compare_serialized_default_prn_tables_case_insensitive(&baseline, &case_only)
+            .expect("case-insensitive diff preserves table structure")
+            .is_empty(),
+        "diff -i wrappers ignore only ASCII letter case"
+    );
+    let mut case_insensitive_reordered = case_only.clone();
+    case_insensitive_reordered.columns.swap(1, 2);
+    assert!(
+        runner
+            .compare_serialized_default_prn_tables_case_insensitive(
+                &baseline,
+                &case_insensitive_reordered,
+            )
+            .is_err(),
+        "case-insensitive diff still preserves exact column order"
+    );
+    let mut bad_index = baseline.clone();
+    bad_index.rows[0][0] = -0.0;
+    assert!(
+        runner
+            .compare_serialized_default_prn_tables(&baseline, &bad_index)
+            .is_err(),
+        "the default indexed layout preserves the canonical integer Index sequence"
+    );
+}
+
+#[test]
+fn passive_primary_source_forms_use_only_active_structural_fields() {
+    let cap_source = |named: bool| {
+        let (named_prefix, positional_prefix) = if named { ("", "*") } else { ("*", "") };
+        format!(
+            "generic capacitor primary-value pair\n\
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)\n\
+R1 1 2 1K\n\
+{named_prefix}C1 3 0 CMODEL C=1pf\n\
+{positional_prefix}C1 3 0 CMODEL 1pf\n\
+VMON 2 3 0\n\
+.MODEL CMODEL C ()\n\
+.TRAN 1N 20U\n\
+.PRINT TRAN V(3) I(VMON)\n\
+.END\n"
+        )
+    };
+    for named in [true, false] {
+        XyceTestRunner::validate_passive_primary_source_forms(
+            &cap_source(named),
+            XycePassivePrimaryKind::CapacitorTran,
+        )
+        .expect("six-argument direct-numeric capacitor source form qualifies");
+        let netlist = XyceTestRunner::parse_xyce_netlist(
+            &cap_source(named),
+            Path::new("passive-cap-source.cir"),
+        )
+        .expect("capacitor fixture parses");
+        let (representation, bits, _) = XyceTestRunner::passive_primary_source_contract(
+            netlist
+                .source_text
+                .as_deref()
+                .expect("source text retained"),
+            "C1",
+            "CMODEL",
+            XycePassivePrimaryKind::CapacitorTran,
+        )
+        .expect("active primary source token qualifies");
+        assert_eq!(
+            representation,
+            if named {
+                XycePassivePrimaryRepresentation::Named
+            } else {
+                XycePassivePrimaryRepresentation::Positional
+            },
+            "commented alternate form must not influence representation detection"
+        );
+        assert_eq!(bits, 1.0e-12f64.to_bits());
+    }
+
+    for invalid in [
+        cap_source(true).replace("C=1pf", "CAP=1pf"),
+        cap_source(true).replace("C=1pf", "VALUE=1pf"),
+        cap_source(true).replace("C=1pf", "C={1pf}"),
+        cap_source(true).replace("CMODEL C=1pf", "1pf CMODEL"),
+        cap_source(true).replace("C=1pf", "C=1pf M=1"),
+    ] {
+        let parsed = XyceTestRunner::parse_xyce_netlist(
+            &invalid,
+            Path::new("invalid-passive-cap-source.cir"),
+        );
+        if let Ok(netlist) = parsed {
+            assert!(
+                XyceTestRunner::passive_primary_source_contract(
+                    netlist
+                        .source_text
+                        .as_deref()
+                        .expect("source text retained"),
+                    "C1",
+                    "CMODEL",
+                    XycePassivePrimaryKind::CapacitorTran,
+                )
+                .is_err(),
+                "unqualified primary syntax must fail source provenance"
+            );
+        }
+    }
+
+    let explicit_period =
+        cap_source(true).replace("PULSE(0 1 10U 1N 1N 30U)", "PULSE(0 1 10U 1N 1N 30U 100U)");
+    assert!(
+        XyceTestRunner::validate_passive_primary_source_forms(
+            &explicit_period,
+            XycePassivePrimaryKind::CapacitorTran,
+        )
+        .is_err(),
+        "the oracle exercises exactly six direct PULSE arguments and an omitted period"
+    );
+    let parameterized_pulse = cap_source(true).replace("10U", "{TD}");
+    assert!(
+        XyceTestRunner::validate_passive_primary_source_forms(
+            &parameterized_pulse,
+            XycePassivePrimaryKind::CapacitorTran,
+        )
+        .is_err(),
+        "PULSE provenance must remain direct numeric"
+    );
+}
+
+#[test]
+fn passive_primary_plans_admit_only_default_prn_output() {
+    let cap_source = "validated capacitor primary-value plan\n\
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)\n\
+R1 1 2 1K\n\
+C1 3 0 CMODEL C=1pf\n\
+VMON 2 3 0\n\
+.MODEL CMODEL C ()\n\
+.TRAN 1N 20U\n\
+.PRINT TRAN V(3) I(VMON)\n\
+.END\n";
+    let cap_plan = XyceStaticTranPlan {
+        deck_path: PathBuf::from("cap-plan.cir"),
+        reference_path: PathBuf::from("unused.prn"),
+        source: cap_source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["V(3)".to_string(), "I(VMON)".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 1.0e-9,
+            stop: 20.0e-6,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::PlainStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    };
+    XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_plan)
+        .expect("canonical capacitor plan qualifies");
+    let mut cap_csv = cap_plan.clone();
+    cap_csv.contract = XyceStaticTranContract::PlainCsv;
+    assert!(XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_csv).is_err());
+    let mut cap_override = cap_plan.clone();
+    cap_override.output_override = true;
+    assert!(XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_override).is_err());
+    let mut cap_start = cap_plan.clone();
+    cap_start.tran.start = Some(1.0e-9);
+    assert!(XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_start).is_err());
+    let mut cap_option = cap_plan.clone();
+    cap_option.source = cap_option
+        .source
+        .replace(".END", ".OPTIONS TIMEINT CONSTSTEP=1\n.END");
+    assert!(
+        XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_option).is_err(),
+        "active options are outside the exact wrapper envelope"
+    );
+    let mut cap_one_probe = cap_plan;
+    cap_one_probe.print.probes.pop();
+    assert!(XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_one_probe).is_err());
+
+    let res_source = "validated resistor primary-value plan\n\
+R1 2 0 RMOD R=1k\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1)\n\
+.PRINT DC V(1) I(VMON)\n\
+.END\n";
+    let res_plan = XyceStaticDcPlan {
+        deck_path: PathBuf::from("res-plan.cir"),
+        execution_dir: None,
+        source: res_source.to_string(),
+        expression_dialect: ExpressionDialect::Xyce,
+        parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+        print: XycePrintRequest {
+            probes: vec!["V(1)".to_string(), "I(VMON)".to_string()],
+        },
+        print_format: None,
+        dc: XyceDcSweep {
+            source: "VIN".to_string(),
+            start: 0.0,
+            stop: 5.0,
+            step: 1.0,
+            mode: rspice_core::netlist::DcSweepMode::Linear,
+            sweep2: None,
+        },
+        dc_data: None,
+        steps: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    XyceTestRunner::validate_passive_res_primary_dc_plan(&res_plan)
+        .expect("canonical resistor plan qualifies");
+    let mut res_formatted = res_plan.clone();
+    res_formatted.print_format = Some("STD".to_string());
+    assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_formatted).is_err());
+    let mut res_second = res_plan.clone();
+    res_second.dc.sweep2 = Some(DcSecondSweep::linear("V2".to_string(), 0.0, 1.0, 1.0));
+    assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_second).is_err());
+    let mut res_list = res_plan.clone();
+    res_list.dc.mode = rspice_core::netlist::DcSweepMode::List(vec![0.0, 1.0]);
+    assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_list).is_err());
+    let mut res_diagnostic = res_plan.clone();
+    res_diagnostic
+        .diagnostics
+        .push(rspice_core::netlist::ParseDiagnostic::warning(
+            1,
+            "test",
+            "unqualified parser state",
+        ));
+    assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_diagnostic).is_err());
+    let mut res_option = res_plan;
+    res_option.source = res_option.source.replace(".END", ".OPTIONS TEMP=27\n.END");
+    assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_option).is_err());
+}
+
+#[test]
+fn passive_cap_primary_snapshot_proves_only_named_to_positional_equivalence() {
+    let source_for = |named: bool| {
+        let (named_prefix, positional_prefix) = if named { ("", "*") } else { ("*", "") };
+        format!(
+            "validated capacitor primary-value pair\n\
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)\n\
+R1 1 2 1K\n\
+{named_prefix}C1 3 0 CMODEL C=1pf\n\
+{positional_prefix}C1 3 0 CMODEL 1pf\n\
+VMON 2 3 0\n\
+.MODEL CMODEL C ()\n\
+.TRAN 1N 20U\n\
+.PRINT TRAN V(3) I(VMON)\n\
+.END\n"
+        )
+    };
+    let print = XycePrintRequest {
+        probes: vec!["V(3)".to_string(), "I(VMON)".to_string()],
+    };
+    let named = XyceTestRunner::parse_xyce_netlist(&source_for(true), Path::new("cap-named.cir"))
+        .expect("named capacitor fixture parses");
+    let positional =
+        XyceTestRunner::parse_xyce_netlist(&source_for(false), Path::new("cap-positional.cir"))
+            .expect("positional capacitor fixture parses");
+    let named_snapshot = XyceTestRunner::passive_cap_primary_snapshot(&named, &print)
+        .expect("named capacitor snapshot qualifies");
+    let positional_snapshot = XyceTestRunner::passive_cap_primary_snapshot(&positional, &print)
+        .expect("positional capacitor snapshot qualifies");
+    assert_eq!(named_snapshot.effective_primary_bits, 1.0e-12f64.to_bits());
+    XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &positional_snapshot)
+        .expect("named -> positional capacitance is the qualified representation pair");
+    assert!(
+        XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &named_snapshot,)
+            .is_err()
+    );
+    assert!(
+        XyceTestRunner::compare_passive_primary_snapshots(&positional_snapshot, &named_snapshot,)
+            .is_err(),
+        "representation direction is part of the upstream wrapper contract"
+    );
+
+    let changed_resistor_source = source_for(false).replace("R1 1 2 1K", "R1 1 2 2K");
+    let changed_resistor = XyceTestRunner::parse_xyce_netlist(
+        &changed_resistor_source,
+        Path::new("cap-changed-resistor.cir"),
+    )
+    .expect("changed resistor fixture parses");
+    let changed_snapshot = XyceTestRunner::passive_cap_primary_snapshot(&changed_resistor, &print)
+        .expect("changed resistor remains individually qualified");
+    assert!(
+        XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &changed_snapshot,)
+            .is_err(),
+        "all non-primary active source and semantic state participates in parity"
+    );
+
+    let explicit_period_source = source_for(false).replace("30U)", "30U 100U)");
+    let explicit_period = XyceTestRunner::parse_xyce_netlist(
+        &explicit_period_source,
+        Path::new("cap-explicit-period.cir"),
+    )
+    .expect("explicit-period fixture parses");
+    assert!(
+        XyceTestRunner::passive_cap_primary_snapshot(&explicit_period, &print).is_err(),
+        "only the canonical omitted-period NaN sentinel is admitted"
+    );
+    let ground_alias_source = source_for(false).replace("C1 3 0", "C1 3 GND");
+    let ground_alias =
+        XyceTestRunner::parse_xyce_netlist(&ground_alias_source, Path::new("cap-ground-alias.cir"))
+            .expect("ground-alias fixture parses");
+    assert!(
+        XyceTestRunner::passive_cap_primary_snapshot(&ground_alias, &print).is_err(),
+        "literal node zero is required"
+    );
+}
+
+#[test]
+fn passive_res_primary_snapshot_normalizes_only_the_named_r_assignment() {
+    let source_for = |named: bool| {
+        let (named_prefix, positional_prefix) = if named { ("", "*") } else { ("*", "") };
+        format!(
+            "validated resistor primary-value pair\n\
+{named_prefix}R1 2 0 RMOD R=1k\n\
+{positional_prefix}R1 2 0 RMOD 1k\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1)\n\
+.PRINT DC V(1) I(VMON)\n\
+.END\n"
+        )
+    };
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".to_string(), "I(VMON)".to_string()],
+    };
+    let named = XyceTestRunner::parse_xyce_netlist(&source_for(true), Path::new("res-named.cir"))
+        .expect("named resistor fixture parses");
+    let positional =
+        XyceTestRunner::parse_xyce_netlist(&source_for(false), Path::new("res-positional.cir"))
+            .expect("positional resistor fixture parses");
+    let named_snapshot = XyceTestRunner::passive_res_primary_snapshot(&named, &print, "VIN")
+        .expect("named resistor snapshot qualifies");
+    let positional_snapshot =
+        XyceTestRunner::passive_res_primary_snapshot(&positional, &print, "VIN")
+            .expect("positional resistor snapshot qualifies");
+    assert_eq!(named_snapshot.effective_primary_bits, 1000.0f64.to_bits());
+    XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &positional_snapshot)
+        .expect("named -> positional resistance is the qualified representation pair");
+
+    let mut extra_instance_parameter = named.clone();
+    let resistor = extra_instance_parameter
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("R1"))
+        .expect("R1 exists");
+    let ElementKind::Resistor {
+        instance_params, ..
+    } = &mut resistor.kind
+    else {
+        panic!("R1 remains a resistor");
+    };
+    instance_params.push(("M".to_string(), 2.0));
+    assert!(
+        XyceTestRunner::passive_res_primary_snapshot(&extra_instance_parameter, &print, "VIN",)
+            .is_err(),
+        "only the redundant named R assignment may be normalized"
+    );
+
+    let zero_rsh_source = source_for(false).replace("RSH=1", "RSH=0");
+    let zero_rsh =
+        XyceTestRunner::parse_xyce_netlist(&zero_rsh_source, Path::new("res-zero-rsh.cir"))
+            .expect("zero-RSH fixture parses");
+    assert!(XyceTestRunner::passive_res_primary_snapshot(&zero_rsh, &print, "VIN").is_err());
+    let negative_zero_monitor_source = source_for(false).replace("VMON 1 2 0V", "VMON 1 2 -0V");
+    let negative_zero_monitor = XyceTestRunner::parse_xyce_netlist(
+        &negative_zero_monitor_source,
+        Path::new("res-negative-zero-monitor.cir"),
+    )
+    .expect("negative-zero monitor fixture parses");
+    assert!(
+        XyceTestRunner::passive_res_primary_snapshot(&negative_zero_monitor, &print, "VIN",)
+            .is_err(),
+        "the monitor source must be exact positive zero"
+    );
+    assert!(
+        XyceTestRunner::passive_res_primary_snapshot(&positional, &print, "VMON").is_err(),
+        "the .DC sweep must name the nonzero drive source"
+    );
+}
+
+#[test]
+fn exact_dc_sweep_comparison_is_bitwise_for_every_dimension() {
+    let baseline = XyceDcSweep {
+        source: "VBIAS".to_string(),
+        start: 1.0,
+        stop: 12.0,
+        step: 1.0,
+        mode: rspice_core::netlist::DcSweepMode::Linear,
+        sweep2: None,
+    };
+    assert!(XyceTestRunner::dc_sweeps_match_exactly(
+        &baseline, &baseline
+    ));
+
+    let mut changed_source_case = baseline.clone();
+    changed_source_case.source = "vbias".to_string();
+    assert!(
+        !XyceTestRunner::dc_sweeps_match_exactly(&baseline, &changed_source_case),
+        "raw .prn sweep-column names participate in exact parity"
+    );
+
+    let mut changed_start = baseline.clone();
+    changed_start.start = f64::from_bits(changed_start.start.to_bits() + 1);
+    assert!(!XyceTestRunner::dc_sweeps_match_exactly(
+        &baseline,
+        &changed_start
+    ));
+
+    let listed = XyceDcSweep {
+        mode: rspice_core::netlist::DcSweepMode::List(vec![1.0, 2.0, 4.0]),
+        ..baseline.clone()
+    };
+    let mut changed_list = listed.clone();
+    let rspice_core::netlist::DcSweepMode::List(values) = &mut changed_list.mode else {
+        panic!("changed list remains a list sweep");
+    };
+    values[1] = f64::from_bits(values[1].to_bits() + 1);
+    assert!(!XyceTestRunner::dc_sweeps_match_exactly(
+        &listed,
+        &changed_list
+    ));
+
+    let nonfinite_primary = XyceDcSweep {
+        start: f64::NAN,
+        ..baseline.clone()
+    };
+    assert!(
+        !XyceTestRunner::dc_sweeps_match_exactly(&nonfinite_primary, &nonfinite_primary,),
+        "matching non-finite primary tuples are never exact"
+    );
+    let nonfinite_list = XyceDcSweep {
+        mode: rspice_core::netlist::DcSweepMode::List(vec![1.0, f64::INFINITY]),
+        ..baseline.clone()
+    };
+    assert!(
+        !XyceTestRunner::dc_sweeps_match_exactly(&nonfinite_list, &nonfinite_list),
+        "matching non-finite list entries are never exact"
+    );
+
+    let with_second = XyceDcSweep {
+        sweep2: Some(DcSecondSweep::linear("VOUTER".to_string(), 0.0, 1.0, 1.0)),
+        ..baseline.clone()
+    };
+    assert!(!XyceTestRunner::dc_sweeps_match_exactly(
+        &baseline,
+        &with_second
+    ));
+    let nonfinite_second = XyceDcSweep {
+        sweep2: Some(DcSecondSweep::linear(
+            "VOUTER".to_string(),
+            0.0,
+            1.0,
+            f64::INFINITY,
+        )),
+        ..baseline
+    };
+    assert!(
+        !XyceTestRunner::dc_sweeps_match_exactly(&nonfinite_second, &nonfinite_second,),
+        "matching non-finite secondary tuples are never exact"
+    );
+}
+
+#[test]
+fn bjt_external_node_plan_rejects_named_or_reformatted_print_destinations() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    let source_for = |print_line: &str| {
+        format!(
+            "validated BJT external-node print contract\n\
+VCC 4 0 DC 12\n\
+R1 4 2 2k\n\
+VMON 2 1 0\n\
+Q1 1 3 0 QN\n\
+.MODEL QN NPN (BF=100)\n\
+.DC VCC 1 12 1\n\
+{print_line}\n\
+.END\n"
+        )
+    };
+    for print_line in [
+        ".PRINT DC FILE=only.prn V(4) I(VMON)",
+        ".PRINT DC FORMAT=STD V(4) I(VMON)",
+        ".PRINT DC PRECISION=12 V(4) I(VMON)",
+        ".PRINT DC WIDTH=120 V(4) I(VMON)",
+        ".PRINT DC NOINDEX V(4) I(VMON)",
+        ".PRINT DC NOINDEX=TRUE V(4) I(VMON)",
+        ".PRINT DC FUTURE_OPTION=1 V(4) I(VMON)",
+    ] {
+        let source = source_for(print_line);
+        let plan = runner
+            .static_dc_plan_for_source_with_execution_dir(
+                Path::new("print-contract.cir"),
+                source,
+                ExpressionDialect::Xyce,
+                None,
+            )
+            .expect("generic static DC adapter accepts the output form");
+        assert!(
+            XyceTestRunner::validate_bjt_external_node_dc_plan(&plan).is_err(),
+            "exact default .prn parity must reject {print_line}"
+        );
+    }
+}
+
+#[test]
+fn bjt_external_node_snapshot_admits_only_the_grounded_representation_pair() {
+    let source_for = |q_line: &str, model_line: &str| {
+        format!(
+            "validated BJT external-node pair\n\
+VCC 4 0 DC 12\n\
+R1 4 2 2k\n\
+VMON 2 1 0\n\
+{q_line}\n\
+{model_line}\n\
+.DC VCC 1 12 1\n\
+.PRINT DC V(4) I(VMON)\n\
+.END\n"
+        )
+    };
+    let print = XycePrintRequest {
+        probes: vec!["V(4)".to_string(), "I(VMON)".to_string()],
+    };
+    let implicit = Netlist::parse(&source_for("Q1 1 3 0 QN", ".MODEL QN NPN (BF=100)"))
+        .expect("implicit-ground BJT fixture parses");
+    let explicit = Netlist::parse(&source_for("Q1 1 3 0 0 QN", ".MODEL QN NPN (BF=100)"))
+        .expect("explicit-ground BJT fixture parses");
+    let implicit_snapshot = XyceTestRunner::bjt_external_node_family_snapshot(&implicit, &print)
+        .expect("implicit-ground snapshot qualifies");
+    let explicit_snapshot = XyceTestRunner::bjt_external_node_family_snapshot(&explicit, &print)
+        .expect("explicit-ground snapshot qualifies");
+    XyceTestRunner::compare_bjt_external_node_family_snapshots(
+        &implicit_snapshot,
+        &explicit_snapshot,
+    )
+    .expect("omitted and explicit grounded substrate forms are semantically identical");
+    assert!(
+        XyceTestRunner::compare_bjt_external_node_family_snapshots(
+            &implicit_snapshot,
+            &implicit_snapshot,
+        )
+        .is_err(),
+        "two omitted-node members do not exercise the wrapper contract"
+    );
+
+    let mut changed_title = explicit.clone();
+    changed_title.title = "different raw-output title".to_string();
+    let changed_title_snapshot =
+        XyceTestRunner::bjt_external_node_family_snapshot(&changed_title, &print)
+            .expect("changed title remains individually qualified");
+    assert!(
+        XyceTestRunner::compare_bjt_external_node_family_snapshots(
+            &implicit_snapshot,
+            &changed_title_snapshot,
+        )
+        .is_err(),
+        "circuit titles participate in exact raw-output parity"
+    );
+
+    let non_ground_substrate =
+        Netlist::parse(&source_for("Q1 1 3 0 7 QN", ".MODEL QN NPN (BF=100)"))
+            .expect("non-ground substrate fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&non_ground_substrate, &print,).is_err()
+    );
+
+    let emitter_equal_non_ground =
+        Netlist::parse(&source_for("Q1 1 3 7 7 QN", ".MODEL QN NPN (BF=100)"))
+            .expect("non-ground emitter/substrate fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&emitter_equal_non_ground, &print,)
+            .is_err(),
+        "substrate equal to a non-ground emitter is not equivalent to an omitted ground node"
+    );
+
+    let gnd_emitter = Netlist::parse(&source_for("Q1 1 3 GND QN", ".MODEL QN NPN (BF=100)"))
+        .expect("GND emitter fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&gnd_emitter, &print).is_err(),
+        "GND is not Xyce node zero without .PREPROCESS REPLACEGND"
+    );
+    let ground_substrate =
+        Netlist::parse(&source_for("Q1 1 3 0 GROUND QN", ".MODEL QN NPN (BF=100)"))
+            .expect("GROUND substrate fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&ground_substrate, &print).is_err(),
+        "GROUND is not Xyce node zero without .PREPROCESS REPLACEGND"
+    );
+    let gnd_source = Netlist::parse(
+        &source_for("Q1 1 3 0 QN", ".MODEL QN NPN (BF=100)").replace("VCC 4 0", "VCC 4 GND"),
+    )
+    .expect("GND source fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&gnd_source, &print).is_err(),
+        "ground aliases are rejected on every admitted element"
+    );
+    let gnd_bang_source = Netlist::parse(
+        &source_for("Q1 1 3 0 QN", ".MODEL QN NPN (BF=100)").replace("VCC 4 0", "VCC 4 GND!"),
+    )
+    .expect("GND! source fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&gnd_bang_source, &print).is_err(),
+        "GND! is not Xyce node zero without .PREPROCESS REPLACEGND"
+    );
+
+    let extra_model_field = Netlist::parse(&source_for(
+        "Q1 1 3 0 0 QN",
+        ".MODEL QN NPN (BF=100 IS=1e-15)",
+    ))
+    .expect("extra model-field fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&extra_model_field, &print).is_err(),
+        "the bounded oracle must not infer or duplicate additional model behavior"
+    );
+
+    let generated_level = Netlist::parse(&source_for(
+        "Q1 1 3 0 0 QN",
+        ".MODEL QN NPN (LEVEL=4 BF=100)",
+    ))
+    .expect("generated-level fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&generated_level, &print).is_err(),
+        "generated-device levels remain outside the native Level-1 relational envelope"
+    );
+
+    let instance_parameter = Netlist::parse(&source_for(
+        "Q1 1 3 0 0 QN AREA=2",
+        ".MODEL QN NPN (BF=100)",
+    ))
+    .expect("instance-parameter fixture parses");
+    assert!(
+        XyceTestRunner::bjt_external_node_family_snapshot(&instance_parameter, &print).is_err(),
+        "instance parameters are not part of the proven wrapper representation pair"
+    );
+
+    let mut changed_resistor = explicit.clone();
+    let ElementKind::Resistor { value, .. } = &mut changed_resistor.elements[1].kind else {
+        panic!("fixture element remains a resistor");
+    };
+    *value = 2_001.0;
+    let changed_snapshot =
+        XyceTestRunner::bjt_external_node_family_snapshot(&changed_resistor, &print)
+            .expect("changed resistor remains individually qualified");
+    assert!(
+        XyceTestRunner::compare_bjt_external_node_family_snapshots(
+            &implicit_snapshot,
+            &changed_snapshot,
+        )
+        .is_err(),
+        "all non-representation element values participate in the semantic fingerprint"
+    );
+}
+
+#[test]
+fn bjt_external_node_family_detection_is_manifest_and_sibling_driven() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-bjt-external-node-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root.join("Netlists").join("BJT_EXTNODE").join("GENERIC");
+    fs::create_dir_all(&family_dir).expect("create generic BJT family fixture");
+    let owner_path = family_dir.join("representation.cir");
+    let baseline_path = family_dir.join("representation1.cir");
+    let explicit_path = family_dir.join("representation2.cir");
+    fs::write(&owner_path, "").expect("write empty wrapper fixture");
+    fs::write(&baseline_path, "implicit member\n.end\n").expect("write baseline fixture");
+    fs::write(&explicit_path, "explicit member\n.end\n").expect("write explicit fixture");
+    let owner_relative = "Netlists/BJT_EXTNODE/GENERIC/representation.cir";
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper manifest fixture");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (path, relative, target_expected) in [
+        (&owner_path, owner_relative, false),
+        (
+            &baseline_path,
+            "Netlists/BJT_EXTNODE/GENERIC/representation1.cir",
+            true,
+        ),
+        (
+            &explicit_path,
+            "Netlists/BJT_EXTNODE/GENERIC/representation2.cir",
+            true,
+        ),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .bjt_external_node_family_contract(&deck)
+            .expect("manifest owner and two direct numbered siblings form a family");
+        assert_eq!(contract.kind, XyceBaselineFamilyKind::BjtExternalNode);
+        assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+        assert_eq!(contract.target_path.is_some(), target_expected);
+        assert!(XyceTestRunner::same_path(
+            &contract.baseline_path,
+            &baseline_path
+        ));
+        assert_eq!(contract.member_paths.len(), 2);
+    }
+
+    let owner_deck = XyceDeck {
+        path: owner_path.clone(),
+        relative_path: owner_relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let zero_path = family_dir.join("representation0.cir");
+    fs::write(&zero_path, "unqualified zero member\n.end\n").expect("write zero-member fixture");
+    assert!(
+        runner
+            .bjt_external_node_family_contract(&owner_deck)
+            .is_none(),
+        "a zero-index direct-numbered sibling is a different upstream family shape"
+    );
+    fs::remove_file(&zero_path).expect("remove zero-member fixture");
+
+    let third_path = family_dir.join("representation3.cir");
+    fs::write(&third_path, "unqualified third member\n.end\n").expect("write third-member fixture");
+    assert!(
+        runner
+            .bjt_external_node_family_contract(&owner_deck)
+            .is_none(),
+        "a third direct-numbered sibling is a different upstream family shape"
+    );
+
+    fs::remove_dir_all(&root).expect("remove generic BJT family fixture");
+}
+
+#[test]
+fn stepped_ic_reference_detection_is_manifest_and_sibling_driven() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-stepped-ic-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root.join("Netlists").join("GENERIC_STEP_IC");
+    fs::create_dir_all(&family_dir).expect("create generic stepped-IC family fixture");
+    let source = |capacitance: &str, step: bool| {
+        format!(
+            "generic stepped IC family\n\
+.ic v(out)=1\n\
+CMAIN out 0 {capacitance}\n\
+RLOAD out bias 1k\n\
+VBIAS bias 0 0\n\
+{}\
+.print tran v(out)\n\
+.tran 0 1m\n\
+.options timeint reltol=1e-6 abstol=1e-6\n\
+.end\n",
+            if step {
+                ".step dec CMAIN:C 1u 100u 1"
+            } else {
+                ""
+            }
+        )
+    };
+    let owner_path = family_dir.join("decay_step.cir");
+    let member_paths = [
+        family_dir.join("decay0.cir"),
+        family_dir.join("decay1.cir"),
+        family_dir.join("decay2.cir"),
+    ];
+    fs::write(&owner_path, source("1u", true)).expect("write stepped owner");
+    for (path, value) in member_paths.iter().zip(["1u", "10u", "100u"]) {
+        fs::write(path, source(value, false)).expect("write independent baseline");
+    }
+    let owner_relative = "Netlists/GENERIC_STEP_IC/decay_step.cir";
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper manifest fixture");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (path, relative) in std::iter::once((&owner_path, owner_relative)).chain(
+        member_paths.iter().enumerate().map(|(index, path)| {
+            (
+                path,
+                match index {
+                    0 => "Netlists/GENERIC_STEP_IC/decay0.cir",
+                    1 => "Netlists/GENERIC_STEP_IC/decay1.cir",
+                    _ => "Netlists/GENERIC_STEP_IC/decay2.cir",
+                },
+            )
+        }),
+    ) {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .stepped_ic_reference_contract(&deck)
+            .expect("manifest owner and contiguous numbered siblings form a family");
+        assert_eq!(contract.family, "decay");
+        assert!(XyceTestRunner::same_path(&contract.owner_path, &owner_path));
+        assert_eq!(contract.member_paths, member_paths);
+        assert!(XyceTestRunner::same_path(&contract.target_path, path));
+    }
+
+    fs::remove_file(&member_paths[1]).expect("remove middle baseline");
+    let owner_deck = XyceDeck {
+        path: owner_path,
+        relative_path: owner_relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    assert!(
+        runner.stepped_ic_reference_contract(&owner_deck).is_none(),
+        "numbered sibling holes must fail family discovery"
+    );
+    fs::remove_dir_all(&root).expect("remove generic stepped-IC family fixture");
+}
+
+#[test]
+fn stepped_ic_snapshot_proves_initial_condition_and_named_circuit_identity() {
+    let source = |capacitance: Value, initial_voltage: Value, resistor: Value| {
+        format!(
+            "stepped IC snapshot\n\
+.ic v(out)={initial_voltage}\n\
+CMAIN out 0 {capacitance}\n\
+RLOAD out bias {resistor}\n\
+VBIAS bias 0 0\n\
+.print tran v(out)\n\
+.tran 0 1m\n\
+.options timeint reltol=1e-6 abstol=1e-6\n\
+.end\n"
+        )
+    };
+    let baseline =
+        XyceTestRunner::parse_xyce_netlist(&source(1.0e-6, 1.0, 1.0e3), Path::new("baseline.cir"))
+            .expect("baseline snapshot fixture parses");
+    let same = XyceTestRunner::parse_xyce_netlist(
+        &source(1.0e-6 + 5.0e-13, 1.0, 1.0e3),
+        Path::new("same.cir"),
+    )
+    .expect("tolerance snapshot fixture parses");
+    let baseline_snapshot =
+        XyceTestRunner::stepped_ic_snapshot(&baseline).expect("baseline snapshot qualifies");
+    let same_snapshot =
+        XyceTestRunner::stepped_ic_snapshot(&same).expect("matching snapshot qualifies");
+    assert!(XyceTestRunner::stepped_ic_snapshots_match(
+        &baseline_snapshot,
+        &same_snapshot
+    ));
+
+    for changed_source in [
+        source(1.0e-6, 0.5, 1.0e3),
+        source(1.0e-6, 1.0, 2.0e3),
+        source(1.0e-6 + 2.0e-12, 1.0, 1.0e3),
+        source(1.0e-6, 1.0, 1.0e3).replace("RLOAD", "RRENAMED"),
+    ] {
+        let changed = XyceTestRunner::parse_xyce_netlist(&changed_source, Path::new("changed.cir"))
+            .expect("changed snapshot fixture parses");
+        let changed_snapshot = XyceTestRunner::stepped_ic_snapshot(&changed)
+            .expect("changed circuit remains individually qualified");
+        assert!(
+            !XyceTestRunner::stepped_ic_snapshots_match(&baseline_snapshot, &changed_snapshot),
+            "IC, topology values, swept value tolerance, and element names all participate in parity"
+        );
+    }
+}
+
+#[test]
+fn passive_primary_composite_detection_is_manifest_and_sibling_driven() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-passive-primary-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root.join("Netlists").join("GENERIC_PASSIVE");
+    fs::create_dir_all(&family_dir).expect("create generic passive family fixture");
+    let owner_path = family_dir.join("orchestrator.cir");
+    let cap_baseline = family_dir.join("alpha.cir");
+    let cap_target = family_dir.join("alpha-bug.cir");
+    let res_baseline = family_dir.join("zeta.cir");
+    let res_target = family_dir.join("zeta-bug.cir");
+    let tran_member = "transient pair member\n.PRINT TRAN V(1)\n.END\n";
+    let dc_member = "dc pair member\n.PRINT DC V(1)\n.END\n";
+    fs::write(&owner_path, "").expect("write empty composite owner");
+    fs::write(&cap_baseline, tran_member).expect("write TRAN named baseline");
+    fs::write(&cap_target, tran_member).expect("write TRAN positional target");
+    fs::write(&res_baseline, dc_member).expect("write DC named baseline");
+    fs::write(&res_target, dc_member).expect("write DC positional target");
+    let owner_relative = "Netlists/GENERIC_PASSIVE/orchestrator.cir";
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper manifest fixture");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (path, relative, target_expected) in [
+        (&owner_path, owner_relative, false),
+        (&cap_baseline, "Netlists/GENERIC_PASSIVE/alpha.cir", true),
+        (&cap_target, "Netlists/GENERIC_PASSIVE/alpha-bug.cir", true),
+        (&res_baseline, "Netlists/GENERIC_PASSIVE/zeta.cir", true),
+        (&res_target, "Netlists/GENERIC_PASSIVE/zeta-bug.cir", true),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .passive_primary_value_composite_contract(&deck)
+            .expect("one owner and two exact base/-bug analysis pairs form a composite");
+        assert_eq!(contract.target_path.is_some(), target_expected);
+        assert_eq!(
+            contract.capacitor_tran.kind,
+            XyceBaselineFamilyKind::PassiveCapPrimaryValue
+        );
+        assert_eq!(
+            contract.resistor_dc.kind,
+            XyceBaselineFamilyKind::PassiveResPrimaryValue
+        );
+        assert_eq!(
+            contract.capacitor_tran.comparison,
+            XyceBaselineFamilyComparison::ExactPrn
+        );
+        assert_eq!(
+            contract.resistor_dc.comparison,
+            XyceBaselineFamilyComparison::ExactPrn
+        );
+        assert!(
+            XyceTestRunner::same_path(&contract.capacitor_tran.baseline_path, &cap_baseline,),
+            "lexically earlier '-bug' target must never become the baseline"
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.resistor_dc.baseline_path,
+            &res_baseline,
+        ));
+    }
+
+    let owner_deck = XyceDeck {
+        path: owner_path.clone(),
+        relative_path: owner_relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let extra_path = family_dir.join("extra.cir");
+    fs::write(&extra_path, dc_member).expect("write extra sibling");
+    assert!(
+        runner
+            .passive_primary_value_composite_contract(&owner_deck)
+            .is_none(),
+        "an extra circuit is a different upstream family shape"
+    );
+    fs::remove_file(&extra_path).expect("remove extra sibling");
+
+    let non_file_path = family_dir.join("non-file.cir");
+    fs::create_dir(&non_file_path).expect("create non-file .cir entry");
+    assert!(
+        runner
+            .passive_primary_value_composite_contract(&owner_deck)
+            .is_none(),
+        "every .cir directory entry must resolve to an ordinary file"
+    );
+    fs::remove_dir(&non_file_path).expect("remove non-file .cir entry");
+
+    fs::write(&owner_path, "nonempty owner\n.END\n").expect("make owner nonempty");
+    assert!(
+        runner
+            .passive_primary_value_composite_contract(&owner_deck)
+            .is_none(),
+        "the manifest owner must be the unique zero-byte circuit"
+    );
+    fs::write(&owner_path, "").expect("restore empty owner");
+
+    fs::write(&res_target, tran_member).expect("change target analysis");
+    assert!(
+        runner
+            .passive_primary_value_composite_contract(&owner_deck)
+            .is_none(),
+        "members of one pair must declare the same unambiguous analysis"
+    );
+    fs::write(&res_baseline, tran_member).expect("change baseline analysis");
+    assert!(
+        runner
+            .passive_primary_value_composite_contract(&owner_deck)
+            .is_none(),
+        "the composite must contain exactly one TRAN pair and one DC pair"
+    );
+    fs::write(&res_baseline, dc_member).expect("restore DC baseline");
+    fs::write(&res_target, dc_member).expect("restore DC target");
+
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/GENERIC_PASSIVE/alpha.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("mark executable member as wrapper-origin");
+    let marked_member_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        marked_member_runner
+            .passive_primary_value_composite_contract(&owner_deck)
+            .is_none(),
+        "only the zero-byte owner may carry wrapper provenance"
+    );
+
+    fs::remove_dir_all(&root).expect("remove generic passive family fixture");
+}
+
+#[test]
+fn xyce_verify_transient_comparison_interpolates_and_integrates_like_release_7_10() {
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+    assert_eq!(
+        XyceTestRunner::xyce_default_prn_roundtrip(1.000000004)
+            .expect("default PRN round trip succeeds")
+            .to_bits(),
+        1.0f64.to_bits(),
+        "FORMAT=STD rounds through eight scientific fraction digits before verification"
+    );
+    assert_eq!(
+        XyceTestRunner::xyce_verify_linear_interpolate(
+            0.0,
+            f64::from_bits(0x3f46_187d_a9c9_ecff),
+            f64::from_bits(0x3f32_a543_d216_30c9),
+            f64::from_bits(0xbfb9_5d15_b39b_3f60),
+            f64::from_bits(0x409a_bda7_d153_6d40),
+        )
+        .to_bits(),
+        0x4086_904a_6c9e_e052,
+        "interpolation must preserve Perl's divide-then-multiply association"
+    );
+    let below_absdiff =
+        f64::from_bits(XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE.to_bits() - 1);
+    assert_eq!(
+        XyceTestRunner::xyce_verify_normalized_error(0.0, below_absdiff),
+        0.0,
+        "ABSDIFFTOL uses a strict below-boundary comparison"
+    );
+    assert_eq!(
+        XyceTestRunner::xyce_verify_normalized_error(
+            0.0,
+            XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+        ),
+        -1.0,
+        "a difference exactly at ABSDIFFTOL is normalized rather than discarded"
+    );
+    let good = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ],
+        rows: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 1.0, 10.0],
+            vec![2.0, 2.0, 20.0],
+        ],
+    };
+    let test = XycePrnTable {
+        columns: good.columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.5, 5.0],
+            vec![2.0, 1.0, 10.0],
+            vec![3.0, 1.5, 15.0],
+            vec![4.0, 2.0, 20.0],
+        ],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&good, &test)
+            .expect("independent grids interpolate")
+            .is_empty(),
+        "a linear good trace must match exact samples on a denser test grid"
+    );
+
+    let duplicate_test = XycePrnTable {
+        columns: good.columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 999.0],
+            vec![2.0, 1.0, 10.0],
+            vec![3.0, 2.0, 20.0],
+        ],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&good, &duplicate_test)
+            .expect("duplicate test time is normalized")
+            .is_empty(),
+        "Release 7.10 keeps the first row and discards an immediately repeated time"
+    );
+
+    let rounded_duplicate_good = XycePrnTable {
+        columns: good.columns.clone(),
+        rows: vec![
+            vec![40.0, 0.0, 0.0],
+            vec![41.0, 1.000000003, 10.0],
+            vec![42.0, 1.000000004, 999.0],
+            vec![43.0, 2.0, 20.0],
+        ],
+    };
+    let rounded_duplicate_test = XycePrnTable {
+        columns: good.columns.clone(),
+        rows: vec![
+            vec![90.0, 0.0, 0.0],
+            vec![91.0, 1.0, 10.0],
+            vec![92.0, 2.0, 20.0],
+        ],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&rounded_duplicate_good, &rounded_duplicate_test,)
+            .expect("printed duplicate good time is normalized")
+            .is_empty(),
+        "PRN rounding occurs before duplicate removal, retains the first row, and discards Index"
+    );
+
+    let mut near_zero = test.clone();
+    near_zero.rows[0][2] = 1.000000004e-12;
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&good, &near_zero)
+            .expect("ZEROTOL normalization compares")
+            .is_empty(),
+        "PRN rounding occurs before values at the default ZEROTOL boundary become exact zero"
+    );
+
+    let collapsed_test = XycePrnTable {
+        columns: good.columns.clone(),
+        rows: vec![vec![0.0, 1.000000003, 10.0], vec![1.0, 1.000000004, 10.0]],
+    };
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&good, &collapsed_test)
+            .is_err(),
+        "a printed grid collapsed to one distinct time has no qualified multi-row RMS oracle"
+    );
+
+    let nonuniform_good = XycePrnTable {
+        columns: good.columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0e-9],
+            vec![1.0, 0.25, 1.0e-9],
+            vec![2.0, 1.0, 1.0e-9],
+        ],
+    };
+    let nonuniform_test = XycePrnTable {
+        columns: good.columns.clone(),
+        rows: vec![
+            vec![0.0, 0.0, 1.0e-9],
+            vec![1.0, 0.25, 9.78e-10],
+            vec![2.0, 1.0, 1.0e-9],
+        ],
+    };
+    let nonuniform_mismatches = runner
+        .compare_xyce_verify_transient_tables(&nonuniform_good, &nonuniform_test)
+        .expect("nonuniform RMS comparison succeeds structurally");
+    assert_eq!(nonuniform_mismatches.len(), 1);
+    assert!(
+        (nonuniform_mismatches[0].relative_error - 2.0f64.sqrt()).abs() < 1.0e-12,
+        "nonuniform trapezoids integrate to sqrt(2), got {}",
+        nonuniform_mismatches[0].relative_error
+    );
+
+    let mut failed = test.clone();
+    failed.rows[2][2] = 20.0;
+    let mismatches = runner
+        .compare_xyce_verify_transient_tables(&good, &failed)
+        .expect("large waveform error remains structurally comparable");
+    assert_eq!(mismatches.len(), 1);
+    assert_eq!(mismatches[0].probe, "V(out)");
+    assert!(mismatches[0].relative_error > 1.0);
+
+    let mut uncovered = test.clone();
+    uncovered.rows[0][1] = -0.5;
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&good, &uncovered)
+            .is_err(),
+        "the good series must cover the complete test time domain"
+    );
+
+    let mut nonfinite = test.clone();
+    nonfinite.rows[1][2] = Value::NAN;
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&good, &nonfinite)
+            .is_err(),
+        "non-finite transient values fail closed"
+    );
+
+    let mut changed_columns = test;
+    changed_columns.columns[2] = "V(other)".to_string();
+    assert!(
+        runner
+            .compare_xyce_verify_transient_tables(&good, &changed_columns)
+            .is_err(),
+        "ordered output columns are part of the verifier contract"
+    );
+}
+
+#[test]
+fn reference_grid_diagnostic_does_not_replace_the_native_integrated_rms_contract() {
+    let source = "reference-grid policy\n\
+                      R1 out 0 1\n\
+                      .tran 0 1\n\
+                      .print tran V(out)\n\
+                      .end\n";
+    let netlist = Netlist::parse_validated(source).expect("reference-grid fixture validates");
+    let plan = XyceStaticTranPlan {
+        deck_path: PathBuf::from("reference-grid.cir"),
+        reference_path: PathBuf::from("reference-grid.prn"),
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 0.0,
+            stop: 1.0,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::WrapperStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        },
+    };
+    let result = TransientResult {
+        time: vec![0.0, 0.5, 1.0],
+        step_sizes: vec![0.0; 3],
+        voltages: vec![vec![0.0, 1.0, 0.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["out".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+    let reference = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ],
+        rows: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.25, 0.5],
+            vec![2.0, 0.2500000004, 999.0],
+            vec![3.0, 1.0, 0.0],
+        ],
+    };
+    let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+
+    let adaptive = XyceTestRunner::transient_family_result_to_prn_table(&plan, &netlist, &result)
+        .expect("adaptive table serializes");
+    assert!(
+        !runner
+            .compare_xyce_verify_transient_tables(&reference, &adaptive)
+            .expect("adaptive-grid comparison is structurally valid")
+            .is_empty(),
+        "the fixture must expose reference interpolation across the unmatched native knot"
+    );
+    assert!(
+        runner
+            .compare_static_tran_reference_grid_diagnostic(&reference, &plan, &netlist, &result)
+            .expect("reference-grid diagnostic succeeds structurally")
+            .is_empty(),
+        "the diagnostic fixture must demonstrate how grid locking could hide a native-grid mismatch"
+    );
+
+    let metadata_reference = XycePrnTable {
+        columns: vec![
+            "STEPNUM".to_string(),
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ],
+        rows: vec![
+            vec![0.0, 0.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.25, 0.5],
+            vec![0.0, 2.0, 0.2500000004, 999.0],
+            vec![0.0, 3.0, 1.0, 0.0],
+        ],
+    };
+    let sampled = XyceTestRunner::transient_family_result_to_prn_table_on_reference_grid(
+        &plan,
+        &netlist,
+        &result,
+        &metadata_reference,
+        XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+    )
+    .expect("optional metadata layout samples its TIME column");
+    assert_eq!(sampled.rows.len(), 3);
+    assert_eq!(sampled.rows[1][1].to_bits(), 0.25f64.to_bits());
+    assert_eq!(sampled.rows[1][2].to_bits(), 0.5f64.to_bits());
+}
+
+#[test]
+fn param_expression_plan_admits_only_the_canonical_default_verifier_contract() {
+    let source = "validated parameter-expression pair\n\
+.param gain=1.5\n\
+.subckt vector a b m n o p\n\
+Bvector a b V={gain*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)}\n\
+.ends\n\
+Xpair out 0 x 0 y 0 vector\n\
+Rin x 0 10\n\
+Vdrive y 0 4.7\n\
+Rload out 0 1\n\
+.print tran V(out)\n\
+.tran 1u 10u\n\
+.end\n";
+    let plan = XyceStaticTranPlan {
+        deck_path: PathBuf::from("parameter.cir"),
+        reference_path: PathBuf::from("parameter.prn"),
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 1.0e-6,
+            stop: 1.0e-5,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::PlainStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    };
+    XyceTestRunner::validate_param_expression_transient_plan(&plan)
+        .expect("canonical parameter-expression transient plan qualifies");
+    let mut comment_title = plan.clone();
+    comment_title.source = source.replacen(
+        "validated parameter-expression pair",
+        "* validated parameter-expression pair",
+        1,
+    );
+    XyceTestRunner::validate_param_expression_transient_plan(&comment_title)
+        .expect("SPICE comment-style title remains an ordinary title");
+
+    let mut with_option = plan.clone();
+    with_option.source = source.replace(".tran", ".options reltol=1e-6\n.tran");
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&with_option).is_err(),
+        "simulator options are outside the bounded representation contract"
+    );
+
+    let mut with_comp = plan.clone();
+    with_comp.source = source.replace(
+        ".param gain=1.5",
+        "*COMP v(out) RELTOL=0.5\n.param gain=1.5",
+    );
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&with_comp).is_err(),
+        "custom comparison tolerances require a separately represented oracle"
+    );
+
+    let mut extra_param = plan.clone();
+    extra_param.source = source.replace("gain=1.5", "gain=1.5 other=2");
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&extra_param).is_err(),
+        "the qualified source form has exactly one direct numeric assignment"
+    );
+
+    let mut parameter_resistor = plan.clone();
+    parameter_resistor.source = source.replace("Rin x 0 10", "Rin x 0 gain");
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&parameter_resistor).is_err(),
+        "resolved resistor parameters cannot add a second representation difference"
+    );
+
+    let mut parameter_source = plan.clone();
+    parameter_source.source = source.replace("Vdrive y 0 4.7", "Vdrive y 0 gain");
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&parameter_source).is_err(),
+        "resolved source parameters cannot add a second representation difference"
+    );
+
+    let mut parameter_tran = plan.clone();
+    parameter_tran.source = source.replace(".tran 1u 10u", ".tran gain 10u");
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&parameter_tran).is_err(),
+        "resolved transient tuple parameters cannot add a second representation difference"
+    );
+
+    let mut formatted_print = plan.clone();
+    formatted_print.source = source.replace(".print tran V(out)", ".print tran format=std V(out)");
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&formatted_print).is_err(),
+        "format assignments change the primary output contract"
+    );
+
+    let mut multiple_probes = plan.clone();
+    multiple_probes.print.probes.push("V(x)".to_string());
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&multiple_probes).is_err(),
+        "the wrapper oracle has exactly one output probe"
+    );
+
+    let mut with_start = plan.clone();
+    with_start.tran.start = Some(1.0e-6);
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&with_start).is_err(),
+        "START changes the admitted transient tuple"
+    );
+
+    let mut constant_step = plan.clone();
+    constant_step.timeint_conststep = true;
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&constant_step).is_err(),
+        "constant-step output is a different contract"
+    );
+
+    let mut csv = plan;
+    csv.contract = XyceStaticTranContract::PlainCsv;
+    assert!(
+        XyceTestRunner::validate_param_expression_transient_plan(&csv).is_err(),
+        "only ordinary primary PRN output is admitted"
+    );
+}
+
+#[test]
+fn sin_expression_plan_admits_only_canonical_transient_output() {
+    let source = "canonical SIN expression family member\n\
+VDRIVE out 0 SIN(1 2 1k)\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n";
+    let plan = XyceStaticTranPlan {
+        deck_path: PathBuf::from("canonical.cir"),
+        reference_path: PathBuf::from("canonical.prn"),
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 1.0e-6,
+            stop: 5.0e-3,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::PlainStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    };
+    XyceTestRunner::validate_sin_expression_transient_plan(&plan)
+        .expect("canonical two-field TRAN and ordinary voltage print qualify");
+
+    let mut with_option = plan.clone();
+    with_option.source = source.replace(".TRAN", ".OPTIONS RELTOL=1e-6\n.TRAN");
+    assert!(
+        XyceTestRunner::validate_sin_expression_transient_plan(&with_option).is_err(),
+        "additional simulator options are outside the exact representation contract"
+    );
+
+    let mut formatted_print = plan.clone();
+    formatted_print.source = source.replace(".PRINT TRAN V(out)", ".PRINT TRAN FORMAT=STD V(out)");
+    assert!(
+        XyceTestRunner::validate_sin_expression_transient_plan(&formatted_print).is_err(),
+        "format assignments change the exact primary-output contract"
+    );
+
+    let mut multiple_probes = plan.clone();
+    multiple_probes.print.probes.push("V(0)".to_string());
+    assert!(
+        XyceTestRunner::validate_sin_expression_transient_plan(&multiple_probes).is_err(),
+        "the bounded wrapper oracle has exactly one probe"
+    );
+
+    let mut start_time = plan.clone();
+    start_time.tran.start = Some(1.0e-6);
+    assert!(
+        XyceTestRunner::validate_sin_expression_transient_plan(&start_time).is_err(),
+        "START changes the admitted transient tuple"
+    );
+
+    let mut constant_step = plan.clone();
+    constant_step.timeint_conststep = true;
+    assert!(
+        XyceTestRunner::validate_sin_expression_transient_plan(&constant_step).is_err(),
+        "constant-step output is a distinct transient contract"
+    );
+
+    let mut csv = plan;
+    csv.contract = XyceStaticTranContract::PlainCsv;
+    assert!(
+        XyceTestRunner::validate_sin_expression_transient_plan(&csv).is_err(),
+        "only ordinary primary PRN output is admitted"
+    );
+}
+
+#[test]
+fn param_expression_snapshot_proves_only_the_direct_parameter_literal_pair() {
+    let source_for = |coefficient: &str| {
+        format!(
+            "validated parameter-expression pair\n\
+.param gain=1.5\n\
+.subckt vector a b m n o p\n\
+Bvector a b V={{{coefficient}*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)}}\n\
+.ends\n\
+Xpair out 0 x 0 y 0 vector\n\
+Rin x 0 10\n\
+Vdrive y 0 4.7\n\
+Rload out 0 1\n\
+.print tran V(out)\n\
+.tran 1u 10u\n\
+.end\n"
+        )
+    };
+    let baseline =
+        Netlist::parse(&source_for("gain")).expect("direct-parameter coefficient fixture parses");
+    let target =
+        Netlist::parse(&source_for("1.5")).expect("direct-literal coefficient fixture parses");
+    let print = XycePrintRequest {
+        probes: vec!["V(out)".to_string()],
+    };
+    let baseline_snapshot = XyceTestRunner::param_expression_family_snapshot(&baseline, &print)
+        .expect("direct-parameter snapshot qualifies");
+    let target_snapshot = XyceTestRunner::param_expression_family_snapshot(&target, &print)
+        .expect("direct-literal snapshot qualifies");
+    XyceTestRunner::compare_param_expression_family_snapshots(&baseline_snapshot, &target_snapshot)
+        .expect("direct parameter and exactly equal literal coefficients are equivalent");
+    assert!(
+        XyceTestRunner::compare_param_expression_family_snapshots(
+            &baseline_snapshot,
+            &baseline_snapshot,
+        )
+        .is_err(),
+        "two parameter references do not exercise the representation contract"
+    );
+
+    let parameter_resistor =
+        Netlist::parse(&source_for("gain").replace("Rload out 0 1", "Rload out 0 gain"))
+            .expect("parameter-resolved resistor fixture parses");
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&parameter_resistor, &print).is_err(),
+        "a resolved resistor parameter cannot hide an additional representation difference"
+    );
+
+    let parameter_source =
+        Netlist::parse(&source_for("gain").replace("Vdrive y 0 4.7", "Vdrive y 0 gain"))
+            .expect("parameter-resolved source fixture parses");
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&parameter_source, &print).is_err(),
+        "a resolved source parameter cannot hide an additional representation difference"
+    );
+
+    let mut changed_parameter = target.clone();
+    let next_parameter = f64::from_bits(1.5f64.to_bits() + 1);
+    changed_parameter.params.set("gain", next_parameter);
+    let ElementKind::BehavioralVoltage { expression, .. } =
+        &mut changed_parameter.subcircuits[0].elements[0].kind
+    else {
+        panic!("subcircuit source remains behavioral")
+    };
+    *expression = format!("{next_parameter:.17}*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)");
+    let changed_parameter_snapshot =
+        XyceTestRunner::param_expression_family_snapshot(&changed_parameter, &print)
+            .expect("one-ULP parameter and matching literal remain individually qualified");
+    assert!(
+        XyceTestRunner::compare_param_expression_family_snapshots(
+            &baseline_snapshot,
+            &changed_parameter_snapshot,
+        )
+        .is_err(),
+        "the global parameter value participates bit-for-bit in semantic parity"
+    );
+
+    let mut changed_resistor = target.clone();
+    let resistor = changed_resistor
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("Rin"))
+        .expect("input resistor exists");
+    let ElementKind::Resistor { value, .. } = &mut resistor.kind else {
+        panic!("input resistor remains a resistor")
+    };
+    *value = f64::from_bits(value.to_bits() + 1);
+    let changed_resistor_snapshot =
+        XyceTestRunner::param_expression_family_snapshot(&changed_resistor, &print)
+            .expect("one-ULP resistor remains individually qualified");
+    assert!(
+        XyceTestRunner::compare_param_expression_family_snapshots(
+            &baseline_snapshot,
+            &changed_resistor_snapshot,
+        )
+        .is_err(),
+        "passive values participate bit-for-bit in semantic parity"
+    );
+
+    for rejected_expression in [
+        "1.5*abs((V(m)-V(n))**2+(V(o)-V(p))**2)",
+        "1.5*sqrt((V(o)-V(p))**2+(V(m)-V(n))**2)",
+        "1.5*sqrt((V(m)-V(n))**3+(V(o)-V(p))**2)",
+        "(1.5+0)*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)",
+    ] {
+        let mut rejected = target.clone();
+        let ElementKind::BehavioralVoltage { expression, .. } =
+            &mut rejected.subcircuits[0].elements[0].kind
+        else {
+            panic!("subcircuit source remains behavioral")
+        };
+        *expression = rejected_expression.to_string();
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&rejected, &print).is_err(),
+            "changed raw AST shape must not qualify: {rejected_expression}"
+        );
+    }
+
+    let mut nonzero_tc = target.clone();
+    let ElementKind::BehavioralVoltage { tc1, .. } =
+        &mut nonzero_tc.subcircuits[0].elements[0].kind
+    else {
+        panic!("subcircuit source remains behavioral")
+    };
+    *tc1 = 1.0e-3;
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&nonzero_tc, &print).is_err(),
+        "temperature coefficients change source semantics"
+    );
+
+    let mut extra_parameter = target.clone();
+    extra_parameter.params.set("other", 2.0);
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&extra_parameter, &print).is_err(),
+        "additional parameter state is outside the bounded pair"
+    );
+
+    let mut ground_alias = target.clone();
+    ground_alias.elements[0].nodes[1] = "GND".to_string();
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&ground_alias, &print).is_err(),
+        "ground aliases are not literal node zero"
+    );
+
+    let mut instance_parameter = target.clone();
+    let ElementKind::Subcircuit { params, .. } = &mut instance_parameter.elements[0].kind else {
+        panic!("first top-level element remains the instance")
+    };
+    params.push((
+        "gain".to_string(),
+        rspice_core::netlist::ParametricValue::Resolved(1.5),
+    ));
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&instance_parameter, &print).is_err(),
+        "instance overrides are outside the global-parameter representation pair"
+    );
+
+    let mut subcircuit_default = target.clone();
+    subcircuit_default.subcircuits[0]
+        .params
+        .push(("gain".to_string(), 1.5));
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&subcircuit_default, &print).is_err(),
+        "subcircuit defaults add a separate parameter scope"
+    );
+
+    let mut non_dc_source = target.clone();
+    let source = non_dc_source
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("Vdrive"))
+        .expect("drive source exists");
+    source.kind = ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Ac {
+        magnitude: 4.7,
+        phase: 0.0,
+    });
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&non_dc_source, &print).is_err(),
+        "only a direct DC independent source is admitted"
+    );
+
+    let wrong_print = XycePrintRequest {
+        probes: vec!["V(x)".to_string()],
+    };
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&target, &wrong_print).is_err(),
+        "the printed output node is part of the qualified topology"
+    );
+
+    let mut extra_element = target;
+    extra_element.elements.push(baseline.elements[1].clone());
+    assert!(
+        XyceTestRunner::param_expression_family_snapshot(&extra_element, &print).is_err(),
+        "additional circuit elements are outside the bounded topology"
+    );
+}
+
+#[test]
+fn sin_expression_snapshot_proves_only_three_argument_representation_parity() {
+    let baseline = Netlist::parse(
+        "independent SIN baseline\n\
+VDRIVE out 0 SIN 1 2 1k\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+    )
+    .expect("independent SIN fixture parses");
+    let target = Netlist::parse(
+        "behavioral SPICE_SIN target\n\
+BDRIVE out 0 V={SPICE_SIN(1,2,1k)}\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+    )
+    .expect("behavioral SPICE_SIN fixture parses");
+    let print = XycePrintRequest {
+        probes: vec!["V(out)".to_string()],
+    };
+    let baseline_snapshot = XyceTestRunner::sin_expression_family_snapshot(&baseline, &print)
+        .expect("independent SIN snapshot qualifies");
+    let target_snapshot = XyceTestRunner::sin_expression_family_snapshot(&target, &print)
+        .expect("behavioral SPICE_SIN snapshot qualifies");
+    XyceTestRunner::compare_sin_expression_family_snapshots(&baseline_snapshot, &target_snapshot)
+        .expect("three-argument SIN and SPICE_SIN forms are semantically identical");
+    assert!(
+        XyceTestRunner::compare_sin_expression_family_snapshots(
+            &baseline_snapshot,
+            &baseline_snapshot,
+        )
+        .is_err(),
+        "two independent-source members do not exercise the representation contract"
+    );
+
+    let mut one_ulp_waveform = target.clone();
+    let ElementKind::BehavioralVoltage { expression, .. } = &mut one_ulp_waveform.elements[0].kind
+    else {
+        panic!("target excitation remains behavioral");
+    };
+    *expression = "SPICE_SIN(1,2.0000000000000004,1k)".to_string();
+    let one_ulp_snapshot =
+        XyceTestRunner::sin_expression_family_snapshot(&one_ulp_waveform, &print)
+            .expect("one-ULP waveform remains individually qualified");
+    assert!(
+        XyceTestRunner::compare_sin_expression_family_snapshots(
+            &baseline_snapshot,
+            &one_ulp_snapshot,
+        )
+        .is_err(),
+        "waveform constants participate bit-for-bit in the semantic snapshot"
+    );
+
+    let mut changed_resistor = target.clone();
+    let ElementKind::Resistor { value, .. } = &mut changed_resistor.elements[1].kind else {
+        panic!("target load remains a resistor");
+    };
+    *value = 5.000000000000001;
+    let changed_resistor_snapshot =
+        XyceTestRunner::sin_expression_family_snapshot(&changed_resistor, &print)
+            .expect("changed resistor remains individually qualified");
+    assert!(
+        XyceTestRunner::compare_sin_expression_family_snapshots(
+            &baseline_snapshot,
+            &changed_resistor_snapshot,
+        )
+        .is_err(),
+        "load values participate in the semantic snapshot"
+    );
+
+    let mut optional_argument = target.clone();
+    let ElementKind::BehavioralVoltage { expression, .. } = &mut optional_argument.elements[0].kind
+    else {
+        panic!("target excitation remains behavioral");
+    };
+    *expression = "SPICE_SIN(1,2,1k,0)".to_string();
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&optional_argument, &print).is_err(),
+        "optional waveform arguments require a separately proven equivalence contract"
+    );
+
+    let mut dynamic_argument = target.clone();
+    let ElementKind::BehavioralVoltage { expression, .. } = &mut dynamic_argument.elements[0].kind
+    else {
+        panic!("target excitation remains behavioral");
+    };
+    *expression = "SPICE_SIN(1,2,time)".to_string();
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&dynamic_argument, &print).is_err(),
+        "time-dependent arguments are not constant waveform definitions"
+    );
+
+    let mut nonzero_tc = target.clone();
+    let ElementKind::BehavioralVoltage { tc1, .. } = &mut nonzero_tc.elements[0].kind else {
+        panic!("target excitation remains behavioral");
+    };
+    *tc1 = 1.0e-3;
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&nonzero_tc, &print).is_err(),
+        "temperature coefficients change behavioral-source semantics"
+    );
+
+    let mut delayed_independent = baseline.clone();
+    let ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Sin { delay, .. }) =
+        &mut delayed_independent.elements[0].kind
+    else {
+        panic!("baseline excitation remains an independent SIN source");
+    };
+    *delay = 1.0e-6;
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&delayed_independent, &print).is_err(),
+        "optional independent-source delay is outside the three-argument contract"
+    );
+
+    let explicit_optional_zeros = Netlist::parse(
+        "six-argument independent SIN\n\
+VDRIVE out 0 SIN 1 2 1k 0 0 0\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+    )
+    .expect("six-argument independent SIN fixture parses");
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&explicit_optional_zeros, &print).is_err(),
+        "explicit optional zeros are a distinct source representation despite equal AST values"
+    );
+
+    let comma_packed_optional_zeros = Netlist::parse(
+        "comma-packed six-argument independent SIN\n\
+VDRIVE out 0 SIN 1 2 1k,0,0,0\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+    )
+    .expect("comma-packed six-argument independent SIN fixture parses");
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&comma_packed_optional_zeros, &print,)
+            .is_err(),
+        "comma-packed optional zeros cannot bypass raw source-arity qualification"
+    );
+
+    let adjacent_optional_zeros = Netlist::parse(
+        "adjacent-token six-argument independent SIN\n\
+VDRIVE out 0 SIN 1 2 1k{0}{0}{0}\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+    )
+    .expect("adjacent-token six-argument independent SIN fixture parses");
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&adjacent_optional_zeros, &print).is_err(),
+        "adjacent expression tokens cannot bypass source-arity qualification"
+    );
+
+    let double_sign_argument = Netlist::parse(
+        "double-sign independent SIN argument\n\
+VDRIVE out 0 SIN --1 2 1k\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+    )
+    .expect("double-sign independent SIN fixture parses");
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&double_sign_argument, &print).is_err(),
+        "multiple adjacent signs are not one numeric source argument"
+    );
+
+    let adjacent_behavioral_tc = Netlist::parse(
+        "adjacent behavioral TC field\n\
+BDRIVE out 0 V={SPICE_SIN(1,2,1k)}TC1=0\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+    )
+    .expect("adjacent behavioral TC fixture parses");
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&adjacent_behavioral_tc, &print).is_err(),
+        "an adjacent zero-valued TC field is still an additional source representation"
+    );
+
+    let mut nonfinite_independent = baseline.clone();
+    let ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Sin { amplitude, .. }) =
+        &mut nonfinite_independent.elements[0].kind
+    else {
+        panic!("baseline excitation remains an independent SIN source");
+    };
+    *amplitude = Value::INFINITY;
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&nonfinite_independent, &print).is_err(),
+        "non-finite waveform values never qualify for exact comparison"
+    );
+
+    let mut ground_alias = target.clone();
+    ground_alias.elements[0].nodes[1] = "GND".to_string();
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&ground_alias, &print).is_err(),
+        "Xyce ground aliases require explicit preprocessing and are not literal node zero"
+    );
+
+    let mut changed_topology = target.clone();
+    for element in &mut changed_topology.elements {
+        element.nodes[0] = "other".to_string();
+    }
+    let other_print = XycePrintRequest {
+        probes: vec!["V(other)".to_string()],
+    };
+    let changed_topology_snapshot =
+        XyceTestRunner::sin_expression_family_snapshot(&changed_topology, &other_print)
+            .expect("changed topology remains individually qualified");
+    assert!(
+        XyceTestRunner::compare_sin_expression_family_snapshots(
+            &baseline_snapshot,
+            &changed_topology_snapshot,
+        )
+        .is_err(),
+        "excitation topology participates in the semantic snapshot"
+    );
+
+    let mut parameterized = target.clone();
+    parameterized.params.set("gain", 2.0);
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&parameterized, &print).is_err(),
+        "parameter state is outside the literal three-constant representation pair"
+    );
+
+    let mut extra_element = target;
+    extra_element.elements.push(baseline.elements[1].clone());
+    assert!(
+        XyceTestRunner::sin_expression_family_snapshot(&extra_element, &print).is_err(),
+        "additional elements are outside the bounded topology"
+    );
+}
+
+#[test]
+fn sin_expression_family_detection_is_manifest_and_sibling_driven() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-sin-expression-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_SIN");
+    fs::create_dir_all(&family_dir).expect("create generic SIN-expression fixture");
+    let owner_path = family_dir.join("representation.cir");
+    let baseline_path = family_dir.join("representation_vsrc.cir");
+    let expression_path = family_dir.join("representation_expr.cir");
+    fs::write(&owner_path, "").expect("write empty wrapper fixture");
+    fs::write(&baseline_path, "independent source member\n.end\n").expect("write baseline fixture");
+    fs::write(&expression_path, "behavioral source member\n.end\n")
+        .expect("write expression fixture");
+    let owner_relative = "Netlists/Certification_Tests/GENERIC_SIN/representation.cir";
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper manifest fixture");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (path, relative, target_expected) in [
+        (&owner_path, owner_relative, false),
+        (
+            &baseline_path,
+            "Netlists/Certification_Tests/GENERIC_SIN/representation_vsrc.cir",
+            true,
+        ),
+        (
+            &expression_path,
+            "Netlists/Certification_Tests/GENERIC_SIN/representation_expr.cir",
+            true,
+        ),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .sin_expression_family_contract(&deck)
+            .expect("manifest owner and exact _vsrc/_expr siblings form a family");
+        assert_eq!(contract.kind, XyceBaselineFamilyKind::SinExpression);
+        assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+        assert_eq!(contract.target_path.is_some(), target_expected);
+        assert!(XyceTestRunner::same_path(
+            &contract.baseline_path,
+            &baseline_path
+        ));
+        assert_eq!(contract.member_paths.len(), 2);
+    }
+
+    let owner_deck = XyceDeck {
+        path: owner_path.clone(),
+        relative_path: owner_relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let third_path = family_dir.join("representation_other.cir");
+    fs::write(&third_path, "unqualified third variant\n.end\n")
+        .expect("write third-variant fixture");
+    assert!(
+        runner.sin_expression_family_contract(&owner_deck).is_none(),
+        "an additional direct variant is a different upstream family shape"
+    );
+    fs::remove_file(&third_path).expect("remove third-variant fixture");
+
+    fs::write(&owner_path, "nonempty owner\n.end\n").expect("make owner nonempty");
+    assert!(
+        runner.sin_expression_family_contract(&owner_deck).is_none(),
+        "the generic wrapper shape requires an empty manifest owner"
+    );
+
+    fs::remove_dir_all(&root).expect("remove generic SIN-expression fixture");
+}
+
+#[test]
+fn param_expression_family_detection_is_manifest_and_sibling_driven() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-param-expression-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_PARAM");
+    fs::create_dir_all(&family_dir).expect("create generic parameter-expression fixture");
+    let owner_path = family_dir.join("representation.cir");
+    let baseline_path = family_dir.join("representation_2.cir");
+    let literal_path = family_dir.join("representation_2a.cir");
+    fs::write(&owner_path, "").expect("write empty wrapper fixture");
+    fs::write(&baseline_path, "parameter member\n.end\n").expect("write parameter fixture");
+    fs::write(&literal_path, "literal member\n.end\n").expect("write literal fixture");
+    let owner_relative = "Netlists/Certification_Tests/GENERIC_PARAM/representation.cir";
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper manifest fixture");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (path, relative, target_expected) in [
+        (&owner_path, owner_relative, false),
+        (
+            &baseline_path,
+            "Netlists/Certification_Tests/GENERIC_PARAM/representation_2.cir",
+            true,
+        ),
+        (
+            &literal_path,
+            "Netlists/Certification_Tests/GENERIC_PARAM/representation_2a.cir",
+            true,
+        ),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .param_expression_family_contract(&deck)
+            .expect("manifest owner and exact _2/_2a siblings form a family");
+        assert_eq!(contract.kind, XyceBaselineFamilyKind::ParamExpression);
+        assert_eq!(
+            contract.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert_eq!(contract.target_path.is_some(), target_expected);
+        assert!(XyceTestRunner::same_path(
+            &contract.baseline_path,
+            &baseline_path
+        ));
+        assert_eq!(contract.member_paths.len(), 2);
+        assert!(XyceTestRunner::same_path(
+            &contract.member_paths[0],
+            &baseline_path
+        ));
+        assert!(XyceTestRunner::same_path(
+            &contract.member_paths[1],
+            &literal_path
+        ));
+    }
+
+    let owner_deck = XyceDeck {
+        path: owner_path.clone(),
+        relative_path: owner_relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let third_path = family_dir.join("representation_3.cir");
+    fs::write(&third_path, "unqualified third variant\n.end\n")
+        .expect("write third-variant fixture");
+    assert!(
+        runner
+            .param_expression_family_contract(&owner_deck)
+            .is_none(),
+        "an additional circuit sibling is a different upstream family shape"
+    );
+    fs::remove_file(&third_path).expect("remove third-variant fixture");
+
+    fs::write(&owner_path, "nonempty owner\n.end\n").expect("make owner nonempty");
+    assert!(
+        runner
+            .param_expression_family_contract(&owner_deck)
+            .is_none(),
+        "the generic wrapper shape requires an empty manifest owner"
+    );
+    fs::write(&owner_path, "").expect("restore empty owner");
+
+    fs::write(&literal_path, "").expect("make literal member empty");
+    assert!(
+        runner
+            .param_expression_family_contract(&owner_deck)
+            .is_none(),
+        "both executable siblings must be nonempty"
+    );
+
+    fs::remove_dir_all(&root).expect("remove generic parameter-expression fixture");
+}
+
+#[test]
+fn scoped_model_family_detection_is_manifest_and_sibling_driven() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-scoped-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_SCOPE");
+    fs::create_dir_all(&family_dir).expect("create generic scoped-family fixture");
+    let owner_path = family_dir.join("representation.cir");
+    let baseline_path = family_dir.join("representation_noscope.cir");
+    fs::write(&owner_path, "generic scoped owner\n.end\n").expect("write owner fixture");
+    fs::write(&baseline_path, "generic explicit baseline\n.end\n").expect("write baseline fixture");
+    let owner_relative = "Netlists/Certification_Tests/GENERIC_SCOPE/representation.cir";
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper manifest fixture");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (path, relative) in [
+        (&owner_path, owner_relative),
+        (
+            &baseline_path,
+            "Netlists/Certification_Tests/GENERIC_SCOPE/representation_noscope.cir",
+        ),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .scoped_model_family_contract(&deck)
+            .expect("manifest owner and _noscope sibling form a scoped family");
+        assert_eq!(contract.kind, XyceBaselineFamilyKind::ScopedModel);
+        assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+        assert!(XyceTestRunner::same_path(
+            &contract.baseline_path,
+            &baseline_path
+        ));
+        assert_eq!(contract.member_paths.len(), 2);
+        assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+    }
+
+    fs::remove_dir_all(&root).expect("remove generic scoped-family fixture");
+}
+
+#[test]
+fn passive_temperature_override_detection_is_structural_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-passive-temperature-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root.join("Netlists").join("GENERIC_PASSIVES");
+    let output_dir = root.join("OutputData").join("GENERIC_PASSIVES");
+    fs::create_dir_all(&family_dir).expect("create generic passive-temperature fixture");
+    fs::create_dir_all(&output_dir).expect("create generic passive-temperature oracle dir");
+    let baseline_path = family_dir.join("generic_temp.cir");
+    let target_path = family_dir.join("generic_temp_instance.cir");
+    let vector_path = family_dir.join("generic_temp_instance2.cir");
+    let oracle_path = output_dir.join("generic_temp.cir.prn");
+    let member = "generic passive temperature member\n.end\n";
+    for path in [&baseline_path, &target_path] {
+        fs::write(path, member).expect("write generic family member");
+    }
+    fs::write(
+        &oracle_path,
+        "Index TIME V(1)\n0 0 0\nEnd of Xyce(TM) Simulation\n",
+    )
+    .expect("write canonical baseline oracle fixture");
+
+    let deck = XyceDeck {
+        path: target_path.clone(),
+        relative_path: "Netlists/GENERIC_PASSIVES/generic_temp_instance.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let contract = runner
+        .passive_temperature_override_family_contract(&deck)
+        .expect("generic baseline/scalar pair with one baseline oracle qualifies");
+    assert_eq!(
+        contract.kind,
+        XyceBaselineFamilyKind::PassiveTemperatureOverride
+    );
+    assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+    assert!(XyceTestRunner::same_path(
+        &contract.baseline_path,
+        &baseline_path
+    ));
+    assert_eq!(contract.member_paths.len(), 2);
+
+    fs::write(&vector_path, member).expect("write unrelated vector-form sibling");
+    let vector_deck = XyceDeck {
+        path: vector_path.clone(),
+        relative_path: "Netlists/GENERIC_PASSIVES/generic_temp_instance2.cir".to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    assert!(
+        runner
+            .passive_temperature_override_family_contract(&vector_deck)
+            .is_none(),
+        "vector TC syntax is a different, not-yet-qualified representation"
+    );
+
+    let extra_path = family_dir.join("generic_temp_extra.cir");
+    fs::write(&extra_path, member).expect("write extra family member");
+    assert!(
+        runner
+            .passive_temperature_override_family_contract(&deck)
+            .is_some(),
+        "unrelated sibling decks must not fingerprint an otherwise strict scalar pair"
+    );
+    fs::remove_file(&extra_path).expect("remove extra family member");
+
+    fs::remove_file(&oracle_path).expect("remove baseline oracle");
+    assert!(
+        runner
+            .passive_temperature_override_family_contract(&deck)
+            .is_none(),
+        "a relational baseline without an independent checked oracle must fail closed"
+    );
+    fs::write(&oracle_path, "oracle\n").expect("restore baseline oracle");
+
+    fs::write(
+        root.join(HARNESS_MANIFEST_FILE),
+        format!(
+            "{}\t{}\n",
+            deck.relative_path, REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+        ),
+    )
+    .expect("mark scalar target as wrapper-origin");
+    let wrapper_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        wrapper_runner
+            .passive_temperature_override_family_contract(&deck)
+            .is_none(),
+        "scalar override members must be ordinary executable decks"
+    );
+
+    fs::remove_dir_all(&root).expect("remove generic passive-temperature fixture");
+}
+
+#[test]
+fn passive_temperature_override_snapshot_proves_scalar_precedence_and_identity() {
+    let print = XycePrintRequest {
+        probes: vec!["V(out)".to_string()],
+    };
+    let baseline_source = "\
+generic passive temperature override
+C1 out 0 CM 1u IC=1 TEMP=100
+R1 out bias 1k
+V1 bias 0 0
+.MODEL CM C (TC1=1m TC2=2u)
+.TRAN 0 1m
+.PRINT TRAN V(out)
+.OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6
+.END
+";
+    let target_source = baseline_source
+        .replace("TEMP=100", "TEMP=100 TC1=1m TC2=2u")
+        .replace("(TC1=1m TC2=2u)", "(TC1=-1m TC2=-2u)");
+    let snapshot = |source: &str| {
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+            .expect("passive temperature snapshot fixture parses");
+        XyceTestRunner::passive_temperature_override_snapshot(&netlist, &print)
+    };
+    let baseline = snapshot(baseline_source).expect("model-coefficient baseline qualifies");
+    let target = snapshot(&target_source).expect("scalar instance target qualifies");
+    XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &target)
+        .expect("only the location of the winning scalar TC pair differs");
+    assert_eq!(
+        baseline.representation,
+        XycePassiveTemperatureRepresentation::ModelCoefficients
+    );
+    assert_eq!(
+        target.representation,
+        XycePassiveTemperatureRepresentation::InstanceCoefficients
+    );
+
+    for invalid in [
+        target_source.replace(" TC2=2u", ""),
+        target_source.replace("TC1=1m TC2=2u", "TC=1m,2u"),
+        target_source.replace("TC1=-1m TC2=-2u", "TC1=1m TC2=2u"),
+        target_source.replace("TC1=-1m TC2=-2u", "TC1=-1m TC2=-2u TNOM=27"),
+        target_source.replace(".MODEL CM C", ".MODEL CM R"),
+        target_source.replace(".TRAN 0 1m", ".PARAM EXTRA=1\n.TRAN 0 1m"),
+    ] {
+        assert!(
+            snapshot(&invalid).is_err(),
+            "missing/vector/unexercised/extra/wrong-model/auxiliary state must fail closed: {invalid}"
+        );
+    }
+
+    for changed in [
+        target_source.replace("TEMP=100", "TEMP=101"),
+        target_source.replace("R1 out bias 1k", "R1 out bias 2k"),
+        target_source.replace("C1 out 0", "C1 changed 0"),
+        target_source.replace("generic passive temperature override", "changed title"),
+        target_source.replace("RELTOL=1e-6", "RELTOL=2e-6"),
+        target_source.replace("TC1=1m TC2=2u", "TC1=2m TC2=2u"),
+    ] {
+        let changed = snapshot(&changed).expect("semantic mutation remains individually valid");
+        assert!(
+            XyceTestRunner::compare_passive_temperature_override_snapshots(&baseline, &changed)
+                .is_err(),
+            "temperature, topology, title, options, and winning coefficients participate in parity"
+        );
+    }
+
+    let inductor_baseline = "\
+generic inductor temperature override
+B1 drive 0 I={10*TIME}
+VMON drive sense 0
+R1 sense out 1e-6
+L1 out 0 LM 10m TEMP=90
+.MODEL LM L (TC1=.01 TC2=.0001)
+.TRAN .1m 1m
+.PRINT TRAN I(VMON) V(out)
+.END
+";
+    let inductor_target = inductor_baseline
+        .replace("TEMP=90", "TEMP=90 TC1=.01 TC2=.0001")
+        .replace("(TC1=.01 TC2=.0001)", "(TC1=-.01 TC2=-.0001)");
+    let inductor_print = XycePrintRequest {
+        probes: vec!["I(VMON)".to_string(), "V(out)".to_string()],
+    };
+    let inductor_snapshot = |source: &str| {
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+            .expect("inductor temperature snapshot fixture parses");
+        XyceTestRunner::passive_temperature_override_snapshot(&netlist, &inductor_print)
+            .expect("inductor temperature snapshot qualifies")
+    };
+    XyceTestRunner::compare_passive_temperature_override_snapshots(
+        &inductor_snapshot(inductor_baseline),
+        &inductor_snapshot(&inductor_target),
+    )
+    .expect("inductor scalar TC1/TC2 precedence has the same strict family semantics");
+}
+
+#[test]
+fn ac_analysis_expression_family_is_structural_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-ac-expression-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_AC_FORMS");
+    fs::create_dir_all(&family_dir).expect("create AC-expression family fixture");
+    let baseline_path = family_dir.join("numeric_sweep.cir");
+    let target_path = family_dir.join("parameter_sweep.cir");
+    let baseline = "\
+generic numeric AC form
+Iexc node 0 AC 2 30 SIN(0 1 1k)
+Rload node 0 2k
+Cload node 0 3u
+.AC DEC 4 2 200
+.PRINT AC V(node)
+.OPTIONS OUTPUT PRINTFOOTER=false
+.END
+";
+    let target = baseline
+        .replace("generic numeric AC form", "generic parameter AC form")
+        .replace(
+            ".AC DEC 4 2 200",
+            ".PARAM samples=4\n.PARAM low=2\n.PARAM high=200\n.AC DEC {samples+0} {low*1} {high/1}",
+        )
+        .replace(".OPTIONS OUTPUT PRINTFOOTER=false\n", "");
+    fs::write(&baseline_path, baseline).expect("write numeric AC member");
+    fs::write(&target_path, &target).expect("write parameter AC member");
+    let manifest = format!(
+        "Netlists/Certification_Tests/GENERIC_AC_FORMS/parameter_sweep.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest)
+        .expect("write AC-expression wrapper provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for path in [&baseline_path, &target_path] {
+        let source = fs::read_to_string(path).expect("read AC member for qualification audit");
+        XyceTestRunner::ac_analysis_source_qualification(&source).unwrap_or_else(|err| {
+            panic!("source qualification failed for {}: {err}", path.display())
+        });
+        let plan = runner
+            .relational_ac_plan_for_path(path)
+            .unwrap_or_else(|err| panic!("AC plan failed for {}: {err}", path.display()));
+        XyceTestRunner::validate_ac_analysis_expression_plan(&plan).unwrap_or_else(|err| {
+            panic!("plan qualification failed for {}: {err}", path.display())
+        });
+        let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, path)
+            .unwrap_or_else(|err| panic!("AC parse failed for {}: {err}", path.display()));
+        XyceTestRunner::ac_analysis_expression_snapshot(&netlist)
+            .unwrap_or_else(|err| panic!("snapshot failed for {}: {err}", path.display()));
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: runner.relative_key(path),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .ac_analysis_expression_family_contract(&deck)
+            .expect("structural AC expression pair qualifies");
+        assert_eq!(contract.kind, XyceBaselineFamilyKind::AcAnalysisExpression);
+        assert!(matches!(
+            contract.comparison,
+            XyceBaselineFamilyComparison::AcComparator(_)
+        ));
+        assert_eq!(contract.member_paths.len(), 2);
+        assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+    }
+
+    let deck = XyceDeck {
+        path: baseline_path.clone(),
+        relative_path: runner.relative_key(&baseline_path),
+        section: XyceDeckSection::Netlists,
+    };
+    for invalid in [
+        target.replace("{samples+0}", "{samples+samples}"),
+        target.replace("{low*1}", "{sqrt(low)}"),
+        target.replace("Rload node 0 2k", "Rload node 0 {low}"),
+        target.replace("{low*1}", "2"),
+        target.replace(".PARAM high=200", ".PARAM high=200\n.PARAM unused=1"),
+        target.replace(".END", ".OPTIONS NONLIN MAXSTEP=1\n.END"),
+        target.replace(".END", ".OPTIONS OUTPUT PRINTFOOTER=false\n.END"),
+        target.replace("Iexc node 0", "Iexc node GND"),
+        target.replace(".PRINT AC V(node)", ".PRINT AC PRECISION=12 V(node)"),
+        target.replace(".PRINT AC V(node)", ".PRINT AC {V(node)+1}"),
+    ] {
+        fs::write(&target_path, &invalid).expect("write invalid AC representation");
+        assert!(
+            runner
+                .ac_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "invalid expression ownership or auxiliary state must fail closed: {invalid}"
+        );
+    }
+    fs::write(&target_path, &target).expect("restore parameter AC member");
+
+    fs::write(
+        &baseline_path,
+        baseline.replace(".OPTIONS OUTPUT PRINTFOOTER=false\n", ""),
+    )
+    .expect("remove canonical baseline footer suppression");
+    assert!(
+        runner
+            .ac_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "direct baseline must own the canonical footer suppression role"
+    );
+    fs::write(&baseline_path, baseline).expect("restore numeric AC member");
+
+    for changed in [
+        target.replace(".PARAM high=200", ".PARAM high=300"),
+        target.replace("Rload node 0 2k", "Rload node 0 3k"),
+        target.replace(".PRINT AC V(node)", ".PRINT AC VM(node)"),
+        target.replace(".AC DEC", ".AC OCT"),
+    ] {
+        fs::write(&target_path, &changed).expect("write semantic AC mutation");
+        assert!(
+            runner
+                .ac_analysis_expression_family_contract(&deck)
+                .is_none(),
+            "sweep, circuit, probe, and variation mutations must prevent pairing"
+        );
+    }
+    fs::write(&target_path, &target).expect("restore target after mutations");
+
+    let extra = family_dir.join("unpaired.cir");
+    fs::write(&extra, baseline).expect("write unpaired AC member");
+    assert!(
+        runner
+            .ac_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "an extra circuit prevents complete-directory inference"
+    );
+    fs::remove_file(&extra).expect("remove unpaired AC member");
+
+    let output_dir = root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_AC_FORMS");
+    fs::create_dir_all(&output_dir).expect("create forbidden AC oracle directory");
+    fs::write(output_dir.join("numeric_sweep.cir.FD.prn"), "oracle\n")
+        .expect("write forbidden AC oracle");
+    assert!(
+        runner
+            .ac_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "generated-reference AC families must not mix static waveform ownership"
+    );
+    fs::remove_dir_all(&output_dir).expect("remove forbidden AC oracle");
+
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+    let unowned_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        unowned_runner
+            .ac_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "parameter representation requires wrapper provenance"
+    );
+
+    fs::remove_dir_all(&root).expect("remove AC-expression family fixture");
+}
+
+#[test]
+fn age_cap_family_is_complete_structural_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-age-cap-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root.join("Netlists").join("GENERIC_AGE_EQUIVALENCE");
+    let output_dir = root.join("OutputData").join("GENERIC_AGE_EQUIVALENCE");
+    fs::create_dir_all(&family_dir).unwrap();
+    fs::create_dir_all(&output_dir).unwrap();
+    let anchor_path = family_dir.join("owner.cir");
+    let aged_path = family_dir.join("native.cir");
+    let equivalent_path = family_dir.join("equivalent.cir");
+    let aged = "Generic capacitor aging equivalence\nRDRIVE drive sense 1\nVPULSE drive 0 PULSE(0 2 100N 1U 1U 15U)\nRLEAK sense 0 10E12\nVMON sense out 0\nCSTORE out 0 4UF AGE=87600\n.TRAN 0.1US 100US\n.OPTIONS TIMEINT RELTOL=1.0e-4\n.PRINT TRAN I(VMON) V(out)\n.END\n";
+    let equivalent = "Generic capacitor aging equivalence\nRDRIVE drive sense 1\nVPULSE drive 0 PULSE(0 2 100N 1U 1U 15U)\nRLEAK sense 0 10E12\nVMON sense out 0\n.PARAM loss = {0.0233}\n.PARAM nominal = {4UF}\n.PARAM lifetime = {87600}\n.PARAM log_lifetime = {log10(lifetime)}\n.PARAM effective = {nominal*(1-loss*log_lifetime)}\nCSTORE out 0 {effective}\n.TRAN 0.1US 100US\n.OPTIONS TIMEINT RELTOL=1.0e-4\n.PRINT TRAN I(VMON) V(out)\n.END\n";
+    fs::write(&anchor_path, " \r\n").unwrap();
+    fs::write(&aged_path, aged).unwrap();
+    fs::write(&equivalent_path, equivalent).unwrap();
+    fs::write(output_dir.join("native.cir.prn"), "ownership only\n").unwrap();
+    let manifest = format!(
+        "Netlists/GENERIC_AGE_EQUIVALENCE/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).unwrap();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: aged_path.clone(),
+        relative_path: runner.relative_key(&aged_path),
+        section: XyceDeckSection::Netlists,
+    };
+    let contract = runner
+        .age_cap_family_contract(&deck)
+        .expect("complete generic AGE family qualifies");
+    assert_eq!(contract.role, XyceAgeCapFamilyRole::AgedBaseline);
+    assert_eq!(
+        contract.relational.comparison,
+        XyceBaselineFamilyComparison::ExactPrn
+    );
+
+    for invalid in [
+        equivalent.replace(
+            "nominal*(1-loss*log_lifetime)",
+            "nominal+(1-loss*log_lifetime)",
+        ),
+        equivalent.replace("log10(lifetime)", "sqrt(lifetime)"),
+        equivalent.replace("{4UF}", "{5UF}"),
+        equivalent.replace("{87600}", "{87601}"),
+        equivalent.replace("{0.0233}", "{0.0234}"),
+        equivalent.replace("CSTORE out 0 {effective}", "CSTORE out 0 {nominal}"),
+        equivalent.replace(".PARAM effective", ".PARAM unused = {1}\n.PARAM effective"),
+        equivalent.replace("RDRIVE drive sense 1", "RDRIVE drive changed 1"),
+        equivalent.replace("RDRIVE drive sense 1", "RDRIVE drive sense {1}"),
+        equivalent.replace("VPULSE drive 0", "VPULSE drive GND"),
+        equivalent.replace("PULSE(0 2", "PULSE(0 3"),
+        equivalent.replace("PULSE(0 2", "PULSE({0} 2"),
+        equivalent.replace("I(VMON) V(out)", "V(out) I(VMON)"),
+        equivalent.replace(".TRAN 0.1US 100US", ".TRAN 0.2US 100US"),
+        equivalent.replace("RELTOL=1.0e-4", "RELTOL=2.0e-4"),
+        equivalent.replace(".END", ".GLOBAL extra\n.END"),
+    ] {
+        fs::write(&equivalent_path, invalid).unwrap();
+        assert!(runner.age_cap_family_contract(&deck).is_none());
+    }
+    fs::write(&equivalent_path, equivalent).unwrap();
+    for invalid in [
+        aged.replace("AGE=87600", "AGE=1"),
+        aged.replace("AGE=87600", "AGE=87600 M=2"),
+        aged.replace("CSTORE out 0 4UF", "CSTORE out 0 5UF"),
+        aged.replace("VMON sense out 0", "VMON changed out 0"),
+        aged.replace("RLEAK sense 0", "RLEAK sense GND"),
+        aged.replace("I(VMON) V(out)", "I(VMON) V(sense)"),
+        aged.replace("100N 1U 1U 15U", "-100N 1U 1U 15U"),
+        aged.replace("100N 1U 1U 15U", "100N 0 1U 15U"),
+    ] {
+        fs::write(&aged_path, invalid).unwrap();
+        assert!(runner.age_cap_family_contract(&deck).is_none());
+    }
+    fs::write(&aged_path, aged).unwrap();
+    let extra_path = family_dir.join("extra.cir");
+    fs::write(&extra_path, equivalent).unwrap();
+    assert!(runner.age_cap_family_contract(&deck).is_none());
+    fs::remove_file(&extra_path).unwrap();
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").unwrap();
+    assert!(
+        XyceTestRunner::new(&root, XyceRunnerConfig::default())
+            .age_cap_family_contract(&deck)
+            .is_none()
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).unwrap();
+    fs::write(output_dir.join("owner.cir.prn"), "ambiguous\n").unwrap();
+    assert!(runner.age_cap_family_contract(&deck).is_none());
+    fs::remove_file(output_dir.join("owner.cir.prn")).unwrap();
+    fs::write(output_dir.join("native.cir.prn"), "").unwrap();
+    assert!(runner.age_cap_family_contract(&deck).is_none());
+    fs::write(output_dir.join("native.cir.prn"), "ownership only\n").unwrap();
+    fs::remove_file(output_dir.join("native.cir.prn")).unwrap();
+    assert!(runner.age_cap_family_contract(&deck).is_none());
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn switch_state_case_family_is_complete_byte_exact_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-switch-state-case-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_SWITCH_CASE");
+    fs::create_dir_all(&family_dir).expect("create switch-case family fixture");
+    let anchor_path = family_dir.join("owner.cir");
+    let uppercase_path = family_dir.join("canonical.cir");
+    let lowercase_path = family_dir.join("alternate.cir");
+    let uppercase = "**** generic switch case parity ****\n\
+SCASE source load model_a OFF CONTROL={if(time>.1,1,0)}\n\
+VSOURCE source 0 DC 5\n\
+RLOAD load 0 5k\n\
+.model model_a SWITCH roff=1e9 ron=1 off=0 on=1\n\
+.TRAN 100n 500ms 0\n\
+.PRINT TRAN V(source) V(load)\n\
+.END\n";
+    let lowercase = uppercase.replacen(" OFF CONTROL", " off CONTROL", 1);
+    fs::write(&anchor_path, " \r\n").expect("write empty wrapper anchor");
+    fs::write(&uppercase_path, uppercase).expect("write uppercase baseline");
+    fs::write(&lowercase_path, &lowercase).expect("write lowercase member");
+    let manifest = format!(
+        "Netlists/Certification_Tests/GENERIC_SWITCH_CASE/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("write wrapper provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck_for = |path: &Path| XyceDeck {
+        path: path.to_path_buf(),
+        relative_path: runner.relative_key(path),
+        section: XyceDeckSection::Netlists,
+    };
+
+    for (path, expected_role) in [
+        (&anchor_path, XyceSwitchStateCaseFamilyRole::Anchor),
+        (
+            &uppercase_path,
+            XyceSwitchStateCaseFamilyRole::UppercaseBaseline,
+        ),
+        (
+            &lowercase_path,
+            XyceSwitchStateCaseFamilyRole::LowercaseMember,
+        ),
+    ] {
+        let contract = runner
+            .switch_state_case_family_contract(&deck_for(path))
+            .expect("complete generic switch-state case family qualifies");
+        assert_eq!(contract.role, expected_role);
+        assert_eq!(
+            contract.relational.comparison,
+            XyceBaselineFamilyComparison::ExactPrn
+        );
+        assert!(XyceTestRunner::same_path(
+            &contract.relational.baseline_path,
+            &uppercase_path
+        ));
+    }
+
+    for invalid in [
+        lowercase.replace(" off CONTROL", " OFF CONTROL"),
+        lowercase.replace(" off CONTROL", " Off CONTROL"),
+        lowercase.replace(" off CONTROL", " on CONTROL"),
+        lowercase.replace("roff=1e9", "roff=1e8"),
+        lowercase.replace("roff=1e9", "roff=1"),
+        lowercase.replace("off=0 on=1", "OFF=0 on=1"),
+        lowercase.replace("time>.1", "time>.2"),
+        lowercase.replace("if(time>.1,1,0)", "0"),
+        lowercase.replace("RLOAD load 0 5k", "RLOAD load 0 6k"),
+        lowercase.replace("V(source) V(load)", "V(load) V(source)"),
+        lowercase.replace(".TRAN 100n 500ms 0", ".TRAN 100n 500ms"),
+        lowercase.replace(".TRAN 100n 500ms 0", ".TRAN 100n 500ms -0"),
+        lowercase.replace(".TRAN 100n 500ms 0", ".TRAN 100n 500ms 1n"),
+        lowercase.replace(".PRINT TRAN", ".OPTIONS RELTOL=1e-3\n.PRINT TRAN"),
+        lowercase.replace(".PRINT TRAN", "*COMP V(load) RELTOL=1\n.PRINT TRAN"),
+        lowercase.replace("VSOURCE source 0", "VSOURCE source GND"),
+        lowercase.replace("SCASE source load", "SCASE source changed"),
+        lowercase.replace("**** generic", "**** changed"),
+        lowercase.replace("SCASE source", "SCASE  source"),
+        lowercase.replace(
+            ".model model_a",
+            "SSECOND source load model_a OFF CONTROL={if(time>.1,1,0)}\n.model model_a",
+        ),
+        lowercase.replace(
+            ".TRAN",
+            ".model second SWITCH ron=1 roff=2 on=1 off=0\n.TRAN",
+        ),
+        lowercase.replace(".TRAN", ".include \"other.cir\"\n.TRAN"),
+        lowercase.replace(".END", ".PARAM unused=1\n.END"),
+    ] {
+        fs::write(&lowercase_path, &invalid).expect("write switch-case mutation");
+        assert!(
+            runner
+                .switch_state_case_family_contract(&deck_for(&lowercase_path))
+                .is_none(),
+            "all changes outside the one initial-state token case must fail closed: {invalid}"
+        );
+    }
+    fs::write(&lowercase_path, &lowercase).expect("restore lowercase member");
+
+    let extra_path = family_dir.join("extra.cir");
+    fs::write(&extra_path, uppercase).expect("write extra family record");
+    assert!(
+        runner
+            .switch_state_case_family_contract(&deck_for(&uppercase_path))
+            .is_none()
+    );
+    fs::remove_file(&extra_path).expect("remove extra family record");
+
+    fs::write(&anchor_path, "not an empty wrapper\n").expect("make anchor nonempty");
+    assert!(
+        runner
+            .switch_state_case_family_contract(&deck_for(&anchor_path))
+            .is_none()
+    );
+    fs::write(&anchor_path, " \r\n").expect("restore empty wrapper anchor");
+
+    let output_dir = root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_SWITCH_CASE");
+    fs::create_dir_all(&output_dir).expect("create output artifact directory");
+    let artifact = output_dir.join("ALTERNATE.CIR.PRN");
+    fs::write(&artifact, "forbidden\n").expect("write case-varied static artifact");
+    assert!(
+        runner
+            .switch_state_case_family_contract(&deck_for(&lowercase_path))
+            .is_none()
+    );
+    fs::remove_file(&artifact).expect("remove static artifact");
+
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "{manifest}Netlists/Certification_Tests/GENERIC_SWITCH_CASE/alternate.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("give a worker wrapper provenance");
+    assert!(
+        XyceTestRunner::new(&root, XyceRunnerConfig::default())
+            .switch_state_case_family_contract(&deck_for(&lowercase_path))
+            .is_none()
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+    assert!(
+        XyceTestRunner::new(&root, XyceRunnerConfig::default())
+            .switch_state_case_family_contract(&deck_for(&anchor_path))
+            .is_none()
+    );
+    fs::remove_dir_all(&root).expect("remove switch-case family fixture");
+}
+
+#[test]
+fn ac_relational_table_preserves_complex_voltage_columns() {
+    let source = "\
+complex AC projection
+I1 node 0 AC 1
+R1 node 0 1k
+.AC DEC 1 10 10
+.PRINT AC V(node)
+.END
+";
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("projection.cir"))
+        .expect("complex AC projection fixture parses");
+    let print = XycePrintRequest {
+        probes: vec!["V(node)".to_string()],
+    };
+    let results = vec![AcResult {
+        frequency: 10.0,
+        node_names: vec!["node".to_string()],
+        branch_names: Vec::new(),
+        voltages: vec![Complex64::new(1.25, -0.5)],
+        currents: Vec::new(),
+    }];
+    let table = XyceTestRunner::ac_family_result_to_prn_table(&print, &netlist, &results)
+        .expect("complex AC result projects to default PRN columns");
+    assert_eq!(
+        table.columns,
+        vec!["Index", "FREQ", "Re(V(node))", "Im(V(node))"]
+    );
+    assert_eq!(table.rows, vec![vec![0.0, 10.0, 1.25, -0.5]]);
+}
+
+#[test]
+fn dc_analysis_expression_family_is_complete_bijective_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-dc-expression-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_DC_FORMS");
+    fs::create_dir_all(&family_dir).expect("create DC-expression family fixture");
+    let literal_a = family_dir.join("numeric_nested.cir");
+    let expression_a = family_dir.join("parameter_nested.cir");
+    let literal_b = family_dir.join("numeric_list.cir");
+    let expression_b = family_dir.join("parameter_list.cir");
+    let direct_a = "\
+numeric nested DC form
+V1 a 0 0
+V2 b 0 0
+R1 a 0 1k
+R2 b 0 2k
+.DC V1 0 2 1 V2 0 1 1
+.PRINT DC V(a) V(b)
+.END
+";
+    let parameter_a = direct_a
+            .replace("numeric nested DC form", "parameterized nested DC form")
+            .replace(
+                ".DC V1 0 2 1 V2 0 1 1",
+                ".PARAM a0=0\n.PARAM a1=2\n.PARAM da=1\n.PARAM b0=0\n.PARAM b1=1\n.PARAM db=1\n.DC V1 {a0} {a1} {da} V2 {b0} {b1} {db}",
+            );
+    let direct_b = "\
+numeric LIST DC form
+V3 out 0 0
+R3 out 0 3k
+.DC V3 LIST -2 0 5
+.PRINT DC V(out)
+.END
+";
+    let parameter_b = direct_b
+        .replace("numeric LIST DC form", "parameterized LIST DC form")
+        .replace(
+            ".DC V3 LIST -2 0 5",
+            ".PARAM p0=-2\n.PARAM p1=0\n.PARAM p2=5\n.DC V3 LIST {p0} {p1} {p2}",
+        );
+    for (path, source) in [
+        (&literal_a, direct_a),
+        (&expression_a, parameter_a.as_str()),
+        (&literal_b, direct_b),
+        (&expression_b, parameter_b.as_str()),
+    ] {
+        fs::write(path, source).expect("write DC-expression family member");
+    }
+    let manifest = format!(
+        "Netlists/Certification_Tests/GENERIC_DC_FORMS/parameter_nested.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/Certification_Tests/GENERIC_DC_FORMS/parameter_list.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest)
+        .expect("write DC-expression wrapper provenance");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for path in [&literal_a, &expression_a, &literal_b, &expression_b] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: runner.relative_key(path),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .dc_analysis_expression_family_contract(&deck)
+            .expect("complete generic semantic family qualifies");
+        assert_eq!(contract.kind, XyceBaselineFamilyKind::DcAnalysisExpression);
+        assert_eq!(contract.comparison, XyceBaselineFamilyComparison::ExactPrn);
+        assert_eq!(contract.member_paths.len(), 2);
+        assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+    }
+
+    let deck = XyceDeck {
+        path: literal_a.clone(),
+        relative_path: runner.relative_key(&literal_a),
+        section: XyceDeckSection::Netlists,
+    };
+    fs::write(
+        &expression_a,
+        parameter_a.replace(".PARAM a1=2", ".PARAM a1=3"),
+    )
+    .expect("change one resolved DC bound");
+    assert!(
+        runner
+            .dc_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "resolved sweep changes prevent semantic pairing"
+    );
+    fs::write(&expression_a, &parameter_a).expect("restore nested wrapper");
+
+    let extra = family_dir.join("unpaired.cir");
+    fs::write(&extra, direct_a).expect("write unpaired member");
+    assert!(
+        runner
+            .dc_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "an extra circuit prevents complete-family inference"
+    );
+    fs::remove_file(&extra).expect("remove unpaired member");
+
+    fs::write(&expression_b, "").expect("empty one wrapper member");
+    assert!(
+        runner
+            .dc_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "empty members fail closed"
+    );
+    fs::write(&expression_b, &parameter_b).expect("restore LIST wrapper");
+
+    let output_dir = root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_DC_FORMS");
+    fs::create_dir_all(&output_dir).expect("create forbidden static-oracle directory");
+    fs::write(output_dir.join("numeric_nested.cir.prn"), "oracle\n")
+        .expect("write forbidden static oracle");
+    assert!(
+        runner
+            .dc_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "generated-reference families must not mix static waveform ownership"
+    );
+    fs::remove_dir_all(&output_dir).expect("remove forbidden oracle");
+
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "Netlists/Certification_Tests/GENERIC_DC_FORMS/parameter_nested.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("remove one wrapper provenance record");
+    let incomplete_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        incomplete_runner
+            .dc_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "wrapper/baseline imbalance fails closed"
+    );
+
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("restore manifest");
+    fs::remove_file(&literal_b).expect("remove second baseline");
+    fs::remove_file(&expression_b).expect("remove second wrapper");
+    let single_pair_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        single_pair_runner
+            .dc_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "one coincidental pair is insufficient generated-reference provenance"
+    );
+
+    fs::remove_dir_all(&root).expect("remove DC-expression family fixture");
+}
+
+#[test]
+fn delimited_expression_family_is_complete_bijective_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-delimited-expression-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_DELIMITERS");
+    fs::create_dir_all(&family_dir).expect("create delimiter family fixture");
+    let braced_path = family_dir.join("reference.cir");
+    let quoted_path = family_dir.join("alternate.cir");
+    let braced = "\
+braced expression representation
+.param factor = {2.0}
+VS bias 0 0V
+RLOAD bias 0 {factor*5.0}
+.DC VS -0.2 0.5 0.01
+.PRINT DC V(bias) {(abs(I(VS)))} {(V(bias)**2.0)} I(VS)
+.END
+";
+    let quoted = "\
+single-quoted expression representation
+.param factor = '2.0'
+VS bias 0 0V
+RLOAD bias 0 'factor*5.0'
+.DC VS -0.2 0.5 0.01
+.PRINT DC V(bias) '(abs(I(VS)))' '(V(bias)**2.0)' I(VS)
+.END
+";
+    fs::write(&braced_path, braced).expect("write braced family member");
+    fs::write(&quoted_path, quoted).expect("write quoted family member");
+    let manifest = format!(
+        "Netlists/Certification_Tests/GENERIC_DELIMITERS/alternate.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest)
+        .expect("write delimiter wrapper provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (path, contract_name) in [
+        (&braced_path, "delimited_expression_family_baseline"),
+        (&quoted_path, "delimited_expression_family_wrapper"),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: runner.relative_key(path),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .delimited_expression_family_contract(&deck)
+            .expect("complete generic delimiter family qualifies");
+        assert_eq!(contract.kind, XyceBaselineFamilyKind::DelimitedExpression);
+        assert_eq!(
+            contract.comparison,
+            XyceBaselineFamilyComparison::ExactPrnCaseInsensitive
+        );
+        let result = runner.run_test(path);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "independently simulated delimiter member should pass: {result:?}"
+        );
+        assert_eq!(result.contract, contract_name);
+    }
+
+    let deck = XyceDeck {
+        path: braced_path.clone(),
+        relative_path: runner.relative_key(&braced_path),
+        section: XyceDeckSection::Netlists,
+    };
+    for invalid in [
+        quoted.replace("'2.0'", "'3.0'"),
+        quoted.replace("factor", "scale"),
+        quoted.replace("'factor*5.0'", "'factor*6.0'"),
+        quoted.replace("RLOAD bias 0", "RLOAD load 0"),
+        quoted.replace("VS bias 0", "VS supply 0"),
+        quoted.replace("VS bias 0 0V", "VS bias 0 1V"),
+        quoted.replace(".DC VS -0.2 0.5 0.01", ".DC VS -0.2 0.6 0.01"),
+        quoted.replace(
+            "V(bias) '(abs(I(VS)))' '(V(bias)**2.0)' I(VS)",
+            "I(VS) '(abs(I(VS)))' '(V(bias)**2.0)' V(bias)",
+        ),
+        quoted.replace("'factor*5.0'", "{factor*5.0}"),
+        quoted.replace("'factor*5.0'", "factor*5.0"),
+        quoted.replace(".END", ".OPTIONS OUTPUT PRINTFOOTER=false\n.END"),
+        quoted.replace(".END", ".MODEL unused R R=1\n.END"),
+        quoted.replace(".END", ".INCLUDE missing.lib\n.END"),
+        quoted.replace(".END", ".SUBCKT unused a b\n.ENDS\n.END"),
+        quoted.replace(".END", "RSECOND bias 0 1\n.END"),
+        quoted.replace(".END", ".STEP PARAM unused 1 2 1\n.END"),
+        quoted.replace("I(VS)\n", "I(VS) V(bias)\n"),
+        quoted.replace("'(abs(I(VS)))'", "''"),
+        quoted.replace("'(abs(I(VS)))'", "'abs(I(VS))"),
+    ] {
+        fs::write(&quoted_path, invalid).expect("write invalid delimiter mutation");
+        assert!(
+            runner.delimited_expression_family_contract(&deck).is_none(),
+            "semantic, dialect, state, and probe mutations must fail closed"
+        );
+    }
+    fs::write(&quoted_path, quoted).expect("restore quoted member");
+
+    let extra = family_dir.join("extra.cir");
+    fs::write(&extra, braced).expect("write extra delimiter member");
+    assert!(
+        runner.delimited_expression_family_contract(&deck).is_none(),
+        "an extra circuit prevents complete-family inference"
+    );
+    fs::remove_file(&extra).expect("remove extra delimiter member");
+
+    let output_dir = root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_DELIMITERS");
+    fs::create_dir_all(&output_dir).expect("create forbidden oracle directory");
+    fs::write(output_dir.join("reference.cir.prn"), "oracle\n")
+        .expect("write forbidden delimiter oracle");
+    assert!(
+        runner.delimited_expression_family_contract(&deck).is_none(),
+        "relational delimiter family rejects static waveform ownership"
+    );
+    fs::remove_dir_all(&output_dir).expect("remove forbidden delimiter oracle");
+
+    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove delimiter wrapper provenance");
+    let unmarked_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        unmarked_runner
+            .delimited_expression_family_contract(&deck)
+            .is_none(),
+        "exactly one quoted wrapper is required"
+    );
+
+    let swapped_manifest = format!(
+        "Netlists/Certification_Tests/GENERIC_DELIMITERS/reference.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), swapped_manifest)
+        .expect("swap delimiter wrapper role");
+    let swapped_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        swapped_runner
+            .delimited_expression_family_contract(&deck)
+            .is_none(),
+        "wrapper role must agree with the single-quoted representation"
+    );
+
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "Netlists/Certification_Tests/GENERIC_DELIMITERS/reference.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/Certification_Tests/GENERIC_DELIMITERS/alternate.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("mark both delimiter members as wrappers");
+    let duplicate_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        duplicate_runner
+            .delimited_expression_family_contract(&deck)
+            .is_none(),
+        "two wrapper roles fail closed"
+    );
+
+    fs::remove_dir_all(&root).expect("remove delimiter family fixture");
+}
+
+#[test]
+fn subckt_parameter_resolution_family_is_complete_typed_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-subckt-resolution-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_SCOPE_FORMS");
+    fs::create_dir_all(&family_dir).expect("create subcircuit-resolution fixture");
+    let anchor = family_dir.join("owner.cir");
+    let baseline = family_dir.join("formal.cir");
+    let implicit = family_dir.join("implicit.cir");
+    let global = family_dir.join("global.cir");
+    let overriding = family_dir.join("override.cir");
+    let unused = family_dir.join("unused.cir");
+    let error = family_dir.join("missing.cir");
+    let harness = |body: &str| {
+        format!(
+            "* generic subcircuit resolution fixture\n{body}\nVSWEEP out 0 DC 0\n.DC VSWEEP 0 2 1\n.PRINT DC V(out) I(VSWEEP)\n.SUBCKT cell p n\nRbody p n {{z}}\n.ENDS\n.END\n"
+        )
+    };
+    let formal_source = harness("Xscope out 0 cell PARAMS: z=20k")
+        .replace(".SUBCKT cell p n", ".SUBCKT cell p n PARAMS: z=10");
+    let implicit_source = harness("Xscope out 0 cell PARAMS: z=20k");
+    let global_source = harness(".PARAM z=20k\nXscope out 0 cell");
+    let override_source = harness(".PARAM z=1k\nXscope out 0 cell PARAMS: z=20k");
+    let unused_source = harness(".PARAM z=1k\nXscope out 0 cell PARAMS: z=20k")
+        .replace("Rbody p n {z}", "Rbody p n 20k");
+    let error_source = harness("Xscope out 0 cell");
+    for (path, source) in [
+        (&baseline, formal_source.as_str()),
+        (&implicit, implicit_source.as_str()),
+        (&global, global_source.as_str()),
+        (&overriding, override_source.as_str()),
+        (&unused, unused_source.as_str()),
+        (&error, error_source.as_str()),
+    ] {
+        fs::write(path, source).expect("write subcircuit-resolution member");
+    }
+    fs::write(&anchor, "").expect("write empty relational anchor");
+    let manifest = format!(
+        "Netlists/Certification_Tests/GENERIC_SCOPE_FORMS/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/Certification_Tests/GENERIC_SCOPE_FORMS/missing.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("write wrapper provenance");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (path, expected_role) in [
+        (&anchor, XyceSubcktParameterResolutionRole::Anchor),
+        (&baseline, XyceSubcktParameterResolutionRole::Baseline),
+        (&implicit, XyceSubcktParameterResolutionRole::Member),
+        (&global, XyceSubcktParameterResolutionRole::Member),
+        (&overriding, XyceSubcktParameterResolutionRole::Member),
+        (&unused, XyceSubcktParameterResolutionRole::Member),
+        (&error, XyceSubcktParameterResolutionRole::ExpectedError),
+    ] {
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path: runner.relative_key(path),
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .subckt_parameter_resolution_family_contract(&deck)
+            .expect("complete generic parameter-resolution family qualifies");
+        assert_eq!(contract.role, expected_role);
+        assert_eq!(contract.valid_paths.len(), 5);
+    }
+
+    let error_plan = runner
+        .static_dc_plan_for_path(&error, ExpressionDialect::Xyce)
+        .expect("expected-error member has a static DC plan");
+    let error_netlist = XyceTestRunner::parse_xyce_netlist(&error_plan.source, &error)
+        .expect("expected-error member parses before flattening");
+    let (representation, parameter_name, snapshot) =
+        XyceTestRunner::subckt_parameter_resolution_qualification(
+            &error_netlist,
+            &error_plan.print,
+            &error_plan.dc.source,
+        )
+        .expect("missing binding is a typed qualified error");
+    assert_eq!(
+        representation,
+        XyceSubcktParameterResolutionRepresentation::UndefinedBinding
+    );
+    assert_eq!(parameter_name, "z");
+    assert!(snapshot.is_none());
+    assert!(matches!(
+        rspice_core::netlist::flatten_netlist_with_models(&error_netlist),
+        Err(ParseError::UndefinedParameter(name)) if name.eq_ignore_ascii_case("z")
+    ));
+
+    let anchor_deck = XyceDeck {
+        path: anchor.clone(),
+        relative_path: runner.relative_key(&anchor),
+        section: XyceDeckSection::Netlists,
+    };
+    let extra = family_dir.join("unrelated.cir");
+    fs::write(&extra, &implicit_source).expect("write duplicate nonbaseline representation");
+    assert!(
+        runner
+            .subckt_parameter_resolution_family_contract(&anchor_deck)
+            .is_none(),
+        "an unrelated or duplicate circuit member prevents complete-family inference"
+    );
+    fs::remove_file(&extra).expect("remove unrelated member");
+
+    fs::write(&global, "").expect("make one semantic member empty");
+    assert!(
+        runner
+            .subckt_parameter_resolution_family_contract(&anchor_deck)
+            .is_none(),
+        "an extra empty member fails closed"
+    );
+    fs::write(&global, &global_source).expect("restore global member");
+
+    let output_dir = root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_SCOPE_FORMS");
+    fs::create_dir_all(&output_dir).expect("create forbidden oracle directory");
+    fs::write(output_dir.join("formal.cir.prn"), "oracle\n")
+        .expect("write forbidden static oracle");
+    assert!(
+        runner
+            .subckt_parameter_resolution_family_contract(&anchor_deck)
+            .is_none(),
+        "generated-reference family cannot mix static waveform ownership"
+    );
+    fs::remove_dir_all(&output_dir).expect("remove forbidden oracle");
+
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "Netlists/Certification_Tests/GENERIC_SCOPE_FORMS/owner.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("remove expected-error wrapper provenance");
+    let wrong_manifest_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        wrong_manifest_runner
+            .subckt_parameter_resolution_family_contract(&anchor_deck)
+            .is_none(),
+        "wrapper provenance must agree with the empty and error roles"
+    );
+
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("restore manifest");
+    fs::write(
+        &unused,
+        unused_source.replace("Rbody p n 20k", "Rbody p n 30k"),
+    )
+    .expect("change unused-binding literal");
+    let restored_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        restored_runner
+            .subckt_parameter_resolution_family_contract(&anchor_deck)
+            .is_none(),
+        "unused binding must equal the literal and the family semantics"
+    );
+
+    fs::remove_dir_all(&root).expect("remove subcircuit-resolution fixture");
+}
+
+#[test]
+fn dc_analysis_expression_snapshot_and_grids_are_fail_closed() {
+    let direct = "\
+direct LIST title
+V1 out 0 0
+R1 out 0 1k
+.DC V1 LIST -2 0 5
+.PRINT DC V(out)
+.END
+";
+    let parameterized = direct
+        .replace("direct LIST title", "parameter expression title")
+        .replace(
+            ".DC V1 LIST -2 0 5",
+            ".PARAM p0=-2\n.PARAM p1=0\n.PARAM p2=5\n.DC V1 LIST {p0} {p1} {p2}",
+        );
+    let snapshot = |source: &str| {
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+            .expect("DC-expression snapshot fixture parses");
+        XyceTestRunner::dc_analysis_expression_snapshot(&netlist)
+    };
+    let baseline = snapshot(direct).expect("direct numeric representation qualifies");
+    let target = snapshot(&parameterized).expect("parameter expression representation qualifies");
+    XyceTestRunner::compare_dc_analysis_expression_snapshots(&baseline, &target)
+        .expect("title and .PARAM/.DC representation are the only differences");
+
+    for invalid in [
+        parameterized.replace("{p0}", "{p0+p0}"),
+        parameterized.replace("{p0}", "{sqrt(p0)}"),
+        parameterized.replace("R1 out 0 1k", "R1 out 0 {p0}"),
+        parameterized.replace("{p1}", "0"),
+        parameterized.replace(".PARAM p2=5", ".PARAM p2=5\n.PARAM unused=1"),
+        parameterized.replace(".DC", "*COMP V(out) reltol=.1\n.DC"),
+        parameterized.replace(".END", ".OPTIONS NONLIN MAXSTEP=1\n.END"),
+        parameterized.replace("V1 out 0 0", "V1 out GND 0"),
+        parameterized.replace(".PRINT DC", ".PRINT TRAN"),
+    ] {
+        assert!(
+            snapshot(&invalid).is_err(),
+            "parameter reuse, functions, non-analysis use, mixed forms, extras, comparators, and extra directives fail closed: {invalid}"
+        );
+    }
+
+    let opaque_model = "\
+opaque MOS model state
+V1 out 0 0
+V2 gate 0 1
+M1 out gate 0 0 NM
+.MODEL NM NMOS(LEVEL=1 KP=1m VTO=1 OPAQUE=2)
+.DC V1 LIST 0 1
+.PRINT DC V(out)
+.END
+";
+    assert!(
+        snapshot(opaque_model).is_err(),
+        "unknown classic-MOS model state must not enter the relational oracle"
+    );
+
+    for changed in [
+        parameterized.replace("R1 out 0 1k", "R1 out 0 2k"),
+        parameterized.replace("V1 out 0 0", "V1 changed 0 0"),
+        parameterized.replace(".PRINT DC V(out)", ".PRINT DC V(changed)"),
+    ] {
+        let changed = snapshot(&changed).expect("semantic mutation remains individually valid");
+        assert!(
+            XyceTestRunner::compare_dc_analysis_expression_snapshots(&baseline, &changed).is_err(),
+            "topology, values, and output selection participate in parity"
+        );
+    }
+
+    let root = std::env::temp_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = |source: &str| {
+        runner
+            .static_dc_plan_for_source_with_execution_dir(
+                Path::new("grid.cir"),
+                source.to_string(),
+                ExpressionDialect::Xyce,
+                None,
+            )
+            .expect("DC grid fixture plans")
+    };
+    let direct_plan = plan(direct);
+    let parameter_plan = plan(&parameterized);
+    assert!(XyceTestRunner::dc_sweeps_match_exactly(
+        &direct_plan.dc,
+        &parameter_plan.dc
+    ));
+    assert_eq!(direct_plan.dc.primary_spec().points(), vec![-2.0, 0.0, 5.0]);
+
+    let dec = plan(&direct.replace(".DC V1 LIST -2 0 5", ".DC DEC V1 .1 100 4"));
+    let dec_points = dec.dc.primary_spec().points();
+    assert_eq!(dec_points.len(), 13);
+    assert_eq!(dec_points.first().copied(), Some(0.1));
+    assert!((dec_points.last().copied().expect("DEC endpoint") - 100.0).abs() <= 1.0e-12);
+
+    let oct = plan(&direct.replace(".DC V1 LIST -2 0 5", ".DC OCT V1 .125 66 3"));
+    let oct_points = oct.dc.primary_spec().points();
+    assert_eq!(oct_points.len(), 28);
+    assert_eq!(oct_points.first().copied(), Some(0.125));
+    assert!((oct_points.last().copied().expect("OCT endpoint") - 64.0).abs() <= 1.0e-12);
+
+    let nested = plan(&direct.replace(".DC V1 LIST -2 0 5", ".DC V1 0 18 1 V1 0 18 1"));
+    assert_eq!(nested.dc.primary_spec().points().len(), 19);
+    assert_eq!(
+        nested
+            .dc
+            .sweep2
+            .as_ref()
+            .expect("secondary sweep")
+            .spec()
+            .points()
+            .len(),
+        19
+    );
+}
+
+#[test]
+fn transient_analysis_expression_family_is_complete_bijective_and_fail_closed() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-tran-expression-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let family_dir = root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_ANALYSIS_FORMS");
+    fs::create_dir_all(&family_dir).expect("create transient-expression family fixture");
+    let literal_a = family_dir.join("literal_decay.cir");
+    let expression_a = family_dir.join("parameter_decay.cir");
+    let literal_b = family_dir.join("literal_sources.cir");
+    let expression_b = family_dir.join("parameter_sources.cir");
+    let direct_a = "\
+generic decay pair
+V1 out 0 0
+R1 out 0 1k
+.TRAN 0 1m
+.PRINT TRAN V(out)
+.END
+";
+    let parameter_a = direct_a.replace(
+        ".TRAN 0 1m",
+        ".PARAM first=0\n.PARAM last=1m\n.TRAN {first} {last}",
+    );
+    let direct_b = "\
+generic source pair
+V1 out 0 SIN(0 1 1k 0 0)
+R1 out 0 2k
+.TRAN 1u 2m 0 10u
+.PRINT TRAN V(out)
+.END
+";
+    let parameter_b = direct_b.replace(
+            ".TRAN 1u 2m 0 10u",
+            ".PARAM first=.5u\n.PARAM last=1m\n.PARAM start=0\n.PARAM ceiling=5u\n.TRAN {2*first} {2*last} {start} {2*ceiling}",
+        );
+    for (path, source) in [
+        (&literal_a, direct_a),
+        (&expression_a, parameter_a.as_str()),
+        (&literal_b, direct_b),
+        (&expression_b, parameter_b.as_str()),
+    ] {
+        fs::write(path, source).expect("write transient-expression family member");
+    }
+    let manifest = format!(
+        "Netlists/Certification_Tests/GENERIC_ANALYSIS_FORMS/parameter_decay.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/Certification_Tests/GENERIC_ANALYSIS_FORMS/parameter_sources.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest)
+        .expect("write transient-expression wrapper provenance");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for path in [&literal_a, &expression_a, &literal_b, &expression_b] {
+        let relative_path = runner.relative_key(path);
+        let deck = XyceDeck {
+            path: path.clone(),
+            relative_path,
+            section: XyceDeckSection::Netlists,
+        };
+        let contract = runner
+            .transient_analysis_expression_family_contract(&deck)
+            .expect("complete generic semantic family qualifies");
+        assert_eq!(
+            contract.kind,
+            XyceBaselineFamilyKind::TransientAnalysisExpression
+        );
+        assert_eq!(
+            contract.comparison,
+            XyceBaselineFamilyComparison::TolerancedStrict
+        );
+        assert_eq!(contract.member_paths.len(), 2);
+        assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+    }
+
+    let extra = family_dir.join("unrelated.cir");
+    fs::write(&extra, direct_a).expect("write unrelated family member");
+    let deck = XyceDeck {
+        path: literal_a.clone(),
+        relative_path: runner.relative_key(&literal_a),
+        section: XyceDeckSection::Netlists,
+    };
+    assert!(
+        runner
+            .transient_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "an unpaired circuit prevents complete-family inference"
+    );
+    fs::remove_file(&extra).expect("remove unrelated family member");
+
+    fs::write(&expression_b, "").expect("empty one wrapper member");
+    assert!(
+        runner
+            .transient_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "empty members fail closed"
+    );
+    fs::write(&expression_b, &parameter_b).expect("restore wrapper member");
+
+    let output_dir = root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_ANALYSIS_FORMS");
+    fs::create_dir_all(&output_dir).expect("create forbidden static-oracle directory");
+    fs::write(output_dir.join("literal_decay.cir.prn"), "oracle\n")
+        .expect("write forbidden static oracle");
+    assert!(
+        runner
+            .transient_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "generated-reference families must not mix static waveform ownership"
+    );
+    fs::remove_dir_all(&output_dir).expect("remove forbidden oracle");
+
+    fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/GENERIC_ANALYSIS_FORMS/parameter_decay.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("remove one wrapper provenance record");
+    let incomplete_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        incomplete_runner
+            .transient_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "wrapper/baseline imbalance fails closed"
+    );
+
+    fs::write(root.join(HARNESS_MANIFEST_FILE), &manifest).expect("restore manifest");
+    fs::remove_file(&literal_b).expect("remove second baseline");
+    fs::remove_file(&expression_b).expect("remove second wrapper");
+    let single_pair_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        single_pair_runner
+            .transient_analysis_expression_family_contract(&deck)
+            .is_none(),
+        "one coincidental pair is insufficient generated-reference provenance"
+    );
+
+    fs::remove_dir_all(&root).expect("remove transient-expression family fixture");
+}
+
+#[test]
+fn transient_analysis_expression_snapshot_proves_only_analysis_representation_changes() {
+    let direct = "\
+generic transient expression snapshot
+V1 out 0 SIN(0 1 1k 0 0)
+R1 out 0 1k
+.TRAN 2u 2m 0 10u
+.PRINT TRAN V(out)
+.OPTIONS TIMEINT RELTOL=1e-6
+.END
+";
+    let parameterized = direct.replace(
+            ".TRAN 2u 2m 0 10u",
+            ".PARAM first=1u\n.PARAM last=1m\n.PARAM start=0\n.PARAM ceiling=5u\n.TRAN {2*first} {2*last} {start} {2*ceiling}",
+        );
+    let print = XycePrintRequest {
+        probes: vec!["V(out)".to_string()],
+    };
+    let snapshot = |source: &str| {
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
+            .expect("transient-expression snapshot fixture parses");
+        XyceTestRunner::transient_analysis_expression_snapshot(&netlist, &print)
+    };
+    let baseline = snapshot(direct).expect("direct numeric representation qualifies");
+    let target = snapshot(&parameterized).expect("parameter expression representation qualifies");
+    XyceTestRunner::compare_transient_analysis_expression_snapshots(&baseline, &target)
+        .expect("only .PARAM/.TRAN representation differs");
+
+    let plan = XyceStaticTranPlan {
+        deck_path: PathBuf::from("member.cir"),
+        reference_path: PathBuf::new(),
+        source: direct.to_string(),
+        print: print.clone(),
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 2.0e-6,
+            stop: 2.0e-3,
+            start: Some(0.0),
+            max_step: Some(1.0e-5),
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::PlainStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    };
+    XyceTestRunner::validate_transient_analysis_expression_plan(&plan)
+        .expect("canonical default-tolerance plan qualifies");
+    let mut tolerance_override = plan;
+    tolerance_override.wrapper_tolerance = Some(XyceComparisonTolerance::from_config(
+        &XyceRunnerConfig::default(),
+    ));
+    assert!(
+        XyceTestRunner::validate_transient_analysis_expression_plan(&tolerance_override).is_err(),
+        "generated-reference analysis-expression parity must retain the canonical default verifier tolerance"
+    );
+
+    for invalid in [
+        parameterized.replace("{2*first}", "{first+first}"),
+        parameterized.replace("{2*first}", "{sqrt(first)}"),
+        parameterized.replace("R1 out 0 1k", "R1 out 0 first"),
+        parameterized.replace("{2*last}", "2m"),
+        parameterized.replace(".PARAM ceiling=5u", ".PARAM ceiling=5u\n.PARAM unused=1"),
+        parameterized.replace(".TRAN", "*COMP V(out) reltol=.1\n.TRAN"),
+    ] {
+        assert!(
+            snapshot(&invalid).is_err(),
+            "parameter reuse, functions, non-analysis use, mixed forms, extras, and comparator overrides fail closed: {invalid}"
+        );
+    }
+
+    for changed in [
+        parameterized.replace("generic transient expression snapshot", "changed title"),
+        parameterized.replace("R1 out 0 1k", "R1 out 0 2k"),
+        parameterized.replace("SIN(0 1 1k 0 0)", "SIN(0 2 1k 0 0)"),
+        parameterized.replace("V1 out 0", "V1 changed 0"),
+        parameterized.replace("RELTOL=1e-6", "RELTOL=2e-6"),
+        parameterized.replace(".PRINT TRAN V(out)", ".PRINT TRAN V(changed)"),
+    ] {
+        let changed = snapshot(&changed).expect("semantic mutation remains individually valid");
+        assert!(
+            XyceTestRunner::compare_transient_analysis_expression_snapshots(&baseline, &changed)
+                .is_err(),
+            "title, topology, values, source waveforms, options, and nonrepresentation source participate in parity"
+        );
+    }
+}
+
+#[test]
+fn baseline_family_record_still_selects_a_real_comparison_target() {
+    let baseline = PathBuf::from("family0.cir");
+    let member = PathBuf::from("family1.cir");
+    let contract = XyceBaselineFamilyContract {
+        kind: XyceBaselineFamilyKind::Subckt,
+        comparison: XyceBaselineFamilyComparison::Toleranced,
+        family: "family".to_string(),
+        baseline_path: baseline.clone(),
+        member_paths: vec![baseline.clone(), member.clone()],
+        target_path: Some(baseline),
+    };
+
+    let (targets, baseline_record) = XyceTestRunner::baseline_family_targets(&contract);
+
+    assert!(baseline_record);
+    assert_eq!(targets, vec![member]);
+}
+
+#[test]
+fn relational_transient_contract_accepts_only_validated_mos3_and_diode_subsets() {
+    let netlist = Netlist::parse(
+        "\
+validated relational nonlinear subsets
+VDD d 0 5
+VG g 0 PULSE(0 5 0 1n 1n 1u)
+M1 d g 0 0 NM L=5u W=175u
+D1 d 0 DM
+.MODEL NM NMOS (LEVEL=3 VTO=1 KP=2e-5 TOX=6e-8 NSUB=8e15)
+.MODEL DM D (IS=2e-14 N=1.1 CJO=3e-10 TT=1e-7)
+.TRAN 10n 1u
+.PRINT TRAN V(d)
+.END
+",
+    )
+    .expect("validated relational deck parses");
+
+    XyceTestRunner::validate_native_relational_transient_contract(&netlist)
+        .expect("validated native MOS3 and diode subsets are eligible relational runtimes");
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+        "the same devices must remain outside the absolute Xyce transient oracle envelope"
+    );
+}
+
+#[test]
+fn scoped_model_relational_purpose_has_a_separate_exact_device_envelope() {
+    let netlist = Netlist::parse(
+        "\
+validated scoped-model relational subset
+VCC c 0 5
+VB b 0 PULSE(0 .8 0 1n 1n 10n 20n)
+R1 c 0 1k
+C1 b 0 1p
+G1 c 0 b 0 1m
+B1 x 0 V={V(c)*K}
+Q1 c b 0 QN
+D1 c 0 DX
+.PARAM K=.5
+.MODEL QN NPN (IS=8e-16 BF=62.5)
+.MODEL DX D (IS=8e-16)
+.TRAN 1n 20n
+.PRINT TRAN V(c)
+.END
+",
+    )
+    .expect("scoped-model relational subset parses");
+
+    XyceTestRunner::validate_native_transient_contract_for_purpose(
+        &netlist,
+        XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+    )
+    .expect("exact scoped-model purpose accepts only its qualified BJT/diode subset");
+    assert!(
+        XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
+        "ordinary relational families must continue rejecting BJT devices"
+    );
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("the absolute purpose shares the exact-IS diode and validated NPN envelopes");
+
+    let contract = XyceBaselineFamilyContract {
+        kind: XyceBaselineFamilyKind::ScopedModel,
+        comparison: XyceBaselineFamilyComparison::Exact,
+        family: "derived-model-semantics".to_string(),
+        baseline_path: PathBuf::from("baseline.cir"),
+        member_paths: vec![PathBuf::from("baseline.cir"), PathBuf::from("owner.cir")],
+        target_path: Some(PathBuf::from("owner.cir")),
+    };
+    let baseline_snapshot = XyceTestRunner::scoped_model_family_snapshot(&contract, &netlist)
+        .expect("qualified scoped snapshot builds")
+        .expect("scoped family has a snapshot");
+    let snapshot_for = |candidate: &Netlist| {
+        XyceTestRunner::scoped_model_family_snapshot(&contract, candidate)
+            .expect("changed semantic snapshot builds")
+            .expect("scoped family has a snapshot")
+    };
+
+    let mut changed_resistor = netlist.clone();
+    let ElementKind::Resistor { value, .. } = &mut changed_resistor
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("R1"))
+        .expect("R1 exists")
+        .kind
+    else {
+        panic!("R1 remains a resistor");
+    };
+    *value = 2.0e3;
+    assert_ne!(baseline_snapshot, snapshot_for(&changed_resistor));
+
+    let mut changed_capacitor = netlist.clone();
+    let ElementKind::Capacitor { value, .. } = &mut changed_capacitor
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("C1"))
+        .expect("C1 exists")
+        .kind
+    else {
+        panic!("C1 remains a capacitor");
+    };
+    *value = 2.0e-12;
+    assert_ne!(baseline_snapshot, snapshot_for(&changed_capacitor));
+
+    let mut changed_dc_source = netlist.clone();
+    let ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Dc(value)) =
+        &mut changed_dc_source
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("VCC"))
+            .expect("VCC exists")
+            .kind
+    else {
+        panic!("VCC remains a DC voltage source");
+    };
+    *value = 6.0;
+    assert_ne!(baseline_snapshot, snapshot_for(&changed_dc_source));
+
+    let mut changed_pulse_source = netlist.clone();
+    let ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse { v2, .. }) =
+        &mut changed_pulse_source
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("VB"))
+            .expect("VB exists")
+            .kind
+    else {
+        panic!("VB remains a pulse voltage source");
+    };
+    *v2 = 0.9;
+    assert_ne!(baseline_snapshot, snapshot_for(&changed_pulse_source));
+
+    let mut changed_vccs = netlist.clone();
+    let ElementKind::Vccs {
+        transconductance, ..
+    } = &mut changed_vccs
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("G1"))
+        .expect("G1 exists")
+        .kind
+    else {
+        panic!("G1 remains a VCCS");
+    };
+    *transconductance = 2.0e-3;
+    assert_ne!(baseline_snapshot, snapshot_for(&changed_vccs));
+
+    let mut changed_behavioral_binding = netlist.clone();
+    changed_behavioral_binding.params.set("K", 0.6);
+    assert_ne!(baseline_snapshot, snapshot_for(&changed_behavioral_binding));
+
+    let mut changed_behavioral_expression = netlist.clone();
+    let ElementKind::BehavioralVoltage { expression, .. } = &mut changed_behavioral_expression
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("B1"))
+        .expect("B1 exists")
+        .kind
+    else {
+        panic!("B1 remains a behavioral voltage source");
+    };
+    *expression = "V(c)*0.7".to_string();
+    assert_ne!(
+        baseline_snapshot,
+        snapshot_for(&changed_behavioral_expression)
+    );
+
+    let mut changed_kind = netlist.clone();
+    changed_kind
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("G1"))
+        .expect("G1 exists")
+        .kind = ElementKind::Resistor {
+        value: 1.0e3,
+        value_expr: None,
+        model: None,
+        instance_params: Vec::new(),
+        deferred_params: Vec::new(),
+    };
+    let changed_kind_snapshot = snapshot_for(&changed_kind);
+    assert_ne!(baseline_snapshot, changed_kind_snapshot);
+
+    let mut changed_bf = netlist.clone();
+    changed_bf
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("QN"))
+        .expect("QN model exists")
+        .params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("BF"))
+        .expect("BF exists")
+        .1 = 63.5;
+    let changed_bf_snapshot = snapshot_for(&changed_bf);
+    assert_ne!(baseline_snapshot, changed_bf_snapshot);
+
+    let mut changed_diode_is = netlist.clone();
+    changed_diode_is
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("DX"))
+        .expect("DX model exists")
+        .params[0]
+        .1 = 9.0e-16;
+    let changed_diode_snapshot = snapshot_for(&changed_diode_is);
+    assert_ne!(baseline_snapshot, changed_diode_snapshot);
+
+    let mut extra_parameter = netlist.clone();
+    extra_parameter
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("QN"))
+        .expect("QN model exists")
+        .params
+        .push(("RC".to_string(), 1.0));
+    assert!(
+        XyceTestRunner::validate_native_transient_contract_for_purpose(
+            &extra_parameter,
+            XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+        )
+        .is_err(),
+        "extra BJT parameters must remain outside the scoped-model proof envelope"
+    );
+
+    let mut duplicate_bjt_model = netlist.clone();
+    let qn = duplicate_bjt_model
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("QN"))
+        .expect("QN model exists")
+        .clone();
+    duplicate_bjt_model.models.push(qn);
+    assert!(
+        XyceTestRunner::validate_native_transient_contract_for_purpose(
+            &duplicate_bjt_model,
+            XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+        )
+        .is_err(),
+        "ambiguous BJT model definitions must fail closed"
+    );
+
+    let mut duplicate_diode_model = netlist.clone();
+    let dx = duplicate_diode_model
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("DX"))
+        .expect("DX model exists")
+        .clone();
+    duplicate_diode_model.models.push(dx);
+    assert!(
+        XyceTestRunner::validate_native_transient_contract_for_purpose(
+            &duplicate_diode_model,
+            XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+        )
+        .is_err(),
+        "ambiguous diode model definitions must fail closed"
+    );
+}
+
+#[test]
+fn absolute_transient_contract_accepts_only_exact_is_diode_subset() {
+    let source = "\
+validated native exact-IS diode transient subset
+VIN in 0 PULSE(5 -1 1n .1n .1n 2n 4n)
+R1 in out 2k
+D1 out 0 DMOD
+.MODEL DMOD D (IS=100f)
+.TRAN .1n 8n
+.PRINT TRAN V(out)
+.END
+";
+    let netlist = Netlist::parse(source).expect("validated exact-IS diode deck parses");
+
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("exact-IS diode with ordinary operating-point startup is eligible");
+
+    for mutation in [
+        source.replace("D1 out 0 DMOD", "D1 out 0 DMOD AREA=2"),
+        source.replace("(IS=100f)", "(IS=100f N=1)"),
+        source.replace("(IS=100f)", "(IS=0)"),
+        source.replace(".TRAN .1n 8n", ".TRAN .1n 8n UIC"),
+        source.replace(".TRAN .1n 8n", ".OPTIONS TEMP=50\n.TRAN .1n 8n"),
+        source.replace(".TRAN .1n 8n", ".OPTIONS GMIN=1e-12\n.TRAN .1n 8n"),
+    ] {
+        let mutated = Netlist::parse(&mutation).expect("diode contract mutation parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&mutated).is_err(),
+            "instance overrides, broader models, and nonstandard startup must fail closed: {mutation}"
+        );
+    }
+
+    let mut ambiguous = netlist;
+    let duplicate = ambiguous
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("DMOD"))
+        .expect("DMOD exists")
+        .clone();
+    ambiguous.models.push(duplicate);
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&ambiguous).is_err(),
+        "ambiguous diode model definitions must fail closed"
+    );
+}
+
+#[test]
+fn absolute_transient_contract_accepts_bare_default_diode_model() {
+    let source = "\
+validated native default-D diode transient subset
+VIN in 0 PULSE(0 5 1n .1n .1n 2n 4n)
+R1 in out 2k
+D1 out 0 DMOD
+.MODEL DMOD D
+.TRAN .1n 8n
+.PRINT TRAN V(out)
+.END
+";
+    let netlist = Netlist::parse(source).expect("bare default-D diode deck parses");
+
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("bare default-D model uses canonical Xyce diode defaults");
+
+    for mutation in [
+        source.replace(".MODEL DMOD D\n", ".MODEL DMOD D (LEVEL=0)\n"),
+        source.replace(".MODEL DMOD D\n", ".MODEL DMOD D (BOGOPARAM={1+2})\n"),
+        source.replace(".MODEL DMOD D\n", ".MODEL DMOD D (N=1)\n"),
+    ] {
+        let mutated = Netlist::parse(&mutation).expect("default-D mutation parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&mutated).is_err(),
+            "non-default model fields must leave the bare default-D envelope: {mutation}"
+        );
+    }
+}
+
+#[test]
+fn absolute_is_only_diode_model_contract_rejects_nonnumeric_parameter_routes() {
+    let qualified = rspice_core::netlist::ModelDef {
+        name: "DMOD".to_string(),
+        model_type: "D".to_string(),
+        params: vec![("IS".to_string(), 1.0e-13)],
+        expr_params: Vec::new(),
+        string_params: Vec::new(),
+        string_vector_params: Vec::new(),
+        real_vector_params: Vec::new(),
+        real_vector_expr_params: Vec::new(),
+        integer_vector_params: Vec::new(),
+    };
+    assert!(XyceTestRunner::model_is_native_exact_is_diode(&qualified));
+
+    let mut nonfinite = qualified.clone();
+    nonfinite.params[0].1 = Value::NAN;
+    assert!(!XyceTestRunner::model_is_native_exact_is_diode(&nonfinite));
+
+    let mut unknown = qualified.clone();
+    unknown.params.push(("N".to_string(), 1.0));
+    assert!(!XyceTestRunner::model_is_native_exact_is_diode(&unknown));
+
+    let mut expression = qualified.clone();
+    expression
+        .expr_params
+        .push(("IS".to_string(), "saturation_current".to_string()));
+    assert!(!XyceTestRunner::model_is_native_exact_is_diode(&expression));
+
+    let mut string = qualified.clone();
+    string
+        .string_params
+        .push(("IS".to_string(), "nominal".to_string()));
+    assert!(!XyceTestRunner::model_is_native_exact_is_diode(&string));
+
+    let mut vector = qualified;
+    vector
+        .real_vector_params
+        .push(("IS".to_string(), vec![1.0e-13, 2.0e-13]));
+    assert!(!XyceTestRunner::model_is_native_exact_is_diode(&vector));
+}
+
+#[test]
+fn absolute_transient_contract_accepts_only_validated_level1_npn_subset() {
+    let netlist = Netlist::parse(
+            "\
+validated native Level-1 NPN transient subset
+VCC c 0 5
+VB b 0 PULSE(0 0.8 1n 1n 1n 10n 20n)
+Q1 c b 0 QN
+Q2 c b 0 0 QN
+.MODEL QN NPN (LEVEL=1 BF=80 BR=.2 RB=100 RC=0 RE=0 CJS=.3p TF=.3n TR=6n CJE=3p CJC=2p IS=1e-16 NE=1 NC=1.1 VJE=.84 VJC=1.1 MJE=.36 MJC=.76 VAF=50 EG=1.1)
+.TRAN .5n 25n
+.PRINT TRAN V(c)
+.END
+",
+        )
+        .expect("validated Level-1 NPN deck parses");
+
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("validated three-terminal and grounded-substrate NPN devices are eligible");
+    assert!(
+        XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
+        "absolute Level-1 NPN qualification must not broaden relational family contracts"
+    );
+}
+
+fn absolute_level9_bsim3_test_source() -> &'static str {
+    "\
+validated Xyce LEVEL=9 BSIM3 absolute transient
+VDD vdd 0 5
+VIN in 0 PULSE(0 5 1n .1n .1n 5n 10n)
+M1 out in 0 0 NMOD W=1.8u L=1.2u
+M2 out in vdd vdd PMOD W=3.6u L=1.2u
+C1 out 0 10f
+.MODEL NMOD NMOS (LEVEL=9)
+.MODEL PMOD PMOS (LEVEL=9)
+.TRAN .1n 12n
+.PRINT TRAN PRECISION=12 WIDTH=21 V(out)
+.END
+"
+}
+
+fn absolute_level9_bsim3_test_netlist() -> Netlist {
+    Netlist::parse(absolute_level9_bsim3_test_source())
+        .expect("validated Xyce LEVEL=9 BSIM3 deck parses")
+}
+
+fn absolute_level9_bsim3_selector_test_plan(
+    source: &str,
+    reference_path: PathBuf,
+) -> XyceStaticTranPlan {
+    XyceStaticTranPlan {
+        deck_path: PathBuf::from("renamed-level9.cir"),
+        reference_path,
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 1.0e-10,
+            stop: 12.0e-9,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::PlainStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    }
+}
+
+#[test]
+fn narrow_voltage_switch_pointwise_comparisons_enable_rms_fallback() {
+    let source = "\
+narrow Xyce voltage switch
+VCTRL control 0 0
+S1 out 0 control 0 SW
+R1 out 0 1k
+.MODEL SW VSWITCH (RON=1 ROFF=1MEG VON=2.51 VOFF=2.5)
+.TRAN 1n 10n
+.PRINT TRAN V(out)
+.END
+";
+    let narrow = Netlist::parse(source).expect("narrow VSWITCH fixture parses");
+    assert!(
+        XyceTestRunner::pointwise_switch_transition_needs_rms_fallback(&narrow),
+        "a narrow transition should retain pointwise comparison with the canonical RMS fallback"
+    );
+
+    let wide = Netlist::parse(&source.replace("VON=2.51", "VON=3.5"))
+        .expect("wide VSWITCH fixture parses");
+    assert!(
+        !XyceTestRunner::pointwise_switch_transition_needs_rms_fallback(&wide),
+        "a wide transition should remain strictly pointwise"
+    );
+}
+
+#[test]
+fn level9_xyce_verify_source_precision_is_strict_and_canonical() {
+    let source = absolute_level9_bsim3_test_source();
+    assert_eq!(
+        XyceTestRunner::strict_level9_xyce_verify_source_precision(source, 2)
+            .expect("canonical source qualifies"),
+        Some(12)
+    );
+
+    let equivalent_output_forms = [
+        source.replace("WIDTH=21", "WIDTH=20"),
+        source.replace("WIDTH=21", "WIDTH=0"),
+        source.replace("WIDTH=21", "WIDTH=21.0"),
+        source.replace("WIDTH=21", "WIDTH=21 WIDTH=30"),
+        source.replace("PRECISION=12", "PRECISION=12.0"),
+        source.replace("PRECISION=12", "PRECISION=12e0"),
+        source.replace("PRECISION=12", "PRECISION=12.9"),
+        source.replace("PRECISION=12", "PRECISION=8 PRECISION=12"),
+        source.replace("PRECISION=12 WIDTH=21", "WIDTH=21 PRECISION=12"),
+        source.replace("PRECISION=12", "FORMAT=STD PRECISION=12"),
+        source.replace("PRECISION=12", "FORMAT=STD FORMAT=STD PRECISION=12"),
+        source.replace("PRECISION=12", "FORMAT=CSV FORMAT=STD PRECISION=12"),
+        source.replace("PRECISION=12", "FORMAT=NOINDEX FORMAT=STD PRECISION=12"),
+        source.replace("PRECISION=12", "FILTER=1 FILTER=0 PRECISION=12"),
+        source.replace(
+            "PRECISION=12",
+            "TIMESCALEFACTOR=2 TIMESCALEFACTOR=1 PRECISION=12",
+        ),
+        source.replace(" WIDTH=21", ""),
+    ];
+    for equivalent in equivalent_output_forms {
+        assert_eq!(
+            XyceTestRunner::strict_level9_xyce_verify_source_precision(&equivalent, 2)
+                .expect("semantically equivalent STD output form evaluates"),
+            Some(12),
+            "WIDTH padding and leading tagged-option order must not alter numeric verifier semantics"
+        );
+    }
+
+    let mutations = [
+        source.replace("PRECISION=12", "PRECISION=8"),
+        source.replace("PRECISION=12", "PRECISION=11.9"),
+        source.replace("PRECISION=12", "PRECISION=1e100"),
+        source.replace("PRECISION=12", "PRECISION=-1 PRECISION=12"),
+        source.replace("PRECISION=12 ", ""),
+        source.replace("WIDTH=21", "WIDTH=not-an-integer"),
+        source.replace("WIDTH=21", "WIDTH=1e100"),
+        source.replace("WIDTH=21", "WIDTH=-5"),
+        source.replace("WIDTH=21", "WIDTH=-5.5"),
+        source.replace("WIDTH=21", "WIDTH='21'"),
+        source.replace("PRECISION=12", "PRECISION=12 PRECISION=8"),
+        source.replace("PRECISION=12", "FORMAT=CSV PRECISION=12"),
+        source.replace("PRECISION=12", "FORMAT=STD FORMAT=CSV PRECISION=12"),
+        source.replace("PRECISION=12", "FILTER=1 PRECISION=12"),
+        source.replace("PRECISION=12", "TIMESCALEFACTOR=2 PRECISION=12"),
+        source.replace("V(out)", "NOINDEX V(out)"),
+        source.replace("V(out)", "V(out) NOINDEX"),
+        source.replace("V(out)", "FILE='side.prn' V(out)"),
+        source.replace("V(out)", "V(out) DELIMITER=','"),
+        source.replace("V(out)", "V(out) FILTER=1"),
+        source.replace("V(out)", "V(out) TIMESCALEFACTOR=1"),
+        source.replace("V(out)", "V(out) UNKNOWN=1"),
+        source.replace(".TRAN .1n 12n", ".TRAN .1n 12n UIC"),
+        source.replace(".END", ".OPTIONS RELTOL=1e-4\n.END"),
+        source.replace(".END", ".PARAM P=1\n.END"),
+        source.replace(".END", ".SAVE V(out)\n.END"),
+        source.replace(".END", ".PRINT TRAN PRECISION=12 WIDTH=21 V(out)\n.END"),
+    ];
+    for mutation in mutations {
+        assert!(
+            !matches!(
+                XyceTestRunner::strict_level9_xyce_verify_source_precision(&mutation, 2),
+                Ok(Some(12))
+            ),
+            "mutated source must not retain the integrated-RMS contract: {mutation}"
+        );
+    }
+    assert!(XyceTestRunner::source_has_comp_directive(
+        &source.replace(".END", "*COMP V(out)\n.END")
+    ));
+    assert!(!XyceTestRunner::source_has_comp_directive(
+        &source.replace(".END", "*COMP{V(out)} RELTOL=1e-3\n.END")
+    ));
+    assert!(!XyceTestRunner::source_has_comp_directive(
+        &source.replace(".END", "*Comparator documentation\n.END")
+    ));
+}
+
+#[test]
+fn level9_default_output_accepts_plain_precisionless_print() {
+    let source = absolute_level9_bsim3_test_source().replace("PRECISION=12 WIDTH=21 ", "");
+    assert!(XyceTestRunner::level9_xyce_verify_default_output(
+        &source, 2
+    ));
+    let netlist = Netlist::parse(&source).expect("precisionless LEVEL=9 fixture parses");
+    let reference_path = std::env::current_exe().expect("test executable is an existing file");
+    let plan = absolute_level9_bsim3_selector_test_plan(&source, reference_path);
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("precisionless LEVEL=9 selector evaluates"),
+        XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        }
+    );
+}
+
+#[test]
+fn level9_default_output_executes_checked_in_oneshot_oracle() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let deck_path = root.join("Netlists/ONESHOT/one-shot.cir");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_tran_plan_for_path_with_purpose(
+            &deck_path,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+        )
+        .expect("checked-in LEVEL=9 one-shot plan qualifies");
+    assert_eq!(
+        plan.comparison_mode,
+        XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+            scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
+        }
+    );
+    let result = runner.run_test(&deck_path);
+    assert!(
+        result.passed,
+        "checked-in LEVEL=9 one-shot failed: {result:?}"
+    );
+    assert!(!result.expected_unsupported);
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected mismatches: {result:?}"
+    );
+}
+
+#[test]
+fn level9_default_output_executes_checked_in_bug439_formerly_bad_vsrc_oracle() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let deck_path = root.join("Netlists/Certification_Tests/BUG_439/formerly-bad-vsrc.cir");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_tran_plan_for_path_with_purpose(
+            &deck_path,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+        )
+        .expect("checked-in BUG439 LEVEL=9 plan qualifies");
+    assert_eq!(
+        plan.comparison_mode,
+        XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: 12,
+        }
+    );
+    let result = runner.run_test(&deck_path);
+    assert!(result.passed, "checked-in BUG439 oracle failed: {result:?}");
+    assert!(!result.expected_unsupported);
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected BUG439 mismatches: {result:?}"
+    );
+}
+
+#[test]
+fn stepped_xyce_verify_selector_preserves_primary_prn_precision_and_comp() {
+    let source = "\
+validated stepped transient verifier
+V1 in 0 PULSE(0 1 1n .1n .1n 2n 5n)
+R1 in 0 1k
+.TRAN .1n 10n
+.PRINT TRAN V(in)
+.END
+";
+    let netlist = Netlist::parse(source).expect("stepped selector fixture parses");
+    let reference_path = std::env::current_exe().expect("test executable is an existing file");
+    let step = StepCommand {
+        target: StepTarget::Device,
+        name: "R1".to_string(),
+        param_name: Some("R".to_string()),
+        sweep: StepSweep::Linear {
+            start: 1.0e3,
+            stop: 2.0e3,
+            step: 1.0e3,
+        },
+    };
+    let make_plan = |source: &str| XyceStaticTranPlan {
+        deck_path: PathBuf::from("renamed-step-tran.cir"),
+        reference_path: reference_path.clone(),
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec!["V(in)".to_string()],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 1.0e-10,
+            stop: 10.0e-9,
+            start: None,
+            max_step: None,
+            uic: false,
+        },
+        steps: vec![step.clone()],
+        contract: XyceStaticTranContract::PlainStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    };
+
+    let default_plan = make_plan(source);
+    let default_mode = XyceTestRunner::select_static_tran_comparison_mode(
+        &default_plan,
+        &netlist,
+        XyceStaticTranPlanPurpose::AbsoluteOracle,
+        false,
+    )
+    .expect("default-precision stepped selector evaluates");
+    assert_eq!(
+        default_mode,
+        XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        }
+    );
+    let mut integrated_plan = default_plan.clone();
+    integrated_plan.comparison_mode = default_mode;
+    assert_eq!(
+        integrated_plan.result_contract(),
+        "static_prn_step_tran",
+        "comparison mode must not change the public stepped-output contract"
+    );
+
+    let comp_source = source.replace(
+        ".PRINT TRAN V(in)",
+        ".PRINT TRAN PRECISION=12 WIDTH=21 V(in)\n*COMP TIME ZEROTOL=0",
+    );
+    let comp_plan = make_plan(&comp_source);
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &comp_plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("authored-precision stepped *COMP selector evaluates"),
+        XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: 12,
+        }
+    );
+
+    let probe_comp_source = comp_source.replace("*COMP TIME ZEROTOL=0", "*COMP V(in) RELTOL=1e-3");
+    let probe_comp_plan = make_plan(&probe_comp_source);
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &probe_comp_plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("printed-probe stepped *COMP selector evaluates"),
+        XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+            scientific_precision: 12,
+            error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
+        }
+    );
+
+    assert!(
+        XyceTestRunner::xyce_verify_step_tran_scientific_precision(
+            &source.replace(".PRINT TRAN", ".PRINT TRAN FORMAT=NOINDEX")
+        )
+        .is_err(),
+        "the integrated verifier must fail closed for non-indexed primary output"
+    );
+}
+
+#[test]
+fn level9_xyce_verify_comparison_selector_fails_closed() {
+    let source = absolute_level9_bsim3_test_source();
+    let netlist = absolute_level9_bsim3_test_netlist();
+    let reference_path = std::env::current_exe().expect("test executable is an existing file");
+    let plan = absolute_level9_bsim3_selector_test_plan(source, reference_path.clone());
+    let selected = XyceTestRunner::select_static_tran_comparison_mode(
+        &plan,
+        &netlist,
+        XyceStaticTranPlanPurpose::AbsoluteOracle,
+        false,
+    )
+    .expect("canonical selector evaluates");
+    assert_eq!(
+        selected,
+        XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: 12
+        }
+    );
+    assert!(selected.uses_integrated_rms_verifier());
+    let mut selected_plan = plan.clone();
+    selected_plan.comparison_mode = selected;
+    assert_eq!(
+        selected_plan.result_contract(),
+        "static_xyce_verify_prn_tran"
+    );
+    selected_plan.comparison_mode = XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+        scientific_precision: 12,
+        error_bounds: XyceVerifyCompErrorBounds::Release710Default,
+    };
+    assert_eq!(
+        selected_plan.result_contract(),
+        "static_xyce_verify_prn_tran",
+        "non-stepped *COMP runs retain the integrated-verifier contract even with default error bounds"
+    );
+    let coarse_reference = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ],
+        rows: vec![vec![0.0, 0.0, 0.0], vec![1.0, selected_plan.tran.stop, 0.0]],
+    };
+    let mut dense_reference = coarse_reference.clone();
+    dense_reference
+        .rows
+        .insert(1, vec![1.0, selected_plan.tran.stop / 10_000.0, 0.0]);
+    dense_reference.rows[2][0] = 2.0;
+    let dc_netlist =
+        Netlist::parse(&source.replace("VIN in 0 PULSE(0 5 1n .1n .1n 5n 10n)", "VIN in 0 0"))
+            .expect("reference-independence fixture parses");
+    let coarse_step = XyceTestRunner::transient_max_step_for_static_plan(
+        &selected_plan,
+        &dc_netlist,
+        &selected_plan.tran,
+        &coarse_reference,
+    )
+    .expect("reference-independent adaptive maximum step resolves");
+    let dense_step = XyceTestRunner::transient_max_step_for_static_plan(
+        &selected_plan,
+        &dc_netlist,
+        &selected_plan.tran,
+        &dense_reference,
+    )
+    .expect("reference-independent adaptive maximum step ignores gold density");
+    assert_eq!(
+        coarse_step.to_bits(),
+        dense_step.to_bits(),
+        "the checked oracle time grid must not influence the simulator's adaptive maximum step"
+    );
+
+    for purpose in [
+        XyceStaticTranPlanPurpose::AnalyticOracle,
+        XyceStaticTranPlanPurpose::RelationalFamily,
+    ] {
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(&plan, &netlist, purpose, false,)
+                .expect("non-absolute purpose evaluates"),
+            XyceStaticTranComparisonMode::Pointwise
+        );
+    }
+    assert!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle,
+            false,
+        )
+        .is_err(),
+        "the dedicated purpose must be derived from a successful selector, never supplied as an input"
+    );
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            true,
+        )
+        .expect("wrapper provenance evaluates"),
+        XyceStaticTranComparisonMode::Pointwise
+    );
+
+    let mut plan_mutations = Vec::new();
+    let mut csv = plan.clone();
+    csv.contract = XyceStaticTranContract::PlainCsv;
+    plan_mutations.push(csv);
+    let mut override_output = plan.clone();
+    override_output.output_override = true;
+    plan_mutations.push(override_output);
+    let mut constant_step = plan.clone();
+    constant_step.timeint_conststep = true;
+    plan_mutations.push(constant_step);
+    let mut tolerance = plan.clone();
+    tolerance.wrapper_tolerance = Some(XyceComparisonTolerance::from_config(
+        &XyceRunnerConfig::default(),
+    ));
+    plan_mutations.push(tolerance);
+    let mut missing_reference = plan.clone();
+    missing_reference.reference_path = reference_path.with_extension("missing");
+    plan_mutations.push(missing_reference);
+    let mut comp = plan.clone();
+    comp.source = source.replace(".END", "*COMP V(out)\n.END");
+    plan_mutations.push(comp);
+    for mutated_plan in plan_mutations {
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &mutated_plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("plan mutation evaluates"),
+            XyceStaticTranComparisonMode::Pointwise
+        );
+    }
+
+    let mut diagnostic_netlist = netlist.clone();
+    diagnostic_netlist
+        .diagnostics
+        .push(rspice_core::netlist::ParseDiagnostic::warning(
+            1,
+            "test-warning",
+            "selector diagnostic fixture",
+        ));
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &diagnostic_netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("diagnostic mutation evaluates"),
+        XyceStaticTranComparisonMode::Pointwise
+    );
+    let mut no_mos = netlist;
+    no_mos
+        .elements
+        .retain(|element| !matches!(element.kind, ElementKind::Mosfet { .. }));
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &no_mos,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("missing-device mutation evaluates"),
+        XyceStaticTranComparisonMode::Pointwise
+    );
+
+    let behavioral_source = source.replace("C1 out 0 10f", "C1 out 0 10f\nB1 auxiliary 0 V=V(out)");
+    let behavioral_netlist = Netlist::parse(&behavioral_source)
+        .expect("behavioral companion mutation parses for selector rejection");
+    let behavioral_element = behavioral_netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("B1"))
+        .expect("behavioral companion exists");
+    assert!(
+        !XyceTestRunner::netlist_element_is_native_level9_xyce_verify_supported(behavioral_element,)
+    );
+    let behavioral_plan =
+        absolute_level9_bsim3_selector_test_plan(&behavioral_source, reference_path.clone());
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &behavioral_plan,
+            &behavioral_netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("behavioral companion mutation evaluates"),
+        XyceStaticTranComparisonMode::Pointwise,
+        "behavioral and other nonlinear companion elements must remain outside the strict LEVEL=9 envelope"
+    );
+}
+
+#[test]
+fn level9_xyce_verify_accepts_explicit_dc_pulse_source() {
+    let source = absolute_level9_bsim3_test_source().replace(
+        "VIN in 0 PULSE(0 5 1n .1n .1n 5n 10n)",
+        "VIN in 0 DC 0 PULSE(0 5 1n .1n .1n 5n 10n)",
+    );
+    let netlist = Netlist::parse(&source).expect("explicit DC/PULSE fixture parses");
+    let vin = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("VIN"))
+        .expect("VIN exists");
+    assert!(
+        XyceTestRunner::netlist_element_is_native_level9_xyce_verify_supported(vin),
+        "the strict LEVEL=9 source envelope admits finite DC/PULSE sources"
+    );
+    let reference_path = std::env::current_exe().expect("test executable is an existing file");
+    let plan = absolute_level9_bsim3_selector_test_plan(&source, reference_path);
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("explicit DC/PULSE selector evaluates"),
+        XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: 12
+        }
+    );
+}
+
+#[test]
+fn level9_bsim3_transient_contract_requires_dedicated_xyce_verify_purpose() {
+    let netlist = absolute_level9_bsim3_test_netlist();
+
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+        "ordinary absolute-oracle plans must not admit LEVEL=9"
+    );
+    assert!(
+        XyceTestRunner::validate_native_transient_contract_for_purpose(
+            &netlist,
+            XyceStaticTranPlanPurpose::AnalyticOracle,
+        )
+        .is_err(),
+        "analytic-oracle plans must not acquire LEVEL=9 eligibility"
+    );
+    XyceTestRunner::validate_native_transient_contract_for_purpose(
+        &netlist,
+        XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle,
+    )
+    .expect("the dedicated integrated-RMS purpose admits the strict LEVEL=9 subset");
+    assert!(
+        XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
+        "the dedicated LEVEL=9 purpose must not broaden relational family contracts"
+    );
+}
+
+#[test]
+fn absolute_level9_bsim3_instance_contract_fails_closed() {
+    let netlist = absolute_level9_bsim3_test_netlist();
+    let qualified = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 exists")
+        .clone();
+    assert!(
+        XyceTestRunner::netlist_element_is_native_absolute_transient_level9_bsim3(
+            &netlist, &qualified,
+        )
+    );
+
+    let mut mutations = Vec::new();
+
+    let mut missing_width = qualified.clone();
+    let ElementKind::Mosfet {
+        instance_params, ..
+    } = &mut missing_width.kind
+    else {
+        panic!("M1 is a MOSFET");
+    };
+    instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case("W"));
+    mutations.push(("missing W", missing_width));
+
+    let mut duplicate_width = qualified.clone();
+    let ElementKind::Mosfet {
+        instance_params, ..
+    } = &mut duplicate_width.kind
+    else {
+        panic!("M1 is a MOSFET");
+    };
+    instance_params.push(("W".to_string(), 2.0e-6));
+    mutations.push(("duplicate W", duplicate_width));
+
+    let mut extra_parameter = qualified.clone();
+    let ElementKind::Mosfet {
+        instance_params, ..
+    } = &mut extra_parameter.kind
+    else {
+        panic!("M1 is a MOSFET");
+    };
+    instance_params.push(("M".to_string(), 1.0));
+    mutations.push(("extra instance parameter", extra_parameter));
+
+    for (label, value) in [("zero L", 0.0), ("negative L", -1.0), ("NaN L", Value::NAN)] {
+        let mut invalid_dimension = qualified.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut invalid_dimension.kind
+        else {
+            panic!("M1 is a MOSFET");
+        };
+        instance_params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("L"))
+            .expect("L exists")
+            .1 = value;
+        mutations.push((label, invalid_dimension));
+    }
+
+    let mut deferred_dimension = qualified.clone();
+    let ElementKind::Mosfet {
+        deferred_params, ..
+    } = &mut deferred_dimension.kind
+    else {
+        panic!("M1 is a MOSFET");
+    };
+    deferred_params.push(("W".to_string(), "WIDTH".to_string()));
+    mutations.push(("deferred instance parameter", deferred_dimension));
+
+    let mut compact = qualified.clone();
+    let ElementKind::Mosfet { compact_syntax, .. } = &mut compact.kind else {
+        panic!("M1 is a MOSFET");
+    };
+    *compact_syntax = true;
+    mutations.push(("compact topology", compact));
+
+    let mut three_terminal = qualified.clone();
+    three_terminal.nodes.pop();
+    mutations.push(("three-terminal topology", three_terminal));
+
+    let mut five_terminal = qualified.clone();
+    five_terminal.nodes.push("thermal".to_string());
+    mutations.push(("five-terminal topology", five_terminal));
+
+    let mut missing_model = qualified.clone();
+    let ElementKind::Mosfet { model, .. } = &mut missing_model.kind else {
+        panic!("M1 is a MOSFET");
+    };
+    *model = "UNKNOWN".to_string();
+    mutations.push(("missing model binding", missing_model));
+
+    for (label, element) in mutations {
+        assert!(
+            !XyceTestRunner::netlist_element_is_native_absolute_transient_level9_bsim3(
+                &netlist, &element,
+            ),
+            "{label} must remain outside the absolute LEVEL=9 BSIM3 envelope"
+        );
+    }
+
+    let mut duplicate_model = netlist.clone();
+    let model = duplicate_model
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("NMOD"))
+        .expect("NMOD exists")
+        .clone();
+    duplicate_model.models.push(model);
+    let element = duplicate_model
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 exists");
+    assert!(
+        !XyceTestRunner::netlist_element_is_native_absolute_transient_level9_bsim3(
+            &duplicate_model,
+            element,
+        ),
+        "ambiguous model bindings must fail closed"
+    );
+}
+
+#[test]
+fn absolute_level9_bsim3_model_contract_fails_closed() {
+    let netlist = absolute_level9_bsim3_test_netlist();
+    let qualified = netlist
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("NMOD"))
+        .expect("NMOD exists")
+        .clone();
+    assert!(XyceTestRunner::model_is_native_absolute_transient_level9_bsim3(&qualified));
+    let pmos = netlist
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("PMOD"))
+        .expect("PMOD exists");
+    assert!(XyceTestRunner::model_is_native_absolute_transient_level9_bsim3(pmos));
+
+    let mut mutations = Vec::new();
+
+    for model_type in ["MOS", "VDMOS", "NPN"] {
+        let mut model = qualified.clone();
+        model.model_type = model_type.to_string();
+        mutations.push((model_type, model));
+    }
+    for (label, level) in [("LEVEL=8", 8.0), ("nonfinite LEVEL", Value::NAN)] {
+        let mut model = qualified.clone();
+        model.params[0].1 = level;
+        mutations.push((label, model));
+    }
+
+    let mut missing_level = qualified.clone();
+    missing_level.params.clear();
+    mutations.push(("missing LEVEL", missing_level));
+
+    let mut extra_numeric = qualified.clone();
+    extra_numeric.params.push(("VTH0".to_string(), 0.7));
+    mutations.push(("extra numeric model parameter", extra_numeric));
+
+    let mut duplicate_level = qualified.clone();
+    duplicate_level.params.push(("LEVEL".to_string(), 9.0));
+    mutations.push(("duplicate LEVEL", duplicate_level));
+
+    let mut expression = qualified.clone();
+    expression
+        .expr_params
+        .push(("VTH0".to_string(), "VT".to_string()));
+    mutations.push(("expression model parameter", expression));
+
+    let mut string = qualified.clone();
+    string
+        .string_params
+        .push(("VERSION".to_string(), "3.3.0".to_string()));
+    mutations.push(("string model parameter", string));
+
+    let mut string_vector = qualified.clone();
+    string_vector
+        .string_vector_params
+        .push(("LABELS".to_string(), vec!["fast".to_string()]));
+    mutations.push(("string-vector model parameter", string_vector));
+
+    let mut real_vector = qualified.clone();
+    real_vector
+        .real_vector_params
+        .push(("VALUES".to_string(), vec![1.0]));
+    mutations.push(("real-vector model parameter", real_vector));
+
+    let mut real_vector_expression = qualified.clone();
+    real_vector_expression
+        .real_vector_expr_params
+        .push(("VALUES".to_string(), vec!["P".to_string()]));
+    mutations.push((
+        "real-vector-expression model parameter",
+        real_vector_expression,
+    ));
+
+    let mut integer_vector = qualified;
+    integer_vector
+        .integer_vector_params
+        .push(("VALUES".to_string(), vec![1]));
+    mutations.push(("integer-vector model parameter", integer_vector));
+
+    for (label, model) in mutations {
+        assert!(
+            !XyceTestRunner::model_is_native_absolute_transient_level9_bsim3(&model),
+            "{label} must remain outside the bare LEVEL=9 model envelope"
+        );
+    }
+}
+
+#[test]
+fn absolute_level9_bsim3_transient_contract_requires_standard_startup() {
+    let source = absolute_level9_bsim3_test_source();
+    let variants = [
+        ("UIC", source.replace(".TRAN .1n 12n", ".TRAN .1n 12n UIC")),
+        (
+            "explicit node initial condition",
+            source.replace(".TRAN .1n 12n", ".IC V(out)=0\n.TRAN .1n 12n"),
+        ),
+        (
+            "node-set hint",
+            source.replace(".TRAN .1n 12n", ".NODESET V(out)=0\n.TRAN .1n 12n"),
+        ),
+        (
+            "capacitor initial state",
+            source.replace("C1 out 0 10f", "C1 out 0 10f IC=.1"),
+        ),
+        (
+            "nondefault TEMP",
+            source.replace(".TRAN .1n 12n", ".OPTIONS TEMP=50\n.TRAN .1n 12n"),
+        ),
+        (
+            "nondefault TNOM",
+            source.replace(".TRAN .1n 12n", ".OPTIONS TNOM=50\n.TRAN .1n 12n"),
+        ),
+        (
+            "temperature analysis",
+            source.replace(".TRAN .1n 12n", ".TEMP 27 50\n.TRAN .1n 12n"),
+        ),
+    ];
+
+    for (label, source) in variants {
+        let netlist = Netlist::parse(&source).expect("startup mutation parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract_for_purpose(
+                &netlist,
+                XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle,
+            )
+            .is_err(),
+            "{label} must remain outside the absolute LEVEL=9 BSIM3 startup contract"
+        );
+    }
+}
+
+#[test]
+fn absolute_level1_npn_transient_contract_rejects_unqualified_state_and_parameters() {
+    for (name, value) in [
+        ("BF", 0.0),
+        ("BF", Value::NAN),
+        ("IS", 0.0),
+        ("VJE", 0.0),
+        ("MJE", 1.0),
+        ("RB", -1.0),
+        ("TF", -1.0e-9),
+        ("LEVEL", 2.0),
+        ("IRB", 1.0e-3),
+    ] {
+        assert!(
+            !XyceTestRunner::native_transient_level1_npn_model_param(name, value),
+            "{name}={value} must stay outside the validated Level-1 NPN envelope"
+        );
+    }
+
+    let uic = Netlist::parse(
+        "\
+unqualified NPN UIC startup
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n UIC
+.PRINT TRAN V(c)
+.END
+",
+    )
+    .expect("UIC deck parses");
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&uic).is_err(),
+        "validated NPN transient comparisons require ordinary DC operating-point startup"
+    );
+
+    let scoped_ic = Netlist::parse(
+        "\
+unqualified scoped NPN initial state
+VCC c 0 5
+VB b 0 .7
+X1 c b 0 QB
+.SUBCKT QB c b e
+Q1 c b e QN
+.IC V(b)=.7
+.ENDS
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+    )
+    .expect("scoped-IC deck parses");
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&scoped_ic).is_err(),
+        "flattening must preserve scoped initial conditions for eligibility checks"
+    );
+
+    let nondefault_tnom = Netlist::parse(
+        "\
+unqualified NPN nominal temperature
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.OPTIONS TNOM=50
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+    )
+    .expect("nondefault-TNOM deck parses");
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&nondefault_tnom).is_err(),
+        "nondefault BJT nominal temperature must remain outside the validated envelope"
+    );
+
+    for deck in [
+        "\
+unqualified NPN instance scaling
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN AREA=2
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+unqualified NPN model parameter
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100 IRB=.001)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+unqualified NPN substrate topology
+VCC c 0 5
+VB b 0 .7
+VS s 0 0
+Q1 c b 0 s QN
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+    ] {
+        let netlist = Netlist::parse(deck).expect("negative Level-1 NPN deck parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+            "unqualified instance, model, and topology forms must remain unsupported"
+        );
+    }
+}
+
+#[test]
+fn absolute_level1_npn_model_contract_rejects_other_routes_and_nonnumeric_fields() {
+    let qualified = rspice_core::netlist::ModelDef {
+        name: "QN".to_string(),
+        model_type: "NPN".to_string(),
+        params: vec![("BF".to_string(), 100.0)],
+        expr_params: Vec::new(),
+        string_params: Vec::new(),
+        string_vector_params: Vec::new(),
+        real_vector_params: Vec::new(),
+        real_vector_expr_params: Vec::new(),
+        integer_vector_params: Vec::new(),
+    };
+    assert!(XyceTestRunner::model_is_native_transient_level1_npn(
+        &qualified
+    ));
+
+    for model_type in ["PNP", "LPNP"] {
+        let mut model = qualified.clone();
+        model.model_type = model_type.to_string();
+        assert!(
+            !XyceTestRunner::model_is_native_transient_level1_npn(&model),
+            "{model_type} must remain outside the NPN-only transient envelope"
+        );
+    }
+
+    let mut generated_level = qualified.clone();
+    generated_level.params.push(("LEVEL".to_string(), 11.0));
+    assert!(
+        !XyceTestRunner::model_is_native_transient_level1_npn(&generated_level),
+        "VBIC LEVEL=11 must remain on its generated-device route"
+    );
+
+    let mut unknown = qualified.clone();
+    unknown.params.push(("BOGUS".to_string(), 1.0));
+    assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+        &unknown
+    ));
+
+    let mut expression = qualified.clone();
+    expression
+        .expr_params
+        .push(("BF".to_string(), "gain".to_string()));
+    assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+        &expression
+    ));
+
+    let mut string = qualified.clone();
+    string
+        .string_params
+        .push(("BF".to_string(), "fast".to_string()));
+    assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+        &string
+    ));
+
+    let mut vector = qualified;
+    vector
+        .real_vector_params
+        .push(("BF".to_string(), vec![100.0, 200.0]));
+    assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+        &vector
+    ));
+}
+
+#[test]
+fn absolute_vbic_level11_transient_contract_is_explicit_and_bounded() {
+    let source = "\
+validated native VBIC level-11 transient subset
+vbe bx 0 PWL (0 0.0 1 1)
+vcb cx bx 0
+vib bx b 0
+vic cx c 0
+rxth dt 0 1e12
+q1 c b 0 dt vbicmodel
+.model vbicmodel npn level=11
++ RCX=10 RCI=10 RBX=1 RBI=10 RE=1 RBP=10 RS=10
++ IBEN=1.0e-13 RTH=100
+.tran 1u 1s
+.print tran v(b)
+.end
+";
+    let netlist = Netlist::parse(source).expect("VBIC Level-11 fixture parses");
+    assert!(
+        XyceTestRunner::netlist_is_native_transient_vbic_level11_single_bjt(&netlist),
+        "the checked-in native VBIC Level-11 envelope must be recognized"
+    );
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("exact VBIC Level-11 fixture is eligible");
+
+    for mutation in [
+        source.replacen("level=11", "level=12", 1),
+        source.replacen("RTH=100", "RTH=100 C10=1", 1),
+        source.replacen("rxth dt 0 1e12", "rxth dt 0 {RTH}", 1),
+        source.replacen(".tran 1u 1s", ".tran 1u 1s UIC", 1),
+    ] {
+        let mutated = Netlist::parse(&mutation).expect("VBIC negative fixture parses");
+        assert!(
+            !XyceTestRunner::netlist_is_native_transient_vbic_level11_single_bjt(&mutated),
+            "mutated VBIC source must remain outside the absolute envelope"
+        );
+    }
+}
+
+#[test]
+fn absolute_level1_gp_bjt_network_accepts_complementary_four_device_envelope_only() {
+    let source = "\
+bounded legacy GP BJT network
+VCC c 0 5
+VBB b 0 0.7
+Q1 c b 0 N1
+Q2 c b 0 P1
+Q3 c b 0 N1
+Q4 c b 0 P1
+.MODEL N1 NPN (LEVEL=1 IS=1e-15 BF=100 NF=1 NE=1 VAF=100 VAR=20 IKF=1e-3 ISE=1e-16 IKR=1e-3 ISC=1e-16 BR=1 NR=1 NC=1 RB=1 RBM=0 RC=1 RE=1 CJE=1p CJC=1p VJE=.7 VJC=.5 MJE=.33 MJC=.33 TF=1p TR=1p XTB=1 EG=1.1)
+.MODEL P1 PNP (LEVEL=1 IS=1e-15 BF=100 NF=1 NE=1 VAF=100 VAR=20 IKF=1e-3 ISE=1e-16 IKR=1e-3 ISC=1e-16 BR=1 NR=1 NC=1 RB=1 RBM=0 RC=1 RE=1 CJE=1p CJC=1p VJE=.7 VJC=.5 MJE=.33 MJC=.33 TF=1p TR=1p XTB=1 EG=1.1)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+";
+    let netlist = Netlist::parse(source).expect("bounded GP BJT deck parses");
+    assert!(XyceTestRunner::netlist_is_native_transient_level1_gp_bjt_network(&netlist));
+
+    let fifth_device = source.replace(".TRAN 1n 10n", "Q5 c b 0 N1\n.TRAN 1n 10n");
+    let netlist = Netlist::parse(&fifth_device).expect("five-device GP BJT deck parses");
+    assert!(!XyceTestRunner::netlist_is_native_transient_level1_gp_bjt_network(&netlist));
+
+    let mut unsupported = netlist
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("N1"))
+        .expect("N1 model exists")
+        .clone();
+    unsupported.params.push(("RTH".to_string(), 1.0));
+    assert!(!XyceTestRunner::model_is_native_transient_level1_gp_bjt(
+        &unsupported
+    ));
+}
+
+#[test]
+fn absolute_classic_level1_mos_transient_contract_is_explicit_and_bounded() {
+    let source = "\
+validated classic MOS Level-1 transient subset
+VDD d 0 5
+VIN g 0 PULSE(0 5 1n 1n 1n 10n 20n)
+R1 d 0 10k
+C1 d 0 0.1p
+MN1 d g 0 0 NM L=5u W=10u
+MP1 d g VDD VDD PM L=5u W=10u
+.MODEL NM NMOS (LEVEL=1 KP=2m VTO=1 TOX=60n)
+.MODEL PM PMOS (LEVEL=1 KP=2m VTO=-1 TOX=60n)
+.TRAN 1n 20n
+.PRINT TRAN V(d)
+.END
+";
+    let netlist = Netlist::parse(source).expect("classic MOS Level-1 fixture parses");
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("exact classic MOS Level-1 fixture is eligible");
+    assert!(
+        XyceTestRunner::model_is_native_transient_level1_mosfet(
+            netlist
+                .models
+                .iter()
+                .find(|model| model.name.eq_ignore_ascii_case("NM"))
+                .expect("NM model exists")
+        ),
+        "NMOS Level-1 model remains on the native classic route"
+    );
+    assert!(
+        XyceTestRunner::model_is_native_transient_level1_mosfet(
+            netlist
+                .models
+                .iter()
+                .find(|model| model.name.eq_ignore_ascii_case("PM"))
+                .expect("PM model exists")
+        ),
+        "PMOS Level-1 model remains on the native classic route"
+    );
+
+    let mut unknown_parameter = netlist.clone();
+    unknown_parameter
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("NM"))
+        .expect("NM model exists")
+        .params
+        .push(("UNQUALIFIED".to_string(), 1.0));
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&unknown_parameter).is_err(),
+        "unknown classic MOS model parameters remain fail-closed"
+    );
+
+    let mut missing_geometry = netlist;
+    let mos = missing_geometry
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+        .expect("MN1 exists");
+    if let ElementKind::Mosfet {
+        instance_params, ..
+    } = &mut mos.kind
+    {
+        instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case("W"));
+    } else {
+        panic!("MN1 remains a MOSFET");
+    }
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&missing_geometry).is_err(),
+        "classic MOS transient admission requires explicit positive L/W geometry"
+    );
+
+    let mut extra_pair_device = missing_geometry.clone();
+    let mut extra = extra_pair_device
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+        .expect("MN1 exists")
+        .clone();
+    extra.name = "MN_EXTRA".to_string();
+    extra_pair_device.elements.push(extra);
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&extra_pair_device).is_err(),
+        "unvalidated multi-device Level-1 MOS propagation remains fail-closed"
+    );
+}
+
+#[test]
+fn absolute_classic_level1_cmos_chain_contract_requires_linear_complementary_stages() {
+    let source = "\
+validated classic MOS Level-1 CMOS chain transient subset
+VDD VDD 0 5
+VIN IN 0 PULSE(0 5 1n 1n 1n 10n 20n)
+RLOAD OUT2 0 10k
+CLOAD OUT2 0 0.1p
+MN1 OUT1 IN 0 0 NM L=5u W=10u
+MP1 OUT1 IN VDD VDD PM L=5u W=10u
+MN2 OUT2 OUT1 0 0 NM L=5u W=10u
+MP2 OUT2 OUT1 VDD VDD PM L=5u W=10u
+.MODEL NM NMOS (LEVEL=1 KP=2m VTO=1 TOX=60n)
+.MODEL PM PMOS (LEVEL=1 KP=2m VTO=-1 TOX=60n)
+.TRAN 1n 20n
+.PRINT TRAN V(OUT2)
+.END
+";
+    let netlist = Netlist::parse(source).expect("classic MOS chain fixture parses");
+    assert!(
+        XyceTestRunner::netlist_is_native_transient_level1_cmos_chain(&netlist),
+        "linear complementary Level-1 chain must be recognized"
+    );
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("linear complementary Level-1 chain is eligible");
+
+    let broken_gate = source.replacen("MP2 OUT2 OUT1 VDD VDD PM", "MP2 OUT2 IN VDD VDD PM", 1);
+    let broken_gate = Netlist::parse(&broken_gate).expect("broken chain fixture parses");
+    assert!(
+        !XyceTestRunner::netlist_is_native_transient_level1_cmos_chain(&broken_gate),
+        "a duplicated gate stage must remain outside the chain envelope"
+    );
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&broken_gate).is_err(),
+        "a non-linear Level-1 network must fail closed"
+    );
+
+    let absolute_lte_floor = source.replacen(
+        ".PRINT TRAN V(OUT2)",
+        ".OPTIONS TIMEINT ABSTOL=1e-3\n.PRINT TRAN V(OUT2)",
+        1,
+    );
+    let absolute_lte_floor =
+        Netlist::parse(&absolute_lte_floor).expect("absolute LTE floor fixture parses");
+    assert!(
+        !XyceTestRunner::netlist_is_native_transient_level1_cmos_chain(&absolute_lte_floor),
+        "an explicit TIMEINT absolute floor must remain outside the chain envelope"
+    );
+}
+
+#[test]
+fn absolute_ekv26_transient_contract_uses_native_pair_envelope() {
+    let source = "\
+validated EKV26 complementary transient subset
+VDD supply 0 3
+VSIG vi 0 DC .5 SIN(0 2.5 1MEG)
+MP1 out vi supply supply PM W=1u L=1u AD=1e-12 AS=1e-12 PS=2e-6 PD=2e-6
+MN1 out vi 0 0 NM W=1u L=1u AD=1e-12 AS=1e-12 PS=2e-6 PD=2e-6
+R1 out 0 1MEG
+.MODEL NM NMOS LEVEL=260 TNOM=27
+.MODEL PM PMOS LEVEL=260 TNOM=27
+.TRAN 10n 5u
+.PRINT TRAN V(vi) V(out)
+.END
+";
+    let netlist = Netlist::parse(source).expect("EKV26 transient fixture parses");
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("native EKV26 complementary pair is eligible");
+    assert!(
+        XyceTestRunner::netlist_is_native_transient_ekv26_pair(&netlist),
+        "fixture must satisfy the reference-backed complementary EKV26 pair envelope"
+    );
+    assert!(
+        netlist
+            .models
+            .iter()
+            .all(XyceTestRunner::model_is_native_transient_ekv26),
+        "both fixture models must use the canonical native EKV26 constructor"
+    );
+
+    let mut unknown_parameter = netlist.clone();
+    unknown_parameter
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("NM"))
+        .expect("NM model exists")
+        .params
+        .push(("UNQUALIFIED".to_string(), 1.0));
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&unknown_parameter).is_err(),
+        "unknown EKV26 model parameters remain fail-closed"
+    );
+
+    let mut generated_model = netlist.clone();
+    generated_model
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("NM"))
+        .expect("NM model exists")
+        .model_type = "EKV_VA".to_string();
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&generated_model).is_err(),
+        "generated Verilog-A EKV model names remain outside the native transient contract"
+    );
+
+    let mut non_ekv_level = netlist.clone();
+    non_ekv_level
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("NM"))
+        .expect("NM model exists")
+        .params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+        .expect("NM LEVEL exists")
+        .1 = 1.0;
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&non_ekv_level).is_err(),
+        "non-EKV MOS levels remain outside the native EKV26 transient contract"
+    );
+
+    let mut unsupported_instance = netlist.clone();
+    let mos = unsupported_instance
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+        .expect("MN1 exists");
+    if let ElementKind::Mosfet {
+        instance_params, ..
+    } = &mut mos.kind
+    {
+        instance_params.push(("CGSO".to_string(), 0.0));
+    } else {
+        panic!("MN1 remains a MOSFET");
+    }
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&unsupported_instance).is_err(),
+        "unsupported EKV26 instance parameters remain fail-closed"
+    );
+
+    let mut deferred_instance = netlist.clone();
+    let mos = deferred_instance
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+        .expect("MN1 exists");
+    if let ElementKind::Mosfet {
+        deferred_params, ..
+    } = &mut mos.kind
+    {
+        deferred_params.push(("W".to_string(), "WVAL".to_string()));
+    } else {
+        panic!("MN1 remains a MOSFET");
+    }
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&deferred_instance).is_err(),
+        "deferred EKV26 instance parameters remain fail-closed"
+    );
+
+    let mut compact_instance = netlist.clone();
+    let mos = compact_instance
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+        .expect("MN1 exists");
+    if let ElementKind::Mosfet { compact_syntax, .. } = &mut mos.kind {
+        *compact_syntax = true;
+    } else {
+        panic!("MN1 remains a MOSFET");
+    }
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&compact_instance).is_err(),
+        "compact EKV26 syntax remains fail-closed"
+    );
+
+    let mut wrong_topology = netlist.clone();
+    let mos = wrong_topology
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+        .expect("MN1 exists");
+    mos.nodes.pop();
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&wrong_topology).is_err(),
+        "non-four-terminal EKV26 topology remains fail-closed"
+    );
+
+    let mut extra_pair_device = netlist;
+    let mut extra = extra_pair_device
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("MN1"))
+        .expect("MN1 exists")
+        .clone();
+    extra.name = "MN_EXTRA".to_string();
+    extra_pair_device.elements.push(extra);
+    assert!(
+        XyceTestRunner::validate_native_transient_contract(&extra_pair_device).is_err(),
+        "larger EKV26 propagation networks remain fail-closed pending a dedicated oracle"
+    );
+
+    for startup_source in [
+        source.replace(".TRAN 10n 5u", ".TRAN 10n 5u UIC"),
+        source.replace(
+            ".MODEL NM NMOS LEVEL=260 TNOM=27",
+            ".MODEL NM NMOS LEVEL=260 TNOM=27\n.OPTIONS TEMP=25",
+        ),
+    ] {
+        let startup_netlist =
+            Netlist::parse(&startup_source).expect("EKV26 startup-boundary fixture parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&startup_netlist).is_err(),
+            "EKV26 absolute transient admission requires ordinary 27 C DC startup"
+        );
+    }
+}
+
+#[test]
+fn absolute_level1_npn_transient_contract_rejects_all_explicit_startup_forms() {
+    for deck in [
+        "\
+top-level NPN initial condition
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.IC V(b)=.7
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+top-level NPN node-set hint
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.NODESET V(b)=.7
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+NPN deck with passive initial state
+VCC c 0 5
+VB b 0 .7
+C1 b 0 1p IC=.1
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+NPN deck with nondefault temperature
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.OPTIONS TEMP=50
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+NPN deck with temperature analysis
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TEMP 27 50
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+NPN deck with resolved deferred instance scaling
+VCC c 0 5
+VB b 0 .7
+X1 c b 0 QB AREA=2
+.SUBCKT QB c b e PARAMS: AREA=1
+Q1 c b e QN AREA={AREA}
+.ENDS
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        "\
+five-terminal generated-level BJT
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 s dt QV
+.MODEL QV NPN (LEVEL=11 RBX=1 RBI=1 RCX=1 RCI=1 RE=1 RBP=1)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+    ] {
+        let netlist = Netlist::parse(deck).expect("negative NPN startup/route deck parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+            "explicit startup, temperature, scaling, and generated-device routes must remain unsupported"
+        );
+    }
+
+    let duplicate_name = Netlist::parse(
+        "\
+duplicate normalized BJT names with different models
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QGOOD
+q1 c b 0 QBAD
+.MODEL QGOOD NPN (BF=100)
+.MODEL QBAD NPN (LEVEL=11 RBX=1 RBI=1 RCX=1 RCI=1 RE=1 RBP=1)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+    )
+    .expect_err("case-insensitive duplicate BJT names fail before route admission");
+    assert!(matches!(
+        duplicate_name,
+        ParseError::DuplicateName {
+            ref canonical_name,
+            ref first_name,
+            ref duplicate_name,
+            ref scope,
+            first_line: 4,
+            duplicate_line: 5,
+        } if canonical_name == "Q1"
+            && first_name == "Q1"
+            && duplicate_name == "q1"
+            && scope == "TOP_LEVEL"
+    ));
+}
+
+#[test]
+fn relational_transient_contract_rejects_unqualified_nonlinear_models() {
+    let unknown_mos_parameter = Netlist::parse(
+        "\
+unqualified relational mos model
+VDD d 0 5
+VG g 0 1
+M1 d g 0 0 NM L=5u W=175u
+.MODEL NM NMOS (LEVEL=3 VTO=1 BOGUS=2)
+.TRAN 10n 1u
+.PRINT TRAN V(d)
+.END
+",
+    )
+    .expect("unknown MOS model parameter remains represented in the parsed model");
+    assert!(
+        XyceTestRunner::validate_native_relational_transient_contract(&unknown_mos_parameter)
+            .is_err(),
+        "unknown model parameters must not enter a relational runtime by producing identical ignored behavior"
+    );
+
+    let unqualified_bjt = Netlist::parse(
+        "\
+unqualified relational bjt
+VC c 0 5
+VB b 0 0.7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TRAN 10n 1u
+.PRINT TRAN V(c)
+.END
+",
+    )
+    .expect("BJT deck parses");
+    assert!(
+        XyceTestRunner::validate_native_relational_transient_contract(&unqualified_bjt).is_err(),
+        "a relational family name must not bypass the qualified nonlinear-device policy"
+    );
+}
+
+#[test]
+fn extended_level1_npn_irb_transient_admission_is_generic_and_oracle_backed() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let path = root.join("Netlists/RESET/reset.cir");
+    let source = fs::read_to_string(&path).expect("read RESET deck");
+    let netlist =
+        XyceTestRunner::parse_xyce_netlist(&source, &path).expect("RESET deck parses in Xyce mode");
+    let element = netlist
+        .elements
+        .iter()
+        .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+        .expect("RESET BJT exists");
+    assert!(
+        XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(&netlist, element,),
+        "the extended Level-1 IRB/RBM envelope must admit RESET"
+    );
+
+    let renamed_source = source.replace("Q1 RESET VB 0", "QRENAMED RESET VB 0");
+    let renamed = XyceTestRunner::parse_xyce_netlist(&renamed_source, &path)
+        .expect("renamed RESET BJT parses");
+    let renamed_element = renamed
+        .elements
+        .iter()
+        .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+        .expect("renamed RESET BJT exists");
+    assert!(
+        XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(
+            &renamed,
+            renamed_element,
+        ),
+        "admission must not depend on an instance name fingerprint"
+    );
+
+    let changed_model_source = source.replace("RB = 25.16", "RB = 26.16");
+    let changed_model = XyceTestRunner::parse_xyce_netlist(&changed_model_source, &path)
+        .expect("numeric GP model mutation parses");
+    let changed_model_element = changed_model
+        .elements
+        .iter()
+        .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+        .expect("changed-model BJT exists");
+    assert!(
+        XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(
+            &changed_model,
+            changed_model_element,
+        ),
+        "admission must remain parameterized over supported finite GP values"
+    );
+
+    let area_source = source.replace("Q1 RESET VB 0 Q2N2222", "Q1 RESET VB 0 Q2N2222 AREA=2");
+    let area_netlist =
+        XyceTestRunner::parse_xyce_netlist(&area_source, &path).expect("AREA mutation parses");
+    let area_element = area_netlist
+        .elements
+        .iter()
+        .find(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+        .expect("AREA BJT exists");
+    assert!(
+        !XyceTestRunner::netlist_device_is_single_native_transient_level1_npn_irb(
+            &area_netlist,
+            area_element,
+        ),
+        "AREA scaling must remain outside the validated IRB envelope"
+    );
+
+    let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+    assert!(result.passed, "RESET oracle failed: {result:?}");
+    assert!(!result.expected_unsupported, "RESET must execute natively");
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected mismatches: {result:?}"
+    );
+}
+
+#[test]
+fn bsim3soi_gain_stage_static_ac_admission_is_exact_and_oracle_backed() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/ACtests/bsim3soi/gain-stagesoi.cir";
+    let path = root.join(relative);
+    let source = fs::read_to_string(&path).expect("read BSIMSOI gain-stage deck");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path).expect("BSIMSOI deck parses");
+
+    assert!(
+        XyceTestRunner::netlist_device_is_single_native_ac_supported_b3soi(&netlist, "M1"),
+        "the canonical one-device BSIMSOI LEVEL=10/SOIMOD=1 AC envelope admits gain-stagesoi"
+    );
+    let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+    assert!(
+        result.passed,
+        "BSIMSOI gain-stage oracle failed: {result:?}"
+    );
+    assert!(
+        !result.expected_unsupported,
+        "BSIMSOI gain-stagesoi must execute"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected mismatches: {result:?}"
+    );
+
+    let default_relative = "Netlists/ACtests/bsim3soi/gain-stagesoi_default.cir";
+    let default_path = root.join(default_relative);
+    let default_source =
+        fs::read_to_string(&default_path).expect("read default-SOIMOD BSIMSOI deck");
+    let default_netlist = XyceTestRunner::parse_xyce_netlist(&default_source, &default_path)
+        .expect("default-SOIMOD BSIMSOI deck parses");
+    assert!(
+        !XyceTestRunner::netlist_device_is_single_native_ac_supported_b3soi(&default_netlist, "M1"),
+        "SOIMOD omission must remain fail-closed until its AC oracle is independently qualified"
+    );
+
+    let mut invalid_selector = netlist;
+    let model = invalid_selector
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("nmos"))
+        .expect("nmos model");
+    model
+        .params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("SOIMOD"))
+        .expect("SOIMOD parameter")
+        .1 = 2.0;
+    assert!(
+        !XyceTestRunner::netlist_device_is_single_native_ac_supported_b3soi(
+            &invalid_selector,
+            "M1"
+        ),
+        "a non-DD SOIMOD selector must fail closed"
+    );
+}
+
+#[test]
+fn bsim4_gstage_static_ac_admission_is_exact_and_oracle_backed() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/ACtests/bsim4/gstage.cir";
+    let path = root.join(relative);
+    let source = fs::read_to_string(&path).expect("read BSIM4 gstage deck");
+    let netlist =
+        XyceTestRunner::parse_xyce_netlist(&source, &path).expect("BSIM4 gstage deck parses");
+
+    assert!(
+        XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(&netlist, "M1"),
+        "the canonical one-device BSIM4 AC envelope admits gstage"
+    );
+    let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+    assert!(result.passed, "BSIM4 gstage oracle failed: {result:?}");
+    assert!(!result.expected_unsupported, "BSIM4 gstage must execute");
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected mismatches: {result:?}"
+    );
+
+    let mut extra_instance_param = netlist.clone();
+    let mos = extra_instance_param
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 element");
+    let ElementKind::Mosfet {
+        instance_params, ..
+    } = &mut mos.kind
+    else {
+        panic!("M1 remains a MOSFET");
+    };
+    instance_params.push(("NF".to_string(), 1.0));
+    assert!(
+        !XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(
+            &extra_instance_param,
+            "M1"
+        ),
+        "non-canonical BSIM4 instance geometry must fail closed"
+    );
+
+    let mut invalid_level = netlist.clone();
+    let model = invalid_level
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("N1"))
+        .expect("N1 model");
+    model
+        .params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+        .expect("LEVEL parameter")
+        .1 = 9.0;
+    assert!(
+        !XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(&invalid_level, "M1"),
+        "a non-BSIM4 model level must fail closed"
+    );
+
+    let mut invalid_selector = netlist;
+    let model = invalid_selector
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("N1"))
+        .expect("N1 model");
+    model
+        .params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("CVCHARGEMOD"))
+        .expect("CVCHARGEMOD parameter")
+        .1 = 4.0;
+    assert!(
+        !XyceTestRunner::netlist_device_is_single_native_ac_supported_bsim4(
+            &invalid_selector,
+            "M1"
+        ),
+        "an unsupported native BSIM4 selector must fail closed"
+    );
+}
+
+#[test]
+fn bsim4_capacitor_transient_admission_is_exact_and_oracle_backed() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Certification_Tests/BUG_710_SON/b4cap.cir";
+    let path = root.join(relative);
+    let source = fs::read_to_string(&path).expect("read BSIM4 capacitor deck");
+    let netlist =
+        XyceTestRunner::parse_xyce_netlist(&source, &path).expect("BSIM4 capacitor deck parses");
+
+    assert!(
+        XyceTestRunner::netlist_is_native_transient_bsim4_capacitor(&netlist),
+        "the canonical one-device BSIM4 capacitor envelope admits b4cap"
+    );
+    let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+    assert!(result.passed, "BSIM4 capacitor oracle failed: {result:?}");
+    assert!(!result.expected_unsupported, "b4cap must execute");
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected mismatches: {result:?}"
+    );
+
+    let mut nonzero_initial_condition = netlist.clone();
+    nonzero_initial_condition.initial_conditions[0].voltage = 1.0;
+    assert!(
+        !XyceTestRunner::netlist_is_native_transient_bsim4_capacitor(&nonzero_initial_condition),
+        "nonzero gate initial conditions must fail closed"
+    );
+
+    let mut reversed_source = netlist;
+    let source = reversed_source
+        .elements
+        .iter_mut()
+        .find(|element| matches!(element.kind, ElementKind::CurrentSource(_)))
+        .expect("I2 element");
+    source.nodes.swap(0, 1);
+    assert!(
+        !XyceTestRunner::netlist_is_native_transient_bsim4_capacitor(&reversed_source),
+        "a reversed current-source topology must fail closed"
+    );
+}
+
+#[test]
+fn bsim3_capacitor_transient_admission_is_exact_and_oracle_backed() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Certification_Tests/BUG_710_SON/b3cap.cir";
+    let path = root.join(relative);
+    let source = fs::read_to_string(&path).expect("read BSIM3 capacitor deck");
+    let netlist =
+        XyceTestRunner::parse_xyce_netlist(&source, &path).expect("BSIM3 capacitor deck parses");
+    assert!(
+        XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(&netlist),
+        "the canonical one-device BSIM3 capacitor envelope admits b3cap"
+    );
+    let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+    assert!(result.passed, "BSIM3 capacitor oracle failed: {result:?}");
+    assert!(!result.expected_unsupported, "b3cap must execute");
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected mismatches: {result:?}"
+    );
+
+    let mut nonzero_initial_condition = netlist.clone();
+    nonzero_initial_condition.initial_conditions[0].voltage = 1.0;
+    assert!(
+        !XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(&nonzero_initial_condition),
+        "nonzero gate initial conditions must fail closed"
+    );
+
+    let mut reversed_source = netlist.clone();
+    let source = reversed_source
+        .elements
+        .iter_mut()
+        .find(|element| matches!(element.kind, ElementKind::CurrentSource(_)))
+        .expect("I2 element");
+    source.nodes.swap(0, 1);
+    assert!(
+        !XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(&reversed_source),
+        "a reversed current-source topology must fail closed"
+    );
+
+    let mut invalid_level = netlist;
+    let model = invalid_level
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("NCH"))
+        .expect("NCH model");
+    model
+        .params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+        .expect("LEVEL parameter")
+        .1 = 14.0;
+    assert!(
+        !XyceTestRunner::netlist_is_native_transient_bsim3_capacitor(&invalid_level),
+        "a non-BSIM3 model level must fail closed"
+    );
+}
+
+#[test]
+fn classic_mos_ac_admission_is_exact_and_fail_closed() {
+    fn source_for(level: f64, tox: bool) -> String {
+        format!(
+            "classic MOS AC admission fixture\n\
+                 VDD 1 0 5\n\
+                 VIN 2 0 DC 2 AC .1\n\
+                 R1 1 3 25k\n\
+                 R2 3 0 100k\n\
+                 M1 3 2 0 0 NM W=4u L=1u\n\
+                 .MODEL NM NMOS (LEVEL={level}{})\n\
+                 .AC DEC 10 100 1e9\n\
+                 .PRINT AC V(3)\n\
+                 .END\n",
+            if tox { " TOX=1e-7" } else { "" }
+        )
+    }
+
+    fn parses(level: f64, tox: bool) -> Netlist {
+        Netlist::parse(&source_for(level, tox)).expect("classic MOS AC fixture parses")
+    }
+
+    fn admitted(netlist: &Netlist) -> bool {
+        XyceTestRunner::netlist_device_is_single_native_ac_supported_bulk_mosfet(netlist, "M1")
+    }
+
+    for model_type in ["NMOS", "PMOS"] {
+        for level in [1.0, 2.0, 3.0, 6.0] {
+            for tox in [false, true] {
+                let mut netlist = parses(level, tox);
+                netlist.models[0].model_type = model_type.to_string();
+                assert!(
+                    admitted(&netlist),
+                    "{model_type} LEVEL={level} TOX-present={tox} fixture"
+                );
+            }
+        }
+    }
+
+    for level in [0.0, 1.000_000_000_5, 1.5, 4.0, 5.0, 9.0] {
+        assert!(!admitted(&parses(level, false)), "LEVEL={level}");
+    }
+
+    let baseline = parses(1.0, true);
+    let reject = |netlist: &Netlist, reason: &str| {
+        assert!(!admitted(netlist), "must reject {reason}");
+    };
+    assert!(
+        !XyceTestRunner::netlist_device_is_single_native_ac_supported_bulk_mosfet(
+            &baseline, "MISSING"
+        ),
+        "the requested instance must be the sole admitted MOSFET"
+    );
+
+    let mut no_mos = baseline.clone();
+    no_mos
+        .elements
+        .retain(|element| !matches!(element.kind, ElementKind::Mosfet { .. }));
+    reject(&no_mos, "a netlist without a MOSFET");
+
+    let mut missing_model = baseline.clone();
+    missing_model.models.clear();
+    reject(&missing_model, "missing model binding");
+
+    for invalid_level in [f64::NAN, f64::INFINITY] {
+        let mut mutated = baseline.clone();
+        mutated.models[0]
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .expect("LEVEL exists")
+            .1 = invalid_level;
+        reject(&mutated, "non-finite LEVEL");
+    }
+
+    for unsupported in ["M", "NF", "AD", "OFF", "TEMP"] {
+        let mut mutated = baseline.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut mutated
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists")
+            .kind
+        else {
+            panic!("M1 remains a MOSFET");
+        };
+        instance_params.push((unsupported.to_string(), 1.0));
+        reject(&mutated, unsupported);
+    }
+
+    for invalid_geometry in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut mutated = baseline.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut mutated
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists")
+            .kind
+        else {
+            panic!("M1 remains a MOSFET");
+        };
+        instance_params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("L"))
+            .expect("L exists")
+            .1 = invalid_geometry;
+        reject(&mutated, "non-positive or non-finite geometry");
+    }
+
+    for missing in ["L", "W"] {
+        let mut mutated = baseline.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut mutated
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists")
+            .kind
+        else {
+            panic!("M1 remains a MOSFET");
+        };
+        instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case(missing));
+        reject(&mutated, "missing required geometry");
+    }
+
+    let mut duplicate_geometry = baseline.clone();
+    let ElementKind::Mosfet {
+        instance_params, ..
+    } = &mut duplicate_geometry
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 exists")
+        .kind
+    else {
+        panic!("M1 remains a MOSFET");
+    };
+    instance_params.push(("l".to_string(), 2.0e-6));
+    reject(&duplicate_geometry, "duplicate geometry");
+
+    let mut deferred_geometry = baseline.clone();
+    let ElementKind::Mosfet {
+        deferred_params, ..
+    } = &mut deferred_geometry
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 exists")
+        .kind
+    else {
+        panic!("M1 remains a MOSFET");
+    };
+    deferred_params.push(("W".to_string(), "WIDTH".to_string()));
+    reject(&deferred_geometry, "deferred geometry");
+
+    let mut compact = baseline.clone();
+    let mos = compact
+        .elements
+        .iter_mut()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 exists");
+    let ElementKind::Mosfet { compact_syntax, .. } = &mut mos.kind else {
+        panic!("M1 remains a MOSFET");
+    };
+    *compact_syntax = true;
+    reject(&compact, "compact MOS syntax");
+
+    for node_count in [3, 5] {
+        let mut mutated = baseline.clone();
+        let mos = mutated
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists");
+        mos.nodes.resize(node_count, "extra".to_string());
+        reject(&mutated, "non-four-terminal topology");
+    }
+
+    let mut duplicate_model = baseline.clone();
+    let mut second_model = duplicate_model.models[0].clone();
+    second_model.name = second_model.name.to_ascii_lowercase();
+    duplicate_model.models.push(second_model);
+    reject(&duplicate_model, "ambiguous model binding");
+
+    let mut second_mos = baseline.clone();
+    let mut extra = second_mos
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 exists")
+        .clone();
+    extra.name = "M2".to_string();
+    second_mos.elements.push(extra);
+    reject(&second_mos, "multiple MOS instances");
+
+    for (name, value) in [("LEVEL", 1.0), ("TOX", 2.0e-7), ("BOGUS", 1.0)] {
+        let mut mutated = baseline.clone();
+        mutated.models[0].params.push((name.to_string(), value));
+        reject(&mutated, "duplicate or unknown model parameter");
+    }
+
+    for invalid_tox in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut mutated = baseline.clone();
+        mutated.models[0]
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("TOX"))
+            .expect("TOX exists")
+            .1 = invalid_tox;
+        reject(&mutated, "invalid TOX");
+    }
+
+    let mut missing_level = baseline.clone();
+    missing_level.models[0]
+        .params
+        .retain(|(name, _)| !name.eq_ignore_ascii_case("LEVEL"));
+    reject(&missing_level, "missing LEVEL");
+
+    let mut wrong_type = baseline.clone();
+    wrong_type.models[0].model_type = "NPN".to_string();
+    reject(&wrong_type, "wrong model type");
+
+    let mut nonnumeric_payloads = Vec::new();
+    let mut expression = baseline.clone();
+    expression.models[0]
+        .expr_params
+        .push(("KP".to_string(), "{K}".to_string()));
+    nonnumeric_payloads.push(expression);
+    let mut string = baseline.clone();
+    string.models[0]
+        .string_params
+        .push(("VERSION".to_string(), "classic".to_string()));
+    nonnumeric_payloads.push(string);
+    let mut string_vector = baseline.clone();
+    string_vector.models[0]
+        .string_vector_params
+        .push(("S".to_string(), vec!["x".to_string()]));
+    nonnumeric_payloads.push(string_vector);
+    let mut real_vector = baseline.clone();
+    real_vector.models[0]
+        .real_vector_params
+        .push(("R".to_string(), vec![1.0]));
+    nonnumeric_payloads.push(real_vector);
+    let mut real_vector_expr = baseline.clone();
+    real_vector_expr.models[0]
+        .real_vector_expr_params
+        .push(("RE".to_string(), vec!["{X}".to_string()]));
+    nonnumeric_payloads.push(real_vector_expr);
+    let mut integer_vector = baseline;
+    integer_vector.models[0]
+        .integer_vector_params
+        .push(("I".to_string(), vec![1]));
+    nonnumeric_payloads.push(integer_vector);
+    for payload in &nonnumeric_payloads {
+        reject(payload, "non-numeric model payload");
+    }
+}
+
+#[test]
+fn static_ac_contract_flattens_exact_scoped_bjt_and_diode_models() {
+    let source = |bjt_params: &str, diode_params: &str| {
+        format!(
+            "scoped static AC fixture\n\
+                 V1 out 0 AC 1\n\
+                 R1 out 0 1k\n\
+                 X1 out 0 0 CELL\n\
+                 .SUBCKT CELL C B E\n\
+                 Q1 C B E QX\n\
+                 D1 C E DX\n\
+                 .MODEL QX PNP ({bjt_params})\n\
+                 .MODEL DX D ({diode_params})\n\
+                 .ENDS\n\
+                 .AC DEC 10 100 100k\n\
+                 .PRINT AC V(out)\n\
+                 .END\n"
+        )
+    };
+    let validate = |source: &str| {
+        let netlist = Netlist::parse(source).expect("scoped static AC fixture parses");
+        let ac = XyceTestRunner::single_ac_analysis(&netlist)
+            .expect("scoped static AC fixture has one analysis");
+        XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+    };
+
+    validate(&source("IS=8e-16 BF=250", "IS=8e-16"))
+        .expect("exact scoped BF/IS BJT and IS diode models are supported");
+    assert!(
+        validate(&source("IS=8e-16 BF=250 TF=1n", "IS=8e-16")).is_err(),
+        "the broad hierarchy path must not admit unvalidated BJT parameters"
+    );
+    assert!(
+        validate(&source("IS=8e-16 BF=250", "IS=8e-16 N=1.1")).is_err(),
+        "the broad hierarchy path must not admit unvalidated diode parameters"
+    );
+    validate(
+        &source("IS=8e-16 BF=250", "IS=8e-16")
+            .replace(".AC DEC 10 100 100k", ".AC DEC 10 100 20k")
+            .replace("PNP", "NPN"),
+    )
+    .expect("exact NPN BF/IS hierarchy is supported through the validated 20 kHz envelope");
+    assert!(
+        validate(&source("IS=8e-16 BF=250", "IS=8e-16").replace("PNP", "NPN")).is_err(),
+        "NPN BF/IS hierarchy above the validated 20 kHz envelope remains unsupported"
+    );
+}
+
+#[test]
+fn static_ac_contract_admits_validated_legacy_bjt_through_100mhz() {
+    let source = "legacy BJT AC fixture\n\
+                      VCC 7 0 12\n\
+                      VEE 8 0 -12\n\
+                      VIN 1 0 AC 1\n\
+                      RS1 1 2 1k\n\
+                      RS2 6 0 1k\n\
+                      Q1 3 2 4 MOD1\n\
+                      Q2 5 6 4 MOD1\n\
+                      RC1 7 3 10k\n\
+                      RC2 7 5 10k\n\
+                      RE 4 8 10k\n\
+                      .MODEL MOD1 NPN BF=50 VAF=50 IS=1e-12 RB=100 CJC=.5PF TF=.6NS\n\
+                      .AC DEC 10 1 100MEG\n\
+                      .PRINT AC V(5)\n\
+                      .END\n";
+    let netlist = Netlist::parse(source).expect("legacy BJT AC fixture parses");
+    let ac = XyceTestRunner::single_ac_analysis(&netlist)
+        .expect("legacy BJT AC fixture has one analysis");
+    XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+        .expect("validated legacy BJT AC envelope admits 100 MHz");
+}
+
+#[test]
+fn static_ac_contract_admits_checked_in_rca3040_gp_oracle() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let path = root.join("Netlists/ACtests/rca3040.cir");
+    let source = fs::read_to_string(&path).expect("read RCA3040 deck");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+        .expect("RCA3040 deck parses in Xyce mode");
+    let ac =
+        XyceTestRunner::single_ac_analysis(&netlist).expect("RCA3040 deck has one AC analysis");
+
+    for element in netlist
+        .elements
+        .iter()
+        .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+    {
+        assert!(
+            XyceTestRunner::netlist_device_is_native_static_ac_legacy_npn_bjt(
+                &netlist,
+                &element.name,
+            ),
+            "RCA3040 legacy GP device {} remains in the validated flat AC envelope",
+            element.name
+        );
+    }
+    XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+        .expect("RCA3040 legacy GP deck is in the native AC envelope");
+
+    let result = XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(&path);
+    assert!(result.passed, "RCA3040 oracle failed: {result:?}");
+    assert!(
+        !result.expected_unsupported,
+        "RCA3040 must execute natively"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "unexpected RCA3040 mismatches: {result:?}"
+    );
+
+    let mut duplicate_parameter = netlist.clone();
+    duplicate_parameter
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("QNL"))
+        .expect("QNL model")
+        .params
+        .push(("BF".to_string(), 80.0));
+    assert!(
+        XyceTestRunner::validate_native_static_ac_contract(&duplicate_parameter, &ac).is_err(),
+        "duplicate legacy GP model parameters remain fail-closed"
+    );
+
+    let mut unqualified = netlist;
+    unqualified
+        .models
+        .iter_mut()
+        .find(|model| model.name.eq_ignore_ascii_case("QNL"))
+        .expect("QNL model")
+        .params
+        .push(("UNQUALIFIED".to_string(), 1.0));
+    assert!(
+        XyceTestRunner::validate_native_static_ac_contract(&unqualified, &ac).is_err(),
+        "unknown legacy GP model parameters remain fail-closed"
+    );
+}
+
+#[test]
+fn xyce_ac_sweep_uses_upstream_logarithmic_grid_without_endpoint_warping() {
+    let sandler8 = XyceTestRunner::xyce_ac_sweep_frequencies(
+        rspice_core::netlist::FreqVariation::Dec,
+        51,
+        1.0e3,
+        20.0e3,
+    );
+    assert_eq!(sandler8.len(), 67);
+    assert_eq!(sandler8[0], 1.0e3);
+    assert!((sandler8[1] - 1.0461834443918254e3).abs() < 1.0e-9);
+    assert!((sandler8[sandler8.len() - 1] - 1.9684194472866122e4).abs() < 1.0e-9);
+    assert!(sandler8.last().is_some_and(|frequency| *frequency < 20.0e3));
+
+    let fractional_decade = XyceTestRunner::xyce_ac_sweep_frequencies(
+        rspice_core::netlist::FreqVariation::Dec,
+        10,
+        1.0,
+        3.0e5,
+    );
+    assert_eq!(fractional_decade.len(), 55);
+    assert!((fractional_decade.last().copied().unwrap() - 251_188.643150958).abs() < 1.0e-6);
+
+    let octave = XyceTestRunner::xyce_ac_sweep_frequencies(
+        rspice_core::netlist::FreqVariation::Oct,
+        2,
+        10.0,
+        50.0,
+    );
+    assert_eq!(octave.len(), 5);
+    assert!((octave[1] - 14.142135623730951).abs() < 1.0e-12);
+    assert!((octave[4] - 40.0).abs() < 1.0e-12);
+
+    let linear = XyceTestRunner::xyce_ac_sweep_frequencies(
+        rspice_core::netlist::FreqVariation::Lin,
+        2,
+        1.0e3,
+        2.0e3,
+    );
+    assert_eq!(linear, vec![1.0e3, 2.0e3]);
+}
+
+#[test]
+fn wrapper_static_ac_contract_rejects_unexecuted_lin_analysis() {
+    let source = "RF port fixture\n\
+                      P1 out 0 PORT=1 Z0=50\n\
+                      .AC LIN 2 1 2\n\
+                      .PRINT AC V(out)\n\
+                      .LIN FORMAT=TOUCHSTONE\n\
+                      .END\n";
+
+    let error = XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(source, false)
+        .expect_err(".LIN must not be silently ignored by the static AC output contract");
+    assert!(error.contains(".LIN") || error.contains(".lin"), "{error}");
+}
+
+#[test]
+fn wrapper_static_ac_contract_accepts_explicit_sparcalc_zero() {
+    let source = "ordinary AC fixture with explicit LIN mode\n\
+                      V1 in 0 AC 1\n\
+                      R1 in out 1k\n\
+                      C1 out 0 1u\n\
+                      .AC LIN 2 1 2\n\
+                      .PRINT AC VM(out)\n\
+                      .LIN SPARCALC=0\n\
+                      .END\n";
+
+    XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(source, false)
+        .expect("SPARCALC=0 explicitly selects ordinary AC output");
+    let netlist = Netlist::parse(source).expect("SPARCALC=0 parses as typed LIN metadata");
+    assert_eq!(
+        netlist.lin_analysis,
+        Some(rspice_core::netlist::LinAnalysis::AcOnly)
+    );
+
+    let sparcalc_one = source.replace("SPARCALC=0", "SPARCALC=1");
+    assert!(
+        XyceTestRunner::validate_native_static_fd_ac_wrapper_contract(&sparcalc_one, false)
+            .is_err(),
+        "SPARCALC=1 remains outside the ordinary-AC contract"
+    );
+    assert!(
+        Netlist::parse(&sparcalc_one).is_err(),
+        "SPARCALC=1 must not be silently ignored by the typed parser"
+    );
+}
+
+#[test]
+fn static_ac_contract_admits_rf_port_only_with_sparcalc_zero() {
+    let source = "RF port ordinary AC fixture\n\
+                      V1 in 0 AC 1 PORT=1 Z0=50\n\
+                      R1 in out 1k\n\
+                      C1 out 0 1u\n\
+                      .AC LIN 2 1 2\n\
+                      .PRINT AC VM(out)\n\
+                      .LIN SPARCALC=0\n\
+                      .END\n";
+    let netlist = Netlist::parse(source).expect("RF port SPARCALC=0 fixture parses");
+    assert!(netlist.elements.iter().any(|element| {
+        matches!(
+            &element.kind,
+            ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::RfPort { .. })
+        )
+    }));
+    let ac = XyceTestRunner::single_ac_analysis(&netlist)
+        .expect("RF port SPARCALC=0 fixture has one AC analysis");
+    XyceTestRunner::validate_native_static_ac_contract(&netlist, &ac)
+        .expect("RF port is ordinary AC when SPARCALC=0 is explicit");
+}
+
+#[test]
+fn xyce_ac_sensitivity_parser_accepts_objvars_and_rejects_ambiguous_fields() {
+    let objectives = XyceTestRunner::parse_xyce_sensitivity_objectives("b, V(c,0), I(V1)")
+        .expect("Xyce OBJVARS forms are parsed structurally");
+    assert_eq!(objectives.len(), 3);
+    assert!(matches!(
+        &objectives[0].spec,
+        XyceAcSensitivityObjectiveSpec::Voltage {
+            positive,
+            negative: None
+        } if positive == "b"
+    ));
+    assert!(matches!(
+        &objectives[1].spec,
+        XyceAcSensitivityObjectiveSpec::Voltage {
+            positive,
+            negative
+        } if positive == "c" && negative.as_deref() == Some("0")
+    ));
+    assert!(matches!(
+        &objectives[2].spec,
+        XyceAcSensitivityObjectiveSpec::BranchCurrent(element) if element == "v1"
+    ));
+
+    let error = XyceTestRunner::parse_xyce_sensitivity_objectives("b,,c")
+        .expect_err("empty objective fields must fail closed");
+    assert!(error.contains("empty objective"), "{error}");
+
+    let error = XyceTestRunner::parse_xyce_sensitivity_parameters("R1:R,R1:R")
+        .expect_err("duplicate sensitivity parameters must fail closed");
+    assert!(error.contains("duplicate parameter"), "{error}");
+
+    let continued =
+        XyceTestRunner::parse_xyce_sensitivity_parameters("RB1:R, Q2N2222:bf, Q2N2222:is,")
+            .expect("comma-terminated continued PARAM fields are valid Xyce syntax");
+    assert_eq!(
+        continued,
+        vec![
+            "RB1:R".to_string(),
+            "Q2N2222:bf".to_string(),
+            "Q2N2222:is".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn xyce_ac_sensitivity_engine_source_removes_only_sens_cards() {
+    let source = "fixture\n\
+                       V1 out 0 AC 1\n\
+                       .SENS OBJVARS=out PARAM=R1:R\n\
+                       + continuation\n\
+                       R1 out 0 1k\n\
+                       .PRINT AC V(out)\n\
+                       .END\n";
+    let stripped = XyceTestRunner::source_without_xyce_sensitivity_directives(source);
+    assert!(!stripped.to_ascii_lowercase().contains(".sens"));
+    assert!(stripped.contains("R1 out 0 1k"));
+    assert!(stripped.contains(".PRINT AC V(out)"));
+    assert!(XyceTestRunner::parse_xyce_netlist(&stripped, Path::new("fixture.cir")).is_ok());
+}
+
+#[test]
+fn xyce_ac_sensitivity_plan_accepts_missing_primary_oracle() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Output/AC-SENS/ac-sens-raw-override-ascii.cir";
+    let deck = XyceDeck {
+        path: root.join(relative),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+
+    let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+        .static_ac_plan_for_deck(&deck)
+        .expect("sensitivity-only AC oracle plan is supported");
+
+    assert!(plan.reference_path.is_none());
+    assert!(plan.print.is_none());
+    assert!(plan.sensitivity.is_some());
+    assert_eq!(plan.contract, XyceStaticAcContract::WrapperStatic);
+}
+
+#[test]
+fn xyce_ac_sensitivity_output_override_uses_canonical_sensitivity_oracle() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Output/Dasho/ac-sens.cir";
+    let deck = XyceDeck {
+        path: root.join(relative),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_ac_plan_for_deck(&deck)
+        .expect("Dasho sensitivity output override plan is supported");
+    assert!(plan.output_override);
+    let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+    assert_eq!(
+        sensitivity.reference_format,
+        XyceAcSensitivityReferenceFormat::Prn
+    );
+    assert!(!sensitivity.no_index);
+    assert!(sensitivity.side_outputs.is_empty());
+    assert!(
+        sensitivity
+            .reference_path
+            .to_string_lossy()
+            .ends_with("FD.SENS.prn")
+    );
+    assert_eq!(sensitivity.print.probes, vec!["v(c)", "C1:C"]);
+}
+
+#[test]
+fn xyce_ac_sensitivity_headerless_schema_is_derived_from_the_print_contract() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Output/AC-SENS/ac-sens-no-headerfooter.cir";
+    let deck = XyceDeck {
+        path: root.join(relative),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let source = fs::read_to_string(&deck.path).expect("read headerless sensitivity deck");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_ac_plan_for_deck(&deck)
+        .expect("headerless sensitivity plan is supported");
+
+    assert!(XyceTestRunner::source_requests_ac_print_headerless(&source));
+    let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+    let columns = XyceTestRunner::xyce_ac_sensitivity_reference_columns(sensitivity);
+    assert_eq!(columns.len(), 49);
+    assert_eq!(columns.first().map(String::as_str), Some("Index"));
+    assert_eq!(columns.get(1).map(String::as_str), Some("FREQ"));
+    assert!(
+        columns
+            .iter()
+            .any(|column| column.eq_ignore_ascii_case("d_re({v(b)})/d_r1:r_adj"))
+    );
+}
+
+#[test]
+fn xyce_ac_sensitivity_noindex_schema_omits_index_column() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Output/AC-SENS/ac-sens-prn-noindex.cir";
+    let deck = XyceDeck {
+        path: root.join(relative),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_ac_plan_for_deck(&deck)
+        .expect("NOINDEX sensitivity plan is supported");
+    let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+    assert!(sensitivity.no_index);
+    let columns = XyceTestRunner::xyce_ac_sensitivity_reference_columns(sensitivity);
+    assert_eq!(columns.len(), 48);
+    assert_eq!(columns.first().map(String::as_str), Some("FREQ"));
+    assert!(
+        !columns
+            .iter()
+            .any(|column| column.eq_ignore_ascii_case("Index"))
+    );
+}
+
+#[test]
+fn xyce_ac_sensitivity_csv_plan_uses_csv_oracle_schema() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Output/AC-SENS/ac-sens-csv.cir";
+    let deck = XyceDeck {
+        path: root.join(relative),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_ac_plan_for_deck(&deck)
+        .expect("CSV sensitivity plan is supported");
+    let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+    assert_eq!(
+        sensitivity.reference_format,
+        XyceAcSensitivityReferenceFormat::Csv
+    );
+    assert!(sensitivity.no_index);
+    assert!(
+        sensitivity
+            .reference_path
+            .to_string_lossy()
+            .ends_with("FD.SENS.csv")
+    );
+    let columns = XyceTestRunner::xyce_ac_sensitivity_reference_columns(sensitivity);
+    assert_eq!(columns.len(), 48);
+    assert_eq!(columns.first().map(String::as_str), Some("FREQ"));
+}
+
+#[test]
+fn xyce_ac_sensitivity_step_plan_preserves_side_outputs() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Output/AC-SENS/ac-sens-step-gnuplot.cir";
+    let deck = XyceDeck {
+        path: root.join(relative),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+        .static_ac_plan_for_deck(&deck)
+        .expect("stepped sensitivity plan must preserve all destinations");
+    assert_eq!(plan.steps.len(), 1);
+    let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+    assert_eq!(sensitivity.side_outputs.len(), 1);
+    assert!(
+        sensitivity.side_outputs[0]
+            .file
+            .ends_with(".FD.SENS.splot.prn")
+    );
+}
+
+#[test]
+fn xyce_ac_sensitivity_plan_accepts_xyce_fallback_side_formats() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let relative = "Netlists/Output/AC-SENS/ac-sens-formats-default-to-prn.cir";
+    let deck = XyceDeck {
+        path: root.join(relative),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let plan = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+        .static_ac_plan_for_deck(&deck)
+        .expect("fallback-format sensitivity plan is supported");
+    let sensitivity = plan.sensitivity.as_ref().expect("sensitivity plan");
+    assert_eq!(sensitivity.side_outputs.len(), 4);
+    assert!(
+        sensitivity
+            .side_outputs
+            .iter()
+            .all(|side| side.reference_path == sensitivity.reference_path)
+    );
+    assert!(sensitivity.side_outputs.iter().all(|side| !side.no_index));
+}
+
+#[test]
+fn relational_transient_contract_rejects_silently_defaulted_parameter_domains() {
+    assert!(!XyceTestRunner::native_relational_diode_instance_param(
+        "OFF", 1.0
+    ));
+    assert!(!XyceTestRunner::native_relational_diode_instance_param(
+        "M", 0.0
+    ));
+    assert!(!XyceTestRunner::native_relational_diode_instance_param(
+        "DTEMP", -400.0
+    ));
+    assert!(!XyceTestRunner::native_relational_diode_model_param(
+        "BV", -1.0
+    ));
+    assert!(!XyceTestRunner::native_relational_diode_model_param(
+        "IBV", 0.0
+    ));
+    assert!(!XyceTestRunner::native_relational_mos3_instance_param(
+        "L", 0.0
+    ));
+    assert!(!XyceTestRunner::native_relational_mos3_instance_param(
+        "M", 0.0
+    ));
+    assert!(!XyceTestRunner::native_relational_mos3_model_param(
+        "KP", -1.0
+    ));
+    assert!(!XyceTestRunner::native_relational_mos3_model_param(
+        "PHI", 0.0
+    ));
+    assert!(!XyceTestRunner::native_relational_mos3_model_param(
+        "RSH", 1.0
+    ));
+    assert!(!XyceTestRunner::native_relational_mos3_model_param(
+        "TPG", 2.0
+    ));
+    assert!(XyceTestRunner::native_relational_mos3_model_param(
+        "RSH", 0.0
+    ));
+
+    assert!(XyceTestRunner::native_relational_diode_model_param(
+        "TBV1", -1.0e-4
+    ));
+    assert!(XyceTestRunner::native_relational_diode_model_param(
+        "TBV2", 5.0e-8
+    ));
+
+    let invalid_geometry = Netlist::parse(
+        "\
+invalid relational MOS3 effective geometry
+VDD d 0 5
+VG g 0 1
+M1 d g 0 0 NM L=1u W=10u
+.MODEL NM NMOS (LEVEL=3 L=1u W=10u LD=1u KP=2e-5 PHI=.6)
+.TRAN 10n 1u
+.PRINT TRAN V(d)
+.END
+",
+    )
+    .expect("invalid effective-geometry deck still parses structurally");
+    assert!(
+        XyceTestRunner::validate_native_relational_transient_contract(&invalid_geometry).is_err(),
+        "a clamped one-picometer effective channel must remain outside the relational contract"
+    );
+}
+
+#[test]
+fn static_step_contract_admits_xyce_level2_tbv_diode() {
+    let netlist = XyceTestRunner::parse_xyce_netlist(
+            "\
+level 2 diode with temperature-dependent breakdown
+V1 1 0 PULSE(7.5 10 1m 1 1 3 6)
+R1 1 2 1k
+D1 0 2 DMOD
+.MODEL DMOD D(LEVEL=2 IS=1E-14 RS=0 N=1 TT=0 CJO=1P VJ=1 M=.5 EG=1.11 XTI=3 KF=0 AF=1 FC=.5 BV=7.255 IBV=.001 TBV1=.00013 TBV2=-5e-8)
+.TRAN 0 1 0 100m
+.STEP TEMP LIST -55 25 72
+.PRINT TRAN V(2) TEMP
+.END
+",
+            Path::new("level2_tbv.cir"),
+        )
+        .expect("Level=2 TBV diode deck parses");
+
+    XyceTestRunner::validate_static_step_tran_contract(&netlist)
+        .expect("native stepped transient contract admits Level=2 TBV diode");
+    let diode = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("D1"))
+        .expect("D1 element");
+    assert!(
+        XyceTestRunner::netlist_element_is_native_absolute_transient_tbv_diode(&netlist, diode)
+    );
+}
+
+#[test]
+fn absolute_transient_contract_admits_device_minimum_legacy_diode() {
+    let netlist = XyceTestRunner::parse_xyce_netlist(
+        "\
+minimum diode defaults
+.options device minres=1 mincap=1n
+V1 in 0 1
+R1 in out 20
+D1 out 0 DMODA
+.model DMODA D (IS=100FA)
+.tran 1n 10n
+.print tran V(out)
+.end
+",
+        Path::new("minimum_diode_defaults.cir"),
+    )
+    .expect("device minimum diode deck parses");
+    let diode = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("D1"))
+        .expect("D1 element");
+    assert!(
+        XyceTestRunner::netlist_element_is_native_absolute_transient_minimum_diode(&netlist, diode)
+    );
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("device minimum diode deck is in the absolute transient envelope");
+
+    let mut without_minimums = netlist.clone();
+    without_minimums.options.device_min_resistance = None;
+    without_minimums.options.device_min_capacitance = None;
+    assert!(
+        !XyceTestRunner::netlist_element_is_native_absolute_transient_minimum_diode(
+            &without_minimums,
+            without_minimums
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("D1"))
+                .expect("D1 element"),
+        )
+    );
+}
+
+#[test]
+fn absolute_transient_contract_admits_canonical_vdmos_level18_integrated_rms() {
+    let source = "\
+IRF130 transient oracle
+VD 3 1 0.5
+VS 2 0 0
+VG 4 0 10 pulse(0 10 300ns 50ns 50ns 400ns 1000ns)
+VID 0 1 DC 0
+M1 3 4 2 0 IRF130 W=0.386 L=2.5u
+.MODEL IRF130 NMOS LEVEL=18
++ CV=1
++ CVE=1
++ VTO=3.5
++ RD=0
++ RS=0.005
++ LAMBDA=0
++ M=3
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=50nm
+.TRAN 0.5n 1u 0u 2n
+.PRINT TRAN precision=10 width=19 V(3) V(4) {I(VID)+0.5}
+.options timeint reltol=1.0e-2 abstol=1.0e-7
+.END
+";
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("vdmos_level18.cir"))
+        .expect("canonical VDMOS LEVEL=18 deck parses");
+    assert!(
+        XyceTestRunner::netlist_is_native_absolute_transient_vdmos_level18(&netlist),
+        "the canonical numeric LEVEL=18 envelope is eligible"
+    );
+    let mosfet = netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 element");
+    assert!(
+        XyceTestRunner::netlist_element_is_native_absolute_transient_vdmos_level18(
+            &netlist, mosfet
+        )
+    );
+    XyceTestRunner::validate_native_transient_contract(&netlist)
+        .expect("canonical VDMOS LEVEL=18 deck is in the absolute transient envelope");
+
+    let plan = XyceStaticTranPlan {
+        deck_path: PathBuf::from("vdmos_level18.cir"),
+        reference_path: std::env::current_exe().expect("test executable is an existing file"),
+        source: source.to_string(),
+        print: XycePrintRequest {
+            probes: vec![
+                "V(3)".to_string(),
+                "V(4)".to_string(),
+                "{I(VID)+0.5}".to_string(),
+            ],
+        },
+        output_override: false,
+        timeint_conststep: false,
+        tran: XyceTranAnalysis {
+            step: 0.5e-9,
+            stop: 1.0e-6,
+            start: Some(0.0),
+            max_step: Some(2.0e-9),
+            uic: false,
+        },
+        steps: Vec::new(),
+        contract: XyceStaticTranContract::PlainStatic,
+        wrapper_tolerance: None,
+        comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+    };
+    assert_eq!(
+        XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("canonical VDMOS selector evaluates"),
+        XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision: 10,
+        }
+    );
+
+    for invalid in [
+        source.replace("+ M=3", "+ M=4"),
+        source.replace("+ CVE=1", "+ CVE=0"),
+        source.replace("+ TOX=50nm", "+ UNKNOWN=1\n+ TOX=50nm"),
+        source.replace("+ UO=230", "+ UO=230\n+ UO=231"),
+        source.replace(
+            "M1 3 4 2 0 IRF130 W=0.386 L=2.5u",
+            "M1 3 4 2 IRF130 W=0.386 L=2.5u",
+        ),
+        source.replace(".options timeint", ".options gmin=1e-12 timeint"),
+    ] {
+        let invalid_netlist =
+            XyceTestRunner::parse_xyce_netlist(&invalid, Path::new("invalid_vdmos_level18.cir"))
+                .expect("invalid VDMOS fixture remains structurally parseable");
+        assert!(
+            !XyceTestRunner::netlist_is_native_absolute_transient_vdmos_level18(&invalid_netlist),
+            "invalid VDMOS variation must remain outside the integrated-RMS envelope"
+        );
+    }
+}
+
+#[test]
+fn static_step_contract_rejects_unresolved_or_unknown_tbv_diode_parameters() {
+    let unknown_instance = XyceTestRunner::parse_xyce_netlist(
+        "\
+unknown diode instance parameter
+V1 1 0 8
+D1 1 0 DMOD FOO=1
+.MODEL DMOD D(LEVEL=2 BV=7 IBV=1m TBV1=1e-4)
+.TRAN 1n 1u
+.STEP TEMP LIST 25 50
+.PRINT TRAN V(1) TEMP
+.END
+",
+        Path::new("unknown_instance_tbv.cir"),
+    )
+    .expect("unknown instance parameter deck parses");
+    assert!(XyceTestRunner::validate_static_step_tran_contract(&unknown_instance).is_err());
+
+    let unresolved_model = XyceTestRunner::parse_xyce_netlist(
+        "\
+unresolved diode model parameter
+V1 1 0 8
+D1 1 0 DMOD
+.MODEL DMOD D(LEVEL=2 BV=7 IBV=1m TBV1={V(1)})
+.TRAN 1n 1u
+.STEP TEMP LIST 25 50
+.PRINT TRAN V(1) TEMP
+.END
+",
+        Path::new("unresolved_model_tbv.cir"),
+    )
+    .expect("unresolved model parameter deck parses");
+    assert!(XyceTestRunner::validate_static_step_tran_contract(&unresolved_model).is_err());
+}
+
+#[test]
+fn transient_temp_probes_validate_and_follow_active_netlist_temperature() {
+    let netlist = Netlist::parse(
+        "\
+global transient temperature probe
+.OPTIONS TEMP=42
+V1 1 0 1
+R1 1 0 1
+.TRAN 1n 1u
+.END
+",
+    )
+    .expect("global temperature probe fixture parses");
+    let result = TransientResult {
+        time: vec![0.0],
+        step_sizes: vec![0.0],
+        voltages: vec![vec![1.0]],
+        branch_currents: Vec::new(),
+        num_nodes: 1,
+        node_names: vec!["1".to_string()],
+        branch_names: Vec::new(),
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: Vec::new(),
+        store_traces: Vec::new(),
+    };
+
+    for probe in ["TEMP", "TEMPER"] {
+        XyceTestRunner::validate_tran_probe(probe, &netlist)
+            .unwrap_or_else(|error| panic!("{probe} must validate: {error}"));
+        let value = XyceTestRunner::evaluate_tran_probe(probe, &netlist, &result, 0.0)
+            .unwrap_or_else(|error| panic!("{probe} must evaluate: {error}"));
+        assert_eq!(value, 42.0, "{probe} follows active netlist temperature");
+    }
+}
+
+#[test]
+fn device_parameter_probe_splits_on_rightmost_colon() {
+    assert_eq!(
+        XyceTestRunner::parse_device_parameter_probe("{Xtest:Xtest2:Rinside:R}"),
+        Some(("xtest:xtest2:rinside".to_string(), "r".to_string()))
+    );
+}
+
+#[test]
+fn print_expression_rewrites_bare_device_parameter_tokens() {
+    let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+        "r1:r" => Ok(2.0),
+        "l1:l" => Ok(3.0e-3),
+        other => Err(format!("unexpected probe {other}")),
+    };
+    let value = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "{R1:R*L1:L}",
+        rspice_core::netlist::ParamContext::default(),
+        &mut call_value,
+    )
+    .expect("device-parameter expression evaluates");
+
+    assert!((value - 6.0e-3).abs() < 1.0e-15, "value {value}");
+}
+
+#[test]
+fn dc_probe_validation_retries_dynamic_denominators_with_distinct_probes() {
+    let netlist = Netlist::default();
+
+    XyceTestRunner::validate_dc_probe("{V(a)/(V(b)-V(c))}", &netlist)
+        .expect("distinct runtime probes must not be rejected by equal placeholders");
+}
+
+#[test]
+fn dc_probe_validation_keeps_constant_division_by_zero_rejected() {
+    let netlist = Netlist::default();
+    let error = XyceTestRunner::validate_dc_probe("{V(a)/(1-1)}", &netlist)
+        .expect_err("constant zero denominator must remain invalid");
+
+    assert!(
+        error.contains("Division by zero"),
+        "unexpected validation error: {error}"
+    );
+}
+
+#[test]
+fn dc_probe_validation_keeps_unsupported_dynamic_probes_rejected() {
+    let netlist = Netlist::default();
+    let error = XyceTestRunner::validate_dc_probe("{V(a)/(I(unknown)-V(c))}", &netlist)
+        .expect_err("unsupported branch probes must remain invalid");
+
+    assert!(
+        error.contains("unknown") || error.contains("unsupported"),
+        "unexpected validation error: {error}"
+    );
+}
+
+#[test]
+fn dc_probe_index_caches_top_level_branch_and_diode_names() {
+    let netlist = Netlist::parse(
+        "\
+indexed DC probe fixture
+V1 1 0 1
+R1 1 0 1
+D1 1 0 DMOD
+.MODEL DMOD D(IS=1e-14)
+.DC V1 0 1 1
+.PRINT DC I(D1) I(R1)
+.END
+",
+    )
+    .expect("indexed DC probe fixture parses");
+    let mut index = XyceTestRunner::dc_probe_index(&netlist);
+
+    assert!(XyceTestRunner::netlist_has_diode_instance_with_index(
+        &netlist, "d1", &mut index,
+    ));
+    assert!(
+        XyceTestRunner::netlist_has_recorded_branch_current_with_index(&netlist, "r1", &mut index,)
+    );
+    assert!(!XyceTestRunner::netlist_has_diode_instance_with_index(
+        &netlist, "unknown", &mut index,
+    ));
+}
+
+#[test]
+fn lead_current_probe_parses_xyce_terminal_accessors() {
+    assert_eq!(
+        XyceTestRunner::parse_lead_current_probe("ID(Mfoo)"),
+        Some(XyceLeadCurrentProbe {
+            terminal: XyceLeadCurrentTerminal::Drain,
+            element_name: "mfoo".to_string(),
+        })
+    );
+    assert_eq!(
+        XyceTestRunner::parse_lead_current_probe(" ib( X1:M1 ) "),
+        Some(XyceLeadCurrentProbe {
+            terminal: XyceLeadCurrentTerminal::Bulk,
+            element_name: "x1:m1".to_string(),
+        })
+    );
+    assert!(XyceTestRunner::parse_lead_current_probe("I(V1)").is_none());
+    assert_eq!(XyceLeadCurrentTerminal::Drain.op_parameter(), Some("id"));
+    assert_eq!(XyceLeadCurrentTerminal::Source.op_parameter(), Some("is"));
+    assert_eq!(XyceLeadCurrentTerminal::Gate.op_parameter(), None);
+}
+
+#[test]
+fn print_expression_evaluates_xyce_lead_current_probe_calls() {
+    let mut context = rspice_core::netlist::ParamContext::new();
+    context.set("scale", 2.0);
+    let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+        "id(m1)" => Ok(3.0),
+        "i(vsense)" => Ok(5.0),
+        other => Err(format!("unexpected probe {other}")),
+    };
+
+    let value = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "ID(M1) * scale + I(VSENSE)",
+        context,
+        &mut call_value,
+    )
+    .expect("lead-current probe expression evaluates");
+
+    assert_eq!(value, 11.0);
+}
+
+#[test]
+fn print_expression_evaluates_xyce_voltage_accessor_probe_calls() {
+    let context = rspice_core::netlist::ParamContext::new();
+    let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+        "vr(a)" => Ok(2.0),
+        "vi(a)" => Ok(0.25),
+        "vm(a)" => Ok(2.0),
+        "vp(a)" => Ok(180.0),
+        other => Err(format!("unexpected probe {other}")),
+    };
+
+    let value = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "VR(A) + VI(A) + VM(A) + VP(A)",
+        context,
+        &mut call_value,
+    )
+    .expect("voltage-accessor probe expression evaluates");
+
+    assert_eq!(value, 184.25);
+}
+
+#[test]
+fn ac_print_validation_accepts_complex_parameter_expression() {
+    let source = "complex ac expression\n\
+             Isrc 1 0 AC 1 0\n\
+             R1 1 0 1e3\n\
+             C1 1 0 2e-6\n\
+             .param r0={log10(-1)}\n\
+             .param r1={m(r0)}\n\
+             .AC DEC 10 1 1e5\n\
+             .print ac v(1) {r0} {r1}\n\
+             .END\n";
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("test.cir"))
+        .expect("complex AC expression deck parses");
+    let print = XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+
+    assert_eq!(
+        print.probes,
+        vec!["v(1)".to_string(), "{r0}".to_string(), "{r1}".to_string()]
+    );
+    XyceTestRunner::validate_ac_probe("{r0}", &netlist)
+        .expect("braced complex parameter expression validates");
+    XyceTestRunner::validate_ac_probe("r0", &netlist)
+        .expect("reference-normalized complex parameter expression validates");
+    XyceTestRunner::validate_ac_probe("{r1}", &netlist)
+        .expect("AC parameter expression wins over same-named resistor");
+}
+
+#[test]
+fn print_request_keeps_continued_probes_after_inline_comments() {
+    let source = "continued print comments\n\
+             .param r0={3.0+2.0J}\n\
+             .param r1={m(r0)}\n\
+             .print ac\n\
+             + v(1)          ; complex voltage\n\
+             + {r0}          ; complex expression\n\
+             + {re(r0)}      ; real projection\n\
+             + {v(1)/r1}     ; expression with probe call\n\
+             .END\n";
+
+    let print = XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+
+    assert_eq!(
+        print.probes,
+        vec![
+            "v(1)".to_string(),
+            "{r0}".to_string(),
+            "{re(r0)}".to_string(),
+            "{v(1)/r1}".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn ac_reference_columns_match_braced_complex_print_expression() {
+    let source = "complex ac expression\n\
+             .print ac\n\
+             + v(1)          ; complex voltage\n\
+             + {r0}          ; complex expression\n\
+             + {0.1+r2}      ; complex expression with literal offset\n\
+             .END\n";
+    let print = XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+    let reference = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "FREQ".to_string(),
+            "Re(V(1))".to_string(),
+            "Im(V(1))".to_string(),
+            "Re({R0})".to_string(),
+            "Im({R0})".to_string(),
+            "Re({0.1+R2})".to_string(),
+            "Im({0.1+R2})".to_string(),
+        ],
+        rows: Vec::new(),
+    };
+
+    let columns = XyceTestRunner::reference_ac_data_columns(&reference, &print, 2)
+        .expect("complex reference headers map to AC print expressions");
+
+    assert_eq!(columns.len(), 6);
+    assert_eq!(columns[2].probe_name(), "{r0}");
+    assert_eq!(columns[4].probe_name(), "{0.1+r2}");
+}
+
+#[test]
+fn dc_complex_param_wrapper_accepts_unlabeled_source_tail() {
+    let source = "\
+testing of complex expressions in parameters and on the .PRINT line
+Vsrc 1 0 1 0
+R1 1 0 1e3
+C1 1 0 2e-6
+.param r0={3.0+2.0J}
+.param r1={m(r0)}
+.param r2={sqrt(-1.00000)}
+.param r3={re(0.1+r2)}
+.param r4={img(r2)}
+.DC Vsrc 1 1 1
+.print DC
++ v(1)
++ {r0}
++ {re(r0)}
++ {img(r0)}
++ {r1}
++ {v(1)/r0}
++ {v(1)/r1}
++ {ph(v(1)/r1)}
++ {db(v(1))}
++ {r(v(1))}
++ {r3}
++ {r4}
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("plain static DC wrapper source validates");
+    let print =
+        XyceTestRunner::single_dc_print_request(source).expect("single DC print request parses");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("test4.cir"))
+        .expect("test4 deck parses");
+    assert!(
+        !XyceTestRunner::braced_expression_is_atomic_real_probe("r1", &netlist),
+        "braced scalar parameter r1 must not be shadowed by resistor R1"
+    );
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect("plain static DC netlist validates");
+    let dc = XyceTestRunner::single_dc_sweep(&netlist).expect("single DC sweep parses");
+    XyceTestRunner::validate_static_dc_contract(&netlist, &dc, &print)
+        .expect("complex parameter DC probes validate");
+}
+
+#[test]
+fn plain_static_dc_wrapper_accepts_primary_probe_format_prn_oracle() {
+    let source = "\
+wrapper-origin hspice probe print with prn oracle
+VA IN 0 DC 0
+E1 1 0 IN 0 2
+R1 1 2 10
+R2 2 0 10
+.DC VA 0 10 1
+.PRINT DC FORMAT=PROBE v(in) v(2)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("plain static DC wrapper source accepts primary FORMAT=PROBE");
+    assert_eq!(
+        XyceTestRunner::static_dc_contract_for_print_format(true, Some("PROBE"))
+            .expect("generic wrapper PROBE contract resolves"),
+        XyceStaticDcContract::WrapperCsd,
+        "generic PROBE output remains CSDF; only the wrapper-origin PRN source validator normalizes this case"
+    );
+}
+
+#[test]
+fn plain_static_dc_wrapper_accepts_native_legacy_diode_model() {
+    let source = "\
+plain static diode dc
+VIN 1 0 DC 5V
+R1 1 2 2K
+D1 3 0 DMOD
+VMON 2 3 0
+.MODEL DMOD D (IS=100FA)
+.DC VIN 5 5 1
+.PRINT DC V(1) I(VMON) V(3)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("plain static DC wrapper source accepts legacy diode model type");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("bug204.cir"))
+        .expect("legacy diode DC deck parses");
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect("plain static DC netlist accepts native legacy diode model");
+}
+
+#[test]
+fn plain_static_dc_wrapper_accepts_xyce_level2_native_diode_subset() {
+    let source = "\
+plain static Xyce level 2 diode dc
+VD 1 0 DC 0.05
+D1 1 0 DXX
+.MODEL DXX D (LEVEL=2 IS=1e-18 N=1)
+.DC VD 0 1.2 0.05
+.PRINT DC FORMAT=PROBE V(1) I(VD)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("source-level diode syntax validates");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("library_parsing.cir"))
+        .expect("Xyce LEVEL=2 diode DC deck parses");
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect("plain static DC netlist accepts Xyce LEVEL=2 native diode subset");
+}
+
+#[test]
+fn plain_static_dc_wrapper_rejects_xyce_level2_diode_outside_native_subset() {
+    let source = "\
+plain static Xyce level 2 diode unsupported param dc
+VD 1 0 DC 0.05
+D1 1 0 DXX
+.MODEL DXX D (LEVEL=2 IRF=1)
+.DC VD 0 1.2 0.05
+.PRINT DC V(1)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("source-level diode syntax validates");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("level2_diode_irf.cir"))
+        .expect("Xyce LEVEL=2 diode unsupported-param deck parses at netlist level");
+    let err = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect_err("unsupported Xyce LEVEL=2 diode params stay outside the wrapper contract");
+    assert!(
+        err.contains("advanced diode model"),
+        "unexpected validation error: {err}"
+    );
+}
+
+#[test]
+fn plain_static_dc_wrapper_accepts_native_resistor_model_family_and_global_param() {
+    let source = "\
+plain static native resistor models dc
+.GLOBAL_PARAM SCALE_R=1
+V1 in 0 1
+R1 in out {V(in)*SCALE_R} RMOD
+R2 out 0 RMOD_SC L=1u W=1u
+.MODEL RMOD R (TCE=3)
+.MODEL RMOD_SC R (RSH=1 TCE=-6)
+.DC V1 1 1 1
+.STEP TEMP 27 37 10
+.PRINT DC V(out) I(R1) I(R2)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("source-level validation accepts native resistor model syntax");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("native_resistors.cir"))
+        .expect("native resistor model deck parses");
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect("plain static DC netlist accepts multiple native resistor models");
+}
+
+#[test]
+fn plain_static_dc_wrapper_rejects_generated_resistor_model_level() {
+    let source = "\
+plain static generated resistor model dc
+V1 in 0 1
+R1 in 0 RMOD
+.MODEL RMOD R (LEVEL=1002)
+.DC V1 1 1 1
+.PRINT DC V(in)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("source-level validation accepts resistor model syntax");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("generated_resistor.cir"))
+        .expect("generated resistor model deck parses at netlist level");
+    let error = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect_err("generated resistor levels stay outside the native wrapper contract");
+    assert!(error.contains("advanced resistor model"));
+}
+
+#[test]
+fn plain_static_dc_wrapper_accepts_binned_native_mos_model_family() {
+    let source = "\
+plain static binned mos dc
+M1 2 1 0 0 nch L=0.11u W=10.1u
+VGS 1 0 1.2
+VDS 2 0 1.2
+.DC VDS 0 1 1
+.PRINT DC V(2) I(VDS)
+.MODEL nch.1 NMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=0.1u WMAX=10u)
+.MODEL nch.2 NMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=10u WMAX=100u)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("source-level plain static DC wrapper validation accepts model bin cards");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("dcModelBinning.cir"))
+        .expect("binned MOS DC deck parses");
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect("plain static DC netlist accepts one binned native MOS model family");
+}
+
+#[test]
+fn plain_static_dc_wrapper_rejects_unrelated_multiple_models() {
+    let source = "\
+plain static unrelated models dc
+M1 2 1 0 0 nch L=1u W=1u
+VGS 1 0 1.2
+VDS 2 0 1.2
+.DC VDS 0 1 1
+.PRINT DC V(2)
+.MODEL nch.1 NMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=0.1u WMAX=10u)
+.MODEL pch.1 PMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=0.1u WMAX=10u)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("source-level validation accepts native MOS model syntax");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("unrelated_models.cir"))
+        .expect("unrelated MOS model deck parses");
+    let err = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect_err("unrelated multiple models stay outside the plain wrapper contract");
+    assert!(
+        err.contains("binned native MOS model family"),
+        "unexpected validation error: {err}"
+    );
+}
+
+#[test]
+fn plain_static_dc_wrapper_rejects_advanced_diode_model_level() {
+    let source = "\
+plain static advanced diode dc
+VIN 1 0 DC 5V
+D1 1 0 DMOD
+.MODEL DMOD D (LEVEL=200 IS=1e-14)
+.DC VIN 5 5 1
+.PRINT DC V(1)
+.END
+";
+
+    XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+        .expect("source-level model type validation accepts diode syntax");
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("advanced_diode.cir"))
+        .expect("advanced diode model deck parses at netlist level");
+    let err = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+        .expect_err("advanced diode levels stay outside the native plain DC wrapper contract");
+    assert!(
+        err.contains("advanced diode model"),
+        "unexpected validation error: {err}"
+    );
+}
+
+#[test]
+fn no_output_dc_wrapper_accepts_dc_without_print() {
+    let source = "\
+no output dc
+R1 1 0 10
+V1 1 0 DC 0
+.DC V1 0 10 1
+.END
+";
+
+    XyceTestRunner::validate_no_output_dc_wrapper_source(source)
+        .expect("no-output DC source validates");
+    assert!(XyceTestRunner::is_native_no_output_dc_wrapper_candidate(
+        "Netlists/Output/DC/dc-noprn.cir",
+        source
+    ));
+}
+
+#[test]
+fn no_output_dc_wrapper_rejects_printed_deck() {
+    let source = "\
+printed dc
+R1 1 0 10
+V1 1 0 DC 0
+.DC V1 0 10 1
+.PRINT DC V(1)
+.END
+";
+
+    let err = XyceTestRunner::validate_no_output_dc_wrapper_source(source)
+        .expect_err("printed deck is not no-output");
+    assert!(
+        err.contains(".PRINT") || err.contains(".print"),
+        "unexpected validation error: {err}"
+    );
+}
+
+#[test]
+fn expected_missing_inductor_value_error_accepts_intended_diagnostic() {
+    let source = "\
+missing inductor value
+V1 1 0 DC 1
+L1 1 0
+.TRAN 1n 1u
+.PRINT TRAN V(1)
+.END
+";
+
+    assert!(
+        XyceTestRunner::is_expected_missing_inductor_value_error_deck(
+            "Netlists/INDUCTOR/ErrorMessageTest.cir",
+            "L value missing from instance line\n"
+        )
+    );
+    XyceTestRunner::validate_expected_missing_inductor_value_error_source(
+        source,
+        Path::new("ErrorMessageTest.cir"),
+    )
+    .expect("missing inductor value diagnostic validates");
+}
+
+#[test]
+fn expected_missing_inductor_value_error_rejects_valid_inductor() {
+    let source = "\
+valid inductor
+V1 1 0 DC 1
+L1 1 0 1u
+.TRAN 1n 1u
+.PRINT TRAN V(1)
+.END
+";
+
+    let err = XyceTestRunner::validate_expected_missing_inductor_value_error_source(
+        source,
+        Path::new("valid_inductor.cir"),
+    )
+    .expect_err("valid inductor deck must not satisfy expected-error contract");
+    assert!(
+        err.contains("parsed successfully"),
+        "unexpected validation error: {err}"
+    );
+}
+
+#[test]
+fn expected_ac_data_analysis_init_contract_classifies_only_unresolved_tables() {
+    let unknown_table = "\
+ac data unknown table
+V1 in 0 AC 1
+R1 in 0 1k
+.AC DATA=missing
+.PRINT AC V(in)
+.END
+";
+    assert!(XyceTestRunner::source_may_have_ac_data_analysis_command(
+        unknown_table
+    ));
+    assert_eq!(
+        XyceTestRunner::expected_ac_data_analysis_init_failure(
+            unknown_table,
+            Path::new("unknown-table.cir")
+        )
+        .expect("unknown-table source validates"),
+        Some(XyceAcDataAnalysisInitFailure::NoDataTables)
+    );
+
+    let missing_named_table = "\
+ac data missing named table
+V1 in 0 AC 1
+R1 in 0 1k
+.DATA points
++ FREQ
++ 1
+.ENDDATA
+.AC DATA=missing
+.PRINT AC V(in)
+.END
+";
+    assert_eq!(
+        XyceTestRunner::expected_ac_data_analysis_init_failure(
+            missing_named_table,
+            Path::new("missing-named-table.cir")
+        )
+        .expect("missing-table source validates"),
+        Some(XyceAcDataAnalysisInitFailure::UnknownTable)
+    );
+
+    let resolved_table = missing_named_table.replace("DATA=missing", "DATA=points");
+    assert_eq!(
+        XyceTestRunner::expected_ac_data_analysis_init_failure(
+            &resolved_table,
+            Path::new("resolved-table.cir")
+        )
+        .expect("resolved-table source validates"),
+        None
+    );
+    assert!(!XyceTestRunner::source_may_have_ac_data_analysis_command(
+        "large wrapper option card\n.OPTIONS OUTPUT outputtimepoints=0,1,2\n.TRAN 1n 1u\n"
+    ));
+}
+
+#[test]
+fn dc_data_tables_materialize_device_value_rows() {
+    let source = "\
+dc data table rows
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+.DATA R1table
++ r1
++ 1
++ 2
+.ENDDATA
+.DATA R2table
++ r2
++ 3
++ 4
+.ENDDATA
+.DC DATA=R1table
+.DC DATA=R2table
+.PRINT DC {R1:R} {R2:R} V(2)
+.END
+";
+
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("dc_data.cir"))
+        .expect(".DC DATA deck parses");
+    let dc_data = XyceTestRunner::dc_data_sweep_for_source(source, &netlist)
+        .expect(".DC DATA tables validate")
+        .expect(".DC DATA sweep is detected");
+    assert_eq!(dc_data.rows.len(), 2);
+
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        ..SimulationConfig::default()
+    });
+    let row_netlist =
+        XyceTestRunner::materialize_dc_data_row_netlist(&engine, &netlist, &dc_data.rows[1])
+            .expect("second .DC DATA row materializes");
+
+    let r1 = row_netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("R1"))
+        .expect("R1 retained");
+    let r2 = row_netlist
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("R2"))
+        .expect("R2 retained");
+    assert!(
+        matches!(&r1.kind, ElementKind::Resistor { value, .. } if (*value - 2.0).abs() <= Value::EPSILON)
+    );
+    assert!(
+        matches!(&r2.kind, ElementKind::Resistor { value, .. } if (*value - 4.0).abs() <= Value::EPSILON)
+    );
+}
+
+#[test]
+fn dc_data_tables_reject_mismatched_table_lengths() {
+    let source = "\
+dc data mismatched rows
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+.DATA R1table
++ r1
++ 1
++ 2
+.ENDDATA
+.DATA R2table
++ r2
++ 3
+.ENDDATA
+.DC DATA=R1table
+.DC DATA=R2table
+.PRINT DC {R1:R} {R2:R} V(2)
+.END
+";
+
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("dc_data.cir"))
+        .expect(".DC DATA deck parses");
+    let err = XyceTestRunner::dc_data_sweep_for_source(source, &netlist)
+        .expect_err("mismatched TABLE-style .DC DATA row counts must reject");
+    assert!(
+        err.contains("expected 2"),
+        "unexpected validation error: {err}"
+    );
+}
+
+#[test]
+fn ac_reference_columns_preserve_current_magnitude_accessor() {
+    let source = "current accessor output\n\
+             .print ac I(V1) IM(V1)\n\
+             .END\n";
+    let print = XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+    let reference = XycePrnTable {
+        columns: vec![
+            "Index".to_string(),
+            "FREQ".to_string(),
+            "Re(I(V1))".to_string(),
+            "Im(I(V1))".to_string(),
+            "IM(V1)".to_string(),
+        ],
+        rows: Vec::new(),
+    };
+
+    let columns = XyceTestRunner::reference_ac_data_columns(&reference, &print, 2)
+        .expect("current component and magnitude headers map to AC print probes");
+
+    assert_eq!(columns.len(), 3);
+    assert_eq!(columns[0].probe_name(), "i(v1)");
+    assert_eq!(columns[1].probe_name(), "i(v1)");
+    assert_eq!(columns[2].probe_name(), "IM(V1)");
+}
+
+#[test]
+fn print_ddx_evaluates_probe_derivative_at_operating_point() {
+    let mut context = rspice_core::netlist::ParamContext::new();
+    context.set("SCALAR", 2.0);
+    let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+        "v(cntl)" => Ok(2.0),
+        "v(2)" => Ok(5.0 / 3.0),
+        other => Err(format!("unexpected probe {other}")),
+    };
+
+    let derivative = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+        "ddx(V(2)/(1.0+scalar*V(cntl)),v(cntl))",
+        context,
+        &mut call_value,
+    )
+    .expect("DDX print expression evaluates");
+
+    assert!((derivative + 2.0 / 15.0).abs() < 1.0e-9);
+}
+
+#[test]
+fn xyce_runner_engine_uses_xyce_device_dialect() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let engine = runner.create_dc_engine();
+
+    assert_eq!(engine.config().spice_dialect, SpiceDialect::Xyce);
+    assert_eq!(
+        engine.config().integration_method,
+        rspice_core::analysis::IntegrationMethod::TrapGear
+    );
+    assert_eq!(
+        engine.config().resolved_jfet_level2_model(),
+        rspice_core::engine::JfetLevel2Model::XyceModifiedShockley
+    );
+    assert_eq!(engine.config().convergence_config.voltage_reltol, 1.0e-4);
+    assert_eq!(engine.config().convergence_config.residual_reltol, 1.0e-3);
+}
+
+#[test]
+fn subckt_family_names_match_upstream_wrapper_globs() {
+    assert_eq!(
+        XyceTestRunner::parse_subckt_wrapper_file_name("subckt_b.cir").as_deref(),
+        Some("b")
+    );
+    assert_eq!(
+        XyceTestRunner::parse_subckt_family_member_file_name("subckt_b0.cir").as_deref(),
+        Some("b")
+    );
+    assert_eq!(
+        XyceTestRunner::parse_subckt_family_member_file_name("subckt_b2_hs.cir").as_deref(),
+        Some("b")
+    );
+    assert_eq!(
+        XyceTestRunner::parse_subckt_family_member_file_name("subckt_a1_dup.cir").as_deref(),
+        Some("a")
+    );
+    assert!(
+        XyceTestRunner::parse_subckt_family_member_file_name("subckt_a2_dup_error.cir").is_none(),
+        "error-checking wrapper decks are not part of the diff-against-baseline family glob"
+    );
+    assert!(
+        XyceTestRunner::parse_subckt_family_member_file_name("subckt_j1.cir").is_some(),
+        "matching the filename glob is separate from requiring a sibling wrapper manifest entry"
+    );
+}
+
+#[test]
+fn ac_comparator_preserves_strict_boundaries_and_signed_frequency_quirks() {
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    let table = |frequency: Value, value: Value| XycePrnTable {
+        columns: vec!["Index".to_string(), "FREQ".to_string(), "V(1)".to_string()],
+        rows: vec![vec![0.0, frequency, value]],
+    };
+
+    let gold = table(-10.0, 1.0);
+    let signed_frequency_quirk = table(100.0, 1.0);
+    assert!(
+        runner
+            .compare_ac_comparator_tables(&gold, &signed_frequency_quirk)
+            .expect("structurally valid tables compare")
+            .is_empty(),
+        "Release 7.10 divides frequency error by signed negative gold frequency"
+    );
+
+    let boundary_gold = table(-10.0, 0.0);
+    let exact_absolute_boundary = table(-10.0, 1.0e-6);
+    assert_eq!(
+        runner
+            .compare_ac_comparator_tables(&boundary_gold, &exact_absolute_boundary)
+            .expect("structurally valid tables compare")
+            .len(),
+        1,
+        "ACComparator requires absDiff strictly below its tolerance"
+    );
+
+    let zero_gold = table(0.0, 1.0);
+    let negative_zero_frequency_deviation = table(-1.0, 1.0);
+    assert!(
+        runner
+            .compare_ac_comparator_tables(&zero_gold, &negative_zero_frequency_deviation)
+            .expect("structurally valid tables compare")
+            .is_empty(),
+        "Release 7.10 zero-frequency check rejects only positive test deviations"
+    );
+}
+
+#[test]
+fn diode_model_alias_family_is_strict_and_fail_closed() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let family = root.join("Netlists/Certification_Tests/BUG_46_SON");
+    let path = family.join("baseline.cir");
+    let alias_path = family.join("synonyms.cir");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_tran_family_plan_for_path(&path, XyceStaticTranPlanPurpose::RelationalFamily)
+        .expect("plan");
+    XyceTestRunner::validate_diode_model_alias_transient_plan(&plan).expect("validate");
+    let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, &path).expect("parse");
+    let baseline =
+        XyceTestRunner::diode_model_alias_family_snapshot(&netlist, &plan.print).expect("snapshot");
+    let alias_plan = runner
+        .static_tran_family_plan_for_path(&alias_path, XyceStaticTranPlanPurpose::RelationalFamily)
+        .expect("alias plan");
+    let alias_netlist =
+        XyceTestRunner::parse_xyce_netlist(&alias_plan.source, &alias_path).expect("alias parse");
+    let alias =
+        XyceTestRunner::diode_model_alias_family_snapshot(&alias_netlist, &alias_plan.print)
+            .expect("alias snapshot");
+    XyceTestRunner::compare_diode_model_alias_family_snapshots(&baseline, &alias)
+        .expect("canonical and alias workers match exactly");
+
+    let source_mutations = [
+        ("IS =", "JS =", "mixed alias spelling"),
+        ("IS =", "CJ0 =", "unadmitted zero-spelling alias"),
+        ("N =", "IS =", "duplicate alias group"),
+        (
+            "IS = 2.355E-14 N = 1.112",
+            "N = 1.112 IS = 2.355E-14",
+            "reordered model card",
+        ),
+        (".end", ".options temp=27\n.end", "extra directive"),
+        (".end", "Rextra 2 0 1k\n.end", "extra element"),
+        (".end", ".model OTHER D IS=1e-12\n.end", "extra model"),
+    ];
+    for (from, to, reason) in source_mutations {
+        let mutated = plan.source.replacen(from, to, 1);
+        assert_ne!(mutated, plan.source, "mutation fixture must change source");
+        assert!(
+            XyceTestRunner::diode_model_alias_source_qualification(&mutated).is_err(),
+            "{reason} must fail source qualification"
+        );
+    }
+
+    let mut reordered_comp = plan.clone();
+    reordered_comp.source = reordered_comp
+        .source
+        .replacen("*COMP V(1)", "*COMP TIME", 1);
+    assert!(
+        XyceTestRunner::validate_diode_model_alias_transient_plan(&reordered_comp).is_err(),
+        "reordered or duplicate *COMP targets are not equivalent"
+    );
+    let mut zero_comp = plan.clone();
+    zero_comp.source = zero_comp.source.replacen("reltol=1e-7", "reltol=0", 1);
+    assert!(
+        XyceTestRunner::validate_diode_model_alias_transient_plan(&zero_comp).is_err(),
+        "nonpositive *COMP tolerances are rejected"
+    );
+    let mut changed_tran = plan.clone();
+    changed_tran.tran.stop = 0.0;
+    assert!(
+        XyceTestRunner::validate_diode_model_alias_transient_plan(&changed_tran).is_err(),
+        "invalid transient bounds are rejected"
+    );
+    let mut changed_probe = plan.clone();
+    changed_probe.print.probes.swap(0, 1);
+    assert!(
+        XyceTestRunner::validate_diode_model_alias_transient_plan(&changed_probe).is_err(),
+        "PRINT and *COMP target order must agree"
+    );
+
+    let mut invalid_pulse = netlist.clone();
+    let ElementKind::VoltageSource(rspice_core::netlist::SourceSpec::Pulse { rise, .. }) =
+        &mut invalid_pulse.elements[0].kind
+    else {
+        panic!("fixture has one PULSE source");
+    };
+    *rise = 0.0;
+    assert!(
+        XyceTestRunner::diode_model_alias_family_snapshot(&invalid_pulse, &plan.print).is_err(),
+        "degenerate PULSE timing is outside the periodic-source envelope"
+    );
+    let mut changed_topology = alias_netlist.clone();
+    changed_topology.elements[1].nodes[1] = "0".to_string();
+    assert!(
+        XyceTestRunner::diode_model_alias_family_snapshot(&changed_topology, &alias_plan.print,)
+            .is_err(),
+        "altered series topology is rejected"
+    );
+    let mut changed_title = alias.clone();
+    changed_title.canonical_source = changed_title.canonical_source.replacen(
+        "Test of diode parameter synonyms",
+        "Changed circuit title",
+        1,
+    );
+    assert!(
+        XyceTestRunner::compare_diode_model_alias_family_snapshots(&baseline, &changed_title)
+            .is_err(),
+        "non-alias source bytes participate in exact semantic parity"
+    );
+    let mut changed_runtime = alias.clone();
+    changed_runtime.runtime_diode.boolean_state[0] = false;
+    assert!(
+        XyceTestRunner::compare_diode_model_alias_family_snapshots(&baseline, &changed_runtime)
+            .is_err(),
+        "resolved BV Option/given state participates in runtime parity"
+    );
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let temp_root = std::env::temp_dir().join(format!(
+        "rspice-xyce-diode-alias-family-{}-{nonce}",
+        std::process::id()
+    ));
+    let temp_family = temp_root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_DIODE_ALIAS");
+    fs::create_dir_all(&temp_family).expect("create diode-alias fixture");
+    let anchor_path = temp_family.join("owner.cir");
+    let canonical_path = temp_family.join("canonical.cir");
+    let alias_path = temp_family.join("alias.cir");
+    fs::write(&anchor_path, "\n").expect("write trim-empty anchor");
+    fs::write(&canonical_path, &plan.source).expect("write canonical worker");
+    fs::write(&alias_path, &alias_plan.source).expect("write alias worker");
+    let anchor_relative = "Netlists/Certification_Tests/GENERIC_DIODE_ALIAS/owner.cir";
+    fs::write(
+        temp_root.join(HARNESS_MANIFEST_FILE),
+        format!("{anchor_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper provenance");
+    let temp_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+    let deck = |path: &Path, relative: &str| XyceDeck {
+        path: path.to_path_buf(),
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let anchor_deck = deck(&anchor_path, anchor_relative);
+    assert_eq!(
+        temp_runner
+            .diode_model_alias_family_contract(&anchor_deck)
+            .expect("complete generic directory qualifies")
+            .role,
+        XyceDiodeModelAliasFamilyRole::Anchor
+    );
+    fs::write(temp_root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+    let missing_provenance_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+    assert!(
+        missing_provenance_runner
+            .diode_model_alias_family_contract(&anchor_deck)
+            .is_none(),
+        "empty owner without wrapper provenance is not a family"
+    );
+    fs::write(
+        temp_root.join(HARNESS_MANIFEST_FILE),
+        format!("{anchor_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("restore wrapper provenance");
+    let restored_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+    let extra_path = temp_family.join("extra.cir");
+    fs::write(&extra_path, &plan.source).expect("write fourth record");
+    assert!(
+        restored_runner
+            .diode_model_alias_family_contract(&anchor_deck)
+            .is_none(),
+        "a fourth circuit changes the complete-directory contract"
+    );
+    fs::remove_file(&extra_path).expect("remove fourth record");
+    let output_dir = temp_root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_DIODE_ALIAS");
+    fs::create_dir_all(&output_dir).expect("create mirrored output directory");
+    fs::write(output_dir.join("unexpected.prn"), "artifact").expect("write unexpected artifact");
+    assert!(
+        restored_runner
+            .diode_model_alias_family_contract(&anchor_deck)
+            .is_none(),
+        "the canonical zero-artifact directory rejects every output artifact"
+    );
+    fs::remove_dir_all(&temp_root).expect("remove diode-alias fixture");
+}
+
+#[test]
+fn nested_include_identity_family_is_strict_and_fail_closed() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    let corpus_family = workspace_root.join("tests/xyce/Netlists/Certification_Tests/BUG_1686");
+    let repeated_source = fs::read_to_string(corpus_family.join("bug_1686a.cir"))
+        .expect("read repeated-target worker")
+        .replace("\r\n", "\n");
+    let split_source = fs::read_to_string(corpus_family.join("bug_1686_dup.cir"))
+        .expect("read split-target worker")
+        .replace("\r\n", "\n");
+    let support_source = fs::read_to_string(corpus_family.join("inc1.sub"))
+        .expect("read support source")
+        .replace("\r\n", "\n");
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let temp_root = std::env::temp_dir().join(format!(
+        "rspice-xyce-nested-include-identity-{}-{nonce}",
+        std::process::id()
+    ));
+    let family = temp_root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("GENERIC_NESTED_INCLUDE_IDENTITY");
+    fs::create_dir_all(&family).expect("create nested-include fixture");
+    let anchor_path = family.join("owner.cir");
+    let repeated_path = family.join("repeated.cir");
+    let split_path = family.join("split.cir");
+    let inc1_path = family.join("inc1.sub");
+    let inc2_path = family.join("inc2.sub");
+    fs::write(&anchor_path, []).expect("write zero-byte anchor");
+    fs::write(&repeated_path, &repeated_source).expect("write repeated-target worker");
+    fs::write(&split_path, &split_source).expect("write split-target worker");
+    fs::write(&inc1_path, &support_source).expect("write first support source");
+    fs::write(&inc2_path, &support_source).expect("write second support source");
+    let anchor_relative = "Netlists/Certification_Tests/GENERIC_NESTED_INCLUDE_IDENTITY/owner.cir";
+    fs::write(
+        temp_root.join(HARNESS_MANIFEST_FILE),
+        format!("{anchor_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write wrapper provenance");
+
+    let runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+    let deck = |path: &Path, name: &str| XyceDeck {
+        path: path.to_path_buf(),
+        relative_path: format!(
+            "Netlists/Certification_Tests/GENERIC_NESTED_INCLUDE_IDENTITY/{name}"
+        ),
+        section: XyceDeckSection::Netlists,
+    };
+    let anchor_deck = deck(&anchor_path, "owner.cir");
+    let repeated_deck = deck(&repeated_path, "repeated.cir");
+    let split_deck = deck(&split_path, "split.cir");
+    let repeated_provenance =
+        XyceTestRunner::nested_include_identity_provenance(&repeated_source, &repeated_path)
+            .expect("repeated-target provenance");
+    let split_provenance =
+        XyceTestRunner::nested_include_identity_provenance(&split_source, &split_path)
+            .expect("split-target provenance");
+    assert_eq!(
+        repeated_provenance.canonical_source, split_provenance.canonical_source,
+        "only parsed include operand spans may differ between workers"
+    );
+    assert_eq!(
+        repeated_provenance.expanded_source, split_provenance.expanded_source,
+        "byte-identical include targets must expand identically"
+    );
+    for path in [&repeated_path, &split_path] {
+        let plan = runner
+            .static_dc_plan_for_path(path, ExpressionDialect::Xyce)
+            .expect("nested-include DC plan");
+        XyceTestRunner::validate_nested_include_identity_dc_plan(&plan)
+            .expect("valid nested-include DC plan");
+        let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, path)
+            .expect("parse nested-include worker");
+        XyceTestRunner::nested_include_identity_family_snapshot(&netlist, &plan)
+            .expect("valid nested-include semantic snapshot");
+    }
+    assert_eq!(
+        runner
+            .nested_include_identity_family_contract(&anchor_deck)
+            .expect("complete generic directory qualifies")
+            .role,
+        XyceNestedIncludeIdentityFamilyRole::Anchor
+    );
+    assert_eq!(
+        runner
+            .nested_include_identity_family_contract(&repeated_deck)
+            .expect("repeated canonical target qualifies")
+            .role,
+        XyceNestedIncludeIdentityFamilyRole::RepeatedTargetBaseline
+    );
+    assert_eq!(
+        runner
+            .nested_include_identity_family_contract(&split_deck)
+            .expect("split identical targets qualify")
+            .role,
+        XyceNestedIncludeIdentityFamilyRole::SplitIdenticalTargetsMember
+    );
+
+    let assert_rejected = |reason: &str| {
+        assert!(
+            runner
+                .nested_include_identity_family_contract(&anchor_deck)
+                .is_none(),
+            "{reason} must invalidate the complete family"
+        );
+    };
+
+    fs::write(&inc2_path, format!("{support_source}* byte mismatch\n"))
+        .expect("mutate support bytes");
+    assert_rejected("non-identical split support bytes");
+    fs::write(&inc2_path, &support_source).expect("restore support bytes");
+
+    let extra_support = family.join("unclaimed.sub");
+    fs::write(&extra_support, &support_source).expect("write extra support file");
+    assert_rejected("unclaimed support file");
+    fs::remove_file(&extra_support).expect("remove extra support file");
+
+    let extra_circuit = family.join("fourth.cir");
+    fs::write(&extra_circuit, &split_source).expect("write extra circuit");
+    assert_rejected("fourth circuit");
+    fs::remove_file(&extra_circuit).expect("remove extra circuit");
+    fs::remove_file(&split_path).expect("remove required circuit");
+    assert_rejected("missing circuit");
+    fs::write(&split_path, &split_source).expect("restore required circuit");
+
+    let output_dir = temp_root
+        .join("OutputData")
+        .join("Certification_Tests")
+        .join("GENERIC_NESTED_INCLUDE_IDENTITY");
+    fs::create_dir_all(&output_dir).expect("create mirrored output directory");
+    fs::write(output_dir.join("unexpected.prn"), "artifact").expect("write unexpected artifact");
+    assert_rejected("unexpected output artifact");
+    fs::remove_dir_all(temp_root.join("OutputData")).expect("remove output artifacts");
+
+    fs::write(&anchor_path, "\n").expect("mutate anchor size");
+    assert_rejected("non-zero-byte wrapper");
+    fs::write(&anchor_path, []).expect("restore zero-byte anchor");
+
+    for (mutated, reason) in [
+        (
+            split_source.replacen(".include inc2.sub", ".inc inc2.sub", 1),
+            "include directive spelling mismatch",
+        ),
+        (
+            split_source.replacen(".include inc2.sub", ".include inc2.sub  ", 1),
+            "include trailing whitespace mismatch",
+        ),
+        (
+            split_source.replacen(
+                ".include inc2.sub",
+                ".include inc2.sub ; unmatched comment",
+                1,
+            ),
+            "include trailing comment mismatch",
+        ),
+    ] {
+        assert_ne!(mutated, split_source, "mutation fixture must change source");
+        let provenance = XyceTestRunner::nested_include_identity_provenance(&mutated, &split_path)
+            .expect("raw include mutation remains individually parseable");
+        assert_ne!(
+            provenance.canonical_source, repeated_provenance.canonical_source,
+            "{reason} must remain visible outside the replaced operand span"
+        );
+        fs::write(&split_path, mutated).expect("write raw-source parity mutation");
+        assert_rejected(reason);
+    }
+    fs::write(&split_path, &split_source).expect("restore split worker");
+
+    for (mutated, reason) in [
+        (
+            split_source.replacen(".include inc2.sub", ".include ./inc2.sub", 1),
+            "non-canonical include path spelling",
+        ),
+        (
+            split_source.replacen(".include inc2.sub", ".include INC2.SUB", 1),
+            "case-variant include path spelling",
+        ),
+        (
+            split_source.replacen(".end\n", "", 1),
+            "missing terminal .END",
+        ),
+        (
+            split_source.replacen(".end\n", ".end\n.end\n", 1),
+            "duplicate .END",
+        ),
+        (
+            split_source.replacen(".print dc v(2) I(v1)", ".print dc v(2) I(v1) FILE=foo", 1),
+            "FILE output on the sole .PRINT DC",
+        ),
+        (
+            split_source.replacen(".end\n", ".print ac v(2)\n.end\n", 1),
+            "extra .PRINT AC",
+        ),
+        (
+            split_source.replacen(".end\n", ".print dc v(2) I(v1) FILE=foo\n.end\n", 1),
+            "extra default .PRINT DC side output",
+        ),
+    ] {
+        assert_ne!(mutated, split_source, "mutation fixture must change source");
+        if reason.starts_with("extra .PRINT") {
+            assert_eq!(
+                mutated.matches(".ends\n").count(),
+                split_source.matches(".ends\n").count(),
+                "extra PRINT mutation must preserve both parent terminators"
+            );
+            assert!(
+                mutated.ends_with(".end\n"),
+                "extra PRINT mutation must preserve the terminal .END"
+            );
+        }
+        assert!(
+            XyceTestRunner::nested_include_identity_provenance(&mutated, &split_path).is_err(),
+            "{reason} must fail raw provenance qualification"
+        );
+        fs::write(&split_path, mutated).expect("write raw grammar mutation");
+        assert_rejected(reason);
+    }
+    fs::write(&split_path, &split_source).expect("restore split worker");
+
+    let top_level_include = repeated_source.replacen(
+        ".subckt fubar 1 2\n.include inc1.sub",
+        ".include inc1.sub\n.subckt fubar 1 2",
+        1,
+    );
+    assert_ne!(top_level_include, repeated_source);
+    fs::write(&repeated_path, top_level_include).expect("move include outside parent");
+    assert_rejected("include outside its parent scope");
+    fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+
+    let duplicate_parent = repeated_source.replacen(".subckt trashed 1 2", ".subckt fubar 1 2", 1);
+    assert_ne!(duplicate_parent, repeated_source);
+    fs::write(&repeated_path, duplicate_parent).expect("duplicate parent scope name");
+    assert_rejected("same-qualified-name parent collision");
+    fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+
+    let repeated_parent_twice = repeated_source.replacen("X2 2 0 trashed", "X2 2 0 fubar", 1);
+    let split_parent_twice = split_source.replacen("X2 2 0 trashed", "X2 2 0 fubar", 1);
+    assert_ne!(repeated_parent_twice, repeated_source);
+    assert_ne!(split_parent_twice, split_source);
+    fs::write(&repeated_path, repeated_parent_twice).expect("duplicate top-level parent binding");
+    fs::write(&split_path, split_parent_twice).expect("duplicate top-level parent binding");
+    assert_rejected("one parent definition left unused");
+    fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+    fs::write(&split_path, &split_source).expect("restore split worker");
+
+    let outside_support = temp_root
+        .join("Netlists")
+        .join("Certification_Tests")
+        .join("outside.sub");
+    fs::write(&outside_support, &support_source).expect("write escaping support source");
+    let escaping_include =
+        repeated_source.replacen(".include inc1.sub", ".include ../outside.sub", 1);
+    assert_ne!(escaping_include, repeated_source);
+    fs::write(&repeated_path, escaping_include).expect("write escaping include");
+    assert_rejected("include escaping the family directory");
+    fs::write(&repeated_path, &repeated_source).expect("restore repeated worker");
+
+    for (mutated, reason) in [
+        (
+            split_source.replacen("R1 2a 2 10k", "R1 2a 2 11k", 1),
+            "changed parent resistance",
+        ),
+        (
+            split_source.replacen("X2 2 0 trashed", "X2 1 0 trashed", 1),
+            "changed top-level topology",
+        ),
+        (
+            split_source.replacen(".dc v1 0 1 .5", ".dc v1 0 1 .25", 1),
+            "changed DC point set",
+        ),
+        (
+            split_source.replacen(".print dc v(2) I(v1)", ".print dc I(v1) v(2)", 1),
+            "reordered probes",
+        ),
+        (
+            split_source.replacen(".end", ".model unexpected D\n.end", 1),
+            "unadmitted auxiliary directive",
+        ),
+    ] {
+        assert_ne!(mutated, split_source, "mutation fixture must change source");
+        fs::write(&split_path, mutated).expect("write semantic mutation");
+        assert_rejected(reason);
+    }
+    fs::write(&split_path, &split_source).expect("restore split worker");
+
+    fs::write(temp_root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper provenance");
+    let missing_provenance_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+    assert!(
+        missing_provenance_runner
+            .nested_include_identity_family_contract(&anchor_deck)
+            .is_none(),
+        "zero-byte owner without wrapper provenance is not a family"
+    );
+
+    fs::remove_dir_all(&temp_root).expect("remove nested-include fixture");
+}
+
+#[test]
+fn numbered_redefinition_dc_family_roles_and_mutations_are_fail_closed() {
+    let corpus_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("tests")
+        .join("xyce");
+    let family_relative = Path::new("Certification_Tests").join("ISSUE_405");
+    let family_dir = corpus_root.join("Netlists").join(&family_relative);
+    let output_dir = corpus_root.join("OutputData").join(&family_relative);
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let deck = |root: &Path, name: &str| XyceDeck {
+        path: root.join("Netlists").join(&family_relative).join(name),
+        relative_path: format!(
+            "Netlists/{}/{}",
+            family_relative.to_string_lossy().replace('\\', "/"),
+            name
+        ),
+        section: XyceDeckSection::Netlists,
+    };
+    let roles = [
+        (
+            "precedence_a.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Owner,
+            ParameterRedefinitionPolicy::UseFirst,
+        ),
+        (
+            "precedence_a0.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Baseline,
+            ParameterRedefinitionPolicy::UseFirst,
+        ),
+        (
+            "precedence_a1.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Member(1),
+            ParameterRedefinitionPolicy::UseFirst,
+        ),
+        (
+            "precedence_a2.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Member(2),
+            ParameterRedefinitionPolicy::UseFirst,
+        ),
+        (
+            "precedence_b.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Owner,
+            ParameterRedefinitionPolicy::UseLast,
+        ),
+        (
+            "precedence_b0.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Baseline,
+            ParameterRedefinitionPolicy::UseLast,
+        ),
+        (
+            "precedence_b1.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Member(1),
+            ParameterRedefinitionPolicy::UseLast,
+        ),
+        (
+            "precedence_b2.cir",
+            XyceNumberedRedefinitionDcFamilyRole::Member(2),
+            ParameterRedefinitionPolicy::UseLast,
+        ),
+    ];
+    for (name, role, policy) in roles {
+        let candidate = deck(&corpus_root, name);
+        let contract = runner
+            .numbered_redefinition_dc_family_contract(&candidate)
+            .expect("family recognized")
+            .expect("family qualifies");
+        assert_eq!(contract.role, role, "unexpected role for {name}");
+        assert_eq!(contract.parameter_redefinition_policy, policy);
+        let result = runner.run_discovered_test(&candidate);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{name}: {:?}",
+            result.error
+        );
+        assert!(result.mismatches.is_empty());
+    }
+    assert!(
+        runner
+            .numbered_redefinition_dc_family_contract(&deck(&corpus_root, "test1.cir"))
+            .is_none(),
+        "standalone oracle deck must retain its direct contract"
+    );
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let temp_root = std::env::temp_dir().join(format!(
+        "rspice-numbered-redefinition-dc-{}-{nonce}",
+        std::process::id()
+    ));
+    let temp_family = temp_root.join("Netlists").join(&family_relative);
+    let temp_output = temp_root.join("OutputData").join(&family_relative);
+    fs::create_dir_all(&temp_family).expect("create source fixture");
+    fs::create_dir_all(&temp_output).expect("create output fixture");
+    for entry in fs::read_dir(&family_dir).expect("read source family") {
+        let entry = entry.expect("read source entry");
+        fs::copy(entry.path(), temp_family.join(entry.file_name())).expect("copy source family");
+    }
+    for entry in fs::read_dir(&output_dir).expect("read output family") {
+        let entry = entry.expect("read output entry");
+        fs::copy(entry.path(), temp_output.join(entry.file_name())).expect("copy output family");
+    }
+    fs::write(
+            temp_root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/ISSUE_405/precedence_a.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/ISSUE_405/precedence_b.cir\trequires_upstream_wrapper\n",
+        )
+        .expect("write fixture manifest");
+    let anchor = deck(&temp_root, "precedence_a.cir");
+    let assert_rejected = |reason: &str| {
+        let mutated = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        assert!(
+            matches!(
+                mutated.numbered_redefinition_dc_family_contract(&anchor),
+                Some(Err(_))
+            ),
+            "mutation accepted: {reason}"
+        );
+    };
+
+    let unexpected = temp_family.join("unexpected.txt");
+    fs::write(&unexpected, "unexpected").expect("write unexpected artifact");
+    assert_rejected("unexpected source artifact");
+    fs::remove_file(unexpected).expect("remove unexpected artifact");
+
+    let a2 = temp_family.join("precedence_a2.cir");
+    let a2_source = fs::read_to_string(&a2).expect("read A2");
+    fs::remove_file(&a2).expect("remove A2");
+    assert_rejected("missing contiguous member");
+    fs::write(&a2, &a2_source).expect("restore A2");
+
+    let b_owner = temp_family.join("precedence_b.cir");
+    fs::write(&b_owner, "* no longer blank\n").expect("make anchor nonblank");
+    assert_rejected("nonblank anchor");
+    fs::write(&b_owner, "   \n").expect("restore whitespace-only anchor");
+
+    let a1 = temp_family.join("precedence_a1.cir");
+    let a1_source = fs::read_to_string(&a1).expect("read A1");
+    let equal_duplicate = a1_source.replacen("barney=20.0", "barney=10.0", 1);
+    assert_ne!(equal_duplicate, a1_source);
+    fs::write(&a1, equal_duplicate).expect("collapse duplicate values");
+    assert_rejected("equal duplicate values");
+    fs::write(&a1, &a1_source).expect("restore A1");
+
+    let lost_expression = a1_source.replacen("par3='par1*par2*2.0'", "par3=48.0", 1);
+    assert_ne!(lost_expression, a1_source);
+    fs::write(&a1, lost_expression).expect("remove dependent formal expression");
+    assert_rejected("lost dependent formal expression");
+    fs::write(&a1, &a1_source).expect("restore A1 expression");
+
+    let print_drift = a1_source.replacen("v(1) v(2)", "v(2) v(1)", 1);
+    assert_ne!(print_drift, a1_source);
+    fs::write(&a1, print_drift).expect("reorder print probes");
+    assert_rejected("PRINT drift");
+    fs::write(&a1, &a1_source).expect("restore A1 print");
+
+    let member_oracle = temp_output.join("precedence_a1.cir.prn");
+    fs::write(&member_oracle, "forbidden").expect("write member oracle");
+    assert_rejected("member oracle");
+    fs::remove_file(member_oracle).expect("remove member oracle");
+
+    let standalone_oracle = temp_output.join("test1.cir.prn");
+    let standalone_oracle_data = fs::read(&standalone_oracle).expect("read standalone oracle");
+    fs::remove_file(&standalone_oracle).expect("remove standalone oracle");
+    assert_rejected("missing standalone oracle");
+    fs::write(&standalone_oracle, standalone_oracle_data).expect("restore standalone oracle");
+
+    let source_artifact = temp_family.join("test2.cir.res.gs");
+    let source_artifact_data = fs::read(&source_artifact).expect("read source artifact");
+    fs::remove_file(&source_artifact).expect("remove source artifact");
+    assert_rejected("missing source artifact");
+    fs::write(&source_artifact, source_artifact_data).expect("restore source artifact");
+
+    fs::remove_dir_all(&temp_root).expect("remove numbered family fixture");
+}
+
+#[test]
+fn shared_stepped_dc_family_roles_and_mutations_are_fail_closed() {
+    let corpus_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("tests")
+        .join("xyce");
+    let family_relative = Path::new("Certification_Tests").join("BUG_1801");
+    let family_dir = corpus_root.join("Netlists").join(&family_relative);
+    let runner = XyceTestRunner::new(&corpus_root, XyceRunnerConfig::default());
+    let deck = |root: &Path, name: &str| XyceDeck {
+        path: root.join("Netlists").join(&family_relative).join(name),
+        relative_path: format!(
+            "Netlists/{}/{}",
+            family_relative.to_string_lossy().replace('\\', "/"),
+            name
+        ),
+        section: XyceDeckSection::Netlists,
+    };
+    let roles = [
+        ("bug_1801_A.cir", XyceSharedSteppedDcFamilyRole::Owner),
+        (
+            "bug_1801_A0.cir",
+            XyceSharedSteppedDcFamilyRole::Baseline(
+                XyceSharedSteppedDcRepresentation::DirectIdentity,
+            ),
+        ),
+        (
+            "bug_1801_A1.cir",
+            XyceSharedSteppedDcFamilyRole::Member(
+                XyceSharedSteppedDcRepresentation::HierarchicalIdentity,
+            ),
+        ),
+        ("bug_1801_B.cir", XyceSharedSteppedDcFamilyRole::Owner),
+        (
+            "bug_1801_B0.cir",
+            XyceSharedSteppedDcFamilyRole::Baseline(
+                XyceSharedSteppedDcRepresentation::DirectTransform,
+            ),
+        ),
+        (
+            "bug_1801_B1.cir",
+            XyceSharedSteppedDcFamilyRole::Member(
+                XyceSharedSteppedDcRepresentation::TransformInSubcircuitBody,
+            ),
+        ),
+        (
+            "bug_1801_B2.cir",
+            XyceSharedSteppedDcFamilyRole::Member(
+                XyceSharedSteppedDcRepresentation::FunctionCallInSubcircuitBody,
+            ),
+        ),
+        (
+            "bug_1801_B3.cir",
+            XyceSharedSteppedDcFamilyRole::Member(
+                XyceSharedSteppedDcRepresentation::FunctionCallAtInstance,
+            ),
+        ),
+    ];
+    for (name, role) in roles {
+        let candidate = deck(&corpus_root, name);
+        let contract = runner
+            .shared_stepped_dc_family_contract(&candidate)
+            .expect("family recognized")
+            .expect("family qualifies");
+        assert_eq!(contract.role, role, "unexpected role for {name}");
+        assert_eq!(contract.baseline_path, contract.member_paths[0]);
+        let result = runner.run_discovered_test(&candidate);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{name}: {:?}",
+            result.error
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{name}: unexpected mismatches"
+        );
+    }
+    for relative_path in [
+        "Netlists/Certification_Tests/BUG_1957/mutindlin_even.cir",
+        "Netlists/Certification_Tests/BUG_39_SON/agauss.cir",
+    ] {
+        let candidate = XyceDeck {
+            path: corpus_root.join(relative_path),
+            relative_path: relative_path.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        assert!(
+            runner
+                .shared_stepped_dc_family_contract(&candidate)
+                .is_none(),
+            "unrelated two-anchor directory must not be claimed: {relative_path}"
+        );
+    }
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    let temp_root = std::env::temp_dir().join(format!(
+        "rspice-shared-step-dc-{}-{nonce}",
+        std::process::id()
+    ));
+    let temp_family = temp_root.join("Netlists").join(&family_relative);
+    let temp_output = temp_root.join("OutputData").join(&family_relative);
+    fs::create_dir_all(&temp_family).expect("create family fixture");
+    fs::create_dir_all(&temp_output).expect("create oracle fixture");
+    for entry in fs::read_dir(&family_dir).expect("read source family") {
+        let entry = entry.expect("read family entry");
+        fs::copy(entry.path(), temp_family.join(entry.file_name())).expect("copy family deck");
+    }
+    for entry in fs::read_dir(corpus_root.join("OutputData").join(&family_relative))
+        .expect("read source oracles")
+    {
+        let entry = entry.expect("read oracle entry");
+        fs::copy(entry.path(), temp_output.join(entry.file_name())).expect("copy family oracle");
+    }
+    fs::write(temp_root.join(HARNESS_MANIFEST_FILE),
+            "Netlists/Certification_Tests/BUG_1801/bug_1801_A.cir\trequires_upstream_wrapper\nNetlists/Certification_Tests/BUG_1801/bug_1801_B.cir\trequires_upstream_wrapper\n")
+            .expect("write wrapper manifest");
+    let anchor = deck(&temp_root, "bug_1801_A.cir");
+    let assert_rejected = |reason: &str| {
+        let mutated = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+        assert!(
+            matches!(
+                mutated.shared_stepped_dc_family_contract(&anchor),
+                Some(Err(_))
+            ),
+            "mutation accepted: {reason}"
+        );
+    };
+
+    let unexpected_artifact = temp_family.join("unexpected.txt");
+    fs::write(&unexpected_artifact, "not part of the admitted family")
+        .expect("write unexpected family artifact");
+    assert_rejected("unexpected Netlists artifact");
+    fs::remove_file(unexpected_artifact).expect("remove unexpected family artifact");
+
+    let b3 = temp_family.join("bug_1801_B3.cir");
+    let b3_source = fs::read_to_string(&b3).expect("read B3");
+    fs::remove_file(&b3).expect("remove B3");
+    assert_rejected("non-contiguous members");
+    let missing_member = deck(&temp_root, "bug_1801_B3.cir");
+    let missing_member_runner = XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+    assert!(
+        matches!(
+            missing_member_runner.shared_stepped_dc_family_contract(&missing_member),
+            Some(Err(_))
+        ),
+        "cleanly absent candidate member must fail closed"
+    );
+    fs::write(&b3, &b3_source).expect("restore B3");
+
+    let b_owner = temp_family.join("bug_1801_B.cir");
+    fs::remove_file(&b_owner).expect("remove B owner anchor");
+    assert_rejected("missing manifest anchor");
+    fs::write(&b_owner, "").expect("restore B owner anchor");
+
+    fs::write(&b_owner, "* anchor must remain empty\n").expect("make B owner nonempty");
+    assert_rejected("nonempty manifest anchor");
+    fs::write(&b_owner, "").expect("restore empty B owner anchor");
+
+    let b2 = temp_family.join("bug_1801_B2.cir");
+    let b2_source = fs::read_to_string(&b2).expect("read B2");
+    let ordinary = b2_source.replacen(".global_param", ".param", 1);
+    assert_ne!(ordinary, b2_source);
+    fs::write(&b2, ordinary).expect("mutate global kind");
+    assert_rejected("ordinary parameter");
+    fs::write(&b2, &b2_source).expect("restore B2");
+
+    let a0 = temp_family.join("bug_1801_A0.cir");
+    let a0_source = fs::read_to_string(&a0).expect("read A0");
+    let degenerate_source = a0_source
+        .replacen("R1 1 0", "R1 0 0", 1)
+        .replacen("V1 1 0", "V1 0 0", 1);
+    assert_ne!(degenerate_source, a0_source);
+    fs::write(&a0, degenerate_source).expect("mutate source and load to ground-ground");
+    assert_rejected("degenerate source and load topology");
+    fs::write(&a0, &a0_source).expect("restore A0 topology");
+
+    let default_mutation = b3_source.replacen("resistance=100k", "resistance=101k", 1);
+    assert_ne!(default_mutation, b3_source);
+    fs::write(&b3, default_mutation).expect("mutate formal default");
+    assert_rejected("formal-default mismatch");
+    fs::write(&b3, &b3_source).expect("restore B3 again");
+
+    let member_oracle = temp_output.join("bug_1801_A0.cir.prn");
+    fs::write(&member_oracle, "forbidden").expect("write member oracle");
+    assert_rejected("member oracle");
+    fs::remove_file(member_oracle).expect("remove member oracle");
+
+    let a1 = temp_family.join("bug_1801_A1.cir");
+    let a1_source = fs::read_to_string(&a1).expect("read A1");
+    let topology_mutation = a1_source.replacen("X1 1 0", "X1 2 0", 1);
+    assert_ne!(topology_mutation, a1_source);
+    fs::write(&a1, topology_mutation).expect("mutate top-level topology");
+    assert_rejected("top-level topology mismatch");
+    fs::write(&a1, &a1_source).expect("restore A1 topology");
+
+    let port_mutation = a1_source.replacen("R1 a b", "R1 b a", 1);
+    assert_ne!(port_mutation, a1_source);
+    fs::write(&a1, port_mutation).expect("mutate subcircuit port mapping");
+    assert_rejected("subcircuit port mapping mismatch");
+    fs::write(&a1, &a1_source).expect("restore A1 port mapping");
+
+    let duplicate_ports = a1_source
+        .replacen(".subckt ressub a b", ".subckt ressub a a", 1)
+        .replacen("R1 a b", "R1 a a", 1);
+    assert_ne!(duplicate_ports, a1_source);
+    fs::write(&a1, duplicate_ports).expect("mutate subcircuit to duplicate ports");
+    assert_rejected("duplicate subcircuit ports");
+    fs::write(&a1, &a1_source).expect("restore distinct A1 ports");
+
+    let non_finite_source = a1_source.replacen("V1 1 0 5V", "V1 1 0 1e309", 1);
+    assert_ne!(non_finite_source, a1_source);
+    fs::write(&a1, non_finite_source).expect("mutate source to infinity");
+    assert_rejected("non-finite source");
+    fs::write(&a1, &a1_source).expect("restore finite A1 source");
+
+    let print_mutation = a1_source.replacen(".print dc V(1) I(V1)", ".print dc V(1)", 1);
+    assert_ne!(print_mutation, a1_source);
+    fs::write(&a1, print_mutation).expect("mutate PRINT");
+    assert_rejected("PRINT mismatch");
+    fs::write(&a1, &a1_source).expect("restore A1 PRINT policy");
+
+    let hidden_family = temp_root.join("temporarily-unreadable-family");
+    fs::rename(&temp_family, &hidden_family).expect("hide candidate family directory");
+    assert_rejected("unreadable candidate family directory");
+    fs::rename(&hidden_family, &temp_family).expect("restore candidate family directory");
+
+    fs::remove_dir_all(&temp_root).expect("remove shared family fixture");
+}
+
+fn expected_failure_test_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce")
+}
+
+fn unique_expected_failure_temp_dir(label: &str) -> PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "rspice-xyce-expected-failure-{label}-{}-{nonce}",
+        std::process::id()
+    ))
+}
+
+#[test]
+fn expected_failure_oracles_retain_exact_removed_wrapper_policies() {
+    let cases = [
+        (
+            XyceExpectedFailureKind::Bug67BehavioralExpression,
+            &[r"Syntax error in number of nodes in expression: \{POLY I[(]V6[)] 300u 1\}"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug671InvalidPwlFile,
+            &["Failed to successfully read vpwl-word.csv"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug726AdjacentCouplings,
+            &[
+                "in file adjacent.cir at or near line 13",
+                "Specified model not found for device K1",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug744DcOperatingPoint,
+            &["DC Operating Point Failed"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference,
+            &["Undefined inductor L2 in mutual inductor K3 definition"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+            &[r"Could not find \.ENDL statement for \'\.LIB NOM\.LIB\'"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitMissingName,
+            &["Subcircuit name required"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+            &[
+                "Duplicate nodes in .subckt INV1 point to different nodes in X line invocation",
+                "Error invoking subcircuit INV1 instance XINV1",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+            &[
+                "Duplicate nodes in .subckt ONEBIT point to different nodes in X line invocation",
+                "Error invoking subcircuit ONEBIT instance X1",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+            &["Subcircuit TESTSUB missing .ENDS"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof,
+            &[
+                "Netlist error in file missing.ends",
+                "Subcircuit TESTSUB missing .ENDS",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+            &["Subcircuit TESTSUB missing .ENDS"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+            &["Subcircuit TS_INV missing .ENDS"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageDcExcessArguments,
+            &["Extraneous values"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+            &["Unsupported AC sweep type: BOGO"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+            &["Unsupported NOISE sweep type: BOGO"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingLibraryEndl,
+            &[r"Could not find \.ENDL statement for \'\.LIB PLUGH\.LIB\'"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+            &[r"Could not find include file plugh\.lib"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+            &[r"Could not find include file plugh\.lib"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageDuplicateDevice,
+            &["Duplicate device DA"][..],
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingDeviceNodes,
+            &["Not enough fields on input line for device R2"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+            &[".INITCOND line may appear only once."][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+            &[".INITCOND line may appear only once."][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+            &[r"\.INITCOND file \'noinits\.dat\' is not formatted properly"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug702MissingInitcondFile,
+            &["Could not open the .INITCOND file ic.dat"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+            &[
+                "Netlist error in file issue455.cir at or near line 4",
+                "No such source function dc in V2",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug1578InvalidDeviceType,
+            &[
+                "in file bug_1578.cir at or near line 10",
+                "Invalid device type for device NETLIST",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug198UnrecognizedLine,
+            &["in file bug_198.cir at or near line 3", "Unrecognized line"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug258UnrecognizedLine,
+            &["in file bug_198.cir at or near line 3", "Unrecognized line"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug587InvalidNumericNotation,
+            &[
+                "in file 587.cir at or near line 43",
+                "Invalid notation encountered",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+            &[
+                "in file bug204.cir at or near line 14",
+                ".DC line not formatted correctly, found unexpected number of fields",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
+            &[
+                "in file bug_281.cir at or near line 7",
+                ".DC line not formatted correctly, found unexpected number of fields",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug401BadDeviceLine,
+            &[
+                "in file bad-device-line.cir at or near line 5",
+                "Invalid device type for device AN",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug401ExtraSpace,
+            &[
+                "in file extra-space.cir at or near line 2",
+                "Invalid device type for device APERFECT",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug401WorseDeviceLine,
+            &[
+                "in file worse-device-line.cir at or near line 6",
+                "Illegal value found for device REALLY",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice,
+            &["Duplicate device V1"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
+            &["Duplicate device XVNODES:R1"][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+            &[
+                "in file bug_769a.cir at or near line 69",
+                "Node Voltage may not be used in parameter expression [(]RVAL[)]",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+            &[
+                "in file bug_769b.cir at or near line 69",
+                "Device Current may not be used in parameter expression [(]RVAL[)]",
+            ][..],
+        ),
+        (
+            XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+            &[
+                "in file bug_769c.cir at or near line 69",
+                "Lead Current may not be used in parameter expression [(]RVAL[)]",
+            ][..],
+        ),
+    ];
+
+    for (kind, patterns) in cases {
+        let policy = kind.upstream_error_policy();
+        assert!(policy.requires_nonzero_exit);
+        assert_eq!(
+            policy.search_streams,
+            XyceUpstreamErrorSearchStreams::EitherCompleteStdoutOrStderr
+        );
+        assert_eq!(policy.ordered_patterns, patterns);
+    }
+    assert_eq!(
+        XyceExpectedFailureKind::Bug204InvalidDcSweepArity.retained_non_oracle_artifact(),
+        Some(XyceExpectedFailureRetainedArtifact {
+            file_name: "bug204.cir.prn",
+            bytes: 147,
+            blake3: XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3,
+        })
+    );
+    assert_eq!(
+        XyceExpectedFailureKind::Bug281InvalidDcSweepArity.retained_non_oracle_artifact(),
+        None
+    );
+    assert_eq!(
+        XyceExpectedFailureKind::Bug587InvalidNumericNotation.retained_non_oracle_artifact(),
+        None
+    );
+}
+
+#[test]
+fn expected_failure_oracle_census_is_exactly_forty_eight_distinct_records() {
+    let root = expected_failure_test_root();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let mut records = runner
+        .discover_tests()
+        .into_iter()
+        .filter_map(|deck| {
+            XyceExpectedFailureKind::for_record(&deck.relative_path).map(|kind| {
+                (
+                    XyceTestRunner::normalize_manifest_key(&deck.relative_path),
+                    kind,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        records,
+        vec![
+            (
+                XYCE_BUG1148_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug1148UndefinedPrintNode,
+            ),
+            (
+                XYCE_BUG1578_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug1578InvalidDeviceType,
+            ),
+            (
+                XYCE_BUG198_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug198UnrecognizedLine,
+            ),
+            (
+                XYCE_BUG204_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+            ),
+            (
+                XYCE_BUG258_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug258UnrecognizedLine,
+            ),
+            (
+                XYCE_BUG281_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
+            ),
+            (
+                XYCE_BUG387_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+            ),
+            (
+                XYCE_BUG40_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug40UndefinedPrintNode,
+            ),
+            (
+                XYCE_BUG401_BAD_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug401BadDeviceLine,
+            ),
+            (
+                XYCE_BUG401_EXTRA_SPACE_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug401ExtraSpace,
+            ),
+            (
+                XYCE_BUG401_WORSE_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug401WorseDeviceLine,
+            ),
+            (
+                XYCE_BUG587_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug587InvalidNumericNotation,
+            ),
+            (
+                XYCE_BUG67_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug67BehavioralExpression,
+            ),
+            (
+                XYCE_BUG671_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug671InvalidPwlFile,
+            ),
+            (
+                XYCE_BUG701_SUBCIRCUIT_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
+            ),
+            (
+                XYCE_BUG701_TOPLEVEL_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice,
+            ),
+            (
+                XYCE_BUG702_DUP_EXTERNAL_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+            ),
+            (
+                XYCE_BUG702_DUP_INLINED_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+            ),
+            (
+                XYCE_BUG702_EMPTY_INITCOND_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+            ),
+            (
+                XYCE_BUG702_MISSING_INITCOND_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug702MissingInitcondFile,
+            ),
+            (
+                XYCE_BUG718_INVALID_NODES_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+            ),
+            (
+                XYCE_BUG726_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug726AdjacentCouplings,
+            ),
+            (
+                XYCE_BUG744_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug744DcOperatingPoint,
+            ),
+            (
+                XYCE_BUG75_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference,
+            ),
+            (
+                XYCE_BUG769_NODE_VOLTAGE_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+            ),
+            (
+                XYCE_BUG769_DEVICE_CURRENT_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+            ),
+            (
+                XYCE_BUG769_LEAD_CURRENT_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+            ),
+            (
+                XYCE_ISSUE455_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+            ),
+            (
+                XYCE_FOURIER_BAD_LINE3_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+            ),
+            (
+                XYCE_LEAD_CURRENTS_INVALID_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+            ),
+            (
+                XYCE_MEASURE_INVALID_NODES_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MeasureInvalidNodes,
+            ),
+            (
+                XYCE_MESSAGE_DUPLICATE_DEVICE_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageDuplicateDevice,
+            ),
+            (
+                XYCE_MESSAGE_MISSING_DEVICE_NODES_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageMissingDeviceNodes,
+            ),
+            (
+                XYCE_AC_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+            ),
+            (
+                XYCE_MESSAGE_MISSING_LIBRARY_ENDL_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageMissingLibraryEndl,
+            ),
+            (
+                XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+            ),
+            (
+                XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+            ),
+            (
+                XYCE_DC_EXCESS_ARGS_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageDcExcessArguments,
+            ),
+            (
+                XYCE_NOISE_UNSUPPORTED_SWEEP_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+            ),
+            (
+                XYCE_MESSAGE_PRINT_BAD_NODENAME_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessagePrintBadNodeName,
+            ),
+            (
+                XYCE_MESSAGE_PRINT_BAD_VARIABLE_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessagePrintBadVariable,
+            ),
+            (
+                XYCE_SUBCKT_A2_DUP_BINDING_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+            ),
+            (
+                XYCE_SUBCKT_J1_DUP_BINDING_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+            ),
+            (
+                XYCE_SUBCKT_MISSING_ENDS_END_CARD_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+            ),
+            (
+                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof,
+            ),
+            (
+                XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+            ),
+            (
+                XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+            ),
+            (
+                XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD.to_string(),
+                XyceExpectedFailureKind::MessageSubcircuitMissingName,
+            ),
+        ]
+    );
+    let contracts = records
+        .iter()
+        .map(|(_, kind)| kind.result_contract())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        contracts.len(),
+        48,
+        "each record requires a distinct contract"
+    );
+}
+
+#[test]
+fn expected_failure_oracles_run_end_to_end_with_distinct_contracts() {
+    let root = expected_failure_test_root();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_67/bug_67.cir",
+            "expected_failure_behavioral_expression_build",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_671/vpwl_binaryfile.cir",
+            "expected_failure_external_pwl_load",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_726/adjacent.cir",
+            "expected_failure_adjacent_coupling_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir",
+            "expected_failure_dc_operating_point",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_75_SON/bug75.cir",
+            "expected_failure_bug75_undefined_mutual_inductor_reference_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1148/bug_1148.cir",
+            "expected_failure_bug1148_undefined_print_node_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_40/bug_40.cir",
+            "expected_failure_bug40_undefined_print_node_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_718_SON/invalidNodes.cir",
+            "expected_failure_bug718_invalid_print_nodes_parse",
+        ),
+        (
+            "Netlists/Message/Print/bad_nodename.cir",
+            "expected_failure_message_print_bad_nodename_parse",
+        ),
+        (
+            "Netlists/Message/Print/bad_variable.cir",
+            "expected_failure_message_print_bad_variable_parse",
+        ),
+        (
+            "Netlists/LEAD_CURRENTS/lead_for_invalid_device.cir",
+            "expected_failure_lead_currents_invalid_device_parse",
+        ),
+        (
+            "Netlists/MEASURE/invalid_nodes.cir",
+            "expected_failure_measure_invalid_nodes_parse",
+        ),
+        (
+            "Netlists/FOURIER/bad_dot_four_line3.cir",
+            "expected_failure_fourier_bad_dot_four_line3_symbols_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_387_SON/bug_387.cir",
+            "expected_failure_missing_library_endl_parse",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_a2_dup_error.cir",
+            "expected_failure_message_subckt_a2_duplicate_binding_build",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_j1_dup_error.cir",
+            "expected_failure_message_subckt_j1_duplicate_binding_build",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_noname.cir",
+            "expected_failure_missing_subcircuit_name_parse",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_missing_ends.cir",
+            "expected_failure_subckt_missing_ends_end_card_parse",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_missing_ends2.cir",
+            "expected_failure_subckt_missing_ends_include_eof_parse",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_missing_ends3.cir",
+            "expected_failure_subckt_missing_ends_toplevel_eof_parse",
+        ),
+        (
+            "Netlists/Message/Subcircuit/subckt_missing_ends4.cir",
+            "expected_failure_subckt_missing_ends_ts_inv_eof_parse",
+        ),
+        (
+            "Netlists/Message/Input/DC_excessArgs.cir",
+            "expected_failure_dc_excess_arguments_parse",
+        ),
+        (
+            "Netlists/Message/Input/AC_setupSweepParam.cir",
+            "expected_failure_ac_unsupported_sweep_type_parse",
+        ),
+        (
+            "Netlists/Message/Input/NOISE_setupSweepParam.cir",
+            "expected_failure_noise_unsupported_sweep_type_parse",
+        ),
+        (
+            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2a.cir",
+            "expected_failure_message_missing_library_endl_parse",
+        ),
+        (
+            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2b.cir",
+            "expected_failure_message_missing_library_file_unquoted_parse",
+        ),
+        (
+            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2c.cir",
+            "expected_failure_message_missing_library_file_quoted_parse",
+        ),
+        (
+            "Netlists/Message/Device/CircuitBlock_addTableData_1.cir",
+            "expected_failure_message_duplicate_device_parse",
+        ),
+        (
+            "Netlists/Message/Device/DeviceBlock_extractNodes_1.cir",
+            "expected_failure_message_missing_device_nodes_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/dup-external.cir",
+            "expected_failure_bug702_duplicate_external_initcond_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/dup-inlined.cir",
+            "expected_failure_bug702_duplicate_inlined_initcond_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/empty-initcond.cir",
+            "expected_failure_bug702_malformed_initcond_file_load",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_702/missing-initcond.cir",
+            "expected_failure_bug702_missing_initcond_file_load",
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
+            "expected_failure_duplicate_dc_source_function_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1578/bug_1578.cir",
+            "expected_failure_bug1578_invalid_device_type_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_198/bug_198.cir",
+            "expected_failure_bug198_unrecognized_line_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_204/bug204.cir",
+            "expected_failure_bug204_invalid_dc_sweep_arity_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_258/bug_198.cir",
+            "expected_failure_bug258_unrecognized_line_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_587/587.cir",
+            "expected_failure_bug587_invalid_numeric_notation_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_281/bug_281.cir",
+            "expected_failure_bug281_invalid_dc_sweep_arity_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_401/bad-device-line.cir",
+            "expected_failure_bug401_bad_device_line_build",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_401/extra-space.cir",
+            "expected_failure_bug401_extra_space_build",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_401/worse-device-line.cir",
+            "expected_failure_bug401_worse_device_line_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_701/dup-toplevel.cir",
+            "expected_failure_bug701_duplicate_toplevel_device_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir",
+            "expected_failure_bug701_duplicate_subcircuit_device_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_769/bug_769a.cir",
+            "expected_failure_bug769_parameter_node_voltage_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_769/bug_769b.cir",
+            "expected_failure_bug769_parameter_device_current_parse",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_769/bug_769c.cir",
+            "expected_failure_bug769_parameter_lead_current_parse",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} must execute its typed expected-failure oracle: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+}
+
+#[test]
+fn output_symbol_expected_failure_censuses_and_sidecars_are_exactly_pinned() {
+    for (kind, expected) in [
+        (
+            XyceExpectedFailureKind::Bug1148UndefinedPrintNode,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 1,
+                physical_names_blake3: XYCE_BUG1148_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 1,
+                manifest_records_blake3: XYCE_BUG1148_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            },
+        ),
+        (
+            XyceExpectedFailureKind::Bug40UndefinedPrintNode,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 1,
+                physical_names_blake3: XYCE_BUG40_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 1,
+                manifest_records_blake3: XYCE_BUG40_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            },
+        ),
+        (
+            XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 2,
+                physical_names_blake3: XYCE_BUG718_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 2,
+                manifest_records_blake3: XYCE_BUG718_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            },
+        ),
+        (
+            XyceExpectedFailureKind::MessagePrintBadNodeName,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 4,
+                physical_names_blake3: XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 4,
+                manifest_records_blake3: XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            },
+        ),
+        (
+            XyceExpectedFailureKind::MessagePrintBadVariable,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 4,
+                physical_names_blake3: XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 4,
+                manifest_records_blake3: XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: true,
+            },
+        ),
+        (
+            XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 53,
+                physical_names_blake3: XYCE_LEAD_CURRENTS_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 9,
+                manifest_records_blake3: XYCE_LEAD_CURRENTS_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
+            },
+        ),
+        (
+            XyceExpectedFailureKind::MeasureInvalidNodes,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 80,
+                physical_names_blake3: XYCE_MEASURE_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 114,
+                manifest_records_blake3: XYCE_MEASURE_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
+            },
+        ),
+        (
+            XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+            XyceExpectedFailureFamilyCensus {
+                physical_cir_count: 15,
+                physical_names_blake3: XYCE_FOURIER_PHYSICAL_CENSUS_BLAKE3,
+                manifest_owner_count: 13,
+                manifest_records_blake3: XYCE_FOURIER_MANIFEST_CENSUS_BLAKE3,
+                require_manifest_bijection: false,
+            },
+        ),
+    ] {
+        assert_eq!(kind.shared_family_census(), Some(expected), "{kind:?}");
+    }
+    assert_eq!(
+        XyceExpectedFailureKind::Bug40UndefinedPrintNode.retained_non_oracle_artifact(),
+        Some(XyceExpectedFailureRetainedArtifact {
+            file_name: "bug_40.cir.prn",
+            bytes: 150,
+            blake3: XYCE_BUG40_RETAINED_NON_ORACLE_PRN_BLAKE3,
+        })
+    );
+    for (kind, file_name) in [
+        (
+            XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+            "invalidNodes.cir.options",
+        ),
+        (
+            XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+            "lead_for_invalid_device.cir.options",
+        ),
+        (
+            XyceExpectedFailureKind::MeasureInvalidNodes,
+            "invalid_nodes.cir.options",
+        ),
+        (
+            XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+            "bad_dot_four_line3.cir.options",
+        ),
+    ] {
+        assert_eq!(
+            kind.expected_source_sidecar(),
+            Some(XyceExpectedFailureSourceSidecar {
+                file_name,
+                bytes: XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES,
+                blake3: XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3,
+            })
+        );
+    }
+}
+
+#[test]
+fn output_symbol_expected_failure_observers_reject_semantic_mutations() {
+    let root = expected_failure_test_root();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let decks = runner.discover_tests();
+    for (kind, authored, replacement) in [
+        (
+            XyceExpectedFailureKind::Bug1148UndefinedPrintNode,
+            "V(2)",
+            "V(1)",
+        ),
+        (
+            XyceExpectedFailureKind::Bug40UndefinedPrintNode,
+            "V(bad)",
+            "V(3)",
+        ),
+        (
+            XyceExpectedFailureKind::Bug718InvalidPrintNodes,
+            "V(bogo1)",
+            "V(a)",
+        ),
+        (
+            XyceExpectedFailureKind::MessagePrintBadNodeName,
+            "V(A,C)",
+            "V(A,B)",
+        ),
+        (
+            XyceExpectedFailureKind::MessagePrintBadVariable,
+            "V(A,C)",
+            "V(A,B)",
+        ),
+        (
+            XyceExpectedFailureKind::LeadCurrentsInvalidDevice,
+            "V(2)",
+            "V(1)",
+        ),
+        (
+            XyceExpectedFailureKind::MeasureInvalidNodes,
+            "V(bogoNode)",
+            "V(1)",
+        ),
+        (
+            XyceExpectedFailureKind::FourierBadLine3OutputSymbols,
+            "I(BogoDevice1)",
+            "I(VS)",
+        ),
+    ] {
+        let path = decks
+            .iter()
+            .find(|deck| {
+                XyceTestRunner::normalize_manifest_key(&deck.relative_path) == kind.record()
+            })
+            .map(|deck| deck.path.clone())
+            .expect("discover output-symbol corpus record");
+        let source = fs::read_to_string(&path).expect("read output-symbol corpus source");
+        XyceTestRunner::observe_undefined_output_symbols_failure(&source, &path, kind)
+            .expect("canonical output-symbol observer contract");
+        let mutated = source.replacen(authored, replacement, 1);
+        assert_ne!(mutated, source, "{kind:?} mutation must apply");
+        assert!(
+            XyceTestRunner::observe_undefined_output_symbols_failure(&mutated, &path, kind)
+                .is_err(),
+            "{kind:?} must reject a corrected semantic dependency"
+        );
+    }
+}
+
+#[test]
+fn expected_failure_shared_family_censuses_are_exactly_pinned() {
+    let message_subcircuit_census = Some(XyceExpectedFailureFamilyCensus {
+        physical_cir_count: 8,
+        physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
+        manifest_owner_count: 8,
+        manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
+        require_manifest_bijection: false,
+    });
+    for member in [
+        XyceExpectedFailureKind::MessageSubcircuitMissingName,
+        XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+        XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof,
+        XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+        XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+        XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+        XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+    ] {
+        assert_eq!(member.shared_family_census(), message_subcircuit_census);
+    }
+    let message_input_census = Some(XyceExpectedFailureFamilyCensus {
+        physical_cir_count: 79,
+        physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
+        manifest_owner_count: 50,
+        manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
+        require_manifest_bijection: false,
+    });
+    for member in [
+        XyceExpectedFailureKind::MessageDcExcessArguments,
+        XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+        XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+        XyceExpectedFailureKind::MessageMissingLibraryEndl,
+        XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+        XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+    ] {
+        assert_eq!(member.shared_family_census(), message_input_census);
+    }
+    let message_device_census = Some(XyceExpectedFailureFamilyCensus {
+        physical_cir_count: 28,
+        physical_names_blake3: XYCE_MESSAGE_DEVICE_PHYSICAL_CENSUS_BLAKE3,
+        manifest_owner_count: 26,
+        manifest_records_blake3: XYCE_MESSAGE_DEVICE_MANIFEST_CENSUS_BLAKE3,
+        require_manifest_bijection: false,
+    });
+    for member in [
+        XyceExpectedFailureKind::MessageDuplicateDevice,
+        XyceExpectedFailureKind::MessageMissingDeviceNodes,
+    ] {
+        assert_eq!(member.shared_family_census(), message_device_census);
+    }
+    let bug702_census = Some(XyceExpectedFailureFamilyCensus {
+        physical_cir_count: 8,
+        physical_names_blake3: XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3,
+        manifest_owner_count: 8,
+        manifest_records_blake3: XYCE_BUG702_MANIFEST_CENSUS_BLAKE3,
+        require_manifest_bijection: true,
+    });
+    for member in [
+        XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+        XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+        XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+        XyceExpectedFailureKind::Bug702MissingInitcondFile,
+    ] {
+        assert_eq!(member.shared_family_census(), bug702_census);
+    }
+    let bug401_census = Some(XyceExpectedFailureFamilyCensus {
+        physical_cir_count: 3,
+        physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
+        manifest_owner_count: 3,
+        manifest_records_blake3: XYCE_BUG401_MANIFEST_CENSUS_BLAKE3,
+        require_manifest_bijection: true,
+    });
+    for member in [
+        XyceExpectedFailureKind::Bug401BadDeviceLine,
+        XyceExpectedFailureKind::Bug401ExtraSpace,
+        XyceExpectedFailureKind::Bug401WorseDeviceLine,
+    ] {
+        assert_eq!(member.shared_family_census(), bug401_census);
+    }
+    let bug701_census = Some(XyceExpectedFailureFamilyCensus {
+        physical_cir_count: 2,
+        physical_names_blake3: XYCE_BUG701_PHYSICAL_CENSUS_BLAKE3,
+        manifest_owner_count: 2,
+        manifest_records_blake3: XYCE_BUG701_MANIFEST_CENSUS_BLAKE3,
+        require_manifest_bijection: true,
+    });
+    for member in [
+        XyceExpectedFailureKind::Bug701DuplicateTopLevelDevice,
+        XyceExpectedFailureKind::Bug701DuplicateSubcircuitDevice,
+    ] {
+        assert_eq!(member.shared_family_census(), bug701_census);
+    }
+    let bug769_census = Some(XyceExpectedFailureFamilyCensus {
+        physical_cir_count: 3,
+        physical_names_blake3: XYCE_BUG769_PHYSICAL_CENSUS_BLAKE3,
+        manifest_owner_count: 3,
+        manifest_records_blake3: XYCE_BUG769_MANIFEST_CENSUS_BLAKE3,
+        require_manifest_bijection: true,
+    });
+    for member in [
+        XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+        XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+        XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+    ] {
+        assert_eq!(member.shared_family_census(), bug769_census);
+    }
+    assert_eq!(
+        XyceExpectedFailureKind::Bug75UndefinedMutualInductorReference.shared_family_census(),
+        Some(XyceExpectedFailureFamilyCensus {
+            physical_cir_count: 1,
+            physical_names_blake3: XYCE_BUG75_PHYSICAL_CENSUS_BLAKE3,
+            manifest_owner_count: 1,
+            manifest_records_blake3: XYCE_BUG75_MANIFEST_CENSUS_BLAKE3,
+            require_manifest_bijection: true,
+        })
+    );
+    for singleton in [
+        XyceExpectedFailureKind::Bug67BehavioralExpression,
+        XyceExpectedFailureKind::Bug671InvalidPwlFile,
+        XyceExpectedFailureKind::Bug726AdjacentCouplings,
+        XyceExpectedFailureKind::Bug744DcOperatingPoint,
+        XyceExpectedFailureKind::Bug387MissingLibraryEndl,
+        XyceExpectedFailureKind::Issue455DuplicateDcSourceFunction,
+        XyceExpectedFailureKind::Bug1578InvalidDeviceType,
+        XyceExpectedFailureKind::Bug198UnrecognizedLine,
+        XyceExpectedFailureKind::Bug204InvalidDcSweepArity,
+        XyceExpectedFailureKind::Bug258UnrecognizedLine,
+        XyceExpectedFailureKind::Bug281InvalidDcSweepArity,
+        XyceExpectedFailureKind::Bug587InvalidNumericNotation,
+    ] {
+        assert_eq!(
+            singleton.shared_family_census(),
+            None,
+            "{singleton:?} must retain singleton provenance"
+        );
+    }
+}
+
+#[test]
+fn expected_failure_shared_family_provenance_mutations_fail_closed() {
+    let source_root = expected_failure_test_root();
+    let source_family = source_root.join("Netlists/Message/Subcircuit");
+    let temp_root = unique_expected_failure_temp_dir("shared-provenance");
+    let temp_family = temp_root.join("Netlists/Message/Subcircuit");
+    let output_dir = temp_root.join("OutputData/Message/Subcircuit");
+    fs::create_dir_all(&temp_family).expect("create shared-family fixture");
+    fs::create_dir_all(&output_dir).expect("create shared-family OutputData fixture");
+    for entry in fs::read_dir(&source_family).expect("read canonical Message/Subcircuit family") {
+        let entry = entry.expect("read canonical family member");
+        let path = entry.path();
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+        {
+            fs::copy(&path, temp_family.join(entry.file_name()))
+                .expect("copy canonical shared-family member");
+        }
+    }
+    let manifest_source =
+        fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE)).expect("read manifest");
+    let canonical_manifest = manifest_source
+        .lines()
+        .filter(|line| {
+            line.split_once('\t').is_some_and(|(path, contract)| {
+                XyceTestRunner::normalize_manifest_key(path)
+                    .starts_with("netlists/message/subcircuit/")
+                    && contract.trim() == REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    fs::write(&manifest_path, &canonical_manifest).expect("write canonical shared manifest");
+    let deck_path = temp_family.join("subckt_noname.cir");
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+    let assert_rejected = |label: &str| {
+        let result = run();
+        assert!(
+            !result.passed,
+            "{label} must fail closed under shared-family provenance: {result:?}"
+        );
+    };
+
+    let canonical = run();
+    assert!(
+        canonical.passed && !canonical.expected_unsupported,
+        "canonical copied shared family must pass: {canonical:?}"
+    );
+
+    let added = temp_family.join("extra.cir");
+    fs::write(&added, "extra\n.end\n").expect("add physical family member");
+    assert_rejected("added physical .cir member");
+    fs::remove_file(&added).expect("remove added physical member");
+
+    let removable = temp_family.join("subckt_unused.cir");
+    let removable_source = fs::read(&removable).expect("read removable family member");
+    fs::remove_file(&removable).expect("remove physical family member");
+    assert_rejected("removed physical .cir member");
+    fs::write(&removable, &removable_source).expect("restore removed family member");
+
+    let renamed = temp_family.join("subckt_renamed.cir");
+    fs::rename(&removable, &renamed).expect("rename physical family member");
+    assert_rejected("renamed physical .cir member");
+    fs::rename(&renamed, &removable).expect("restore renamed family member");
+
+    let collision_paths = [
+        temp_family.join("RSpice_Case_Probe.cir"),
+        temp_family.join("rspice_case_probe.CIR"),
+    ];
+    fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+    fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+    let case_probe_entries = fs::read_dir(&temp_family)
+        .expect("read case-probe directory")
+        .map(|entry| entry.expect("read case-probe entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+        })
+        .collect::<Vec<_>>();
+    if case_probe_entries.len() == 2 {
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("case-colliding")),
+            "case-colliding physical names must fail explicitly: {result:?}"
+        );
+    }
+    for path in case_probe_entries {
+        fs::remove_file(path).expect("remove case probe");
+    }
+
+    let without_target = canonical_manifest
+        .lines()
+        .filter(|line| {
+            !XyceTestRunner::normalize_manifest_key(line)
+                .starts_with(XYCE_SUBCKT_NONAME_EXPECTED_FAILURE_RECORD)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(&manifest_path, without_target).expect("remove target manifest owner");
+    assert_rejected("removed target manifest owner");
+    fs::write(&manifest_path, &canonical_manifest).expect("restore target manifest owner");
+
+    let added_owner = format!(
+        "{canonical_manifest}Netlists/Message/Subcircuit/extra.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, added_owner).expect("add manifest owner");
+    assert_rejected("added manifest owner");
+    fs::write(&manifest_path, &canonical_manifest).expect("restore exact manifest census");
+
+    let replaced_owner = canonical_manifest.replacen(
+        "Netlists/Message/Subcircuit/subckt_unused.cir",
+        "Netlists/Message/Subcircuit/subckt_replaced.cir",
+        1,
+    );
+    assert_ne!(replaced_owner, canonical_manifest);
+    fs::write(&manifest_path, replaced_owner).expect("replace manifest owner");
+    assert_rejected("replaced manifest owner");
+    fs::write(&manifest_path, &canonical_manifest).expect("restore manifest owner");
+
+    let artifact = output_dir.join("SUBCKT_NONAME.CIR.ERR");
+    fs::write(&artifact, "forbidden").expect("write target output artifact");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("must not own checked-in output artifacts")),
+        "target artifact must fail closed: {result:?}"
+    );
+    fs::remove_file(&artifact).expect("remove noname output artifact");
+
+    for file_name in ["subckt_a2_dup_error.cir", "subckt_j1_dup_error.cir"] {
+        let target_path = temp_family.join(file_name);
+        let run_target =
+            || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&target_path);
+        let canonical_target = run_target();
+        assert!(
+            canonical_target.passed && !canonical_target.expected_unsupported,
+            "canonical copied {file_name} must execute its typed adapter: {canonical_target:?}"
+        );
+
+        let source = fs::read(&target_path)
+            .unwrap_or_else(|error| panic!("read copied {file_name}: {error}"));
+        let mut changed_source = source.clone();
+        changed_source.extend_from_slice(b"\r\n");
+        fs::write(&target_path, changed_source)
+            .unwrap_or_else(|error| panic!("mutate copied {file_name}: {error}"));
+        let changed = run_target();
+        assert!(
+            !changed.passed
+                && changed
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("source digest changed")),
+            "{file_name} source mutation must fail its pinned digest: {changed:?}"
+        );
+        fs::write(&target_path, &source)
+            .unwrap_or_else(|error| panic!("restore copied {file_name}: {error}"));
+
+        let artifact = output_dir.join(format!("{}.ERR", file_name.to_ascii_uppercase()));
+        fs::write(&artifact, "forbidden")
+            .unwrap_or_else(|error| panic!("write {file_name} artifact: {error}"));
+        let artifact_result = run_target();
+        assert!(
+            !artifact_result.passed
+                && artifact_result.error.as_deref().is_some_and(|error| {
+                    error.contains("must not own checked-in output artifacts")
+                }),
+            "{file_name} artifact must fail closed: {artifact_result:?}"
+        );
+        fs::remove_file(artifact)
+            .unwrap_or_else(|error| panic!("remove {file_name} artifact: {error}"));
+    }
+
+    fs::remove_dir_all(temp_root).expect("remove shared-family provenance fixture");
+}
+
+#[test]
+fn expected_failure_provenance_mutations_fail_closed() {
+    let source_root = expected_failure_test_root();
+    let source_path = source_root.join("Netlists/Certification_Tests/BUG_744/bad_dc_op.cir");
+    let source = fs::read(&source_path).expect("read canonical BUG 744 source");
+    let temp_root = unique_expected_failure_temp_dir("provenance");
+    let family_dir = temp_root.join("Netlists/Certification_Tests/BUG_744");
+    let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_744");
+    fs::create_dir_all(&family_dir).expect("create temporary BUG 744 family");
+    fs::create_dir_all(&output_dir).expect("create temporary BUG 744 OutputData");
+    let deck_path = family_dir.join("bad_dc_op.cir");
+    fs::write(&deck_path, &source).expect("copy canonical BUG 744 source");
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    let canonical_manifest = format!(
+        "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, &canonical_manifest).expect("write canonical manifest");
+
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+    let canonical = run();
+    assert!(
+        canonical.passed && !canonical.expected_unsupported,
+        "canonical temporary BUG 744 fixture must pass: {canonical:?}"
+    );
+
+    let mutated_source =
+        String::from_utf8(source.clone()).expect("BUG 744 source is UTF-8") + "* digest mutation\n";
+    fs::write(&deck_path, mutated_source).expect("write digest mutation");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("source digest changed")),
+        "source digest mutation must fail closed: {result:?}"
+    );
+    fs::write(&deck_path, &source).expect("restore canonical source");
+
+    fs::write(&manifest_path, "").expect("remove manifest ownership");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("manifest provenance")),
+        "missing manifest ownership must fail closed: {result:?}"
+    );
+    fs::write(&manifest_path, &canonical_manifest).expect("restore canonical manifest");
+
+    let duplicate_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_744/other.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, duplicate_manifest).expect("write duplicate family owner");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("exactly one manifest owner")),
+        "duplicate family manifest owner must fail closed: {result:?}"
+    );
+    fs::write(&manifest_path, &canonical_manifest).expect("restore one manifest owner");
+
+    let extra_sibling = family_dir.join("other.cir");
+    fs::write(&extra_sibling, "extra sibling\n.end\n").expect("write extra .cir sibling");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("exactly its one qualified .cir record")),
+        "extra .cir sibling must fail closed: {result:?}"
+    );
+    fs::remove_file(extra_sibling).expect("remove extra sibling");
+
+    let case_variant_artifact = output_dir.join("BAD_DC_OP.CIR.ERR");
+    fs::write(&case_variant_artifact, "forbidden").expect("write case-variant artifact");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("must not own checked-in output artifacts")),
+        "case-variant OutputData artifact must fail closed: {result:?}"
+    );
+
+    fs::remove_dir_all(&temp_root).expect("remove provenance fixture");
+}
+
+#[test]
+fn bug67_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_67/bug_67.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 67");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    runner
+        .observe_bug67_behavioral_expression_failure(&source, &path)
+        .expect("canonical BUG 67 failure is observed");
+
+    for (mutated, label) in [
+        (
+            source.replacen("POLY I(V6) 300u 1", "POLY(1) I(V6) 300u 1", 1),
+            "corrected POLY dimension",
+        ),
+        (
+            source.replacen("POLY I(V6) 300u 1", "POLY I(V6) 300u 2", 1),
+            "different malformed expression",
+        ),
+        (
+            source.replacen(".TRAN 1U 1000U 0 5U", ".TRAN 2U 1000U 0 5U", 1),
+            "changed analysis",
+        ),
+        (
+            source.replacen(".PRINT TRAN  V(7)  V(8)", ".PRINT TRAN V(7)", 1),
+            "changed probes",
+        ),
+        (
+            source.replacen("X2 9 7 11 12 7 LM124N", "X9 9 7 11 12 7 LM124N", 1),
+            "changed instance order",
+        ),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            runner
+                .observe_bug67_behavioral_expression_failure(&mutated, &path)
+                .is_err(),
+            "{label} must not satisfy BUG 67"
+        );
+    }
+}
+
+#[test]
+fn bug726_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_726/adjacent.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 726");
+    XyceTestRunner::observe_bug726_adjacent_coupling_failure(&source, &path)
+        .expect("canonical BUG 726 failure is observed");
+
+    for (mutated, label) in [
+        (
+            source.replacen(
+                "K1 L1 L2 0.75 K2 L1 L3 0.8",
+                "K1 L1 L2 0.75\nK2 L1 L3 0.8",
+                1,
+            ),
+            "split valid K devices",
+        ),
+        (
+            source.replacen("K1 L1 L2 0.75 K2 L1 L3 0.8", "K1 L1 L2 0.75", 1),
+            "removed adjacent tail",
+        ),
+        (
+            source.replacen(
+                "K1 L1 L2 0.75 K2 L1 L3 0.8",
+                "K1 L1 L2 0.75 K9 L1 L3 0.8",
+                1,
+            ),
+            "changed adjacent identifier",
+        ),
+        (
+            source.replacen(
+                "K1 L1 L2 0.75 K2 L1 L3 0.8",
+                "\nK1 L1 L2 0.75 K2 L1 L3 0.8",
+                1,
+            ),
+            "shifted physical line",
+        ),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_bug726_adjacent_coupling_failure(&mutated, &path).is_err(),
+            "{label} must not satisfy BUG 726"
+        );
+    }
+}
+
+#[test]
+fn bug671_expected_failure_observer_rejects_fixture_mutations() {
+    let root = expected_failure_test_root();
+    let source_path = root.join("Netlists/Certification_Tests/BUG_671/vpwl_binaryfile.cir");
+    let fixture_path = root.join("Netlists/Certification_Tests/BUG_671/vpwl-word.csv");
+    let source = fs::read_to_string(&source_path).expect("read BUG 671");
+    let fixture = fs::read(&fixture_path).expect("read BUG 671 fixture");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let temp_dir = unique_expected_failure_temp_dir("bug671");
+    fs::create_dir_all(&temp_dir).expect("create BUG 671 fixture directory");
+    let temp_deck = temp_dir.join("vpwl_binaryfile.cir");
+    let temp_fixture = temp_dir.join("vpwl-word.csv");
+    fs::write(&temp_deck, &source).expect("copy BUG 671 deck");
+    fs::write(&temp_fixture, &fixture).expect("copy BUG 671 fixture");
+    runner
+        .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+        .expect("canonical copied BUG 671 fixture is observed");
+
+    fs::write(&temp_fixture, "0,0\n1,1\n").expect("write valid CSV mutation");
+    assert!(
+        runner
+            .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+            .is_err(),
+        "valid CSV must not satisfy binary-file expected failure"
+    );
+    assert!(
+        rspice_core::device::pwl_file::load_pwl_file(&temp_fixture).is_ok(),
+        "corrected CSV must genuinely load"
+    );
+
+    fs::remove_file(&temp_fixture).expect("remove fixture");
+    assert!(
+        runner
+            .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+            .is_err(),
+        "missing fixture must not satisfy invalid-encoding failure"
+    );
+
+    let mut flipped = fixture.clone();
+    flipped[128] ^= 0x01;
+    fs::write(&temp_fixture, flipped).expect("write byte-flipped fixture");
+    assert!(
+        runner
+            .observe_bug671_invalid_pwl_failure(&source, &temp_deck)
+            .is_err(),
+        "byte-flipped fixture must fail exact provenance"
+    );
+
+    fs::remove_dir_all(&temp_dir).expect("remove BUG 671 fixture directory");
+}
+
+#[test]
+fn bug744_expected_failure_observer_rejects_corrected_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_744/bad_dc_op.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 744");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    runner
+        .observe_bug744_dc_operating_point_failure(&source, &path)
+        .expect("canonical BUG 744 failure is observed");
+
+    let corrected = source.replacen("Vsrc2 1 0 2", "", 1);
+    assert_ne!(corrected, source);
+    assert!(
+        runner
+            .observe_bug744_dc_operating_point_failure(&corrected, &path)
+            .is_err(),
+        "solvable one-source circuit must not satisfy BUG 744"
+    );
+    let corrected_netlist = XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("corrected BUG 744 source parses");
+    assert!(
+        runner
+            .create_xyce_engine()
+            .run_dc_op(&corrected_netlist)
+            .is_ok(),
+        "corrected BUG 744 source must genuinely have a DC operating point"
+    );
+
+    for (mutated, label) in [
+        (
+            source.replacen("Vsrc2 1 0 2", "Vsrc2 1 0 5", 1),
+            "removed voltage contradiction",
+        ),
+        (
+            source.replacen(".tran 0 1", ".tran 1e-3 1", 1),
+            "changed analysis",
+        ),
+        (
+            source.replacen(".print tran v(1)", ".print tran v(2)", 1),
+            "changed probe",
+        ),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            runner
+                .observe_bug744_dc_operating_point_failure(&mutated, &path)
+                .is_err(),
+            "{label} must not satisfy BUG 744"
+        );
+    }
+}
+
+#[test]
+fn bug75_expected_failure_observer_rejects_corrections_shifts_and_identity_mutations() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_75_SON/bug75.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 75");
+    XyceTestRunner::observe_bug75_undefined_mutual_inductor_reference_failure(&source, &path)
+        .expect("canonical BUG 75 failure is observed");
+
+    let corrected = source.replacen("*L2 2 3 1", "L2 2 3 1", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("BUG 75 with defined L2 genuinely parses");
+
+    for (mutated, label) in [
+        (corrected, "defined missing inductor"),
+        (
+            source.replacen("K3 L1 L2 0", "K3 L1 L9 0", 1),
+            "different missing inductor",
+        ),
+        (
+            source.replacen("K3 L1 L2 0", "K9 L1 L2 0", 1),
+            "different coupling identity",
+        ),
+        (
+            source.replacen("K3 L1 L2 0", "K3 L2 L1 0", 1),
+            "different missing-reference position",
+        ),
+        (
+            source.replacen("K3 L1 L2 0", "k3 L1 l2 0", 1),
+            "different authored casing",
+        ),
+        (
+            source.replacen("K3 L1 L2 0", "K3 L1 L2 0.5", 1),
+            "different coupling coefficient",
+        ),
+        (
+            source.replacen("K1 L1 L3 0.1", "K0 L1 Lmissing 0.1\r\nK1 L1 L3 0.1", 1),
+            "earlier undefined coupling",
+        ),
+        (format!("\r\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change BUG 75");
+        assert!(
+            XyceTestRunner::observe_bug75_undefined_mutual_inductor_reference_failure(
+                &mutated, &path,
+            )
+            .is_err(),
+            "{label} must not satisfy BUG 75"
+        );
+    }
+
+    let renamed = path.with_file_name("renamed.cir");
+    assert!(
+        XyceTestRunner::observe_bug75_undefined_mutual_inductor_reference_failure(
+            &source, &renamed,
+        )
+        .is_err(),
+        "renamed BUG 75 deck must fail exact record identity"
+    );
+}
+
+#[test]
+fn bug75_expected_failure_provenance_mutations_fail_closed() {
+    let source_root = expected_failure_test_root();
+    let source_family = source_root.join("Netlists/Certification_Tests/BUG_75_SON");
+    let temp_root = unique_expected_failure_temp_dir("bug75-provenance");
+    let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_75_SON");
+    fs::create_dir_all(&temp_family).expect("create BUG 75 family fixture");
+    for file_name in ["bug75.cir", "README", "options"] {
+        fs::copy(source_family.join(file_name), temp_family.join(file_name))
+            .unwrap_or_else(|error| panic!("copy BUG 75 {file_name}: {error}"));
+    }
+    let canonical_manifest = format!(
+        "Netlists/Certification_Tests/BUG_75_SON/bug75.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    fs::write(&manifest_path, &canonical_manifest).expect("write BUG 75 manifest");
+    let deck_path = temp_family.join("bug75.cir");
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+    let assert_rejected = |label: &str, expected_error: &str| {
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains(expected_error)),
+            "{label} must fail closed with {expected_error:?}: {result:?}"
+        );
+    };
+
+    let canonical = run();
+    assert!(
+        canonical.passed
+            && !canonical.expected_unsupported
+            && canonical.contract
+                == "expected_failure_bug75_undefined_mutual_inductor_reference_parse"
+            && canonical.error.is_none()
+            && canonical.mismatches.is_empty(),
+        "canonical copied BUG 75 family must pass: {canonical:?}"
+    );
+
+    let source = fs::read(&deck_path).expect("read copied BUG 75 deck");
+    let mut mutated_source = source.clone();
+    mutated_source.extend_from_slice(b"\r\n");
+    fs::write(&deck_path, mutated_source).expect("mutate BUG 75 source digest");
+    assert_rejected("source digest mutation", "source digest changed");
+    fs::write(&deck_path, &source).expect("restore BUG 75 deck");
+
+    let extra_circuit = temp_family.join("other.cir");
+    fs::write(&extra_circuit, "extra\n.end\n").expect("add BUG 75 circuit sibling");
+    assert_rejected("added circuit sibling", "physical .cir census changed");
+    fs::remove_file(extra_circuit).expect("remove BUG 75 circuit sibling");
+
+    let duplicate_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_75_SON/BUG75.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, duplicate_manifest).expect("duplicate BUG 75 manifest owner");
+    assert_rejected(
+        "case-colliding manifest owner",
+        "duplicate or case-colliding record",
+    );
+
+    let wrong_contract =
+        canonical_manifest.replace(REQUIRES_UPSTREAM_WRAPPER_CONTRACT, "wrong_contract");
+    fs::write(&manifest_path, wrong_contract).expect("change BUG 75 manifest contract");
+    assert_rejected("wrong manifest contract", "manifest provenance");
+
+    let prefix_isolation_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_75_SON_EXTRA/unrelated.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, prefix_isolation_manifest)
+        .expect("write BUG 75 prefix-isolation owner");
+    let prefix_isolated = run();
+    assert!(
+        prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+        "adjacent manifest prefixes must not enter BUG 75 provenance: {prefix_isolated:?}"
+    );
+    fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 75 manifest");
+
+    for file_name in ["README", "options"] {
+        let path = temp_family.join(file_name);
+        let bytes =
+            fs::read(&path).unwrap_or_else(|error| panic!("read BUG 75 {file_name}: {error}"));
+        let mut mutated = bytes.clone();
+        mutated.extend_from_slice(b"mutation");
+        fs::write(&path, mutated)
+            .unwrap_or_else(|error| panic!("mutate BUG 75 {file_name}: {error}"));
+        assert_rejected(&format!("mutated {file_name}"), "retained source");
+        fs::write(&path, bytes)
+            .unwrap_or_else(|error| panic!("restore BUG 75 {file_name}: {error}"));
+    }
+
+    for extra_name in ["count.pl", "tags", "bug75.cir.sh"] {
+        let path = temp_family.join(extra_name);
+        fs::write(&path, "forbidden")
+            .unwrap_or_else(|error| panic!("add BUG 75 {extra_name}: {error}"));
+        assert_rejected(
+            &format!("added removed sidecar {extra_name}"),
+            "source-directory census changed",
+        );
+        fs::remove_file(path).unwrap_or_else(|error| panic!("remove BUG 75 {extra_name}: {error}"));
+    }
+
+    let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_75_SON");
+    fs::create_dir_all(&output_dir).expect("create BUG 75 OutputData fixture");
+    fs::write(output_dir.join("unrelated.txt"), "forbidden")
+        .expect("write BUG 75 forbidden output");
+    assert_rejected("added OutputData entry", "OutputData census changed");
+
+    fs::remove_dir_all(temp_root).expect("remove BUG 75 provenance fixture");
+}
+
+#[test]
+fn bug387_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_387_SON/bug_387.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 387");
+    XyceTestRunner::observe_bug387_missing_library_endl_failure(&source, &path)
+        .expect("canonical BUG 387 failure is observed");
+
+    let corrected = source.replacen(".end", ".endl\n.end", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("BUG 387 source with matching .ENDL genuinely parses");
+    assert!(
+        XyceTestRunner::observe_bug387_missing_library_endl_failure(&corrected, &path).is_err(),
+        "corrected library section must not satisfy BUG 387"
+    );
+
+    for (mutated, label) in [
+        (
+            source.replacen(".lib nom.lib", ".lib other.lib", 1),
+            "different missing library section",
+        ),
+        (format!("\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_bug387_missing_library_endl_failure(&mutated, &path).is_err(),
+            "{label} must not satisfy BUG 387"
+        );
+    }
+}
+
+#[test]
+fn subckt_noname_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Message/Subcircuit/subckt_noname.cir");
+    let source = fs::read_to_string(&path).expect("read subckt_noname");
+    XyceTestRunner::observe_subckt_noname_failure(&source, &path)
+        .expect("canonical subckt_noname failure is observed");
+
+    let corrected = source.replacen(".subckt \r\n", ".subckt unused a b\r\n", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("named unused subcircuit genuinely parses");
+    assert!(
+        XyceTestRunner::observe_subckt_noname_failure(&corrected, &path).is_err(),
+        "corrected .SUBCKT must not satisfy the missing-name oracle"
+    );
+
+    for (mutated, label) in [
+        (
+            source.replacen(".subckt \r\n", ".subckt\r\n", 1),
+            "changed malformed line spelling",
+        ),
+        (format!("\r\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_subckt_noname_failure(&mutated, &path).is_err(),
+            "{label} must not satisfy subckt_noname"
+        );
+    }
+}
+
+#[test]
+fn duplicate_subcircuit_binding_observers_reject_corrections_shifts_and_identity_mutations() {
+    let root = expected_failure_test_root();
+    let family = root.join("Netlists/Message/Subcircuit");
+    for (file_name, kind, malformed, corrected, alternate_conflict) in [
+        (
+            "subckt_a2_dup_error.cir",
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+            "Xinv1 IN MID VDD 0 IN MID VDD VDD INV1",
+            "Xinv1 IN MID VDD 0 IN MID VDD 0 INV1",
+            "Xinv1 IN MID VDD 0 OTHER MID VDD 0 INV1",
+        ),
+        (
+            "subckt_j1_dup_error.cir",
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+            "X1 1 2 3 9 13 99 99 1 ONEBIT",
+            "X1 1 2 3 9 13 99 99 99 ONEBIT",
+            "X1 1 2 3 9 13 99 1 99 ONEBIT",
+        ),
+    ] {
+        let path = family.join(file_name);
+        let source =
+            fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {file_name}: {error}"));
+        XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(&source, &path, kind)
+            .unwrap_or_else(|error| {
+                panic!("canonical {file_name} duplicate binding is observed: {error}")
+            });
+
+        let corrected_source = source.replacen(malformed, corrected, 1);
+        assert_ne!(corrected_source, source);
+        let corrected_netlist = XyceTestRunner::parse_xyce_netlist(&corrected_source, &path)
+            .unwrap_or_else(|error| panic!("corrected {file_name} parses: {error}"));
+        rspice_core::netlist::flatten_netlist_with_models(&corrected_netlist)
+            .unwrap_or_else(|error| panic!("corrected {file_name} flattens: {error}"));
+        assert!(
+            XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                &corrected_source,
+                &path,
+                kind,
+            )
+            .is_err(),
+            "corrected {file_name} must not satisfy its duplicate-binding oracle"
+        );
+
+        let moved_conflict = source.replacen(malformed, alternate_conflict, 1);
+        assert_ne!(moved_conflict, source);
+        assert!(
+            XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                &moved_conflict,
+                &path,
+                kind,
+            )
+            .is_err(),
+            "{file_name} conflict-position mutation must fail closed"
+        );
+
+        let shifted = format!("\r\n{source}");
+        assert!(
+            XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                &shifted, &path, kind,
+            )
+            .is_err(),
+            "shifted {file_name} must fail exact authored-line provenance"
+        );
+
+        let temp_dir = unique_expected_failure_temp_dir("duplicate-subckt-binding-path");
+        fs::create_dir_all(&temp_dir).expect("create duplicate-binding path fixture");
+        let renamed = temp_dir.join("renamed.cir");
+        fs::write(&renamed, &source).expect("write renamed duplicate-binding fixture");
+        assert!(
+            XyceTestRunner::observe_message_duplicate_subcircuit_binding_failure(
+                &source, &renamed, kind,
+            )
+            .is_err(),
+            "renamed {file_name} must fail exact record identity"
+        );
+        fs::remove_dir_all(temp_dir).expect("remove duplicate-binding path fixture");
+    }
+}
+
+#[test]
+fn missing_subcircuit_ends_observers_reject_corrections_shifts_and_path_mutations() {
+    let root = expected_failure_test_root();
+    let family = root.join("Netlists/Message/Subcircuit");
+    for (file_name, kind, malformed, corrected) in [
+        (
+            "subckt_missing_ends.cir",
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsEndCard,
+            "\r\n.end\r\n\r\n.tran",
+            "\r\n.ends\r\n\r\n.tran",
+        ),
+        (
+            "subckt_missing_ends3.cir",
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTopLevelEof,
+            "*.ends",
+            ".ends",
+        ),
+        (
+            "subckt_missing_ends4.cir",
+            XyceExpectedFailureKind::MessageSubcircuitMissingEndsTsInvEof,
+            "*.ENDS TS_INV",
+            ".ENDS TS_INV",
+        ),
+    ] {
+        let path = family.join(file_name);
+        let source =
+            fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {file_name}: {error}"));
+        XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &path, kind)
+            .unwrap_or_else(|error| {
+                panic!("canonical {file_name} missing-.ENDS failure is observed: {error}")
+            });
+
+        let corrected_source = source.replacen(malformed, corrected, 1);
+        assert_ne!(corrected_source, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected_source, &path)
+            .unwrap_or_else(|error| panic!("corrected {file_name} genuinely parses: {error}"));
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&corrected_source, &path, kind)
+                .is_err(),
+            "corrected {file_name} must not satisfy its missing-.ENDS oracle"
+        );
+
+        let shifted = format!("\r\n{source}");
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&shifted, &path, kind).is_err(),
+            "shifted {file_name} must not satisfy its missing-.ENDS oracle"
+        );
+
+        let temp_dir = unique_expected_failure_temp_dir("missing-ends-path");
+        fs::create_dir_all(&temp_dir).expect("create missing-.ENDS path fixture");
+        let renamed = temp_dir.join("renamed.cir");
+        fs::write(&renamed, &source).expect("write renamed missing-.ENDS fixture");
+        assert!(
+            XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &renamed, kind)
+                .is_err(),
+            "renamed {file_name} must fail exact record identity"
+        );
+        fs::remove_dir_all(temp_dir).expect("remove missing-.ENDS path fixture");
+    }
+}
+
+#[test]
+fn missing_subcircuit_ends_include_observer_pins_dependency_and_child_provenance() {
+    let root = expected_failure_test_root();
+    let source_family = root.join("Netlists/Message/Subcircuit");
+    let source = fs::read_to_string(source_family.join("subckt_missing_ends2.cir"))
+        .expect("read subckt_missing_ends2");
+    let dependency = fs::read(source_family.join("missing.ends")).expect("read missing.ends");
+    let temp_dir = unique_expected_failure_temp_dir("missing-ends-include");
+    fs::create_dir_all(&temp_dir).expect("create missing-.ENDS include fixture");
+    let deck_path = temp_dir.join("subckt_missing_ends2.cir");
+    let dependency_path = temp_dir.join("missing.ends");
+    fs::write(&deck_path, &source).expect("write missing-.ENDS include deck");
+    fs::write(&dependency_path, &dependency).expect("write missing-.ENDS include dependency");
+    let kind = XyceExpectedFailureKind::MessageSubcircuitMissingEndsIncludeEof;
+
+    XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind)
+        .expect("canonical copied include EOF failure is observed");
+
+    let corrected_dependency = ".subckt testsub a b c\r\nr1 a b 1\r\nr2 b c 1\r\n.ends testsub\r\n";
+    fs::write(&dependency_path, corrected_dependency).expect("close included subcircuit");
+    XyceTestRunner::parse_xyce_netlist(&source, &deck_path)
+        .expect("included source with matching .ENDS genuinely parses");
+    assert!(
+        XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind).is_err(),
+        "corrected dependency must fail exact missing-.ENDS provenance"
+    );
+
+    let mut changed_dependency = dependency.clone();
+    changed_dependency[20] ^= 0x01;
+    fs::write(&dependency_path, changed_dependency).expect("mutate missing.ends bytes");
+    assert!(
+        XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind).is_err(),
+        "byte-mutated dependency must fail exact provenance"
+    );
+
+    fs::remove_file(&dependency_path).expect("remove missing.ends dependency");
+    assert!(
+        XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &deck_path, kind).is_err(),
+        "missing dependency must fail closed"
+    );
+
+    fs::write(&dependency_path, &dependency).expect("restore missing.ends dependency");
+    let renamed_deck = temp_dir.join("renamed.cir");
+    fs::write(&renamed_deck, &source).expect("write renamed include deck");
+    assert!(
+        XyceTestRunner::observe_missing_subcircuit_ends_failure(&source, &renamed_deck, kind)
+            .is_err(),
+        "renamed include owner must fail exact record identity"
+    );
+
+    let shifted = format!("\r\n{source}");
+    assert!(
+        XyceTestRunner::observe_missing_subcircuit_ends_failure(&shifted, &deck_path, kind)
+            .is_err(),
+        "shifted include owner must fail exact authored-line provenance"
+    );
+
+    fs::remove_dir_all(temp_dir).expect("remove missing-.ENDS include fixture");
+}
+
+#[test]
+fn dc_excess_args_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Message/Input/DC_excessArgs.cir");
+    let source = fs::read_to_string(&path).expect("read DC_excessArgs");
+    XyceTestRunner::observe_dc_excess_args_failure(&source, &path)
+        .expect("canonical DC_excessArgs failure is observed");
+
+    let corrected = source.replacen(".DC V1 -8.0 -4.0 0.0 4.0", ".DC V1 -8.0 -4.0 0.0", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("three-value .DC sweep genuinely parses");
+    assert!(
+        XyceTestRunner::observe_dc_excess_args_failure(&corrected, &path).is_err(),
+        "corrected .DC must not satisfy the excess-argument oracle"
+    );
+
+    for (mutated, label) in [
+        (
+            source.replacen(".DC V1 -8.0 -4.0 0.0 4.0", ".DC V1 -8.0 -4.0 0.0 5.0", 1),
+            "different excess value",
+        ),
+        (format!("\r\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_dc_excess_args_failure(&mutated, &path).is_err(),
+            "{label} must not satisfy DC_excessArgs"
+        );
+    }
+}
+
+#[test]
+fn message_input_and_device_observers_reject_corrections_shifts_and_path_mutations() {
+    let root = expected_failure_test_root();
+    let cases = [
+        (
+            "Netlists/Message/Input/AC_setupSweepParam.cir",
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+        ),
+        (
+            "Netlists/Message/Input/NOISE_setupSweepParam.cir",
+            XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+        ),
+        (
+            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2a.cir",
+            XyceExpectedFailureKind::MessageMissingLibraryEndl,
+        ),
+        (
+            "Netlists/Message/Device/CircuitBlock_addTableData_1.cir",
+            XyceExpectedFailureKind::MessageDuplicateDevice,
+        ),
+        (
+            "Netlists/Message/Device/DeviceBlock_extractNodes_1.cir",
+            XyceExpectedFailureKind::MessageMissingDeviceNodes,
+        ),
+    ];
+    for (relative, kind) in cases {
+        let path = root.join(relative);
+        let source =
+            fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {relative}: {error}"));
+        let observe = |candidate: &str, candidate_path: &Path| match kind {
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType
+            | XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType => {
+                XyceTestRunner::observe_unsupported_frequency_sweep_failure(
+                    candidate,
+                    candidate_path,
+                    kind,
+                )
+            }
+            XyceExpectedFailureKind::MessageMissingLibraryEndl => {
+                XyceTestRunner::observe_message_missing_library_endl_failure(
+                    candidate,
+                    candidate_path,
+                )
+            }
+            XyceExpectedFailureKind::MessageDuplicateDevice => {
+                XyceTestRunner::observe_message_duplicate_device_failure(candidate, candidate_path)
+            }
+            XyceExpectedFailureKind::MessageMissingDeviceNodes => {
+                XyceTestRunner::observe_message_missing_device_nodes_failure(
+                    candidate,
+                    candidate_path,
+                )
+            }
+            _ => unreachable!("case list contains only the five direct observers"),
+        };
+        observe(&source, &path).unwrap_or_else(|error| {
+            panic!("canonical {relative} expected failure is observed: {error}")
+        });
+
+        let corrected = match kind {
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType => {
+                source.replacen(".ac bogo 5 100 1e6", ".ac dec 5 100 1e6", 1)
+            }
+            XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType => {
+                source.replacen(".noise v(4) v1 bogo", ".noise v(4) v1 dec", 1)
+            }
+            XyceExpectedFailureKind::MessageMissingLibraryEndl => {
+                source.replacen(".end", ".endl\n.end", 1)
+            }
+            XyceExpectedFailureKind::MessageDuplicateDevice => {
+                source.replacen("DA 1 3 DA", "DB 1 3 DA", 1)
+            }
+            XyceExpectedFailureKind::MessageMissingDeviceNodes => source
+                .replacen("R2 out_1", "R2 out_1 0 100K", 1)
+                .replacen("C2 out_1 100pF", "C2 out_1 0 100pF", 1),
+            _ => unreachable!(),
+        };
+        assert_ne!(
+            corrected, source,
+            "{relative} correction must change source"
+        );
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .unwrap_or_else(|error| panic!("corrected {relative} genuinely parses: {error}"));
+        assert!(
+            observe(&corrected, &path).is_err(),
+            "corrected {relative} must not satisfy its expected-failure oracle"
+        );
+
+        let shifted = format!("\r\n{source}");
+        assert!(
+            observe(&shifted, &path).is_err(),
+            "shifted {relative} must not satisfy its expected-failure oracle"
+        );
+
+        let temp_dir = unique_expected_failure_temp_dir("message-path");
+        fs::create_dir_all(&temp_dir).expect("create message path fixture");
+        let renamed = temp_dir.join("renamed.cir");
+        fs::write(&renamed, &source).expect("write renamed message fixture");
+        assert!(
+            observe(&source, &renamed).is_err(),
+            "renamed {relative} must fail exact record identity"
+        );
+        fs::remove_dir_all(temp_dir).expect("remove message path fixture");
+    }
+}
+
+#[test]
+fn missing_library_file_observers_pin_quoting_execution_dir_and_absent_dependency() {
+    let root = expected_failure_test_root();
+    let temp_root = unique_expected_failure_temp_dir("missing-library-file");
+    let family = temp_root.join("Netlists/Message/Input");
+    fs::create_dir_all(&family).expect("create missing-library family fixture");
+
+    for (file_name, kind, source_line, alternate_line) in [
+        (
+            "CircuitBlock_parseIncludeFile_2b.cir",
+            XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+            ".lib plugh.lib x",
+            ".lib 'plugh.lib' x",
+        ),
+        (
+            "CircuitBlock_parseIncludeFile_2c.cir",
+            XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+            ".lib 'plugh.lib' x",
+            ".lib plugh.lib x",
+        ),
+    ] {
+        let canonical_path = root.join("Netlists/Message/Input").join(file_name);
+        let source = fs::read_to_string(&canonical_path)
+            .unwrap_or_else(|error| panic!("read {file_name}: {error}"));
+        let deck_path = family.join(file_name);
+        fs::write(&deck_path, &source).expect("write missing-library owner");
+        XyceTestRunner::observe_message_missing_library_file_failure(&source, &deck_path, kind)
+            .unwrap_or_else(|error| {
+                panic!("canonical copied {file_name} missing-library failure is observed: {error}")
+            });
+
+        let quote_mutation = source.replacen(source_line, alternate_line, 1);
+        assert_ne!(quote_mutation, source);
+        assert!(
+            XyceTestRunner::observe_message_missing_library_file_failure(
+                &quote_mutation,
+                &deck_path,
+                kind
+            )
+            .is_err(),
+            "quote spelling mutation must not satisfy {file_name}"
+        );
+        let shifted = format!("\r\n{source}");
+        assert!(
+            XyceTestRunner::observe_message_missing_library_file_failure(
+                &shifted, &deck_path, kind
+            )
+            .is_err(),
+            "shifted source must not satisfy {file_name}"
+        );
+        let renamed = family.join("renamed.cir");
+        fs::write(&renamed, &source).expect("write renamed missing-library owner");
+        assert!(
+            XyceTestRunner::observe_message_missing_library_file_failure(&source, &renamed, kind)
+                .is_err(),
+            "renamed owner must not satisfy {file_name}"
+        );
+        fs::remove_file(&renamed).expect("remove renamed missing-library owner");
+
+        for dependency_dir in [
+            family.clone(),
+            family.join("lib"),
+            family.join("models"),
+            family.join("..").join("lib"),
+            family.join("..").join("models"),
+        ] {
+            fs::create_dir_all(&dependency_dir).expect("create missing-library resolver directory");
+            let dependency = dependency_dir.join("PlUgH.LiB");
+            fs::write(&dependency, ".lib x\nRKEEP 1 0 1\n.endl x\n")
+                .expect("write case-variant plugh.lib dependency");
+            assert!(
+                XyceTestRunner::observe_message_missing_library_file_failure(
+                    &source, &deck_path, kind
+                )
+                .is_err(),
+                "resolvable dependency at {} must invalidate {file_name}",
+                dependency.display()
+            );
+            fs::remove_file(&dependency).expect("remove plugh.lib dependency");
+        }
+    }
+
+    fs::remove_dir_all(temp_root).expect("remove missing-library fixture");
+}
+
+#[test]
+fn selected_message_expected_failures_reject_source_directory_sidecars() {
+    let temp_dir = unique_expected_failure_temp_dir("message-source-sidecars");
+    fs::create_dir_all(&temp_dir).expect("create source-sidecar fixture");
+    fs::write(temp_dir.join("README"), "allowed family documentation")
+        .expect("write allowed README");
+    fs::write(temp_dir.join("options"), "allowed family options").expect("write allowed options");
+
+    for (kind, file_name) in [
+        (
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingA2,
+            "subckt_a2_dup_error.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageSubcircuitDuplicateBindingJ1,
+            "subckt_j1_dup_error.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageAcUnsupportedSweepType,
+            "AC_setupSweepParam.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageNoiseUnsupportedSweepType,
+            "NOISE_setupSweepParam.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingLibraryEndl,
+            "CircuitBlock_parseIncludeFile_2a.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingLibraryFileUnquoted,
+            "CircuitBlock_parseIncludeFile_2b.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingLibraryFileQuoted,
+            "CircuitBlock_parseIncludeFile_2c.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageDuplicateDevice,
+            "CircuitBlock_addTableData_1.cir",
+        ),
+        (
+            XyceExpectedFailureKind::MessageMissingDeviceNodes,
+            "DeviceBlock_extractNodes_1.cir",
+        ),
+    ] {
+        let deck_path = temp_dir.join(file_name);
+        fs::write(&deck_path, "fixture").expect("write selected expected-failure deck");
+        XyceTestRunner::validate_expected_failure_source_sidecars(kind, &deck_path).unwrap_or_else(
+            |error| panic!("{file_name} without a source sidecar must qualify: {error}"),
+        );
+
+        let sidecar = temp_dir.join(format!("{file_name}.res"));
+        fs::write(&sidecar, "forbidden").expect("write forbidden source sidecar");
+        assert!(
+            XyceTestRunner::validate_expected_failure_source_sidecars(kind, &deck_path).is_err(),
+            "{file_name} source sidecar must fail closed"
+        );
+        fs::remove_file(sidecar).expect("remove forbidden source sidecar");
+
+        let case_variant = temp_dir.join(format!("{}.PRN", file_name.to_ascii_uppercase()));
+        fs::write(&case_variant, "forbidden").expect("write case-variant source sidecar");
+        assert!(
+            XyceTestRunner::validate_expected_failure_source_sidecars(kind, &deck_path).is_err(),
+            "{file_name} case-variant source sidecar must fail closed"
+        );
+        fs::remove_file(case_variant).expect("remove case-variant source sidecar");
+        fs::remove_file(deck_path).expect("remove selected expected-failure deck");
+    }
+
+    fs::remove_dir_all(temp_dir).expect("remove source-sidecar fixture");
+}
+
+#[test]
+fn bug702_expected_failure_observers_reject_corrections_shifts_paths_and_resources() {
+    let root = expected_failure_test_root();
+    let family = root.join("Netlists/Certification_Tests/BUG_702");
+    for (file_name, kind) in [
+        (
+            "dup-external.cir",
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+        ),
+        (
+            "dup-inlined.cir",
+            XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+        ),
+        (
+            "empty-initcond.cir",
+            XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+        ),
+        (
+            "missing-initcond.cir",
+            XyceExpectedFailureKind::Bug702MissingInitcondFile,
+        ),
+    ] {
+        let path = family.join(file_name);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read BUG702 {file_name}: {error}"));
+        XyceTestRunner::observe_bug702_expected_failure(&source, &path, kind).unwrap_or_else(
+            |error| panic!("canonical BUG702 {file_name} expected failure is observed: {error}"),
+        );
+
+        let shifted = format!("\r\n{source}");
+        assert!(
+            XyceTestRunner::observe_bug702_expected_failure(&shifted, &path, kind).is_err(),
+            "shifted BUG702 {file_name} must fail exact line provenance"
+        );
+
+        let temp_dir = unique_expected_failure_temp_dir("bug702-path");
+        fs::create_dir_all(&temp_dir).expect("create BUG702 renamed fixture");
+        let renamed = temp_dir.join("renamed.cir");
+        fs::write(&renamed, &source).expect("write renamed BUG702 deck");
+        assert!(
+            XyceTestRunner::observe_bug702_expected_failure(&source, &renamed, kind).is_err(),
+            "renamed BUG702 {file_name} must fail exact record identity"
+        );
+        fs::remove_dir_all(temp_dir).expect("remove BUG702 renamed fixture");
+    }
+
+    for (file_name, kind, duplicate_line) in [
+        (
+            "dup-external.cir",
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+            ".INITcond initcond.dat",
+        ),
+        (
+            "dup-inlined.cir",
+            XyceExpectedFailureKind::Bug702DuplicateInlinedInitcond,
+            ".initcond xinV1:MN1=2,0",
+        ),
+    ] {
+        let path = family.join(file_name);
+        let source = fs::read_to_string(&path).expect("read duplicate BUG702 deck");
+        let corrected = source.replacen(duplicate_line, &format!("*{duplicate_line}"), 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_netlist_with_expression_dialect_and_execution_dir(
+            &corrected,
+            &path,
+            ExpressionDialect::Xyce,
+            Some(&family),
+        )
+        .unwrap_or_else(|error| panic!("corrected BUG702 {file_name} parses: {error}"));
+        assert!(
+            XyceTestRunner::observe_bug702_expected_failure(&corrected, &path, kind).is_err(),
+            "single-directive BUG702 {file_name} must not satisfy duplicate oracle"
+        );
+    }
+
+    let external_source =
+        fs::read_to_string(family.join("dup-external.cir")).expect("read dup-external");
+    let initcond_bytes = fs::read(family.join("initcond.dat")).expect("read initcond.dat");
+    let temp_external = unique_expected_failure_temp_dir("bug702-dup-external-resource");
+    fs::create_dir_all(&temp_external).expect("create dup-external resource fixture");
+    let external_path = temp_external.join("dup-external.cir");
+    let resource_path = temp_external.join("initcond.dat");
+    fs::write(&external_path, &external_source).expect("write dup-external fixture");
+    fs::write(&resource_path, &initcond_bytes).expect("write initcond resource");
+    XyceTestRunner::observe_bug702_expected_failure(
+        &external_source,
+        &external_path,
+        XyceExpectedFailureKind::Bug702DuplicateExternalInitcond,
+    )
+    .expect("copied dup-external fixture qualifies");
+    fs::write(&resource_path, "XiNv1:mn1 IC=3,0\n").expect("mutate initcond resource");
+    assert!(
+        XyceTestRunner::observe_bug702_expected_failure(
+            &external_source,
+            &external_path,
+            XyceExpectedFailureKind::Bug702DuplicateExternalInitcond
+        )
+        .is_err(),
+        "mutated initcond.dat must fail exact resource provenance"
+    );
+    fs::remove_dir_all(temp_external).expect("remove dup-external resource fixture");
+
+    let missing_source =
+        fs::read_to_string(family.join("missing-initcond.cir")).expect("read missing-initcond");
+    let temp_missing = unique_expected_failure_temp_dir("bug702-missing-resource");
+    fs::create_dir_all(&temp_missing).expect("create missing-initcond fixture");
+    let missing_path = temp_missing.join("missing-initcond.cir");
+    fs::write(&missing_path, &missing_source).expect("write missing-initcond fixture");
+    XyceTestRunner::observe_bug702_expected_failure(
+        &missing_source,
+        &missing_path,
+        XyceExpectedFailureKind::Bug702MissingInitcondFile,
+    )
+    .expect("copied missing-initcond fixture qualifies");
+    let ic_path = temp_missing.join("Ic.DaT");
+    fs::write(&ic_path, "XiNv1:mn1 IC=2,0\n").expect("create case-variant ic.dat");
+    assert!(
+        XyceTestRunner::observe_bug702_expected_failure(
+            &missing_source,
+            &missing_path,
+            XyceExpectedFailureKind::Bug702MissingInitcondFile
+        )
+        .is_err(),
+        "case-insensitive execution-directory dependency must invalidate missing-file oracle"
+    );
+    fs::remove_file(&ic_path).expect("remove case-variant ic.dat");
+    fs::write(temp_missing.join("ic.dat"), "XiNv1:mn1 IC=2,0\n").expect("create corrected ic.dat");
+    XyceTestRunner::parse_netlist_with_expression_dialect_and_execution_dir(
+        &missing_source,
+        &missing_path,
+        ExpressionDialect::Xyce,
+        Some(&temp_missing),
+    )
+    .expect("missing-initcond deck with valid dependency genuinely parses");
+    fs::remove_dir_all(temp_missing).expect("remove missing-initcond fixture");
+
+    let empty_source =
+        fs::read_to_string(family.join("empty-initcond.cir")).expect("read empty-initcond");
+    let noinits_bytes = fs::read(family.join("noinits.dat")).expect("read noinits.dat");
+    let temp_empty = unique_expected_failure_temp_dir("bug702-empty-resource");
+    fs::create_dir_all(&temp_empty).expect("create empty-initcond fixture");
+    let empty_path = temp_empty.join("empty-initcond.cir");
+    let noinits_path = temp_empty.join("noinits.dat");
+    fs::write(&empty_path, &empty_source).expect("write empty-initcond fixture");
+    fs::write(&noinits_path, &noinits_bytes).expect("write whitespace noinits.dat");
+    XyceTestRunner::observe_bug702_expected_failure(
+        &empty_source,
+        &empty_path,
+        XyceExpectedFailureKind::Bug702MalformedInitcondFile,
+    )
+    .expect("copied empty-initcond fixture qualifies");
+    fs::write(&noinits_path, "XiNv1:mn1 IC=2,0\n").expect("correct noinits.dat");
+    XyceTestRunner::parse_netlist_with_expression_dialect_and_execution_dir(
+        &empty_source,
+        &empty_path,
+        ExpressionDialect::Xyce,
+        Some(&temp_empty),
+    )
+    .expect("empty-initcond deck with valid resource genuinely parses");
+    assert!(
+        XyceTestRunner::observe_bug702_expected_failure(
+            &empty_source,
+            &empty_path,
+            XyceExpectedFailureKind::Bug702MalformedInitcondFile
+        )
+        .is_err(),
+        "corrected noinits.dat must not satisfy malformed-file oracle"
+    );
+    fs::remove_file(&noinits_path).expect("remove noinits.dat");
+    assert!(
+        XyceTestRunner::observe_bug702_expected_failure(
+            &empty_source,
+            &empty_path,
+            XyceExpectedFailureKind::Bug702MalformedInitcondFile
+        )
+        .is_err(),
+        "missing noinits.dat must not be confused with malformed-file oracle"
+    );
+    fs::remove_dir_all(temp_empty).expect("remove empty-initcond fixture");
+}
+
+#[test]
+fn bug702_inlined_multiple_positive_alias_runs_first() {
+    let root = expected_failure_test_root();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let result =
+        runner.run_test(root.join("Netlists/Certification_Tests/BUG_702/inlined-multiple.cir"));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "BUG702 inlined-multiple must execute its alias transient oracle: {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "bug702_inlined_multiple_initcond_alias_tran"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
+fn bug702_inverter_positive_aliases_run_with_distinct_contracts() {
+    let root = expected_failure_test_root();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (file_name, expected_contract) in [
+        (
+            "inlined-single.cir",
+            "bug702_inlined_single_initcond_alias_tran",
+        ),
+        ("external.cir", "bug702_external_initcond_alias_tran"),
+        ("precedence.cir", "bug702_initcond_precedence_alias_tran"),
+    ] {
+        let result = runner.run_test(
+            root.join("Netlists/Certification_Tests/BUG_702")
+                .join(file_name),
+        );
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "BUG702 {file_name} must execute its inverter alias transient oracle: {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn bug702_positive_effective_sources_are_exact_and_mutations_fail_closed() {
+    let root = expected_failure_test_root();
+    for (file_name, kind, canonical_relative, mutation) in [
+        (
+            "inlined-multiple.cir",
+            XyceBug702PositiveKind::InlinedMultiple,
+            "Netlists/BUG_174/nlrcs10.cir",
+            (".INITCOND C1 IC=400", ".INITCOND C1 IC=399"),
+        ),
+        (
+            "inlined-single.cir",
+            XyceBug702PositiveKind::InlinedSingle,
+            "Netlists/INIT_CONDS/inv1xIC.cir",
+            (".initcond XiNv1:mn1 IC=2,0", ".initcond XiNv1:mn1 IC=3,0"),
+        ),
+        (
+            "external.cir",
+            XyceBug702PositiveKind::External,
+            "Netlists/INIT_CONDS/inv1xIC.cir",
+            ("\"initcond.dat\"", "\"other.dat\""),
+        ),
+        (
+            "precedence.cir",
+            XyceBug702PositiveKind::Precedence,
+            "Netlists/INIT_CONDS/inv1xIC.cir",
+            ("ic=20000,10000", "ic=2,0"),
+        ),
+    ] {
+        let source = fs::read_to_string(
+            root.join("Netlists/Certification_Tests/BUG_702")
+                .join(file_name),
+        )
+        .unwrap_or_else(|error| panic!("read BUG702 {file_name}: {error}"));
+        let effective = XyceTestRunner::bug702_effective_canonical_source(kind, &source)
+            .unwrap_or_else(|error| panic!("derive BUG702 {file_name} effective source: {error}"));
+        let canonical = fs::read_to_string(root.join(canonical_relative))
+            .unwrap_or_else(|error| panic!("read canonical {canonical_relative}: {error}"));
+        assert_eq!(
+            effective, canonical,
+            "BUG702 {file_name} must be byte-equivalent after applying its typed INITCOND representation"
+        );
+
+        let mutated = source.replacen(mutation.0, mutation.1, 1);
+        assert_ne!(mutated, source);
+        assert!(
+            XyceTestRunner::bug702_effective_canonical_source(kind, &mutated).is_err(),
+            "BUG702 {file_name} semantic mutation must fail exact representation qualification"
+        );
+    }
+
+    let mut contracts = BTreeSet::new();
+    for relative in [
+        "Netlists/Certification_Tests/BUG_702/inlined-multiple.cir",
+        "Netlists/Certification_Tests/BUG_702/inlined-single.cir",
+        "Netlists/Certification_Tests/BUG_702/external.cir",
+        "Netlists/Certification_Tests/BUG_702/precedence.cir",
+    ] {
+        let kind = XyceBug702PositiveKind::for_record(relative)
+            .unwrap_or_else(|| panic!("BUG702 positive record recognized: {relative}"));
+        assert_eq!(
+            XyceTestRunner::normalize_manifest_key(relative),
+            kind.record()
+        );
+        assert!(
+            contracts.insert(kind.result_contract()),
+            "BUG702 positive records require distinct result contracts"
+        );
+    }
+    assert_eq!(contracts.len(), 4);
+}
+
+#[test]
+fn bug702_complete_family_provenance_rejects_source_reference_and_manifest_drift() {
+    let source_root = expected_failure_test_root();
+    let source_family = source_root.join("Netlists/Certification_Tests/BUG_702");
+    let source_output = source_root.join("OutputData/Certification_Tests/BUG_702");
+    let temp_root = unique_expected_failure_temp_dir("bug702-complete-provenance");
+    let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_702");
+    let temp_output = temp_root.join("OutputData/Certification_Tests/BUG_702");
+    fs::create_dir_all(&temp_family).expect("create BUG702 source fixture");
+    fs::create_dir_all(&temp_output).expect("create BUG702 output fixture");
+    for entry in fs::read_dir(&source_family).expect("read canonical BUG702 source family") {
+        let entry = entry.expect("read BUG702 source entry");
+        if entry.path().is_file() {
+            fs::copy(entry.path(), temp_family.join(entry.file_name()))
+                .expect("copy BUG702 source entry");
+        }
+    }
+    for entry in fs::read_dir(&source_output).expect("read canonical BUG702 output family") {
+        let entry = entry.expect("read BUG702 output entry");
+        if entry.path().is_file() {
+            fs::copy(entry.path(), temp_output.join(entry.file_name()))
+                .expect("copy BUG702 output entry");
+        }
+    }
+    let manifest_source =
+        fs::read_to_string(source_root.join(HARNESS_MANIFEST_FILE)).expect("read manifest");
+    let canonical_manifest = manifest_source
+        .lines()
+        .filter(|line| {
+            line.split_once('\t').is_some_and(|(path, contract)| {
+                XyceTestRunner::normalize_manifest_key(path)
+                    .starts_with("netlists/certification_tests/bug_702/")
+                    && contract.trim() == REQUIRES_UPSTREAM_WRAPPER_CONTRACT
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    fs::write(&manifest_path, &canonical_manifest).expect("write BUG702 manifest");
+    let runner = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default());
+    runner()
+        .validate_bug702_complete_family_provenance(&temp_family)
+        .expect("canonical copied BUG702 complete family qualifies");
+    runner()
+        .validate_bug702_family_census(&temp_family, XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD)
+        .expect("canonical copied BUG702 manifest bijection qualifies");
+
+    let unexpected = temp_family.join("inlined-single.cir.prn");
+    fs::write(&unexpected, "forbidden source sidecar").expect("write BUG702 source sidecar");
+    assert!(
+        runner()
+            .validate_bug702_complete_family_provenance(&temp_family)
+            .is_err(),
+        "BUG702 source sidecar must fail complete-family provenance"
+    );
+    fs::remove_file(unexpected).expect("remove BUG702 source sidecar");
+
+    let readme = temp_family.join("README");
+    let readme_bytes = fs::read(&readme).expect("read copied BUG702 README");
+    fs::write(&readme, "mutated README").expect("mutate BUG702 README");
+    assert!(
+        runner()
+            .validate_bug702_complete_family_provenance(&temp_family)
+            .is_err(),
+        "BUG702 README drift must fail complete-family provenance"
+    );
+    fs::write(&readme, readme_bytes).expect("restore BUG702 README");
+
+    let reference = temp_output.join("inv1xIC.cir.prn");
+    let reference_bytes = fs::read(&reference).expect("read copied BUG702 reference");
+    fs::write(&reference, "mutated reference").expect("mutate BUG702 reference");
+    assert!(
+        runner()
+            .validate_bug702_complete_family_provenance(&temp_family)
+            .is_err(),
+        "BUG702 reference drift must fail complete-family provenance"
+    );
+    fs::write(&reference, &reference_bytes).expect("restore BUG702 reference");
+
+    fs::remove_file(&reference).expect("remove BUG702 reference");
+    assert!(
+        runner()
+            .validate_bug702_complete_family_provenance(&temp_family)
+            .is_err(),
+        "missing BUG702 alias reference must fail complete-family provenance"
+    );
+    fs::write(&reference, reference_bytes).expect("restore removed BUG702 reference");
+
+    let missing_owner = canonical_manifest
+        .lines()
+        .filter(|line| {
+            !XyceTestRunner::normalize_manifest_key(line)
+                .starts_with(XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(&manifest_path, missing_owner).expect("remove BUG702 manifest owner");
+    assert!(
+        runner()
+            .validate_bug702_family_census(
+                &temp_family,
+                XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD
+            )
+            .is_err(),
+        "missing BUG702 manifest owner must fail the 8/8 bijection"
+    );
+
+    fs::remove_dir_all(temp_root).expect("remove BUG702 provenance fixture");
+}
+
+#[test]
+fn issue455_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/ISSUE_455/issue455.cir");
+    let source = fs::read_to_string(&path).expect("read ISSUE 455");
+    XyceTestRunner::observe_issue455_duplicate_dc_failure(&source, &path)
+        .expect("canonical ISSUE 455 failure is observed");
+
+    let corrected = source.replacen("V2 1 0 dc 1.0 dc 0.0", "V2 1 0 dc 1.0", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("single DC source specification genuinely parses");
+    assert!(
+        XyceTestRunner::observe_issue455_duplicate_dc_failure(&corrected, &path).is_err(),
+        "corrected V2 source must not satisfy ISSUE 455"
+    );
+
+    for (mutated, label) in [
+        (
+            source.replacen("V2 1 0 dc 1.0 dc 0.0", "V2 1 0 dc 1.0 dc 2.0", 1),
+            "different duplicate DC value",
+        ),
+        (format!("\r\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_issue455_duplicate_dc_failure(&mutated, &path).is_err(),
+            "{label} must not satisfy ISSUE 455"
+        );
+    }
+}
+
+#[test]
+fn bug1578_bug198_and_bug258_observers_reject_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+
+    let bug1578_path = root.join("Netlists/Certification_Tests/BUG_1578/bug_1578.cir");
+    let bug1578_source = fs::read_to_string(&bug1578_path).expect("read BUG 1578");
+    XyceTestRunner::observe_bug1578_invalid_device_type_failure(&bug1578_source, &bug1578_path)
+        .expect("canonical BUG 1578 failure is observed");
+    let corrected_bug1578 = bug1578_source.replacen(
+        "Netlist to Test the Xyce Pulse Voltage Source Model",
+        "* Netlist to Test the Xyce Pulse Voltage Source Model",
+        1,
+    );
+    assert_ne!(corrected_bug1578, bug1578_source);
+    XyceTestRunner::parse_xyce_netlist(&corrected_bug1578, &bug1578_path)
+        .expect("commented BUG 1578 invalid device line genuinely parses");
+    for (mutated, label) in [
+        (corrected_bug1578, "commented invalid device line"),
+        (
+            bug1578_source.replacen(
+                "Netlist to Test the Xyce Pulse Voltage Source Model",
+                "Invalid line to Test the Xyce Pulse Voltage Source Model",
+                1,
+            ),
+            "different invalid device type",
+        ),
+        (format!("\r\n{bug1578_source}"), "shifted physical line"),
+    ] {
+        assert_ne!(
+            mutated, bug1578_source,
+            "{label} mutation must change BUG 1578"
+        );
+        assert!(
+            XyceTestRunner::observe_bug1578_invalid_device_type_failure(&mutated, &bug1578_path)
+                .is_err(),
+            "{label} must not satisfy BUG 1578"
+        );
+    }
+
+    let bug198_path = root.join("Netlists/Certification_Tests/BUG_198/bug_198.cir");
+    let bug258_path = root.join("Netlists/Certification_Tests/BUG_258/bug_198.cir");
+    let bug198_source = fs::read_to_string(&bug198_path).expect("read BUG 198");
+    let bug258_source = fs::read_to_string(&bug258_path).expect("read BUG 258");
+    assert_eq!(
+        bug198_source, bug258_source,
+        "BUG 198 and BUG 258 intentionally retain byte-identical netlists"
+    );
+    assert_eq!(XYCE_BUG198_SOURCE_BLAKE3, XYCE_BUG258_SOURCE_BLAKE3);
+    assert_ne!(
+        XyceExpectedFailureKind::Bug198UnrecognizedLine.record(),
+        XyceExpectedFailureKind::Bug258UnrecognizedLine.record()
+    );
+    assert_ne!(
+        XyceExpectedFailureKind::Bug198UnrecognizedLine.result_contract(),
+        XyceExpectedFailureKind::Bug258UnrecognizedLine.result_contract()
+    );
+
+    for (label, source, path, kind) in [
+        (
+            "BUG 198",
+            &bug198_source,
+            &bug198_path,
+            XyceExpectedFailureKind::Bug198UnrecognizedLine,
+        ),
+        (
+            "BUG 258",
+            &bug258_source,
+            &bug258_path,
+            XyceExpectedFailureKind::Bug258UnrecognizedLine,
+        ),
+    ] {
+        XyceTestRunner::observe_bug198_or_bug258_unrecognized_line_failure(source, path, kind)
+            .unwrap_or_else(|error| panic!("canonical {label} failure is observed: {error}"));
+        let corrected = source.replacen(
+            "# Tier No.: 1                                               ",
+            "* Tier No.: 1                                               ",
+            1,
+        );
+        assert_ne!(corrected, source.as_str());
+        XyceTestRunner::parse_xyce_netlist(&corrected, path)
+            .unwrap_or_else(|error| panic!("corrected {label} genuinely parses: {error}"));
+        for (mutated, mutation_label) in [
+            (corrected, "commented unrecognized line"),
+            (
+                source.replacen(
+                    "# Tier No.: 1                                               ",
+                    "# Different invalid line                                    ",
+                    1,
+                ),
+                "different hash-prefixed line",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(
+                mutated,
+                source.as_str(),
+                "{mutation_label} mutation must change {label}"
+            );
+            assert!(
+                XyceTestRunner::observe_bug198_or_bug258_unrecognized_line_failure(
+                    &mutated, path, kind
+                )
+                .is_err(),
+                "{mutation_label} must not satisfy {label}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bug587_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_587/587.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 587");
+    XyceTestRunner::observe_bug587_invalid_numeric_notation_failure(&source, &path)
+        .expect("canonical BUG 587 failure is observed");
+
+    let corrected = source.replacen("R1 1 2 2.0e+{primary}", "R1 1 2 2K", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("corrected BUG 587 numeric notation genuinely parses");
+
+    for (mutated, label) in [
+        (corrected, "corrected resistor value"),
+        (
+            source.replacen("R1 1 2 2.0e+{primary}", "R1 1 2 2.1e+{primary}", 1),
+            "different invalid mantissa",
+        ),
+        (
+            source.replacen(".param primary={13-secondary}", ".param primary=4", 1),
+            "changed parameter relationship",
+        ),
+        (format!("\r\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change BUG 587");
+        assert!(
+            XyceTestRunner::observe_bug587_invalid_numeric_notation_failure(&mutated, &path)
+                .is_err(),
+            "{label} must not satisfy BUG 587"
+        );
+    }
+}
+
+#[test]
+fn bug587_expected_failure_provenance_mutations_fail_closed() {
+    let source_root = expected_failure_test_root();
+    let source_path = source_root.join("Netlists/Certification_Tests/BUG_587/587.cir");
+    let source = fs::read(&source_path).expect("read canonical BUG 587 source");
+    let temp_root = unique_expected_failure_temp_dir("bug587-provenance");
+    let family_dir = temp_root.join("Netlists/Certification_Tests/BUG_587");
+    let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_587");
+    fs::create_dir_all(&family_dir).expect("create temporary BUG 587 family");
+    fs::create_dir_all(&output_dir).expect("create temporary BUG 587 OutputData");
+    let deck_path = family_dir.join("587.cir");
+    fs::write(&deck_path, &source).expect("copy canonical BUG 587 source");
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    let canonical_manifest = format!(
+        "Netlists/Certification_Tests/BUG_587/587.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, &canonical_manifest).expect("write canonical BUG 587 manifest");
+
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+    let canonical = run();
+    assert!(
+        canonical.passed && !canonical.expected_unsupported,
+        "canonical temporary BUG 587 fixture must pass: {canonical:?}"
+    );
+
+    let mutated_source =
+        String::from_utf8(source.clone()).expect("BUG 587 source is UTF-8") + "* digest mutation\n";
+    fs::write(&deck_path, mutated_source).expect("write BUG 587 digest mutation");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("source digest changed")),
+        "BUG 587 source digest mutation must fail closed: {result:?}"
+    );
+    fs::write(&deck_path, &source).expect("restore canonical BUG 587 source");
+
+    let extra_sibling = family_dir.join("other.cir");
+    fs::write(&extra_sibling, "extra sibling\n.end\n").expect("write BUG 587 sibling");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("exactly its one qualified .cir record")),
+        "BUG 587 extra circuit sibling must fail closed: {result:?}"
+    );
+    fs::remove_file(extra_sibling).expect("remove BUG 587 sibling");
+
+    let artifact = output_dir.join("587.CIR.ERR");
+    fs::write(&artifact, "forbidden").expect("write BUG 587 output artifact");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("must not own checked-in output artifacts")),
+        "BUG 587 output artifact must fail closed: {result:?}"
+    );
+    fs::remove_file(artifact).expect("remove BUG 587 output artifact");
+
+    let extra_owner = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_587/other.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, extra_owner).expect("write extra BUG 587 manifest owner");
+    let result = run();
+    assert!(
+        !result.passed
+            && result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("exactly one manifest owner")),
+        "BUG 587 extra manifest owner must fail closed: {result:?}"
+    );
+
+    fs::remove_dir_all(temp_root).expect("remove BUG 587 provenance fixture");
+}
+
+#[test]
+fn bug204_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_204/bug204.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 204");
+    XyceTestRunner::observe_bug204_invalid_dc_sweep_arity(&source, &path)
+        .expect("canonical BUG 204 failure is observed");
+
+    let corrected = source.replacen(".DC VIN 5 5", ".DC VIN 5 5 1", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("BUG 204 with explicit STEP genuinely parses");
+    assert!(
+        XyceTestRunner::observe_bug204_invalid_dc_sweep_arity(&corrected, &path).is_err(),
+        "corrected BUG 204 must not satisfy invalid DC arity"
+    );
+
+    for (mutated, label) in [
+        (
+            source.replacen(".DC VIN 5 5", ".DC VMON 5 5", 1),
+            "different sweep source",
+        ),
+        (
+            source.replacen(".DC VIN 5 5", ".DC VIN 4 5", 1),
+            "different sweep bounds",
+        ),
+        (format!("\r\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_bug204_invalid_dc_sweep_arity(&mutated, &path).is_err(),
+            "{label} must not satisfy BUG 204"
+        );
+    }
+}
+
+#[test]
+fn bug281_expected_failure_observer_rejects_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Certification_Tests/BUG_281/bug_281.cir");
+    let source = fs::read_to_string(&path).expect("read BUG 281");
+    XyceTestRunner::observe_bug281_invalid_dc_sweep_arity(&source, &path)
+        .expect("canonical BUG 281 failure is observed");
+
+    let corrected = source.replacen(".DC VIN 5 5", ".DC VIN 5 5 1", 1);
+    assert_ne!(corrected, source);
+    XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+        .expect("BUG 281 with explicit STEP genuinely parses");
+    assert!(
+        XyceTestRunner::observe_bug281_invalid_dc_sweep_arity(&corrected, &path).is_err(),
+        "corrected BUG 281 must not satisfy invalid DC arity"
+    );
+
+    for (mutated, label) in [
+        (
+            source.replacen(".DC VIN 5 5", ".DC VMON 5 5", 1),
+            "different sweep source",
+        ),
+        (
+            source.replacen(".DC VIN 5 5", ".DC VIN 4 5", 1),
+            "different sweep bounds",
+        ),
+        (format!("\r\n{source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_bug281_invalid_dc_sweep_arity(&mutated, &path).is_err(),
+            "{label} must not satisfy BUG 281"
+        );
+    }
+}
+
+#[test]
+fn bug401_expected_failure_observers_reject_corrected_and_shifted_inputs() {
+    let root = expected_failure_test_root();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let family = root.join("Netlists/Certification_Tests/BUG_401");
+
+    let bad_path = family.join("bad-device-line.cir");
+    let bad_source = fs::read_to_string(&bad_path).expect("read BUG 401 bad-device-line");
+    runner
+        .observe_bug401_bad_device_line_failure(&bad_source, &bad_path)
+        .expect("canonical BUG 401 bad-device-line failure is observed");
+    let corrected_bad = bad_source.replacen(
+        "An example of perfect nonsense that is too easy to get from a user!",
+        "* An example of perfect nonsense that is too easy to get from a user!",
+        1,
+    );
+    assert_ne!(corrected_bad, bad_source);
+    let corrected_bad_netlist = XyceTestRunner::parse_xyce_netlist(&corrected_bad, &bad_path)
+        .expect("commented BUG 401 bad-device-line genuinely parses");
+    runner
+        .create_xyce_engine()
+        .build_circuit(&corrected_bad_netlist)
+        .expect("commented BUG 401 bad-device-line genuinely builds");
+    for (mutated, label) in [
+        (corrected_bad, "commented malformed A line"),
+        (
+            bad_source.replacen("from a user!", "from a operator!", 1),
+            "different inferred XSPICE model",
+        ),
+        (format!("\n{bad_source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, bad_source, "{label} mutation must change source");
+        assert!(
+            runner
+                .observe_bug401_bad_device_line_failure(&mutated, &bad_path)
+                .is_err(),
+            "{label} must not satisfy BUG 401 bad-device-line"
+        );
+    }
+
+    let extra_path = family.join("extra-space.cir");
+    let extra_source = fs::read_to_string(&extra_path).expect("read BUG 401 extra-space");
+    runner
+        .observe_bug401_extra_space_failure(&extra_source, &extra_path)
+        .expect("canonical BUG 401 extra-space failure is observed");
+    let corrected_extra = extra_source.replacen(
+        "APerfect nonsense that is too easy to get from a user!",
+        "* APerfect nonsense that is too easy to get from a user!",
+        1,
+    );
+    assert_ne!(corrected_extra, extra_source);
+    let corrected_extra_netlist = XyceTestRunner::parse_xyce_netlist(&corrected_extra, &extra_path)
+        .expect("commented BUG 401 extra-space genuinely parses");
+    runner
+        .create_xyce_engine()
+        .build_circuit(&corrected_extra_netlist)
+        .expect("commented BUG 401 extra-space genuinely builds");
+    for (mutated, label) in [
+        (corrected_extra, "commented malformed A line"),
+        (
+            extra_source.replacen("from a user!", "from a operator!", 1),
+            "different inferred XSPICE model",
+        ),
+        (format!("\n{extra_source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, extra_source, "{label} mutation must change source");
+        assert!(
+            runner
+                .observe_bug401_extra_space_failure(&mutated, &extra_path)
+                .is_err(),
+            "{label} must not satisfy BUG 401 extra-space"
+        );
+    }
+
+    let worse_path = family.join("worse-device-line.cir");
+    let worse_source = fs::read_to_string(&worse_path).expect("read BUG 401 worse-device-line");
+    XyceTestRunner::observe_bug401_worse_device_line_failure(&worse_source, &worse_path)
+        .expect("canonical BUG 401 worse-device-line failure is observed");
+    let corrected_worse = worse_source.replacen(
+        "Really good example of perfect nonsense that is too easy to get from a user!",
+        "* Really good example of perfect nonsense that is too easy to get from a user!",
+        1,
+    );
+    assert_ne!(corrected_worse, worse_source);
+    let corrected_worse_netlist = XyceTestRunner::parse_xyce_netlist(&corrected_worse, &worse_path)
+        .expect("commented BUG 401 worse-device-line genuinely parses");
+    runner
+        .create_xyce_engine()
+        .build_circuit(&corrected_worse_netlist)
+        .expect("commented BUG 401 worse-device-line genuinely builds");
+    for (mutated, label) in [
+        (corrected_worse, "commented malformed resistor line"),
+        (
+            worse_source.replacen("perfect nonsense", "different nonsense", 1),
+            "different illegal resistor token",
+        ),
+        (format!("\n{worse_source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, worse_source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_bug401_worse_device_line_failure(&mutated, &worse_path)
+                .is_err(),
+            "{label} must not satisfy BUG 401 worse-device-line"
+        );
+    }
+}
+
+#[test]
+fn bug769_expected_failure_observers_pin_one_line_delta_and_reject_mutations() {
+    let root = expected_failure_test_root();
+    let family = root.join("Netlists/Certification_Tests/BUG_769");
+    let family_anchor = family.join("bug_769a.cir");
+    XyceTestRunner::require_bug769_one_line_delta_family(&family_anchor)
+        .expect("canonical BUG 769 family differs only at physical line 69");
+
+    for (file_name, kind, parameter_line, corrected_line, changed_probe) in [
+        (
+            "bug_769a.cir",
+            XyceExpectedFailureKind::Bug769ParameterNodeVoltage,
+            ".param RVAL={76K+v(3)}",
+            ".param RVAL={76K+3}",
+            ".param RVAL={76K+v(4)}",
+        ),
+        (
+            "bug_769b.cir",
+            XyceExpectedFailureKind::Bug769ParameterDeviceCurrent,
+            ".param RVAL={76K+i(v2)}",
+            ".param RVAL={76K+2}",
+            ".param RVAL={76K+i(v1)}",
+        ),
+        (
+            "bug_769c.cir",
+            XyceExpectedFailureKind::Bug769ParameterLeadCurrent,
+            ".param RVAL={76K+i(c2)}",
+            ".param RVAL={76K+1}",
+            ".param RVAL={76K+i(c1)}",
+        ),
+    ] {
+        let path = family.join(file_name);
+        let source = fs::read_to_string(&path).expect("read canonical BUG 769 member");
+        XyceTestRunner::observe_bug769_parameter_probe_failure(&source, &path, kind)
+            .expect("canonical BUG 769 parameter-probe failure is observed");
+
+        let corrected = source.replacen(parameter_line, corrected_line, 1);
+        assert_ne!(corrected, source);
+        XyceTestRunner::parse_xyce_netlist(&corrected, &path)
+            .expect("corrected BUG 769 scalar parameter genuinely parses");
+        assert!(
+            XyceTestRunner::observe_bug769_parameter_probe_failure(&corrected, &path, kind)
+                .is_err(),
+            "corrected {file_name} must not satisfy BUG 769"
+        );
+
+        for (mutated, label) in [
+            (
+                source.replacen("RVAL", "OTHER", 1),
+                "changed parameter identifier",
+            ),
+            (
+                source.replacen(parameter_line, changed_probe, 1),
+                "changed circuit probe",
+            ),
+            (format!("\r\n{source}"), "shifted physical line"),
+        ] {
+            assert_ne!(mutated, source, "{label} mutation must change source");
+            assert!(
+                XyceTestRunner::observe_bug769_parameter_probe_failure(&mutated, &path, kind)
+                    .is_err(),
+                "{label} must not satisfy {file_name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bug701_expected_failure_observers_reject_corrected_and_structural_mutations() {
+    let root = expected_failure_test_root();
+    let family = root.join("Netlists/Certification_Tests/BUG_701");
+
+    let top_path = family.join("dup-toplevel.cir");
+    let top_source = fs::read_to_string(&top_path).expect("read BUG 701 dup-toplevel");
+    XyceTestRunner::observe_bug701_duplicate_toplevel_failure(&top_source, &top_path)
+        .expect("canonical BUG 701 top-level duplicate is observed");
+    let corrected_top = top_source.replacen("V1 1 0 5", "V2 1 0 5", 1);
+    assert_ne!(corrected_top, top_source);
+    XyceTestRunner::parse_xyce_netlist(&corrected_top, &top_path)
+        .expect("renamed top-level source genuinely parses");
+    for (mutated, label) in [
+        (corrected_top, "renamed duplicate source"),
+        (
+            top_source.replacen("V1 1 0 5", "v1 1 0 5", 1),
+            "case-variant canonical spelling",
+        ),
+        (format!("\r\n{top_source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, top_source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_bug701_duplicate_toplevel_failure(&mutated, &top_path).is_err(),
+            "{label} must not satisfy BUG 701 dup-toplevel"
+        );
+    }
+
+    let sub_path = family.join("dup-subcircuit.cir");
+    let sub_source = fs::read_to_string(&sub_path).expect("read BUG 701 dup-subcircuit");
+    XyceTestRunner::observe_bug701_duplicate_subcircuit_failure(&sub_source, &sub_path)
+        .expect("canonical BUG 701 subcircuit duplicate is observed");
+    let corrected_sub = sub_source.replacen("R1 b 0 1", "R2 b 0 1", 1);
+    assert_ne!(corrected_sub, sub_source);
+    XyceTestRunner::parse_xyce_netlist(&corrected_sub, &sub_path)
+        .expect("renamed subcircuit resistor genuinely parses");
+    for (mutated, label) in [
+        (corrected_sub, "renamed duplicate resistor"),
+        (
+            sub_source.replacen("XvNodes 1 22 rNodes", "Xother 1 22 rNodes", 1),
+            "renamed flattening instance",
+        ),
+        (
+            sub_source.replacen("XvNodes 1 22 rNodes\r\n", "", 1),
+            "removed flattening instance",
+        ),
+        (
+            sub_source.replacen("XvNodes 1 22 rNodes", "XvNodes 1 22 other", 1),
+            "changed flattening target",
+        ),
+        (format!("\r\n{sub_source}"), "shifted physical line"),
+    ] {
+        assert_ne!(mutated, sub_source, "{label} mutation must change source");
+        assert!(
+            XyceTestRunner::observe_bug701_duplicate_subcircuit_failure(&mutated, &sub_path)
+                .is_err(),
+            "{label} must not satisfy BUG 701 dup-subcircuit"
+        );
+    }
+}
+
+#[test]
+fn bug401_expected_failure_family_provenance_fails_closed() {
+    let source_root = expected_failure_test_root();
+    let source_family = source_root.join("Netlists/Certification_Tests/BUG_401");
+    let temp_root = unique_expected_failure_temp_dir("bug401-family");
+    let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_401");
+    fs::create_dir_all(&temp_family).expect("create BUG 401 family fixture");
+    for file_name in [
+        "bad-device-line.cir",
+        "extra-space.cir",
+        "worse-device-line.cir",
+    ] {
+        fs::copy(source_family.join(file_name), temp_family.join(file_name))
+            .expect("copy BUG 401 family member");
+    }
+    let canonical_manifest = [
+        "Netlists/Certification_Tests/BUG_401/bad-device-line.cir\trequires_upstream_wrapper",
+        "Netlists/Certification_Tests/BUG_401/extra-space.cir\trequires_upstream_wrapper",
+        "Netlists/Certification_Tests/BUG_401/worse-device-line.cir\trequires_upstream_wrapper",
+    ]
+    .join("\n")
+        + "\n";
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    fs::write(&manifest_path, &canonical_manifest).expect("write BUG 401 manifest");
+    let deck_path = temp_family.join("bad-device-line.cir");
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+    let assert_rejected = |label: &str, expected_error: &str| {
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains(expected_error)),
+            "{label} must fail closed with {expected_error:?}: {result:?}"
+        );
+    };
+
+    let canonical = run();
+    assert!(
+        canonical.passed
+            && !canonical.expected_unsupported
+            && canonical.contract == "expected_failure_bug401_bad_device_line_build",
+        "canonical copied BUG 401 family must pass: {canonical:?}"
+    );
+
+    let added = temp_family.join("added.cir");
+    fs::write(&added, "added\n.end\n").expect("add BUG 401 physical member");
+    assert_rejected("added physical member", "physical .cir census changed");
+    fs::remove_file(&added).expect("remove added BUG 401 member");
+
+    let removable = temp_family.join("worse-device-line.cir");
+    let removable_source = fs::read(&removable).expect("read removable BUG 401 member");
+    fs::remove_file(&removable).expect("remove BUG 401 physical member");
+    assert_rejected("removed physical member", "physical .cir census changed");
+    fs::write(&removable, &removable_source).expect("restore BUG 401 member");
+
+    let collision_paths = [
+        temp_family.join("RSpice_Case_Probe.cir"),
+        temp_family.join("rspice_case_probe.CIR"),
+    ];
+    fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+    fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+    let case_probe_entries = fs::read_dir(&temp_family)
+        .expect("read BUG 401 case-probe directory")
+        .map(|entry| entry.expect("read BUG 401 case-probe entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+        })
+        .collect::<Vec<_>>();
+    if case_probe_entries.len() == 2 {
+        assert_rejected("case-colliding physical members", "case-colliding");
+    }
+    for path in case_probe_entries {
+        fs::remove_file(path).expect("remove BUG 401 case probe");
+    }
+
+    let duplicate_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_401/bad-device-line.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, duplicate_manifest).expect("write duplicate BUG 401 owner");
+    assert_rejected(
+        "duplicate manifest owner",
+        "duplicate or case-colliding record",
+    );
+
+    let case_variant_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_401/BAD-DEVICE-LINE.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, case_variant_manifest).expect("write case-variant BUG 401 owner");
+    assert_rejected(
+        "case-variant manifest owner",
+        "duplicate or case-colliding record",
+    );
+
+    let non_bijective_manifest = canonical_manifest.replace(
+        "Netlists/Certification_Tests/BUG_401/worse-device-line.cir",
+        "Netlists/Certification_Tests/BUG_401/missing-device-line.cir",
+    );
+    fs::write(&manifest_path, non_bijective_manifest)
+        .expect("write non-bijective BUG 401 manifest");
+    assert_rejected(
+        "non-bijective manifest owner",
+        "manifest/physical .cir census is not a bijection",
+    );
+
+    let prefix_isolation_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_401_SON/unrelated.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, prefix_isolation_manifest)
+        .expect("write BUG 401 SON prefix-isolation row");
+    let prefix_isolated = run();
+    assert!(
+        prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+        "BUG_401_SON manifest rows must not enter the BUG_401 family census: {prefix_isolated:?}"
+    );
+
+    fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 401 manifest");
+    let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_401");
+    fs::create_dir_all(&output_dir).expect("create BUG 401 OutputData fixture");
+    fs::write(output_dir.join("bad-device-line.cir.prn"), "forbidden")
+        .expect("write forbidden BUG 401 artifact");
+    assert_rejected(
+        "target output artifact",
+        "must not own checked-in output artifacts",
+    );
+
+    fs::remove_dir_all(temp_root).expect("remove BUG 401 family fixture");
+}
+
+#[test]
+fn bug769_expected_failure_family_provenance_fails_closed() {
+    let source_root = expected_failure_test_root();
+    let source_family = source_root.join("Netlists/Certification_Tests/BUG_769");
+    let temp_root = unique_expected_failure_temp_dir("bug769-family");
+    let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_769");
+    fs::create_dir_all(&temp_family).expect("create BUG 769 family fixture");
+    for file_name in ["bug_769a.cir", "bug_769b.cir", "bug_769c.cir"] {
+        fs::copy(source_family.join(file_name), temp_family.join(file_name))
+            .expect("copy BUG 769 family member");
+    }
+    let canonical_manifest = [
+        "Netlists/Certification_Tests/BUG_769/bug_769a.cir\trequires_upstream_wrapper",
+        "Netlists/Certification_Tests/BUG_769/bug_769b.cir\trequires_upstream_wrapper",
+        "Netlists/Certification_Tests/BUG_769/bug_769c.cir\trequires_upstream_wrapper",
+    ]
+    .join("\n")
+        + "\n";
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    fs::write(&manifest_path, &canonical_manifest).expect("write BUG 769 manifest");
+    let deck_path = temp_family.join("bug_769a.cir");
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+    let assert_rejected = |label: &str, expected_error: &str| {
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains(expected_error)),
+            "{label} must fail closed with {expected_error:?}: {result:?}"
+        );
+    };
+
+    let canonical = run();
+    assert!(
+        canonical.passed
+            && !canonical.expected_unsupported
+            && canonical.contract == "expected_failure_bug769_parameter_node_voltage_parse",
+        "canonical copied BUG 769 family must pass: {canonical:?}"
+    );
+
+    let added = temp_family.join("added.cir");
+    fs::write(&added, "added\n.end\n").expect("add BUG 769 physical member");
+    assert_rejected("added physical member", "physical .cir census changed");
+    fs::remove_file(&added).expect("remove added BUG 769 member");
+
+    let removable = temp_family.join("bug_769c.cir");
+    let removable_source = fs::read(&removable).expect("read removable BUG 769 member");
+    fs::remove_file(&removable).expect("remove BUG 769 physical member");
+    assert_rejected("removed physical member", "physical .cir census changed");
+    fs::write(&removable, &removable_source).expect("restore BUG 769 member");
+
+    let altered = temp_family.join("bug_769b.cir");
+    let altered_source = fs::read_to_string(&altered).expect("read BUG 769 sibling");
+    fs::write(
+        &altered,
+        altered_source.replacen("R2 3 1 {RVAL}", "R2 3 1 {RVAL} ", 1),
+    )
+    .expect("alter BUG 769 non-probe sibling line");
+    assert_rejected(
+        "changed non-probe family line",
+        "must differ only at physical line 69",
+    );
+    fs::write(&altered, altered_source).expect("restore BUG 769 sibling");
+
+    let collision_paths = [
+        temp_family.join("RSpice_Case_Probe.cir"),
+        temp_family.join("rspice_case_probe.CIR"),
+    ];
+    fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+    fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+    let case_probe_entries = fs::read_dir(&temp_family)
+        .expect("read BUG 769 case-probe directory")
+        .map(|entry| entry.expect("read BUG 769 case-probe entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+        })
+        .collect::<Vec<_>>();
+    if case_probe_entries.len() == 2 {
+        assert_rejected("case-colliding physical members", "case-colliding");
+    }
+    for path in case_probe_entries {
+        fs::remove_file(path).expect("remove BUG 769 case probe");
+    }
+
+    let duplicate_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_769/bug_769a.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, duplicate_manifest).expect("write duplicate BUG 769 owner");
+    assert_rejected(
+        "duplicate manifest owner",
+        "duplicate or case-colliding record",
+    );
+
+    let case_variant_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_769/BUG_769A.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, case_variant_manifest).expect("write case-variant BUG 769 owner");
+    assert_rejected(
+        "case-variant manifest owner",
+        "duplicate or case-colliding record",
+    );
+
+    let non_bijective_manifest = canonical_manifest.replace(
+        "Netlists/Certification_Tests/BUG_769/bug_769c.cir",
+        "Netlists/Certification_Tests/BUG_769/missing.cir",
+    );
+    fs::write(&manifest_path, non_bijective_manifest)
+        .expect("write non-bijective BUG 769 manifest");
+    assert_rejected(
+        "non-bijective manifest owner",
+        "manifest/physical .cir census is not a bijection",
+    );
+
+    let prefix_isolation_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_769_SON/unrelated.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, prefix_isolation_manifest)
+        .expect("write BUG 769 SON prefix-isolation row");
+    let prefix_isolated = run();
+    assert!(
+        prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+        "BUG_769_SON manifest rows must not enter the BUG_769 family census: {prefix_isolated:?}"
+    );
+
+    fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 769 manifest");
+    let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_769");
+    fs::create_dir_all(&output_dir).expect("create BUG 769 OutputData fixture");
+    fs::write(output_dir.join("bug_769a.cir.prn"), "forbidden")
+        .expect("write forbidden BUG 769 artifact");
+    assert_rejected(
+        "target output artifact",
+        "must not own checked-in output artifacts",
+    );
+
+    fs::remove_dir_all(temp_root).expect("remove BUG 769 family fixture");
+}
+
+#[test]
+fn bug701_expected_failure_family_provenance_fails_closed() {
+    let source_root = expected_failure_test_root();
+    let source_family = source_root.join("Netlists/Certification_Tests/BUG_701");
+    let temp_root = unique_expected_failure_temp_dir("bug701-family");
+    let temp_family = temp_root.join("Netlists/Certification_Tests/BUG_701");
+    fs::create_dir_all(&temp_family).expect("create BUG 701 family fixture");
+    for file_name in ["dup-subcircuit.cir", "dup-toplevel.cir"] {
+        fs::copy(source_family.join(file_name), temp_family.join(file_name))
+            .expect("copy BUG 701 family member");
+    }
+    let canonical_manifest = [
+        "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir\trequires_upstream_wrapper",
+        "Netlists/Certification_Tests/BUG_701/dup-toplevel.cir\trequires_upstream_wrapper",
+    ]
+    .join("\n")
+        + "\n";
+    let manifest_path = temp_root.join(HARNESS_MANIFEST_FILE);
+    fs::write(&manifest_path, &canonical_manifest).expect("write BUG 701 manifest");
+    let deck_path = temp_family.join("dup-toplevel.cir");
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+    let assert_rejected = |label: &str, expected_error: &str| {
+        let result = run();
+        assert!(
+            !result.passed
+                && result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains(expected_error)),
+            "{label} must fail closed with {expected_error:?}: {result:?}"
+        );
+    };
+
+    let canonical = run();
+    assert!(
+        canonical.passed
+            && !canonical.expected_unsupported
+            && canonical.contract == "expected_failure_bug701_duplicate_toplevel_device_parse",
+        "canonical copied BUG 701 family must pass: {canonical:?}"
+    );
+
+    let added = temp_family.join("added.cir");
+    fs::write(&added, "added\n.end\n").expect("add BUG 701 physical member");
+    assert_rejected("added physical member", "physical .cir census changed");
+    fs::remove_file(&added).expect("remove added BUG 701 member");
+
+    let subcircuit = temp_family.join("dup-subcircuit.cir");
+    let subcircuit_source = fs::read(&subcircuit).expect("read BUG 701 subcircuit member");
+    fs::remove_file(&subcircuit).expect("remove BUG 701 physical member");
+    assert_rejected("removed physical member", "physical .cir census changed");
+    fs::write(&subcircuit, &subcircuit_source).expect("restore BUG 701 member");
+
+    let renamed = temp_family.join("renamed-subcircuit.cir");
+    fs::rename(&subcircuit, &renamed).expect("rename BUG 701 physical member");
+    assert_rejected("renamed physical member", "physical .cir census changed");
+    fs::rename(&renamed, &subcircuit).expect("restore BUG 701 physical name");
+
+    let collision_paths = [
+        temp_family.join("RSpice_Case_Probe.cir"),
+        temp_family.join("rspice_case_probe.CIR"),
+    ];
+    fs::write(&collision_paths[0], "case probe A\n.end\n").expect("write case probe A");
+    fs::write(&collision_paths[1], "case probe B\n.end\n").expect("write case probe B");
+    let case_probe_entries = fs::read_dir(&temp_family)
+        .expect("read BUG 701 case-probe directory")
+        .map(|entry| entry.expect("read BUG 701 case-probe entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("rspice_case_probe.cir"))
+        })
+        .collect::<Vec<_>>();
+    if case_probe_entries.len() == 2 {
+        assert_rejected("case-colliding physical members", "case-colliding");
+    }
+    for path in case_probe_entries {
+        fs::remove_file(path).expect("remove BUG 701 case probe");
+    }
+
+    let duplicate_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_701/dup-toplevel.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, duplicate_manifest).expect("write duplicate BUG 701 owner");
+    assert_rejected(
+        "duplicate manifest owner",
+        "duplicate or case-colliding record",
+    );
+
+    let case_variant_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_701/DUP-TOPLEVEL.CIR\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, case_variant_manifest).expect("write case-variant BUG 701 owner");
+    assert_rejected(
+        "case-variant manifest owner",
+        "duplicate or case-colliding record",
+    );
+
+    let non_bijective_manifest = canonical_manifest.replace(
+        "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir",
+        "Netlists/Certification_Tests/BUG_701/missing-subcircuit.cir",
+    );
+    fs::write(&manifest_path, non_bijective_manifest)
+        .expect("write non-bijective BUG 701 manifest");
+    assert_rejected(
+        "non-bijective manifest owner",
+        "manifest/physical .cir census is not a bijection",
+    );
+
+    let prefix_isolation_manifest = format!(
+        "{canonical_manifest}Netlists/Certification_Tests/BUG_701_SON/ac_files.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+    );
+    fs::write(&manifest_path, prefix_isolation_manifest)
+        .expect("write BUG 701 SON prefix-isolation row");
+    let prefix_isolated = run();
+    assert!(
+        prefix_isolated.passed && !prefix_isolated.expected_unsupported,
+        "BUG_701_SON manifest rows must not enter the BUG_701 family census: {prefix_isolated:?}"
+    );
+
+    fs::write(&manifest_path, &canonical_manifest).expect("restore BUG 701 manifest");
+    let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_701");
+    fs::create_dir_all(&output_dir).expect("create BUG 701 OutputData fixture");
+    fs::write(output_dir.join("dup-toplevel.cir.prn"), "forbidden")
+        .expect("write forbidden BUG 701 artifact");
+    assert_rejected(
+        "target output artifact",
+        "must not own checked-in output artifacts",
+    );
+
+    fs::remove_dir_all(temp_root).expect("remove BUG 701 family fixture");
+}
+
+#[test]
+fn bug204_retained_non_oracle_artifact_provenance_fails_closed() {
+    let source_root = expected_failure_test_root();
+    let source_deck = source_root.join("Netlists/Certification_Tests/BUG_204/bug204.cir");
+    let source_artifact = source_root.join("OutputData/Certification_Tests/BUG_204/bug204.cir.prn");
+    let temp_root = unique_expected_failure_temp_dir("bug204-artifact");
+    let family_dir = temp_root.join("Netlists/Certification_Tests/BUG_204");
+    let output_dir = temp_root.join("OutputData/Certification_Tests/BUG_204");
+    fs::create_dir_all(&family_dir).expect("create BUG 204 family fixture");
+    fs::create_dir_all(&output_dir).expect("create BUG 204 OutputData fixture");
+    let deck_path = family_dir.join("bug204.cir");
+    let artifact_path = output_dir.join("bug204.cir.prn");
+    fs::copy(&source_deck, &deck_path).expect("copy BUG 204 source");
+    fs::copy(&source_artifact, &artifact_path).expect("copy retained BUG 204 artifact");
+    fs::write(
+            temp_root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "Netlists/Certification_Tests/BUG_204/bug204.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("write BUG 204 manifest");
+    let run = || XyceTestRunner::new(&temp_root, XyceRunnerConfig::default()).run_test(&deck_path);
+
+    let canonical = run();
+    assert!(
+        canonical.passed
+            && !canonical.expected_unsupported
+            && canonical.contract == "expected_failure_bug204_invalid_dc_sweep_arity_parse",
+        "canonical BUG 204 must route to typed failure before stale PRN planning: {canonical:?}"
+    );
+
+    let artifact = fs::read(&artifact_path).expect("read retained BUG 204 artifact");
+    fs::remove_file(&artifact_path).expect("remove retained BUG 204 artifact");
+    let missing = run();
+    assert!(
+        !missing.passed
+            && missing
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("classified non-oracle artifact")),
+        "missing retained artifact must fail closed: {missing:?}"
+    );
+    fs::write(&artifact_path, &artifact).expect("restore retained BUG 204 artifact");
+
+    let mut mutated_artifact = artifact.clone();
+    mutated_artifact[0] ^= 0x01;
+    fs::write(&artifact_path, mutated_artifact).expect("mutate retained BUG 204 artifact");
+    let mutated = run();
+    assert!(
+        !mutated.passed
+            && mutated
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("retained non-oracle artifact changed")),
+        "mutated retained artifact must fail closed: {mutated:?}"
+    );
+    fs::write(&artifact_path, &artifact).expect("restore exact retained artifact");
+
+    let renamed_artifact = output_dir.join("bug204.cir.old");
+    fs::rename(&artifact_path, &renamed_artifact).expect("rename retained BUG 204 artifact");
+    let renamed = run();
+    assert!(
+        !renamed.passed
+            && renamed
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("changed name")),
+        "renamed retained artifact must fail closed: {renamed:?}"
+    );
+    fs::rename(&renamed_artifact, &artifact_path).expect("restore artifact name");
+
+    let extra_artifact = output_dir.join("bug204.cir.csv");
+    fs::write(&extra_artifact, "forbidden").expect("write extra BUG 204 artifact");
+    let extra = run();
+    assert!(
+        !extra.passed
+            && extra
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("exactly its one classified non-oracle")),
+        "extra target artifact must fail closed: {extra:?}"
+    );
+
+    fs::remove_dir_all(temp_root).expect("remove BUG 204 artifact fixture");
+}
+
+#[test]
+fn startup_oracle_source_identity_and_provenance_mutations_fail_closed() {
+    let root = expected_failure_test_root();
+    let relative = "Netlists/Message/Input/IC_No_Args_Warning.cir";
+    let path = root.join(relative);
+    let kind = XyceStartupOracleKind::IcEmptyWarning;
+    let canonical = fs::read(&path).expect("read startup warning source");
+    XyceTestRunner::validate_startup_source_identity(kind, &canonical)
+        .expect("canonical startup source identity qualifies");
+
+    let mut byte_mutation = canonical.clone();
+    byte_mutation[0] ^= 1;
+    assert!(
+        XyceTestRunner::validate_startup_source_identity(kind, &byte_mutation).is_err(),
+        "one-byte mutation must fail the exact source digest"
+    );
+    let mut length_mutation = canonical.clone();
+    length_mutation.push(b'\n');
+    assert!(
+        XyceTestRunner::validate_startup_source_identity(kind, &length_mutation).is_err(),
+        "length mutation must fail the exact source identity"
+    );
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let canonical_deck = XyceDeck {
+        path: path.clone(),
+        section: XyceDeckSection::Netlists,
+        relative_path: relative.to_string(),
+    };
+    runner
+        .validate_startup_oracle_provenance(&canonical_deck, kind)
+        .expect("canonical startup provenance qualifies");
+
+    let wrong_path = XyceDeck {
+        relative_path: "Netlists/Message/Input/NODESET_No_Args_Warning.cir".to_string(),
+        ..canonical_deck.clone()
+    };
+    assert!(
+        runner
+            .validate_startup_oracle_provenance(&wrong_path, kind)
+            .is_err(),
+        "record/path substitution must fail closed"
+    );
+
+    let mut missing_owner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    assert!(
+        missing_owner
+            .upstream_wrapper_decks
+            .remove(XYCE_IC_EMPTY_WARNING_RECORD),
+        "canonical manifest contains startup warning owner"
+    );
+    assert!(
+        missing_owner
+            .validate_startup_oracle_provenance(&canonical_deck, kind)
+            .is_err(),
+        "missing manifest ownership must fail closed"
+    );
+}
+
+#[test]
+fn startup_warning_observers_reject_typed_semantic_mutations() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Message/Input/IC_At_Missing_Node_Warning.cir");
+    let source = fs::read_to_string(&path).expect("read IC missing-node source");
+    let kind = XyceStartupOracleKind::IcMissingNodeWarning;
+    let expected = kind.warning_expectation().expect("warning expectation");
+    let canonical = XyceTestRunner::parse_xyce_netlist(&source, &path)
+        .expect("canonical startup warning source parses");
+    XyceTestRunner::validate_startup_warning_observation(&canonical, &path, kind, expected)
+        .expect("canonical typed startup warning qualifies");
+
+    let known_source = source.replace("V(Bleem)=1", "V(1)=1");
+    assert_ne!(known_source, source);
+    let known = XyceTestRunner::parse_xyce_netlist(&known_source, &path)
+        .expect("known-node mutation parses");
+    assert!(
+        XyceTestRunner::validate_startup_warning_observation(&known, &path, kind, expected,)
+            .is_err(),
+        "known topology node must not retain the undefined-node observation"
+    );
+
+    let extra_warning_source = source.replace(".IC V(Bleem)=1", ".IC V(Bleem)=1\n.NODESET");
+    assert_ne!(extra_warning_source, source);
+    let extra = XyceTestRunner::parse_xyce_netlist(&extra_warning_source, &path)
+        .expect("extra-warning mutation parses");
+    assert!(
+        XyceTestRunner::validate_startup_warning_observation(&extra, &path, kind, expected,)
+            .is_err(),
+        "additional parse warnings must fail an exact success-warning contract"
+    );
+
+    let bug_path = root.join("Netlists/Certification_Tests/BUG_667_SON/ic_in_subckt_warning.cir");
+    let bug_source = fs::read_to_string(&bug_path).expect("read BUG667 startup source");
+    let bug_kind = XyceStartupOracleKind::Bug667ScopedGlobalWarning;
+    let bug_expected = bug_kind.warning_expectation().expect("BUG667 expectation");
+    let local_source = bug_source.replace("V($G_VCC)=0.0", "V(mid)=0.0");
+    assert_ne!(local_source, bug_source);
+    let local = XyceTestRunner::parse_xyce_netlist(&local_source, &bug_path)
+        .expect("local scoped startup mutation parses");
+    assert!(
+        XyceTestRunner::validate_startup_warning_observation(
+            &local,
+            &bug_path,
+            bug_kind,
+            bug_expected,
+        )
+        .is_err(),
+        "local subcircuit target must not satisfy the scoped-global warning"
+    );
+}
+
+#[test]
+fn startup_conflict_observer_requires_typed_order_and_precedence() {
+    let root = expected_failure_test_root();
+    let path = root.join("Netlists/Message/Input/IC_And_NODESET_Specified.cir");
+    let source = fs::read_to_string(&path).expect("read startup conflict source");
+    XyceTestRunner::observe_startup_conflict(&source, &path)
+        .expect("canonical conflict is IC then NODESET at physical lines 16 and 17");
+
+    let same_mode = source.replace(".NODESET V(Bleem)=1", ".IC V(Bleem)=1");
+    assert_ne!(same_mode, source);
+    assert!(
+        XyceTestRunner::observe_startup_conflict(&same_mode, &path).is_err(),
+        "same-mode cards must not satisfy the mixed-mode conflict"
+    );
+
+    let reversed = source
+        .replace(".IC V(Bleem)=1", ".TEMP_STARTUP V(Bleem)=1")
+        .replace(".NODESET V(Bleem)=1", ".IC V(Bleem)=1")
+        .replace(".TEMP_STARTUP V(Bleem)=1", ".NODESET V(Bleem)=1");
+    assert_ne!(reversed, source);
+    assert!(
+        XyceTestRunner::observe_startup_conflict(&reversed, &path).is_err(),
+        "reversing the ordered conflict origins must fail closed"
+    );
+}
+
+#[test]
+fn measure_cont_step_stream_detects_value_order_status_and_metadata_changes() {
+    let numeric = |value| XyceMeasurementReferenceValue::Numeric {
+        value,
+        quantization: None,
+    };
+    let rows = vec![
+        XyceMixedMeasurementReferenceRow {
+            name: "first".to_string(),
+            value: numeric(1.25),
+            trigger_axis: Some(numeric(0.1)),
+            target_axis: Some(numeric(0.2)),
+        },
+        XyceMixedMeasurementReferenceRow {
+            name: "second".to_string(),
+            value: XyceMeasurementReferenceValue::Failed,
+            trigger_axis: Some(numeric(0.3)),
+            target_axis: None,
+        },
+    ];
+    let canonical = XyceTestRunner::measure_cont_step_mt_stream(&rows)
+        .expect("serialize canonical stepped measurement stream");
+
+    let mut value = rows.clone();
+    value[0].value = numeric(2.25);
+    let mut order = rows.clone();
+    order.swap(0, 1);
+    let mut status = rows.clone();
+    status[1].value = numeric(0.0);
+    let mut metadata = rows.clone();
+    metadata[0].target_axis = Some(numeric(0.25));
+
+    for counterfactual in [value, order, status, metadata] {
+        assert_ne!(
+            XyceTestRunner::measure_cont_step_mt_stream(&counterfactual)
+                .expect("serialize counterfactual stepped stream"),
+            canonical
+        );
+    }
+}
+
+#[test]
+fn noise_gs_parser_preserves_frequency_at_and_failure_metadata() {
+    let path =
+        std::env::temp_dir().join(format!("rspice-noise-gs-parser-{}.txt", std::process::id()));
+    fs::write(
+        &path,
+        "DERIVWHEN = 1.250000e+00 at freq = 2.500000e+00\n\
+             DERIVAT = -3.000000e+00 for AT = 4.000000e+00\n\
+             DERIVFAIL = 0.000000e+00 FAILED\n",
+    )
+    .expect("write NOISE GS parser fixture");
+
+    let rows = XyceTestRunner::parse_measure_cont_gs_file(&path)
+        .expect("parse NOISE frequency-bearing GS rows");
+    fs::remove_file(path).expect("remove NOISE GS parser fixture");
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0].event_axis,
+        Some(XyceMeasurementReferenceValue::Numeric {
+            value: 2.5,
+            quantization: Some(1.0e-6),
+        })
+    );
+    assert_eq!(
+        rows[1].event_axis,
+        Some(XyceMeasurementReferenceValue::Numeric {
+            value: 4.0,
+            quantization: Some(1.0e-6),
+        })
+    );
+    assert_eq!(rows[2].event_axis, None);
+    assert_eq!(rows[2].mixed.value, XyceMeasurementReferenceValue::Failed);
+}

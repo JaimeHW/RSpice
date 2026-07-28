@@ -1,14 +1,14 @@
 use super::*;
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn normalize_variable_name(name: &str) -> String {
+    pub(in crate::suites::ngspice) fn normalize_variable_name(name: &str) -> String {
         name.chars()
             .filter(|c| !c.is_whitespace())
             .collect::<String>()
             .to_ascii_lowercase()
     }
 
-    pub(in crate::testing::ngspice_runner) fn default_transient_max_step(
+    pub(in crate::suites::ngspice) fn default_transient_max_step(
         tstep: f64,
         tstop: f64,
         tstart: f64,
@@ -28,7 +28,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn evaluate_ac_complex_value(
+    pub(in crate::suites::ngspice) fn evaluate_ac_complex_value(
         func: &str,
         value: num_complex::Complex64,
         abs_tol: f64,
@@ -49,7 +49,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn evaluate_reference_complex_output(
+    pub(in crate::suites::ngspice) fn evaluate_reference_complex_output(
         var_name: &str,
         value: num_complex::Complex64,
         abs_tol: f64,
@@ -63,7 +63,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_voltage_probe(
+    pub(in crate::suites::ngspice) fn parse_voltage_probe(
         var: &str,
     ) -> Option<(String, Option<String>)> {
         let normalized = Self::normalize_variable_name(var);
@@ -78,7 +78,7 @@ impl TestRunner {
         }
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_current_probe(var: &str) -> Option<String> {
+    pub(in crate::suites::ngspice) fn parse_current_probe(var: &str) -> Option<String> {
         let normalized = Self::normalize_variable_name(var);
         if normalized.starts_with("i(") && normalized.ends_with(')') {
             let inner = &normalized[2..normalized.len() - 1];
@@ -98,18 +98,18 @@ impl TestRunner {
             })
     }
 
-    pub(in crate::testing::ngspice_runner) fn branch_probe_names_from_netlist(
+    pub(in crate::suites::ngspice) fn branch_probe_names_from_netlist(
         netlist: &Netlist,
     ) -> Vec<String> {
         netlist
             .elements
             .iter()
             .filter_map(|element| match &element.kind {
-                crate::netlist::ElementKind::Inductor { .. }
-                | crate::netlist::ElementKind::JilesAthertonInductor { .. }
-                | crate::netlist::ElementKind::VoltageSource(_)
-                | crate::netlist::ElementKind::Ccvs { .. }
-                | crate::netlist::ElementKind::BehavioralVoltage { .. } => {
+                rspice_core::netlist::ElementKind::Inductor { .. }
+                | rspice_core::netlist::ElementKind::JilesAthertonInductor { .. }
+                | rspice_core::netlist::ElementKind::VoltageSource(_)
+                | rspice_core::netlist::ElementKind::Ccvs { .. }
+                | rspice_core::netlist::ElementKind::BehavioralVoltage { .. } => {
                     Some(element.name.clone())
                 }
                 _ => None,
@@ -117,7 +117,7 @@ impl TestRunner {
             .collect()
     }
 
-    pub(in crate::testing::ngspice_runner) fn parse_ac_probe(var: &str) -> Option<AcProbe> {
+    pub(in crate::suites::ngspice) fn parse_ac_probe(var: &str) -> Option<AcProbe> {
         let normalized = Self::normalize_variable_name(var);
         for func in [
             "vdb", "db", "vm", "mag", "vr", "ir", "vi", "ii", "vp", "ip", "ph",
@@ -178,7 +178,7 @@ impl TestRunner {
         None
     }
 
-    pub(in crate::testing::ngspice_runner) fn combine_reference_tables(
+    pub(in crate::suites::ngspice) fn combine_reference_tables(
         axis_name: String,
         tables: Vec<ReferenceTable>,
     ) -> ReferenceTable {
@@ -201,7 +201,7 @@ impl TestRunner {
         combined
     }
 
-    pub(in crate::testing::ngspice_runner) fn resolve_node_index(
+    pub(in crate::suites::ngspice) fn resolve_node_index(
         node_to_idx: &HashMap<String, usize>,
         node: &str,
     ) -> Option<usize> {
@@ -211,7 +211,7 @@ impl TestRunner {
         node.parse::<usize>().ok()
     }
 
-    pub(in crate::testing::ngspice_runner) fn reference_node_exists(
+    pub(in crate::suites::ngspice) fn reference_node_exists(
         node_to_idx: &HashMap<String, usize>,
         node: &str,
     ) -> bool {

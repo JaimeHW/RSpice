@@ -91,7 +91,7 @@ impl TestRunner {
         self.validation_manifest.get(&key).copied()
     }
 
-    pub(in crate::testing::ngspice_runner) fn suppresses_historical_reference_output_for(
+    pub(in crate::suites::ngspice) fn suppresses_historical_reference_output_for(
         &self,
         cir_path: &Path,
     ) -> bool {

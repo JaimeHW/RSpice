@@ -16,7 +16,11 @@ use crate::{CircuitData, Netlist, Value};
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 const DC_SWEEP_RESULT_PREALLOC_LIMIT: usize = 4096;
 
-pub(crate) fn bounded_dc_sweep_points(
+/// Enumerate the sweep points a `.DC` spec expands to.
+///
+/// Bounded by the engine's analysis-point resource limit, so an unbounded
+/// or hostile sweep specification fails here rather than during the run.
+pub fn bounded_dc_sweep_points(
     engine: &Engine,
     spec: &crate::netlist::DcSweepSpec,
     abort: &dyn AbortSignal,
@@ -81,7 +85,7 @@ enum DcSweepSource {
 /// explicit device parameter (`R1:R`).  The former means the element's
 /// primary value parameter.  Keeping this resolution in the engine makes the
 /// direct DC API and the regression wrapper agree on the same semantics.
-pub(crate) fn canonical_device_parameter_sweep_source(
+pub fn canonical_device_parameter_sweep_source(
     netlist: &Netlist,
     source_name: &str,
 ) -> Option<String> {
@@ -215,7 +219,7 @@ impl DcSweepSource {
 impl Engine {
     /// Resolve a Xyce device-parameter `.DC` source to the canonical AST
     /// override spelling used by the engine and regression wrapper.
-    pub(crate) fn canonical_device_parameter_sweep_source(
+    pub fn canonical_device_parameter_sweep_source(
         netlist: &Netlist,
         source_name: &str,
     ) -> Option<String> {

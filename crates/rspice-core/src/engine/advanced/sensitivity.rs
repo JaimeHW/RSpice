@@ -245,7 +245,11 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn create_perturbed_netlist_multi(
+    /// Clone a netlist with parameter overrides applied.
+    ///
+    /// Returns the rewritten netlist and the number of substitutions made, so a
+    /// caller can tell "applied nothing" from "applied everything".
+    pub fn create_perturbed_netlist_multi(
         netlist: &Netlist,
         overrides: &[(String, Value)],
     ) -> Result<(Netlist, usize), SimulationError> {
