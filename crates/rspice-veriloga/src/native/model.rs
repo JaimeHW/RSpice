@@ -969,6 +969,43 @@ impl NativeModel {
         &self.current_dependencies.assignment_branch_unknowns
     }
 
+    /// Whether the current fused stamp driver can preserve all current-probe
+    /// ordering semantics without publishing terminal-pair currents inside
+    /// native code.
+    ///
+    /// Prior-contribution and contribution-produced terminal-pair probes are
+    /// deliberately kept on the scalar path until the driver publishes those
+    /// values at the exact expression boundary.
+    pub(crate) fn stamp_kernel_is_eligible(&self) -> bool {
+        self.entries.stamp_kernel.is_some()
+            && self
+                .current_dependencies
+                .assignment_prior_currents
+                .is_empty()
+            && self
+                .current_dependencies
+                .stamp_values
+                .iter()
+                .all(Vec::is_empty)
+            && self
+                .current_dependencies
+                .stamp_value_prior_currents
+                .iter()
+                .all(Vec::is_empty)
+            && self
+                .current_dependencies
+                .jacobians
+                .iter()
+                .flatten()
+                .all(Vec::is_empty)
+            && self
+                .current_dependencies
+                .jacobian_prior_currents
+                .iter()
+                .flatten()
+                .all(Vec::is_empty)
+    }
+
     pub(crate) fn run_parameter_default(
         &self,
         index: usize,

@@ -41,7 +41,8 @@ use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
 use crate::native::{
-    NativeModel, NativeRequiredStorage, clear_native_runtime_error, take_native_runtime_error,
+    NativeModel, NativeRequiredStorage, NativeStampKernelIo, clear_native_runtime_error,
+    take_native_runtime_error,
 };
 
 #[cfg(feature = "native")]
@@ -174,6 +175,12 @@ pub struct VerilogADevice {
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
     native_model: std::sync::Arc<NativeModel>,
+    /// Byte-addressable mirror of `program_active` for the native stamp ABI.
+    #[cfg(feature = "native")]
+    native_program_active: Vec<u8>,
+    /// Flat, model-order Jacobian output storage for the fused stamp driver.
+    #[cfg(feature = "native")]
+    native_stamp_jacobians: Vec<f64>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
 }
@@ -346,6 +353,12 @@ impl VerilogADevice {
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
+        #[cfg(feature = "native")]
+        let native_jacobian_count = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum();
         let mut device = Self {
             name: name.into(),
             model,
@@ -359,6 +372,10 @@ impl VerilogADevice {
             matrix_indices: MatrixIndices::default(),
             #[cfg(feature = "native")]
             native_model,
+            #[cfg(feature = "native")]
+            native_program_active: vec![1; num_stamp_programs],
+            #[cfg(feature = "native")]
+            native_stamp_jacobians: vec![0.0; native_jacobian_count],
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
@@ -1381,6 +1398,9 @@ impl VerilogADevice {
         }
 
         self.program_active = program_active;
+        self.native_program_active.clear();
+        self.native_program_active
+            .extend(self.program_active.iter().map(|active| u8::from(*active)));
         self.branch_active = branch_active;
         Ok(())
     }
@@ -1947,7 +1967,7 @@ impl VerilogADevice {
             params: context.parameters.as_ptr(),
             branch_currents: context.terminal_pair_currents_ptr(),
             branch_currents_len: context.terminal_pair_currents_len(),
-            currents: context.currents.as_ptr(),
+            currents: context.currents.as_mut_ptr() as *const f64,
             currents_len: context.currents.len(),
             num_terminals: context.terminal_count(),
             port_connected: context.port_connected.as_ptr(),
@@ -2694,8 +2714,247 @@ impl VerilogADevice {
         self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
     }
 
+    fn stamp_structural_branches<M>(&self, matrix_add: &mut M, multiplicity: f64)
+    where
+        M: FnMut(usize, usize, f64),
+    {
+        for (ordinal, source) in self.model.branch_sources.iter().enumerate() {
+            let br = Self::index_to_node(
+                &StampIndex::Branch(ordinal),
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            );
+            let Some(br) = br else { continue };
+
+            if !self.branch_active.get(ordinal).copied().unwrap_or(false) {
+                matrix_add(br, br, 1.0);
+                continue;
+            }
+
+            let pos = Self::index_to_node(
+                &source.pos,
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            );
+            let neg = Self::index_to_node(
+                &source.neg,
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            );
+
+            if let Some(p) = pos {
+                matrix_add(p, br, multiplicity);
+                if !source.indirect {
+                    matrix_add(br, p, 1.0);
+                }
+            }
+            if let Some(n) = neg {
+                matrix_add(n, br, -multiplicity);
+                if !source.indirect {
+                    matrix_add(br, n, -1.0);
+                }
+            }
+        }
+    }
+
     /// Checked stamping with an explicit named-limiter evaluation policy.
     pub fn try_stamp_with_mode<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        matrix_add: M,
+        rhs_add: R,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        #[cfg(feature = "native")]
+        if self.native_model.stamp_kernel_is_eligible() {
+            return self.try_stamp_native_kernel(circuit_voltages, matrix_add, rhs_add, mode);
+        }
+
+        self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
+    }
+
+    #[cfg(feature = "native")]
+    fn try_stamp_native_kernel<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        mut matrix_add: M,
+        mut rhs_add: R,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        self.try_update_all_voltages(circuit_voltages)?;
+        self.begin_evaluation(mode);
+
+        let model = &self.model;
+        let native = self.native_model.as_ref();
+        let stamp_count = model.stamp_programs.len();
+        let expected_jacobians = model
+            .stamp_programs
+            .iter()
+            .map(|program| program.jacobian_programs.len())
+            .sum::<usize>();
+        if self.native_program_active.len() != stamp_count
+            || self.native_stamp_jacobians.len() != expected_jacobians
+        {
+            return Err(VmError::NativeJit(format!(
+                "native fused-stamp buffers do not match compiled model shape ({}/{stamp_count} active flags, {}/{expected_jacobians} Jacobians); no interpreter fallback",
+                self.native_program_active.len(),
+                self.native_stamp_jacobians.len()
+            )));
+        }
+
+        {
+            let context = &mut self.context;
+            context.clear_currents();
+            context.currents.resize(stamp_count, 0.0);
+            if context.variables.len() < model.num_variables {
+                context.variables.resize(model.num_variables, 0.0);
+            }
+            Self::validate_native_storage(context, native)?;
+            Self::validate_native_current_pairs(
+                context,
+                native.num_terminals,
+                native.assignment_current_pairs(),
+            )?;
+            Self::validate_native_prior_currents(context, native.assignment_prior_currents())?;
+            Self::validate_native_branch_unknowns(context, native.assignment_branch_unknowns())?;
+
+            for (stamp_index, program) in model.stamp_programs.iter().enumerate() {
+                if self.native_program_active[stamp_index] == 0 {
+                    continue;
+                }
+                Self::validate_native_branch_unknowns(
+                    context,
+                    native
+                        .stamp_value_branch_unknowns(stamp_index)
+                        .ok_or_else(|| Self::missing_native_stamp_value_entry(stamp_index))?,
+                )?;
+                for entry_index in 0..program.jacobian_programs.len() {
+                    Self::validate_native_branch_unknowns(
+                        context,
+                        native
+                            .jacobian_branch_unknowns(stamp_index, entry_index)
+                            .ok_or_else(|| {
+                                Self::missing_native_jacobian_entry(stamp_index, entry_index)
+                            })?,
+                    )?;
+                }
+            }
+
+            self.native_stamp_jacobians.fill(0.0);
+            let ctx = Self::eval_context_from(context);
+            let io = NativeStampKernelIo {
+                program_active: self.native_program_active.as_ptr(),
+                jacobians: self.native_stamp_jacobians.as_mut_ptr(),
+            };
+            let vars = context.variables.as_mut_ptr();
+            clear_native_runtime_error();
+            if !native.run_stamp_kernel(&ctx, vars, &io) {
+                return Err(VmError::NativeJit(
+                    "native JIT image is missing its fused stamp entry; no interpreter fallback"
+                        .into(),
+                ));
+            }
+            if let Some(error) = take_native_runtime_error() {
+                return Err(VmError::NativeJit(error));
+            }
+        }
+
+        // Validate every native result before any solver callback observes it,
+        // then publish contribution currents for later simulator APIs.
+        let mut jacobian_base = 0usize;
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            if self.native_program_active[program_idx] != 0 {
+                let value = Self::finite_result(
+                    self.context.currents[program_idx],
+                    format!("contribution {program_idx}"),
+                )?;
+                self.context.currents[program_idx] = value;
+                if program.branch_ordinal.is_none()
+                    && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+                {
+                    self.context.set_branch_current(pos, neg, value);
+                }
+                for entry_idx in 0..program.jacobian_programs.len() {
+                    Self::finite_result(
+                        self.native_stamp_jacobians[jacobian_base + entry_idx],
+                        format!("Jacobian {program_idx}:{entry_idx}"),
+                    )?;
+                }
+            }
+            jacobian_base += program.jacobian_programs.len();
+        }
+
+        let m = self.context.multiplicity;
+        self.stamp_structural_branches(&mut matrix_add, m);
+
+        jacobian_base = 0;
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            if self.native_program_active[program_idx] == 0 {
+                jacobian_base += program.jacobian_programs.len();
+                continue;
+            }
+
+            let scale = if program.branch_ordinal.is_none() {
+                m
+            } else {
+                1.0
+            };
+            let value = self.context.currents[program_idx];
+            let mut eq_value =
+                Self::finite_result(value * scale, format!("scaled contribution {program_idx}"))?;
+
+            for jacobian_entry in &self.matrix_indices.jacobian[program_idx] {
+                let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
+                let deriv = Self::finite_result(
+                    self.native_stamp_jacobians[jacobian_base + jacobian_entry.jacobian_idx]
+                        * scale,
+                    format!("Jacobian {}:{}", program_idx, jacobian_entry.jacobian_idx),
+                )?;
+
+                match (program.branch_ordinal, program.indirect) {
+                    (None, _) | (Some(_), true) => {
+                        if model_entry.sign > 0.0 {
+                            let x_col = Self::axis_value(&self.context, &model_entry.col_axis);
+                            eq_value -= deriv * x_col;
+                        }
+                    }
+                    (Some(_), false) => {
+                        let x_col = Self::axis_value(&self.context, &model_entry.col_axis);
+                        eq_value += model_entry.sign * deriv * x_col;
+                    }
+                }
+
+                if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
+                    matrix_add(row, col, jacobian_entry.sign * deriv);
+                }
+            }
+
+            eq_value = Self::finite_result(
+                eq_value,
+                format!("equivalent source for contribution {program_idx}"),
+            )?;
+            for entry in &self.matrix_indices.rhs[program_idx] {
+                if let Some(row) = entry.node {
+                    rhs_add(row, entry.sign * eq_value);
+                }
+            }
+            jacobian_base += program.jacobian_programs.len();
+        }
+        Ok(())
+    }
+
+    fn try_stamp_scalar_with_mode<M, R>(
         &mut self,
         circuit_voltages: &[f64],
         mut matrix_add: M,
@@ -3377,6 +3636,7 @@ mod tests {
             .iter()
             .map(|stamp| stamp.reactive_jacobians.len())
             .collect::<Vec<_>>();
+        let native_jacobian_count = jacobian_entry_points.iter().sum();
 
         let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
         context.port_connected = vec![1; num_terminals];
@@ -3410,6 +3670,8 @@ mod tests {
                 jacobian_entry_points,
                 reactive_jacobian_entry_points,
             )),
+            native_program_active: vec![1; num_stamp_programs],
+            native_stamp_jacobians: vec![0.0; native_jacobian_count],
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
