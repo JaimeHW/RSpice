@@ -244,7 +244,11 @@ pub(super) fn rewrite_scoped_references(
             | ElementKind::XyceMemristor { model, .. }
             | ElementKind::VSwitch { model, .. }
             | ElementKind::ISwitch { model, .. }
-            | ElementKind::Xspice { model, .. } => Some(model),
+            | ElementKind::Xspice { model, .. }
+            | ElementKind::Coupling {
+                model: Some(model),
+                ..
+            } => Some(model),
             ElementKind::TransmissionLine { model, .. } => model.as_mut(),
             _ => None,
         };

@@ -708,6 +708,7 @@ fn parse_netlist_impl(
     normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
     resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
     validate_resistor_model_references_with_abort(&state, abort)?;
+    validate_coupling_model_references_with_abort(&state, abort)?;
 
     ensure_parse_not_aborted(abort)?;
     state.into_netlist(
@@ -3229,6 +3230,72 @@ fn validate_resistor_model_references_in_elements_with_abort(
             }
             .into());
         }
+    }
+    Ok(())
+}
+
+/// Validate optional nonlinear-core model names on K cards after every model
+/// definition has been collected.  Xyce parses a trailing identifier as a
+/// model only when it resolves to a declared model; otherwise the token is an
+/// unconsumed tail and the mutual-inductor card is malformed.  Delaying this
+/// check until the complete deck is available preserves legal forward model
+/// references while still rejecting ordinary trailing identifiers.
+fn validate_coupling_model_references_with_abort(
+    state: &ParseState,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    let models = state
+        .models
+        .iter()
+        .map(|model| model.name.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    validate_coupling_model_references_in_elements_with_abort(&state.elements, &models, abort)?;
+    for (index, subckt) in state.subcircuits.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        validate_coupling_model_references_in_subckt_with_abort(subckt, &models, abort)?;
+    }
+    ensure_parse_not_aborted(abort)
+}
+
+fn validate_coupling_model_references_in_subckt_with_abort(
+    subckt: &SubcircuitDef,
+    models: &HashSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    validate_coupling_model_references_in_elements_with_abort(&subckt.elements, models, abort)?;
+    for (index, nested) in subckt.nested_subcircuits.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        validate_coupling_model_references_in_subckt_with_abort(nested, models, abort)?;
+    }
+    Ok(())
+}
+
+fn validate_coupling_model_references_in_elements_with_abort(
+    elements: &[Element],
+    models: &HashSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    for (index, element) in elements.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        let ElementKind::Coupling {
+            model: Some(model),
+            ..
+        } = &element.kind
+        else {
+            continue;
+        };
+        if models.contains(&model.to_ascii_uppercase()) {
+            continue;
+        }
+        return Err(ParseError::Syntax {
+            line: 0,
+            message: format!(
+                "Coupling '{}' references unknown model '{}'",
+                element.name, model
+            ),
+        }
+        .into());
     }
     Ok(())
 }
