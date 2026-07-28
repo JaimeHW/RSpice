@@ -233,7 +233,7 @@ mod tests {
         shelf_drag_over_canvas: bool,
     ) -> (bool, bool) {
         let mut outcome = (false, false);
-        let _ = ctx.run(input, |ctx| {
+        let _ = ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let response =
                     ui.interact(ui.max_rect(), Id::new("placement-canvas"), Sense::click());
@@ -395,7 +395,7 @@ mod tests {
         state.schematic.tool = Tool::Place(ComponentType::Capacitor);
 
         let mut handled = false;
-        let _ = ctx.run(placement_key_input(Key::R, Modifiers::NONE), |ctx| {
+        let _ = ctx.run_ui(placement_key_input(Key::R, Modifiers::NONE), |ctx| {
             handled = handle_pre_render_placement_transform(ctx, &mut state, true);
         });
 

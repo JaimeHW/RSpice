@@ -84,7 +84,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             Workspace::Design | Workspace::Simulate
         );
     TopBottomPanel::top("workbench.context_toolbar")
-        .exact_height(layout.toolbar_height)
+        .exact_size(layout.toolbar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {

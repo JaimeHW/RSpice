@@ -227,10 +227,10 @@ mod tests {
             .tabbed_property_dialog
             .set_value("name", PropertyValue::String("R99".to_owned()));
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
 
@@ -251,16 +251,16 @@ mod tests {
             .tabbed_property_dialog
             .set_value("name", PropertyValue::String("R99".to_owned()));
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
         assert!(state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.discard_confirm);
 
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
         assert!(!state.tabbed_property_dialog.open);
@@ -293,10 +293,10 @@ mod tests {
             .set_value("name", PropertyValue::String("R99".to_owned()));
         state.tabbed_property_dialog.model_browser.open = true;
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
 
@@ -314,10 +314,10 @@ mod tests {
         open_property_editor(&mut state, 44);
         state.tabbed_property_dialog.active_tab = "Temperature".to_owned();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             dialog_input(vec![
                 // Move explicitly to the end. Ctrl+A is Select All on
                 // Windows/Linux but an Emacs-style line-start command on
@@ -342,7 +342,7 @@ mod tests {
                 .contains_key("tc1")
         );
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
         assert_eq!(
@@ -367,10 +367,10 @@ mod tests {
             Some("Multiplier must be at least 1".to_owned()),
         );
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
 
@@ -391,10 +391,10 @@ mod tests {
         state
             .tabbed_property_dialog
             .set_value("m", PropertyValue::number(2.0));
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
 

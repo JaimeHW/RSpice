@@ -1483,7 +1483,7 @@ mod tests {
         state.schematic.components.push(component);
         state.schematic.selection.select_only_component(17);
 
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

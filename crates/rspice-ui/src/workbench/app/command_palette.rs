@@ -2140,8 +2140,8 @@ mod tests {
         app.state.dialogs.command_palette.open();
         app.state.dialogs.command_palette.query = "opa189_a".to_owned();
 
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
-        let _ = ctx.run(raw_input(vec![key_event(Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+        let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
             app.render_command_palette(ctx);
         });
 
@@ -2251,7 +2251,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut app = test_app();
         app.state.dialogs.command_palette.open();
-        let output = ctx.run(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+        let output = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
         let nodes = output
             .platform_output
             .accesskit_update
@@ -2317,23 +2317,23 @@ mod tests {
                 egui::os::OperatingSystem::Windows,
             )
             .len();
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
 
-        let _ = ctx.run(raw_input(vec![key_event(Key::ArrowDown)]), |ctx| {
+        let _ = ctx.run_ui(raw_input(vec![key_event(Key::ArrowDown)]), |ctx| {
             app.render_command_palette(ctx);
         });
         assert_eq!(app.state.dialogs.command_palette.selected, 1);
 
         app.state.dialogs.command_palette.selected = 0;
-        let _ = ctx.run(raw_input(vec![key_event(Key::ArrowUp)]), |ctx| {
+        let _ = ctx.run_ui(raw_input(vec![key_event(Key::ArrowUp)]), |ctx| {
             app.render_command_palette(ctx);
         });
         assert_eq!(app.state.dialogs.command_palette.selected, row_count - 1);
 
         app.state.dialogs.command_palette.query = "Stop active run".to_owned();
         app.state.dialogs.command_palette.selected = 0;
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
-        let _ = ctx.run(raw_input(vec![key_event(Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+        let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
             app.render_command_palette(ctx);
         });
         assert!(app.state.dialogs.command_palette.open);
@@ -2341,8 +2341,8 @@ mod tests {
 
         app.state.dialogs.command_palette.query = "About RSpice".to_owned();
         app.state.dialogs.command_palette.selected = 0;
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
-        let _ = ctx.run(raw_input(vec![key_event(Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+        let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
             app.render_command_palette(ctx);
         });
         assert!(!app.state.dialogs.command_palette.open);
@@ -2360,10 +2360,10 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = test_app();
         app.state.dialogs.command_palette.open();
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
         assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id()));
 
-        let _ = ctx.run(raw_input(vec![key_event(Key::Tab)]), |ctx| {
+        let _ = ctx.run_ui(raw_input(vec![key_event(Key::Tab)]), |ctx| {
             app.render_command_palette(ctx);
         });
         let focused = ctx.memory(|memory| memory.focused()).expect("modal focus");
@@ -2382,7 +2382,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let underlying_id = Id::new("command-palette-test-underlying");
         let mut underlying = String::from("baseline");
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id))
                     .request_focus();
@@ -2392,7 +2392,7 @@ mod tests {
 
         let mut app = test_app();
         app.state.dialogs.command_palette.open();
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
             });
@@ -2401,7 +2401,7 @@ mod tests {
         assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id()));
 
         ctx.memory_mut(|memory| memory.request_focus(underlying_id));
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
             });
@@ -2409,7 +2409,7 @@ mod tests {
         });
         assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id()));
 
-        let _ = ctx.run(raw_input(vec![key_event(Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(raw_input(vec![key_event(Key::Escape)]), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
             });

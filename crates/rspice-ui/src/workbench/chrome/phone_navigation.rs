@@ -34,7 +34,7 @@ fn phone_badge_rect(item_rect: egui::Rect) -> egui::Rect {
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
     let shown = TopBottomPanel::bottom("workbench.phone_navigation")
-        .exact_height(layout.phone_navigation_height)
+        .exact_size(layout.phone_navigation_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
         .show(ctx, |ui| {

@@ -818,7 +818,7 @@ mod tests {
             .expect("numeric parameter");
         let ctx = egui::Context::default();
 
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 apply_param_edit(ui, &mut state, &row, 2.0, false);
             });
@@ -843,7 +843,7 @@ mod tests {
             .expect("numeric parameter");
         let ctx = egui::Context::default();
 
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 apply_param_edit(ui, &mut state, &row, 2.0, false);
             });

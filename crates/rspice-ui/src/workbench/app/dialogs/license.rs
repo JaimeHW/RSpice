@@ -232,7 +232,7 @@ fn summary_card(ui: &mut egui::Ui, info: &LicenseInfo) {
     let frame = egui::Frame::NONE
         .fill(c.bg_elevated)
         .stroke(egui::Stroke::new(1.0, c.border))
-        .rounding(t.radius)
+        .corner_radius(t.radius)
         .inner_margin(egui::Margin::symmetric(12, 10));
     frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -283,7 +283,7 @@ fn feature_chip(ui: &mut egui::Ui, label: &str) {
     egui::Frame::NONE
         .fill(c.bg_panel)
         .stroke(egui::Stroke::new(1.0, c.border_strong))
-        .rounding(t.radius)
+        .corner_radius(t.radius)
         .inner_margin(egui::Margin::symmetric(8, 3))
         .show(ui, |ui| {
             ui.label(

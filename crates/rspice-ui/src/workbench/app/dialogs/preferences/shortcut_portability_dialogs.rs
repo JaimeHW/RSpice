@@ -1794,7 +1794,7 @@ mod tests {
         state.open_export();
         let library = ShortcutProfileLibrary::default();
         let mut action = ShortcutPortabilityAction::None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1814,7 +1814,7 @@ mod tests {
                 );
             },
         );
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1860,7 +1860,7 @@ mod tests {
         let mut state = ShortcutPortabilityDialogsState::default();
         state.open_import();
         open_with_artifact(&mut state.import, &library, artifact);
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1925,7 +1925,7 @@ mod tests {
         let mut state = ShortcutPortabilityDialogsState::default();
         state.open_import();
         state.import.pending = ImportPending::Commit;
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1976,7 +1976,7 @@ mod tests {
             ..ShortcutImportDialogState::default()
         };
         let before = state.options.clone();
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2003,7 +2003,7 @@ mod tests {
         let mut state = ShortcutPortabilityDialogsState::default();
         state.open_export();
         state.export.pending = true;
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

@@ -840,7 +840,7 @@ mod tests {
         request_first: bool,
     ) -> ModalFocusFixtureIds {
         let mut rendered = None;
-        let _output = ctx.run(input, |ctx| {
+        let _output = ctx.run_ui(input, |ctx| {
             let background = egui::CentralPanel::default()
                 .show(ctx, |ui| ui.button("Background action"))
                 .inner;

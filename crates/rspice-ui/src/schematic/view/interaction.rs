@@ -2119,7 +2119,7 @@ mod tests {
     fn with_test_ui(mut body: impl FnMut(&egui::Ui)) {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| body(ui));
         });
     }
@@ -2583,7 +2583,7 @@ mod tests {
         let mut intent = None;
         let mut keys_remain = None;
 
-        let _ = ctx.run(move_keyboard_input(), |ctx| {
+        let _ = ctx.run_ui(move_keyboard_input(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // accessibility-pointer-shim: test-only canvas focus harness.
                 let response = ui.interact(
@@ -2612,7 +2612,7 @@ mod tests {
         let mut intent = None;
         let mut keys_remain = None;
 
-        let _ = ctx.run(move_keyboard_input(), |ctx| {
+        let _ = ctx.run_ui(move_keyboard_input(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // accessibility-pointer-shim: test-only canvas focus harness.
                 let response = ui.interact(
@@ -2932,7 +2932,7 @@ mod tests {
                     .collect(),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
+            let _ = ctx.run_ui(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     // accessibility-pointer-shim: test-only canvas event harness.
                     let response = ui.interact(
@@ -3306,7 +3306,7 @@ mod tests {
         let symbol_context = SchematicSymbolContext::default();
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         let viewport = pointer_viewport();
         let hit = super::super::net_labels::hit_bounds(&ctx, &viewport, &label)
             .expect("visible label")
@@ -3390,7 +3390,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             assert!(activate_requirement_link(&mut state, 33, ctx));
         });
         assert!(

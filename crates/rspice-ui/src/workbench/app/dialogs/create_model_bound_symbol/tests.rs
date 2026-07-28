@@ -21,7 +21,7 @@ fn render_accessibility_frame(
     ctx: &Context,
     size: egui::Vec2,
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
-    ctx.run(
+    ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..egui::RawInput::default()
@@ -340,7 +340,7 @@ fn accessibility_tree_exposes_the_mockup_dialog_and_complete_actions() {
         .dialogs
         .create_model_bound_symbol
         .pin_contract_reviewed = true;
-    let output = ctx.run(
+    let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 900.0))),
             ..egui::RawInput::default()

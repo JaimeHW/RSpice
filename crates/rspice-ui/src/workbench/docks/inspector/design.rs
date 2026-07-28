@@ -3213,7 +3213,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut height = 0.0;
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.set_width(312.0);
                 height = rejection_slot(ui, reason).height();
@@ -3239,7 +3239,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        ctx.run(Default::default(), |ctx| {
+        ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| add_contents(ui));
         })
         .platform_output

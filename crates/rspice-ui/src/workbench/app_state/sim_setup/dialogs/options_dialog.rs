@@ -259,7 +259,7 @@ fn options_preview(ui: &mut Ui, setup: &SimSetupState) {
     egui::Frame::NONE
         .fill(c.bg_inset)
         .stroke(egui::Stroke::new(1.0, c.border))
-        .rounding(t.radius)
+        .corner_radius(t.radius)
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

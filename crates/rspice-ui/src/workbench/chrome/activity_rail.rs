@@ -58,7 +58,7 @@ pub(super) fn paint_numeric_badge(
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     let t = Tokens::get(ctx);
     let shown = SidePanel::left("workbench.activity_rail")
-        .exact_width(ACTIVITY_RAIL_W)
+        .exact_size(ACTIVITY_RAIL_W)
         .resizable(false)
         .frame(Frame::new().fill(t.color.bg_app))
         .show_separator_line(true)

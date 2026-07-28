@@ -833,10 +833,10 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.dialogs.bus_tap.open();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
 
@@ -860,10 +860,10 @@ mod tests {
         app.state.schematic.read_only = true;
         app.state.dialogs.bus_tap.open();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
 
@@ -880,16 +880,16 @@ mod tests {
         app.state.dialogs.bus_tap.open();
         app.state.dialogs.bus_tap.mark_edited();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
         assert!(app.state.dialogs.bus_tap.open);
         assert!(app.state.dialogs.bus_tap.discard_confirm);
 
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_bus_tap_dialog(ctx)
         });
         assert!(!app.state.dialogs.bus_tap.open);

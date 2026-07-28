@@ -2172,10 +2172,10 @@ mod tests {
         draft.declaration = "ADDR<0:15>".to_owned();
         app.state.dialogs.object_properties.mark_edited();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_object_properties_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_object_properties_dialog(ctx)
         });
 
@@ -2204,16 +2204,16 @@ mod tests {
         draft.declaration = "ADDR[7:0]".to_owned();
         app.state.dialogs.object_properties.mark_edited();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_object_properties_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_object_properties_dialog(ctx)
         });
         assert!(app.state.dialogs.object_properties.open);
         assert!(app.state.dialogs.object_properties.discard_confirm);
 
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_object_properties_dialog(ctx)
         });
         assert!(!app.state.dialogs.object_properties.open);
@@ -2229,7 +2229,7 @@ mod tests {
         app.state.schematic.buses.push(bus.clone());
         open_bus_dialog(&mut app, &bus);
 
-        let output = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_object_properties_dialog(ctx)
         });
         let nodes = output

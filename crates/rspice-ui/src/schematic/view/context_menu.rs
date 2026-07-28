@@ -1720,7 +1720,7 @@ mod tests {
             state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
             let symbol_context = SchematicSymbolContext::from_state(&state);
 
-            let _ = ctx.run(Default::default(), |ctx| {
+            let _ = ctx.run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     render_context_contents(
                         ui,
@@ -1733,7 +1733,7 @@ mod tests {
             });
 
             let mut key_still_available = true;
-            let _ = ctx.run(context_key_input(key), |ctx| {
+            let _ = ctx.run_ui(context_key_input(key), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     render_context_contents(
                         ui,
@@ -1898,7 +1898,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let symbol_context = SchematicSymbolContext::from_state(&state);
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 execute_context_action(
                     ContextAction::Properties,
@@ -1944,7 +1944,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let symbol_context = SchematicSymbolContext::from_state(&state);
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 execute_context_action(
                     ContextAction::Properties,
@@ -1991,7 +1991,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let symbol_context = SchematicSymbolContext::from_state(&state);
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 execute_context_action(
                     ContextAction::Properties,

@@ -889,10 +889,10 @@ mod tests {
         let (mut app, id) = component_app();
         assert!(open_selected_object_rename(&mut app.state));
         app.state.dialogs.rename_selection.draft = "R_ENTER".to_owned();
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
         assert!(!app.state.dialogs.rename_selection.open);
@@ -902,10 +902,10 @@ mod tests {
         app.state.schematic.selection.select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         app.state.dialogs.rename_selection.draft = "R_ESCAPE".to_owned();
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
         assert!(!app.state.dialogs.rename_selection.open);

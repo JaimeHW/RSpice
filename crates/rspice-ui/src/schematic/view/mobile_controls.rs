@@ -307,7 +307,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,

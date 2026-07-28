@@ -2133,7 +2133,7 @@ mod tests {
         app.state.schematic.components = vec![component(1, "X1", Some("tt"))];
         open_selection_bulk_edit_dialog(&mut app.state);
 
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

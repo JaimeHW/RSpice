@@ -5083,7 +5083,7 @@ mod tests {
             let mut app = RSpiceApp::test_instance();
             app.state.workbench.analysis_lifecycle_status = detail.to_owned();
             let mut height = 0.0;
-            let _ = ctx.run(
+            let _ = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 240.0))),
                     ..egui::RawInput::default()
@@ -5882,7 +5882,7 @@ mod tests {
         ] {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
-            let output = ctx.run(
+            let output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 320.0))),
                     ..Default::default()
@@ -5916,7 +5916,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut query = "noise".to_owned();
         let mut geometry = None;
-        let _output = ctx.run(
+        let _output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 720.0))),
                 ..Default::default()

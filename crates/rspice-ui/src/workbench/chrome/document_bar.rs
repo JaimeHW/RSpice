@@ -31,7 +31,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 
     let t = Tokens::get(ctx);
     TopBottomPanel::top("workbench.document_bar")
-        .exact_height(layout.document_bar_height)
+        .exact_size(layout.document_bar_height)
         .frame(Frame::new().fill(t.color.bg_app))
         .show_separator_line(false)
         .show(ctx, |ui| {
@@ -1106,7 +1106,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut fitted = String::new();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let font = theme::sans(tokens::FS_1, FontWeight::Regular);
                 fitted = ellipsize_document_label(

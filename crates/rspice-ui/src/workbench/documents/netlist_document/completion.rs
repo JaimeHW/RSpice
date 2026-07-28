@@ -349,7 +349,7 @@ fn draw_popover(
             egui::Frame::NONE
                 .fill(c.bg_elevated)
                 .stroke(egui::Stroke::new(1.0, c.border_strong))
-                .rounding(3.0)
+                .corner_radius(3.0)
                 .shadow(egui::epaint::Shadow {
                     offset: [0, 6],
                     blur: 24,

@@ -1242,7 +1242,7 @@ mod tests {
             ..Default::default()
         };
         let mut category = PreferenceCategory::Appearance;
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |_, _| {});
         });
         let update = output
@@ -1280,7 +1280,7 @@ mod tests {
             });
         }
         let mut value = false;
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -1367,7 +1367,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0))),
                 ..Default::default()
@@ -1473,7 +1473,7 @@ mod tests {
         };
         let mut selected = 0;
 
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let _ = segmented(
                     ui,
@@ -1513,7 +1513,7 @@ mod tests {
             ..Default::default()
         };
         let mut category = PreferenceCategory::Appearance;
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |ui, _| {
                 setting_row(ui, "First fidelity row", "", |_| {});
                 setting_row(ui, "Second fidelity row", "", |_| {});
@@ -1547,7 +1547,7 @@ mod tests {
             ..Default::default()
         };
         let mut category = PreferenceCategory::Appearance;
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |ui, _| {
                 setting_row(
                     ui,
@@ -1591,7 +1591,7 @@ mod tests {
         };
         let mut category = PreferenceCategory::Appearance;
 
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |ui, _| {
                 page_heading(ui, "Appearance", "Appearance preferences");
                 section_label(ui, "Visual system");
@@ -1658,7 +1658,7 @@ mod tests {
             ..Default::default()
         };
         let mut category = PreferenceCategory::Appearance;
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |ui, _| {
                 page_heading(ui, "Appearance", "Appearance preferences");
             });

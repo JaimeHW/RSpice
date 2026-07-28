@@ -2607,7 +2607,7 @@ mod tests {
         let mut focus_pending = false;
 
         let nodes = ctx
-            .run(Default::default(), |ctx| {
+            .run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.set_width(260.0);
                     header(ui, &mut app);

@@ -1050,7 +1050,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        let output = ctx.run(Default::default(), |ctx| {
+        let output = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let mut cache = DecimationCache::default();
                 show(ui, &spec, &mut cache, None, None);

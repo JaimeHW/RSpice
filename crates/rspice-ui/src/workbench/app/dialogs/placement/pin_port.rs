@@ -698,10 +698,10 @@ mod tests {
         open_dialog(&mut app);
         let topology = app.state.schematic.topology_version();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_pin_port_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_pin_port_dialog(ctx)
         });
 
@@ -742,10 +742,10 @@ mod tests {
                 app.state.schematic.read_only = true;
             }
 
-            let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
                 app.render_pin_port_dialog(ctx)
             });
-            let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+            let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 app.render_pin_port_dialog(ctx)
             });
 
@@ -764,16 +764,16 @@ mod tests {
         open_dialog(&mut app);
         app.state.dialogs.pin_port.mark_edited();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_pin_port_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_pin_port_dialog(ctx)
         });
         assert!(app.state.dialogs.pin_port.open);
         assert!(app.state.dialogs.pin_port.discard_confirm);
 
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_pin_port_dialog(ctx)
         });
         assert!(!app.state.dialogs.pin_port.open);

@@ -237,7 +237,7 @@ mod tests {
     fn initialized_context() -> Context {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         ctx
     }
 

@@ -216,7 +216,7 @@ impl Theme {
         let mut effective = self;
         effective.mode = self.mode.effective(ctx);
         let t = effective.tokens();
-        ctx.set_style(build_style(&t));
+        ctx.set_global_style(build_style(&t));
         t.install(ctx);
     }
 
@@ -242,7 +242,7 @@ impl Theme {
                 bar_pad: 9.0 + (touch_target - 44.0) * 0.5,
             };
         }
-        ctx.set_style(build_style(&t));
+        ctx.set_global_style(build_style(&t));
         t.install(ctx);
     }
 }
@@ -504,13 +504,13 @@ mod tests {
         theme.apply_responsive_metrics_with_target(&ctx, Some(44.0));
         assert_eq!(Tokens::get(&ctx).metrics.ctl_h, 44.0);
         assert_eq!(Tokens::get(&ctx).metrics.row_h, 44.0);
-        assert_eq!(ctx.style().spacing.interact_size.y, 44.0);
-        assert_eq!(ctx.style().spacing.interact_size.x, 44.0);
+        assert_eq!(ctx.global_style().spacing.interact_size.y, 44.0);
+        assert_eq!(ctx.global_style().spacing.interact_size.x, 44.0);
 
         theme.apply_responsive_metrics_with_target(&ctx, None);
         assert_eq!(Tokens::get(&ctx).metrics.ctl_h, 32.0);
         assert_eq!(Tokens::get(&ctx).metrics.row_h, 33.0);
-        assert_eq!(ctx.style().spacing.interact_size.y, 32.0);
+        assert_eq!(ctx.global_style().spacing.interact_size.y, 32.0);
     }
 
     #[test]

@@ -1874,7 +1874,7 @@ mod tests {
         app.state.workbench.activate(Workspace::Design);
 
         let nodes = ctx
-            .run(Default::default(), |ctx| {
+            .run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.set_width(312.0);
                     header(ui, &mut app);
@@ -2041,7 +2041,7 @@ mod tests {
         };
         let mut row_height = 0.0;
 
-        let _ = ctx.run(input, |ctx| {
+        let _ = ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::new())
                 .show(ctx, |ui| {

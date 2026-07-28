@@ -174,7 +174,7 @@ mod tests {
     fn results_secondary_pane_is_an_accessible_named_region() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

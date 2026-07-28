@@ -462,10 +462,10 @@ mod tests {
         open_at(&mut app, Point::new(30, 50));
         app.state.dialogs.net_label_placement.name = "afe_out".to_owned();
 
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_net_label_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_net_label_dialog(ctx)
         });
         assert!(!app.state.dialogs.net_label_placement.open);
@@ -475,15 +475,15 @@ mod tests {
         open_at(&mut app, Point::new(60, 50));
         app.state.dialogs.net_label_placement.name = "discard_me".to_owned();
         app.state.dialogs.net_label_placement.mark_edited();
-        let _ = ctx.run(dialog_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_net_label_dialog(ctx)
         });
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_net_label_dialog(ctx)
         });
         assert!(app.state.dialogs.net_label_placement.open);
         assert!(app.state.dialogs.net_label_placement.discard_confirm);
-        let _ = ctx.run(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_net_label_dialog(ctx)
         });
         assert!(!app.state.dialogs.net_label_placement.open);

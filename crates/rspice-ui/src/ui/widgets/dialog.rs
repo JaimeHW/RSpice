@@ -751,7 +751,7 @@ impl<'a> Dialog<'a> {
                     c.bg_elevated
                 })
                 .stroke(Stroke::new(1.0, c.border_strong))
-                .rounding(layout.radius)
+                .corner_radius(layout.radius)
                 // Every currently implemented mockup dialog inherits
                 // `--shadow`. The stronger `--shadow-dialog` elevation is
                 // reserved for DRC workflows, which are not represented by
@@ -1579,7 +1579,7 @@ mod tests {
     }
 
     fn focus_underlying_editor(ctx: &Context, underlying: &mut String) {
-        let _output = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.add(
                     egui::TextEdit::singleline(underlying)
@@ -1599,7 +1599,7 @@ mod tests {
         mut body: impl FnMut(&mut Ui),
     ) -> (DialogChoice, egui::FullOutput) {
         let mut choice = DialogChoice::None;
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let _ = ui.add(
                     egui::TextEdit::singleline(underlying)
@@ -1884,7 +1884,7 @@ mod tests {
         focus_underlying_editor(&ctx, &mut underlying);
 
         let mut choice = DialogChoice::None;
-        let _ = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let _ = ui.add(
                     egui::TextEdit::singleline(&mut underlying)
@@ -1901,7 +1901,7 @@ mod tests {
                 });
         });
 
-        let output = ctx.run(
+        let output = ctx.run_ui(
             raw_input(vec![key_event(Key::Escape, Modifiers::NONE)]),
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
@@ -1937,7 +1937,7 @@ mod tests {
         assert_eq!(focused_node.role(), egui::accesskit::Role::Button);
         assert_eq!(focused_node.label(), Some("Discard changes"));
 
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             raw_input(vec![key_event(Key::Escape, Modifiers::NONE)]),
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
@@ -1999,7 +1999,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        let output = ctx.run(raw_input(Vec::new()), |ctx| {
+        let output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             let _ = Dialog::new("Test", TEST_TITLE, "Accept")
                 .transaction_state(
                     DialogTransactionTone::Error,
@@ -2040,7 +2040,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             let _ = Dialog::new(
                 "A deliberately long governed workflow",
                 TEST_TITLE,
@@ -2098,7 +2098,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
                 .size(DialogSize::CapabilityReview)
                 .show(ctx, |ui| {
@@ -2152,7 +2152,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut preferred_id = None;
 
-        let _output = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
                 .initial_focus(DialogInitialFocus::BodyControl)
                 .show_with_initial_body_focus(ctx, |ui| {
@@ -2170,7 +2170,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
 
-        let _output = ctx.run(raw_input(Vec::new()), |ctx| {
+        let _output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
                 .primary_enabled(false)
                 .initial_focus(DialogInitialFocus::Primary)

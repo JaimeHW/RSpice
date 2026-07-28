@@ -73,7 +73,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let menu_projection = MenuProjection::for_layout(viewport_width, layout.compact_shell);
     let large_targets = viewport_width <= 820.0 || layout.coarse_pointer;
     TopBottomPanel::top("workbench.title_bar")
-        .exact_height(layout.title_bar_height)
+        .exact_size(layout.title_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {
@@ -2162,7 +2162,7 @@ mod tests {
             events,
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
+        let _ = ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 menus(ui, app, MenuProjection::All, false, 35.0);
             });
@@ -2183,7 +2183,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = title_test_app();
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2219,7 +2219,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = title_test_app();
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2400,7 +2400,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = title_test_app();
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -2438,7 +2438,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut width = 0.0;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 width = search_keycap_width(ui, "Ctrl K");
                 let text_width = ui
@@ -2752,7 +2752,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut fitted = String::new();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let font = theme::sans(tokens::FS_0, FontWeight::Regular);
                 fitted = ellipsize_to_width(

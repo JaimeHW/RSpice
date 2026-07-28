@@ -3664,7 +3664,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut action_rect = None;
         let mut body_rect = None;
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -3727,7 +3727,7 @@ mod tests {
                 app.state.library_manager.clear();
                 app.state.model_library_manager.clear();
 
-                let output = ctx.run(
+                let output = ctx.run_ui(
                     egui::RawInput {
                         screen_rect: Some(Rect::from_min_size(
                             egui::Pos2::ZERO,
@@ -3787,7 +3787,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut consumed = None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -3829,7 +3829,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut consumed = None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -3987,7 +3987,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut heights = None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,

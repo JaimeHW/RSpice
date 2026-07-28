@@ -1883,7 +1883,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut state = AppState::default();
         let mut actions = PreferencePageActions::default();
-        let first = ctx.run(input(1_100.0, 900.0), |ctx| {
+        let first = ctx.run_ui(input(1_100.0, 900.0), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_page(ui, &mut state, &mut actions);
             });
@@ -1909,7 +1909,7 @@ mod tests {
                     modifiers: Modifiers::NONE,
                 },
             ];
-            let _ = ctx.run(
+            let _ = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: input(1_100.0, 900.0).screen_rect,
                     events,
@@ -2091,7 +2091,7 @@ mod tests {
             repeat: false,
             modifiers,
         };
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 events: vec![
                     key_event(Key::K, ctrl),
@@ -2231,7 +2231,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut state = AppState::default();
         let mut actions = PreferencePageActions::default();
-        let output = ctx.run(input(1_100.0, 900.0), |ctx| {
+        let output = ctx.run_ui(input(1_100.0, 900.0), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_page(ui, &mut state, &mut actions);
             });
@@ -2357,7 +2357,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut state = AppState::default();
         let mut actions = PreferencePageActions::default();
-        let output = ctx.run(input(390.0, 844.0), |ctx| {
+        let output = ctx.run_ui(input(390.0, 844.0), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_page(ui, &mut state, &mut actions);
             });
@@ -2408,7 +2408,7 @@ mod tests {
         let mut state = AppState::default();
         let profile = state.ui.preferences.shortcuts().clone();
         state.dialogs.shortcut_editor.open(&profile);
-        let output = ctx.run(input(390.0, 844.0), |ctx| render_editor(ctx, &mut state));
+        let output = ctx.run_ui(input(390.0, 844.0), |ctx| render_editor(ctx, &mut state));
         let nodes = output
             .platform_output
             .accesskit_update
@@ -2484,7 +2484,7 @@ mod tests {
         state.dialogs.shortcut_editor.dirty = true;
         state.dialogs.shortcut_editor.persistence_pending = true;
         let before = state.dialogs.shortcut_editor.clone();
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: input(1_100.0, 900.0).screen_rect,
                 events: vec![egui::Event::Key {

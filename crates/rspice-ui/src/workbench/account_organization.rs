@@ -788,7 +788,7 @@ mod tests {
             SurfaceId::AccountOrganization
         );
 
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

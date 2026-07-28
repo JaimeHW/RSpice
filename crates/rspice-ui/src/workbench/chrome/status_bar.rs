@@ -20,7 +20,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
     let visibility = status_visibility(ctx.content_rect().width());
     let shown = TopBottomPanel::bottom("workbench.status_bar")
-        .exact_height(layout.status_bar_height)
+        .exact_size(layout.status_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
         .show(ctx, |ui| {

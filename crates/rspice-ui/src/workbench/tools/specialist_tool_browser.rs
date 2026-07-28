@@ -1095,7 +1095,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut height = 0.0;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 240.0))),
                 ..Default::default()
@@ -1258,7 +1258,7 @@ mod tests {
         let mut rendered_width = 0.0;
         let card = Rect::from_min_size(egui::Pos2::ZERO, vec2(280.0, TOUCH_CARD_HEIGHT));
         let layout = tool_card_layout(card, TOUCH_ACTION_SIDE, 180.0);
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ctx, |ui| {
@@ -1284,7 +1284,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut rect = Rect::NOTHING;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 240.0))),
                 ..Default::default()

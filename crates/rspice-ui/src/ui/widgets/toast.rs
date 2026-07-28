@@ -405,7 +405,7 @@ impl Toasts {
         if soonest_expiry.is_finite() {
             ctx.request_repaint_after(Duration::from_secs_f64(soonest_expiry));
         }
-        let animate_entry = ctx.style().animation_time > 0.0;
+        let animate_entry = ctx.global_style().animation_time > 0.0;
         if animate_entry
             && self
                 .queue

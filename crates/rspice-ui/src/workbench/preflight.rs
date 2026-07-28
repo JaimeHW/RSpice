@@ -1316,7 +1316,7 @@ mod tests {
         let report = blocker_report(
             "Generated input revision differs from the validated dependency closure and must wrap safely.",
         );
-        let output = ctx.run(input, |ctx| {
+        let output = ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default()
                 .frame(Frame::new())
                 .show(ctx, |ui| {
@@ -1388,7 +1388,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 160.0))),
                 ..Default::default()

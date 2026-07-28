@@ -683,7 +683,7 @@ mod tests {
         let ctx = Context::default();
         let mut app = test_app();
         app.state.dialogs.preferences_open = true;
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             app.render_preferences_dialog(ctx)
         });
         assert!(output.platform_output.accesskit_update.is_none());
@@ -707,7 +707,7 @@ mod tests {
             .workspace_layout_manager
             .open(crate::workbench::WorkspacePreset::Engineering);
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             app.render_preferences_dialog(ctx)
         });
 
@@ -732,7 +732,7 @@ mod tests {
         for category in PreferenceCategory::ALL {
             let mut state = AppState::default();
             let mut actions = PreferencePageActions::default();
-            let output = ctx.run(
+            let output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -899,7 +899,7 @@ mod tests {
             ctx.enable_accesskit();
             let mut app = test_app();
             app.execute_preference_page_actions(&ctx, actions);
-            let output = ctx.run(
+            let output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,

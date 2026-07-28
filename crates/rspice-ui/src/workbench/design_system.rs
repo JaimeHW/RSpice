@@ -1621,7 +1621,7 @@ mod tests {
     #[test]
     fn semantic_status_marks_are_font_independent_vector_geometry() {
         let ctx = egui::Context::default();
-        let output = ctx.run(Default::default(), |ctx| {
+        let output = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 for mark in [
                     StatusMark::Success,
@@ -1717,7 +1717,7 @@ mod tests {
         ];
 
         let nodes = ctx
-            .run(Default::default(), |ctx| {
+            .run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.set_width(160.0);
                     section_header(
@@ -1781,7 +1781,7 @@ mod tests {
         let mut first = egui::Rect::NOTHING;
         let mut second = egui::Rect::NOTHING;
 
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     card(ui, "Status", |ui| {

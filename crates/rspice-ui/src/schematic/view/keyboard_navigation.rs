@@ -661,7 +661,7 @@ mod tests {
         focus_canvas: bool,
     ) -> (bool, bool) {
         let mut outcome = (false, false);
-        let _ = ctx.run(key_input(key, modifiers), |ctx| {
+        let _ = ctx.run_ui(key_input(key, modifiers), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // accessibility-pointer-shim: test-only canvas focus harness.
                 let response = ui.interact(
