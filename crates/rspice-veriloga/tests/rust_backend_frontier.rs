@@ -494,6 +494,11 @@ struct BackendSelectionCounts {
     structured: usize,
     hybrid: usize,
     legacy_device: usize,
+    /// Never chosen by `Auto`, which is what this file measures — the canonical
+    /// backend is selected explicitly until the corpus has been regenerated
+    /// through it. Counted rather than ignored so the day that changes shows up
+    /// here as a number instead of as a silent reclassification.
+    canonical: usize,
 }
 
 impl BackendSelectionCounts {
@@ -504,6 +509,7 @@ impl BackendSelectionCounts {
             RustBackendSelection::StructuredKernel => self.structured += 1,
             RustBackendSelection::ScalarHybrid => self.hybrid += 1,
             RustBackendSelection::LegacyDevice => self.legacy_device += 1,
+            RustBackendSelection::CanonicalCfg => self.canonical += 1,
         }
     }
 }

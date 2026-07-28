@@ -1538,6 +1538,7 @@ mod tests {
             structured: 0,
             hybrid: 0,
             legacy_device: 1,
+            canonical: 0,
         };
         let reasons = vec![BuiltinBackendFallbackReason {
             source: PathBuf::from("cmc/model.va"),
@@ -1568,6 +1569,7 @@ mod tests {
             structured: 1,
             hybrid: 1,
             legacy_device: 0,
+            canonical: 0,
         };
         let reasons = vec![BuiltinBackendFallbackReason {
             source: PathBuf::from("cmc/hisim.va"),
