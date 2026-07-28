@@ -409,11 +409,21 @@ class CiConfigurationTests(unittest.TestCase):
         """
         ceiling = 900
 
-        # path -> current line count. Every entry is debt; the list must reach
-        # empty. Shrink an entry when a split lands; never raise one.
+        # path -> current line count. Shrink an entry when a split lands; never
+        # raise one.
+        #
+        # engine/mod.rs is the one structural exception rather than debt. PyO3
+        # permits a single `#[pymethods]` block per type unless the
+        # `multiple-pymethods` feature is enabled, which pulls in `inventory`
+        # for a dependency this project does not want. That block is the whole
+        # public Engine surface, and most of its bulk is the Python-facing
+        # docstrings, which belong beside the signatures they document.
+        # Everything that can leave has: the validators, the RF configuration
+        # builders, the value types, the private helper impl, and the directive
+        # runner all live in sibling modules.
         allowlist = {
             "crates/rspice-python/src/config.rs": 1338,
-            "crates/rspice-python/src/engine.rs": 4231,
+            "crates/rspice-python/src/engine/mod.rs": 1940,
             "crates/rspice-python/src/errors.rs": 1019,
             "crates/rspice-python/src/netlist.rs": 1141,
         }
