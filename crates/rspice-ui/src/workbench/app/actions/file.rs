@@ -286,7 +286,7 @@ impl RSpiceApp {
     /// Open an entry from the recent-files list, prompting to save first when
     /// the current document has unsaved changes.
     pub(crate) fn open_recent_file(&mut self, recent: crate::workbench::app::RecentFile) {
-        if crate::workbench::project_lifecycle::has_unsaved_changes(&self.state) {
+        if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state) {
             self.state
                 .dialogs
                 .confirmation_dialog
@@ -496,7 +496,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn project_save_never_falls_through_to_legacy_schematic_io_in_any_workspace() {
-        use crate::workbench::project_lifecycle::{DestinationAuthority, SaveScope};
+        use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
         use crate::workbench::state::Workspace;
 
         for workspace in [
@@ -512,7 +512,7 @@ mod tests {
             let schematic_path = unique_temp_path("rspice-legacy-save-routing", "rsch");
             let saved_paths = Rc::new(RefCell::new(Vec::new()));
             let mut state = crate::workbench::app::AppState::default();
-            crate::workbench::project_lifecycle::save_native(
+            crate::workbench::lifecycle::project_lifecycle::save_native(
                 &mut state,
                 SaveScope::AllDocuments,
                 &project_path,
@@ -628,7 +628,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn recent_kind_is_preserved_and_selects_project_or_schematic_save_scope() {
-        use crate::workbench::project_lifecycle::{DestinationAuthority, SaveScope};
+        use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
 
         let source = unique_temp_path("rspice-recent-source", "rspiceproj");
         let target_project = unique_temp_path("rspice-recent-target", "rspiceproj");
@@ -640,7 +640,7 @@ mod tests {
             .project
             .rename("Recent target project")
             .expect("valid target name");
-        crate::workbench::project_lifecycle::save_native(
+        crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut target_state,
             SaveScope::AllDocuments,
             &target_project,
@@ -652,7 +652,7 @@ mod tests {
         project_source
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
-        crate::workbench::project_lifecycle::save_native(
+        crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut project_source,
             SaveScope::AllDocuments,
             &source,
@@ -726,7 +726,7 @@ mod tests {
         schematic_source
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
-        crate::workbench::project_lifecycle::save_native(
+        crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut schematic_source,
             SaveScope::AllDocuments,
             &source,
@@ -806,11 +806,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn close_project_review_counts_documents_and_active_run_blocks_discard() {
-        use crate::workbench::project_lifecycle::{DestinationAuthority, SaveScope};
+        use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
 
         let path = unique_temp_path("rspice-close-review", "rspiceproj");
         let mut state = crate::workbench::app::AppState::default();
-        crate::workbench::project_lifecycle::save_native(
+        crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut state,
             SaveScope::AllDocuments,
             &path,
@@ -818,7 +818,7 @@ mod tests {
         )
         .expect("seed canonical project");
         assert_eq!(
-            crate::workbench::project_lifecycle::dirty_document_count(&state),
+            crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             0
         );
         assert!(crate::workbench::project_workflow::request_close_project(
@@ -835,7 +835,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::new(2, 4));
         insert_ac_analysis(&mut state);
         assert_eq!(
-            crate::workbench::project_lifecycle::dirty_document_count(&state),
+            crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             2
         );
         assert!(crate::workbench::project_workflow::request_close_project(
@@ -863,7 +863,7 @@ mod tests {
         assert!(state.dialogs.project_review_dialog.request.is_none());
         assert!(state.project_lifecycle.project_open);
         assert_eq!(
-            crate::workbench::project_lifecycle::dirty_document_count(&state),
+            crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             2
         );
         remove_project_artifacts(&path);
@@ -872,12 +872,12 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn save_all_and_close_publishes_every_dirty_document_before_closing() {
-        use crate::workbench::project_lifecycle::{DestinationAuthority, SaveScope};
+        use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
 
         let path = unique_temp_path("rspice-save-all-close", "rspiceproj");
         let saved_paths = Rc::new(RefCell::new(Vec::new()));
         let mut state = crate::workbench::app::AppState::default();
-        crate::workbench::project_lifecycle::save_native(
+        crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut state,
             SaveScope::AllDocuments,
             &path,
@@ -932,11 +932,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn external_change_prevents_save_and_close_and_retains_review_and_work() {
-        use crate::workbench::project_lifecycle::{DestinationAuthority, SaveScope};
+        use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
 
         let path = unique_temp_path("rspice-close-external-change", "rspiceproj");
         let mut state = crate::workbench::app::AppState::default();
-        crate::workbench::project_lifecycle::save_native(
+        crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut state,
             SaveScope::AllDocuments,
             &path,
@@ -965,7 +965,7 @@ mod tests {
             app.state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
         ));
-        assert!(crate::workbench::project_lifecycle::has_unsaved_changes(
+        assert!(crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
             &app.state
         ));
         remove_project_artifacts(&path);

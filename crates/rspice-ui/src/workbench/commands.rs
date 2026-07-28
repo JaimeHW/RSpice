@@ -895,7 +895,7 @@ impl Command {
 
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
-        if crate::workbench::project_lifecycle::operation_in_progress(state)
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state)
             && self.blocked_by_project_operation()
         {
             return false;
@@ -915,15 +915,15 @@ impl Command {
             Self::SaveAs => state.project_lifecycle.project_open,
             Self::SaveAll => {
                 state.project_lifecycle.project_open
-                    && crate::workbench::project_lifecycle::has_unsaved_changes(state)
+                    && crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
             }
             Self::RevertActiveDocument => {
                 state.project_lifecycle.accepted().is_some()
-                    && crate::workbench::project_lifecycle::active_document_is_dirty(state)
+                    && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(state)
                     && !state.simulation.is_running
             }
             Self::CloseActiveDocument => {
-                crate::workbench::project_lifecycle::can_close_active_document(state)
+                crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
             Self::CloseProject => state.project_lifecycle.project_open,
             Self::PageSetup | Self::ExportActiveView => {
@@ -1342,7 +1342,7 @@ impl Command {
     }
 
     pub fn execute(self, app: &mut RSpiceApp) {
-        if crate::workbench::project_lifecycle::operation_in_progress(&app.state)
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
             app.state

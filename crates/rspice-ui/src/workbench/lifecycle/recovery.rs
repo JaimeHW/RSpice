@@ -26,10 +26,10 @@ use crate::state::{
 use crate::workbench::app::{AppState, RSpiceApp, RecentKind};
 use crate::workbench::file_workflow::FileWorkflowIo;
 
-use super::state::{LocalSafeModeOptions, Workspace};
+use crate::workbench::state::{LocalSafeModeOptions, Workspace};
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::recovery_checkpoint::{
+use crate::workbench::lifecycle::recovery_checkpoint::{
     CheckpointBinding, CheckpointInspection, CheckpointOwnership, SourceSnapshotRelation,
     discard_bound_checkpoint, inspect_checkpoint, read_bound_checkpoint, read_source_snapshot,
 };
@@ -226,7 +226,7 @@ fn discover_candidates(
     let mut candidates = sources
         .into_iter()
         .flat_map(|original| {
-            crate::workbench::recovery_checkpoint::checkpoint_paths_for_source(&original)
+            crate::workbench::lifecycle::recovery_checkpoint::checkpoint_paths_for_source(&original)
                 .into_iter()
                 .filter_map(move |checkpoint| discover_candidate(original.clone(), checkpoint, io))
         })
@@ -854,7 +854,7 @@ pub(crate) fn start_local_safe_mode(
     if options.isolate_prior_documents && app.state.project_lifecycle.project_open {
         app.state
             .workbench
-            .begin_project_close(super::state::ProjectCloseDestination::EmptyWorkbench);
+            .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
         if !crate::workbench::project_workflow::close_project_discard(&mut app.state) {
             return Err("The current project could not be isolated safely".to_owned());
         }

@@ -27,6 +27,7 @@
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/module_layering.rs`, not by this file.
+pub(crate) mod lifecycle;
 pub(crate) mod documents;
 pub(crate) mod account_organization;
 pub(crate) mod app;
@@ -58,14 +59,8 @@ pub(crate) mod panels;
 pub(crate) mod platform;
 mod preferences;
 mod preflight;
-pub(crate) mod project_checkpoint;
 mod project_launcher;
-pub(crate) mod project_lifecycle;
 pub(crate) mod project_workflow;
-mod recovery;
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod recovery_checkpoint;
-mod session;
 pub(crate) mod shortcut_artifacts;
 pub(crate) mod shortcut_library_persistence;
 pub(crate) mod shortcut_profile_workflow;
@@ -76,7 +71,6 @@ pub(crate) mod state;
 pub(crate) mod surface_catalog;
 pub(crate) mod surface_route;
 mod surfaces;
-pub(crate) mod window_session;
 
 pub use availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
@@ -105,14 +99,14 @@ pub use preferences::{
     UserPreferences, WorkspacePreferences, WorkspacePreset,
 };
 pub use documents::result_document::{ResultViewer, ResultsState};
-pub use session::{
+pub use lifecycle::session::{
     InspectorEdit, SavedSelectionBulkFilter, SelectionBulkFilter, SelectionBulkFilterSession,
     SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard, SymbolDocumentSnapshot,
     SymbolGridSpacing, SymbolSelection, SymbolTool, SymbolUiState, UiSessionState,
     UiSessionStateSer, mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about,
     mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about, symbol_shape_bounds,
 };
-pub(crate) use session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};
+pub(crate) use lifecycle::session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};
 pub use shortcuts::{
     ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding,
     ProtectedShortcutPolicy, ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
@@ -126,7 +120,7 @@ pub use surface_catalog::{
     SurfaceIdParseError, SurfaceMetadata,
 };
 pub use surface_route::{SurfaceRoute, SurfaceRouteParseError};
-pub use window_session::{
+pub use lifecycle::window_session::{
     ApplicationWindowBounds, ApplicationWindowId, ApplicationWindowState, WindowSessionError,
     WindowSessionRegistry,
 };

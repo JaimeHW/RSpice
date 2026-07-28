@@ -97,7 +97,7 @@ pub(crate) fn dispatch_file_menu_action(
 }
 
 fn require_save_confirmation_if_dirty(state: &mut AppState, action: ConfirmationAction) -> bool {
-    if !crate::workbench::project_lifecycle::has_unsaved_changes(state) {
+    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
         return false;
     }
 
@@ -115,7 +115,7 @@ fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
-    if !crate::workbench::project_lifecycle::has_unsaved_changes(state) {
+    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
         return false;
     }
 

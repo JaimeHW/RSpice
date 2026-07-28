@@ -48,7 +48,7 @@ use crate::hardcopy::sources::{
     validate_label,
 };
 use crate::workbench::documents::result_document::ResultViewer;
-use crate::workbench::session::SymbolSelection;
+use crate::workbench::lifecycle::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::documents::visualization_studio::{
     VisualizationAnnotation as StudioAnnotation, VisualizationAutoscale,

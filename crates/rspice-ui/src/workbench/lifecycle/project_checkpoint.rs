@@ -150,7 +150,7 @@ pub(crate) fn matches_current_state(
     summary: &ProjectCheckpointSummary,
     state: &AppState,
 ) -> Result<bool, String> {
-    let project = crate::workbench::project_lifecycle::snapshot(state)
+    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project checkpoint comparison failed: {error}"))?;
     project
         .validate()
@@ -165,7 +165,7 @@ fn prepare_checkpoint(
     state: &AppState,
     reason: ProjectCheckpointReason,
 ) -> Result<(ProjectCheckpointManifest, String), String> {
-    let project = crate::workbench::project_lifecycle::snapshot(state)
+    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project checkpoint snapshot failed: {error}"))?;
     project
         .validate()
@@ -227,7 +227,7 @@ pub(crate) fn start_create(
     let manifest_for_completion = manifest.clone();
     let manifest_key_for_completion = manifest_key.clone();
     let snapshot_key_for_completion = snapshot_key.clone();
-    crate::workbench::project_lifecycle::start_browser_checkpoint_publish(
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_publish(
         prefix,
         manifest_key,
         snapshot_key,
@@ -647,7 +647,7 @@ pub(crate) fn start_list(
 ) {
     let project_id = state.workspace.project.id().to_string();
     let prefix = browser_project_prefix(&project_id);
-    crate::workbench::project_lifecycle::start_browser_checkpoint_list(prefix, move |records| {
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_list(prefix, move |records| {
         complete(records.map(|(records, orphan_snapshots)| {
             let mut checkpoints = Vec::new();
             let mut quarantined = Vec::new();
@@ -748,7 +748,7 @@ pub(crate) fn start_recovery_copy_bytes(
     complete: impl FnOnce(Result<Vec<u8>, String>) + 'static,
 ) {
     let ProjectCheckpointLocator::Browser { snapshot_key, .. } = &summary.locator;
-    crate::workbench::project_lifecycle::start_browser_checkpoint_read(
+    crate::workbench::lifecycle::project_lifecycle::start_browser_checkpoint_read(
         snapshot_key.clone(),
         move |result| {
             complete(result.and_then(|bytes| {
@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn snapshot_integrity_rejects_any_byte_change() {
         let state = AppState::default();
-        let project = crate::workbench::project_lifecycle::snapshot(&state).expect("snapshot");
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).expect("snapshot");
         let bytes = crate::io::project_io::serialize_project_file(&project)
             .expect("serialize")
             .into_bytes();

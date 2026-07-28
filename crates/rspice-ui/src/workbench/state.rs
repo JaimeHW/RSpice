@@ -1580,7 +1580,7 @@ pub struct WorkbenchState {
     /// document ownership. Engineering documents remain owned by their
     /// project stores; this registry only controls where each is presented.
     #[serde(default)]
-    pub window_session: super::window_session::WindowSessionRegistry,
+    pub window_session: crate::workbench::lifecycle::window_session::WindowSessionRegistry,
     #[serde(default)]
     pub engineering_profile: EngineeringProfile,
     /// Version marker used to distinguish sessions that predate canonical
@@ -1656,7 +1656,7 @@ pub struct WorkbenchState {
     #[serde(skip)]
     pub project_launcher_page: ProjectLauncherPage,
     #[serde(skip)]
-    pub(crate) project_launcher_recovery: super::recovery::RecoveryCatalog,
+    pub(crate) project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog,
     /// Safe mode applies only to this process. The prior session remains the
     /// persisted source of truth for the next ordinary launch.
     #[serde(skip)]
@@ -1835,7 +1835,7 @@ impl Default for WorkbenchState {
     fn default() -> Self {
         Self {
             workspace: Workspace::Design,
-            window_session: super::window_session::WindowSessionRegistry::default(),
+            window_session: crate::workbench::lifecycle::window_session::WindowSessionRegistry::default(),
             engineering_profile: EngineeringProfile::AnalogIc,
             navigation_schema_version: NAVIGATION_SCHEMA_VERSION,
             layout_schema_version: LAYOUT_SCHEMA_VERSION,
@@ -1857,7 +1857,7 @@ impl Default for WorkbenchState {
             project_launcher_sort: ProjectLauncherSort::LastOpened,
             project_launcher_filter: ProjectLauncherFilter::All,
             project_launcher_page: ProjectLauncherPage::Projects,
-            project_launcher_recovery: super::recovery::RecoveryCatalog::default(),
+            project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog::default(),
             safe_mode: LocalSafeModeState::default(),
             project_close_destination: ProjectCloseDestination::Launcher,
             focus_project_launcher_search: false,

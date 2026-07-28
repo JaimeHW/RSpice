@@ -1,7 +1,7 @@
 //! Session state shared by document engines.
 //!
 //! Top-level navigation, responsive layout, docks, and drawers belong to
-//! [`super::WorkbenchState`]. This module contains only cross-frame document
+//! [`crate::workbench::WorkbenchState`]. This module contains only cross-frame document
 //! interaction state and durable presentation preferences.
 
 use serde::{Deserialize, Serialize};
@@ -660,7 +660,7 @@ pub struct UiSessionState {
     pub autosave_minutes: u8,
     /// Canonical user/device preference overrides not already owned by the
     /// theme or autosave runtime.
-    pub preferences: super::preferences::UserPreferences,
+    pub preferences: crate::workbench::preferences::UserPreferences,
     /// Decimal-mark information supplied by the native/web platform edge.
     /// `None` is deliberate: engineering code must not guess the host locale.
     pub number_locale: crate::quantity::UiNumberLocale,
@@ -709,7 +709,7 @@ pub struct UiSessionState {
     /// This is deliberately excluded from `UiSessionStateSer`: source-map
     /// and retained-result highlights are presentation state, not project
     /// data or a durable preference value.
-    pub(crate) schematic_cross_probe: super::cross_probe::SchematicCrossProbeRuntime,
+    pub(crate) schematic_cross_probe: crate::workbench::cross_probe::SchematicCrossProbeRuntime,
     /// Device-local working and named engineering-table views. Project-owned
     /// named views live in `ProjectWorkspace`; this store is the personal
     /// preference authority restored on desktop, web, and tablet hosts.
@@ -728,7 +728,7 @@ pub struct UiSessionState {
     /// One-shot request to change platform fullscreen state. Keeping this
     /// transient prevents the web backend from receiving the same viewport
     /// command every frame and preserves the user's persisted preference in
-    /// [`super::WorkbenchState`].
+    /// [`crate::workbench::WorkbenchState`].
     pub(crate) full_screen_request: Option<bool>,
     /// Results workspace state (viewer, cursors, plot caches).
     pub results: crate::workbench::documents::result_document::ResultsState,
@@ -797,7 +797,7 @@ impl UiSessionState {
 }
 
 /// Serialized subset of [`UiSessionState`]. Responsive layout is persisted by
-/// [`super::WorkbenchState`]; transient document interaction signals are not.
+/// [`crate::workbench::WorkbenchState`]; transient document interaction signals are not.
 #[derive(Serialize, Deserialize)]
 pub struct UiSessionStateSer {
     #[serde(default)]
@@ -825,7 +825,7 @@ pub struct UiSessionStateSer {
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
     #[serde(default)]
-    preferences: super::preferences::UserPreferences,
+    preferences: crate::workbench::preferences::UserPreferences,
     #[serde(default)]
     browser_spoken_feedback: bool,
     #[serde(default)]
@@ -1171,7 +1171,7 @@ mod symbol_selection_tests {
 
 #[cfg(test)]
 mod platform_request_tests {
-    use super::UiSessionState;
+    use crate::workbench::UiSessionState;
 
     #[test]
     fn full_screen_request_is_consumed_exactly_once() {

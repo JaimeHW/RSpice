@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{
+use crate::workbench::{
     SurfaceId, SurfaceRoute,
     state::{Workspace, WorkspaceDocumentId, WorkspaceLayoutState},
 };

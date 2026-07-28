@@ -387,12 +387,12 @@ mod tests {
     #[test]
     fn session_round_trip_preserves_exact_browser_binding_receipt() {
         let mut state = AppState::default();
-        let receipt = crate::workbench::project_lifecycle::BrowserBindingReceipt {
+        let receipt = crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt {
             binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
             project_id: state.workspace.project.id().to_string(),
             accepted_generation: 23,
             accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
-            backend: crate::workbench::project_lifecycle::BrowserBindingBackend::Opfs,
+            backend: crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::Opfs,
         };
         state.browser_project_binding_receipt = Some(receipt.clone());
 
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn session_round_trip_preserves_exact_native_binding_receipt() {
         let mut state = AppState::default();
-        let receipt = crate::workbench::project_lifecycle::NativeBindingReceipt {
+        let receipt = crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
             project_id: state.workspace.project.id().to_string(),
             accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),

@@ -788,7 +788,7 @@ impl Command {
         if matches!(self, Self::PreviousWorkspace | Self::NextWorkspace) {
             return CommandAvailability::Hidden;
         }
-        if crate::workbench::project_lifecycle::operation_in_progress(&app.state)
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
             return CommandAvailability::Disabled("project operation is still in progress");

@@ -22,7 +22,7 @@ use crate::workbench::app::{RecentFile, RecentKind};
 
 use super::commands::Command;
 use super::design_system::WorkbenchIcon;
-use super::recovery::{
+use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
     discard_checkpoint, open_comparison, open_diagnostics_folder,
     recovery_replacement_block_reason, refresh_catalog_if_requested, software_rendering_supported,

@@ -278,7 +278,7 @@ impl RSpiceApp {
         let target_view_key = fresh_report.active_view().key();
         if original_journal.is_empty()
             && let Some(accepted) =
-                crate::workbench::project_lifecycle::accepted_active_schematic(&self.state)
+                crate::workbench::lifecycle::project_lifecycle::accepted_active_schematic(&self.state)
             && let Err(error) = self.state.schematic.seed_accepted_revision_baseline(
                 &accepted,
                 fresh_report.project_id(),
@@ -535,7 +535,7 @@ fn rollback_validated_save(
             })
     };
     let detail = match rollback_result {
-        Ok(()) => match crate::workbench::project_lifecycle::refresh_registry(state) {
+        Ok(()) => match crate::workbench::lifecycle::project_lifecycle::refresh_registry(state) {
             Ok(()) => message.to_owned(),
             Err(error) => format!(
                 "{message} The journal rollback completed, but the project dirty-state registry could not be refreshed: {error}. Reopen the project before retrying."

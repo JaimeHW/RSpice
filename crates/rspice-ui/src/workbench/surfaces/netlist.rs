@@ -124,7 +124,7 @@ fn reconcile_documents(app: &mut RSpiceApp) {
 
 fn refresh_generated_artifact(app: &mut RSpiceApp) {
     let input_digest =
-        match crate::workbench::project_lifecycle::generated_netlist_input_digest(&app.state) {
+        match crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&app.state) {
             Ok(digest) => digest,
             Err(error) => {
                 app.state.ui.netlist.current_generation_input_digest = None;

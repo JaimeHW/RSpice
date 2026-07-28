@@ -1779,7 +1779,7 @@ mod tests {
             );
         controller.abort();
 
-        let project = crate::workbench::project_lifecycle::snapshot(&state)
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("production snapshot accepts controller run");
         let json = crate::io::project_io::serialize_project_file(&project)
             .expect("controller plan run serializes");
@@ -3009,7 +3009,7 @@ mod tests {
             );
         controller.abort();
 
-        let project = crate::workbench::project_lifecycle::snapshot(&state)
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("production snapshot accepts controller manual run");
         let json = crate::io::project_io::serialize_project_file(&project)
             .expect("controller manual run serializes");

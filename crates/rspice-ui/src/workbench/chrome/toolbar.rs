@@ -13,7 +13,7 @@ use super::super::RouteTransitionSource;
 use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
-use super::super::session::SymbolTool;
+use crate::workbench::lifecycle::session::SymbolTool;
 use super::super::state::{Drawer, Workspace};
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;

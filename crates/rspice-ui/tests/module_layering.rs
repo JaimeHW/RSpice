@@ -406,19 +406,19 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "design_system",
     "documents/visualization_family",
     // Document engines and the interaction session they hang off.
-    "session",
+    "lifecycle/session",
     "documents/netlist_document",
     "documents/result_document",
     "documents/code_workspace",
     "documents/model_editor",
     "documents/model_correlation",
-    "window_session",
+    "lifecycle/window_session",
     // Import, persistence, checkpointing, and recovery.
     "browser/file_import",
-    "project_lifecycle",
-    "project_checkpoint",
-    "recovery",
-    "recovery_checkpoint",
+    "lifecycle/project_lifecycle",
+    "lifecycle/project_checkpoint",
+    "lifecycle/recovery",
+    "lifecycle/recovery_checkpoint",
     "shortcut_library_persistence",
     "shortcut_artifacts",
     // Hardcopy adapters: resolve sources, then render, then print.
@@ -482,7 +482,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "project_workflow", 46),
     ("app", "panels", 30),
     ("documents/result_document", "app", 23),
-    ("project_lifecycle", "app", 15),
+    ("lifecycle/project_lifecycle", "app", 15),
     ("app", "export_workflow", 14),
     ("app", "chrome", 12),
     ("app", "menu_bar", 12),
@@ -490,7 +490,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "browser/navigation", 7),
     ("app", "file_actions", 6),
     ("documents/netlist_document", "app", 6),
-    ("recovery", "app", 6),
+    ("lifecycle/recovery", "app", 6),
     ("app", "simulation_analysis_tabs", 3),
     ("app", "browser/accessibility", 2),
     ("app", "netlist_workflow", 2),
@@ -500,7 +500,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "cross_probe", 1),
     ("browser/file_import", "app", 1),
     ("hardcopy_adapters/sources", "app", 1),
-    ("project_checkpoint", "app", 1),
+    ("lifecycle/project_checkpoint", "app", 1),
     // Not new coupling: these were written `use crate::workbench::{A, B};`,
     // and the first version of this table could not read a brace group, so
     // it scored the whole import as zero edges. Expanding groups is what
@@ -527,9 +527,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("shortcut_artifacts", "browser/download", 1),
     ("surfaces", "browser/download", 1),
     // Recovery and checkpointing reaching sideways into the workflows.
-    ("recovery", "file_workflow", 6),
-    ("recovery", "project_workflow", 2),
-    ("recovery", "recovery_checkpoint", 2),
+    ("lifecycle/recovery", "file_workflow", 6),
+    ("lifecycle/recovery", "project_workflow", 2),
+    ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
     ("shortcut_artifacts", "shortcut_profile_workflow", 4),
     ("browser/file_import", "shortcut_profile_workflow", 1),
     ("shortcut_library_persistence", "shortcut_artifacts", 1),
@@ -560,8 +560,8 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("state", "preferences", 1),
     ("state", "documents/model_editor", 2),
     ("state", "documents/model_correlation", 2),
-    ("state", "window_session", 2),
-    ("state", "recovery", 2),
+    ("state", "lifecycle/window_session", 2),
+    ("state", "lifecycle/recovery", 2),
     ("state", "documents/visualization_studio", 7),
     // Dispatch reaching the surfaces and tools it should be routing to.
     ("commands", "documents/visualization_studio", 6),
@@ -571,14 +571,14 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("commands", "preflight", 1),
     ("commands", "specialist_tool_browser", 1),
     // Session state naming the document engines whose state it aggregates.
-    ("session", "documents/result_document", 2),
-    ("session", "documents/code_workspace", 1),
-    ("session", "documents/netlist_document", 1),
-    ("session", "cross_probe", 1),
+    ("lifecycle/session", "documents/result_document", 2),
+    ("lifecycle/session", "documents/code_workspace", 1),
+    ("lifecycle/session", "documents/netlist_document", 1),
+    ("lifecycle/session", "cross_probe", 1),
     // Remaining short-form edges.
     ("availability", "capability_workflow", 1),
     ("feature_availability", "design_system", 1),
-    ("recovery_checkpoint", "file_workflow", 3),
+    ("lifecycle/recovery_checkpoint", "file_workflow", 6),
     ("hardcopy_adapters/sources", "documents/visualization_studio", 1),
     ("surface_route", "surface_catalog", 2),
     ("surface_route", "capability_workflow", 1),
@@ -716,17 +716,25 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
         let mut code = strip_line_comments(&source);
 
-        // A file sitting directly in `src/workbench/` is a module of the
-        // shell, so its `super::` means `crate::workbench::` — the same edge
-        // written the short way. 310 references took that form and went
-        // uncounted, about 15% of the interior. Deeper files are excluded on
-        // purpose: there `super::` names a sibling inside their own module,
-        // which is not a cross-module edge.
-        let names_the_shell_via_super = file
-            .strip_prefix(workbench_dir())
-            .is_ok_and(|relative| relative.components().count() == 1);
-        if names_the_shell_via_super {
-            code = code.replace("super::", PREFIX);
+        // `super::` is the same edge written the short way, and 310
+        // references took that form — about 15% of the shell's interior —
+        // while this test read only `crate::workbench::`. Resolve it against
+        // the file's own parent module so grouping files into a directory
+        // cannot hide the edges between them: in `workbench/lifecycle/x.rs`,
+        // `super::y` is `crate::workbench::lifecycle::y`.
+        if let Ok(relative) = file.strip_prefix(workbench_dir()) {
+            let mut parent: Vec<&str> = relative
+                .to_str()
+                .unwrap_or_default()
+                .split(['\\', '/'])
+                .collect();
+            parent.pop(); // the file itself
+            let mut resolved = PREFIX.to_owned();
+            for segment in parent {
+                resolved.push_str(segment);
+                resolved.push_str("::");
+            }
+            code = code.replace("super::", &resolved);
         }
 
         let mut rest = code.as_str();
@@ -1021,7 +1029,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/docks/inspector/design.rs", 3994),
     ("workbench/surfaces/project.rs", 3994),
     ("workbench/feature_availability_data.rs", 3872),
-    ("workbench/project_lifecycle.rs", 3741),
+    ("workbench/lifecycle/project_lifecycle.rs", 3741),
     ("workbench/surfaces/model_correlation.rs", 3631),
     ("workbench/state.rs", 3507),
     ("schematic/view/interaction.rs", 3491),
@@ -1031,7 +1039,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("state/schematic/state/editor_ops/array_ops.rs", 3320),
     ("simulation/controller.rs", 3214),
     ("simulation/execution/snapshot.rs", 3068),
-    ("workbench/project_lifecycle/persistence.rs", 3004),
+    ("workbench/lifecycle/project_lifecycle/persistence.rs", 3004),
     ("workbench/feature_availability.rs", 2988),
     ("workbench/project_launcher.rs", 2932),
     ("workbench/docks/navigator.rs", 2877),

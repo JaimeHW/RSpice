@@ -310,7 +310,7 @@ pub struct AppState {
     /// Transactional document registry, accepted project baseline, and
     /// canonical persistence identity. Runtime-only; session recovery keeps
     /// the working set separately and reconstructs this boundary at startup.
-    pub(crate) project_lifecycle: crate::workbench::project_lifecycle::ProjectLifecycleState,
+    pub(crate) project_lifecycle: crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState,
     /// Pending cell deletion (library, cell_name)
     pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
@@ -341,12 +341,12 @@ pub struct AppState {
     /// Exact native canonical-file authority saved with the working session.
     /// A restored pathname alone never grants ordinary Save authority.
     pub(crate) native_project_binding_receipt:
-        Option<crate::workbench::project_lifecycle::NativeBindingReceipt>,
+        Option<crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt>,
     /// Exact browser canonical-binding authority saved with the working-set
     /// session.  The binding UUID is opaque and intentionally independent of
     /// the logical project UUID. Runtime file handles are never serialized.
     pub(crate) browser_project_binding_receipt:
-        Option<crate::workbench::project_lifecycle::BrowserBindingReceipt>,
+        Option<crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt>,
     /// The activated license key as pasted (persisted; re-verified on load).
     pub(crate) license_key: Option<String>,
     /// The verified grant behind `license_key` (derived, never persisted).
@@ -734,7 +734,7 @@ impl RSpiceApp {
         // Restore global user Verilog-A library (commercial-style user library).
         restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace);
         state.restore_active_schematic_from_workspace();
-        crate::workbench::project_lifecycle::initialize_from_session(&mut state);
+        crate::workbench::lifecycle::project_lifecycle::initialize_from_session(&mut state);
         #[cfg(target_arch = "wasm32")]
         initialize_browser_surface_navigation(&mut state, &cc.egui_ctx);
 
@@ -814,7 +814,7 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::file_import::register_text_import_repaint_context(ctx);
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::project_lifecycle::poll_browser_binding_restore(&mut self.state);
+        crate::workbench::lifecycle::project_lifecycle::poll_browser_binding_restore(&mut self.state);
         #[cfg(target_arch = "wasm32")]
         if crate::workbench::project_workflow::poll_browser_project_import(&mut self.state) {
             self.restore_workspace_after_project_load();
@@ -852,7 +852,7 @@ impl RSpiceApp {
     /// active document: `cell* — project — RSpice`.
     fn sync_window_title(&mut self, ctx: &Context) {
         let has_unsaved_changes = should_warn_before_browser_unload(
-            crate::workbench::project_lifecycle::has_unsaved_changes(&self.state),
+            crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state),
             false,
         );
         #[cfg(target_arch = "wasm32")]

@@ -345,8 +345,8 @@ pub(crate) struct TechnologyAttachmentDialogState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectCheckpointRecoveryState {
     pub(crate) project_id: Option<String>,
-    pub(crate) checkpoints: Vec<crate::workbench::project_checkpoint::ProjectCheckpointSummary>,
-    pub(crate) quarantined: Vec<crate::workbench::project_checkpoint::ProjectCheckpointQuarantine>,
+    pub(crate) checkpoints: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
+    pub(crate) quarantined: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointQuarantine>,
     pub(crate) error: Option<String>,
     pub(crate) initialized: bool,
     #[cfg(target_arch = "wasm32")]
@@ -1152,7 +1152,7 @@ pub(crate) struct CheckAndSaveDialogState {
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_transaction: Option<crate::workbench::project_lifecycle::TransactionId>,
+    pub(crate) pending_transaction: Option<crate::workbench::lifecycle::project_lifecycle::TransactionId>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
     #[cfg(target_arch = "wasm32")]
@@ -1937,7 +1937,7 @@ pub struct DialogState {
     /// restore dialog resolves it before either exact byte snapshot is loaded.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) pending_autosave_restore:
-        Option<crate::workbench::recovery_checkpoint::AutosaveRestoreCandidate>,
+        Option<crate::workbench::lifecycle::recovery_checkpoint::AutosaveRestoreCandidate>,
 
     /// Starting position of selection drag (grid coords)
     pub drag_start: Option<(i32, i32)>,

@@ -78,7 +78,7 @@ pub(in crate::workbench::app) fn default_app_state() -> AppState {
         script_console: crate::workbench::panels::ScriptConsoleState::default(),
         library_manager,
         workspace,
-        project_lifecycle: crate::workbench::project_lifecycle::ProjectLifecycleState::default(),
+        project_lifecycle: crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState::default(),
         pending_delete_cell: None,
         pending_delete_view: None,
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
