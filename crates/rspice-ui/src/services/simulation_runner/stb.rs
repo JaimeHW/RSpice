@@ -8,7 +8,7 @@ use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use std::path::Path;
 
@@ -84,29 +84,11 @@ impl StbData {
     }
 }
 
-/// Run STB (loop stability) analysis
+/// Run STB analysis over a decade sweep with cooperative cancellation.
 ///
-/// Measures the loop gain and phase of a feedback system to determine
-/// phase margin and gain margin using AC analysis data.
-pub fn run_stb_analysis(
-    netlist_text: &str,
-    probe: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    points_per_decade: usize,
-) -> Result<StbData, String> {
-    run_stb_analysis_with_abort(
-        netlist_text,
-        probe,
-        start_freq,
-        stop_freq,
-        points_per_decade,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Run STB analysis with cooperative cancellation.
+/// Test-only. The shipping path is
+/// [`run_stb_analysis_with_sweep_and_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_stb_analysis_with_abort(
     netlist_text: &str,
     probe: &str,
@@ -126,34 +108,11 @@ pub fn run_stb_analysis_with_abort(
     )
 }
 
-/// Run STB (loop stability) analysis with a source path used to resolve
-/// relative includes and model file references.
+/// Run STB analysis with source-path resolution and cancellation, fixing the
+/// sweep to per-decade.
 ///
-/// `probe` names a 0 V voltage source placed in the feedback loop; the
-/// engine measures the true loop gain at that break via Tian's
-/// double-injection method. An unknown probe is a hard error — there is no
-/// meaningful fallback quantity.
-pub fn run_stb_analysis_with_source_path(
-    netlist_text: &str,
-    probe: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    points_per_decade: usize,
-    source_path: Option<&Path>,
-) -> Result<StbData, String> {
-    run_stb_analysis_with_source_path_and_abort(
-        netlist_text,
-        probe,
-        start_freq,
-        stop_freq,
-        points_per_decade,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Run STB analysis with source-path resolution and cancellation.
+/// Test-only; see [`run_stb_analysis_with_abort`].
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn run_stb_analysis_with_source_path_and_abort(
     netlist_text: &str,
@@ -176,30 +135,14 @@ pub fn run_stb_analysis_with_source_path_and_abort(
     )
 }
 
-/// Run STB analysis with an explicit sweep type and source path.
-pub fn run_stb_analysis_with_sweep_and_source_path(
-    netlist_text: &str,
-    probe: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    sweep_type: rspice_core::analysis::advanced::stb::StbSweepType,
-    points_per_decade: usize,
-    source_path: Option<&Path>,
-) -> Result<StbData, String> {
-    run_stb_analysis_with_sweep_and_source_path_and_abort(
-        netlist_text,
-        probe,
-        start_freq,
-        stop_freq,
-        sweep_type,
-        points_per_decade,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Run STB analysis with an explicit sweep, source path, and cancellation.
+/// Run STB (loop stability) analysis with an explicit sweep, source path, and
+/// cancellation.
+///
+/// Measures the loop gain and phase of a feedback system to determine phase
+/// margin and gain margin. `probe` names a 0 V voltage source placed in the
+/// feedback loop; the engine measures the true loop gain at that break via
+/// Tian's double-injection method. An unknown probe is a hard error — there is
+/// no meaningful fallback quantity.
 #[allow(clippy::too_many_arguments)]
 pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     netlist_text: &str,

@@ -134,15 +134,10 @@ pub use soa::{
     run_soa_analysis_with_source_path_and_abort,
 };
 pub use sparameter::{
-    SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep, run_sparameter_analysis,
-    run_sparameter_analysis_with_abort, run_sparameter_analysis_with_source_path,
-    run_sparameter_analysis_with_source_path_and_abort,
+    SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep,
+    run_sparameter_analysis_with_abort,
 };
-pub use stb::{
-    StbData, run_stb_analysis, run_stb_analysis_with_abort, run_stb_analysis_with_source_path,
-    run_stb_analysis_with_source_path_and_abort, run_stb_analysis_with_sweep_and_source_path,
-    run_stb_analysis_with_sweep_and_source_path_and_abort,
-};
+pub use stb::{StbData, run_stb_analysis_with_sweep_and_source_path_and_abort};
 pub use sweeps::{
     CornerBaseMode, CornerData, CornerFrequencySweep, CornerModelBinding, CornerProcess,
     CornerRunConfig, ParametricData, TempRunConfig, run_corner_analysis,

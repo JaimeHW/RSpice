@@ -1848,7 +1848,7 @@ mod tests {
         verification_navigator_requires_scroll,
     };
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::services::{
+    use crate::services::yield_manager::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
     };
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};

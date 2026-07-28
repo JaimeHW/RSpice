@@ -21,7 +21,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
-use crate::services::yield_manager::YieldAnalysisManager;
+use crate::services::yield_manager::{YieldAnalysisManager, YieldAnalysisProvenance};
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
@@ -1268,7 +1268,7 @@ impl SimulationController {
                         let yield_provenance = target_run_id
                             .and_then(|run_sequence| state.simulation.run_by_sequence(run_sequence))
                             .and_then(|run| {
-                                crate::services::YieldAnalysisProvenance::from_monte_carlo_result(
+                                YieldAnalysisProvenance::from_monte_carlo_result(
                                     run.run_id,
                                     run.dataset_id,
                                     &sim_result,

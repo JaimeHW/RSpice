@@ -9,13 +9,5 @@ pub(crate) mod safety;
 pub(crate) mod simulation_runner;
 pub(crate) mod yield_manager;
 
-// Re-export main types for convenient access
-pub use safety::{SoAManager, SoAViolation, ViolationSeverity};
-pub use simulation_runner::{
-    AcData, DcSweepData, HbData, NoiseData, PssData, PstbData, StbData, TransientData,
-    run_pss_analysis, run_pstb_analysis, run_sensitivity_analysis, run_stb_analysis,
-};
-pub use yield_manager::{
-    DistributionStats, MonteCarloSamplingMode, SpecLimitType, YieldAnalysisManager,
-    YieldAnalysisProvenance, YieldResult, YieldSpec,
-};
+// No flattening re-exports: every consumer of a service type names the module
+// that defines it, so the owner of a name is readable at the use site.

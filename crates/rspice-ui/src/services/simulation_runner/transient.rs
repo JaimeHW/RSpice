@@ -5,13 +5,20 @@
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, now_ms, parse_runner_netlist_with_abort,
+    ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{Engine, TransientResult};
-use rspice_core::netlist::AnalysisCommand;
 use std::path::Path;
+
+// Reached only by the legacy `cfg(test)` whole-deck path; see [`SimulationResult`].
+#[cfg(test)]
+use super::now_ms;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
+#[cfg(test)]
+use rspice_core::netlist::AnalysisCommand;
 
 /// Result of a whole-deck simulation run in the legacy shape, where an
 /// ordinary parse or solver failure is carried in `success`/`error` rather
@@ -52,12 +59,6 @@ pub struct TransientData {
 }
 
 impl TransientData {
-    /// Create from Engine's TransientResult and node names
-    pub fn from_result(result: TransientResult, node_names: &[String]) -> Self {
-        Self::from_result_with_abort(result, node_names, &NoAbort)
-            .expect("NoAbort cannot cancel transient result conversion")
-    }
-
     /// Create from an engine transient result with cooperative cancellation
     /// during waveform transposition.
     pub fn from_result_with_abort(
@@ -366,6 +367,30 @@ mod tests {
         let result = run_simulation_with_abort(DECK, &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn legacy_simulation_shape_reports_success_in_band() {
+        const TRAN_DECK: &str = "Legacy simulation shape\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .tran 1n 10n\n\
+             .end\n";
+
+        let result = run_simulation_with_abort(TRAN_DECK, &NoAbort).expect("not cancelled");
+
+        // The legacy shape carries outcome in-band: success and error are the
+        // status, not the Result arm.
+        assert!(result.success);
+        assert!(result.error.is_none());
+
+        let transient = result.transient.expect("`.tran` produces waveforms");
+        assert!(!transient.time.is_empty());
+        assert_eq!(result.stats.num_points, transient.time.len());
+
+        let dc_op = result.dc_op.expect("operating point is always attempted");
+        assert_eq!(dc_op.len(), 1, "one non-ground node");
+        assert_eq!(dc_op[0].1, 1.0, "V1 holds the node at 1 V");
     }
 
     #[test]

@@ -12,7 +12,7 @@ use super::{
 };
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind, SourceSpec};
@@ -119,33 +119,17 @@ pub struct SParameterData {
     pub z0: Vec<Value>,
 }
 
-/// Run N-port S-parameter analysis by solving Y-parameters from AC source injections.
-pub fn run_sparameter_analysis(
-    netlist_text: &str,
-    config: &SParameterRunConfig,
-) -> Result<SParameterData, String> {
-    run_sparameter_analysis_with_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run N-port S-parameter analysis with cooperative cancellation.
+/// Run N-port S-parameter analysis by solving Y-parameters from AC source
+/// injections, with cooperative cancellation.
+///
+/// This is the shipping entry point; the frequency-analysis spec calls it
+/// directly, so unlike its siblings it resolves no source path.
 pub fn run_sparameter_analysis_with_abort(
     netlist_text: &str,
     config: &SParameterRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<SParameterData> {
     run_sparameter_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run N-port S-parameter analysis with a source path used to resolve relative
-/// includes and model file references.
-pub fn run_sparameter_analysis_with_source_path(
-    netlist_text: &str,
-    config: &SParameterRunConfig,
-    source_path: Option<&Path>,
-) -> Result<SParameterData, String> {
-    run_sparameter_analysis_with_source_path_and_abort(netlist_text, config, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
 }
 
 /// Run N-port S-parameter analysis with source-path resolution and
