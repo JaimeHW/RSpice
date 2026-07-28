@@ -217,9 +217,7 @@ fn output_symbol_validation_attributes(
     attributes
 }
 
-fn startup_directive_kind_name(
-    kind: rspice_core::netlist::StartupDirectiveKind,
-) -> &'static str {
+fn startup_directive_kind_name(kind: rspice_core::netlist::StartupDirectiveKind) -> &'static str {
     match kind {
         rspice_core::netlist::StartupDirectiveKind::Ic => "ic",
         rspice_core::netlist::StartupDirectiveKind::NodeSet => "nodeset",
