@@ -4565,6 +4565,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "clap",
+ "rspice-conformance",
  "rspice-core",
  "rspice-veriloga",
  "serde",
