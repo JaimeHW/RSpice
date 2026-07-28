@@ -998,20 +998,17 @@ fn source_files_have_no_byte_order_mark() {
 /// The 77 that remain are load-bearing: removing one produces the warning it
 /// claims to be silencing.
 ///
-/// Raised 77 -> 81 on 2026-07-28 for four module-scoped `#![allow(dead_code)]`
-/// attributes, on `product::capability_readiness` and the
-/// `results::report_{package,pdfa,publication}` cluster. They meet the test
-/// above emphatically -- removing them produces 287 warnings -- and they are
-/// the opposite of the stale 32: each covers a subsystem that `git log -S`
-/// confirms has *never* had a caller in the crate's history, so its status is
-/// known rather than merely unexamined. Closing the public module surface took
-/// reported dead code to 1531, and burying the 1244 worth acting on under 287
-/// with a settled answer is what makes the rest of the signal usable.
+/// This count went 77 -> 81 -> 85 -> 77 over 2026-07-28, and the round trip is
+/// the point. It was raised to 81 to cover `product::capability_readiness` and
+/// the `results::report_{package,pdfa,publication}` cluster, each carrying its
+/// own evidence and removal condition: wire the module up, or delete it. Both
+/// were then answered by deleting them -- the report cluster duplicated the
+/// shipping `hardcopy_adapters` publication path, and capability readiness had
+/// no surface to resolve claims for -- so their four attributes went with them.
 ///
-/// Each attribute carries the evidence and its own removal condition: wire the
-/// module up, or delete it. If one of those modules is ever wired up, drop its
-/// attribute rather than leaving it to absorb the next real warning -- that is
-/// exactly how the previous 32 became worthless.
+/// A suppression that states its removal condition gets removed. That is the
+/// difference between these and the 32 stale ones: those had no condition, so
+/// nothing ever retired them.
 ///
 /// Raised 81 -> 85 on 2026-07-28 for the four "inferred/default" analysis
 /// entry points left standing after the runner overload ladders were retired:
@@ -1028,9 +1025,11 @@ fn source_files_have_no_byte_order_mark() {
 /// `tf::infer_tf_run_config`. Deleting them would delete the capability, not a
 /// duplicate of one -- which is a product decision rather than a cleanup.
 ///
-/// Same rule as the four above: wire them up or delete them, and drop the
-/// attribute either way.
-const MAX_LINT_SUPPRESSIONS: usize = 85;
+/// Same rule: wire them up or delete them, and drop the attribute either way.
+///
+/// Lowered 85 -> 77 when the two clusters above were deleted. The four
+/// inference entries are the only additions still standing.
+const MAX_LINT_SUPPRESSIONS: usize = 77;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

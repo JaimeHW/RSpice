@@ -5,7 +5,6 @@
 //! automation, and presentation. UI code may render these contracts but must
 //! not invent alternate identities, readiness labels, or lifecycle rules.
 
-pub(crate) mod capability_readiness;
 mod catalog;
 mod command;
 mod identity;
