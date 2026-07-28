@@ -226,6 +226,14 @@ impl StampAuditEntry {
         !(self.uncertainty <= AUDIT_MAX_USABLE_UNCERTAINTY)
     }
 
+    /// Whether either side of this entry is large enough for a solver to act on.
+    ///
+    /// `numeric` may be `NaN`; `f64::max` returns the other operand in that
+    /// case, so an unverified entry is judged on its stamp alone.
+    pub fn significant(&self, floor: Value) -> bool {
+        self.stamped.abs().max(self.numeric.abs()) > floor
+    }
+
     /// Agreement this entry must show, given how precise the oracle managed to
     /// be here.
     ///
@@ -306,10 +314,19 @@ impl StampAudit {
     /// `base` is the tolerance demanded where the difference converged; entries
     /// the difference resolved less well are held to their own error bar
     /// instead, so a stiff junction cannot manufacture a failure.
+    ///
+    /// Entries beneath the significance floor are skipped, which
+    /// [`Self::unverified_significant`] already did and this did not. The
+    /// inconsistency mattered: a reactive block whose largest entry is 4e-14 F
+    /// carries entries at 1e-24 F, and against an exactly-zero stamp those read
+    /// as a whole percent of disagreement while being ten orders below anything
+    /// the solver can represent. Judged as failures they are noise; judged
+    /// against the floor they are what the floor exists to describe.
     pub fn failures(&self, base: Value) -> Vec<StampAuditEntry> {
         let mut failures: Vec<StampAuditEntry> = self
             .comparable()
             .copied()
+            .filter(|entry| entry.significant(self.significance_floor))
             .filter(|entry| entry.relative_error > entry.required_tolerance(base))
             .collect();
         failures.sort_by(|left, right| right.relative_error.total_cmp(&left.relative_error));
@@ -697,7 +714,19 @@ impl GoldenHarness {
         Ok(derivatives)
     }
 
-    fn stamp_dense(&mut self, unknowns: &[Value]) -> Result<(Vec<Value>, Vec<Value>), GoldenError> {
+    /// Stamp at `unknowns` with simulation parameters of the caller's choosing.
+    ///
+    /// Everything else here runs at the simulator's defaults, which is what
+    /// makes captured records comparable. A `$simparam` read is only observable
+    /// by varying them — a device that folded the call to its literal fallback
+    /// and one that reads it at run time are indistinguishable at a single
+    /// value. This is the entry point that tells them apart, and so the one
+    /// that makes gmin stepping checkable at all.
+    pub fn stamp_with(
+        &mut self,
+        unknowns: &[Value],
+        simparams: GeneratedSimulationParameters,
+    ) -> Result<(Vec<Value>, Vec<Value>), GoldenError> {
         self.matrix.clear_values();
         self.rhs.fill(0.0);
         self.instance
@@ -707,10 +736,14 @@ impl GoldenHarness {
                 unknowns,
                 self.node_count,
                 GeneratedAnalysisKind::Dc,
-                GeneratedSimulationParameters::new(),
+                simparams,
             )
             .map_err(|error| self.evaluation_error(error))?;
         Ok((self.dense_matrix(), self.rhs.clone()))
+    }
+
+    fn stamp_dense(&mut self, unknowns: &[Value]) -> Result<(Vec<Value>, Vec<Value>), GoldenError> {
+        self.stamp_with(unknowns, GeneratedSimulationParameters::new())
     }
 
     /// Reactive stamp at `omega = 1`, so the imaginary block is `dQ/dV` itself.
