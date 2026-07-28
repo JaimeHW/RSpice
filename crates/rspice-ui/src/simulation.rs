@@ -15,7 +15,6 @@ pub(crate) mod multi_run;
 pub(crate) mod netlist_gen;
 pub(crate) mod netlist_viewer;
 pub(crate) mod optimizer;
-pub(crate) mod options_translator;
 pub(crate) mod output_contract;
 pub use output_contract::{
     SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,

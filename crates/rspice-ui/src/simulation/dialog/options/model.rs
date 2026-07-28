@@ -2,9 +2,7 @@
 //!
 //! The tolerances, limits, and integration settings a run is executed under.
 
-use super::{
-    DampingStrategy, IntegrationMethod, MatrixSolver, ParseError, ValidationError, parse_si_value,
-};
+use super::{DampingStrategy, IntegrationMethod, MatrixSolver, ValidationError};
 
 /// Complete simulation options matching Cadence Spectre.
 ///
@@ -138,10 +136,6 @@ impl SimulationOptions {
         self.temp + 273.15
     }
 
-    pub fn tnom_kelvin(&self) -> f64 {
-        self.tnom + 273.15
-    }
-
     fn core_damping_strategy(&self) -> rspice_core::engine::DampingStrategy {
         match self.damping {
             DampingStrategy::None => rspice_core::engine::DampingStrategy::None,
@@ -233,11 +227,6 @@ impl SimulationOptions {
             .min(sim_config.convergence_config.gmin_initial);
 
         sim_config
-    }
-
-    /// Convert to rspice_core SimulationConfig for engine use.
-    pub fn to_simulation_config(&self) -> rspice_core::engine::SimulationConfig {
-        self.resolve_simulation_config(None)
     }
 
     /// Validate all options.
@@ -344,59 +333,5 @@ impl SimulationOptions {
 
         lines.join("\n")
     }
-
-    /// Parse from SPICE .options lines.
-    pub fn from_spice_options(text: &str) -> Result<Self, ParseError> {
-        let mut opts = Self::default();
-
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('*') {
-                continue;
-            }
-
-            let content = line
-                .trim_start_matches(".OPTIONS")
-                .trim_start_matches(".options")
-                .trim_start_matches('+')
-                .trim();
-
-            for part in content.split_whitespace() {
-                if let Some((key, val)) = part.split_once('=') {
-                    match key.to_uppercase().as_str() {
-                        "RELTOL" => opts.reltol = parse_si_value(val)?,
-                        "RESIDUAL_RELTOL" | "RESRELTOL" => {
-                            opts.residual_reltol = parse_si_value(val)?
-                        }
-                        "ABSTOL" => opts.abstol = parse_si_value(val)?,
-                        "VNTOL" => opts.vntol = parse_si_value(val)?,
-                        "IABSTOL" => opts.iabstol = parse_si_value(val)?,
-                        "CHGTOL" => opts.chgtol = parse_si_value(val)?,
-                        "PIVREL" => opts.pivrel = parse_si_value(val)?,
-                        "PIVTOL" => opts.pivtol = parse_si_value(val)?,
-                        "GMIN" => opts.gmin = parse_si_value(val)?,
-                        "ITL1" => opts.itl1 = parse_usize_option(val)?,
-                        "ITL2" => opts.itl2 = parse_usize_option(val)?,
-                        "ITL4" => opts.itl4 = parse_usize_option(val)?,
-                        "METHOD" => {
-                            if let Some(m) = IntegrationMethod::from_spice(val) {
-                                opts.method = m;
-                            }
-                        }
-                        "TEMP" => opts.temp = parse_si_value(val)?,
-                        "TNOM" => opts.tnom = parse_si_value(val)?,
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        Ok(opts)
-    }
 }
 
-fn parse_usize_option(value: &str) -> Result<usize, ParseError> {
-    value
-        .parse()
-        .map_err(|_| ParseError::InvalidNumber(value.to_string()))
-}

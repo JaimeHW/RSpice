@@ -41,18 +41,6 @@ impl IntegrationMethod {
         }
     }
 
-    pub fn from_spice(s: &str) -> Option<Self> {
-        match s.to_uppercase().as_str() {
-            "TRAP" | "TRAPEZOIDAL" => Some(IntegrationMethod::Trap),
-            "EULER" | "BE" => Some(IntegrationMethod::Euler),
-            "GEAR" | "BDF" => Some(IntegrationMethod::Gear),
-            "GEAR2" => Some(IntegrationMethod::Gear2),
-            "TRAPGEAR" | "AUTO" => Some(IntegrationMethod::TrapGear),
-            "GEAR2ONLY" => Some(IntegrationMethod::Gear2Only),
-            _ => None,
-        }
-    }
-
     pub fn all() -> &'static [IntegrationMethod] {
         &[
             IntegrationMethod::Trap,
