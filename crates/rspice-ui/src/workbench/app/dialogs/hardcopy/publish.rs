@@ -42,8 +42,8 @@ use crate::hardcopy::{
 };
 use crate::product::ContentDigest;
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::export_workflow::deterministic_stored_zip;
-use crate::workbench::export_workflow::{
+use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
+use crate::workbench::workflows::export_workflow::{
     ObservedExportDestination, SaveDialogConfig, export_completion_message,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -1562,7 +1562,7 @@ fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> 
     else {
         return Ok(PublicationCompletion::Cancelled);
     };
-    crate::workbench::file_actions::ensure_file_extension(&mut path, extension);
+    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
     let destination = app.export_workflow_io.observe_destination(&path)?;
 
     // The picker may have yielded. The exact current source is authenticated
@@ -2548,7 +2548,7 @@ mod tests {
     #[test]
     fn selected_export_name_receives_the_contract_extension() {
         let mut path = std::path::PathBuf::from("review-output");
-        crate::workbench::file_actions::ensure_file_extension(&mut path, "pdf");
+        crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "pdf");
         assert_eq!(path, std::path::PathBuf::from("review-output.pdf"));
     }
 

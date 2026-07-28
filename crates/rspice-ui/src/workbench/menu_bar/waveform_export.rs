@@ -1,6 +1,6 @@
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app::AppState;
-use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 const NO_RESULTS_MESSAGE: &str = "No simulation results to export. Run a simulation first.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
@@ -487,13 +487,13 @@ fn export_typed_result_csv(
         filter_extensions: &["csv"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::file_actions::ensure_file_extension(&mut path, "csv");
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "csv");
             let export = io.observe_destination(&path).and_then(|destination| {
                 io.write_text_file_observed(&destination, &prepared.contents)
             });
             match export {
                 Ok(()) => state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                    crate::workbench::export_workflow::export_completion_message(
+                    crate::workbench::workflows::export_workflow::export_completion_message(
                         "CSV",
                         &path,
                         Some(prepared.detail.clone()),
@@ -524,7 +524,7 @@ fn export_csv(
         filter_extensions: &["csv"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::file_actions::ensure_file_extension(&mut path, "csv");
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "csv");
 
             let export = io
                 .observe_destination(&path)
@@ -537,7 +537,7 @@ fn export_csv(
                         dataset.point_count()
                     );
                     state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                        crate::workbench::export_workflow::export_completion_message(
+                        crate::workbench::workflows::export_workflow::export_completion_message(
                             "CSV",
                             &path,
                             Some(detail),
@@ -596,7 +596,7 @@ fn export_touchstone(
         filter_extensions: &filter_extensions,
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::file_actions::ensure_file_extension(&mut path, &extension);
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, &extension);
             let export = io
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
@@ -608,7 +608,7 @@ fn export_touchstone(
                         dataset.point_count()
                     );
                     state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                        crate::workbench::export_workflow::export_completion_message(
+                        crate::workbench::workflows::export_workflow::export_completion_message(
                             "Touchstone",
                             &path,
                             Some(detail),

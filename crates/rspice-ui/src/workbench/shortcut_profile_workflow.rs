@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::workbench::export_workflow::{
+use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
 };
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
@@ -541,7 +541,7 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
-    use crate::workbench::export_workflow::{ObservedExportDestination, SaveDialogConfig};
+    use crate::workbench::workflows::export_workflow::{ObservedExportDestination, SaveDialogConfig};
 
     const VALID_SOURCE: &str = r#"{
         "format": "rspice.shortcuts/1",

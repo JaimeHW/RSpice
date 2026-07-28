@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::AppState;
-use crate::workbench::export_workflow::ExportWorkflowIo;
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
 use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
@@ -1504,7 +1504,7 @@ impl SimulationController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+    use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
     use crate::simulation::plan::AnalysisKind;
     use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};

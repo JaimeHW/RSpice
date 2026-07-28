@@ -1,6 +1,6 @@
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::{AppState, RSpiceApp};
-use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);
 
@@ -744,7 +744,7 @@ pub(crate) fn save_owned_netlist_source(
             }
             state.ui.netlist.externally_saved_content_digest = Some(visible_digest);
             state.push_user_message(ConsoleMessage::info(
-                crate::workbench::export_workflow::export_completion_message(
+                crate::workbench::workflows::export_workflow::export_completion_message(
                     "SPICE source",
                     &path,
                     None,

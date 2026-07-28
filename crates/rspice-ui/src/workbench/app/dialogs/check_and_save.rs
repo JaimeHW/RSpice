@@ -12,7 +12,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
-use crate::workbench::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
+use crate::workbench::workflows::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
 
 use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::dialogs::operation_primitives::{
@@ -393,7 +393,7 @@ impl RSpiceApp {
     #[cfg(target_arch = "wasm32")]
     pub(in crate::workbench::app) fn handle_check_and_save_continuation(
         &mut self,
-        event: &crate::workbench::project_workflow::SaveContinuationEvent,
+        event: &crate::workbench::workflows::project_workflow::SaveContinuationEvent,
     ) -> bool {
         let dialog = &self.state.dialogs.check_and_save;
         let Some(expected) = dialog.pending_transaction else {
@@ -404,7 +404,7 @@ impl RSpiceApp {
         }
         let revision_id = dialog.pending_revision_id;
         match event {
-            crate::workbench::project_workflow::SaveContinuationEvent::Saved(_) => {
+            crate::workbench::workflows::project_workflow::SaveContinuationEvent::Saved(_) => {
                 if let Some(id) = revision_id {
                     complete_validated_save(&mut self.state, id, false);
                 } else {
@@ -414,7 +414,7 @@ impl RSpiceApp {
                     );
                 }
             }
-            crate::workbench::project_workflow::SaveContinuationEvent::SavedWithNewerChanges(_) => {
+            crate::workbench::workflows::project_workflow::SaveContinuationEvent::SavedWithNewerChanges(_) => {
                 if let Some(id) = revision_id {
                     complete_validated_save(&mut self.state, id, true);
                 } else {
@@ -424,25 +424,25 @@ impl RSpiceApp {
                     );
                 }
             }
-            crate::workbench::project_workflow::SaveContinuationEvent::Cancelled(_) => {
+            crate::workbench::workflows::project_workflow::SaveContinuationEvent::Cancelled(_) => {
                 rollback_pending_validated_save(
                     &mut self.state,
                     "The browser save was cancelled. No validated revision was committed.",
                 );
             }
-            crate::workbench::project_workflow::SaveContinuationEvent::Conflict(_) => {
+            crate::workbench::workflows::project_workflow::SaveContinuationEvent::Conflict(_) => {
                 rollback_pending_validated_save(
                     &mut self.state,
                     "The canonical browser project changed outside RSpice. Reopen it or save an independent copy; no validated revision was committed locally.",
                 );
             }
-            crate::workbench::project_workflow::SaveContinuationEvent::Failed(_, error) => {
+            crate::workbench::workflows::project_workflow::SaveContinuationEvent::Failed(_, error) => {
                 rollback_pending_validated_save(
                     &mut self.state,
                     &format!("The validated revision could not be saved: {error}"),
                 );
             }
-            crate::workbench::project_workflow::SaveContinuationEvent::PublishedButNotAdopted(
+            crate::workbench::workflows::project_workflow::SaveContinuationEvent::PublishedButNotAdopted(
                 _,
                 error,
             ) => {

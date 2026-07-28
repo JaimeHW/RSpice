@@ -491,7 +491,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     let materialized = if state.ui.netlist.active_document
         == super::ActiveNetlistDocument::OwnedSource
     {
-        crate::workbench::netlist_workflow::compose_owned_netlist_execution_source(state, &buffer)
+        crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(state, &buffer)
     } else {
         Ok(buffer.clone())
     };

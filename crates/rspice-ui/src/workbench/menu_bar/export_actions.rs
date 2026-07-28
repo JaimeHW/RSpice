@@ -1,5 +1,5 @@
 use crate::workbench::app::AppState;
-use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 pub(super) fn action_export_svg_with_io(
     state: &mut AppState,
@@ -39,7 +39,7 @@ pub(super) fn action_export_svg_with_io(
         filter_extensions: &["svg"],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::file_actions::ensure_file_extension(&mut path, "svg");
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "svg");
 
             let export = io
                 .observe_destination(&path)
@@ -47,7 +47,7 @@ pub(super) fn action_export_svg_with_io(
             match export {
                 Ok(()) => {
                     state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                        crate::workbench::export_workflow::export_completion_message(
+                        crate::workbench::workflows::export_workflow::export_completion_message(
                             "SVG", &path, None, io,
                         ),
                     ));
@@ -139,7 +139,7 @@ pub(crate) fn action_export_netlist_with_io(
         filter_extensions: &[extension],
     }) {
         Ok(Some(mut path)) => {
-            crate::workbench::file_actions::ensure_file_extension(&mut path, extension);
+            crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
 
             let export = io.observe_destination(&path).and_then(|destination| {
                 io.write_text_file_observed(&destination, &netlist_content)
@@ -147,7 +147,7 @@ pub(crate) fn action_export_netlist_with_io(
             match export {
                 Ok(()) => {
                     state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                        crate::workbench::export_workflow::export_completion_message(
+                        crate::workbench::workflows::export_workflow::export_completion_message(
                             filter_name,
                             &path,
                             None,
@@ -251,14 +251,14 @@ pub(crate) fn action_export_generated_netlist_with_options(
     }) else {
         return false;
     };
-    crate::workbench::file_actions::ensure_file_extension(&mut path, "zip");
+    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "zip");
     let result = io.observe_destination(&path).and_then(|destination| {
         io.write_bytes_file_observed(&destination, &bundle, "application/zip")
     });
     match result {
         Ok(()) => {
             state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                crate::workbench::export_workflow::export_completion_message(
+                crate::workbench::workflows::export_workflow::export_completion_message(
                     "Generated netlist bundle",
                     &path,
                     None,
@@ -311,14 +311,14 @@ fn publish_generated_source(
     }) else {
         return false;
     };
-    crate::workbench::file_actions::ensure_file_extension(&mut path, extension);
+    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, extension);
     let result = io
         .observe_destination(&path)
         .and_then(|destination| io.write_text_file_observed(&destination, &source));
     match result {
         Ok(()) => {
             state.push_user_message(crate::diagnostics::ConsoleMessage::info(
-                crate::workbench::export_workflow::export_completion_message(
+                crate::workbench::workflows::export_workflow::export_completion_message(
                     filter_name,
                     &path,
                     None,

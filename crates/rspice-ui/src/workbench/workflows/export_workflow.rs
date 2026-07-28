@@ -380,7 +380,7 @@ fn publish_observed_bytes(
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::{ExportWorkflowIo, NativeExportWorkflowIo, deterministic_stored_zip};
+    use super::*;
     use sha2::{Digest as _, Sha256};
 
     fn stored_entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {

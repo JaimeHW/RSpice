@@ -448,7 +448,7 @@ impl SimulationController {
         }
 
         let owned_materialized = if owned_active {
-            crate::workbench::netlist_workflow::compose_owned_netlist_execution_source(state, source)
+            crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(state, source)
                 .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?
         } else {
             source.to_owned()

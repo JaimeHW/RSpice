@@ -9,7 +9,7 @@ use crate::state::{
 };
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-use crate::workbench::export_workflow::{
+use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
 };
 
@@ -502,7 +502,7 @@ impl RSpiceApp {
                     #[cfg(target_arch = "wasm32")]
                     {
                         let bytes =
-                            crate::workbench::export_workflow::deterministic_stored_zip(&[
+                            crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
                                 ("table.csv", text.as_bytes()),
                                 ("schema.json", schema.as_bytes()),
                             ])?;
@@ -545,7 +545,7 @@ impl RSpiceApp {
                         #[cfg(target_arch = "wasm32")]
                         {
                             let bytes =
-                                crate::workbench::export_workflow::deterministic_stored_zip(&[
+                                crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
                                     ("table.tsv", text.as_bytes()),
                                     ("metadata.json", metadata.as_bytes()),
                                 ])?;

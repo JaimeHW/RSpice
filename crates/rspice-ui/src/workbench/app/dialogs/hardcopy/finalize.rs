@@ -20,7 +20,7 @@ use crate::hardcopy::{
     HardcopyPlan, OutputFormat, RenderTarget,
 };
 use crate::product::ContentDigest;
-use crate::workbench::export_workflow::{
+use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
 };
 use crate::workbench::hardcopy_adapters::print::{

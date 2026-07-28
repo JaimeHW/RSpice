@@ -9,7 +9,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::app::{HelpCenterPage, RSpiceApp, session::shortcuts::ShortcutCategory};
 use crate::workbench::commands::{Command, CommandPlatform};
-use crate::workbench::export_workflow::SaveDialogConfig;
+use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
 const PRODUCT_LICENSE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));
 
@@ -654,7 +654,7 @@ fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log
     }) else {
         return;
     };
-    crate::workbench::file_actions::ensure_file_extension(&mut path, "json");
+    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "json");
     let result = app
         .export_workflow_io
         .observe_destination(&path)

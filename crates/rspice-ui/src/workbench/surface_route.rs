@@ -13,10 +13,8 @@ use uuid::Uuid;
 
 use crate::product::{ObjectRef, ProductObjectKind};
 
-use super::{
-    capability_workflow::CapabilityWorkflowId,
-    surface_catalog::{SurfaceId, SurfaceIdParseError},
-};
+use super::surface_catalog::{SurfaceId, SurfaceIdParseError};
+use super::workflows::capability_workflow::CapabilityWorkflowId;
 
 /// Stable route to one canonical GUI surface and, when applicable, one exact
 /// product object. Selection, scroll, and other presentation state do not

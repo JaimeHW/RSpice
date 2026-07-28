@@ -27,6 +27,7 @@
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/module_layering.rs`, not by this file.
+pub(crate) mod workflows;
 pub(crate) mod lifecycle;
 pub(crate) mod documents;
 pub(crate) mod account_organization;
@@ -34,18 +35,14 @@ pub(crate) mod app;
 pub(crate) mod availability;
 pub(crate) mod browser;
 pub(crate) mod calculator_tool;
-pub(crate) mod capability_workflow;
 pub(crate) mod chrome;
 pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod design_system;
 mod docks;
 pub(crate) mod examples;
-pub(crate) mod export_workflow;
 mod feature_availability;
 pub(crate) mod feature_availability_data;
-pub(crate) mod file_actions;
-pub(crate) mod file_workflow;
 pub(crate) mod frame;
 pub(crate) mod hardcopy_adapters;
 mod jobs_manager;
@@ -53,14 +50,12 @@ mod layout;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) mod navigation;
-pub(crate) mod netlist_workflow;
 mod notification_center;
 pub(crate) mod panels;
 pub(crate) mod platform;
 mod preferences;
 mod preflight;
 mod project_launcher;
-pub(crate) mod project_workflow;
 pub(crate) mod shortcut_artifacts;
 pub(crate) mod shortcut_library_persistence;
 pub(crate) mod shortcut_profile_workflow;
@@ -75,7 +70,7 @@ mod surfaces;
 pub use availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
 };
-pub use capability_workflow::{
+pub use workflows::capability_workflow::{
     CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
 };
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;

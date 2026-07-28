@@ -382,7 +382,7 @@ impl AppState {
     pub(crate) fn application_modal_open(&self) -> bool {
         #[cfg(target_arch = "wasm32")]
         let browser_file_operation_open =
-            crate::workbench::project_workflow::browser_file_operation_label(self).is_some();
+            crate::workbench::workflows::project_workflow::browser_file_operation_label(self).is_some();
         #[cfg(not(target_arch = "wasm32"))]
         let browser_file_operation_open = false;
 
@@ -631,9 +631,9 @@ pub struct RSpiceApp {
     /// Simulation controller for running analyses
     pub(crate) simulation_controller: crate::simulation::SimulationController,
     /// File workflow IO backend (native in production, injectable in tests).
-    pub(crate) file_workflow_io: Box<dyn crate::workbench::file_workflow::FileWorkflowIo>,
+    pub(crate) file_workflow_io: Box<dyn crate::workbench::workflows::file_workflow::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
-    pub(crate) export_workflow_io: Box<dyn crate::workbench::export_workflow::ExportWorkflowIo>,
+    pub(crate) export_workflow_io: Box<dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo>,
 }
 
 fn configure_platform_input_contract(ctx: &Context) {
@@ -690,8 +690,8 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::workbench::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::workbench::export_workflow::NativeExportWorkflowIo),
+            file_workflow_io: Box::new(crate::workbench::workflows::file_workflow::NativeFileWorkflowIo),
+            export_workflow_io: Box::new(crate::workbench::workflows::export_workflow::NativeExportWorkflowIo),
         }
     }
 
@@ -775,8 +775,8 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::workbench::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::workbench::export_workflow::NativeExportWorkflowIo),
+            file_workflow_io: Box::new(crate::workbench::workflows::file_workflow::NativeFileWorkflowIo),
+            export_workflow_io: Box::new(crate::workbench::workflows::export_workflow::NativeExportWorkflowIo),
         }
     }
 
@@ -816,21 +816,21 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::lifecycle::project_lifecycle::poll_browser_binding_restore(&mut self.state);
         #[cfg(target_arch = "wasm32")]
-        if crate::workbench::project_workflow::poll_browser_project_import(&mut self.state) {
+        if crate::workbench::workflows::project_workflow::poll_browser_project_import(&mut self.state) {
             self.restore_workspace_after_project_load();
         }
         #[cfg(target_arch = "wasm32")]
         if let Some(event) =
-            crate::workbench::project_workflow::poll_browser_project_save(&mut self.state)
+            crate::workbench::workflows::project_workflow::poll_browser_project_save(&mut self.state)
         {
             self.handle_save_continuation_event(event);
         }
         #[cfg(target_arch = "wasm32")]
-        if crate::workbench::file_workflow::poll_browser_schematic_import(&mut self.state) {
+        if crate::workbench::workflows::file_workflow::poll_browser_schematic_import(&mut self.state) {
             self.state.clear_transient_specialized_viewer_data();
         }
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::netlist_workflow::poll_browser_netlist_import(&mut self.state);
+        crate::workbench::workflows::netlist_workflow::poll_browser_netlist_import(&mut self.state);
         self.simulation_controller
             .update(&mut self.state, self.export_workflow_io.as_ref());
         if self.state.simulation.is_running {

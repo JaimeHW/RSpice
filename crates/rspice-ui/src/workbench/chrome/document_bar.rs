@@ -609,7 +609,7 @@ fn close_document(
             if !activate_document(state, document) {
                 return false;
             }
-            crate::workbench::project_workflow::close_active_document(state)
+            crate::workbench::workflows::project_workflow::close_active_document(state)
         }
         _ => {
             state.workbench.documents.close(document);

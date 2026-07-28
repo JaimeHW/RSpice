@@ -1135,7 +1135,8 @@ mod tests {
     use crate::product::{ObjectRef, ProductObjectKind};
 
     use super::*;
-    use crate::workbench::{capability_workflow::CapabilityWorkflowId, surface_catalog::SurfaceId};
+    use crate::workbench::surface_catalog::SurfaceId;
+    use crate::workbench::workflows::capability_workflow::CapabilityWorkflowId;
 
     fn object_route(surface_id: SurfaceId) -> SurfaceRoute {
         let object_ref = ObjectRef::new(

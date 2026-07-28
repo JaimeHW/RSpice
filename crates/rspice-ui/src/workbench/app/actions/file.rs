@@ -4,13 +4,13 @@ use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp}
 impl RSpiceApp {
     /// Internal: Actually create a new schematic (after confirmation)
     pub(in crate::workbench::app) fn do_file_new(&mut self) {
-        crate::workbench::file_actions::action_file_new(&mut self.state);
+        crate::workbench::workflows::file_actions::action_file_new(&mut self.state);
     }
 
     /// Internal: Actually open a schematic (after confirmation)
     pub(in crate::workbench::app) fn do_file_open(&mut self) {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-        crate::workbench::file_actions::action_file_open_with_io(state, io);
+        crate::workbench::workflows::file_actions::action_file_open_with_io(state, io);
     }
 
     /// Handle user response to save confirmation dialog
@@ -75,19 +75,19 @@ impl RSpiceApp {
                     )
                 );
                 let outcome = if project_action {
-                    crate::workbench::project_workflow::save_all_for_continuation(&mut self.state)
+                    crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state)
                 } else if self.state.project_lifecycle.project_open {
-                    crate::workbench::project_workflow::save_active_for_continuation(
+                    crate::workbench::workflows::project_workflow::save_active_for_continuation(
                         &mut self.state,
                     )
                 } else if self.action_file_save() {
                     if self.state.schematic.is_dirty {
-                        crate::workbench::project_workflow::SaveRequestOutcome::CopyOnly
+                        crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly
                     } else {
-                        crate::workbench::project_workflow::SaveRequestOutcome::CanonicalComplete
+                        crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete
                     }
                 } else {
-                    crate::workbench::project_workflow::SaveRequestOutcome::Cancelled
+                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
                 };
                 if outcome.authorizes_immediate_destructive_action() {
                     if let Some(action) = pending {
@@ -101,7 +101,7 @@ impl RSpiceApp {
                     return;
                 }
                 match outcome {
-                    crate::workbench::project_workflow::SaveRequestOutcome::CanonicalPending(
+                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
                         transaction,
                     ) => {
                         if let Some(action) = pending {
@@ -114,7 +114,7 @@ impl RSpiceApp {
                             );
                         }
                     }
-                    crate::workbench::project_workflow::SaveRequestOutcome::CopyOnly => {
+                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
                         self.state.push_user_message(
                             crate::diagnostics::ConsoleMessage::warning(
                                 "Downloaded a copy, but no canonical save completed. The pending action was not authorized and unsaved work remains open."
@@ -127,10 +127,10 @@ impl RSpiceApp {
                             pending_recent_kind;
                         self.state.dialogs.confirmation_dialog.pending_example = pending_example;
                     }
-                    crate::workbench::project_workflow::SaveRequestOutcome::CopyPending
-                    | crate::workbench::project_workflow::SaveRequestOutcome::Cancelled
-                    | crate::workbench::project_workflow::SaveRequestOutcome::Failed(_) => {}
-                    crate::workbench::project_workflow::SaveRequestOutcome::CanonicalComplete => {
+                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
+                    | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
+                    | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Failed(_) => {}
+                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                         unreachable!("canonical completion returned through the authorization gate")
                     }
                 }
@@ -141,7 +141,7 @@ impl RSpiceApp {
     #[cfg(target_arch = "wasm32")]
     pub(in crate::workbench::app) fn handle_save_continuation_event(
         &mut self,
-        event: crate::workbench::project_workflow::SaveContinuationEvent,
+        event: crate::workbench::workflows::project_workflow::SaveContinuationEvent,
     ) {
         if self.handle_check_and_save_continuation(&event) {
             return;
@@ -186,12 +186,12 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench::app) fn begin_close_project_after_save(&mut self) {
-        match crate::workbench::project_workflow::save_all_for_continuation(&mut self.state) {
-            crate::workbench::project_workflow::SaveRequestOutcome::CanonicalComplete => {
+        match crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state) {
+            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                 self.state.dialogs.project_review_dialog.close();
-                crate::workbench::project_workflow::close_project_discard(&mut self.state);
+                crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
             }
-            crate::workbench::project_workflow::SaveRequestOutcome::CanonicalPending(
+            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
                 transaction,
             ) => {
                 self.state.dialogs.project_review_dialog.close();
@@ -203,16 +203,16 @@ impl RSpiceApp {
                     None,
                 );
             }
-            crate::workbench::project_workflow::SaveRequestOutcome::CopyOnly => {
+            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
                 self.state.push_user_message(
                     crate::diagnostics::ConsoleMessage::warning(
                         "A project copy was downloaded, but canonical Save all did not complete. The project remains open with its working changes.",
                     ),
                 );
             }
-            crate::workbench::project_workflow::SaveRequestOutcome::CopyPending
-            | crate::workbench::project_workflow::SaveRequestOutcome::Cancelled
-            | crate::workbench::project_workflow::SaveRequestOutcome::Failed(_) => {}
+            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
+            | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
+            | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Failed(_) => {}
         }
     }
 
@@ -229,7 +229,7 @@ impl RSpiceApp {
             path,
             recent_kind,
             example,
-            crate::workbench::project_workflow::open_project,
+            crate::workbench::workflows::project_workflow::open_project,
         );
     }
 
@@ -243,7 +243,7 @@ impl RSpiceApp {
     ) {
         match action {
             ConfirmationAction::ProjectNew => {
-                crate::workbench::project_workflow::create_new_project(&mut self.state);
+                crate::workbench::workflows::project_workflow::create_new_project(&mut self.state);
             }
             ConfirmationAction::ProjectOpen => {
                 let opened = open_project(&mut self.state);
@@ -255,7 +255,7 @@ impl RSpiceApp {
                 }
             }
             ConfirmationAction::CloseProject => {
-                crate::workbench::project_workflow::close_project_discard(&mut self.state);
+                crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
             }
             ConfirmationAction::FileNew => self.do_file_new(),
             ConfirmationAction::FileOpen => self.do_file_open(),
@@ -274,7 +274,7 @@ impl RSpiceApp {
                 }
             }
             ConfirmationAction::ImportNetlist => {
-                crate::workbench::netlist_workflow::import_netlist(&mut self.state);
+                crate::workbench::workflows::netlist_workflow::import_netlist(&mut self.state);
             }
             ConfirmationAction::Exit => {
                 // Signal exit request - this will be handled by the frame update
@@ -320,7 +320,7 @@ impl RSpiceApp {
             RecentKind::Project => {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let opened = crate::workbench::project_workflow::load_project_from_path(
+                    let opened = crate::workbench::workflows::project_workflow::load_project_from_path(
                         &mut self.state,
                         &path,
                     );
@@ -339,7 +339,7 @@ impl RSpiceApp {
             }
             RecentKind::Schematic => {
                 let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-                crate::workbench::file_workflow::load_schematic_from_path_with_io(state, &path, io)
+                crate::workbench::workflows::file_workflow::load_schematic_from_path_with_io(state, &path, io)
             }
         };
 
@@ -352,10 +352,10 @@ impl RSpiceApp {
 
     pub(in crate::workbench::app) fn action_file_save(&mut self) -> bool {
         if self.state.project_lifecycle.project_open {
-            return crate::workbench::project_workflow::save_project(&mut self.state);
+            return crate::workbench::workflows::project_workflow::save_project(&mut self.state);
         }
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-        crate::workbench::file_actions::action_file_save_with_io(state, io)
+        crate::workbench::workflows::file_actions::action_file_save_with_io(state, io)
     }
 }
 
@@ -365,8 +365,8 @@ mod tests {
     use crate::io::{SchematicIoError, WaveformDataset};
     use crate::simulation::plan::AnalysisKind;
     use crate::state::{Component, ComponentType, Point, SchematicState};
-    use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-    use crate::workbench::file_workflow::FileWorkflowIo;
+    use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+    use crate::workbench::workflows::file_workflow::FileWorkflowIo;
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
@@ -821,7 +821,7 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             0
         );
-        assert!(crate::workbench::project_workflow::request_close_project(
+        assert!(crate::workbench::workflows::project_workflow::request_close_project(
             &mut state
         ));
         assert!(matches!(
@@ -838,7 +838,7 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             2
         );
-        assert!(crate::workbench::project_workflow::request_close_project(
+        assert!(crate::workbench::workflows::project_workflow::request_close_project(
             &mut state
         ));
         assert!(matches!(
@@ -848,7 +848,7 @@ mod tests {
 
         let project_id = state.workspace.project.id();
         state.simulation.is_running = true;
-        assert!(!crate::workbench::project_workflow::close_project_discard(
+        assert!(!crate::workbench::workflows::project_workflow::close_project_discard(
             &mut state
         ));
         assert!(state.project_lifecycle.project_open);
@@ -889,7 +889,7 @@ mod tests {
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(3, 8));
         let close_ac_id = insert_ac_analysis(&mut state);
-        crate::workbench::project_workflow::request_close_project(&mut state);
+        crate::workbench::workflows::project_workflow::request_close_project(&mut state);
         let mut app = test_app_with_file_io(
             state,
             TestFileWorkflowIo {
@@ -946,7 +946,7 @@ mod tests {
         state
             .schematic
             .add_component(ComponentType::Inductor, Point::new(6, 10));
-        crate::workbench::project_workflow::request_close_project(&mut state);
+        crate::workbench::workflows::project_workflow::request_close_project(&mut state);
         std::fs::write(&path, b"external owner replaced this project snapshot")
             .expect("simulate external replacement");
         let mut app = test_app_with_file_io(

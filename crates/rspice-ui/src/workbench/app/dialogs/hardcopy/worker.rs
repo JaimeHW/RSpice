@@ -13,7 +13,7 @@ use crate::hardcopy::{
     MAX_PREVIEW_PAGES, OutputFormat,
 };
 use crate::product::ContentDigest;
-use crate::workbench::export_workflow::deterministic_stored_zip;
+use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
 use crate::workbench::hardcopy_adapters::render::{
     HardcopyRenderer, HardcopySceneMetadata, MAX_ARTIFACT_BYTES, MAX_PREVIEW_WORKER_MANIFEST_BYTES,
     MAX_PREVIEW_WORKER_RGBA_BYTES, MAX_PUBLICATION_BYTES, MAX_PUBLICATION_WORKER_MANIFEST_BYTES,

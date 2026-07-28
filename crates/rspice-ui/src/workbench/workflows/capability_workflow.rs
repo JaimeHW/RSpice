@@ -8,7 +8,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::surface_catalog::SurfaceId;
+use crate::workbench::surface_catalog::SurfaceId;
 
 /// Immutable metadata for one deep-linked capability workflow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

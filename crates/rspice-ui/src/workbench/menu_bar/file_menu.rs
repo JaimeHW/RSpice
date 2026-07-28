@@ -2,8 +2,8 @@
 //! exports and application exit. Rendering lives in the workbench title bar.
 
 use crate::workbench::app::{AppState, ConfirmationAction};
-use crate::workbench::export_workflow::ExportWorkflowIo;
-use crate::workbench::file_workflow::FileWorkflowIo;
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
+use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 /// Every action reachable from the File menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,40 +35,40 @@ pub(crate) fn dispatch_file_menu_action(
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectNew) {
                 return;
             }
-            crate::workbench::project_workflow::create_new_project(state);
+            crate::workbench::workflows::project_workflow::create_new_project(state);
         }
         FileMenuAction::OpenProject => {
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectOpen) {
                 return;
             }
-            crate::workbench::project_workflow::open_project(state);
+            crate::workbench::workflows::project_workflow::open_project(state);
         }
         FileMenuAction::SaveProjectAs => {
-            crate::workbench::project_workflow::save_project_as(state);
+            crate::workbench::workflows::project_workflow::save_project_as(state);
         }
         FileMenuAction::SaveAll => {
-            crate::workbench::project_workflow::save_all(state);
+            crate::workbench::workflows::project_workflow::save_all(state);
         }
         FileMenuAction::RevertActiveDocument => {
-            crate::workbench::project_workflow::request_revert_active_document(state);
+            crate::workbench::workflows::project_workflow::request_revert_active_document(state);
         }
         FileMenuAction::CloseActiveDocument => {
-            crate::workbench::project_workflow::close_active_document(state);
+            crate::workbench::workflows::project_workflow::close_active_document(state);
         }
         FileMenuAction::CloseProject => {
-            crate::workbench::project_workflow::request_close_project(state);
+            crate::workbench::workflows::project_workflow::request_close_project(state);
         }
         FileMenuAction::Open => {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen) {
                 return;
             }
-            crate::workbench::file_actions::action_file_open_with_io(state, file_workflow_io);
+            crate::workbench::workflows::file_actions::action_file_open_with_io(state, file_workflow_io);
         }
         FileMenuAction::Save => {
             if state.project_lifecycle.project_open {
-                let _ = crate::workbench::project_workflow::save_project(state);
+                let _ = crate::workbench::workflows::project_workflow::save_project(state);
             } else {
-                let _ = crate::workbench::file_actions::action_file_save_with_io(
+                let _ = crate::workbench::workflows::file_actions::action_file_save_with_io(
                     state,
                     file_workflow_io,
                 );
@@ -78,7 +78,7 @@ pub(crate) fn dispatch_file_menu_action(
             if require_save_confirmation_if_dirty(state, ConfirmationAction::ImportNetlist) {
                 return;
             }
-            crate::workbench::netlist_workflow::import_netlist(state);
+            crate::workbench::workflows::netlist_workflow::import_netlist(state);
         }
         FileMenuAction::ExportSvg => {
             super::export_actions::action_export_svg_with_io(state, export_workflow_io)

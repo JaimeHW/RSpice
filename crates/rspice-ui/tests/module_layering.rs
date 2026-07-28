@@ -396,7 +396,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "surface_catalog",
     "availability",
     "navigation",
-    "capability_workflow",
+    "workflows/capability_workflow",
     "logging",
     "layout",
     "shortcuts",
@@ -433,12 +433,12 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // that lists it, and it loads a circuit into `AppState`.
     "examples",
     // Workflows that mutate application state.
-    "file_workflow",
-    "project_workflow",
-    "export_workflow",
-    "netlist_workflow",
+    "workflows/file_workflow",
+    "workflows/project_workflow",
+    "workflows/export_workflow",
+    "workflows/netlist_workflow",
     "shortcut_profile_workflow",
-    "file_actions",
+    "workflows/file_actions",
     // Command dispatch.
     "commands",
     // Chrome, docks, surfaces, and the rest of the presentation layer.
@@ -479,21 +479,21 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // `app` is the application root and the application data at once. Retired
     // by splitting `AppState` (data, low) from `RSpiceApp` (frame loop, top).
     ("app", "commands", 48),
-    ("app", "project_workflow", 46),
+    ("app", "workflows/project_workflow", 46),
     ("app", "panels", 30),
     ("documents/result_document", "app", 23),
     ("lifecycle/project_lifecycle", "app", 15),
-    ("app", "export_workflow", 14),
+    ("app", "workflows/export_workflow", 14),
     ("app", "chrome", 12),
     ("app", "menu_bar", 12),
-    ("app", "file_workflow", 9),
+    ("app", "workflows/file_workflow", 9),
     ("app", "browser/navigation", 7),
-    ("app", "file_actions", 6),
+    ("app", "workflows/file_actions", 6),
     ("documents/netlist_document", "app", 6),
     ("lifecycle/recovery", "app", 6),
     ("app", "simulation_analysis_tabs", 3),
     ("app", "browser/accessibility", 2),
-    ("app", "netlist_workflow", 2),
+    ("app", "workflows/netlist_workflow", 2),
     ("documents/model_editor", "app", 2),
     ("app", "browser/download", 1),
     ("app", "calculator_tool", 1),
@@ -522,19 +522,19 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("surfaces", "preflight", 1),
     // Browser import/download sitting above what needs it.
     ("documents/code_workspace", "browser/file_import", 7),
-    ("export_workflow", "browser/download", 3),
-    ("project_workflow", "browser/download", 1),
+    ("workflows/export_workflow", "browser/download", 3),
+    ("workflows/project_workflow", "browser/download", 1),
     ("shortcut_artifacts", "browser/download", 1),
     ("surfaces", "browser/download", 1),
     // Recovery and checkpointing reaching sideways into the workflows.
-    ("lifecycle/recovery", "file_workflow", 6),
-    ("lifecycle/recovery", "project_workflow", 2),
+    ("lifecycle/recovery", "workflows/file_workflow", 6),
+    ("lifecycle/recovery", "workflows/project_workflow", 2),
     ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
     ("shortcut_artifacts", "shortcut_profile_workflow", 4),
     ("browser/file_import", "shortcut_profile_workflow", 1),
     ("shortcut_library_persistence", "shortcut_artifacts", 1),
-    ("documents/code_workspace", "export_workflow", 1),
-    ("documents/netlist_document", "netlist_workflow", 1),
+    ("documents/code_workspace", "workflows/export_workflow", 1),
+    ("documents/netlist_document", "workflows/netlist_workflow", 1),
     // Calling the painter instead of setting state the painter reads. These
     // were invisible until the frame renderer moved out of `workbench.rs`:
     // as free functions on the module root they belonged to no submodule, so
@@ -576,16 +576,14 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("lifecycle/session", "documents/netlist_document", 1),
     ("lifecycle/session", "cross_probe", 1),
     // Remaining short-form edges.
-    ("availability", "capability_workflow", 1),
     ("feature_availability", "design_system", 1),
-    ("lifecycle/recovery_checkpoint", "file_workflow", 6),
+    ("lifecycle/recovery_checkpoint", "workflows/file_workflow", 6),
     ("hardcopy_adapters/sources", "documents/visualization_studio", 1),
     ("surface_route", "surface_catalog", 2),
-    ("surface_route", "capability_workflow", 1),
+    ("surface_route", "workflows/capability_workflow", 1),
     ("surfaces", "documents/visualization_studio", 1),
     ("docks", "documents/visualization_studio", 1),
     // Contracts naming things above them.
-    ("state", "capability_workflow", 1),
     ("state", "simulation_analysis_tabs", 1),
 ];
 

@@ -368,7 +368,7 @@ pub(crate) fn suggested_schematic_save_path(default_name: Option<&str>) -> PathB
             .filter(|name| !name.trim().is_empty())
             .unwrap_or("untitled.rsch"),
     );
-    crate::workbench::file_actions::ensure_file_extension(&mut path, "rsch");
+    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "rsch");
     path
 }
 

@@ -12,7 +12,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::product::{ContentDigest, RunId, SimulationPlanId};
 use crate::state::{AnalysisResultSourceDomain, ProjectSourceLanguage, SimulationRun, SpecEntry};
 use crate::workbench::RSpiceApp;
-use crate::workbench::export_workflow::SaveDialogConfig;
+use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
 use super::{
     AutomationDispatchSnapshot, AutomationExecutionState, AutomationValidationReceipt,

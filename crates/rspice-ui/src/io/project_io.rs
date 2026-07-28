@@ -3780,7 +3780,7 @@ pub(crate) fn suggested_project_save_path(default_name: Option<&str>) -> PathBuf
             .filter(|name| !name.trim().is_empty())
             .unwrap_or("untitled.rspiceproj"),
     );
-    crate::workbench::file_actions::ensure_file_extension(&mut path, "rspiceproj");
+    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "rspiceproj");
     path
 }
 

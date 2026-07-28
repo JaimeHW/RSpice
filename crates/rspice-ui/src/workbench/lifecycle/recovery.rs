@@ -24,7 +24,7 @@ use crate::state::{
     View, ViewType,
 };
 use crate::workbench::app::{AppState, RSpiceApp, RecentKind};
-use crate::workbench::file_workflow::FileWorkflowIo;
+use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 use crate::workbench::state::{LocalSafeModeOptions, Workspace};
 
@@ -450,7 +450,7 @@ fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> 
     #[cfg(not(target_arch = "wasm32"))]
     {
         let expected =
-            crate::workbench::file_workflow::autosave_checkpoint_path(&candidate.original);
+            crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&candidate.original);
         if expected != candidate.checkpoint {
             return Err(
                 "Recovery checkpoint identity no longer matches its saved source".to_owned(),
@@ -855,7 +855,7 @@ pub(crate) fn start_local_safe_mode(
         app.state
             .workbench
             .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
-        if !crate::workbench::project_workflow::close_project_discard(&mut app.state) {
+        if !crate::workbench::workflows::project_workflow::close_project_discard(&mut app.state) {
             return Err("The current project could not be isolated safely".to_owned());
         }
     } else if options.isolate_prior_documents {
@@ -1223,7 +1223,7 @@ mod tests {
         let root = unique_temp_dir("recovery-project-boundary");
         let project_path = root.join("guard.rspiceproj");
         let mut state = AppState::default();
-        assert!(crate::workbench::project_workflow::save_project_to_path(
+        assert!(crate::workbench::workflows::project_workflow::save_project_to_path(
             &mut state,
             &project_path
         ));
@@ -1260,13 +1260,13 @@ mod tests {
         let root = unique_temp_dir("recovery-discovery");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
-        let checkpoint = crate::workbench::file_workflow::autosave_checkpoint_path(&source);
+        let checkpoint = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&checkpoint, "not schematic json").expect("write malformed checkpoint");
 
         let candidates = discover_candidates(
             &[source.clone()],
             &[],
-            &crate::workbench::file_workflow::NativeFileWorkflowIo,
+            &crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
         );
         assert_eq!(candidates.len(), 1);
         assert!(matches!(
@@ -1283,7 +1283,7 @@ mod tests {
         let root = unique_temp_dir("recovery-generations");
         let source = root.join("design.rsch");
         crate::io::save_schematic(&SchematicState::default(), &source).expect("save source");
-        let legacy = crate::workbench::file_workflow::autosave_checkpoint_path(&source);
+        let legacy = crate::workbench::workflows::file_workflow::autosave_checkpoint_path(&source);
         std::fs::write(&legacy, "not schematic json").expect("write malformed legacy point");
         let mut generated_name = legacy.as_os_str().to_owned();
         generated_name.push(format!(".generation-{}", uuid::Uuid::new_v4()));
@@ -1297,7 +1297,7 @@ mod tests {
         let candidates = discover_candidates(
             &[source.clone()],
             &[source],
-            &crate::workbench::file_workflow::NativeFileWorkflowIo,
+            &crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
         );
 
         assert_eq!(candidates.len(), 2);

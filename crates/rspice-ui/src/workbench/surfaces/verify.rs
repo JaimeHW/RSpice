@@ -3958,7 +3958,7 @@ fn regression_ci_documents(
 }
 
 fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) {
-    use crate::workbench::export_workflow::SaveDialogConfig;
+    use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
     let result: Result<Option<(std::path::PathBuf, bool)>, String> = (|| {
         let Some(path) = app.export_workflow_io.show_save_dialog(SaveDialogConfig {
@@ -3970,7 +3970,7 @@ fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) {
         else {
             return Ok(None);
         };
-        let package = crate::workbench::export_workflow::deterministic_stored_zip(&[
+        let package = crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
             ("rspice-golden-regression.xml", junit.as_bytes()),
             ("rspice-golden-regression.tap", tap.as_bytes()),
         ])?;

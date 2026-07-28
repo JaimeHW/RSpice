@@ -234,8 +234,8 @@ mod tests {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::workbench::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::workbench::export_workflow::NativeExportWorkflowIo),
+            file_workflow_io: Box::new(crate::workbench::workflows::file_workflow::NativeFileWorkflowIo),
+            export_workflow_io: Box::new(crate::workbench::workflows::export_workflow::NativeExportWorkflowIo),
         }
     }
 

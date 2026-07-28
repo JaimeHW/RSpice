@@ -1186,7 +1186,7 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
         }
     };
     let default_name = format!("rspice-run-{sequence}-manifest.json");
-    let config = crate::workbench::export_workflow::SaveDialogConfig {
+    let config = crate::workbench::workflows::export_workflow::SaveDialogConfig {
         title: "Export Run Manifest",
         default_name: &default_name,
         filter_name: "RSpice Run Manifest",
@@ -1204,13 +1204,13 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
     }) else {
         return;
     };
-    crate::workbench::file_actions::ensure_file_extension(&mut path, "json");
+    crate::workbench::workflows::file_actions::ensure_file_extension(&mut path, "json");
     let result = io
         .observe_destination(&path)
         .and_then(|destination| io.write_text_file_observed(&destination, &payload));
     match result {
         Ok(()) => app.state.push_user_message(ConsoleMessage::info(
-            crate::workbench::export_workflow::export_completion_message(
+            crate::workbench::workflows::export_workflow::export_completion_message(
                 "Run manifest",
                 &path,
                 None,

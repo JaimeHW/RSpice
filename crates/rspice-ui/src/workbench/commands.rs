@@ -2016,7 +2016,7 @@ impl Command {
             }
             Self::FindCodeDocument => app.state.ui.netlist.find.open = true,
             Self::ValidateCodeDocument => {
-                crate::workbench::netlist_workflow::validate_visible_netlist_source(app);
+                crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
             }
             Self::CompareGeneratedRevisions => {
                 app.state.ui.netlist.comparison_dialog.open = true;

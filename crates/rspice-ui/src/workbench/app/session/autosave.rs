@@ -15,7 +15,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::file_workflow;
+use crate::workbench::workflows::file_workflow;
 
 impl RSpiceApp {
     /// Write a checkpoint when the interval has elapsed on a dirty,

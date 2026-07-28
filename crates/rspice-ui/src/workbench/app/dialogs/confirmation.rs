@@ -29,7 +29,7 @@ impl RSpiceApp {
             return;
         }
         let Some(message) =
-            crate::workbench::project_workflow::browser_file_operation_label(&self.state)
+            crate::workbench::workflows::project_workflow::browser_file_operation_label(&self.state)
         else {
             return;
         };
@@ -62,7 +62,7 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            crate::workbench::project_workflow::cancel_pending_browser_file_operation(
+            crate::workbench::workflows::project_workflow::cancel_pending_browser_file_operation(
                 &mut self.state,
             );
         }
@@ -145,7 +145,7 @@ impl RSpiceApp {
                 match choice {
                     DialogChoice::Primary => {
                         self.state.dialogs.project_review_dialog.close();
-                        crate::workbench::project_workflow::confirm_revert_active_document(
+                        crate::workbench::workflows::project_workflow::confirm_revert_active_document(
                             &mut self.state,
                             &token,
                         );
@@ -198,11 +198,11 @@ impl RSpiceApp {
                     }
                     DialogChoice::Primary => {
                         self.state.dialogs.project_review_dialog.close();
-                        crate::workbench::project_workflow::close_project_discard(&mut self.state);
+                        crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
                     }
                     DialogChoice::Secondary => {
                         self.state.dialogs.project_review_dialog.close();
-                        crate::workbench::project_workflow::close_project_discard(&mut self.state);
+                        crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
                     }
                     DialogChoice::Ghost | DialogChoice::Cancelled => {
                         self.state.dialogs.project_review_dialog.close();

@@ -880,7 +880,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             open_ownership_dialog(&mut app.state, strategy);
         }
         Some(NetlistToolbarAction::Validate) => {
-            crate::workbench::netlist_workflow::validate_visible_netlist_source(app);
+            crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
         }
         Some(NetlistToolbarAction::Save) => {
             app.state.ui.netlist.save_dialog.open = true;
@@ -1368,14 +1368,14 @@ fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         });
     match choice {
         DialogChoice::Primary => {
-            if crate::workbench::netlist_workflow::save_owned_netlist_source(
+            if crate::workbench::workflows::netlist_workflow::save_owned_netlist_source(
                 &mut app.state,
                 &app.simulation_controller,
                 app.export_workflow_io.as_ref(),
                 false,
                 &dialog.message,
             ) {
-                crate::workbench::netlist_workflow::validate_visible_netlist_source(app);
+                crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
                 dialog.open = false;
                 dialog.error = None;
                 dialog.message = "Update owned SPICE source".to_owned();

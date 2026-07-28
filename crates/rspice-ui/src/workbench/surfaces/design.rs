@@ -631,7 +631,7 @@ mod tests {
     #[test]
     fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
         let mut app = RSpiceApp::test_instance();
-        assert!(crate::workbench::netlist_workflow::apply_imported_netlist(
+        assert!(crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
             &mut app.state,
             "V1 out 0 1\n.op\n.end\n".to_owned(),
             None,
