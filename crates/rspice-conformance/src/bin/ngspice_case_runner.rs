@@ -27,7 +27,7 @@
 //! `--test-dir`, `--circuit`, and `--result` are required; the rest default
 //! to [`TestRunnerConfig::default`].
 
-use rspice_core::testing::{TestRunner, TestRunnerConfig, encode_test_result};
+use rspice_conformance::testing::{TestRunner, TestRunnerConfig, encode_test_result};
 use std::path::PathBuf;
 
 fn main() {

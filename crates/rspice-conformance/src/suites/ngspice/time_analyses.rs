@@ -51,7 +51,16 @@ impl TestRunner {
                 .max_by_key(|series| series.x.len())
             && series.x.len() >= 2
         {
-            engine.config.locked_time_grid = Some(std::sync::Arc::new(series.x.clone()));
+            if let Err(error) = engine.set_locked_time_grid(std::sync::Arc::new(series.x.clone())) {
+                return TestResult {
+                    name: name.to_string(),
+                    passed: false,
+                    error: Some(format!("Invalid locked replay grid: {error}")),
+                    mismatches: Vec::new(),
+                    duration_ms: start.elapsed().as_millis(),
+                    analysis_type: Some("Transient".to_string()),
+                };
+            }
         }
         let max_step =
             tmax.unwrap_or_else(|| Self::default_transient_max_step(tstep, tstop, tstart));
