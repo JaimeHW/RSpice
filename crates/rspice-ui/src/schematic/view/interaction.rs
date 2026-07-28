@@ -587,7 +587,7 @@ fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Con
         Some(crate::state::RequirementTarget::ProjectSpecification(reference)) => {
             let reference = reference.to_owned();
             state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
-            crate::workbench::result_document::open_specification_editor(state);
+            crate::workbench::documents::result_document::open_specification_editor(state);
             state
                 .workbench
                 .activate(crate::workbench::state::Workspace::Results);
@@ -2255,7 +2255,7 @@ mod tests {
         );
         assert_eq!(
             state.ui.code_workspace.page,
-            crate::workbench::code_workspace::CodeWorkspacePage::VerilogA
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA
         );
     }
 

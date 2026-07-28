@@ -1,7 +1,7 @@
 //! Netlist Line Classification
 //!
 //! Classifies SPICE deck lines for syntax highlighting in the netlist view
-//! (`crate::workbench::netlist_document`), which maps each [`LineType`] onto the
+//! (`crate::workbench::documents::netlist_document`), which maps each [`LineType`] onto the
 //! active design tokens.
 
 /// Type of netlist line for syntax highlighting

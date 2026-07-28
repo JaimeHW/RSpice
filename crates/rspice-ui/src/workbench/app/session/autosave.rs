@@ -11,11 +11,11 @@
 use egui::Context;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::file_workflow;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::file_workflow;
 
 impl RSpiceApp {
     /// Write a checkpoint when the interval has elapsed on a dirty,
@@ -50,7 +50,8 @@ impl RSpiceApp {
             return;
         }
 
-        match crate::workbench::recovery_checkpoint::write_checkpoint(&path, &self.state.schematic) {
+        match crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(&path, &self.state.schematic)
+        {
             Ok(checkpoint) => {
                 self.state.log_buffer.log(
                     crate::diagnostics::LogSeverity::Debug,
@@ -112,7 +113,7 @@ impl RSpiceApp {
         match choice {
             DialogChoice::None => {}
             DialogChoice::Primary => {
-                let restored = crate::workbench::recovery_checkpoint::read_bound_checkpoint(
+                let restored = crate::workbench::lifecycle::recovery_checkpoint::read_bound_checkpoint(
                     &path,
                     &checkpoint,
                     &candidate.binding,
@@ -144,7 +145,7 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost => {
                 if can_discard {
-                    match crate::workbench::recovery_checkpoint::discard_bound_checkpoint(
+                    match crate::workbench::lifecycle::recovery_checkpoint::discard_bound_checkpoint(
                         &path,
                         &checkpoint,
                         &candidate.binding,

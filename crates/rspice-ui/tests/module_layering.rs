@@ -171,8 +171,8 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
-        let entries = fs::read_dir(&dir)
-            .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()));
+        let entries =
+            fs::read_dir(&dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()));
         for entry in entries {
             let path = entry.expect("directory entry").path();
             if path.is_dir() {
@@ -390,6 +390,7 @@ fn module_references_respect_the_layer_order() {
 const WORKBENCH_LAYERS: &[&str] = &[
     // Contracts, routes, and policy. These describe the shell without
     // operating it.
+    "platform",
     "state",
     "surface_route",
     "surface_catalog",
@@ -403,27 +404,27 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "feature_availability",
     "feature_availability_data",
     "design_system",
-    "visualization_family",
+    "documents/visualization_family",
     // Document engines and the interaction session they hang off.
-    "session",
-    "netlist_document",
-    "result_document",
-    "code_workspace",
-    "model_editor",
-    "model_correlation",
-    "window_session",
+    "lifecycle/session",
+    "documents/netlist_document",
+    "documents/result_document",
+    "documents/code_workspace",
+    "documents/model_editor",
+    "documents/model_correlation",
+    "lifecycle/window_session",
     // Import, persistence, checkpointing, and recovery.
-    "browser_file_import",
-    "project_lifecycle",
-    "project_checkpoint",
-    "recovery",
-    "recovery_checkpoint",
+    "browser/file_import",
+    "lifecycle/project_lifecycle",
+    "lifecycle/project_checkpoint",
+    "lifecycle/recovery",
+    "lifecycle/recovery_checkpoint",
     "shortcut_library_persistence",
     "shortcut_artifacts",
     // Hardcopy adapters: resolve sources, then render, then print.
-    "hardcopy_sources",
-    "hardcopy_render",
-    "hardcopy_print",
+    "hardcopy_adapters/sources",
+    "hardcopy_adapters/render",
+    "hardcopy_adapters/print",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",
@@ -446,7 +447,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "docks",
     "menu_bar",
     "surfaces",
-    "visualization_studio",
+    "documents/visualization_studio",
     "notification_center",
     "project_launcher",
     "specialist_tool_browser",
@@ -456,9 +457,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "cross_probe",
     "account_organization",
     "simulation_analysis_tabs",
-    "browser_navigation",
-    "browser_download",
-    "browser_accessibility",
+    "browser/navigation",
+    "browser/download",
+    "browser/accessibility",
+    // The frame is painted last and may reach anything below it.
+    "frame",
 ];
 
 /// Order violations inside `workbench` today, with exact counts.
@@ -478,37 +481,37 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "commands", 48),
     ("app", "project_workflow", 46),
     ("app", "panels", 30),
-    ("result_document", "app", 23),
-    ("project_lifecycle", "app", 15),
+    ("documents/result_document", "app", 23),
+    ("lifecycle/project_lifecycle", "app", 15),
     ("app", "export_workflow", 14),
     ("app", "chrome", 12),
     ("app", "menu_bar", 12),
     ("app", "file_workflow", 9),
-    ("app", "browser_navigation", 7),
+    ("app", "browser/navigation", 7),
     ("app", "file_actions", 6),
-    ("netlist_document", "app", 6),
-    ("recovery", "app", 6),
+    ("documents/netlist_document", "app", 6),
+    ("lifecycle/recovery", "app", 6),
     ("app", "simulation_analysis_tabs", 3),
-    ("app", "browser_accessibility", 2),
+    ("app", "browser/accessibility", 2),
     ("app", "netlist_workflow", 2),
-    ("model_editor", "app", 2),
-    ("app", "browser_download", 1),
+    ("documents/model_editor", "app", 2),
+    ("app", "browser/download", 1),
     ("app", "calculator_tool", 1),
     ("app", "cross_probe", 1),
-    ("browser_file_import", "app", 1),
-    ("hardcopy_sources", "app", 1),
-    ("project_checkpoint", "app", 1),
+    ("browser/file_import", "app", 1),
+    ("hardcopy_adapters/sources", "app", 1),
+    ("lifecycle/project_checkpoint", "app", 1),
     // Not new coupling: these were written `use crate::workbench::{A, B};`,
     // and the first version of this table could not read a brace group, so
     // it scored the whole import as zero edges. Expanding groups is what
     // surfaced them.
-    ("code_workspace", "app", 2),
+    ("documents/code_workspace", "app", 2),
     ("feature_availability", "app", 1),
     // `commands` is a dispatcher and a command vocabulary in one file.
     // Retired by dropping the vocabulary to `commands::registry` at rank 0.
     ("shortcut_artifacts", "commands", 11),
     ("preferences", "commands", 3),
-    ("result_document", "commands", 3),
+    ("documents/result_document", "commands", 3),
     ("shortcut_profile_workflow", "commands", 2),
     ("shortcuts", "commands", 2),
     ("shortcut_library_persistence", "commands", 1),
@@ -518,24 +521,72 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("chrome", "preflight", 1),
     ("surfaces", "preflight", 1),
     // Browser import/download sitting above what needs it.
-    ("code_workspace", "browser_file_import", 7),
-    ("export_workflow", "browser_download", 3),
-    ("project_workflow", "browser_download", 1),
-    ("shortcut_artifacts", "browser_download", 1),
-    ("surfaces", "browser_download", 1),
+    ("documents/code_workspace", "browser/file_import", 7),
+    ("export_workflow", "browser/download", 3),
+    ("project_workflow", "browser/download", 1),
+    ("shortcut_artifacts", "browser/download", 1),
+    ("surfaces", "browser/download", 1),
     // Recovery and checkpointing reaching sideways into the workflows.
-    ("recovery", "file_workflow", 6),
-    ("recovery", "project_workflow", 2),
-    ("recovery", "recovery_checkpoint", 2),
+    ("lifecycle/recovery", "file_workflow", 6),
+    ("lifecycle/recovery", "project_workflow", 2),
+    ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
     ("shortcut_artifacts", "shortcut_profile_workflow", 4),
-    ("browser_file_import", "shortcut_profile_workflow", 1),
+    ("browser/file_import", "shortcut_profile_workflow", 1),
     ("shortcut_library_persistence", "shortcut_artifacts", 1),
-    ("code_workspace", "export_workflow", 1),
-    ("netlist_document", "netlist_workflow", 1),
+    ("documents/code_workspace", "export_workflow", 1),
+    ("documents/netlist_document", "netlist_workflow", 1),
+    // Calling the painter instead of setting state the painter reads. These
+    // were invisible until the frame renderer moved out of `workbench.rs`:
+    // as free functions on the module root they belonged to no submodule, so
+    // nothing scored them. Retired by having the full-screen and secondary
+    // -window transitions write `WorkbenchState` and letting `frame` observe
+    // it, which is what every other chrome transition already does.
+    ("app", "frame", 5),
+    ("commands", "frame", 1),
+    // Edges that were written `super::x` instead of `crate::workbench::x`.
+    // The first version of this table only read the long form, so 310
+    // references — about 15% of the shell's interior — were scored as zero.
+    // These are not new coupling; they are the coupling that short-form
+    // imports were hiding.
+    //
+    // `state` accounts for ten of them, and they are the interesting ones:
+    // the shell's own persisted state reaches up into routing, presentation,
+    // and the document engines. That is the same inversion the top-level
+    // `state -> *` entries describe, one layer down.
+    ("state", "availability", 6),
+    ("state", "navigation", 4),
+    ("state", "surface_catalog", 2),
+    ("state", "surface_route", 1),
+    ("state", "preferences", 1),
+    ("state", "documents/model_editor", 2),
+    ("state", "documents/model_correlation", 2),
+    ("state", "lifecycle/window_session", 2),
+    ("state", "lifecycle/recovery", 2),
+    ("state", "documents/visualization_studio", 7),
+    // Dispatch reaching the surfaces and tools it should be routing to.
+    ("commands", "documents/visualization_studio", 6),
+    ("commands", "surfaces", 4),
+    ("commands", "account_organization", 1),
+    ("commands", "jobs_manager", 1),
+    ("commands", "preflight", 1),
+    ("commands", "specialist_tool_browser", 1),
+    // Session state naming the document engines whose state it aggregates.
+    ("lifecycle/session", "documents/result_document", 2),
+    ("lifecycle/session", "documents/code_workspace", 1),
+    ("lifecycle/session", "documents/netlist_document", 1),
+    ("lifecycle/session", "cross_probe", 1),
+    // Remaining short-form edges.
+    ("availability", "capability_workflow", 1),
+    ("feature_availability", "design_system", 1),
+    ("lifecycle/recovery_checkpoint", "file_workflow", 6),
+    ("hardcopy_adapters/sources", "documents/visualization_studio", 1),
+    ("surface_route", "surface_catalog", 2),
+    ("surface_route", "capability_workflow", 1),
+    ("surfaces", "documents/visualization_studio", 1),
+    ("docks", "documents/visualization_studio", 1),
     // Contracts naming things above them.
     ("state", "capability_workflow", 1),
     ("state", "simulation_analysis_tabs", 1),
-    ("shortcuts", "result_document", 1),
 ];
 
 fn workbench_dir() -> PathBuf {
@@ -560,10 +611,34 @@ fn workbench_rank(module: &str) -> usize {
 /// `src/workbench/app.rs` and `src/workbench/app/dialogs/state.rs` both belong
 /// to `app`. `src/workbench.rs` is the module root and is not scanned: like
 /// the crate root, it is allowed to see everything it declares.
+///
+/// Declared names may be nested — `hardcopy/sources` — so that grouping files
+/// into a directory does not collapse their ranks into one. The longest
+/// declared prefix wins, which keeps `hardcopy/render` distinct from
+/// `hardcopy/print` while a bare `app` still owns everything beneath it.
 fn workbench_owning_module(file: &Path) -> Option<String> {
     let relative = file.strip_prefix(workbench_dir()).ok()?;
-    let first = relative.components().next()?.as_os_str().to_str()?;
-    Some(first.trim_end_matches(".rs").to_owned())
+    let path = relative
+        .to_str()?
+        .replace('\\', "/")
+        .trim_end_matches(".rs")
+        .to_owned();
+    longest_declared_prefix(&path)
+}
+
+/// The longest entry of [`WORKBENCH_LAYERS`] that is a component-wise prefix
+/// of `path`, which is itself `/`-separated.
+fn longest_declared_prefix(path: &str) -> Option<String> {
+    WORKBENCH_LAYERS
+        .iter()
+        .filter(|declared| {
+            path == **declared
+                || path
+                    .strip_prefix(*declared)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .max_by_key(|declared| declared.len())
+        .map(|declared| (*declared).to_owned())
 }
 
 /// Map each name re-exported by `workbench.rs` back to the module that owns it.
@@ -611,6 +686,21 @@ fn workbench_reexports() -> BTreeMap<String, String> {
     map
 }
 
+/// Normalize a Rust path tail to the `/`-separated form the layer table uses,
+/// keeping only the leading identifier run: `hardcopy::sources::Foo` becomes
+/// `hardcopy/sources/Foo`, which [`longest_declared_prefix`] then resolves.
+fn path_segments(item: &str) -> String {
+    item.split("::")
+        .map(|segment| {
+            segment
+                .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                .trim()
+        })
+        .take_while(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Reference counts between `workbench` submodules, keyed `(from, to)`.
 fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
     const PREFIX: &str = "crate::workbench::";
@@ -624,7 +714,28 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
         };
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        let code = strip_line_comments(&source);
+        let mut code = strip_line_comments(&source);
+
+        // `super::` is the same edge written the short way, and 310
+        // references took that form — about 15% of the shell's interior —
+        // while this test read only `crate::workbench::`. Resolve it against
+        // the file's own parent module so grouping files into a directory
+        // cannot hide the edges between them: in `workbench/lifecycle/x.rs`,
+        // `super::y` is `crate::workbench::lifecycle::y`.
+        if let Ok(relative) = file.strip_prefix(workbench_dir()) {
+            let mut parent: Vec<&str> = relative
+                .to_str()
+                .unwrap_or_default()
+                .split(['\\', '/'])
+                .collect();
+            parent.pop(); // the file itself
+            let mut resolved = PREFIX.to_owned();
+            for segment in parent {
+                resolved.push_str(segment);
+                resolved.push_str("::");
+            }
+            code = code.replace("super::", &resolved);
+        }
 
         let mut rest = code.as_str();
         while let Some(index) = rest.find(PREFIX) {
@@ -633,7 +744,7 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
             // `use crate::workbench::{A, b::C};` names two modules in one
             // occurrence. Expanding the group keeps the metric on coupling
             // rather than on whether the author happened to merge imports.
-            let names: Vec<&str> = if rest.starts_with('{') {
+            let names: Vec<String> = if rest.starts_with('{') {
                 let Some(close) = rest.find('}') else {
                     continue;
                 };
@@ -641,30 +752,26 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
                 rest = &rest[close + 1..];
                 group
                     .split(',')
-                    .map(|item| {
-                        let item = item.trim();
-                        let head = item.split("::").next().unwrap_or(item);
-                        head.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
-                    })
+                    .map(|item| path_segments(item.trim()))
                     .filter(|name| !name.is_empty())
                     .collect()
             } else {
                 let end = rest
-                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .find(|c: char| !c.is_alphanumeric() && c != '_' && c != ':')
                     .unwrap_or(rest.len());
-                let name = &rest[..end];
+                let path = &rest[..end];
                 rest = &rest[end..];
-                vec![name]
+                vec![path_segments(path)]
             };
 
             for name in names {
-                // A path names either a submodule directly or a type the root
-                // re-exports from one. Anything else is a function defined in
-                // `workbench.rs` itself, which belongs to the root, not a
-                // module.
-                let to = if declared.contains(&name) {
-                    name.to_owned()
-                } else if let Some(owner) = reexports.get(name) {
+                // A path names either a submodule — possibly nested, as
+                // `hardcopy::sources` — or a type the root re-exports from
+                // one. Anything else is a function defined in `workbench.rs`
+                // itself, which belongs to the root, not a module.
+                let to = if let Some(module) = longest_declared_prefix(&name) {
+                    module
+                } else if let Some(owner) = reexports.get(name.as_str()) {
                     owner.clone()
                 } else {
                     continue;
@@ -768,6 +875,41 @@ fn workbench_references_respect_the_layer_order() {
     assert!(failures.is_empty(), "{failures}");
 }
 
+/// The crate's public surface, frozen at its current size.
+///
+/// `rspice-ui` is an application, not a library: its only consumers are its
+/// own `main.rs`, the three wasm entry points in `lib.rs`, the integration
+/// tests, and the `license_tool` example. Everything else being `pub` meant
+/// no item was ever safely removable, and the layering tables above were
+/// standing in for a visibility boundary the compiler could have enforced.
+///
+/// The count is a ceiling: it may fall, never rise. Prefer `pub(crate)`, and
+/// prefer a re-export at the crate root over widening a module.
+const MAX_PUBLIC_MODULES: usize = 132;
+
+#[test]
+fn the_public_module_surface_does_not_grow() {
+    let root = src_dir();
+    let mut count = 0;
+    for file in rust_sources(&root) {
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+        count += strip_line_comments(&source)
+            .lines()
+            .filter(|line| line.trim_start().starts_with("pub mod "))
+            .count();
+    }
+    assert!(
+        count <= MAX_PUBLIC_MODULES,
+        "`pub mod` declarations rose to {count}, ceiling is {MAX_PUBLIC_MODULES}.\n\
+         A public module cannot be refactored without checking the whole \
+         world. Use `pub(crate) mod`, and re-export from the crate root if an \
+         integration test or example genuinely needs the item.\n\
+         If a reduction elsewhere justifies the change, lower \
+         MAX_PUBLIC_MODULES in tests/module_layering.rs."
+    );
+}
+
 /// No source file starts with a UTF-8 byte-order mark.
 ///
 /// Three did. A BOM is invisible in every editor that matters, survives
@@ -834,7 +976,9 @@ fn whole_application_mutable_access_does_not_grow() {
     for file in rust_sources(&root) {
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        count += strip_line_comments(&source).matches("&mut RSpiceApp").count();
+        count += strip_line_comments(&source)
+            .matches("&mut RSpiceApp")
+            .count();
     }
     assert!(
         count <= MAX_WHOLE_APP_MUTABLE_PARAMS,
@@ -860,42 +1004,42 @@ fn whole_application_mutable_access_does_not_grow() {
 const LINE_BUDGET: usize = 2500;
 
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("workbench/hardcopy_sources.rs", 8328),
+    ("workbench/hardcopy_adapters/sources.rs", 8326),
     ("simulation/runner/worker_contract.rs", 8226),
     ("io/project_io.rs", 8214),
-    ("workbench/hardcopy_render.rs", 8095),
+    ("workbench/hardcopy_adapters/render.rs", 8096),
     ("state/workspace.rs", 7524),
-    ("workbench/visualization_studio.rs", 7601),
+    ("workbench/documents/visualization_studio.rs", 7601),
     ("state/model_library/qualification.rs", 6924),
     ("workbench/surfaces/model_editor.rs", 6892),
     ("workbench/surfaces/verify.rs", 6794),
     ("workbench/surfaces/simulate.rs", 6406),
     ("results/visualization_document.rs", 6394),
-    ("workbench/model_editor.rs", 5107),
+    ("workbench/documents/model_editor.rs", 5107),
     ("results/report_document.rs", 4877),
     ("workbench/commands.rs", 4716),
     ("io/durable_file.rs", 4689),
     ("product/capability_readiness.rs", 4593),
     ("simulation/plan/model.rs", 4241),
-    ("workbench/surfaces/models.rs", 4224),
-    ("workbench/result_document/waves.rs", 4199),
+    ("workbench/surfaces/models.rs", 4229),
+    ("workbench/documents/result_document/waves.rs", 4199),
     ("state/model_library/manager.rs", 4171),
     ("state/model_library/correlation.rs", 4049),
     ("hardcopy/contract.rs", 4031),
     ("workbench/docks/inspector/design.rs", 3994),
-    ("workbench/surfaces/project.rs", 3993),
+    ("workbench/surfaces/project.rs", 3994),
     ("workbench/feature_availability_data.rs", 3872),
-    ("workbench/project_lifecycle.rs", 3741),
+    ("workbench/lifecycle/project_lifecycle.rs", 3741),
     ("workbench/surfaces/model_correlation.rs", 3631),
     ("workbench/state.rs", 3507),
     ("schematic/view/interaction.rs", 3491),
     ("workbench/app/actions/workspace.rs", 3400),
-    ("workbench/hardcopy_print.rs", 3355),
+    ("workbench/hardcopy_adapters/print.rs", 3357),
     ("workbench/app/dialogs/hardcopy/render.rs", 3348),
     ("state/schematic/state/editor_ops/array_ops.rs", 3320),
     ("simulation/controller.rs", 3214),
     ("simulation/execution/snapshot.rs", 3068),
-    ("workbench/project_lifecycle/persistence.rs", 3004),
+    ("workbench/lifecycle/project_lifecycle/persistence.rs", 3004),
     ("workbench/feature_availability.rs", 2988),
     ("workbench/project_launcher.rs", 2932),
     ("workbench/docks/navigator.rs", 2877),
@@ -907,7 +1051,10 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/shortcut_artifacts/merge.rs", 2597),
     ("state/netlist_document/document.rs", 2579),
     ("workbench/app/dialogs/hardcopy/publish.rs", 2565),
-    ("workbench/app/dialogs/preferences/shortcut_preferences.rs", 2530),
+    (
+        "workbench/app/dialogs/preferences/shortcut_preferences.rs",
+        2530,
+    ),
 ];
 
 #[test]

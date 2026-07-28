@@ -3,13 +3,13 @@
 
 use egui::{Context, Grid, RichText, ScrollArea};
 
-use crate::workbench::app::{HelpCenterPage, RSpiceApp, session::shortcuts::ShortcutCategory};
-use crate::workbench::export_workflow::SaveDialogConfig;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
 use crate::workbench::ShortcutPreferences;
+use crate::workbench::app::{HelpCenterPage, RSpiceApp, session::shortcuts::ShortcutCategory};
 use crate::workbench::commands::{Command, CommandPlatform};
+use crate::workbench::export_workflow::SaveDialogConfig;
 
 const PRODUCT_LICENSE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));
 

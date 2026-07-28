@@ -8,12 +8,14 @@
 use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::{AppState, FullScreenPanels, FullScreenScope, RSpiceApp, ViewOperation};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, SelectionImpact, SelectionPreview,
     select_mono_with_response, selection_command_workflow, workflow_preview_status,
+};
+use crate::workbench::app::{
+    AppState, FullScreenPanels, FullScreenScope, RSpiceApp, ViewOperation,
 };
 
 pub(crate) fn open_full_screen_workflow(state: &mut AppState) {
@@ -164,7 +166,10 @@ fn full_screen_body(
     )
 }
 
-fn reset_view_body(ui: &mut Ui, draft: &crate::workbench::app::ViewOperationDialogState) -> egui::Id {
+fn reset_view_body(
+    ui: &mut Ui,
+    draft: &crate::workbench::app::ViewOperationDialogState,
+) -> egui::Id {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     let first = readonly_row(
         ui,

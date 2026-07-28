@@ -6,12 +6,12 @@
 
 use egui::{ComboBox, Context, Grid, RichText};
 
-use crate::workbench::app::{
-    NewWindowInitialContent, RSpiceApp, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
-};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::workbench::app::{
+    NewWindowInitialContent, RSpiceApp, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+};
 use crate::workbench::commands::Command;
 use crate::workbench::state::{ProjectPage, Workspace, WorkspaceDocumentId, WorkspaceLayoutState};
 use crate::workbench::{ApplicationWindowId, WorkspacePreset};

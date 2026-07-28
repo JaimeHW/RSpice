@@ -15,12 +15,12 @@ use egui::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::{AppState, RSpiceApp};
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize},
 };
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::{
     RouteTransitionSource, SurfaceExecutionAvailability, SurfaceId, SurfaceRoute,

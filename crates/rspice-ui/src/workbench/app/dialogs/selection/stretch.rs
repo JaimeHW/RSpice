@@ -18,7 +18,9 @@ use crate::ui::widgets::{
 use crate::workbench::app::dialogs::schematic_command::{
     DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE, field_label, read_only_value, snap_label,
 };
-use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority, StretchSelectionDialogState};
+use crate::workbench::app::{
+    AppState, RSpiceApp, SchematicEditAuthority, StretchSelectionDialogState,
+};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} GEOMETRY EDIT";
 const TITLE: &str = "Stretch selection";

@@ -5,10 +5,10 @@ mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::state::{Component, ComponentType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::Command;
 use super::super::design_system::{
@@ -878,14 +878,16 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             message.clone(),
                         );
                         app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                                message,
+                            ));
                     }
                 }
             }
         }
     }
     ui.add_space(8.0);
-    crate::workbench::result_document::right_panel(ui, &mut app.state);
+    crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
 }
 
 fn is_schematic_cross_probe_candidate(signal: &str) -> bool {
@@ -1449,7 +1451,7 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
-    use super::super::netlist_document::{ActiveNetlistDocument, DiagnosticSeverity};
+    use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, DiagnosticSeverity};
 
     let errors = app
         .state
@@ -1506,7 +1508,7 @@ fn diagnostic_section_header(
     ui: &mut Ui,
     title: &str,
     count: usize,
-    severity: super::super::netlist_document::DiagnosticSeverity,
+    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
 ) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
@@ -1561,7 +1563,7 @@ fn diagnostic_section_header(
     );
 }
 
-fn diagnostic_row(ui: &mut Ui, diagnostic: &super::super::netlist_document::Diagnostic) {
+fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::workbench::documents::netlist_document::Diagnostic) {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
     const PADDING_X: f32 = 9.0;
@@ -1605,9 +1607,9 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &super::super::netlist_document::Diag
     );
 
     let icon = match diagnostic.severity {
-        super::super::netlist_document::DiagnosticSeverity::Info => WorkbenchIcon::Info,
-        super::super::netlist_document::DiagnosticSeverity::Warning
-        | super::super::netlist_document::DiagnosticSeverity::Error => WorkbenchIcon::Warning,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => WorkbenchIcon::Info,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning
+        | crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => WorkbenchIcon::Warning,
     };
     icon.paint(
         ui.painter(),
@@ -1711,7 +1713,7 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     design_section_header(ui, "Owned source provenance", None);
     let source = &state.simulation.netlist_content;
-    let source_digest = super::super::netlist_document::source_content_digest(source);
+    let source_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
     property_row(
         ui,
         "Source origin",
@@ -1765,7 +1767,7 @@ fn generated_state(state: &AppState) -> &'static str {
         "stale · refresh pending"
     } else {
         let digest =
-            super::super::netlist_document::source_content_digest(&netlist.generated_source);
+            crate::workbench::documents::netlist_document::source_content_digest(&netlist.generated_source);
         if netlist.validation.as_ref().is_some_and(|receipt| {
             receipt.visible_content_digest == digest
                 && receipt.project_revision == state.workspace.project.revision().get()
@@ -1819,7 +1821,7 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
     format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
 }
 
-fn diagnostic_location(diagnostic: &super::super::netlist_document::Diagnostic) -> String {
+fn diagnostic_location(diagnostic: &crate::workbench::documents::netlist_document::Diagnostic) -> String {
     let location = match (
         diagnostic.source_line.or(diagnostic.line),
         diagnostic.column,
@@ -1839,22 +1841,22 @@ fn diagnostic_location(diagnostic: &super::super::netlist_document::Diagnostic) 
 
 fn diagnostic_tone(
     tokens: &Tokens,
-    severity: super::super::netlist_document::DiagnosticSeverity,
+    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
 ) -> Color32 {
     match severity {
-        super::super::netlist_document::DiagnosticSeverity::Info => tokens.color.info,
-        super::super::netlist_document::DiagnosticSeverity::Warning => tokens.color.warn,
-        super::super::netlist_document::DiagnosticSeverity::Error => tokens.color.err,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => tokens.color.info,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => tokens.color.warn,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => tokens.color.err,
     }
 }
 
 fn diagnostic_severity_name(
-    severity: super::super::netlist_document::DiagnosticSeverity,
+    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
 ) -> &'static str {
     match severity {
-        super::super::netlist_document::DiagnosticSeverity::Info => "Information",
-        super::super::netlist_document::DiagnosticSeverity::Warning => "Warning",
-        super::super::netlist_document::DiagnosticSeverity::Error => "Error",
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => "Information",
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => "Warning",
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => "Error",
     }
 }
 
@@ -1916,7 +1918,7 @@ mod tests {
             .dataset_id
             .clone();
         app.state.ui.results.selected_trace =
-            Some(crate::workbench::result_document::SelectedResultTrace {
+            Some(crate::workbench::documents::result_document::SelectedResultTrace {
                 dataset_id,
                 analysis_index: 0,
                 waveform_index: 0,
@@ -2052,8 +2054,8 @@ mod tests {
 
     #[test]
     fn netlist_diagnostic_locations_are_one_based_and_exact() {
-        let diagnostic = crate::workbench::netlist_document::Diagnostic {
-            severity: crate::workbench::netlist_document::DiagnosticSeverity::Warning,
+        let diagnostic = crate::workbench::documents::netlist_document::Diagnostic {
+            severity: crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
             source_path: None,
             source_line: Some(127),
             span: None,
@@ -2083,12 +2085,12 @@ mod tests {
         let mut state = AppState::default();
         state.simulation.netlist_content = "owned\n.end\n".to_owned();
         let project_revision = state.workspace.project.revision().get();
-        let digest = crate::workbench::netlist_document::source_content_digest(
+        let digest = crate::workbench::documents::netlist_document::source_content_digest(
             &state.simulation.netlist_content,
         );
         state.ui.netlist.externally_saved_content_digest = Some(digest);
         state.ui.netlist.validation = Some(
-            crate::workbench::netlist_document::NetlistValidationReceipt {
+            crate::workbench::documents::netlist_document::NetlistValidationReceipt {
                 visible_content_digest: digest,
                 executable_source_digest: digest,
                 prepared_snapshot_digest: digest,
@@ -2100,7 +2102,7 @@ mod tests {
 
         assert_eq!(owned_source_state(&state, digest), "saved · validated");
         state.simulation.netlist_content.push_str("* edit\n");
-        let edited = crate::workbench::netlist_document::source_content_digest(
+        let edited = crate::workbench::documents::netlist_document::source_content_digest(
             &state.simulation.netlist_content,
         );
         assert_eq!(

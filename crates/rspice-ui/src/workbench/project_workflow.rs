@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::AppState;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::project_lifecycle::DestinationAuthority;
-use crate::workbench::project_lifecycle::{PersistenceBinding, ProjectLifecycleError, SaveScope};
 use crate::io::ProjectFile;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::ProjectIoError;
+use crate::workbench::app::AppState;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
+use crate::workbench::lifecycle::project_lifecycle::{PersistenceBinding, ProjectLifecycleError, SaveScope};
 use crate::workbench::state::ProjectCloseDestination;
 
 #[derive(Debug, Clone, Copy)]
@@ -75,7 +75,7 @@ pub(crate) fn create_new_project(state: &mut AppState) {
         crate::workbench::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
     state.model_library_manager = crate::workbench::app::default_model_library_manager();
     state.browser_project_save_name = None;
-    crate::workbench::project_lifecycle::reset_for_new_project(state);
+    crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);
     state.push_user_message(ConsoleMessage::info("Created new project"));
 }
 
@@ -119,7 +119,7 @@ pub(crate) fn save_all(state: &mut AppState) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SaveRequestOutcome {
     CanonicalComplete,
-    CanonicalPending(crate::workbench::project_lifecycle::TransactionId),
+    CanonicalPending(crate::workbench::lifecycle::project_lifecycle::TransactionId),
     CopyOnly,
     CopyPending,
     Cancelled,
@@ -146,7 +146,7 @@ pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestO
 
 #[cfg(not(target_arch = "wasm32"))]
 fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
-    if let Some(path) = crate::workbench::project_lifecycle::canonical_native_path(state) {
+    if let Some(path) = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state) {
         return save_native_scope(state, scope, &path, DestinationAuthority::Canonical)
             .map_or_else(SaveRequestOutcome::Failed, |()| {
                 SaveRequestOutcome::CanonicalComplete
@@ -176,9 +176,9 @@ fn save_native_scope(
     path: &Path,
     authority: DestinationAuthority,
 ) -> Result<(), String> {
-    match crate::workbench::project_lifecycle::save_native(state, scope, path, authority) {
+    match crate::workbench::lifecycle::project_lifecycle::save_native(state, scope, path, authority) {
         Ok(()) => {
-            let canonical = crate::workbench::project_lifecycle::canonical_native_path(state)
+            let canonical = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
                 .unwrap_or_else(|| path.to_path_buf());
             state.browser_project_save_name = None;
             state.remember_recent_file(crate::workbench::app::RecentKind::Project, &canonical);
@@ -243,7 +243,7 @@ fn start_browser_project_save(
     project_copy: bool,
 ) -> SaveRequestOutcome {
     let suggested_name = project_save_dialog_default_name(state);
-    let mut prepared = match crate::workbench::project_lifecycle::prepare_browser_save(
+    let mut prepared = match crate::workbench::lifecycle::project_lifecycle::prepare_browser_save(
         state,
         scope,
         project_copy,
@@ -261,20 +261,20 @@ fn start_browser_project_save(
         project_copy,
         prepared.source_handle_id,
         if project_copy {
-            crate::workbench::project_lifecycle::browser_file_picker_supported()
+            crate::workbench::lifecycle::project_lifecycle::browser_file_picker_supported()
         } else {
-            crate::workbench::project_lifecycle::browser_canonical_save_supported()
+            crate::workbench::lifecycle::project_lifecycle::browser_canonical_save_supported()
         },
     );
     if prepared.target.handle_id.is_none()
         && prepared.target.backend
-            == crate::workbench::project_lifecycle::BrowserBindingBackend::ExternalFile
+            == crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile
         && !save_surface_supported
     {
         let text = match String::from_utf8(std::mem::take(&mut prepared.bytes)) {
             Ok(text) => text,
             Err(error) => {
-                crate::workbench::project_lifecycle::cancel_transaction_if(
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     state,
                     prepared.transaction,
                 );
@@ -287,9 +287,9 @@ fn start_browser_project_save(
             }
         };
         let path = std::path::PathBuf::from(&prepared.suggested_name);
-        match crate::workbench::browser_download::download_text_file(&path, &text) {
+        match crate::workbench::browser::download::download_text_file(&path, &text) {
             Ok(()) => {
-                crate::workbench::project_lifecycle::cancel_transaction_if(
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     state,
                     prepared.transaction,
                 );
@@ -301,7 +301,7 @@ fn start_browser_project_save(
                 return SaveRequestOutcome::CopyOnly;
             }
             Err(error) => {
-                crate::workbench::project_lifecycle::cancel_transaction_if(
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     state,
                     prepared.transaction,
                 );
@@ -317,7 +317,7 @@ fn start_browser_project_save(
     let name = prepared.suggested_name.clone();
     let bytes = std::mem::take(&mut prepared.bytes);
     let transaction = prepared.transaction;
-    match crate::workbench::project_lifecycle::start_browser_write(
+    match crate::workbench::lifecycle::project_lifecycle::start_browser_write(
         target,
         !project_copy,
         &name,
@@ -328,7 +328,7 @@ fn start_browser_project_save(
                     .borrow_mut()
                     .push_back(BrowserProjectSaveCompletion { prepared, result });
             });
-            crate::workbench::browser_file_import::request_browser_import_repaint();
+            crate::workbench::browser::file_import::request_browser_import_repaint();
         },
     ) {
         Ok(()) => {
@@ -340,7 +340,7 @@ fn start_browser_project_save(
         }
         Err(error) => {
             let message = error.clone();
-            crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project save failed: {error}"
             )));
@@ -351,24 +351,24 @@ fn start_browser_project_save(
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserProjectSaveCompletion {
-    prepared: crate::workbench::project_lifecycle::BrowserPreparedSave,
-    result: crate::workbench::project_lifecycle::BrowserWriteResult,
+    prepared: crate::workbench::lifecycle::project_lifecycle::BrowserPreparedSave,
+    result: crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult,
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SaveContinuationEvent {
-    Saved(crate::workbench::project_lifecycle::TransactionId),
-    SavedWithNewerChanges(crate::workbench::project_lifecycle::TransactionId),
-    Cancelled(crate::workbench::project_lifecycle::TransactionId),
-    Conflict(crate::workbench::project_lifecycle::TransactionId),
-    Failed(crate::workbench::project_lifecycle::TransactionId, String),
-    PublishedButNotAdopted(crate::workbench::project_lifecycle::TransactionId, String),
+    Saved(crate::workbench::lifecycle::project_lifecycle::TransactionId),
+    SavedWithNewerChanges(crate::workbench::lifecycle::project_lifecycle::TransactionId),
+    Cancelled(crate::workbench::lifecycle::project_lifecycle::TransactionId),
+    Conflict(crate::workbench::lifecycle::project_lifecycle::TransactionId),
+    Failed(crate::workbench::lifecycle::project_lifecycle::TransactionId, String),
+    PublishedButNotAdopted(crate::workbench::lifecycle::project_lifecycle::TransactionId, String),
 }
 
 #[cfg(target_arch = "wasm32")]
 impl SaveContinuationEvent {
-    pub(crate) fn transaction(&self) -> crate::workbench::project_lifecycle::TransactionId {
+    pub(crate) fn transaction(&self) -> crate::workbench::lifecycle::project_lifecycle::TransactionId {
         match self {
             Self::Saved(transaction)
             | Self::SavedWithNewerChanges(transaction)
@@ -412,47 +412,49 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
     let transaction = completion.prepared.transaction;
     let saved_scope = completion.prepared.scope;
     let saved_document = completion.prepared.saved_document.clone();
-    if !crate::workbench::project_lifecycle::browser_operation_context_is_current(
+    if !crate::workbench::lifecycle::project_lifecycle::browser_operation_context_is_current(
         state,
         &completion.prepared.context,
     ) {
         let terminal = match &completion.result {
-            crate::workbench::project_lifecycle::BrowserWriteResult::Saved { .. }
-            | crate::workbench::project_lifecycle::BrowserWriteResult::SavedSessionOnly { .. } => {
+            crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Saved { .. }
+            | crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::SavedSessionOnly { .. } => {
                 SaveContinuationEvent::PublishedButNotAdopted(
                     transaction,
                     "The project bytes were published after this tab lost authority, so RSpice did not adopt them as the canonical live baseline. Reopen the project before continuing."
                         .to_owned(),
                 )
             }
-            crate::workbench::project_lifecycle::BrowserWriteResult::Cancelled => {
+            crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Cancelled => {
                 SaveContinuationEvent::Cancelled(transaction)
             }
-            crate::workbench::project_lifecycle::BrowserWriteResult::ExternalChange { .. } => {
+            crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::ExternalChange { .. } => {
                 SaveContinuationEvent::Conflict(transaction)
             }
-            crate::workbench::project_lifecycle::BrowserWriteResult::Failed(error) => {
+            crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Failed(error) => {
                 SaveContinuationEvent::Failed(transaction, error.clone())
             }
         };
         match &completion.result {
-            crate::workbench::project_lifecycle::BrowserWriteResult::Saved { handle_id, .. }
-            | crate::workbench::project_lifecycle::BrowserWriteResult::SavedSessionOnly {
+            crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Saved {
+                handle_id, ..
+            }
+            | crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::SavedSessionOnly {
                 handle_id,
                 ..
-            } => crate::workbench::project_lifecycle::release_browser_handle_if_unowned(
+            } => crate::workbench::lifecycle::project_lifecycle::release_browser_handle_if_unowned(
                 state, *handle_id,
             ),
-            crate::workbench::project_lifecycle::BrowserWriteResult::Cancelled
-            | crate::workbench::project_lifecycle::BrowserWriteResult::ExternalChange { .. }
-            | crate::workbench::project_lifecycle::BrowserWriteResult::Failed(_) => {}
+            crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Cancelled
+            | crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::ExternalChange { .. }
+            | crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Failed(_) => {}
         }
-        crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
         return (!project_copy).then_some(terminal);
     }
     let mut continuation = None;
     match completion.result {
-        crate::workbench::project_lifecycle::BrowserWriteResult::Saved {
+        crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Saved {
             handle_id,
             binding_id,
             backend,
@@ -460,10 +462,10 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             generation,
             display_name,
             digest,
-        } => match crate::workbench::project_lifecycle::complete_browser_save(
+        } => match crate::workbench::lifecycle::project_lifecycle::complete_browser_save(
             state,
             completion.prepared,
-            crate::workbench::project_lifecycle::BrowserSavePublication {
+            crate::workbench::lifecycle::project_lifecycle::BrowserSavePublication {
                 handle_id,
                 binding_id,
                 backend,
@@ -509,7 +511,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 }
             }
         },
-        crate::workbench::project_lifecycle::BrowserWriteResult::SavedSessionOnly {
+        crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::SavedSessionOnly {
             handle_id,
             binding_id,
             backend,
@@ -518,10 +520,10 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             display_name,
             digest,
             persistence_error,
-        } => match crate::workbench::project_lifecycle::complete_browser_save(
+        } => match crate::workbench::lifecycle::project_lifecycle::complete_browser_save(
             state,
             completion.prepared,
-            crate::workbench::project_lifecycle::BrowserSavePublication {
+            crate::workbench::lifecycle::project_lifecycle::BrowserSavePublication {
                 handle_id,
                 binding_id,
                 backend,
@@ -569,21 +571,21 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 }
             }
         },
-        crate::workbench::project_lifecycle::BrowserWriteResult::Cancelled => {
-            crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+        crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Cancelled => {
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
             if !project_copy {
                 continuation = Some(SaveContinuationEvent::Cancelled(transaction));
             }
         }
-        crate::workbench::project_lifecycle::BrowserWriteResult::ExternalChange {
+        crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::ExternalChange {
             observed_digest,
         } => {
-            crate::workbench::project_lifecycle::record_browser_save_conflict(
+            crate::workbench::lifecycle::project_lifecycle::record_browser_save_conflict(
                 state,
                 &completion.prepared,
                 observed_digest,
             );
-            crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
             state.push_user_message(ConsoleMessage::error(
                 "Browser project changed outside RSpice; reopen it or save an independent project copy",
             ));
@@ -591,8 +593,8 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 continuation = Some(SaveContinuationEvent::Conflict(transaction));
             }
         }
-        crate::workbench::project_lifecycle::BrowserWriteResult::Failed(error) => {
-            crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+        crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Failed(error) => {
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
             state.push_user_message(ConsoleMessage::error(format!(
                 "Browser project save failed: {error}"
             )));
@@ -607,11 +609,11 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
 #[cfg(target_arch = "wasm32")]
 fn canonical_save_continuation_event(
     state: &AppState,
-    transaction: crate::workbench::project_lifecycle::TransactionId,
+    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
     scope: SaveScope,
-    saved_document: &crate::workbench::project_lifecycle::ProjectDocumentId,
+    saved_document: &crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId,
 ) -> SaveContinuationEvent {
-    if crate::workbench::project_lifecycle::saved_snapshot_authorizes_continuation(
+    if crate::workbench::lifecycle::project_lifecycle::saved_snapshot_authorizes_continuation(
         state,
         scope,
         saved_document,
@@ -628,7 +630,7 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     match crate::io::show_save_project_dialog(Some(default_name.as_str())) {
         Ok(path) => {
-            match crate::workbench::project_lifecycle::save_project_copy_native(state, &path) {
+            match crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(state, &path) {
                 Ok(()) => {
                     state.push_user_message(ConsoleMessage::info(format!(
                     "Saved independent project copy: {} (the active project remains bound to its original location)",
@@ -661,13 +663,13 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn browser_file_operation_label(state: &AppState) -> Option<String> {
-    if let Some(kind) = crate::workbench::browser_file_import::active_text_import_kind() {
+    if let Some(kind) = crate::workbench::browser::file_import::active_text_import_kind() {
         return Some(format!(
             "Waiting for the browser {} picker or permission request to finish.",
             kind.label()
         ));
     }
-    crate::workbench::project_lifecycle::operation_in_progress(state)
+    crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state)
         .then(|| "Waiting for the browser project file or permission request to finish.".to_owned())
 }
 
@@ -677,9 +679,9 @@ pub(crate) fn browser_file_operation_label(state: &AppState) -> Option<String> {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn cancel_pending_browser_file_operation(state: &mut AppState) -> bool {
     let import_cancelled =
-        crate::workbench::browser_file_import::cancel_active_text_import().is_some();
+        crate::workbench::browser::file_import::cancel_active_text_import().is_some();
     let lifecycle_cancelled =
-        crate::workbench::project_lifecycle::cancel_pending_browser_operation(state);
+        crate::workbench::lifecycle::project_lifecycle::cancel_pending_browser_operation(state);
     let continuation_cancelled = state
         .dialogs
         .confirmation_dialog
@@ -694,7 +696,7 @@ pub(crate) fn cancel_pending_browser_file_operation(state: &mut AppState) -> boo
 }
 
 pub(crate) fn request_revert_active_document(state: &mut AppState) -> bool {
-    match crate::workbench::project_lifecycle::prepare_revert_active_document(state) {
+    match crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(state) {
         Ok(token) => {
             state.dialogs.project_review_dialog.show_revert(token);
             true
@@ -708,9 +710,9 @@ pub(crate) fn request_revert_active_document(state: &mut AppState) -> bool {
 
 pub(crate) fn confirm_revert_active_document(
     state: &mut AppState,
-    token: &crate::workbench::project_lifecycle::RevertReviewToken,
+    token: &crate::workbench::lifecycle::project_lifecycle::RevertReviewToken,
 ) -> bool {
-    match crate::workbench::project_lifecycle::confirm_revert_active_document(state, token) {
+    match crate::workbench::lifecycle::project_lifecycle::confirm_revert_active_document(state, token) {
         Ok(()) => {
             state.push_user_message(ConsoleMessage::info("Reverted active document"));
             true
@@ -723,7 +725,7 @@ pub(crate) fn confirm_revert_active_document(
 }
 
 pub(crate) fn close_active_document(state: &mut AppState) -> bool {
-    match crate::workbench::project_lifecycle::close_active_document(state) {
+    match crate::workbench::lifecycle::project_lifecycle::close_active_document(state) {
         Ok(()) => {
             state.push_user_message(ConsoleMessage::info(
                 "Closed active document presentation; project data was retained",
@@ -784,7 +786,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
         crate::workbench::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
     state.model_library_manager = crate::workbench::app::default_model_library_manager();
     state.browser_project_save_name = None;
-    crate::workbench::project_lifecycle::mark_project_closed(state);
+    crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
     match state.workbench.take_project_close_destination() {
         ProjectCloseDestination::Launcher => state.workbench.open_project_launcher(),
         ProjectCloseDestination::EmptyWorkbench => {
@@ -800,14 +802,14 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool {
-    let transaction = match crate::workbench::project_lifecycle::begin_project_replacement(state) {
+    let transaction = match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
         Ok(transaction) => transaction,
         Err(error) => {
             lifecycle_error(state, error, "Project open blocked");
             return false;
         }
     };
-    match crate::workbench::project_lifecycle::read_native_binding(path) {
+    match crate::workbench::lifecycle::project_lifecycle::read_native_binding(path) {
         Ok((project, binding)) => {
             let canonical_path = match &binding {
                 PersistenceBinding::Native { canonical_path, .. } => canonical_path.clone(),
@@ -821,7 +823,7 @@ pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool 
             )
         }
         Err(error) => {
-            crate::workbench::project_lifecycle::cancel_transaction(state);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project open failed: {}",
                 error
@@ -837,7 +839,7 @@ pub(crate) fn apply_loaded_project(
     project: ProjectFile,
     origin: ProjectLoadOrigin<'_>,
 ) -> bool {
-    let transaction = match crate::workbench::project_lifecycle::begin_project_replacement(state) {
+    let transaction = match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
         Ok(transaction) => transaction,
         Err(error) => {
             lifecycle_error(state, error, "Project open blocked");
@@ -852,15 +854,15 @@ fn apply_loaded_project_authorized(
     mut project: ProjectFile,
     origin: ProjectLoadOrigin<'_>,
     binding: Option<PersistenceBinding>,
-    transaction: crate::workbench::project_lifecycle::TransactionId,
+    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
 ) -> bool {
     if let Err(error) =
-        crate::workbench::project_lifecycle::validate_project_replacement(state, transaction)
+        crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(state, transaction)
     {
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
         #[cfg(not(target_arch = "wasm32"))]
-        crate::workbench::project_lifecycle::cancel_transaction(state);
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
         lifecycle_error(state, error, "Project open blocked");
         return false;
     }
@@ -875,9 +877,9 @@ fn apply_loaded_project_authorized(
                         "Project open failed: persisted execution context is invalid: {error}"
                     )));
                     #[cfg(target_arch = "wasm32")]
-                    crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
                     #[cfg(not(target_arch = "wasm32"))]
-                    crate::workbench::project_lifecycle::cancel_transaction(state);
+                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
                     return false;
                 }
             },
@@ -938,7 +940,7 @@ fn apply_loaded_project_authorized(
     for warning in execution_warnings {
         state.push_user_message(ConsoleMessage::warning(warning));
     }
-    crate::workbench::project_lifecycle::accept_loaded_project(state, accepted_baseline, binding);
+    crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(state, accepted_baseline, binding);
     true
 }
 
@@ -959,14 +961,14 @@ pub(crate) fn open_project(state: &mut AppState) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn open_project(state: &mut AppState) -> bool {
-    let transaction = match crate::workbench::project_lifecycle::begin_project_replacement(state) {
+    let transaction = match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
         Ok(transaction) => transaction,
         Err(error) => {
             lifecycle_error(state, error, "Project open blocked");
             return false;
         }
     };
-    let context = crate::workbench::project_lifecycle::browser_operation_context(state);
+    let context = crate::workbench::lifecycle::project_lifecycle::browser_operation_context(state);
     match start_browser_project_import(transaction, context) {
         Ok(()) => {
             state.push_user_message(ConsoleMessage::info(
@@ -975,7 +977,7 @@ pub(crate) fn open_project(state: &mut AppState) -> bool {
             true
         }
         Err(error) => {
-            crate::workbench::project_lifecycle::cancel_transaction(state);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(state);
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project open failed: {}",
                 error
@@ -990,7 +992,7 @@ pub(crate) fn open_project(state: &mut AppState) -> bool {
 enum BrowserProjectImportResult {
     Transaction(BrowserProjectImportCompletion),
     CanonicalPromoted {
-        context: crate::workbench::project_lifecycle::BrowserOperationContext,
+        context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
         handle_id: u64,
         display_name: String,
         result: Result<(), String>,
@@ -1000,9 +1002,9 @@ enum BrowserProjectImportResult {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct BrowserProjectImportCompletion {
-    transaction: crate::workbench::project_lifecycle::TransactionId,
-    context: crate::workbench::project_lifecycle::BrowserOperationContext,
-    import_token: crate::workbench::browser_file_import::TextImportToken,
+    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
+    import_token: crate::workbench::browser::file_import::TextImportToken,
     payload: BrowserProjectImportPayload,
 }
 
@@ -1011,8 +1013,8 @@ struct BrowserProjectImportCompletion {
 enum BrowserProjectImportPayload {
     Cancelled,
     Failed(String),
-    Canonical(crate::workbench::project_lifecycle::BrowserOpenResult),
-    Loaded(crate::workbench::browser_file_import::PickedTextFile),
+    Canonical(crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult),
+    Loaded(crate::workbench::browser::file_import::PickedTextFile),
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1023,16 +1025,16 @@ thread_local! {
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_project_import(
-    transaction: crate::workbench::project_lifecycle::TransactionId,
-    context: crate::workbench::project_lifecycle::BrowserOperationContext,
+    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
 ) -> Result<(), String> {
-    let import_token = crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::Project,
+    let import_token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::Project,
     )?;
 
-    if crate::workbench::project_lifecycle::browser_open_file_picker_supported() {
+    if crate::workbench::lifecycle::project_lifecycle::browser_open_file_picker_supported() {
         let canonical_context = context.clone();
-        let started = crate::workbench::project_lifecycle::start_browser_open(move |result| {
+        let started = crate::workbench::lifecycle::project_lifecycle::start_browser_open(move |result| {
             BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| {
                 queue
                     .borrow_mut()
@@ -1045,7 +1047,7 @@ fn start_browser_project_import(
                         },
                     ));
             });
-            crate::workbench::browser_file_import::request_browser_import_repaint();
+            crate::workbench::browser::file_import::request_browser_import_repaint();
         });
         match started {
             Ok(()) => return Ok(()),
@@ -1057,7 +1059,7 @@ fn start_browser_project_import(
         }
     }
 
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         crate::io::project_io::PROJECT_FILTER.0,
         crate::io::project_io::PROJECT_FILTER.1,
         move |result| {
@@ -1096,7 +1098,7 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
             display_name,
             result,
         } => {
-            if crate::workbench::project_lifecycle::complete_browser_binding_promotion(
+            if crate::workbench::lifecycle::project_lifecycle::complete_browser_binding_promotion(
                 state, &context, handle_id, &result,
             ) {
                 match result {
@@ -1112,31 +1114,32 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
         }
         BrowserProjectImportResult::Transaction(completion) => {
             let transaction = completion.transaction;
-            if !crate::workbench::project_lifecycle::browser_operation_context_is_current(
+            if !crate::workbench::lifecycle::project_lifecycle::browser_operation_context_is_current(
                 state,
                 &completion.context,
             ) {
                 if let BrowserProjectImportPayload::Canonical(
-                    crate::workbench::project_lifecycle::BrowserOpenResult::Opened {
-                        handle_id, ..
+                    crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened {
+                        handle_id,
+                        ..
                     },
                 ) = &completion.payload
                 {
-                    crate::workbench::project_lifecycle::release_browser_handle(*handle_id);
+                    crate::workbench::lifecycle::project_lifecycle::release_browser_handle(*handle_id);
                 }
                 finish_browser_project_import(completion.import_token);
-                crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
                 return false;
             }
             match completion.payload {
                 BrowserProjectImportPayload::Cancelled => {
                     finish_browser_project_import(completion.import_token);
-                    crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
                     false
                 }
                 BrowserProjectImportPayload::Failed(error) => {
                     finish_browser_project_import(completion.import_token);
-                    crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
                     state.push_user_message(ConsoleMessage::error(format!(
                         "Project open failed: {error}"
                     )));
@@ -1153,7 +1156,7 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                             transaction,
                         ),
                         Err(error) => {
-                            crate::workbench::project_lifecycle::cancel_transaction_if(
+                            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                                 state,
                                 transaction,
                             );
@@ -1174,17 +1177,17 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn finish_browser_project_import(token: crate::workbench::browser_file_import::TextImportToken) {
-    let _ = crate::workbench::browser_file_import::finish_text_import(token);
+fn finish_browser_project_import(token: crate::workbench::browser::file_import::TextImportToken) {
+    let _ = crate::workbench::browser::file_import::finish_text_import(token);
 }
 
 #[cfg(target_arch = "wasm32")]
 fn finish_browser_canonical_open(
     state: &mut AppState,
-    transaction: crate::workbench::project_lifecycle::TransactionId,
-    result: crate::workbench::project_lifecycle::BrowserOpenResult,
+    transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
+    result: crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult,
 ) -> bool {
-    let crate::workbench::project_lifecycle::BrowserOpenResult::Opened {
+    let crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened {
         handle_id,
         display_name,
         bytes,
@@ -1192,24 +1195,24 @@ fn finish_browser_canonical_open(
     } = result
     else {
         match result {
-            crate::workbench::project_lifecycle::BrowserOpenResult::Cancelled => {
-                crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Cancelled => {
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
             }
-            crate::workbench::project_lifecycle::BrowserOpenResult::Failed(error) => {
-                crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Failed(error) => {
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
                 state.push_user_message(ConsoleMessage::error(format!(
                     "Project open failed: {error}"
                 )));
             }
-            crate::workbench::project_lifecycle::BrowserOpenResult::Opened { .. } => unreachable!(),
+            crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened { .. } => unreachable!(),
         }
         return false;
     };
     let text = match String::from_utf8(bytes) {
         Ok(text) => text,
         Err(error) => {
-            crate::workbench::project_lifecycle::release_browser_handle(handle_id);
-            crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project open failed: selected project is not valid UTF-8: {error}"
             )));
@@ -1219,8 +1222,8 @@ fn finish_browser_canonical_open(
     let project = match crate::io::project_io::load_project_text(&text, None) {
         Ok(project) => project,
         Err(error) => {
-            crate::workbench::project_lifecycle::release_browser_handle(handle_id);
-            crate::workbench::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project open failed: {error}"
             )));
@@ -1230,7 +1233,7 @@ fn finish_browser_canonical_open(
     let binding = PersistenceBinding::Browser {
         handle_id,
         binding_id: uuid::Uuid::new_v4(),
-        backend: crate::workbench::project_lifecycle::BrowserBindingBackend::ExternalFile,
+        backend: crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
         project_id: project.workspace.project.id().to_string(),
         accepted_generation: 1,
         display_name: display_name.clone(),
@@ -1246,15 +1249,15 @@ fn finish_browser_canonical_open(
         transaction,
     );
     if !opened {
-        crate::workbench::project_lifecycle::release_browser_handle(handle_id);
+        crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
         return false;
     }
     // The project replacement is accepted before its binding record is
     // promoted. Promotion is separately context/CAS guarded, so IndexedDB can
     // never authorize an open that failed to apply or a project that has since
     // been replaced.
-    let context = crate::workbench::project_lifecycle::begin_browser_binding_promotion(state);
-    crate::workbench::project_lifecycle::start_browser_binding_persist(
+    let context = crate::workbench::lifecycle::project_lifecycle::begin_browser_binding_promotion(state);
+    crate::workbench::lifecycle::project_lifecycle::start_browser_binding_persist(
         binding_for_persist,
         move |result| {
             BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| {
@@ -1267,7 +1270,7 @@ fn finish_browser_canonical_open(
                         result,
                     });
             });
-            crate::workbench::browser_file_import::request_browser_import_repaint();
+            crate::workbench::browser::file_import::request_browser_import_repaint();
         },
     );
     true
@@ -1286,8 +1289,8 @@ mod tests {
     use crate::analysis::histogram::HistogramBuilder;
     use crate::analysis::nyquist::NyquistData;
     use crate::analysis::pole_zero::PoleZeroData;
-    use crate::workbench::app::ActiveViewer;
     use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
+    use crate::workbench::app::ActiveViewer;
 
     fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
         run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
@@ -1306,7 +1309,7 @@ mod tests {
         assert!(SaveRequestOutcome::CanonicalComplete.authorizes_immediate_destructive_action());
         assert!(
             !SaveRequestOutcome::CanonicalPending(
-                crate::workbench::project_lifecycle::TransactionId::new()
+                crate::workbench::lifecycle::project_lifecycle::TransactionId::new()
             )
             .authorizes_immediate_destructive_action()
         );

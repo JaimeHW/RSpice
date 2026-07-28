@@ -15,8 +15,8 @@ mod state;
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::AppState;
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, ViewType};
+use crate::workbench::app::AppState;
 
 pub(crate) fn open_symbol_import_dialog(state: &mut AppState) {
     let Some(target_library) = writable_library_name(state) else {

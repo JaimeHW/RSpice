@@ -3752,7 +3752,7 @@ pub fn save_project_file(project: &ProjectFile, path: &Path) -> Result<(), Proje
 
     #[cfg(target_arch = "wasm32")]
     {
-        crate::workbench::browser_download::download_text_file(path, &contents)
+        crate::workbench::browser::download::download_text_file(path, &contents)
             .map_err(ProjectIoError::Io)?;
         Ok(())
     }

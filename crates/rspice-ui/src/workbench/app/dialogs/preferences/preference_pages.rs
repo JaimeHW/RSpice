@@ -961,7 +961,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePage
                     &mut value,
                 ) {
                     state.ui.browser_spoken_feedback = value;
-                    crate::workbench::browser_accessibility::set_spoken_feedback(value);
+                    crate::workbench::browser::accessibility::set_spoken_feedback(value);
                 }
             });
         },

@@ -176,7 +176,7 @@ fn run_pss(
             "shooting PSS operating-point dependency is unavailable: {error}"
         ))
     })?;
-    let actual_source_digest = crate::workbench::netlist_document::source_content_digest(netlist);
+    let actual_source_digest = crate::workbench::documents::netlist_document::source_content_digest(netlist);
     if artifact.effective_source_content_digest() != actual_source_digest {
         return Err(SimulationError::InvalidConfig(format!(
             "shooting PSS source identity {} does not match its bound operating-point source {}",

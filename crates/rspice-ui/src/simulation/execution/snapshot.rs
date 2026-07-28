@@ -1304,7 +1304,7 @@ fn validate_prepared_task_integrity(
         .as_deref()
         .unwrap_or(executable_netlist);
     let exact_source_digest = if task.executable_netlist_override.is_some() {
-        crate::workbench::netlist_document::source_content_digest(exact_source)
+        crate::workbench::documents::netlist_document::source_content_digest(exact_source)
     } else {
         source_digest
     };
@@ -2215,7 +2215,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
+        let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
             project_id,
             &bundle,
             Some("snapshot_owned"),

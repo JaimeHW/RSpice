@@ -9,7 +9,9 @@ use crate::state::{
 };
 
 use super::state::*;
-use crate::workbench::app::{AppState, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture};
+use crate::workbench::app::{
+    AppState, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture,
+};
 
 pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     let library = state

@@ -5,9 +5,9 @@ use egui::{
     Response, Sense, TopBottomPanel, Ui, Vec2,
 };
 
-use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::WorkbenchIcon;

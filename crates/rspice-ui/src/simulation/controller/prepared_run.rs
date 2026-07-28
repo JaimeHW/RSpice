@@ -419,7 +419,7 @@ impl SimulationController {
     ) -> Result<PreparedRunSnapshot, PreparationError> {
         if state.ui.netlist.active_document_initialized
             && state.ui.netlist.active_document
-                == crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff
+                == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         {
             return Err(PreparationError::new(
                 PreparationStage::SourceChecks,
@@ -427,7 +427,7 @@ impl SimulationController {
             ));
         }
         let owned_active = state.ui.netlist.active_document
-            == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
             || (!state.ui.netlist.active_document_initialized
                 && state.simulation.netlist_content.is_empty()
                 && state.workspace.netlist_source.is_some());
@@ -816,7 +816,7 @@ fn prepared_project_veriloga_runtimes(
     // Persisted validation authenticates only the exact source bytes. Rebuild
     // transient executable artifacts rather than trusting serialized code or
     // requiring a redundant manual compile after project/session restore.
-    let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
+    let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
         state.workspace.project.id(),
         bundle,
         None,
@@ -2176,7 +2176,7 @@ mod tests {
                 crate::state::ProjectSourceLanguage::VerilogA,
             ))
             .expect("installed project source bundle");
-        let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
+        let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
             state.workspace.project.id(),
             bundle,
             None,

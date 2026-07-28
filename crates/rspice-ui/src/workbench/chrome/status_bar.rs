@@ -2,10 +2,10 @@
 
 use egui::{Align, Context, Frame, Layout, Sense, TopBottomPanel, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::state::SchematicGridPitch;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::Command;
 use super::super::design_system::WorkbenchIcon;

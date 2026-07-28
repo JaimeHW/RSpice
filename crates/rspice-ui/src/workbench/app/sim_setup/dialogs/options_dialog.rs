@@ -10,7 +10,6 @@ use egui::{Context, Ui};
 
 use super::RSpiceApp;
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::SimSetupState;
 use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
@@ -22,6 +21,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, check_row, chip, choice_row, dialog_tabs, input_row,
 };
+use crate::workbench::app::SimSetupState;
 
 const TABS: &[&str] = &[
     "Accuracy",

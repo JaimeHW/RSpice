@@ -3,9 +3,9 @@
 
 use egui::{Align2, Context, Frame, TopBottomPanel, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::Command;
 use super::super::design_system::WorkbenchIcon;

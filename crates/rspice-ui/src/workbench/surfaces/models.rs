@@ -8,11 +8,6 @@ use egui::{Align, Align2, Color32, Key, Layout, Rect, ScrollArea, Sense, Stroke,
 use sha2::{Digest as _, Sha256};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
-use crate::workbench::app::{
-    open_create_model_bound_symbol_dialog, open_symbol_import_dialog,
-    open_symbol_parameter_form_dialog,
-};
 use crate::state::model_library::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
     ModelSourceEvidenceBinding, QualificationAnalysis, QualificationPlatform,
@@ -21,12 +16,17 @@ use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, View
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::{
+    open_create_model_bound_symbol_dialog, open_symbol_import_dialog,
+    open_symbol_parameter_form_dialog,
+};
 
 use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::{
     property_card, property_row, property_row_toned, workspace_title_row,
 };
-use super::super::model_editor::{self, ModelEditorSection};
+use crate::workbench::documents::model_editor::{self, ModelEditorSection};
 use super::super::state::{ModelsPage, Workspace};
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
@@ -330,7 +330,12 @@ fn models_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
         // library was selected before while the model name changed underneath
         // it — showing another library's data under this name. Until a pack
         // definition can be loaded on demand, such a row is not selectable.
-        if app.state.model_library_manager.get_library(library).is_some() {
+        if app
+            .state
+            .model_library_manager
+            .get_library(library)
+            .is_some()
+        {
             app.state.model_library_manager.select_library(library);
             app.state.workbench.selected_model = Some(model.to_owned());
         }

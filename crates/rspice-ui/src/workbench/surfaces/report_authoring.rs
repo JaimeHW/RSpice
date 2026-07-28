@@ -8,7 +8,6 @@ use std::borrow::Cow;
 
 use egui::{Align2, Color32, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::results::report_document::{
     ReportBlockKind, ReportDocument, ReportEdit, ReportEntityRef, ReportPageId,
     ReportPageUpdatePolicy, ReportReferenceMode, ReportSourceId, ReportTemplate, TableCell,
@@ -16,6 +15,7 @@ use crate::results::report_document::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, input_row, select};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::Command;
 use super::super::design_system::{
@@ -2018,7 +2018,7 @@ fn valid_document_title(title: &str) -> bool {
 fn report_mutation_allowed(state: &AppState) -> bool {
     state.project_lifecycle.project_open
         && !state.workbench.safe_mode.project_read_only()
-        && !crate::workbench::project_lifecycle::operation_in_progress(state)
+        && !crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state)
 }
 
 fn report_mutation_block_reason(state: &AppState) -> &'static str {
@@ -2026,7 +2026,7 @@ fn report_mutation_block_reason(state: &AppState) -> &'static str {
         "Open a project before changing its report document."
     } else if state.workbench.safe_mode.project_read_only() {
         "Report changes are unavailable because the active project is read-only."
-    } else if crate::workbench::project_lifecycle::operation_in_progress(state) {
+    } else if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state) {
         "Wait for the current project operation to finish before changing the report."
     } else {
         "Report changes are unavailable in the current application state."

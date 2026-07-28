@@ -276,7 +276,7 @@ impl RSpiceApp {
                 return outcome;
             }
         };
-        let receipt = match crate::workbench::code_workspace::compile_project_bundle_receipt(
+        let receipt = match crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
             self.state.workspace.project.id(),
             &bundle,
             Some(&module_name),
@@ -365,7 +365,7 @@ impl RSpiceApp {
             .workbench
             .activate(crate::workbench::state::Workspace::Netlist);
         self.state.ui.code_workspace.page =
-            crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
         self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
         self.state.push_user_message(ConsoleMessage::info(format!(
             "Created Verilog-A view '{view_name}' for cell '{cell}' and opened its project-owned source."
@@ -744,9 +744,9 @@ mod tests {
         );
         assert_eq!(
             app.state.ui.code_workspace.page,
-            crate::workbench::code_workspace::CodeWorkspacePage::VerilogA
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA
         );
-        let selected = crate::workbench::code_workspace::selected_veriloga_source(&app).unwrap();
+        let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(&app).unwrap();
         assert_eq!(selected.bundle().id(), bundle.id());
         assert_eq!(selected.selected_module(), Some("rspice_precision_amp_va"));
         assert!(selected.bundle().validation_is_current());

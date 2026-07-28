@@ -4,16 +4,16 @@
 use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, TopBottomPanel, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::state::{SchematicGridPitch, Tool, ViewType, WireRoutingMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 
 use super::super::RouteTransitionSource;
 use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
-use super::super::session::SymbolTool;
+use crate::workbench::lifecycle::session::SymbolTool;
 use super::super::state::{Drawer, Workspace};
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
@@ -919,7 +919,7 @@ fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let generated = app.state.ui.netlist.active_document
-        == crate::workbench::netlist_document::ActiveNetlistDocument::Generated;
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
     toolbar_text_command(
         ui,
         app,

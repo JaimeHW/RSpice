@@ -10,7 +10,6 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Color32, Ui};
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::simulation::netlist_gen::{
     DesignNet, HierarchySource, NetClass, design_nets_with_hierarchy,
@@ -30,6 +29,7 @@ use crate::workbench::design_system::{
     schematic_property_row_status as property_row_status,
 };
 use crate::workbench::state::{InlineEditField, ModelsPage, VerificationPage, Workspace};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::{
     ComponentModelEvidence, component_model_evidence, muted_inspector_copy,
@@ -549,12 +549,10 @@ fn field_value(component: &Component, field: &InlineEditField) -> String {
         InlineEditField::Instance => component.name.clone(),
         InlineEditField::Value => component.value.clone(),
         InlineEditField::Parameters => component.params.clone(),
-        InlineEditField::Parameter(key) => {
-            crate::state::parse_params_string(&component.params)
-                .get(key)
-                .cloned()
-                .unwrap_or_default()
-        }
+        InlineEditField::Parameter(key) => crate::state::parse_params_string(&component.params)
+            .get(key)
+            .cloned()
+            .unwrap_or_default(),
     }
 }
 
@@ -1383,7 +1381,7 @@ fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
                         ComponentModelSourceTarget::VerilogA(reference) => {
                             app.state.open_workspace_view(reference.clone());
                             app.state.ui.code_workspace.page =
-                                crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+                                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
                             app.state.workbench.activate(Workspace::Netlist);
                         }
                     }

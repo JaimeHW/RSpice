@@ -87,8 +87,10 @@ impl RSpiceApp {
     pub(in crate::workbench::app) fn process_pdk_settings_dialog(&mut self, ctx: &Context) {
         #[cfg(target_arch = "wasm32")]
         poll_browser_model_imports(ctx, &mut self.state);
-        let result =
-            crate::workbench::panels::render_pdk_settings_dialog(ctx, &mut self.state.pdk_settings_dialog);
+        let result = crate::workbench::panels::render_pdk_settings_dialog(
+            ctx,
+            &mut self.state.pdk_settings_dialog,
+        );
         match result {
             crate::workbench::panels::PdkSettingsDialogResult::Applied(config) => {
                 let load_result = self

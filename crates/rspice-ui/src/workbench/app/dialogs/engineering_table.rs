@@ -3,15 +3,20 @@
 use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::export_workflow::{ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig};
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::state::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy, SortDirection,
 };
+use crate::ui::tokens::Tokens;
+use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::export_workflow::{
+    ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
+};
 
-use crate::workbench::app::{AppState, EngineeringTableDialogPage, EngineeringTableExportFormat, EngineeringTableExportScope, RSpiceApp};
+use crate::workbench::app::{
+    AppState, EngineeringTableDialogPage, EngineeringTableExportFormat,
+    EngineeringTableExportScope, RSpiceApp,
+};
 
 const EYEBROW: &str = "VIEW \u{00b7} UNIVERSAL DATA-GRID CONTRACT";
 
@@ -35,8 +40,8 @@ enum BodyAction {
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     static BROWSER_SAVED_VIEW_IMPORT: std::cell::RefCell<Option<(
-        crate::workbench::browser_file_import::TextImportToken,
-        Result<Option<crate::workbench::browser_file_import::PickedTextFile>, String>,
+        crate::workbench::browser::file_import::TextImportToken,
+        Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
     )>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -496,10 +501,11 @@ impl RSpiceApp {
                     )?;
                     #[cfg(target_arch = "wasm32")]
                     {
-                        let bytes = crate::workbench::export_workflow::deterministic_stored_zip(&[
-                            ("table.csv", text.as_bytes()),
-                            ("schema.json", schema.as_bytes()),
-                        ])?;
+                        let bytes =
+                            crate::workbench::export_workflow::deterministic_stored_zip(&[
+                                ("table.csv", text.as_bytes()),
+                                ("schema.json", schema.as_bytes()),
+                            ])?;
                         io.write_bytes_file_observed(&observed, &bytes, "application/zip")
                     }
                     #[cfg(not(target_arch = "wasm32"))]
@@ -742,8 +748,8 @@ impl RSpiceApp {
                     Some("An engineering table view picker is already open.".to_owned());
                 return;
             }
-            let token = match crate::workbench::browser_file_import::try_begin_text_import(
-                crate::workbench::browser_file_import::BrowserTextImportKind::EngineeringTableView,
+            let token = match crate::workbench::browser::file_import::try_begin_text_import(
+                crate::workbench::browser::file_import::BrowserTextImportKind::EngineeringTableView,
             ) {
                 Ok(token) => token,
                 Err(error) => {
@@ -752,11 +758,11 @@ impl RSpiceApp {
                 }
             };
             self.state.dialogs.engineering_table.saved_import_token = Some(token);
-            crate::workbench::browser_file_import::pick_text_file(
+            crate::workbench::browser::file_import::pick_text_file(
                 "RSpice engineering table view",
                 &["json", "rspice-table-view"],
                 move |result| {
-                    if crate::workbench::browser_file_import::text_import_is_current(token) {
+                    if crate::workbench::browser::file_import::text_import_is_current(token) {
                         BROWSER_SAVED_VIEW_IMPORT.with(|slot| {
                             *slot.borrow_mut() = Some((token, result));
                         });
@@ -773,7 +779,7 @@ impl RSpiceApp {
             return;
         };
         if self.state.dialogs.engineering_table.saved_import_token != Some(token)
-            || !crate::workbench::browser_file_import::finish_text_import(token)
+            || !crate::workbench::browser::file_import::finish_text_import(token)
         {
             return;
         }

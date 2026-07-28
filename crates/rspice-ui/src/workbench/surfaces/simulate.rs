@@ -6,7 +6,6 @@ use std::collections::HashSet;
 
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
@@ -20,6 +19,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, IconButton, mono_input, select,
 };
+use crate::workbench::RSpiceApp;
 use crate::workbench::state::{
     ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationWorkflowDialog,
 };
@@ -2507,7 +2507,7 @@ fn envelope_source_catalog_input_digest(app: &RSpiceApp) -> ContentDigest {
         app.state.sim_setup.options.to_spice_options(),
         model_library_identity,
     );
-    crate::workbench::netlist_document::source_content_digest(&material)
+    crate::workbench::documents::netlist_document::source_content_digest(&material)
 }
 
 fn build_envelope_source_catalog_with_digest(

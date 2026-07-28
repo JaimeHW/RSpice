@@ -16,7 +16,9 @@ use crate::ui::widgets::{
     SchematicCommandPreview, schematic_command_workflow, select_with_response,
 };
 
-use crate::workbench::app::{AppState, MoveSelectionDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{
+    AppState, MoveSelectionDialogState, RSpiceApp, SchematicEditAuthority,
+};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY PRESERVING";
 const TITLE: &str = "Move selection";

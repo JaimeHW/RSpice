@@ -9,21 +9,21 @@ use egui::{
     TextureOptions, Ui, vec2,
 };
 
-use crate::workbench::app::RSpiceApp;
-use crate::ui::icons::Icon;
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton,
-};
-use crate::workbench::design_system::section_header;
 use crate::hardcopy::{
     BackgroundMode, ColorMapping, Length, LengthUnit, Orientation, OutputFormat, PaperSize,
     PrintColor, PrintMappingEntry, PrintMappingTable, PrintRedundancy, ScaleMode, StandardPaper,
     TilingMode, Watermark,
 };
-use crate::workbench::hardcopy_render::HardcopyPreviewPage;
+use crate::ui::icons::Icon;
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton,
+};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::design_system::section_header;
+use crate::workbench::hardcopy_adapters::render::HardcopyPreviewPage;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::hardcopy_render::HardcopyRenderer;
+use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
 
 use super::{HardcopyDialogPage, HardcopyDialogState, HardcopyWorkflow, PaperDraft, publish};
 
@@ -296,11 +296,11 @@ impl RSpiceApp {
                 #[cfg(target_os = "windows")]
                 {
                     let printer_id = self.state.dialogs.hardcopy.printer_id.clone();
-                    match crate::workbench::hardcopy_print::show_native_printer_properties(
+                    match crate::workbench::hardcopy_adapters::print::show_native_printer_properties(
                         &printer_id,
                         None,
                     ) {
-                        Ok(crate::workbench::hardcopy_print::PrinterDriverPropertiesOutcome::Accepted {
+                        Ok(crate::workbench::hardcopy_adapters::print::PrinterDriverPropertiesOutcome::Accepted {
                             capabilities,
                             suggestion,
                         }) => {
@@ -315,7 +315,7 @@ impl RSpiceApp {
                                 Some(suggestion),
                             );
                         }
-                        Ok(crate::workbench::hardcopy_print::PrinterDriverPropertiesOutcome::Cancelled) => {}
+                        Ok(crate::workbench::hardcopy_adapters::print::PrinterDriverPropertiesOutcome::Cancelled) => {}
                         Err(error) => {
                             self.state.dialogs.hardcopy.error = Some(error.to_string());
                         }
@@ -988,30 +988,30 @@ fn content_pagination(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Option<Bo
                                 .width(ui.available_width())
                                 .show_ui(ui, |ui| {
                                     let choices = [
-                                (
-                                    active_scope.map_or("Active document", scope_label),
-                                    source_choice_for_active_extent(
-                                        &draft.source_candidates,
-                                        active_candidate,
-                                    ),
-                                ),
-                                (
-                                    "Selection",
-                                    source_choice_for_scope(
-                                        &draft.source_candidates,
-                                        active_candidate,
-                                        crate::hardcopy::HardcopyScope::Selection,
-                                    ),
-                                ),
-                                (
-                                    "All sheets / panes",
-                                    source_choice_for_scope(
-                                        &draft.source_candidates,
-                                        active_candidate,
-                                        crate::hardcopy::HardcopyScope::AllSheetsOrPanes,
-                                    ),
-                                ),
-                            ];
+                                        (
+                                            active_scope.map_or("Active document", scope_label),
+                                            source_choice_for_active_extent(
+                                                &draft.source_candidates,
+                                                active_candidate,
+                                            ),
+                                        ),
+                                        (
+                                            "Selection",
+                                            source_choice_for_scope(
+                                                &draft.source_candidates,
+                                                active_candidate,
+                                                crate::hardcopy::HardcopyScope::Selection,
+                                            ),
+                                        ),
+                                        (
+                                            "All sheets / panes",
+                                            source_choice_for_scope(
+                                                &draft.source_candidates,
+                                                active_candidate,
+                                                crate::hardcopy::HardcopyScope::AllSheetsOrPanes,
+                                            ),
+                                        ),
+                                    ];
                                     for (label, choice) in choices {
                                         let active = choice.as_ref().is_some_and(|(key, scope)| {
                                             active_key.as_deref() == Some(key.as_str())
@@ -2717,14 +2717,10 @@ fn standard_paper_label(paper: StandardPaper) -> &'static str {
 fn document_kind_label(kind: crate::hardcopy::HardcopyDocumentKind) -> &'static str {
     match kind {
         crate::hardcopy::HardcopyDocumentKind::SchematicOrSymbol => "Schematic / symbol",
-        crate::hardcopy::HardcopyDocumentKind::LayoutWithLayerLegend => {
-            "Layout + layer legend"
-        }
+        crate::hardcopy::HardcopyDocumentKind::LayoutWithLayerLegend => "Layout + layer legend",
         crate::hardcopy::HardcopyDocumentKind::PlotOrWorksheet => "Plot / worksheet",
         crate::hardcopy::HardcopyDocumentKind::Report => "Report",
-        crate::hardcopy::HardcopyDocumentKind::EngineeringDocument => {
-            "Engineering document"
-        }
+        crate::hardcopy::HardcopyDocumentKind::EngineeringDocument => "Engineering document",
     }
 }
 
@@ -2757,8 +2753,8 @@ fn detailed_scope_label(scope: &crate::hardcopy::HardcopyScope) -> &str {
 }
 
 fn source_choice_for_active_extent(
-    candidates: &[crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor],
-    candidate: Option<&crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor>,
+    candidates: &[crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor],
+    candidate: Option<&crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
 ) -> Option<(String, crate::hardcopy::HardcopyScope)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
     candidate
@@ -2788,8 +2784,8 @@ fn source_choice_for_active_extent(
 }
 
 fn source_choice_for_scope(
-    candidates: &[crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor],
-    candidate: Option<&crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor>,
+    candidates: &[crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor],
+    candidate: Option<&crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
     scope: crate::hardcopy::HardcopyScope,
 ) -> Option<(String, crate::hardcopy::HardcopyScope)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
@@ -2804,8 +2800,8 @@ fn source_choice_for_scope(
 }
 
 fn named_source_choices(
-    candidates: &[crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor],
-    candidate: Option<&crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor>,
+    candidates: &[crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor],
+    candidate: Option<&crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
 ) -> Vec<(String, crate::hardcopy::HardcopyScope, String)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
     candidates
@@ -3100,7 +3096,7 @@ fn media_label(value: &crate::hardcopy::PrinterMediaSource) -> String {
 #[cfg(target_os = "windows")]
 fn apply_printer_job(
     draft: &mut HardcopyDialogState,
-    capabilities: &crate::workbench::hardcopy_print::PrinterCapabilitySnapshot,
+    capabilities: &crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot,
     paper_id: &str,
     media: crate::hardcopy::PrinterMediaSource,
     dpi: u16,
@@ -3122,7 +3118,7 @@ fn apply_printer_job(
             }
         }
     };
-    let geometry = crate::workbench::hardcopy_print::resolve_native_printer_mode(
+    let geometry = crate::workbench::hardcopy_adapters::print::resolve_native_printer_mode(
         capabilities,
         paper_id,
         dpi,
@@ -3190,7 +3186,7 @@ fn reconcile_native_printer_job(draft: &mut HardcopyDialogState) -> bool {
         }
     };
     let paper_id = capability_paper.platform_id().to_string();
-    let Ok(geometry) = crate::workbench::hardcopy_print::resolve_native_printer_mode(
+    let Ok(geometry) = crate::workbench::hardcopy_adapters::print::resolve_native_printer_mode(
         capabilities,
         &paper_id,
         current_job.resolution_dpi(),
@@ -3224,7 +3220,7 @@ fn reconcile_native_printer_job(draft: &mut HardcopyDialogState) -> bool {
 #[cfg(target_os = "windows")]
 fn apply_suggested_paper(
     draft: &mut HardcopyDialogState,
-    capabilities: &crate::workbench::hardcopy_print::PrinterCapabilitySnapshot,
+    capabilities: &crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot,
     paper_platform_id: Option<i16>,
 ) {
     let Some(paper) = paper_platform_id.and_then(|platform_id| {
@@ -3325,7 +3321,7 @@ mod tests {
     #[test]
     fn document_type_choice_prefers_active_extent_over_selection() {
         use crate::hardcopy::{HardcopyDocumentKind, HardcopyScope};
-        use crate::workbench::hardcopy_sources::{
+        use crate::workbench::hardcopy_adapters::sources::{
             RetainedHardcopySourceAvailability, RetainedHardcopySourceDescriptor,
         };
 

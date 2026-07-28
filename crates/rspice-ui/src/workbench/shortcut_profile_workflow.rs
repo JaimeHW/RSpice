@@ -12,7 +12,9 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::workbench::export_workflow::{ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::export_workflow::{
+    ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
+};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{ShortcutPreferences, ShortcutProfileAudit};
 
@@ -348,7 +350,7 @@ pub fn import_shortcut_profile()
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug)]
 struct BrowserShortcutProfileImportCompletion {
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: Result<Option<StagedShortcutProfile>, ShortcutProfileWorkflowError>,
 }
 
@@ -360,17 +362,17 @@ thread_local! {
 
 #[cfg(target_arch = "wasm32")]
 pub fn start_browser_shortcut_profile_import() -> Result<(), String> {
-    let token = crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::ShortcutProfile,
+    let token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::ShortcutProfile,
     )?;
     BROWSER_SHORTCUT_PROFILE_IMPORT_RESULT.with(|slot| {
         *slot.borrow_mut() = None;
     });
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         SHORTCUT_PROFILE_FILTER_NAME,
         SHORTCUT_PROFILE_FILTER_EXTENSIONS,
         move |result| {
-            if !crate::workbench::browser_file_import::text_import_is_current(token) {
+            if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
             }
             let result = match result {
@@ -390,10 +392,10 @@ pub fn start_browser_shortcut_profile_import() -> Result<(), String> {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 fn complete_browser_shortcut_profile_import(
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: Result<Option<StagedShortcutProfile>, ShortcutProfileWorkflowError>,
 ) {
-    if !crate::workbench::browser_file_import::text_import_is_current(token) {
+    if !crate::workbench::browser::file_import::text_import_is_current(token) {
         return;
     }
     BROWSER_SHORTCUT_PROFILE_IMPORT_RESULT.with(|slot| {
@@ -406,7 +408,7 @@ pub fn poll_browser_shortcut_profile_import()
 -> Option<Result<Option<StagedShortcutProfile>, ShortcutProfileWorkflowError>> {
     let completion =
         BROWSER_SHORTCUT_PROFILE_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())?;
-    if !crate::workbench::browser_file_import::finish_text_import(completion.token) {
+    if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return None;
     }
     Some(completion.result)
@@ -791,7 +793,7 @@ mod tests {
 
     #[test]
     fn stale_browser_completion_cannot_release_replacement_lease() {
-        use crate::workbench::browser_file_import::{
+        use crate::workbench::browser::file_import::{
             BrowserTextImportKind, cancel_active_text_import, text_import_is_current,
             try_begin_text_import,
         };

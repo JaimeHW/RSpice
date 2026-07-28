@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(restored.closure_digest(), original.closure_digest());
         assert_eq!(restored.root().exact_bytes(), original.root().exact_bytes());
         assert_eq!(restored.files(), original.files());
-        let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
+        let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
             crate::product::ProjectId::new(),
             restored,
             Some("rspice_precision_amp_va"),

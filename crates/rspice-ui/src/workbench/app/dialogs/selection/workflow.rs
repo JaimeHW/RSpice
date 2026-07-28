@@ -12,6 +12,7 @@ use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
+use crate::state::SchematicHierarchyVisibility;
 use crate::state::{
     ClipboardData, ComponentType, Point, SchematicSelectionFilter, SchematicSnapshot,
     SchematicState, Selection,
@@ -21,7 +22,6 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
-use crate::state::SchematicHierarchyVisibility;
 
 use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
 

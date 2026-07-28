@@ -2,12 +2,12 @@
 
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::RSpiceApp;
 
-use super::super::code_workspace::{
+use crate::workbench::documents::code_workspace::{
     CodeEditorLanguage, CodeEditorSeverity, CodeWorkspacePage, TargetQualification,
     show_code_editor,
 };
@@ -26,10 +26,10 @@ fn title_actions_stack(available_width: f32) -> bool {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    super::super::code_workspace::poll_veriloga_import(app);
-    super::super::code_workspace::poll_veriloga_compile(app);
+    crate::workbench::documents::code_workspace::poll_veriloga_import(app);
+    crate::workbench::documents::code_workspace::poll_veriloga_compile(app);
     let t = Tokens::get(ui.ctx());
-    let selected = super::super::code_workspace::selected_veriloga_source(app);
+    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(app);
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -49,7 +49,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 return;
             }
         };
-        let active_path = super::super::code_workspace::active_veriloga_file_path(app, &selected);
+        let active_path = crate::workbench::documents::code_workspace::active_veriloga_file_path(app, &selected);
         let mut source = selected
             .bundle()
             .file_content(&active_path)
@@ -183,7 +183,7 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        let _ = super::super::netlist_document::open_generated_primary(&mut app.state);
+        let _ = crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
         app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
     }
 }
@@ -196,7 +196,7 @@ fn compile_button(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, width: f32)
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        super::super::code_workspace::start_veriloga_compile(app, ui.ctx().clone());
+        crate::workbench::documents::code_workspace::start_veriloga_compile(app, ui.ctx().clone());
     }
 }
 
@@ -231,10 +231,10 @@ fn title_button_width(ui: &Ui, label: &str, accent: bool) -> f32 {
 fn code_pane(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    selected: &super::super::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     active_path: &str,
     source: &mut String,
-    diagnostics: &[super::super::code_workspace::CodeEditorDiagnostic],
+    diagnostics: &[crate::workbench::documents::code_workspace::CodeEditorDiagnostic],
 ) {
     source_editor(ui, app, selected, active_path, source, diagnostics);
 }
@@ -242,10 +242,10 @@ fn code_pane(
 fn source_editor(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    selected: &super::super::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     active_path: &str,
     source: &mut String,
-    diagnostics: &[super::super::code_workspace::CodeEditorDiagnostic],
+    diagnostics: &[crate::workbench::documents::code_workspace::CodeEditorDiagnostic],
 ) {
     let t = Tokens::get(ui.ctx());
     let (toolbar, _) = ui.allocate_exact_size(
@@ -326,7 +326,7 @@ fn source_editor(
             CodeEditorLanguage::VerilogA,
             &editor_diagnostics,
         ) {
-            match super::super::code_workspace::replace_selected_veriloga_file(
+            match crate::workbench::documents::code_workspace::replace_selected_veriloga_file(
                 app,
                 selected,
                 active_path,
@@ -334,12 +334,13 @@ fn source_editor(
             ) {
                 Ok(true) => {}
                 Ok(false) => {}
-                Err(error) => app
-                    .state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "Could not update {}: {error}",
-                        active_path
-                    ))),
+                Err(error) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                            "Could not update {}: {error}",
+                            active_path
+                        )))
+                }
             }
         }
     });
@@ -347,8 +348,8 @@ fn source_editor(
 
 fn current_diagnostics(
     app: &RSpiceApp,
-    selected: &super::super::code_workspace::SelectedVerilogASource,
-) -> Vec<super::super::code_workspace::CodeEditorDiagnostic> {
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+) -> Vec<crate::workbench::documents::code_workspace::CodeEditorDiagnostic> {
     let state = &app.state.ui.code_workspace.veriloga;
     current_receipt(app, selected)
         .map(|receipt| receipt.diagnostics.clone())
@@ -362,8 +363,8 @@ fn current_diagnostics(
 
 fn current_receipt<'a>(
     app: &'a RSpiceApp,
-    selected: &super::super::code_workspace::SelectedVerilogASource,
-) -> Option<&'a super::super::code_workspace::VerilogACompileReceipt> {
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+) -> Option<&'a crate::workbench::documents::code_workspace::VerilogACompileReceipt> {
     app.state
         .ui
         .code_workspace
@@ -376,7 +377,7 @@ fn current_receipt<'a>(
 fn inspector(
     ui: &mut Ui,
     app: &RSpiceApp,
-    selected: &super::super::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) {
     let t = Tokens::get(ui.ctx());
     ui.set_width(ui.available_width());
@@ -526,7 +527,7 @@ fn muted_row(ui: &mut Ui, text: &str) {
         });
 }
 
-fn diagnostic_row(ui: &mut Ui, diagnostic: &super::super::code_workspace::CodeEditorDiagnostic) {
+fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::workbench::documents::code_workspace::CodeEditorDiagnostic) {
     let t = Tokens::get(ui.ctx());
     let tone = match diagnostic.severity {
         CodeEditorSeverity::Info => t.color.info,

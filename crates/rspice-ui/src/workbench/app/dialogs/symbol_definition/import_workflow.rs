@@ -10,8 +10,8 @@ use crate::ui::widgets::{
 
 use super::source_picker;
 use super::state::SymbolImportBindingChoice;
-use crate::workbench::app::publish_symbol_definition_candidate;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::publish_symbol_definition_candidate;
 
 const IMPORT_EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} VALIDATED INTERCHANGE";
 const IMPORT_TITLE: &str = "Import symbol definition";

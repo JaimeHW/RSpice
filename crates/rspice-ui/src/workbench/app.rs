@@ -161,7 +161,6 @@ pub(crate) use dialogs::view_operations::{
 };
 pub(crate) use dialogs::window_session::open_window_workflow;
 
-
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
 
@@ -311,7 +310,7 @@ pub struct AppState {
     /// Transactional document registry, accepted project baseline, and
     /// canonical persistence identity. Runtime-only; session recovery keeps
     /// the working set separately and reconstructs this boundary at startup.
-    pub(crate) project_lifecycle: crate::workbench::project_lifecycle::ProjectLifecycleState,
+    pub(crate) project_lifecycle: crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState,
     /// Pending cell deletion (library, cell_name)
     pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
@@ -342,12 +341,12 @@ pub struct AppState {
     /// Exact native canonical-file authority saved with the working session.
     /// A restored pathname alone never grants ordinary Save authority.
     pub(crate) native_project_binding_receipt:
-        Option<crate::workbench::project_lifecycle::NativeBindingReceipt>,
+        Option<crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt>,
     /// Exact browser canonical-binding authority saved with the working-set
     /// session.  The binding UUID is opaque and intentionally independent of
     /// the logical project UUID. Runtime file handles are never serialized.
     pub(crate) browser_project_binding_receipt:
-        Option<crate::workbench::project_lifecycle::BrowserBindingReceipt>,
+        Option<crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt>,
     /// The activated license key as pasted (persisted; re-verified on load).
     pub(crate) license_key: Option<String>,
     /// The verified grant behind `license_key` (derived, never persisted).
@@ -433,12 +432,12 @@ impl AppState {
         let active_document = if self.ui.netlist.active_document_initialized {
             self.ui.netlist.active_document
         } else if self.workspace.netlist_source.is_some() {
-            crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+            crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         } else {
-            crate::workbench::netlist_document::ActiveNetlistDocument::Generated
+            crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
         };
         let source = if active_document
-            == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         {
             self.workspace
                 .netlist_source
@@ -451,12 +450,12 @@ impl AppState {
             return Some("Enter a netlist before running".to_string());
         }
         if active_document
-            == crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         {
             return Some("Generated comparison documents cannot be executed".to_owned());
         }
-        let current_digest = crate::workbench::netlist_document::source_content_digest(source);
-        if active_document == crate::workbench::netlist_document::ActiveNetlistDocument::Generated
+        let current_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
+        if active_document == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
             && (self.ui.netlist.generation_error.is_some()
                 || self.ui.netlist.generated_input_digest
                     != self.ui.netlist.current_generation_input_digest)
@@ -478,7 +477,7 @@ impl AppState {
                 "Validate the exact current source and project revision before running".to_owned(),
             );
         }
-        if active_document == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+        if active_document == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
             && self.ui.netlist.externally_saved_content_digest != Some(current_digest)
         {
             return Some("Save the validated owned source deck before running".to_owned());
@@ -735,7 +734,7 @@ impl RSpiceApp {
         // Restore global user Verilog-A library (commercial-style user library).
         restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace);
         state.restore_active_schematic_from_workspace();
-        crate::workbench::project_lifecycle::initialize_from_session(&mut state);
+        crate::workbench::lifecycle::project_lifecycle::initialize_from_session(&mut state);
         #[cfg(target_arch = "wasm32")]
         initialize_browser_surface_navigation(&mut state, &cc.egui_ctx);
 
@@ -813,9 +812,9 @@ impl RSpiceApp {
         self.state.poll_shortcut_library_persistence();
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::browser_file_import::register_text_import_repaint_context(ctx);
+        crate::workbench::browser::file_import::register_text_import_repaint_context(ctx);
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::project_lifecycle::poll_browser_binding_restore(&mut self.state);
+        crate::workbench::lifecycle::project_lifecycle::poll_browser_binding_restore(&mut self.state);
         #[cfg(target_arch = "wasm32")]
         if crate::workbench::project_workflow::poll_browser_project_import(&mut self.state) {
             self.restore_workspace_after_project_load();
@@ -853,7 +852,7 @@ impl RSpiceApp {
     /// active document: `cell* — project — RSpice`.
     fn sync_window_title(&mut self, ctx: &Context) {
         let has_unsaved_changes = should_warn_before_browser_unload(
-            crate::workbench::project_lifecycle::has_unsaved_changes(&self.state),
+            crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state),
             false,
         );
         #[cfg(target_arch = "wasm32")]
@@ -1109,7 +1108,7 @@ pub(crate) fn close_design_management_dialog_route(state: &mut AppState) {
 #[cfg(target_arch = "wasm32")]
 fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
     use crate::workbench::RouteTransitionSource;
-    use crate::workbench::browser_navigation::{
+    use crate::workbench::browser::navigation::{
         current_location, install_popstate_listener, restart_history_session,
     };
 
@@ -1154,7 +1153,7 @@ fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
 
 #[cfg(target_arch = "wasm32")]
 fn synchronize_browser_surface_navigation(state: &mut AppState) {
-    use crate::workbench::browser_navigation::{
+    use crate::workbench::browser::navigation::{
         ensure_popstate_listener, history_session_ready, poll_popstate, push_route, replace_route,
         traversal_in_flight, traversal_watchdog_expired, traverse_history,
     };
@@ -1244,7 +1243,7 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
             return;
         }
         let canonical = state.workbench.current_route();
-        match crate::workbench::browser_navigation::restart_history_session(canonical) {
+        match crate::workbench::browser::navigation::restart_history_session(canonical) {
             Ok(()) => {
                 state
                     .workbench
@@ -1283,7 +1282,7 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
 
 #[cfg(target_arch = "wasm32")]
 fn recover_browser_history_at_active_task(state: &mut AppState) {
-    use crate::workbench::browser_navigation::{ensure_popstate_listener, restart_history_session};
+    use crate::workbench::browser::navigation::{ensure_popstate_listener, restart_history_session};
 
     state.workbench.clear_browser_history_effects();
     let canonical = state.workbench.current_route();
@@ -1306,10 +1305,10 @@ fn recover_browser_history_at_active_task(state: &mut AppState) {
 #[cfg(target_arch = "wasm32")]
 fn rollback_browser_navigation_after_sync_failure(
     state: &mut AppState,
-    error: crate::workbench::browser_navigation::BrowserNavigationError,
+    error: crate::workbench::browser::navigation::BrowserNavigationError,
 ) {
     use crate::workbench::RouteTransitionSource;
-    use crate::workbench::browser_navigation::{active_browser_route, restart_history_session};
+    use crate::workbench::browser::navigation::{active_browser_route, restart_history_session};
 
     match active_browser_route() {
         Ok(browser_route) => {
@@ -1385,7 +1384,8 @@ impl eframe::App for RSpiceApp {
         crate::ui::viewport::capture_root_viewport(&ctx, ui.max_rect());
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(enabled) = crate::workbench::browser_accessibility::spoken_feedback_override()
+            if let Some(enabled) =
+                crate::workbench::browser::accessibility::spoken_feedback_override()
             {
                 self.state.ui.browser_spoken_feedback = enabled;
             }
@@ -1411,7 +1411,7 @@ impl eframe::App for RSpiceApp {
     fn on_exit(&mut self) {
         log::info!("eframe on_exit — application shutting down");
         #[cfg(target_arch = "wasm32")]
-        if let Err(error) = crate::workbench::browser_navigation::uninstall_popstate_listener() {
+        if let Err(error) = crate::workbench::browser::navigation::uninstall_popstate_listener() {
             log::warn!("Failed to remove browser route listener: {error}");
         }
     }

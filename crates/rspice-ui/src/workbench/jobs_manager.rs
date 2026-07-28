@@ -12,7 +12,6 @@ use egui::{
 use serde_json::json;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::{AppState, RSpiceApp};
 use crate::product::RunId;
 use crate::state::{
     AnalysisResultSourceDomain, ExecutionTarget, SimulationRun, SimulationRunLifecycle,
@@ -23,6 +22,7 @@ use crate::ui::{
     tokens::{self, Tokens},
     widgets::{Dialog, DialogChoice, DialogSize},
 };
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::{RouteTransitionSource, SurfaceId, SurfaceRoute, commands::Command};
 

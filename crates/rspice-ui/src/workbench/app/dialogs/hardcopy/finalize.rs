@@ -15,18 +15,18 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use sha2::{Digest as _, Sha256};
 
-use crate::workbench::export_workflow::{
-    ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
-};
-use crate::workbench::hardcopy_print::{
-    HardcopyCancellationToken, HardcopyPrintError, discover_native_printers, spool_native_hardcopy,
-};
-use crate::product::ContentDigest;
 use crate::hardcopy::{
     CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
     HardcopyPlan, OutputFormat, RenderTarget,
 };
-use crate::workbench::hardcopy_render::{RenderedHardcopyPublication, RenderedPrinterPages};
+use crate::product::ContentDigest;
+use crate::workbench::export_workflow::{
+    ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
+};
+use crate::workbench::hardcopy_adapters::print::{
+    HardcopyCancellationToken, HardcopyPrintError, discover_native_printers, spool_native_hardcopy,
+};
+use crate::workbench::hardcopy_adapters::render::{RenderedHardcopyPublication, RenderedPrinterPages};
 
 const NATIVE_FINALIZATION_THREAD_NAME: &str = "rspice-hardcopy-finalize";
 const CANCELLED_MESSAGE: &str = "Native hardcopy finalization was cancelled.";
@@ -838,11 +838,11 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::AtomicU64;
 
-    use crate::product::ObjectRevision;
     use crate::hardcopy::{
         ActiveHardcopySource, ContentExtent, HardcopyDocumentId, HardcopyDocumentKind,
         HardcopyScope, HardcopySetup, Length,
     };
+    use crate::product::ObjectRevision;
 
     use super::*;
 
@@ -1212,7 +1212,7 @@ mod tests {
     fn discovery_and_missing_device_failures_have_truthful_print_outcomes() {
         let discovery = FinalizationFailure::Print {
             error: HardcopyPrintError::PlatformUnavailable(
-                crate::workbench::hardcopy_print::HardcopyPlatformUnavailableReason::
+                crate::workbench::hardcopy_adapters::print::HardcopyPlatformUnavailableReason::
                     NativePrintingIsWindowsOnly,
             ),
             pages_completed: 0,

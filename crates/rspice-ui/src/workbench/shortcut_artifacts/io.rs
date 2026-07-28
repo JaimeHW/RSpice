@@ -411,7 +411,7 @@ impl ShortcutArtifactIo for NativeShortcutArtifactIo {
         destination: &ObservedArtifactDestination,
         artifact: &PreparedShortcutArtifact,
     ) -> Result<ArtifactPublication, String> {
-        crate::workbench::browser_download::download_bytes_file(
+        crate::workbench::browser::download::download_bytes_file(
             &destination.path,
             artifact.bytes(),
             artifact.format().mime_type(),
@@ -531,11 +531,11 @@ mod tests {
     use egui::os::OperatingSystem;
 
     use super::*;
+    use crate::workbench::ShortcutPreferences;
+    use crate::workbench::commands::{CommandPlatform, ShortcutContext};
     use crate::workbench::shortcut_artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };
-    use crate::workbench::ShortcutPreferences;
-    use crate::workbench::commands::{CommandPlatform, ShortcutContext};
 
     fn reference_model() -> ShortcutReferenceModel {
         build_shortcut_reference_model(

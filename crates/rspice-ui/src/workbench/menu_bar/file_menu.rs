@@ -68,8 +68,10 @@ pub(crate) fn dispatch_file_menu_action(
             if state.project_lifecycle.project_open {
                 let _ = crate::workbench::project_workflow::save_project(state);
             } else {
-                let _ =
-                    crate::workbench::file_actions::action_file_save_with_io(state, file_workflow_io);
+                let _ = crate::workbench::file_actions::action_file_save_with_io(
+                    state,
+                    file_workflow_io,
+                );
             }
         }
         FileMenuAction::ImportNetlist => {
@@ -87,7 +89,7 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::ImportVerilogA => {
             state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
             state.ui.code_workspace.page =
-                crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
             state.ui.code_workspace.veriloga.import_requested = true;
         }
         FileMenuAction::Exit => request_exit(state),
@@ -95,7 +97,7 @@ pub(crate) fn dispatch_file_menu_action(
 }
 
 fn require_save_confirmation_if_dirty(state: &mut AppState, action: ConfirmationAction) -> bool {
-    if !crate::workbench::project_lifecycle::has_unsaved_changes(state) {
+    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
         return false;
     }
 
@@ -113,7 +115,7 @@ fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
-    if !crate::workbench::project_lifecycle::has_unsaved_changes(state) {
+    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
         return false;
     }
 

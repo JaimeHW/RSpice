@@ -48,6 +48,20 @@
 // warnings are left visible on purpose: the migration is an egui API change
 // with layout consequences that needs its own visual verification pass, and a
 // silent allow is how it stayed invisible in the first place.
+// NOTE: closing the public surface (see the visibility note below) turned 192
+// items into `dead_code` warnings. They were never reachable — the compiler
+// simply could not say so while their modules were `pub`. All 192 are dead on
+// native, on wasm32, and with tests compiled; `--lib` alone is not enough,
+// because it hides anything only a `#[cfg(test)]` block or a browser-only
+// path calls.
+//
+// They are deliberately not swept. `workbench::simulation_analysis_tabs` is
+// the reason: 26 of its items are unreachable, but it is one coherent catalog
+// of 25 analysis tabs whose two index tables happen to have no reader.
+// Deleting the unreferenced half would leave a catalog that no longer
+// describes the product. Retire these per module — decide whether each thing
+// is finished-but-unwired or genuinely abandoned — not with a bulk delete.
+//
 // The desktop build detaches from its console on Windows and the browser
 // build has no stderr at all, so anything printed is a diagnostic nobody
 // will ever read. Route it through `log` and the application log buffer.
@@ -80,14 +94,14 @@
 pub mod analysis;
 
 /// Schematic editor - Canvas, export, toolbar, symbol library
-pub mod schematic;
+pub(crate) mod schematic;
 
 /// Simulation management - Controller, dialogs, netlist generation
 pub mod simulation;
 
 
 /// Property editing - Component properties and design variables
-pub mod properties;
+pub(crate) mod properties;
 
 /// The RSpice design system - tokens, palettes, fonts, icons, widgets
 pub mod ui;
@@ -95,11 +109,11 @@ pub mod ui;
 /// Persisted page-setup contracts and deterministic pagination. Document
 /// adapters, scene rendering, the platform print boundary, and the dialogs
 /// live in `workbench::hardcopy`; this is the layer `state` can persist.
-pub mod hardcopy;
+pub(crate) mod hardcopy;
 
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.
-pub mod workbench;
+pub(crate) mod workbench;
 
 /// Versioned visualization documents, immutable dataset bindings, exact-data
 /// queries, viewer compatibility, and progressive result operations.
@@ -111,7 +125,7 @@ pub mod product;
 
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
-pub mod automation_workflow;
+pub(crate) mod automation_workflow;
 
 // =============================================================================
 // Core Infrastructure
@@ -129,15 +143,15 @@ pub mod state;
 /// Unit-safe user presentation and UI quantity-input policy. Values entering
 /// or leaving this module are always expressed in their documented SI base
 /// units; deck dialect and PDK database-unit semantics live elsewhere.
-pub mod quantity;
+pub(crate) mod quantity;
 
 /// Diagnostics the application reports about itself: the console message
 /// model and the structured, filterable application log.
-pub mod diagnostics;
+pub(crate) mod diagnostics;
 
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
-pub mod time_compat;
+pub(crate) mod time_compat;
 
 /// Shared output specification helpers for analysis/sensitivity paths
 pub(crate) mod output_spec;
@@ -148,6 +162,10 @@ pub(crate) mod output_spec;
 
 /// Re-export the main application type
 pub use workbench::RSpiceApp;
+
+/// Native logging environment for the desktop binary.
+#[cfg(not(target_arch = "wasm32"))]
+pub use workbench::logging::native_log_env;
 
 #[cfg(target_arch = "wasm32")]
 pub fn run_rspice_ui_worker_request(
@@ -160,7 +178,7 @@ pub fn run_rspice_ui_worker_request(
 pub fn run_rspice_ui_veriloga_compile_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    workbench::code_workspace::run_veriloga_worker_request_value(value)
+    workbench::documents::code_workspace::run_veriloga_worker_request_value(value)
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -15,7 +15,9 @@ use crate::workbench::design_system::{
     WorkbenchIcon, property_row, property_row_toned, section_header,
 };
 
-use crate::workbench::app::dialogs::review_primitives::{input_field, purpose_line, read_only_field};
+use crate::workbench::app::dialogs::review_primitives::{
+    input_field, purpose_line, read_only_field,
+};
 use crate::workbench::app::{AppState, RSpiceApp};
 
 const MANAGER_TITLE: &str = "Testbench configuration sets";

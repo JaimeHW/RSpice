@@ -366,7 +366,7 @@ pub fn import_shortcut_artifact_source()
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug)]
 struct BrowserShortcutArtifactImportCompletion {
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError>,
 }
 
@@ -374,15 +374,15 @@ struct BrowserShortcutArtifactImportCompletion {
 thread_local! {
     static BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT: std::cell::RefCell<Option<BrowserShortcutArtifactImportCompletion>> =
         const { std::cell::RefCell::new(None) };
-    static BROWSER_SHORTCUT_ARTIFACT_IMPORT_TOKEN: std::cell::Cell<Option<crate::workbench::browser_file_import::TextImportToken>> =
+    static BROWSER_SHORTCUT_ARTIFACT_IMPORT_TOKEN: std::cell::Cell<Option<crate::workbench::browser::file_import::TextImportToken>> =
         const { std::cell::Cell::new(None) };
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
 fn begin_browser_shortcut_artifact_import()
--> Result<crate::workbench::browser_file_import::TextImportToken, ShortcutArtifactImportError> {
-    let token = crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::ShortcutProfile,
+-> Result<crate::workbench::browser::file_import::TextImportToken, ShortcutArtifactImportError> {
+    let token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::ShortcutProfile,
     )
     .map_err(|error| {
         ShortcutArtifactImportError::new(ShortcutArtifactImportErrorKind::ImportBusy, error)
@@ -434,7 +434,7 @@ fn browser_host_platform() -> Result<VscodeHostPlatform, ShortcutArtifactImportE
 #[cfg(any(test, target_arch = "wasm32"))]
 fn browser_picker_result(
     platform: VscodeHostPlatform,
-    result: Result<Option<crate::workbench::browser_file_import::PickedTextFile>, String>,
+    result: Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
 ) -> Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError> {
     match result {
         Ok(Some(file)) => {
@@ -457,10 +457,10 @@ fn browser_picker_result(
 
 #[cfg(any(test, target_arch = "wasm32"))]
 fn complete_browser_shortcut_artifact_import(
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError>,
 ) -> bool {
-    if !crate::workbench::browser_file_import::text_import_is_current(token) {
+    if !crate::workbench::browser::file_import::text_import_is_current(token) {
         return false;
     }
     BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| {
@@ -474,11 +474,11 @@ fn complete_browser_shortcut_artifact_import(
 pub fn start_browser_shortcut_artifact_import() -> Result<(), ShortcutArtifactImportError> {
     let platform = browser_host_platform()?;
     let token = begin_browser_shortcut_artifact_import()?;
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         SHORTCUT_SOURCE_FILTER_NAME,
         SHORTCUT_SOURCE_FILTER_EXTENSIONS,
         move |result| {
-            if !crate::workbench::browser_file_import::text_import_is_current(token) {
+            if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
             }
             let result = browser_picker_result(platform, result);
@@ -494,7 +494,7 @@ pub fn poll_browser_shortcut_artifact_import()
 -> Option<Result<ShortcutArtifactImportOutcome, ShortcutArtifactImportError>> {
     let completion =
         BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())?;
-    if !crate::workbench::browser_file_import::finish_text_import(completion.token) {
+    if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         clear_browser_shortcut_artifact_import_owner(completion.token);
         return None;
     }
@@ -504,7 +504,7 @@ pub fn poll_browser_shortcut_artifact_import()
 
 #[cfg(any(test, target_arch = "wasm32"))]
 fn clear_browser_shortcut_artifact_import_owner(
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
 ) {
     BROWSER_SHORTCUT_ARTIFACT_IMPORT_TOKEN.with(|slot| {
         if slot.get() == Some(token) {
@@ -534,14 +534,14 @@ pub fn cancel_browser_shortcut_artifact_import() -> BrowserShortcutArtifactImpor
     let Some(token) = BROWSER_SHORTCUT_ARTIFACT_IMPORT_TOKEN.with(std::cell::Cell::get) else {
         return BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased;
     };
-    if !crate::workbench::browser_file_import::text_import_is_current(token) {
+    if !crate::workbench::browser::file_import::text_import_is_current(token) {
         clear_browser_shortcut_artifact_import_owner(token);
         BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| {
             *slot.borrow_mut() = None;
         });
         return BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased;
     }
-    if crate::workbench::browser_file_import::cancel_active_text_import() != Some(token) {
+    if crate::workbench::browser::file_import::cancel_active_text_import() != Some(token) {
         return BrowserShortcutArtifactImportCancelOutcome::StillOwned;
     }
     clear_browser_shortcut_artifact_import_owner(token);
@@ -612,7 +612,7 @@ mod tests {
             cancel_browser_shortcut_artifact_import(),
             BrowserShortcutArtifactImportCancelOutcome::StillOwned
         ) {
-            let _ = crate::workbench::browser_file_import::cancel_active_text_import();
+            let _ = crate::workbench::browser::file_import::cancel_active_text_import();
         }
         BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| {
             *slot.borrow_mut() = None;
@@ -780,7 +780,7 @@ mod tests {
         reset_browser_test_state();
         let stale = begin_browser_shortcut_artifact_import().expect("first lease starts");
         assert_eq!(
-            crate::workbench::browser_file_import::cancel_active_text_import(),
+            crate::workbench::browser::file_import::cancel_active_text_import(),
             Some(stale)
         );
         let current = begin_browser_shortcut_artifact_import().expect("replacement starts");
@@ -790,9 +790,7 @@ mod tests {
             Ok(ShortcutArtifactImportOutcome::Cancelled)
         ));
         assert!(poll_browser_shortcut_artifact_import().is_none());
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            current
-        ));
+        assert!(crate::workbench::browser::file_import::text_import_is_current(current));
 
         assert!(complete_browser_shortcut_artifact_import(
             current,
@@ -825,16 +823,12 @@ mod tests {
         ));
 
         let replacement = begin_browser_shortcut_artifact_import().expect("replacement starts");
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            replacement
-        ));
+        assert!(crate::workbench::browser::file_import::text_import_is_current(replacement));
         assert!(!complete_browser_shortcut_artifact_import(
             cancelled,
             Ok(ShortcutArtifactImportOutcome::Cancelled)
         ));
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            replacement
-        ));
+        assert!(crate::workbench::browser::file_import::text_import_is_current(replacement));
         assert_eq!(
             cancel_browser_shortcut_artifact_import(),
             BrowserShortcutArtifactImportCancelOutcome::Cancelled
@@ -845,8 +839,8 @@ mod tests {
     #[test]
     fn browser_cancel_never_cancels_another_workflows_lease() {
         reset_browser_test_state();
-        let other = crate::workbench::browser_file_import::try_begin_text_import(
-            crate::workbench::browser_file_import::BrowserTextImportKind::Project,
+        let other = crate::workbench::browser::file_import::try_begin_text_import(
+            crate::workbench::browser::file_import::BrowserTextImportKind::Project,
         )
         .expect("other workflow starts");
 
@@ -854,10 +848,8 @@ mod tests {
             cancel_browser_shortcut_artifact_import(),
             BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased
         );
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            other
-        ));
-        assert!(crate::workbench::browser_file_import::finish_text_import(
+        assert!(crate::workbench::browser::file_import::text_import_is_current(other));
+        assert!(crate::workbench::browser::file_import::finish_text_import(
             other
         ));
         reset_browser_test_state();
@@ -868,7 +860,7 @@ mod tests {
         reset_browser_test_state();
         let stale = begin_browser_shortcut_artifact_import().expect("shortcut picker starts");
         assert_eq!(
-            crate::workbench::browser_file_import::cancel_active_text_import(),
+            crate::workbench::browser::file_import::cancel_active_text_import(),
             Some(stale)
         );
 
@@ -900,10 +892,12 @@ mod tests {
 
         let detection = browser_picker_result(
             VscodeHostPlatform::Linux,
-            Ok(Some(crate::workbench::browser_file_import::PickedTextFile {
-                name: "keybindings.jsonc".to_owned(),
-                contents: "[invalid]".to_owned(),
-            })),
+            Ok(Some(
+                crate::workbench::browser::file_import::PickedTextFile {
+                    name: "keybindings.jsonc".to_owned(),
+                    contents: "[invalid]".to_owned(),
+                },
+            )),
         )
         .unwrap_err();
         assert_eq!(detection.kind(), ShortcutArtifactImportErrorKind::Detection);

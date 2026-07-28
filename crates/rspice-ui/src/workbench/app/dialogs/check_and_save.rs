@@ -3,7 +3,6 @@
 use egui::{Align, Align2, Context, Frame, Layout, Margin, Sense, Stroke, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
 use crate::state::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionJournal,
     ValidatedRevisionRequest, ValidatedSchematicRevisionId,
@@ -13,13 +12,16 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
+use crate::workbench::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
 
 use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::dialogs::operation_primitives::{
     CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, operation_steps,
     paint_body_dividers,
 };
-use crate::workbench::app::dialogs::review_primitives::{input_field, purpose_line, read_only_field};
+use crate::workbench::app::dialogs::review_primitives::{
+    input_field, purpose_line, read_only_field,
+};
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::{AppState, RSpiceApp};
 
@@ -276,7 +278,7 @@ impl RSpiceApp {
         let target_view_key = fresh_report.active_view().key();
         if original_journal.is_empty()
             && let Some(accepted) =
-                crate::workbench::project_lifecycle::accepted_active_schematic(&self.state)
+                crate::workbench::lifecycle::project_lifecycle::accepted_active_schematic(&self.state)
             && let Err(error) = self.state.schematic.seed_accepted_revision_baseline(
                 &accepted,
                 fresh_report.project_id(),
@@ -533,7 +535,7 @@ fn rollback_validated_save(
             })
     };
     let detail = match rollback_result {
-        Ok(()) => match crate::workbench::project_lifecycle::refresh_registry(state) {
+        Ok(()) => match crate::workbench::lifecycle::project_lifecycle::refresh_registry(state) {
             Ok(()) => message.to_owned(),
             Err(error) => format!(
                 "{message} The journal rollback completed, but the project dirty-state registry could not be refreshed: {error}. Reopen the project before retrying."

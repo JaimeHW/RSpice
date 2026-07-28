@@ -3,13 +3,13 @@
 use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
 
 use crate::diagnostics::LogSeverity;
-use crate::workbench::RSpiceApp;
-use crate::workbench::panels::ConsoleHistoryItem;
 use crate::simulation::automation::CommandOutput;
 use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
+use crate::workbench::panels::ConsoleHistoryItem;
 
 use super::super::commands::{Command, CommandAvailability, command_catalog};
 use super::super::design_system::WorkbenchIcon;
@@ -971,7 +971,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
                 });
         });
     if add_measurement {
-        super::super::visualization_studio::open_measurement_editor(app);
+        crate::workbench::documents::visualization_studio::open_measurement_editor(app);
     }
 }
 
@@ -1493,10 +1493,10 @@ fn muted(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::AppState;
     use crate::diagnostics::LogSource;
     use crate::services::drc::{DrcResult, DrcSeverity};
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+    use crate::workbench::AppState;
     use crate::workbench::state::WorkbenchState;
 
     #[test]

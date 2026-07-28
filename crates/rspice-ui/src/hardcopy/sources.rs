@@ -7,7 +7,7 @@
 //! the analysis viewers, and `state` must not reach up through those to
 //! describe its own saved data.
 //!
-//! The document adapters in `workbench::hardcopy_sources` import these types
+//! The document adapters in `workbench::hardcopy_adapters::sources` import these types
 //! and the shared validation helpers back down from here.
 
 use serde::{Deserialize, Serialize};

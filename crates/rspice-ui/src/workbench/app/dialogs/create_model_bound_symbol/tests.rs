@@ -7,11 +7,11 @@ use super::controller::{
     open_create_model_bound_symbol_dialog, parse_target, validate_create_symbol_draft,
 };
 use super::state::*;
-use crate::workbench::app::{AppState, RSpiceApp};
 use crate::state::{
     CellViewRef, ComponentType, Library, ModelBoundSymbolDefinition, Point, SymbolSourceContract,
     ViewType, model_library::DeviceModel, model_library::ModelType,
 };
+use crate::workbench::app::{AppState, RSpiceApp};
 
 fn render_accessibility_frame(
     app: &mut RSpiceApp,

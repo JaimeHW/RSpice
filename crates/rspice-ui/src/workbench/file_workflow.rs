@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::AppState;
 use crate::io::SchematicIoError;
 use crate::state::{SchematicState, ViewType};
+use crate::workbench::app::AppState;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SchematicLoadOrigin<'a> {
@@ -143,7 +143,7 @@ pub(crate) fn load_schematic_from_path_with_io(
     // saved source. Legacy or changed-source checkpoints only interrupt this
     // open when they are strictly newer; stale evidence remains in Recovery.
     #[cfg(not(target_arch = "wasm32"))]
-    match super::recovery_checkpoint::autosave_restore_candidate(path) {
+    match crate::workbench::lifecycle::recovery_checkpoint::autosave_restore_candidate(path) {
         Ok(Some(candidate)) => {
             state.dialogs.pending_autosave_restore = Some(candidate);
             return true;
@@ -264,13 +264,13 @@ fn schematic_save_dialog_default_name(state: &AppState) -> Option<String> {
 enum BrowserSchematicImportResult {
     Cancelled,
     Failed(String),
-    Loaded(crate::workbench::browser_file_import::PickedTextFile),
+    Loaded(crate::workbench::browser::file_import::PickedTextFile),
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct BrowserSchematicImportCompletion {
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: BrowserSchematicImportResult,
 }
 
@@ -282,15 +282,15 @@ thread_local! {
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_schematic_import() -> Result<(), String> {
-    let token = crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::Schematic,
+    let token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::Schematic,
     )?;
 
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         crate::io::schematic_io::SCHEMATIC_FILTER.0,
         crate::io::schematic_io::SCHEMATIC_FILTER.1,
         move |result| {
-            if !crate::workbench::browser_file_import::text_import_is_current(token) {
+            if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
             }
             let event = match result {
@@ -315,7 +315,7 @@ pub(crate) fn poll_browser_schematic_import(state: &mut AppState) -> bool {
     else {
         return false;
     };
-    if !crate::workbench::browser_file_import::finish_text_import(completion.token) {
+    if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return false;
     }
     match completion.result {
@@ -363,7 +363,7 @@ pub(crate) fn save_schematic_to_path_with_io(
                 // legacy, or replaced recovery evidence is retained.
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    if let Err(error) = super::recovery_checkpoint::cleanup_checkpoint(path) {
+                    if let Err(error) = crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(path) {
                         log::warn!("Saved source but autosave checkpoint cleanup failed: {error}");
                     }
                 }

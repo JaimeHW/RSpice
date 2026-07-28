@@ -10,12 +10,12 @@ use egui::{
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
 use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::Command;
 use super::super::design_system::{WorkbenchIcon, card, property_card, property_row, status_dot};
@@ -55,13 +55,13 @@ struct BrowserTechnologyCheckpointCompletion {
     project_id: String,
     expected_revision: u64,
     binding: ProjectTechnologyBinding,
-    result: Result<crate::workbench::project_checkpoint::ProjectCheckpointSummary, String>,
+    result: Result<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary, String>,
 }
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserRecoveryCatalogCompletion {
     project_id: String,
-    result: Result<crate::workbench::project_checkpoint::ProjectCheckpointCatalog, String>,
+    result: Result<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointCatalog, String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2552,9 +2552,9 @@ fn attach_technology_candidate(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let checkpoint = crate::workbench::project_checkpoint::create(
+        let checkpoint = crate::workbench::lifecycle::project_checkpoint::create(
             &app.state,
-            crate::workbench::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
+            crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
         )?;
         commit_technology_after_checkpoint(app, candidate.binding.clone(), &checkpoint)
     }
@@ -2569,12 +2569,12 @@ fn attach_technology_candidate(
 fn commit_technology_after_checkpoint(
     app: &mut RSpiceApp,
     binding: ProjectTechnologyBinding,
-    checkpoint: &crate::workbench::project_checkpoint::ProjectCheckpointSummary,
+    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) -> Result<String, String> {
     let previous_revision = app.state.workspace.project.revision();
     if checkpoint.project_revision() != previous_revision.get()
         || checkpoint.project_name() != app.state.workspace.project.name()
-        || !crate::workbench::project_checkpoint::matches_current_state(checkpoint, &app.state)?
+        || !crate::workbench::lifecycle::project_checkpoint::matches_current_state(checkpoint, &app.state)?
     {
         return Err(
             "Project changed after its recovery checkpoint was captured; attachment was not committed"
@@ -2627,9 +2627,9 @@ fn start_browser_technology_checkpoint(
     let queued_project_id = project_id.clone();
     let queued_binding = binding.clone();
     let repaint = ctx.clone();
-    crate::workbench::project_checkpoint::start_create(
+    crate::workbench::lifecycle::project_checkpoint::start_create(
         &app.state,
-        crate::workbench::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
+        crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
         move |result| {
             BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS.with(|queue| {
                 queue
@@ -2715,7 +2715,7 @@ fn poll_browser_recovery_completions(ctx: &Context, app: &mut RSpiceApp) {
             continue;
         }
         let result = completion.result.and_then(|bytes| {
-            crate::workbench::browser_download::download_bytes_file(
+            crate::workbench::browser::download::download_bytes_file(
                 std::path::Path::new(&completion.filename),
                 &bytes,
                 "application/vnd.rspice.project+json",
@@ -3148,7 +3148,7 @@ fn ensure_project_recovery_catalog(ctx: &Context, app: &mut RSpiceApp) {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let result = crate::workbench::project_checkpoint::list(&app.state);
+        let result = crate::workbench::lifecycle::project_checkpoint::list(&app.state);
         let recovery = &mut app.state.dialogs.project_checkpoint_recovery;
         recovery.initialized = true;
         match result {
@@ -3169,7 +3169,7 @@ fn ensure_project_recovery_catalog(ctx: &Context, app: &mut RSpiceApp) {
         app.state.dialogs.project_checkpoint_recovery.loading = true;
         let queued_project_id = project_id;
         let repaint = ctx.clone();
-        crate::workbench::project_checkpoint::start_list(&app.state, move |result| {
+        crate::workbench::lifecycle::project_checkpoint::start_list(&app.state, move |result| {
             BROWSER_RECOVERY_CATALOG_COMPLETIONS.with(|queue| {
                 queue
                     .borrow_mut()
@@ -3426,7 +3426,7 @@ fn format_byte_count(bytes: u64) -> String {
 }
 
 fn recovery_copy_filename(
-    checkpoint: &crate::workbench::project_checkpoint::ProjectCheckpointSummary,
+    checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) -> String {
     let base = checkpoint
         .project_name()
@@ -3449,7 +3449,7 @@ fn recovery_copy_filename(
 fn export_project_checkpoint_copy(
     ctx: &Context,
     app: &mut RSpiceApp,
-    checkpoint: crate::workbench::project_checkpoint::ProjectCheckpointSummary,
+    checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
     let filename = recovery_copy_filename(&checkpoint);
     #[cfg(not(target_arch = "wasm32"))]
@@ -3461,7 +3461,8 @@ fn export_project_checkpoint_copy(
         else {
             return;
         };
-        match crate::workbench::project_checkpoint::publish_recovery_copy(&checkpoint, &destination) {
+        match crate::workbench::lifecycle::project_checkpoint::publish_recovery_copy(&checkpoint, &destination)
+        {
             Ok(()) => {
                 let receipt = format!("Saved independent recovery copy: {}", destination.display());
                 app.state
@@ -3487,7 +3488,7 @@ fn export_project_checkpoint_copy(
         let project_id = app.state.workspace.project.id().to_string();
         let queued_filename = filename.clone();
         let repaint = ctx.clone();
-        crate::workbench::project_checkpoint::start_recovery_copy_bytes(
+        crate::workbench::lifecycle::project_checkpoint::start_recovery_copy_bytes(
             checkpoint,
             std::path::PathBuf::from(&filename),
             move |result| {

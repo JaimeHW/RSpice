@@ -62,7 +62,9 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            crate::workbench::project_workflow::cancel_pending_browser_file_operation(&mut self.state);
+            crate::workbench::project_workflow::cancel_pending_browser_file_operation(
+                &mut self.state,
+            );
         }
     }
 
@@ -155,7 +157,7 @@ impl RSpiceApp {
                 }
             }
             ProjectReviewRequest::CloseProject => {
-                let dirty = crate::workbench::project_lifecycle::dirty_document_count(&self.state);
+                let dirty = crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&self.state);
                 let running = self.state.simulation.is_running;
                 let primary = if dirty > 0 {
                     "Save all and close"

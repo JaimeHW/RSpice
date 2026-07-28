@@ -788,7 +788,7 @@ impl Command {
         if matches!(self, Self::PreviousWorkspace | Self::NextWorkspace) {
             return CommandAvailability::Hidden;
         }
-        if crate::workbench::project_lifecycle::operation_in_progress(&app.state)
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
         {
             return CommandAvailability::Disabled("project operation is still in progress");
@@ -862,7 +862,7 @@ impl Command {
             }
             Self::ToggleResultsSplit => "no retained result dataset is available",
             Self::ResultViewer(viewer) => {
-                crate::workbench::result_document::viewer_unavailability_reason(&app.state, viewer)
+                crate::workbench::documents::result_document::viewer_unavailability_reason(&app.state, viewer)
                     .unwrap_or("the active dataset is incompatible with this viewer")
             }
             Self::VerificationPage(crate::workbench::state::VerificationPage::Drc) => {

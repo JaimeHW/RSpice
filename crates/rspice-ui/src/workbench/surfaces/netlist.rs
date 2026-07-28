@@ -7,17 +7,17 @@
 use egui::{Align, Layout, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::{AppState, RSpiceApp};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::{AppState, RSpiceApp};
 
+use super::super::design_system::{WorkbenchIcon, empty_state, icon_button};
+use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, source_content_digest};
 use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
 };
-use super::super::design_system::{WorkbenchIcon, empty_state, icon_button};
-use super::super::netlist_document::{ActiveNetlistDocument, source_content_digest};
 
 const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
@@ -30,7 +30,7 @@ const PHONE_ACTION_WIDTH: f32 = PHONE_PRIMARY_WIDTH + CODE_TOOLBAR_GAP + 28.0;
 
 pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
     reconcile_documents(app);
-    super::super::netlist_document::prepare(&mut app.state);
+    crate::workbench::documents::netlist_document::prepare(&mut app.state);
 }
 
 pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -51,7 +51,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     .unwrap_or("Add a circuit before generating the primary netlist."),
             );
         } else {
-            super::super::netlist_document::show_editor(ui, &mut app.state);
+            crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
         }
     });
     find_replace_window(ui.ctx(), app);
@@ -118,13 +118,13 @@ fn reconcile_documents(app: &mut RSpiceApp) {
     {
         app.state.simulation.netlist_content = projected;
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
-        super::super::netlist_document::invalidate_source_evidence(&mut app.state.ui.netlist);
+        crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state.ui.netlist);
     }
 }
 
 fn refresh_generated_artifact(app: &mut RSpiceApp) {
     let input_digest =
-        match crate::workbench::project_lifecycle::generated_netlist_input_digest(&app.state) {
+        match crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&app.state) {
             Ok(digest) => digest,
             Err(error) => {
                 app.state.ui.netlist.current_generation_input_digest = None;
@@ -141,7 +141,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
     app.state.ui.netlist.current_generation_input_digest = Some(input_digest);
     if authoritative_input_changed {
         app.invalidate_simulation_preflight();
-        super::super::netlist_document::invalidate_source_evidence(&mut app.state.ui.netlist);
+        crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state.ui.netlist);
         if let Some(document) = app.state.ui.netlist.generated_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());
         }
@@ -319,7 +319,7 @@ fn generated_project_source_dependencies(
             bundle.root().logical_path(),
         )
         .map_err(|error| error.to_string())?;
-        let virtual_bundle = super::super::code_workspace::project_bundle_as_virtual(bundle)?;
+        let virtual_bundle = crate::workbench::documents::code_workspace::project_bundle_as_virtual(bundle)?;
         let compilation = rspice_veriloga::VerilogACompiler::default()
             .compile_virtual_runtime_diagnosed(
                 &virtual_bundle,
@@ -417,11 +417,8 @@ fn project_bundle_locator(
     source_key: &str,
     logical_path: &str,
 ) -> Result<crate::state::SourceLocator, String> {
-    crate::state::SourceLocator::try_new(
-        format!("{source_key}#/{logical_path}"),
-        logical_path,
-    )
-    .map_err(|error| error.to_string())
+    crate::state::SourceLocator::try_new(format!("{source_key}#/{logical_path}"), logical_path)
+        .map_err(|error| error.to_string())
 }
 
 fn compiler_dependency_locator(
@@ -607,7 +604,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             .diagnostics
             .iter()
             .filter(|diagnostic| {
-                diagnostic.severity != super::super::netlist_document::DiagnosticSeverity::Error
+                diagnostic.severity != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
             })
             .count()
             + app
@@ -877,7 +874,7 @@ fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
             let _ = open_owned_source(&mut app.state);
         }
         Some(NetlistToolbarAction::OpenGenerated) => {
-            let _ = super::super::netlist_document::open_generated_primary(&mut app.state);
+            let _ = crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
         }
         Some(NetlistToolbarAction::OpenOwnershipDialog(strategy)) => {
             open_ownership_dialog(&mut app.state, strategy);
@@ -981,9 +978,9 @@ struct NetlistSearchMatch {
 
 fn netlist_search_documents(
     state: &AppState,
-    scope: super::super::netlist_document::NetlistFindScope,
+    scope: crate::workbench::documents::netlist_document::NetlistFindScope,
 ) -> Vec<NetlistSearchDocument> {
-    use super::super::netlist_document::NetlistFindScope;
+    use crate::workbench::documents::netlist_document::NetlistFindScope;
 
     let generated = || NetlistSearchDocument {
         active_document: ActiveNetlistDocument::Generated,
@@ -1228,7 +1225,7 @@ fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         });
     match choice {
         DialogChoice::Primary => {
-            match super::super::netlist_document::compare_generated_revision(
+            match crate::workbench::documents::netlist_document::compare_generated_revision(
                 &mut app.state,
                 dialog.selected_history_index,
             ) {
@@ -1607,7 +1604,7 @@ fn create_owned_source(
     state.ui.netlist.externally_saved_content_digest = None;
     state.simulation.netlist_content = source;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    super::super::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
+    crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
     Ok(())
 }
 
@@ -1697,10 +1694,10 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
+    use crate::workbench::documents::netlist_document::NetlistFindScope;
     use crate::state::{
         FindDirection, FindOptions, ReplaceScope, find_all_in_source, replace_in_source,
     };
-    use super::super::netlist_document::NetlistFindScope;
 
     let owned = app.state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource;
     let mut find = app.state.ui.netlist.find.clone();
@@ -1711,24 +1708,24 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         regular_expression: find.regular_expression,
     };
     let documents = netlist_search_documents(&app.state, find.scope);
-    let matches: Result<Vec<NetlistSearchMatch>, crate::state::FindError> =
-        if find.find.is_empty() {
-            Ok(Vec::new())
-        } else {
-            documents
-                .iter()
-                .try_fold(Vec::<NetlistSearchMatch>::new(), |mut all, document| {
-                    all.extend(
-                        find_all_in_source(&document.source, &find.find, options)?
-                            .into_iter()
-                            .map(|found| NetlistSearchMatch {
-                                document: document.clone(),
-                                found,
-                            }),
-                    );
-                    Ok(all)
-                })
-        };
+    let matches: Result<Vec<NetlistSearchMatch>, crate::state::FindError> = if find.find.is_empty()
+    {
+        Ok(Vec::new())
+    } else {
+        documents
+            .iter()
+            .try_fold(Vec::<NetlistSearchMatch>::new(), |mut all, document| {
+                all.extend(
+                    find_all_in_source(&document.source, &find.find, options)?
+                        .into_iter()
+                        .map(|found| NetlistSearchMatch {
+                            document: document.clone(),
+                            found,
+                        }),
+                );
+                Ok(all)
+            })
+    };
     find.error = matches.as_ref().err().map(ToString::to_string);
     let matches = matches.unwrap_or_default();
     if matches.is_empty() {
@@ -1921,7 +1918,7 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 match result.document.active_document {
                     ActiveNetlistDocument::Generated => {
                         let _ =
-                            super::super::netlist_document::open_generated_primary(&mut app.state);
+                            crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
                     }
                     ActiveNetlistDocument::OwnedSource => {
                         let _ = open_owned_source(&mut app.state);
@@ -1958,7 +1955,7 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 Ok(outcome) => {
                     let count = outcome.replacement_count();
                     if count > 0
-                        && super::super::netlist_document::replace_owned_source(
+                        && crate::workbench::documents::netlist_document::replace_owned_source(
                             &mut app.state,
                             outcome.into_source(),
                         )
@@ -1979,10 +1976,10 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
 
 fn find_scope_combo(
     ui: &mut Ui,
-    find: &mut super::super::netlist_document::NetlistFindState,
+    find: &mut crate::workbench::documents::netlist_document::NetlistFindState,
     has_owned_source: bool,
 ) {
-    use super::super::netlist_document::NetlistFindScope;
+    use crate::workbench::documents::netlist_document::NetlistFindScope;
 
     egui::ComboBox::from_id_salt("rspice.code.find-scope")
         .selected_text(match find.scope {
@@ -2046,7 +2043,7 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
         .diagnostics
         .iter()
         .filter(|diagnostic| {
-            diagnostic.severity == super::super::netlist_document::DiagnosticSeverity::Error
+            diagnostic.severity == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
         })
         .count();
     if errors > 0 {
@@ -2092,15 +2089,12 @@ fn open_owned_source(state: &mut AppState) -> bool {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            crate::state::SourceLocator::try_new(
-                path.display().to_string(),
-                display_name,
-            )
-            .and_then(|locator| locator.with_native_origin(path.display().to_string()))
-            .and_then(|locator| {
-                owned.import_source(owned.content_digest(), locator, source.as_bytes().to_vec())
-            })
-            .and_then(|_| owned.make_editable(owned.content_digest()))
+            crate::state::SourceLocator::try_new(path.display().to_string(), display_name)
+                .and_then(|locator| locator.with_native_origin(path.display().to_string()))
+                .and_then(|locator| {
+                    owned.import_source(owned.content_digest(), locator, source.as_bytes().to_vec())
+                })
+                .and_then(|_| owned.make_editable(owned.content_digest()))
         } else {
             owned.replace_editable_source(owned.content_digest(), source.as_bytes().to_vec())
         };
@@ -2143,7 +2137,7 @@ fn open_owned_source(state: &mut AppState) -> bool {
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
-    super::super::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
+    crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
     true
 }
 
@@ -2271,18 +2265,18 @@ mod tests {
             state.workspace.netlist_source.as_deref(),
             Some(retained_generated.as_str())
         );
-        assert!(crate::workbench::netlist_document::replace_owned_source(
+        assert!(crate::workbench::documents::netlist_document::replace_owned_source(
             &mut state,
             "owned edit\n.end\n".to_owned()
         ));
 
-        assert!(super::super::super::netlist_document::open_generated_primary(&mut state));
+        assert!(crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
         assert_eq!(state.simulation.netlist_content, retained_generated);
         assert_eq!(
             state.workspace.netlist_source.as_deref(),
             Some("owned edit\n.end\n")
         );
-        assert!(!super::super::super::netlist_document::open_generated_primary(&mut state));
+        assert!(!crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
     }
 
     #[test]

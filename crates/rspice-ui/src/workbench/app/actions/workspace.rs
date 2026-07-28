@@ -1,5 +1,4 @@
 use crate::diagnostics::{ConsoleMessage, LogAnchor, LogSeverity, LogSource};
-use crate::workbench::app::{AppState, RSpiceApp};
 use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::state::{
@@ -8,6 +7,7 @@ use crate::state::{
     SchematicState, SymbolDocument, SymbolEditorMetadata, View, ViewType,
 };
 use crate::workbench::SymbolDocumentSnapshot;
+use crate::workbench::app::{AppState, RSpiceApp};
 use std::collections::HashMap;
 
 const MAX_FINDING_ROWS: usize = 50;
@@ -1603,7 +1603,7 @@ impl AppState {
         };
         self.open_workspace_view(reference);
         self.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        self.ui.code_workspace.page = crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+        self.ui.code_workspace.page = crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
         true
     }
 
@@ -1642,7 +1642,6 @@ impl RSpiceApp {
     }
 }
 
-
 fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
     encoded
         .split_whitespace()
@@ -1663,7 +1662,6 @@ fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
 #[cfg(test)]
 mod tests {
     use crate::diagnostics::{LogAnchor, LogSource};
-    use crate::workbench::app::AppState;
     use crate::services::drc::{DrcLocation, DrcViolationType};
     use crate::state::{
         Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
@@ -1672,6 +1670,7 @@ mod tests {
         ViewType, Wire,
     };
     use crate::workbench::ChoicePreference;
+    use crate::workbench::app::AppState;
     use crate::workbench::state::Workspace;
 
     #[test]

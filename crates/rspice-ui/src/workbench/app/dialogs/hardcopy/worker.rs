@@ -8,18 +8,18 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::workbench::export_workflow::deterministic_stored_zip;
-use crate::product::ContentDigest;
 use crate::hardcopy::{
     HardcopyArtifactIdentity, HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup,
     MAX_PREVIEW_PAGES, OutputFormat,
 };
-use crate::workbench::hardcopy_render::{
+use crate::product::ContentDigest;
+use crate::workbench::export_workflow::deterministic_stored_zip;
+use crate::workbench::hardcopy_adapters::render::{
     HardcopyRenderer, HardcopySceneMetadata, MAX_ARTIFACT_BYTES, MAX_PREVIEW_WORKER_MANIFEST_BYTES,
     MAX_PREVIEW_WORKER_RGBA_BYTES, MAX_PUBLICATION_BYTES, MAX_PUBLICATION_WORKER_MANIFEST_BYTES,
     RenderedHardcopyPublication,
 };
-use crate::workbench::hardcopy_sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
+use crate::workbench::hardcopy_adapters::sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
 
 const HARDCOPY_WORKER_PROTOCOL_VERSION: u32 = 1;
 const MAX_REQUEST_METADATA_BYTES: usize = MAX_WORKER_SNAPSHOT_BYTES;
@@ -394,7 +394,7 @@ fn execute_request(
             }
             let snapshot = buffers.pop().expect("validated one-buffer request");
             let prepared =
-                crate::workbench::hardcopy_sources::PreparedRetainedHardcopyResolution::from_worker_snapshot_json(
+                crate::workbench::hardcopy_adapters::sources::PreparedRetainedHardcopyResolution::from_worker_snapshot_json(
                     &snapshot,
                 )
                 .map_err(|error| error.to_string())?;
@@ -760,7 +760,7 @@ mod browser {
     }
 
     pub(crate) fn start_source_resolution(
-        prepared: crate::workbench::hardcopy_sources::PreparedRetainedHardcopyResolution,
+        prepared: crate::workbench::hardcopy_adapters::sources::PreparedRetainedHardcopyResolution,
         source_key: String,
         scope: crate::hardcopy::HardcopyScope,
         epoch: u64,
@@ -781,8 +781,8 @@ mod browser {
 
     pub(crate) fn start_preview(
         plan: &crate::hardcopy::HardcopyPlan,
-        source: &crate::workbench::hardcopy_sources::ResolvedHardcopyDocument,
-        metadata: crate::workbench::hardcopy_render::HardcopySceneMetadata,
+        source: &crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument,
+        metadata: crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata,
         page_indices: Vec<usize>,
         dpi: u16,
         epoch: u64,
@@ -810,8 +810,8 @@ mod browser {
 
     pub(crate) fn start_publication(
         plan: &crate::hardcopy::HardcopyPlan,
-        source: &crate::workbench::hardcopy_sources::ResolvedHardcopyDocument,
-        metadata: crate::workbench::hardcopy_render::HardcopySceneMetadata,
+        source: &crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument,
+        metadata: crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata,
         package_multi_part: bool,
         epoch: u64,
         generation: u64,
@@ -1166,13 +1166,13 @@ pub(crate) use browser::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::AppState;
-    use crate::state::{Point, Wire};
     use crate::hardcopy::{
         BackgroundMode, ColorMapping, FontPolicy, RenderSetup, RenderTarget, ScaleMode,
     };
-    use crate::workbench::hardcopy_render::{HardcopyPreviewPage, RenderedHardcopyPublication};
-    use crate::workbench::hardcopy_sources::{
+    use crate::state::{Point, Wire};
+    use crate::workbench::AppState;
+    use crate::workbench::hardcopy_adapters::render::{HardcopyPreviewPage, RenderedHardcopyPublication};
+    use crate::workbench::hardcopy_adapters::sources::{
         PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
         resolve_retained_hardcopy_source,
     };

@@ -40,7 +40,7 @@ pub(in crate::workbench::app) fn default_app_state() -> AppState {
         ),
     ) {
         ui.code_workspace.veriloga.receipt = Some(
-            crate::workbench::code_workspace::compile_project_bundle_receipt(
+            crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
                 workspace.project.id(),
                 bundle,
                 None,
@@ -55,8 +55,8 @@ pub(in crate::workbench::app) fn default_app_state() -> AppState {
         let plan = crate::automation_workflow::compile_workflow(document.content())
             .expect("the canonical bootstrapped Automation source must compile");
         ui.code_workspace.automation.receipt = Some(
-            crate::workbench::code_workspace::AutomationValidationReceipt {
-                token: crate::workbench::code_workspace::SourceOperationToken {
+            crate::workbench::documents::code_workspace::AutomationValidationReceipt {
+                token: crate::workbench::documents::code_workspace::SourceOperationToken {
                     project_id: workspace.project.id(),
                     revision: document.revision().get(),
                     content_digest: document.content_digest(),
@@ -78,7 +78,7 @@ pub(in crate::workbench::app) fn default_app_state() -> AppState {
         script_console: crate::workbench::panels::ScriptConsoleState::default(),
         library_manager,
         workspace,
-        project_lifecycle: crate::workbench::project_lifecycle::ProjectLifecycleState::default(),
+        project_lifecycle: crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState::default(),
         pending_delete_cell: None,
         pending_delete_view: None,
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),

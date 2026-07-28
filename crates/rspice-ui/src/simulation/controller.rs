@@ -572,7 +572,7 @@ impl SimulationController {
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
         self.current_effective_source_content_digest =
-            Some(crate::workbench::netlist_document::source_content_digest(
+            Some(crate::workbench::documents::netlist_document::source_content_digest(
                 next_analysis.executable_netlist(),
             ));
         self.current_op_effective_source_content_digest = config.as_ref().and_then(|config| {
@@ -1779,7 +1779,7 @@ mod tests {
             );
         controller.abort();
 
-        let project = crate::workbench::project_lifecycle::snapshot(&state)
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("production snapshot accepts controller run");
         let json = crate::io::project_io::serialize_project_file(&project)
             .expect("controller plan run serializes");
@@ -3009,7 +3009,7 @@ mod tests {
             );
         controller.abort();
 
-        let project = crate::workbench::project_lifecycle::snapshot(&state)
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("production snapshot accepts controller manual run");
         let json = crate::io::project_io::serialize_project_file(&project)
             .expect("controller manual run serializes");
