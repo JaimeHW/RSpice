@@ -482,13 +482,19 @@ fn lower_jacobian_program(
     if let Some(mir) = canonical_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
         let axis = canonical_derivative_axis_for_column(model, mir, &jacobian.col_axis)?;
+        let state_slots = CanonicalExpressionStateSlots::for_equation(
+            model,
+            mir,
+            equation_id,
+            &jacobian.program,
+        )?;
         return NativeProgram::from_mir_derivative(
             model.name.clone(),
             EntryKind::Jacobian,
             mir,
             equation_id,
             axis,
-            limits.with_canonical_table_lookup_slots(&table_lookup_slots),
+            state_slots.apply(limits.with_canonical_table_lookup_slots(&table_lookup_slots)),
         );
     }
 
@@ -5496,6 +5502,33 @@ endmodule
 
         compile_model_with_canonical_ir(&model, &artifact)
             .expect("repeated canonical assignments pair state slots by occurrence");
+    }
+
+    #[test]
+    fn canonical_jacobian_maps_state_slots_used_by_product_rule() {
+        let source = r#"
+module native_canonical_jacobian_state_product(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n) * ddt(V(p, n) * V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model.stamp_programs[0]
+                .jacobian_programs
+                .iter()
+                .flat_map(|jacobian| &jacobian.program.instructions)
+                .any(|instruction| matches!(instruction, Instruction::DdtState(_))),
+            "product-rule Jacobian must read the ddt value state"
+        );
+
+        compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical Jacobian maps bytecode state slots before MIR lowering");
     }
 
     #[test]
