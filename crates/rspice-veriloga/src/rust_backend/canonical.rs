@@ -218,13 +218,6 @@ impl ModelPlan {
         })?;
         reject_unsupported_kinds(artifact, &cfg.function)?;
 
-        // From the primal body, before a single derivative exists. Cutting the
-        // noise slice out of the differentiated function instead would work and
-        // would be wrong: the AD pass leaves a packed lane at every merge, the
-        // optimizer's dead-code pass keeps every block parameter, and the
-        // magnitudes would arrive carrying rows nothing asked for.
-        let noise = plan_noise(artifact, &cfg);
-
         // In value order, which is the lowering's order, so the numbering is a
         // property of the model rather than of a hash map's iteration.
         let mut ddt_slots: HashMap<ExprId, usize> = HashMap::new();
@@ -269,6 +262,20 @@ impl ModelPlan {
                 None => Vec::new(),
             })
             .collect();
+
+        // Every read-out is taken, so the function has stopped growing and the
+        // noise slice can be cut from it.
+        //
+        // The primal body first, and the differentiated one only if that fails.
+        // A magnitude wants no derivative, so cutting from the primal is what
+        // keeps the slice to the arithmetic the powers actually name — but
+        // `ddx` is a symbolic derivative only the AD pass resolves, and six
+        // shipped models read one inside a noise power. Measured both ways over
+        // the corpus: always-primal costs those six 5.4 MB of fallback, and
+        // always-differentiated costs the other 35 more than it saves the six,
+        // because the AD pass leaves bookkeeping the magnitudes can reach.
+        let noise = plan_noise(artifact, &cfg, &cfg.function)
+            .or_else(|| plan_noise(artifact, &cfg, &differentiated.function));
 
         // A contribution with no `ddt` stores no charge. Its row is kept and
         // emptied rather than dropped, so both row lists stay parallel to
@@ -361,7 +368,11 @@ impl ModelPlan {
 /// given another source's power would be reported under the wrong mechanism at
 /// the wrong branch, which reads as a physics result rather than as a compiler
 /// fault. `None` costs the model nothing but the smaller file.
-fn plan_noise(artifact: &CanonicalIrArtifact, cfg: &CfgModel) -> Option<NoisePlan> {
+fn plan_noise(
+    artifact: &CanonicalIrArtifact,
+    cfg: &CfgModel,
+    function: &CfgFunction,
+) -> Option<NoisePlan> {
     let planned = &artifact.noise_sources.sources;
     // A silent model falls back too: the generator being replaced already emits
     // the empty evaluator for one, and this emitter has no reason to.
@@ -407,22 +418,24 @@ fn plan_noise(artifact: &CanonicalIrArtifact, cfg: &CfgModel) -> Option<NoisePla
         });
     }
 
-    let (mut function, outputs) = optimize_cfg(&cfg.function, &wanted);
+    let (mut function, outputs) = optimize_cfg(function, &wanted);
 
-    // Two kinds cannot appear in this body. `ddt` reads and writes per-instance
-    // history, and `evaluate_noise_sources` takes `&self` — a magnitude that
+    // One kind cannot appear in this body. `ddt` reads and writes per-instance
+    // history and `evaluate_noise_sources` takes `&self`, so a magnitude that
     // depended on one would advance the transient state while the noise
-    // analysis merely read it. `ddx` is a symbolic derivative that only the AD
-    // pass resolves, and this slice is deliberately cut before any of that runs.
+    // analysis merely read it.
     //
-    // *Which* such values are left is not the question. A charge storing `ddt`
-    // is the residual of its own contribution, and the optimizer's dead-code
-    // pass marks every block parameter live, so a guarded contribution carries
-    // its `ddt` into every slice cut from the function whether or not a
-    // magnitude mentions it. The question is whether a magnitude *reads* one,
-    // and only reachability answers it.
+    // Whether any `ddt` is *left* is not the question — a charge storing one is
+    // the residual of its own contribution, and a residual can survive into a
+    // slice on an edge nothing here reads. The question is whether a magnitude
+    // reads one, and only reachability answers it.
     let live = reachable(&function, &outputs);
     for (index, value) in function.values.iter_mut().enumerate() {
+        // `ddt` reads and writes per-instance history, and a magnitude that
+        // reached one would advance the transient state while the noise
+        // analysis merely read it. A `ddx` is unresolved, which only happens in
+        // the primal body — returning `None` on one is what sends the model
+        // round again against the differentiated function.
         if !matches!(
             value.kind,
             CfgValueKind::Ddt { .. } | CfgValueKind::Ddx { .. }
@@ -795,6 +808,17 @@ impl ModelPlan {
             "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor}};\n",
             options.runtime_path, options.runtime_path
         );
+        // A resolved `ddx` is a lane read, so a magnitude that uses one needs
+        // the same packed-value support `stamp.rs` carries. Emitted only where
+        // the body has one: on a model whose magnitudes are plain arithmetic it
+        // would be a page of unused types in every device.
+        if function
+            .values
+            .iter()
+            .any(|value| value.value_type.shape().is_some())
+        {
+            out.push_str(RUNTIME_PRELUDE);
+        }
         out.push_str(&super::noise::descriptor_table(artifact));
         out.push_str("\nimpl Instance {\n");
         out.push_str(
