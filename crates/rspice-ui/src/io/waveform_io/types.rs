@@ -59,19 +59,6 @@ impl WaveformFormat {
         }
     }
 
-    /// Whether this format currently supports reading.
-    pub fn can_read(&self) -> bool {
-        matches!(
-            self,
-            WaveformFormat::Psf
-                | WaveformFormat::Csv
-                | WaveformFormat::Tsv
-                | WaveformFormat::Nutmeg
-                | WaveformFormat::AsciiRaw
-                | WaveformFormat::Touchstone
-        )
-    }
-
     /// Whether this format currently supports writing.
     pub fn can_write(&self) -> bool {
         matches!(
@@ -267,23 +254,3 @@ impl WaveformDataset {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::io::waveform_io) enum TouchstoneDataFormat {
-    Ri,
-    Ma,
-    Db,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::io::waveform_io) enum TouchstoneMatrixFormat {
-    Full,
-    Lower,
-    Upper,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(in crate::io::waveform_io) struct TouchstoneOptions {
-    pub(in crate::io::waveform_io) freq_scale_hz: f64,
-    pub(in crate::io::waveform_io) data_format: TouchstoneDataFormat,
-    pub(in crate::io::waveform_io) reference_ohms: f64,
-}

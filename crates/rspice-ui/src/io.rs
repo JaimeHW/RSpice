@@ -8,10 +8,8 @@
 //! - `session_io` - Session state serialization
 //! - `schematic_io` - Schematic file save/load
 //! - `netlist_export` - Netlist generation from schematic
-//! - `waveform_io` - Waveform file formats (PSF, NUTMEG, CSV)
+//! - `waveform_io` - Waveform export (CSV, TSV, Touchstone)
 
-pub(crate) mod binary_io;
-mod cadence_psf;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod durable_file;
 pub(crate) mod lib_parser;
@@ -23,8 +21,6 @@ pub(crate) mod schematic_io;
 pub(crate) mod waveform_io;
 
 // Re-exports
-pub use binary_io::{PsfHeader, PsfReader, PsfWriter};
-pub use cadence_psf::{CadencePsfError, ParsedCadencePsfBinary, parse_cadence_psf_binary};
 pub use lib_parser::{
     IncludeDirective, IncludeType, LibrarySection, ModelDef, ParamValue, ParsedLibrary,
     SubcircuitDef,
@@ -44,5 +40,5 @@ pub use schematic_io::{
 };
 
 pub use waveform_io::{
-    SignalType, WaveformDataset, WaveformFormat, WaveformReader, WaveformSignal, WaveformWriter,
+    SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter,
 };
