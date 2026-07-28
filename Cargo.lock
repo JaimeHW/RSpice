@@ -4596,6 +4596,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-conformance"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "num-complex",
+ "rspice-core",
+]
+
+[[package]]
 name = "rspice-core"
 version = "0.1.0"
 dependencies = [

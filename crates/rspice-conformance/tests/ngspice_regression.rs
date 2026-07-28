@@ -7,7 +7,7 @@
 //! against the current local ngspice source tree and executable instead, set
 //! `RSPICE_NGSPICE_LIVE_REFERENCES=1`, `NGSPICE_SOURCE_ROOT`, and `NGSPICE_EXE`.
 
-use rspice_core::{
+use rspice_conformance::{
     netlist::Netlist,
     testing::{
         TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics,

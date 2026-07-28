@@ -22,7 +22,7 @@
 //! Materialized suites are deleted on exit unless `--keep-example-suite` or
 //! an explicit suite root is given.
 
-use rspice_core::testing::{TestResult, TestRunner, TestRunnerConfig};
+use rspice_conformance::testing::{TestResult, TestRunner, TestRunnerConfig};
 use rspice_core::xspice::CodeModelRegistry;
 use rspice_core::xspice::conformance::{
     ConformanceIssue, ConformanceSeverity, IfSpecConformancePolicy, XspiceParitySkippedDeck,

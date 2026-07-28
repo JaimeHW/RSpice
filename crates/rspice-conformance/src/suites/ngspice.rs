@@ -26,16 +26,27 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[path = "ngspice/dc_analyses.rs"]
 mod dc_analyses;
+#[path = "ngspice/directives.rs"]
 mod directives;
+#[path = "ngspice/discovery.rs"]
 mod discovery;
+#[path = "ngspice/engines.rs"]
 mod engines;
+#[path = "ngspice/execution.rs"]
 mod execution;
+#[path = "ngspice/frequency_analyses.rs"]
 mod frequency_analyses;
+#[path = "ngspice/manifest.rs"]
 mod manifest;
+#[path = "ngspice/reference.rs"]
 mod reference;
+#[path = "ngspice/suite.rs"]
 mod suite;
+#[path = "ngspice/time_analyses.rs"]
 mod time_analyses;
+#[path = "ngspice/validation.rs"]
 mod validation;
 
 // ═══════════════════════════════════════════════════════════════════════════════
