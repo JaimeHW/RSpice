@@ -12,6 +12,8 @@
 //! - `config` - Simulation and convergence configuration
 //! - `results` - Simulation results with NumPy array support
 //! - `measure` - .MEAS evaluation against simulation results
+//! - `signal` - SPICE output-specification parsing
+//! - `export` - Touchstone, SPICE raw, and CSV serialization
 //! - `abort` - Ctrl-C cancellation plumbing
 //! - `errors` - Python exception types
 //!
@@ -34,9 +36,11 @@ mod abort;
 mod config;
 mod engine;
 mod errors;
+mod export;
 mod measure;
 mod netlist;
 mod results;
+mod signal;
 
 use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
@@ -70,7 +74,7 @@ fn ac_frequencies<'py>(
         "oct" | "octave" => rspice_core::netlist::FreqVariation::Oct,
         "lin" | "linear" => rspice_core::netlist::FreqVariation::Lin,
         other => {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "variation must be 'dec', 'oct', or 'lin', got '{other}'"
             )));
         }
@@ -78,7 +82,7 @@ fn ac_frequencies<'py>(
     let frequencies =
         rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start_freq, stop_freq);
     if frequencies.is_empty() {
-        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "invalid frequency sweep: {points} points from {start_freq} to {stop_freq} Hz"
         )));
     }
@@ -176,6 +180,9 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "MeasurementError",
         m.py().get_type::<errors::MeasurementError>(),
     )?;
+    // RSpiceKeyError / RSpiceIndexError / RSpiceValueError / RSpiceTypeError:
+    // each is an RSpiceError *and* the builtin a caller already expects.
+    errors::register_hybrid_errors(m)?;
 
     // __all__ drives the package __init__'s star-import: dunders must be
     // listed explicitly or maturin's wrapper hides them.
@@ -237,6 +244,10 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "ConvergenceError",
             "CancelledError",
             "MeasurementError",
+            "RSpiceKeyError",
+            "RSpiceIndexError",
+            "RSpiceValueError",
+            "RSpiceTypeError",
         ],
     )?;
 

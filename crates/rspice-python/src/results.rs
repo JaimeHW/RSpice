@@ -20,7 +20,6 @@
 //! never fabricated.
 
 use numpy::{PyArray1, ToPyArray};
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rspice_core::analysis::{
@@ -29,6 +28,8 @@ use rspice_core::analysis::{
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
+
+use crate::signal::SignalSpec;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,32 +64,32 @@ impl From<ResultAccessError> for PyErr {
             ResultAccessError::InvalidNodeIndex {
                 node,
                 available_nodes,
-            } => PyIndexError::new_err(format!(
+            } => crate::errors::index_error(format!(
                 "node index {node} is out of range for result with {available_nodes} nodes"
             )),
             ResultAccessError::InvalidTimeIndex {
                 time_index,
                 available_points,
-            } => PyIndexError::new_err(format!(
+            } => crate::errors::index_error(format!(
                 "time index {time_index} is out of range for result with {available_points} points"
             )),
             ResultAccessError::InvalidSweepIndex {
                 index,
                 available_points,
-            } => PyIndexError::new_err(format!(
+            } => crate::errors::index_error(format!(
                 "sweep index {index} is out of range for result with {available_points} points"
             )),
             ResultAccessError::InvalidFreqIndex {
                 index,
                 available_points,
-            } => PyIndexError::new_err(format!(
+            } => crate::errors::index_error(format!(
                 "frequency index {index} is out of range for result with {available_points} points"
             )),
             ResultAccessError::UnknownNodeName { name } => {
-                PyKeyError::new_err(format!("unknown node '{name}'"))
+                crate::errors::key_error(format!("unknown node '{name}'"))
             }
             ResultAccessError::UnknownBranchName { name } => {
-                PyKeyError::new_err(format!("unknown branch '{name}'"))
+                crate::errors::key_error(format!("unknown branch '{name}'"))
             }
         }
     }
@@ -280,7 +281,7 @@ impl PySimulationResult {
             .iter()
             .find(|entry| entry.name.eq_ignore_ascii_case(name))
             .cloned()
-            .ok_or_else(|| PyKeyError::new_err(format!("unknown device '{name}'")))
+            .ok_or_else(|| crate::errors::key_error(format!("unknown device '{name}'")))
     }
 
     /// Get all branch currents as a NumPy array
@@ -365,7 +366,7 @@ impl PyDeviceOperatingPoint {
             .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
             .map(|(_, value)| *value)
             .ok_or_else(|| {
-                PyKeyError::new_err(format!(
+                crate::errors::key_error(format!(
                     "device '{}' has no operating-point parameter '{name}'",
                     self.name
                 ))
@@ -457,12 +458,12 @@ impl PyCompressedTransientResult {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let values = match self.node_index(&node)? {
             Some(index) => self.inner.voltages.get(index).cloned().ok_or_else(|| {
-                PyValueError::new_err("malformed compressed transient voltage matrix")
+                crate::errors::value_error("malformed compressed transient voltage matrix")
             })?,
             None => vec![0.0; self.inner.time.len()],
         };
         if values.len() != self.inner.time.len() {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "malformed compressed transient waveform length",
             ));
         }
@@ -471,11 +472,11 @@ impl PyCompressedTransientResult {
 
     fn voltage_at(&self, node: NodeIdentifier, time: f64) -> PyResult<f64> {
         if !time.is_finite() {
-            return Err(PyValueError::new_err("time must be finite"));
+            return Err(crate::errors::value_error("time must be finite"));
         }
         match self.node_index(&node)? {
             Some(index) => self.inner.interpolate(index, time).ok_or_else(|| {
-                PyValueError::new_err("compressed transient waveform cannot be interpolated")
+                crate::errors::value_error("compressed transient waveform cannot be interpolated")
             }),
             None => Ok(0.0),
         }
@@ -489,14 +490,14 @@ impl PyCompressedTransientResult {
         num_points: usize,
     ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
         if num_points < 2 {
-            return Err(PyValueError::new_err("num_points must be at least 2"));
+            return Err(crate::errors::value_error("num_points must be at least 2"));
         }
         match self.node_index(&node)? {
             Some(index) => self
                 .inner
                 .resample(index, num_points)
                 .map(|(time, values)| (time.to_pyarray(py), values.to_pyarray(py)))
-                .ok_or_else(|| PyValueError::new_err("compressed waveform cannot be resampled")),
+                .ok_or_else(|| crate::errors::value_error("compressed waveform cannot be resampled")),
             None => {
                 let start = self.inner.time.first().copied().unwrap_or(0.0);
                 let stop = self.inner.time.last().copied().unwrap_or(start);
@@ -539,11 +540,11 @@ impl PyTransientCheckpoint {
     fn load(path: PathBuf) -> PyResult<Self> {
         rspice_core::engine::TransientCheckpoint::load(&path)
             .map(Self::new)
-            .map_err(PyValueError::new_err)
+            .map_err(crate::errors::value_error)
     }
 
     fn save(&self, path: PathBuf) -> PyResult<()> {
-        self.inner.save(&path).map_err(PyValueError::new_err)
+        self.inner.save(&path).map_err(crate::errors::value_error)
     }
 
     #[getter]
@@ -600,7 +601,7 @@ impl PyTransientResult {
             })
             .map(|trace| trace.values.as_slice())
             .ok_or_else(|| {
-                PyKeyError::new_err(format!(
+                crate::errors::key_error(format!(
                     "device operating-point trace '@{device}[{parameter}]' was not recorded; add it to .SAVE"
                 ))
             })
@@ -741,6 +742,196 @@ impl PyTransientResult {
         }
         .map_err(PyErr::from)
     }
+
+    /// Resolve any SPICE output specification to a time series.
+    ///
+    /// Differential voltages are evaluated sample by sample rather than being
+    /// approximated from a single node, and branch currents come from the MNA
+    /// branch equations rather than the node map.
+    pub(crate) fn signal_waveform(&self, spec: &SignalSpec) -> PyResult<Vec<f64>> {
+        match spec {
+            SignalSpec::Voltage {
+                node,
+                reference: None,
+            } => self
+                .checked_waveform_named(node)
+                .map_err(|_| unknown_signal_error(spec, "node")),
+            SignalSpec::Voltage {
+                node,
+                reference: Some(reference),
+            } => {
+                let positive = self
+                    .checked_waveform_named(node)
+                    .map_err(|_| unknown_signal_error(spec, "node"))?;
+                let negative = self
+                    .checked_waveform_named(reference)
+                    .map_err(|_| unknown_signal_error(spec, "reference node"))?;
+                if positive.len() != negative.len() {
+                    return Err(crate::errors::value_error(format!(
+                        "malformed transient result: '{}' and its reference have {} and {} samples",
+                        spec.label(),
+                        positive.len(),
+                        negative.len()
+                    )));
+                }
+                Ok(positive
+                    .iter()
+                    .zip(&negative)
+                    .map(|(high, low)| high - low)
+                    .collect())
+            }
+            SignalSpec::Current { element } => self
+                .inner
+                .try_branch_current_waveform_named(element)
+                .map(<[f64]>::to_vec)
+                .ok_or_else(|| unknown_signal_error(spec, "branch")),
+        }
+    }
+}
+
+/// Error for a probe whose circuit quantity does not exist, naming the
+/// original specification rather than an extracted fragment.
+fn unknown_signal_error(spec: &SignalSpec, what: &str) -> PyErr {
+    crate::errors::key_error(format!(
+        "unknown {what} in output specification '{}'",
+        spec.label()
+    ))
+}
+
+/// Serialize a raw plot, mapping a layout failure onto a Python exception.
+fn raw_export_bytes(
+    plot: &crate::export::RawPlot,
+    format: crate::export::RawFormat,
+) -> PyResult<Vec<u8>> {
+    crate::export::raw_bytes(plot, format).map_err(crate::errors::value_error)
+}
+
+/// Write an exported artifact, reporting the caller's path on failure.
+///
+/// Verbatim Windows prefixes are stripped so the message names the path the
+/// caller passed rather than the extended-length form.
+fn write_export_file(path: &std::path::Path, bytes: &[u8]) -> PyResult<()> {
+    crate::export::write_bytes(path, bytes).map_err(|error| {
+        pyo3::exceptions::PyOSError::new_err(format!(
+            "could not write '{}': {error}",
+            crate::errors::public_path_string(path)
+        ))
+    })
+}
+
+/// Reshape column-major real series into CSV rows.
+///
+/// Callers validate series lengths through `RawPlot`, so a short series here
+/// yields a NaN cell rather than a panic on a malformed core result.
+fn transpose_real(series: &[Vec<rspice_core::Complex64>]) -> Vec<Vec<f64>> {
+    let points = series.first().map_or(0, Vec::len);
+    (0..points)
+        .map(|point| {
+            series
+                .iter()
+                .map(|column| column.get(point).map_or(f64::NAN, |value| value.re))
+                .collect()
+        })
+        .collect()
+}
+
+/// Reshape column-major complex series into CSV rows, splitting each complex
+/// column into adjacent real and imaginary cells.
+fn transpose_complex(series: &[Vec<rspice_core::Complex64>]) -> Vec<Vec<f64>> {
+    let points = series.first().map_or(0, Vec::len);
+    (0..points)
+        .map(|point| {
+            series
+                .iter()
+                .flat_map(|column| {
+                    let value = column
+                        .get(point)
+                        .copied()
+                        .unwrap_or(rspice_core::Complex64::new(f64::NAN, f64::NAN));
+                    [value.re, value.im]
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Split complex column headers into `<name>_real` / `<name>_imag` pairs, so
+/// a CSV round-trips a phasor without choosing a lossy polar convention.
+fn complex_csv_headers(names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .flat_map(|name| [format!("{name}_real"), format!("{name}_imag")])
+        .collect()
+}
+
+impl PyTransientResult {
+    /// Column layout shared by the CSV and raw exporters.
+    fn raw_plot(&self, title: &str) -> crate::export::RawPlot {
+        use crate::export::{RawVariable, RawVariableKind};
+        let real = |values: &[f64]| -> Vec<rspice_core::Complex64> {
+            values
+                .iter()
+                .map(|value| rspice_core::Complex64::new(*value, 0.0))
+                .collect()
+        };
+
+        let mut variables = vec![RawVariable {
+            name: "time".to_string(),
+            kind: RawVariableKind::Time,
+        }];
+        let mut series = vec![real(&self.inner.time)];
+        for (index, name) in self.inner.node_names.iter().enumerate() {
+            variables.push(RawVariable {
+                name: format!("V({name})"),
+                kind: RawVariableKind::Voltage,
+            });
+            series.push(real(self.inner.voltages.get(index).map_or(&[][..], Vec::as_slice)));
+        }
+        for (index, name) in self.inner.branch_names.iter().enumerate() {
+            variables.push(RawVariable {
+                name: format!("I({name})"),
+                kind: RawVariableKind::Current,
+            });
+            series.push(real(
+                self.inner
+                    .branch_currents
+                    .get(index)
+                    .map_or(&[][..], Vec::as_slice),
+            ));
+        }
+
+        crate::export::RawPlot {
+            title: title.to_string(),
+            plot_name: "Transient Analysis".to_string(),
+            variables,
+            series,
+            complex: false,
+        }
+    }
+
+    /// Shared `.FOUR` evaluation for every waveform source.
+    fn fourier_of_waveform(
+        &self,
+        waveform: &[f64],
+        fundamental: f64,
+        num_harmonics: usize,
+    ) -> PyResult<PyFourierResult> {
+        if !fundamental.is_finite() || fundamental <= 0.0 {
+            return Err(crate::errors::value_error(format!(
+                "fundamental must be a positive finite frequency in Hz, got {fundamental}"
+            )));
+        }
+        if num_harmonics == 0 {
+            return Err(crate::errors::value_error(
+                "num_harmonics must be at least 1",
+            ));
+        }
+        let analysis =
+            FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(num_harmonics));
+        Ok(PyFourierResult::from_core(
+            &analysis.analyze(&self.inner.time, waveform),
+        ))
+    }
 }
 
 #[pymethods]
@@ -823,7 +1014,7 @@ impl PyTransientResult {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let values = self.device_op_values(device, parameter)?;
         if values.len() != self.inner.time.len() {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "malformed device operating-point trace '@{device}[{parameter}]': {} samples for {} time points",
                 values.len(),
                 self.inner.time.len()
@@ -875,26 +1066,136 @@ impl PyTransientResult {
     /// Example:
     ///     >>> four = tran.fourier("out", fundamental=1e3)
     ///     >>> print(f"THD = {four.thd_percent:.2f}%")
-    #[pyo3(signature = (node, fundamental, num_harmonics=9))]
+    ///     >>> diff = tran.fourier("outp", 1e3, reference="outn")
+    #[pyo3(signature = (node, fundamental, num_harmonics=9, *, reference=None))]
     fn fourier(
         &self,
         node: NodeIdentifier,
         fundamental: f64,
         num_harmonics: usize,
+        reference: Option<NodeIdentifier>,
     ) -> PyResult<PyFourierResult> {
-        if !fundamental.is_finite() || fundamental <= 0.0 {
-            return Err(PyValueError::new_err(format!(
-                "fundamental must be a positive finite frequency in Hz, got {fundamental}"
-            )));
-        }
-        if num_harmonics == 0 {
-            return Err(PyValueError::new_err("num_harmonics must be at least 1"));
-        }
-        let waveform = self.waveform_for(&node)?;
-        let analysis =
-            FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(num_harmonics));
-        let result = analysis.analyze(&self.inner.time, &waveform);
-        Ok(PyFourierResult::from_core(&result))
+        let waveform = match reference {
+            None => self.waveform_for(&node)?,
+            Some(reference) => {
+                let positive = self.waveform_for(&node)?;
+                let negative = self.waveform_for(&reference)?;
+                positive
+                    .iter()
+                    .zip(&negative)
+                    .map(|(high, low)| high - low)
+                    .collect()
+            }
+        };
+        self.fourier_of_waveform(&waveform, fundamental, num_harmonics)
+    }
+
+    /// Fourier-analyze a branch-current waveform
+    ///
+    /// The `.FOUR` counterpart of `fourier` for `I(element)` outputs. Branch
+    /// currents exist for voltage sources and inductors.
+    ///
+    /// Args:
+    ///     element: Element name (e.g. "V1", "L2")
+    ///     fundamental: Fundamental frequency in Hz
+    ///     num_harmonics: Number of harmonics to compute (default 9)
+    ///
+    /// Raises:
+    ///     ValueError: If fundamental is not a positive finite number
+    ///     KeyError: If no branch carries that name
+    ///
+    /// Example:
+    ///     >>> four = tran.fourier_current("V1", fundamental=1e3)
+    #[pyo3(signature = (element, fundamental, num_harmonics=9))]
+    fn fourier_current(
+        &self,
+        element: &str,
+        fundamental: f64,
+        num_harmonics: usize,
+    ) -> PyResult<PyFourierResult> {
+        let waveform = self.signal_waveform(&SignalSpec::Current {
+            element: element.to_string(),
+        })?;
+        self.fourier_of_waveform(&waveform, fundamental, num_harmonics)
+    }
+
+    /// Evaluate any SPICE output specification against this result
+    ///
+    /// Accepts `V(out)`, `V(outp,outn)`, `I(V1)`, or a bare node name — the
+    /// same probe grammar `.FOUR` and `.PRINT` use.
+    ///
+    /// Args:
+    ///     spec: Output specification string
+    ///
+    /// Returns:
+    ///     numpy.ndarray: Signal values at each time point
+    ///
+    /// Raises:
+    ///     ValueError: If the specification is malformed
+    ///     KeyError: If the node, reference node, or branch does not exist
+    ///
+    /// Example:
+    ///     >>> vdiff = tran.signal("V(outp,outn)")
+    ///     >>> isupply = tran.signal("I(V1)")
+    fn signal<'py>(&self, py: Python<'py>, spec: &str) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let parsed = crate::signal::parse_signal_spec(spec).map_err(crate::errors::value_error)?;
+        Ok(self.signal_waveform(&parsed)?.to_pyarray(py))
+    }
+
+    /// Column headers used by `to_csv` and the raw exporters, in order.
+    #[getter]
+    fn export_columns(&self) -> Vec<String> {
+        self.raw_plot("").variables.into_iter().map(|v| v.name).collect()
+    }
+
+    /// Render every node voltage and branch current as RFC 4180 CSV.
+    ///
+    /// The first column is `time`; the rest are `V(node)` and `I(element)`
+    /// in `node_names` then `branch_names` order. Values carry full
+    /// double precision so the table round-trips exactly.
+    fn to_csv(&self) -> PyResult<String> {
+        let plot = self.raw_plot("");
+        crate::export::csv(
+            &plot.variables.iter().map(|v| v.name.clone()).collect::<Vec<_>>(),
+            &transpose_real(&plot.series),
+        )
+        .map_err(crate::errors::value_error)
+    }
+
+    /// Write `to_csv()` to a file.
+    fn write_csv(&self, path: PathBuf) -> PyResult<()> {
+        write_export_file(&path, self.to_csv()?.as_bytes())
+    }
+
+    /// Serialize as an ngspice-compatible SPICE raw file.
+    ///
+    /// Args:
+    ///     format: "ascii" (default) or "binary"
+    ///     title: Header title; defaults to "RSpice transient analysis"
+    ///
+    /// Returns:
+    ///     bytes: The complete raw file
+    #[pyo3(signature = (*, format="ascii", title=None))]
+    fn to_raw<'py>(
+        &self,
+        py: Python<'py>,
+        format: &str,
+        title: Option<&str>,
+    ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+        let plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
+        let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
+        Ok(pyo3::types::PyBytes::new(py, &bytes))
+    }
+
+    /// Write a SPICE raw file. Same options as `to_raw`.
+    ///
+    /// Example:
+    ///     >>> tran.write_raw("run.raw", format="binary")
+    #[pyo3(signature = (path, *, format="ascii", title=None))]
+    fn write_raw(&self, path: PathBuf, format: &str, title: Option<&str>) -> PyResult<()> {
+        let plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
+        let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
+        write_export_file(&path, &bytes)
     }
 
     /// Get the number of time points
@@ -1028,6 +1329,59 @@ impl PyAcResult {
         }
     }
 
+    /// Column layout shared by the CSV and raw exporters.
+    ///
+    /// A row that is short relative to the first row yields NaN rather than
+    /// dropping a column, so a malformed core result stays diagnosable in the
+    /// exported artifact instead of silently changing the table's shape.
+    fn raw_plot(&self, title: &str) -> crate::export::RawPlot {
+        use crate::export::{RawVariable, RawVariableKind};
+        let missing = rspice_core::Complex64::new(f64::NAN, f64::NAN);
+
+        let mut variables = vec![RawVariable {
+            name: "frequency".to_string(),
+            kind: RawVariableKind::Frequency,
+        }];
+        let mut series = vec![
+            self.frequencies
+                .iter()
+                .map(|frequency| rspice_core::Complex64::new(*frequency, 0.0))
+                .collect::<Vec<_>>(),
+        ];
+        for (index, name) in self.node_names.iter().enumerate() {
+            variables.push(RawVariable {
+                name: format!("V({name})"),
+                kind: RawVariableKind::Voltage,
+            });
+            series.push(
+                self.results
+                    .iter()
+                    .map(|row| row.voltages.get(index).copied().unwrap_or(missing))
+                    .collect(),
+            );
+        }
+        for (index, name) in self.branch_names.iter().enumerate() {
+            variables.push(RawVariable {
+                name: format!("I({name})"),
+                kind: RawVariableKind::Current,
+            });
+            series.push(
+                self.results
+                    .iter()
+                    .map(|row| row.currents.get(index).copied().unwrap_or(missing))
+                    .collect(),
+            );
+        }
+
+        crate::export::RawPlot {
+            title: title.to_string(),
+            plot_name: "AC Analysis".to_string(),
+            variables,
+            series,
+            complex: true,
+        }
+    }
+
     fn frequency_label(&self, freq_index: usize, result: &AcResult) -> String {
         let frequency = self
             .frequencies
@@ -1064,7 +1418,7 @@ impl PyAcResult {
             .get(freq_index)
             .ok_or_else(|| PyErr::from(invalid_freq_index_error(freq_index, self.results.len())))?;
         self.voltage_phasor_from_row(freq_index, result, node)
-            .map_err(PyValueError::new_err)
+            .map_err(crate::errors::value_error)
     }
 
     fn voltage_phasor_from_row(
@@ -1098,7 +1452,7 @@ impl PyAcResult {
             .get(freq_index)
             .ok_or_else(|| PyErr::from(invalid_freq_index_error(freq_index, self.results.len())))?;
         self.branch_current_from_row(freq_index, result, branch)
-            .map_err(PyValueError::new_err)
+            .map_err(crate::errors::value_error)
     }
 
     fn branch_current_from_row(
@@ -1144,7 +1498,7 @@ pub struct PyDistortionResult {
 impl PyDistortionResult {
     pub fn from_core(result: &DistortionAnalysisResult) -> PyResult<Self> {
         if result.points.is_empty() {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "malformed distortion result: no F1 points",
             ));
         }
@@ -1178,7 +1532,7 @@ impl PyDistortionResult {
                     .enumerate()
                     .map(|(index, point)| {
                         point.fundamental_f2.clone().ok_or_else(|| {
-                            PyValueError::new_err(format!(
+                            crate::errors::value_error(format!(
                                 "malformed distortion result: missing F2 response at F1 index {index}"
                             ))
                         })
@@ -1200,7 +1554,7 @@ impl PyDistortionResult {
                             .product(kind)
                             .map(|value| value.response.clone())
                             .ok_or_else(|| {
-                                PyValueError::new_err(format!(
+                                crate::errors::value_error(format!(
                                     "malformed distortion result: missing '{}' response at F1 index {index}",
                                     kind.label()
                                 ))
@@ -1238,7 +1592,7 @@ impl PyDistortionResult {
             "f1-f2" | "difference" | "im2difference" => DistortionProduct::Difference,
             "2f1-f2" | "im3" | "thirdorderdifference" => DistortionProduct::ThirdOrderDifference,
             _ => {
-                return Err(PyValueError::new_err(format!(
+                return Err(crate::errors::value_error(format!(
                     "unknown distortion product '{name}'; available products: {}",
                     self.available_product_labels().join(", ")
                 )));
@@ -1247,7 +1601,7 @@ impl PyDistortionResult {
         if self.products.iter().any(|(kind, _)| *kind == product) {
             Ok(product)
         } else {
-            Err(PyValueError::new_err(format!(
+            Err(crate::errors::value_error(format!(
                 "distortion product '{}' is not available in {} mode; available products: {}",
                 product.label(),
                 if self.f2_over_f1.is_some() {
@@ -1272,14 +1626,14 @@ impl PyDistortionResult {
             .iter()
             .find(|(kind, _)| *kind == product)
             .map(|(_, rows)| rows.as_slice())
-            .ok_or_else(|| PyValueError::new_err("distortion result is missing a product series"))
+            .ok_or_else(|| crate::errors::value_error("distortion result is missing a product series"))
     }
 
     fn validate_series_length(&self, label: &str, rows: &[AcResult]) -> PyResult<()> {
         if rows.len() == self.fundamental_f1.len() {
             Ok(())
         } else {
-            Err(PyValueError::new_err(format!(
+            Err(crate::errors::value_error(format!(
                 "malformed distortion result: {label} has {} rows for {} F1 points",
                 rows.len(),
                 self.fundamental_f1.len()
@@ -1338,13 +1692,13 @@ impl PyDistortionResult {
                     return Ok(0.0);
                 }
                 let numerator = numerator.voltages.get(node - 1).ok_or_else(|| {
-                    PyValueError::new_err(format!(
+                    crate::errors::value_error(format!(
                         "malformed distortion product '{}' at F1 index {index}: missing node {node}",
                         product.label()
                     ))
                 })?;
                 let denominator = denominator.voltages.get(node - 1).ok_or_else(|| {
-                    PyValueError::new_err(format!(
+                    crate::errors::value_error(format!(
                         "malformed F1 result at index {index}: missing node {node}"
                     ))
                 })?;
@@ -1363,13 +1717,13 @@ impl PyDistortionResult {
             .enumerate()
             .map(|(index, (numerator, denominator))| {
                 let numerator = numerator.currents.get(branch).ok_or_else(|| {
-                    PyValueError::new_err(format!(
+                    crate::errors::value_error(format!(
                         "malformed distortion product '{}' at F1 index {index}: missing branch current {branch}",
                         product.label()
                     ))
                 })?;
                 let denominator = denominator.currents.get(branch).ok_or_else(|| {
-                    PyValueError::new_err(format!(
+                    crate::errors::value_error(format!(
                         "malformed F1 result at index {index}: missing branch current {branch}"
                     ))
                 })?;
@@ -1730,6 +2084,83 @@ impl PyAcResult {
         Ok(self.checked_voltage_phasor(freq_index, idx)?.arg())
     }
 
+    /// Column headers used by the raw exporter, in order.
+    #[getter]
+    fn export_columns(&self) -> Vec<String> {
+        self.raw_plot("").variables.into_iter().map(|v| v.name).collect()
+    }
+
+    /// Render this sweep as RFC 4180 CSV.
+    ///
+    /// The first column is `frequency`; every phasor becomes an adjacent
+    /// `<name>_real` / `<name>_imag` pair, so the table is lossless rather
+    /// than committing to a magnitude/phase convention.
+    fn to_csv(&self) -> PyResult<String> {
+        let plot = self.raw_plot("");
+        // The sweep axis is real; only the phasor columns are split, so the
+        // table has no all-zero imaginary frequency column.
+        let (axis, phasors) = plot
+            .variables
+            .split_first()
+            .ok_or_else(|| crate::errors::value_error("AC result has no columns"))?;
+        let mut headers = vec![axis.name.clone()];
+        headers.extend(complex_csv_headers(
+            &phasors
+                .iter()
+                .map(|variable| variable.name.clone())
+                .collect::<Vec<_>>(),
+        ));
+
+        let (axis_series, phasor_series) = plot
+            .series
+            .split_first()
+            .ok_or_else(|| crate::errors::value_error("AC result has no data"))?;
+        let interleaved = transpose_complex(phasor_series);
+        let rows = axis_series
+            .iter()
+            .zip(interleaved)
+            .map(|(frequency, mut row)| {
+                row.insert(0, frequency.re);
+                row
+            })
+            .collect::<Vec<_>>();
+
+        crate::export::csv(&headers, &rows).map_err(crate::errors::value_error)
+    }
+
+    /// Write `to_csv()` to a file.
+    fn write_csv(&self, path: PathBuf) -> PyResult<()> {
+        write_export_file(&path, self.to_csv()?.as_bytes())
+    }
+
+    /// Serialize as an ngspice-compatible SPICE raw file.
+    ///
+    /// AC data is written with `Flags: complex`, so every value carries both
+    /// its real and imaginary part.
+    ///
+    /// Args:
+    ///     format: "ascii" (default) or "binary"
+    ///     title: Header title; defaults to "RSpice AC analysis"
+    #[pyo3(signature = (*, format="ascii", title=None))]
+    fn to_raw<'py>(
+        &self,
+        py: Python<'py>,
+        format: &str,
+        title: Option<&str>,
+    ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+        let plot = self.raw_plot(title.unwrap_or("RSpice AC analysis"));
+        let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
+        Ok(pyo3::types::PyBytes::new(py, &bytes))
+    }
+
+    /// Write a SPICE raw file. Same options as `to_raw`.
+    #[pyo3(signature = (path, *, format="ascii", title=None))]
+    fn write_raw(&self, path: PathBuf, format: &str, title: Option<&str>) -> PyResult<()> {
+        let plot = self.raw_plot(title.unwrap_or("RSpice AC analysis"));
+        let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
+        write_export_file(&path, &bytes)
+    }
+
     fn __repr__(&self) -> String {
         let freq_range = match (self.frequencies.first(), self.frequencies.last()) {
             (Some(first), Some(last)) => format!("{first:.1e}-{last:.1e} Hz"),
@@ -2009,12 +2440,20 @@ impl PyDcSweepResult {
 
     /// Get the result at a specific sweep index
     ///
+    /// Carries the same per-device operating-point data as `sweep[index]`
+    /// and `points()`.
+    ///
     /// Raises:
     ///     IndexError: If the sweep index is out of range
     pub fn result_at(&self, index: usize) -> PyResult<PySimulationResult> {
-        self.point(index)
-            .map(|(_, r)| PySimulationResult::new(r.clone()))
-            .map_err(PyErr::from)
+        let (_, result) = self.point(index).map_err(PyErr::from)?;
+        Ok(PySimulationResult::new_with_device_operating_points(
+            result.clone(),
+            self.device_operating_points
+                .get(index)
+                .cloned()
+                .unwrap_or_default(),
+        ))
     }
 
     /// Get the sweep value at a specific index
@@ -2065,6 +2504,56 @@ impl PyDcSweepResult {
         Ok(voltages.to_pyarray(py))
     }
 
+    /// Column headers used by `to_csv` and the raw exporters, in order.
+    #[getter]
+    fn export_columns(&self) -> Vec<String> {
+        self.raw_plot("").variables.into_iter().map(|v| v.name).collect()
+    }
+
+    /// Render the sweep as RFC 4180 CSV.
+    ///
+    /// The first column is the swept source; the rest are `V(node)` and
+    /// `I(element)`. A nested sweep is flattened in the same order as
+    /// `points()`, with the secondary coordinate in its own column.
+    fn to_csv(&self) -> PyResult<String> {
+        let plot = self.raw_plot("");
+        crate::export::csv(
+            &plot.variables.iter().map(|v| v.name.clone()).collect::<Vec<_>>(),
+            &transpose_real(&plot.series),
+        )
+        .map_err(crate::errors::value_error)
+    }
+
+    /// Write `to_csv()` to a file.
+    fn write_csv(&self, path: PathBuf) -> PyResult<()> {
+        write_export_file(&path, self.to_csv()?.as_bytes())
+    }
+
+    /// Serialize as an ngspice-compatible SPICE raw file.
+    ///
+    /// Args:
+    ///     format: "ascii" (default) or "binary"
+    ///     title: Header title; defaults to "RSpice DC sweep"
+    #[pyo3(signature = (*, format="ascii", title=None))]
+    fn to_raw<'py>(
+        &self,
+        py: Python<'py>,
+        format: &str,
+        title: Option<&str>,
+    ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+        let plot = self.raw_plot(title.unwrap_or("RSpice DC sweep"));
+        let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
+        Ok(pyo3::types::PyBytes::new(py, &bytes))
+    }
+
+    /// Write a SPICE raw file. Same options as `to_raw`.
+    #[pyo3(signature = (path, *, format="ascii", title=None))]
+    fn write_raw(&self, path: PathBuf, format: &str, title: Option<&str>) -> PyResult<()> {
+        let plot = self.raw_plot(title.unwrap_or("RSpice DC sweep"));
+        let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
+        write_export_file(&path, &bytes)
+    }
+
     fn __repr__(&self) -> String {
         let sweep_range = match (self.results.first(), self.results.last()) {
             (Some(first), Some(last)) => format!("{:.2}-{:.2}", first.0, last.0),
@@ -2076,6 +2565,98 @@ impl PyDcSweepResult {
             sweep_range,
             self.shape()
         )
+    }
+}
+
+impl PyDcSweepResult {
+    /// Column layout shared by the CSV and raw exporters.
+    ///
+    /// The sweep axis is a voltage rather than time or frequency, so it is
+    /// declared as a voltage column, matching how ngspice writes DC plots.
+    fn raw_plot(&self, title: &str) -> crate::export::RawPlot {
+        use crate::export::{RawVariable, RawVariableKind};
+        let complex = |values: Vec<f64>| -> Vec<rspice_core::Complex64> {
+            values
+                .into_iter()
+                .map(|value| rspice_core::Complex64::new(value, 0.0))
+                .collect()
+        };
+
+        let axis_name = self
+            .primary_source
+            .clone()
+            .unwrap_or_else(|| "sweep".to_string());
+        let mut variables = vec![RawVariable {
+            name: format!("v-sweep({axis_name})"),
+            kind: RawVariableKind::Voltage,
+        }];
+        let mut series = vec![complex(
+            self.results.iter().map(|(value, _)| *value).collect(),
+        )];
+
+        if let (Some(secondary), Some(values)) =
+            (&self.secondary_source, &self.secondary_sweep_values)
+        {
+            variables.push(RawVariable {
+                name: format!("v-sweep2({secondary})"),
+                kind: RawVariableKind::Voltage,
+            });
+            series.push(complex(
+                (0..self.results.len())
+                    .map(|index| {
+                        values
+                            .get(index / self.inner_points.max(1))
+                            .copied()
+                            .unwrap_or(f64::NAN)
+                    })
+                    .collect(),
+            ));
+        }
+
+        // Every point of a sweep shares one circuit, so the first result's
+        // name vectors define the columns.
+        let (node_names, branch_names) = self.results.first().map_or_else(
+            || (Vec::new(), Vec::new()),
+            |(_, result)| (result.node_names.clone(), result.branch_names.clone()),
+        );
+        // node_names[0] is ground; it is a constant zero column and is
+        // deliberately omitted, matching the transient and AC exporters.
+        for (index, name) in node_names.iter().enumerate().skip(1) {
+            variables.push(RawVariable {
+                name: format!("V({name})"),
+                kind: RawVariableKind::Voltage,
+            });
+            series.push(complex(
+                self.results
+                    .iter()
+                    .map(|(_, result)| {
+                        result.node_voltages.get(index).copied().unwrap_or(f64::NAN)
+                    })
+                    .collect(),
+            ));
+        }
+        for (index, name) in branch_names.iter().enumerate() {
+            variables.push(RawVariable {
+                name: format!("I({name})"),
+                kind: RawVariableKind::Current,
+            });
+            series.push(complex(
+                self.results
+                    .iter()
+                    .map(|(_, result)| {
+                        result.branch_currents.get(index).copied().unwrap_or(f64::NAN)
+                    })
+                    .collect(),
+            ));
+        }
+
+        crate::export::RawPlot {
+            title: title.to_string(),
+            plot_name: "DC transfer characteristic".to_string(),
+            variables,
+            series,
+            complex: false,
+        }
     }
 }
 
@@ -2418,7 +2999,7 @@ impl PyAcSensitivityResult {
             .find(|trace| trace.vector_name.eq_ignore_ascii_case(vector_name))
             .cloned()
             .ok_or_else(|| {
-                PyKeyError::new_err(format!("unknown AC sensitivity vector '{vector_name}'"))
+                crate::errors::key_error(format!("unknown AC sensitivity vector '{vector_name}'"))
             })
     }
 
@@ -2426,7 +3007,7 @@ impl PyAcSensitivityResult {
     #[pyo3(signature = (frequency_index, count=10))]
     fn top(&self, frequency_index: usize, count: usize) -> PyResult<Vec<PyAcSensitivity>> {
         if frequency_index >= self.frequencies.len() {
-            return Err(PyIndexError::new_err(format!(
+            return Err(crate::errors::index_error(format!(
                 "frequency index {frequency_index} is out of range for result with {} points",
                 self.frequencies.len()
             )));
@@ -2570,7 +3151,7 @@ impl PySensitivityResult {
             .cloned()
             .ok_or_else(|| {
                 let suffix = parameter.map_or(String::new(), |name| format!("/{name}"));
-                PyKeyError::new_err(format!("unknown sensitivity '{element}{suffix}'"))
+                crate::errors::key_error(format!("unknown sensitivity '{element}{suffix}'"))
             })
     }
 
@@ -2675,18 +3256,18 @@ impl PyVariableStatistics {
     /// successful samples are available.
     fn percentile(&self, pct: f64) -> PyResult<f64> {
         if !pct.is_finite() || !(0.0..=100.0).contains(&pct) {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "percentile must be a finite number from 0 to 100, got {pct}"
             )));
         }
         if self.samples.is_empty() {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "cannot compute a percentile without successful samples",
             ));
         }
         let mut sorted = self.samples.clone();
         if sorted.iter().any(|sample| !sample.is_finite()) {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "cannot compute a percentile from non-finite samples",
             ));
         }
@@ -2771,18 +3352,37 @@ impl PyMonteCarloResult {
             variables,
         }
     }
+
+    /// Exact match first, then a case-insensitive scan.
+    fn lookup(&self, name: &str) -> Option<PyVariableStatistics> {
+        self.variables.get(name).cloned().or_else(|| {
+            self.variables
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                .map(|(_, stats)| stats.clone())
+        })
+    }
 }
 
 #[pymethods]
 impl PyMonteCarloResult {
     /// Get statistics for a specific variable by name (case-insensitive)
-    fn get_variable(&self, name: &str) -> Option<PyVariableStatistics> {
-        self.variables.get(name).cloned().or_else(|| {
-            self.variables
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                .map(|(_, v)| v.clone())
+    ///
+    /// Raises:
+    ///     KeyError: If no variable carries that name. Use `try_variable`
+    ///               for a `None`-returning probe.
+    fn get_variable(&self, name: &str) -> PyResult<PyVariableStatistics> {
+        self.lookup(name).ok_or_else(|| {
+            crate::errors::key_error(format!(
+                "unknown Monte Carlo variable '{name}'; available: {}",
+                self.variable_names().join(", ")
+            ))
         })
+    }
+
+    /// Get statistics for a variable, or None when it was not recorded.
+    fn try_variable(&self, name: &str) -> Option<PyVariableStatistics> {
+        self.lookup(name)
     }
 
     /// Get all variable names
@@ -2794,18 +3394,37 @@ impl PyMonteCarloResult {
     }
 
     /// Get mean for a variable
-    fn mean(&self, name: &str) -> Option<f64> {
-        self.get_variable(name).map(|v| v.mean)
+    ///
+    /// Raises:
+    ///     KeyError: If no variable carries that name
+    fn mean(&self, name: &str) -> PyResult<f64> {
+        self.get_variable(name).map(|stats| stats.mean)
     }
 
     /// Get standard deviation for a variable
-    fn std_dev(&self, name: &str) -> Option<f64> {
-        self.get_variable(name).map(|v| v.std_dev)
+    ///
+    /// Raises:
+    ///     KeyError: If no variable carries that name
+    fn std_dev(&self, name: &str) -> PyResult<f64> {
+        self.get_variable(name).map(|stats| stats.std_dev)
     }
 
     /// Get min/max range as tuple
-    fn range(&self, name: &str) -> Option<(f64, f64)> {
-        self.get_variable(name).map(|v| (v.min, v.max))
+    ///
+    /// Raises:
+    ///     KeyError: If no variable carries that name
+    fn range(&self, name: &str) -> PyResult<(f64, f64)> {
+        self.get_variable(name).map(|stats| (stats.min, stats.max))
+    }
+
+    /// Look up a variable with `mc["V(OUT)"]`
+    fn __getitem__(&self, name: &str) -> PyResult<PyVariableStatistics> {
+        self.get_variable(name)
+    }
+
+    /// `"V(OUT)" in mc`
+    fn __contains__(&self, name: &str) -> bool {
+        self.lookup(name).is_some()
     }
 
     /// Get success rate as percentage
@@ -3264,12 +3883,12 @@ impl PySParameterResult {
     ) -> PyResult<&[rspice_core::Complex64]> {
         let num_ports = self.port_names.len();
         if !(1..=num_ports).contains(&output_port) {
-            return Err(PyIndexError::new_err(format!(
+            return Err(crate::errors::index_error(format!(
                 "output_port must be in 1..={num_ports}, got {output_port}"
             )));
         }
         if !(1..=num_ports).contains(&input_port) {
-            return Err(PyIndexError::new_err(format!(
+            return Err(crate::errors::index_error(format!(
                 "input_port must be in 1..={num_ports}, got {input_port}"
             )));
         }
@@ -3277,7 +3896,7 @@ impl PySParameterResult {
             .get(output_port - 1)
             .and_then(|row| row.get(input_port - 1))
             .map(Vec::as_slice)
-            .ok_or_else(|| PyValueError::new_err("malformed S-parameter result matrix"))
+            .ok_or_else(|| crate::errors::value_error("malformed S-parameter result matrix"))
     }
 
     fn current_noise_correlation(
@@ -3287,17 +3906,17 @@ impl PySParameterResult {
     ) -> PyResult<&[rspice_core::Complex64]> {
         let num_ports = self.port_names.len();
         if !(1..=num_ports).contains(&output_port) {
-            return Err(PyIndexError::new_err(format!(
+            return Err(crate::errors::index_error(format!(
                 "output_port must be in 1..={num_ports}, got {output_port}"
             )));
         }
         if !(1..=num_ports).contains(&input_port) {
-            return Err(PyIndexError::new_err(format!(
+            return Err(crate::errors::index_error(format!(
                 "input_port must be in 1..={num_ports}, got {input_port}"
             )));
         }
         let noise = self.noise.as_ref().ok_or_else(|| {
-            PyValueError::new_err(
+            crate::errors::value_error(
                 "port-noise data was not computed; pass do_noise=True or use .SP ... donoise",
             )
         })?;
@@ -3306,7 +3925,7 @@ impl PySParameterResult {
             .get(output_port - 1)
             .and_then(|row| row.get(input_port - 1))
             .map(Vec::as_slice)
-            .ok_or_else(|| PyValueError::new_err("malformed port-noise correlation matrix"))
+            .ok_or_else(|| crate::errors::value_error("malformed port-noise correlation matrix"))
     }
 }
 
@@ -3517,6 +4136,71 @@ impl PySParameterResult {
         self.minimum_noise_figure_db(py)
     }
 
+    /// Conventional Touchstone extension for this port count (e.g. "s2p").
+    #[getter]
+    fn touchstone_extension(&self) -> String {
+        crate::export::touchstone_extension(self.parameters.len())
+    }
+
+    /// Render this sweep as a Touchstone v1 document.
+    ///
+    /// Args:
+    ///     format: "ri" (real/imaginary, default), "ma" (magnitude/angle),
+    ///             or "db" (dB magnitude/angle). Angles are in degrees.
+    ///     frequency_unit: "hz", "khz", "mhz", or "ghz" (default "ghz")
+    ///     comments: Optional `!` comment lines written above the option line
+    ///
+    /// Returns:
+    ///     str: The complete Touchstone document
+    ///
+    /// Raises:
+    ///     ValueError: For an unknown format or frequency unit, or when the
+    ///                 ports do not share one reference impedance — Touchstone
+    ///                 v1 has no way to express per-port normalization.
+    ///
+    /// Example:
+    ///     >>> open("dut.s2p", "w").write(sparams.to_touchstone(format="ma"))
+    #[pyo3(signature = (*, format="ri", frequency_unit="ghz", comments=None))]
+    fn to_touchstone(
+        &self,
+        format: &str,
+        frequency_unit: &str,
+        comments: Option<Vec<String>>,
+    ) -> PyResult<String> {
+        crate::export::touchstone(
+            &crate::export::TouchstoneInput {
+                frequencies: &self.frequencies,
+                parameters: &self.parameters,
+                reference_impedances: &self.reference_impedances,
+                comments: comments.as_deref().unwrap_or(&[]),
+            },
+            crate::export::TouchstoneFormat::parse(format).map_err(crate::errors::value_error)?,
+            crate::export::TouchstoneFrequencyUnit::parse(frequency_unit)
+                .map_err(crate::errors::value_error)?,
+        )
+        .map_err(crate::errors::value_error)
+    }
+
+    /// Write this sweep to a Touchstone file.
+    ///
+    /// Same arguments as `to_touchstone`, plus the destination path. The
+    /// caller chooses the filename; `touchstone_extension` gives the
+    /// conventional suffix for this port count.
+    ///
+    /// Example:
+    ///     >>> sparams.write_touchstone(f"dut.{sparams.touchstone_extension}")
+    #[pyo3(signature = (path, *, format="ri", frequency_unit="ghz", comments=None))]
+    fn write_touchstone(
+        &self,
+        path: PathBuf,
+        format: &str,
+        frequency_unit: &str,
+        comments: Option<Vec<String>>,
+    ) -> PyResult<()> {
+        let document = self.to_touchstone(format, frequency_unit, comments)?;
+        write_export_file(&path, document.as_bytes())
+    }
+
     #[getter]
     fn sopt<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<rspice_core::Complex64>>> {
         self.optimum_source_reflection(py)
@@ -3662,7 +4346,7 @@ impl PyPssResult {
 
     fn voltage_at(&self, node: NodeIdentifier, time: f64) -> PyResult<f64> {
         if !time.is_finite() {
-            return Err(PyValueError::new_err("time must be finite"));
+            return Err(crate::errors::value_error("time must be finite"));
         }
         match self.waveform_index(&node)? {
             Some(index) => Ok(self.inner.waveforms[index].interpolate(
@@ -3808,7 +4492,7 @@ impl PyHbResult {
             .spectral_voltages
             .iter()
             .find(|value| value.node_name.eq_ignore_ascii_case(node))
-            .ok_or_else(|| PyKeyError::new_err(format!("unknown node '{node}'")))
+            .ok_or_else(|| crate::errors::key_error(format!("unknown node '{node}'")))
     }
 }
 
@@ -3933,7 +4617,7 @@ impl PyPacResult {
 
     fn validate_sideband(&self, sideband: i32) -> PyResult<()> {
         if sideband < self.inner.sideband_min || sideband > self.inner.sideband_max {
-            return Err(PyIndexError::new_err(format!(
+            return Err(crate::errors::index_error(format!(
                 "sideband {sideband} is outside [{}, {}]",
                 self.inner.sideband_min, self.inner.sideband_max
             )));
@@ -3994,7 +4678,7 @@ impl PyPacResult {
         let node_index = self
             .inner
             .node_index(node)
-            .ok_or_else(|| PyKeyError::new_err(format!("unknown node '{node}'")))?;
+            .ok_or_else(|| crate::errors::key_error(format!("unknown node '{node}'")))?;
         let values = (0..self.inner.frequencies.len())
             .map(|frequency_index| self.inner.voltage(node_index, frequency_index, sideband))
             .collect::<Vec<_>>();
@@ -4189,7 +4873,7 @@ impl PyPeriodicNoiseResult {
             .iter()
             .find(|value| value.name.eq_ignore_ascii_case(name))
             .cloned()
-            .ok_or_else(|| PyKeyError::new_err(format!("unknown noise contributor '{name}'")))
+            .ok_or_else(|| crate::errors::key_error(format!("unknown noise contributor '{name}'")))
     }
 
     fn __repr__(&self) -> String {
@@ -4469,7 +5153,7 @@ impl PyMeasurement {
     fn __float__(&self) -> PyResult<f64> {
         match (self.ok, self.value) {
             (true, Some(value)) => Ok(value),
-            _ => Err(PyValueError::new_err(format!(
+            _ => Err(crate::errors::value_error(format!(
                 "measurement '{}' failed: {}",
                 self.name,
                 self.failure_message()
@@ -4624,6 +5308,21 @@ pub struct PyRunReport {
     /// All measurement outcomes
     #[pyo3(get)]
     pub measurements: Vec<PyMeasurement>,
+    /// Every `.op` result, in deck order. `op` is the last of these.
+    #[pyo3(get)]
+    pub all_op: Vec<Py<PySimulationResult>>,
+    /// Every `.dc` result, in deck order. `dc` is the last of these.
+    #[pyo3(get)]
+    pub all_dc: Vec<Py<PyDcSweepResult>>,
+    /// Every `.tran` result, in deck order. `tran` is the last of these.
+    #[pyo3(get)]
+    pub all_tran: Vec<Py<PyTransientResult>>,
+    /// Every `.ac`/`.ac data` result, in deck order. `ac` is the last of these.
+    #[pyo3(get)]
+    pub all_ac: Vec<Py<PyAcResult>>,
+    /// Every `.noise`/`.noise data` sweep, in deck order. `noise` is the last.
+    #[pyo3(get)]
+    pub all_noise: Vec<Vec<PyNoiseResult>>,
 }
 
 #[pymethods]

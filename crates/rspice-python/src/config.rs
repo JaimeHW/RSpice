@@ -15,17 +15,78 @@
 //! `config.convergence.gmin_stepping` modifies a temporary and is lost.
 //! Either build with keywords or assign whole sub-objects back.
 
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use rspice_core::ResourceLimits;
 use rspice_core::analysis::IntegrationMethod;
 use rspice_core::engine::{BypassConfig, ConvergenceConfig, DampingStrategy, SimulationConfig};
 
+/// Exact float comparison for configuration equality.
+///
+/// Bit equality rather than `==` so a configuration compares equal to itself
+/// even when a field carries a sentinel such as NaN, and so `inf` ceilings
+/// compare as the same policy.
+fn same_float(left: f64, right: f64) -> bool {
+    left.to_bits() == right.to_bits()
+}
+
+impl PartialEq for PyBypassConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.enabled == other.inner.enabled
+            && same_float(self.inner.reltol, other.inner.reltol)
+            && same_float(self.inner.abstol, other.inner.abstol)
+    }
+}
+
+impl PartialEq for PyConvergenceConfig {
+    fn eq(&self, other: &Self) -> bool {
+        let (left, right) = (&self.inner, &other.inner);
+        left.gmin_stepping == right.gmin_stepping
+            && left.source_stepping == right.source_stepping
+            && left.pseudo_transient == right.pseudo_transient
+            && left.arc_length == right.arc_length
+            && left.damping_strategy == right.damping_strategy
+            && left.verbose == right.verbose
+            && same_float(left.gmin_initial, right.gmin_initial)
+            && same_float(left.gmin_target, right.gmin_target)
+            && same_float(left.voltage_reltol, right.voltage_reltol)
+            && same_float(left.residual_reltol, right.residual_reltol)
+            && same_float(left.voltage_abstol, right.voltage_abstol)
+            && same_float(left.current_abstol, right.current_abstol)
+            && same_float(left.charge_abstol, right.charge_abstol)
+    }
+}
+
+impl PartialEq for PySimulationConfig {
+    fn eq(&self, other: &Self) -> bool {
+        let (left, right) = (&self.inner, &other.inner);
+        left.max_iterations == right.max_iterations
+            && left.transient_max_iterations == right.transient_max_iterations
+            && left.integration_method == right.integration_method
+            && same_float(left.tolerance, right.tolerance)
+            && same_float(left.min_timestep, right.min_timestep)
+            && same_float(left.max_timestep, right.max_timestep)
+            && same_float(left.temperature, right.temperature)
+            && same_float(left.transient_trtol, right.transient_trtol)
+            && PyConvergenceConfig {
+                inner: left.convergence_config.clone(),
+            } == PyConvergenceConfig {
+                inner: right.convergence_config.clone(),
+            }
+            && PyBypassConfig {
+                inner: left.bypass_config.clone(),
+            } == PyBypassConfig {
+                inner: right.bypass_config.clone(),
+            }
+            && PyResourceLimits::from_core(left.resource_limits)
+                == PyResourceLimits::from_core(right.resource_limits)
+    }
+}
+
 fn validate_positive(name: &str, value: f64) -> PyResult<f64> {
     if value.is_finite() && value > 0.0 {
         Ok(value)
     } else {
-        Err(PyValueError::new_err(format!(
+        Err(crate::errors::value_error(format!(
             "{name} must be a positive finite number, got {value}"
         )))
     }
@@ -35,7 +96,7 @@ fn validate_nonnegative(name: &str, value: f64) -> PyResult<f64> {
     if value.is_finite() && value >= 0.0 {
         Ok(value)
     } else {
-        Err(PyValueError::new_err(format!(
+        Err(crate::errors::value_error(format!(
             "{name} must be a non-negative finite number, got {value}"
         )))
     }
@@ -49,7 +110,7 @@ fn validate_positive_or_unbounded(name: &str, value: f64) -> PyResult<f64> {
     if value == f64::INFINITY || (value.is_finite() && value > 0.0) {
         Ok(value)
     } else {
-        Err(PyValueError::new_err(format!(
+        Err(crate::errors::value_error(format!(
             "{name} must be a positive finite number, or float('inf') for no cap, got {value}"
         )))
     }
@@ -59,7 +120,7 @@ fn validate_positive_usize(name: &str, value: usize) -> PyResult<usize> {
     if value > 0 {
         Ok(value)
     } else {
-        Err(PyValueError::new_err(format!(
+        Err(crate::errors::value_error(format!(
             "{name} must be at least 1, got {value}"
         )))
     }
@@ -69,7 +130,7 @@ fn validate_timestep_window(min_timestep: f64, max_timestep: f64) -> PyResult<()
     if min_timestep <= max_timestep {
         Ok(())
     } else {
-        Err(PyValueError::new_err(format!(
+        Err(crate::errors::value_error(format!(
             "min_timestep ({min_timestep}) must be <= max_timestep ({max_timestep})"
         )))
     }
@@ -79,7 +140,7 @@ fn validate_gmin_window(gmin_initial: f64, gmin_target: f64) -> PyResult<()> {
     if gmin_initial >= gmin_target {
         Ok(())
     } else {
-        Err(PyValueError::new_err(format!(
+        Err(crate::errors::value_error(format!(
             "gmin_initial ({gmin_initial}) must be >= gmin_target ({gmin_target})"
         )))
     }
@@ -220,7 +281,7 @@ impl PyIntegrationMethod {
 ///     >>> bypass = BypassConfig(enabled=True, reltol=1e-3)
 ///     >>> bypass.enabled
 ///     True
-#[pyclass(name = "BypassConfig", module = "rspice", from_py_object)]
+#[pyclass(name = "BypassConfig", module = "rspice", from_py_object, eq)]
 #[derive(Clone)]
 pub struct PyBypassConfig {
     pub(crate) inner: BypassConfig,
@@ -313,7 +374,7 @@ impl PyBypassConfig {
 ///
 /// Note: reading a nested config (e.g. `sim_config.convergence`) returns a
 /// copy; mutate it and assign it back, or construct with keywords.
-#[pyclass(name = "ConvergenceConfig", module = "rspice", from_py_object)]
+#[pyclass(name = "ConvergenceConfig", module = "rspice", from_py_object, eq)]
 #[derive(Clone)]
 pub struct PyConvergenceConfig {
     pub(crate) inner: ConvergenceConfig,
@@ -582,8 +643,8 @@ impl PyConvergenceConfig {
 ///
 /// The same object can be supplied to `Netlist.parse*` and
 /// `SimulationConfig`, ensuring parsing and execution use one policy.
-#[pyclass(name = "ResourceLimits", module = "rspice", from_py_object)]
-#[derive(Clone)]
+#[pyclass(name = "ResourceLimits", module = "rspice", from_py_object, eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PyResourceLimits {
     #[pyo3(get, set)]
     pub max_netlist_bytes: usize,
@@ -786,7 +847,7 @@ impl PyResourceLimits {
 /// The default transient timestep ceiling is unbounded, and `max_timestep`
 /// reads back as `inf`. Pass a finite value when the application requires a
 /// product-level ceiling, and assign `float('inf')` to lift it again.
-#[pyclass(name = "SimulationConfig", module = "rspice", from_py_object)]
+#[pyclass(name = "SimulationConfig", module = "rspice", from_py_object, eq)]
 #[derive(Clone)]
 pub struct PySimulationConfig {
     pub(crate) inner: SimulationConfig,

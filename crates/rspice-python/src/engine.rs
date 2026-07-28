@@ -17,7 +17,6 @@
 //! All simulation calls release the GIL. Long iterative and swept analyses
 //! additionally poll Python signals so KeyboardInterrupt cancels them.
 
-use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
@@ -51,11 +50,11 @@ use crate::results::{
 /// Validate that every frequency is finite and non-negative.
 fn validate_frequencies(frequencies: &[f64]) -> PyResult<()> {
     if frequencies.is_empty() {
-        return Err(PyValueError::new_err("frequencies must not be empty"));
+        return Err(crate::errors::value_error("frequencies must not be empty"));
     }
     for &f in frequencies {
         if !f.is_finite() || f < 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "frequencies must be finite and non-negative, got {f}"
             )));
         }
@@ -66,18 +65,18 @@ fn validate_frequencies(frequencies: &[f64]) -> PyResult<()> {
 /// Validate the stricter frequency and fixed-F2 contract used by `.DISTO`.
 fn validate_distortion_arguments(frequencies: &[f64], f2_over_f1: Option<f64>) -> PyResult<()> {
     if frequencies.is_empty() {
-        return Err(PyValueError::new_err("frequencies must not be empty"));
+        return Err(crate::errors::value_error("frequencies must not be empty"));
     }
     for (index, &frequency) in frequencies.iter().enumerate() {
         if !frequency.is_finite() || frequency <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "distortion F1 frequency at index {index} must be finite and positive, got {frequency}"
             )));
         }
     }
     if let Some(ratio) = f2_over_f1 {
         if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "f2_over_f1 must be finite and strictly between 0 and 1, got {ratio}"
             )));
         }
@@ -87,7 +86,7 @@ fn validate_distortion_arguments(frequencies: &[f64], f2_over_f1: Option<f64>) -
             .enumerate()
             .find(|(_, frequency)| **frequency <= f2)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "distortion F1 frequency at index {index} ({frequency}) must be greater than the fixed F2 frequency ({f2})"
             )));
         }
@@ -100,7 +99,7 @@ fn parse_variation(variation: &str) -> PyResult<FreqVariation> {
         "dec" | "decade" => Ok(FreqVariation::Dec),
         "oct" | "octave" => Ok(FreqVariation::Oct),
         "lin" | "linear" => Ok(FreqVariation::Lin),
-        other => Err(PyValueError::new_err(format!(
+        other => Err(crate::errors::value_error(format!(
             "variation must be 'dec', 'oct', or 'lin', got '{other}'"
         ))),
     }
@@ -132,7 +131,7 @@ fn sweep_frequencies(
 ) -> PyResult<Vec<f64>> {
     let frequencies = ac_sweep_frequencies(variation, points, start, stop);
     if frequencies.is_empty() {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "invalid frequency sweep: {variation:?} {points} points from {start} to {stop} Hz"
         )));
     }
@@ -144,19 +143,19 @@ fn ac_data_frequencies(netlist: &rspice_core::Netlist, table_name: &str) -> PyRe
         .data_tables
         .iter()
         .find(|table| table.name.eq_ignore_ascii_case(table_name))
-        .ok_or_else(|| PyValueError::new_err(format!("AC DATA table '{table_name}' not found")))?;
+        .ok_or_else(|| crate::errors::value_error(format!("AC DATA table '{table_name}' not found")))?;
     let frequency_column = table
         .params
         .iter()
         .position(|param| param.eq_ignore_ascii_case("FREQ"))
         .ok_or_else(|| {
-            PyValueError::new_err(format!(
+            crate::errors::value_error(format!(
                 "AC DATA table '{}' must contain a FREQ column",
                 table.name
             ))
         })?;
     if table.rows.is_empty() {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "AC DATA table '{}' has no rows",
             table.name
         )));
@@ -164,7 +163,7 @@ fn ac_data_frequencies(netlist: &rspice_core::Netlist, table_name: &str) -> PyRe
     let mut frequencies = Vec::with_capacity(table.rows.len());
     for (row_index, row) in table.rows.iter().enumerate() {
         if row.len() != table.params.len() {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "AC DATA table '{}' row {} has {} values, expected {}",
                 table.name,
                 row_index + 1,
@@ -174,7 +173,7 @@ fn ac_data_frequencies(netlist: &rspice_core::Netlist, table_name: &str) -> PyRe
         }
         let frequency = row[frequency_column];
         if !frequency.is_finite() || frequency < 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "AC DATA table '{}' row {} has invalid frequency {frequency}",
                 table.name,
                 row_index + 1
@@ -202,13 +201,13 @@ fn collect_sparameter_ports(netlist: &rspice_core::Netlist) -> PyResult<Vec<SPar
             continue;
         };
         if element.nodes.len() < 2 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "S-parameter port source '{}' must have positive and negative nodes",
                 element.name
             )));
         }
         if !port.z0.is_finite() || port.z0 <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "S-parameter port source '{}' has invalid z0 {}; expected a positive impedance",
                 element.name, port.z0
             )));
@@ -220,7 +219,7 @@ fn collect_sparameter_ports(netlist: &rspice_core::Netlist) -> PyResult<Vec<SPar
         });
     }
     if ports.is_empty() {
-        return Err(PyValueError::new_err(
+        return Err(crate::errors::value_error(
             "S-parameter analysis requires voltage sources annotated with portnum=<n> [z0=<ohms>]",
         ));
     }
@@ -228,7 +227,7 @@ fn collect_sparameter_ports(netlist: &rspice_core::Netlist) -> PyResult<Vec<SPar
     for (index, port) in ports.iter().enumerate() {
         let expected = index + 1;
         if port.number != expected {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "S-parameter port numbers must be dense and unique starting at 1; expected {expected}, found {} on '{}'",
                 port.number, port.source_name
             )));
@@ -512,19 +511,19 @@ fn resolve_hb_harmonic_orders(
         return Ok(vec![9; tone_count]);
     };
     if requested.is_empty() {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "{context} harmonic orders must not be empty"
         )));
     }
     if requested.contains(&0) {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "{context} harmonic orders must all be at least 1"
         )));
     }
     match requested.len() {
         1 => Ok(vec![requested[0]; tone_count]),
         count if count == tone_count => Ok(requested.to_vec()),
-        count => Err(PyValueError::new_err(format!(
+        count => Err(crate::errors::value_error(format!(
             "{context} has {tone_count} tones but {count} harmonic orders; provide one order to broadcast or one per tone"
         ))),
     }
@@ -536,19 +535,19 @@ fn hb_config_from_tones(
     source_names: Option<&[String]>,
 ) -> PyResult<HbConfig> {
     if frequencies.is_empty() {
-        return Err(PyValueError::new_err(
+        return Err(crate::errors::value_error(
             "HB requires at least one tone frequency",
         ));
     }
     if harmonic_orders.len() != frequencies.len() {
-        return Err(PyValueError::new_err(
+        return Err(crate::errors::value_error(
             "HB requires exactly one harmonic order per tone",
         ));
     }
     if let Some(names) = source_names
         && names.len() != frequencies.len()
     {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "HB has {} tones but {} source names",
             frequencies.len(),
             names.len()
@@ -559,17 +558,17 @@ fn hb_config_from_tones(
     let mut tones = Vec::with_capacity(frequencies.len());
     for (index, (&frequency, &order)) in frequencies.iter().zip(harmonic_orders).enumerate() {
         if !frequency.is_finite() || frequency <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "HB tone frequency at index {index} must be positive and finite, got {frequency}"
             )));
         }
         if order == 0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "HB harmonic order at index {index} must be at least 1"
             )));
         }
         if !unique.insert(frequency.to_bits()) {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "HB tone frequency {frequency} is listed more than once"
             )));
         }
@@ -610,43 +609,43 @@ fn configure_hb_numerics(
     verbose: bool,
 ) -> PyResult<()> {
     if !tolerance.is_finite() || tolerance <= 0.0 {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "tolerance must be positive and finite, got {tolerance}"
         )));
     }
     if !abstol.is_finite() || abstol <= 0.0 {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "abstol must be positive and finite, got {abstol}"
         )));
     }
     if max_iterations == 0 {
-        return Err(PyValueError::new_err("max_iterations must be at least 1"));
+        return Err(crate::errors::value_error("max_iterations must be at least 1"));
     }
     if !damping.is_finite() || !(0.1..=1.0).contains(&damping) {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "damping must be finite and in [0.1, 1.0], got {damping}"
         )));
     }
     if !min_damping.is_finite() || min_damping <= 0.0 || min_damping > damping {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::errors::value_error(format!(
             "min_damping must be finite, positive, and no greater than damping ({damping}), got {min_damping}"
         )));
     }
     if oversample == 0 {
-        return Err(PyValueError::new_err("oversample must be at least 1"));
+        return Err(crate::errors::value_error("oversample must be at least 1"));
     }
     if max_mixing_order == 0 {
-        return Err(PyValueError::new_err("max_mixing_order must be at least 1"));
+        return Err(crate::errors::value_error("max_mixing_order must be at least 1"));
     }
     if gmres_restart == 0 {
-        return Err(PyValueError::new_err("gmres_restart must be at least 1"));
+        return Err(crate::errors::value_error("gmres_restart must be at least 1"));
     }
     if let Some(points) = collocation_points {
         let minimum = config.minimum_collocation_points().ok_or_else(|| {
-            PyValueError::new_err("HB harmonic count exceeds the addressable collocation grid")
+            crate::errors::value_error("HB harmonic count exceeds the addressable collocation grid")
         })?;
         if points % 2 == 0 || points < minimum {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "collocation_points must be odd and at least {minimum}, got {points}"
             )));
         }
@@ -760,7 +759,7 @@ impl PyEngine {
                     .position(|n| n.eq_ignore_ascii_case(name))
                     .map(|pos| pos + 1)
                     .ok_or_else(|| {
-                        pyo3::exceptions::PyKeyError::new_err(format!(
+                        crate::errors::key_error(format!(
                             "unknown {what} node '{name}'"
                         ))
                     })
@@ -829,7 +828,7 @@ impl PyEngine {
         let engine = self.engine_for_netlist(&netlist.inner);
         let temp = temperature.unwrap_or(engine.config().temperature);
         if !temp.is_finite() || temp <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "temperature must be a positive number of Kelvin, got {temp}"
             )));
         }
@@ -1010,12 +1009,12 @@ impl PyEngine {
         let engine = self.engine_for_netlist(&netlist.inner);
         let output = if output_is_current {
             if reference.is_some() {
-                return Err(PyValueError::new_err(
+                return Err(crate::errors::value_error(
                     "a branch-current sensitivity output cannot have a reference node",
                 ));
             }
             let NodeIdentifier::Name(element) = output else {
-                return Err(PyTypeError::new_err(
+                return Err(crate::errors::type_error(
                     "a branch-current sensitivity output must be an element name",
                 ));
             };
@@ -1051,12 +1050,12 @@ impl PyEngine {
         let engine = self.engine_for_netlist(&netlist.inner);
         let output = if output_is_current {
             if reference.is_some() {
-                return Err(PyValueError::new_err(
+                return Err(crate::errors::value_error(
                     "a branch-current sensitivity output cannot have a reference node",
                 ));
             }
             let NodeIdentifier::Name(element) = output else {
-                return Err(PyTypeError::new_err(
+                return Err(crate::errors::type_error(
                     "a branch-current sensitivity output must be an element name",
                 ));
             };
@@ -1093,7 +1092,7 @@ impl PyEngine {
     ) -> PyResult<PySParameterResult> {
         validate_frequencies(&frequencies)?;
         if frequencies.contains(&0.0) {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "S-parameter frequencies must be strictly positive",
             ));
         }
@@ -1300,7 +1299,7 @@ impl PyEngine {
     pub fn new(config: Option<PySimulationConfig>) -> PyResult<Self> {
         let config = config.map_or_else(SimulationConfig::default, |cfg| cfg.inner);
         let inner =
-            Engine::try_new(config).map_err(|error| PyValueError::new_err(error.to_string()))?;
+            Engine::try_new(config).map_err(|error| crate::errors::value_error(error.to_string()))?;
         Ok(Self {
             inner,
             active_runs: ActiveRuns::default(),
@@ -1358,7 +1357,7 @@ impl PyEngine {
     /// `.MEAS` statements are then evaluated against the TRAN, DC, AC, and
     /// NOISE results. Every directive contributes at least one entry to
     /// `records`; anything that could not be executed is recorded with
-    /// `skipped=True` and a reason instead of being dropped silently.
+    /// `skipped=True` and the reason instead of being dropped silently.
     ///
     /// Measurements whose analysis did not run are reported as failed with
     /// an explanatory error, so `assert_passed()` cannot green-wash a CI
@@ -1366,6 +1365,12 @@ impl PyEngine {
     ///
     /// Args:
     ///     netlist: Parsed netlist with analysis directives
+    ///     continue_on_error: When True (the default), a directive that fails
+    ///         is recorded with `skipped=True` and its error text, and the
+    ///         remaining directives still run — so one unconverged sweep
+    ///         still yields the results and .MEAS outcomes of everything
+    ///         else, and `assert_passed()` still fails. Set False to abort
+    ///         the whole run and raise the first failure instead.
     ///
     /// Returns:
     ///     RunReport: results, per-directive records, and measurements
@@ -1374,7 +1379,13 @@ impl PyEngine {
     ///     >>> report = engine.run(netlist)
     ///     >>> report.assert_passed()
     ///     >>> print(report.measurement("tpd").value)
-    pub fn run(&self, py: Python<'_>, netlist: &PyNetlist) -> PyResult<PyRunReport> {
+    #[pyo3(signature = (netlist, *, continue_on_error=true))]
+    pub fn run(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        continue_on_error: bool,
+    ) -> PyResult<PyRunReport> {
         let net = &netlist.inner;
         let mut records: Vec<PyAnalysisRecord> = Vec::new();
         let mut op: Option<Py<PySimulationResult>> = None;
@@ -1396,422 +1407,467 @@ impl PyEngine {
         let mut sensitivity_ac: Option<PyAcSensitivityResult> = None;
         let mut fourier: Vec<PyFourierResult> = Vec::new();
         let mut pending_fourier: Vec<(f64, Vec<String>, usize)> = Vec::new();
+        // A deck may carry more than one directive of the same kind. The
+        // singular fields keep the last result (the documented contract);
+        // these keep every one, in deck order.
+        let mut all_op: Vec<Py<PySimulationResult>> = Vec::new();
+        let mut all_dc: Vec<Py<PyDcSweepResult>> = Vec::new();
+        let mut all_tran: Vec<Py<PyTransientResult>> = Vec::new();
+        let mut all_ac: Vec<Py<PyAcResult>> = Vec::new();
+        let mut all_noise: Vec<Vec<PyNoiseResult>> = Vec::new();
 
         for analysis in &net.analyses {
-            match analysis {
-                AnalysisCommand::Op => {
-                    let result = self.run_dc_op(py, netlist)?;
-                    op = Some(Py::new(py, result)?);
-                    records.push(PyAnalysisRecord::executed("op", ".op".to_string()));
-                }
-                AnalysisCommand::Dc {
-                    source,
-                    start,
-                    stop,
-                    step,
-                    mode,
-                    sweep2,
-                } => {
-                    let engine = self.engine_for_netlist(&netlist.inner);
-                    let primary = DcSweepSpec {
-                        start: *start,
-                        stop: *stop,
-                        step: *step,
-                        mode: mode.clone(),
-                    };
-                    let results = run_interruptible(py, &self.active_runs, |abort| {
-                        engine.run_dc_sweep2_spec_with_report_and_abort(
-                            &netlist.inner,
-                            source,
-                            &primary,
-                            sweep2.as_ref(),
-                            abort,
-                        )
-                    })?;
-                    let result = match sweep2 {
-                        Some(outer) => PyDcSweepResult::new_nested_with_reports(
-                            results,
-                            source,
-                            &outer.source,
-                            outer.spec().points(),
-                        )?,
-                        None => PyDcSweepResult::new_named_with_reports(results, source),
-                    };
-                    dc = Some(Py::new(py, result)?);
-                    let description = describe_analysis(analysis);
-                    records.push(PyAnalysisRecord::executed("dc", description));
-                }
-                AnalysisCommand::Tran {
-                    step,
-                    stop,
-                    start,
-                    max_step,
-                    uic: _,
-                } => {
-                    let tstart = start.unwrap_or(0.0);
-                    let resolved = resolve_tran_max_step(*step, *stop, tstart, *max_step);
-                    let result = self.tran_impl(py, netlist, *stop, resolved, tstart)?;
-                    tran = Some(Py::new(py, result)?);
-                    let mut detail = format!(".tran {step} {stop}");
-                    if tstart > 0.0 {
-                        detail.push_str(&format!(" (tstart={tstart})"));
+            let records_before = records.len();
+            // The directive body runs inside an immediately-invoked closure so
+            // one failure becomes a skipped record instead of discarding the
+            // whole report.
+            let outcome = (|| -> PyResult<()> {
+                match analysis {
+                    AnalysisCommand::Op => {
+                        let result = self.run_dc_op(py, netlist)?;
+                        let handle = Py::new(py, result)?;
+                        all_op.push(handle.clone_ref(py));
+                        op = Some(handle);
+                        records.push(PyAnalysisRecord::executed("op", ".op".to_string()));
                     }
-                    records.push(PyAnalysisRecord::executed("tran", detail));
-                }
-                AnalysisCommand::Ac {
-                    variation,
-                    points,
-                    start_freq,
-                    stop_freq,
-                } => {
-                    let frequencies =
-                        sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
-                    let result = self.ac_impl(py, netlist, frequencies)?;
-                    ac = Some(Py::new(py, result)?);
-                    records.push(PyAnalysisRecord::executed(
-                        "ac",
-                        format!(
-                            ".ac {} {points} {start_freq} {stop_freq}",
-                            format!("{variation:?}").to_lowercase()
-                        ),
-                    ));
-                }
-                AnalysisCommand::AcData { table_name } => {
-                    let frequencies = ac_data_frequencies(net, table_name)?;
-                    let result = self.ac_impl(py, netlist, frequencies)?;
-                    ac = Some(Py::new(py, result)?);
-                    records.push(PyAnalysisRecord::executed(
-                        "ac_data",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::Hb { frequencies } => {
-                    let requested_orders = if net.options.hb_num_frequencies.is_empty() {
-                        None
-                    } else {
-                        Some(net.options.hb_num_frequencies.as_slice())
-                    };
-                    let orders = resolve_hb_harmonic_orders(
-                        frequencies.len(),
-                        requested_orders,
-                        ".OPTIONS HBINT NUMFREQ",
-                    )?;
-                    let mut config = hb_config_from_tones(frequencies, &orders, None)?;
-                    // Xyce's explicit single-tone NUMFREQ contract uses the
-                    // minimal bilateral 2*N+1 collocation grid.
-                    if frequencies.len() == 1 && requested_orders.is_some() {
-                        config.collocation_points = Some(
-                            orders[0]
-                                .checked_mul(2)
-                                .and_then(|count| count.checked_add(1))
-                                .ok_or_else(|| {
-                                    PyValueError::new_err(
-                                        ".OPTIONS HBINT NUMFREQ exceeds the addressable collocation grid",
-                                    )
-                                })?,
-                        );
+                    AnalysisCommand::Dc {
+                        source,
+                        start,
+                        stop,
+                        step,
+                        mode,
+                        sweep2,
+                    } => {
+                        let engine = self.engine_for_netlist(&netlist.inner);
+                        let primary = DcSweepSpec {
+                            start: *start,
+                            stop: *stop,
+                            step: *step,
+                            mode: mode.clone(),
+                        };
+                        let results = run_interruptible(py, &self.active_runs, |abort| {
+                            engine.run_dc_sweep2_spec_with_report_and_abort(
+                                &netlist.inner,
+                                source,
+                                &primary,
+                                sweep2.as_ref(),
+                                abort,
+                            )
+                        })?;
+                        let result = match sweep2 {
+                            Some(outer) => PyDcSweepResult::new_nested_with_reports(
+                                results,
+                                source,
+                                &outer.source,
+                                outer.spec().points(),
+                            )?,
+                            None => PyDcSweepResult::new_named_with_reports(results, source),
+                        };
+                        let handle = Py::new(py, result)?;
+                        all_dc.push(handle.clone_ref(py));
+                        dc = Some(handle);
+                        let description = describe_analysis(analysis);
+                        records.push(PyAnalysisRecord::executed("dc", description));
                     }
-                    let engine = self.engine_for_netlist(net);
-                    let result = run_interruptible(py, &self.active_runs, |abort| {
-                        engine.run_hb_with_abort(net, config, abort)
-                    })?;
-                    hb = Some(PyHbResult::from_core(&result));
-                    records.push(PyAnalysisRecord::executed(
-                        "hb",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::Disto {
-                    variation,
-                    points,
-                    start_freq,
-                    stop_freq,
-                    f2_over_f1,
-                } => {
-                    let frequencies =
-                        sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
-                    let result = self.distortion_impl(py, netlist, frequencies, *f2_over_f1)?;
-                    distortion = Some(Py::new(py, result)?);
-                    records.push(PyAnalysisRecord::executed(
-                        "disto",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::Sp {
-                    variation,
-                    points,
-                    start_freq,
-                    stop_freq,
-                    do_noise,
-                } => {
-                    let frequencies =
-                        sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
-                    s_parameters =
-                        Some(self.sparameter_impl(py, netlist, frequencies, *do_noise)?);
-                    records.push(PyAnalysisRecord::executed(
-                        "sp",
-                        describe_analysis(analysis),
-                    ));
-                    if *do_noise {
+                    AnalysisCommand::Tran {
+                        step,
+                        stop,
+                        start,
+                        max_step,
+                        uic: _,
+                    } => {
+                        let tstart = start.unwrap_or(0.0);
+                        let resolved = resolve_tran_max_step(*step, *stop, tstart, *max_step);
+                        let result = self.tran_impl(py, netlist, *stop, resolved, tstart)?;
+                        let handle = Py::new(py, result)?;
+                        all_tran.push(handle.clone_ref(py));
+                        tran = Some(handle);
+                        let mut detail = format!(".tran {step} {stop}");
+                        if tstart > 0.0 {
+                            detail.push_str(&format!(" (tstart={tstart})"));
+                        }
+                        records.push(PyAnalysisRecord::executed("tran", detail));
+                    }
+                    AnalysisCommand::Ac {
+                        variation,
+                        points,
+                        start_freq,
+                        stop_freq,
+                    } => {
+                        let frequencies =
+                            sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+                        let result = self.ac_impl(py, netlist, frequencies)?;
+                        let handle = Py::new(py, result)?;
+                        all_ac.push(handle.clone_ref(py));
+                        ac = Some(handle);
                         records.push(PyAnalysisRecord::executed(
-                            "sp_noise",
+                            "ac",
+                            format!(
+                                ".ac {} {points} {start_freq} {stop_freq}",
+                                format!("{variation:?}").to_lowercase()
+                            ),
+                        ));
+                    }
+                    AnalysisCommand::AcData { table_name } => {
+                        let frequencies = ac_data_frequencies(net, table_name)?;
+                        let result = self.ac_impl(py, netlist, frequencies)?;
+                        let handle = Py::new(py, result)?;
+                        all_ac.push(handle.clone_ref(py));
+                        ac = Some(handle);
+                        records.push(PyAnalysisRecord::executed(
+                            "ac_data",
                             describe_analysis(analysis),
                         ));
                     }
-                }
-                AnalysisCommand::Noise {
-                    output_node,
-                    reference_node,
-                    input_source,
-                    variation,
-                    points,
-                    start_freq,
-                    stop_freq,
-                } => {
-                    let engine = self.engine_for_netlist(net);
-                    let output = self.resolve_node(
-                        &engine,
-                        net,
-                        &NodeIdentifier::Name(output_node.clone()),
-                        "noise output",
-                    )?;
-                    let output_neg = match reference_node {
-                        Some(reference) => Some(self.resolve_node(
+                    AnalysisCommand::Hb { frequencies } => {
+                        let requested_orders = if net.options.hb_num_frequencies.is_empty() {
+                            None
+                        } else {
+                            Some(net.options.hb_num_frequencies.as_slice())
+                        };
+                        let orders = resolve_hb_harmonic_orders(
+                            frequencies.len(),
+                            requested_orders,
+                            ".OPTIONS HBINT NUMFREQ",
+                        )?;
+                        let mut config = hb_config_from_tones(frequencies, &orders, None)?;
+                        // Xyce's explicit single-tone NUMFREQ contract uses the
+                        // minimal bilateral 2*N+1 collocation grid.
+                        if frequencies.len() == 1 && requested_orders.is_some() {
+                            config.collocation_points = Some(
+                                orders[0]
+                                    .checked_mul(2)
+                                    .and_then(|count| count.checked_add(1))
+                                    .ok_or_else(|| {
+                                        crate::errors::value_error(
+                                            ".OPTIONS HBINT NUMFREQ exceeds the addressable collocation grid",
+                                        )
+                                    })?,
+                            );
+                        }
+                        let engine = self.engine_for_netlist(net);
+                        let result = run_interruptible(py, &self.active_runs, |abort| {
+                            engine.run_hb_with_abort(net, config, abort)
+                        })?;
+                        hb = Some(PyHbResult::from_core(&result));
+                        records.push(PyAnalysisRecord::executed(
+                            "hb",
+                            describe_analysis(analysis),
+                        ));
+                    }
+                    AnalysisCommand::Disto {
+                        variation,
+                        points,
+                        start_freq,
+                        stop_freq,
+                        f2_over_f1,
+                    } => {
+                        let frequencies =
+                            sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+                        let result = self.distortion_impl(py, netlist, frequencies, *f2_over_f1)?;
+                        distortion = Some(Py::new(py, result)?);
+                        records.push(PyAnalysisRecord::executed(
+                            "disto",
+                            describe_analysis(analysis),
+                        ));
+                    }
+                    AnalysisCommand::Sp {
+                        variation,
+                        points,
+                        start_freq,
+                        stop_freq,
+                        do_noise,
+                    } => {
+                        let frequencies =
+                            sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+                        s_parameters =
+                            Some(self.sparameter_impl(py, netlist, frequencies, *do_noise)?);
+                        records.push(PyAnalysisRecord::executed(
+                            "sp",
+                            describe_analysis(analysis),
+                        ));
+                        if *do_noise {
+                            records.push(PyAnalysisRecord::executed(
+                                "sp_noise",
+                                describe_analysis(analysis),
+                            ));
+                        }
+                    }
+                    AnalysisCommand::Noise {
+                        output_node,
+                        reference_node,
+                        input_source,
+                        variation,
+                        points,
+                        start_freq,
+                        stop_freq,
+                    } => {
+                        let engine = self.engine_for_netlist(net);
+                        let output = self.resolve_node(
                             &engine,
                             net,
-                            &NodeIdentifier::Name(reference.clone()),
-                            "noise reference",
-                        )?),
-                        None => None,
-                    };
-                    let frequencies =
-                        sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
-                    let source = if input_source.is_empty() {
-                        None
-                    } else {
-                        Some(input_source.as_str())
-                    };
-                    let results = self.noise_core_impl(
-                        py,
-                        netlist,
-                        output,
-                        output_neg,
-                        source,
-                        &frequencies,
-                        None,
-                    )?;
-                    noise = Some(results.iter().map(PyNoiseResult::from_core).collect());
-                    noise_core = Some(results);
-                    records.push(PyAnalysisRecord::executed(
-                        "noise",
-                        format!(".noise V({output_node}) {input_source}"),
-                    ));
-                }
-                AnalysisCommand::NoiseData {
-                    output_node,
-                    reference_node,
-                    input_source,
-                    table_name,
-                } => {
-                    let engine = self.engine_for_netlist(net);
-                    let (_, results) = run_interruptible(py, &self.active_runs, |abort| {
-                        engine.run_noise_data_named_with_input_source_and_abort(
-                            net,
+                            &NodeIdentifier::Name(output_node.clone()),
+                            "noise output",
+                        )?;
+                        let output_neg = match reference_node {
+                            Some(reference) => Some(self.resolve_node(
+                                &engine,
+                                net,
+                                &NodeIdentifier::Name(reference.clone()),
+                                "noise reference",
+                            )?),
+                            None => None,
+                        };
+                        let frequencies =
+                            sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+                        let source = if input_source.is_empty() {
+                            None
+                        } else {
+                            Some(input_source.as_str())
+                        };
+                        let results = self.noise_core_impl(
+                            py,
+                            netlist,
+                            output,
+                            output_neg,
+                            source,
+                            &frequencies,
+                            None,
+                        )?;
+                        let converted: Vec<PyNoiseResult> =
+                            results.iter().map(PyNoiseResult::from_core).collect();
+                        all_noise.push(converted.clone());
+                        noise = Some(converted);
+                        noise_core = Some(results);
+                        records.push(PyAnalysisRecord::executed(
+                            "noise",
+                            format!(".noise V({output_node}) {input_source}"),
+                        ));
+                    }
+                    AnalysisCommand::NoiseData {
+                        output_node,
+                        reference_node,
+                        input_source,
+                        table_name,
+                    } => {
+                        let engine = self.engine_for_netlist(net);
+                        let (_, results) = run_interruptible(py, &self.active_runs, |abort| {
+                            engine.run_noise_data_named_with_input_source_and_abort(
+                                net,
+                                output_node,
+                                reference_node.as_deref(),
+                                input_source,
+                                table_name,
+                                engine.config().temperature,
+                                abort,
+                            )
+                        })?;
+                        let converted: Vec<PyNoiseResult> =
+                            results.iter().map(PyNoiseResult::from_core).collect();
+                        all_noise.push(converted.clone());
+                        noise = Some(converted);
+                        noise_core = Some(results);
+                        records.push(PyAnalysisRecord::executed(
+                            "noise_data",
+                            format!(".noise V({output_node}) {input_source} DATA={table_name}"),
+                        ));
+                    }
+                    AnalysisCommand::Tf {
+                        output_node,
+                        reference_node,
+                        output_is_current,
+                        input_source,
+                    } => {
+                        let result = self.tf_impl(
+                            py,
+                            netlist,
                             output_node,
                             reference_node.as_deref(),
+                            *output_is_current,
                             input_source,
-                            table_name,
-                            engine.config().temperature,
-                            abort,
-                        )
-                    })?;
-                    noise = Some(results.iter().map(PyNoiseResult::from_core).collect());
-                    noise_core = Some(results);
-                    records.push(PyAnalysisRecord::executed(
-                        "noise_data",
-                        format!(".noise V({output_node}) {input_source} DATA={table_name}"),
-                    ));
-                }
-                AnalysisCommand::Tf {
-                    output_node,
-                    reference_node,
-                    output_is_current,
-                    input_source,
-                } => {
-                    let result = self.tf_impl(
-                        py,
-                        netlist,
-                        output_node,
-                        reference_node.as_deref(),
-                        *output_is_current,
-                        input_source,
-                    )?;
-                    tf = Some(result);
-                    records.push(PyAnalysisRecord::executed(
-                        "tf",
-                        format!(".tf {output_node} {input_source}"),
-                    ));
-                }
-                AnalysisCommand::Stb {
-                    variation,
-                    points,
-                    start_freq,
-                    stop_freq,
-                    probe,
-                } => {
-                    let result = self.stb_impl(
-                        py,
-                        netlist,
-                        probe,
-                        *variation,
-                        *points,
-                        *start_freq,
-                        *stop_freq,
-                    )?;
-                    stb = Some(result);
-                    records.push(PyAnalysisRecord::executed(
-                        "stb",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::PoleZero {
-                    input_pos,
-                    input_neg,
-                    output_pos,
-                    output_neg,
-                    transfer_type,
-                    analysis_type,
-                } => {
-                    let (compute_poles, compute_zeros) = match analysis_type {
-                        PoleZeroAnalysisType::PoleZero => (true, true),
-                        PoleZeroAnalysisType::PolesOnly => (true, false),
-                        PoleZeroAnalysisType::ZerosOnly => (false, true),
-                    };
-                    let result = self.pz_impl(
-                        py,
-                        netlist,
-                        &NodeIdentifier::Name(input_pos.clone()),
-                        Some(&NodeIdentifier::Name(input_neg.clone())),
-                        &NodeIdentifier::Name(output_pos.clone()),
-                        Some(&NodeIdentifier::Name(output_neg.clone())),
-                        matches!(transfer_type, PoleZeroTransferType::Current),
-                        compute_poles,
-                        compute_zeros,
-                    )?;
-                    pz = Some(result);
-                    records.push(PyAnalysisRecord::executed(
-                        "pz",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::MonteCarlo(command) => {
-                    let distribution = match command.distribution {
-                        rspice_core::netlist::MonteCarloDistribution::Gaussian => "gaussian",
-                        rspice_core::netlist::MonteCarloDistribution::Uniform => "uniform",
-                        rspice_core::netlist::MonteCarloDistribution::WorstCase => "worst_case",
-                    };
-                    let params = (!command.params.is_empty()).then(|| command.params.clone());
-                    let result = self.run_monte_carlo(
-                        py,
-                        netlist,
-                        command.runs,
-                        command.seed,
-                        distribution,
-                        command.relative_spread,
-                        params,
-                    )?;
-                    monte_carlo = Some(result);
-                    records.push(PyAnalysisRecord::executed(
-                        "mc",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::Step(command) => {
-                    let values = command.sweep.values();
-                    let engine = self.engine_for_netlist(net);
-                    let results = run_interruptible(py, &self.active_runs, |abort| {
-                        engine.run_step_command_with_abort(net, command, &values, abort)
-                    })?;
-                    step_result = Some(PyDcSweepResult::new_named(results, &command.name));
-                    records.push(PyAnalysisRecord::executed(
-                        "step",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::Temp { temperatures } => {
-                    let command = StepCommand {
-                        target: StepTarget::Temp,
-                        name: "TEMP".to_string(),
-                        param_name: None,
-                        sweep: StepSweep::List(temperatures.clone()),
-                    };
-                    let engine = self.engine_for_netlist(net);
-                    let results = run_interruptible(py, &self.active_runs, |abort| {
-                        engine.run_step_command_with_abort(net, &command, temperatures, abort)
-                    })?;
-                    temperature = Some(PyDcSweepResult::new_named(results, "TEMP"));
-                    records.push(PyAnalysisRecord::executed(
-                        "temp",
-                        describe_analysis(analysis),
-                    ));
-                }
-                AnalysisCommand::Sensitivity {
-                    output_node,
-                    reference_node,
-                    output_is_current,
-                    filters,
-                    ac_sweep,
-                } => {
-                    if let Some(sweep) = ac_sweep {
-                        let frequencies = ac_sweep_frequencies(
-                            sweep.variation,
-                            sweep.points,
-                            sweep.start_freq,
-                            sweep.stop_freq,
-                        );
-                        let output = NodeIdentifier::Name(output_node.clone());
-                        let reference = reference_node
-                            .as_ref()
-                            .map(|name| NodeIdentifier::Name(name.clone()));
-                        sensitivity_ac = Some(self.sensitivity_ac_complete_impl(
-                            py,
-                            netlist,
-                            &output,
-                            reference.as_ref(),
-                            *output_is_current,
-                            &frequencies,
-                            filters,
-                        )?);
+                        )?;
+                        tf = Some(result);
                         records.push(PyAnalysisRecord::executed(
-                            "sens_ac",
-                            describe_analysis(analysis),
+                            "tf",
+                            format!(".tf {output_node} {input_source}"),
                         ));
-                    } else {
-                        let output = NodeIdentifier::Name(output_node.clone());
-                        let reference = reference_node
-                            .as_ref()
-                            .map(|name| NodeIdentifier::Name(name.clone()));
-                        sensitivity = Some(self.sensitivity_dc_complete_impl(
+                    }
+                    AnalysisCommand::Stb {
+                        variation,
+                        points,
+                        start_freq,
+                        stop_freq,
+                        probe,
+                    } => {
+                        let result = self.stb_impl(
                             py,
                             netlist,
-                            &output,
-                            reference.as_ref(),
-                            *output_is_current,
-                            filters,
-                        )?);
+                            probe,
+                            *variation,
+                            *points,
+                            *start_freq,
+                            *stop_freq,
+                        )?;
+                        stb = Some(result);
                         records.push(PyAnalysisRecord::executed(
-                            "sens",
+                            "stb",
                             describe_analysis(analysis),
                         ));
                     }
+                    AnalysisCommand::PoleZero {
+                        input_pos,
+                        input_neg,
+                        output_pos,
+                        output_neg,
+                        transfer_type,
+                        analysis_type,
+                    } => {
+                        let (compute_poles, compute_zeros) = match analysis_type {
+                            PoleZeroAnalysisType::PoleZero => (true, true),
+                            PoleZeroAnalysisType::PolesOnly => (true, false),
+                            PoleZeroAnalysisType::ZerosOnly => (false, true),
+                        };
+                        let result = self.pz_impl(
+                            py,
+                            netlist,
+                            &NodeIdentifier::Name(input_pos.clone()),
+                            Some(&NodeIdentifier::Name(input_neg.clone())),
+                            &NodeIdentifier::Name(output_pos.clone()),
+                            Some(&NodeIdentifier::Name(output_neg.clone())),
+                            matches!(transfer_type, PoleZeroTransferType::Current),
+                            compute_poles,
+                            compute_zeros,
+                        )?;
+                        pz = Some(result);
+                        records.push(PyAnalysisRecord::executed(
+                            "pz",
+                            describe_analysis(analysis),
+                        ));
+                    }
+                    AnalysisCommand::MonteCarlo(command) => {
+                        let distribution = match command.distribution {
+                            rspice_core::netlist::MonteCarloDistribution::Gaussian => "gaussian",
+                            rspice_core::netlist::MonteCarloDistribution::Uniform => "uniform",
+                            rspice_core::netlist::MonteCarloDistribution::WorstCase => "worst_case",
+                        };
+                        let params = (!command.params.is_empty()).then(|| command.params.clone());
+                        let result = self.run_monte_carlo(
+                            py,
+                            netlist,
+                            command.runs,
+                            command.seed,
+                            distribution,
+                            command.relative_spread,
+                            params,
+                        )?;
+                        monte_carlo = Some(result);
+                        records.push(PyAnalysisRecord::executed(
+                            "mc",
+                            describe_analysis(analysis),
+                        ));
+                    }
+                    AnalysisCommand::Step(command) => {
+                        let values = command.sweep.values();
+                        let engine = self.engine_for_netlist(net);
+                        let results = run_interruptible(py, &self.active_runs, |abort| {
+                            engine.run_step_command_with_abort(net, command, &values, abort)
+                        })?;
+                        step_result = Some(PyDcSweepResult::new_named(results, &command.name));
+                        records.push(PyAnalysisRecord::executed(
+                            "step",
+                            describe_analysis(analysis),
+                        ));
+                    }
+                    AnalysisCommand::Temp { temperatures } => {
+                        let command = StepCommand {
+                            target: StepTarget::Temp,
+                            name: "TEMP".to_string(),
+                            param_name: None,
+                            sweep: StepSweep::List(temperatures.clone()),
+                        };
+                        let engine = self.engine_for_netlist(net);
+                        let results = run_interruptible(py, &self.active_runs, |abort| {
+                            engine.run_step_command_with_abort(net, &command, temperatures, abort)
+                        })?;
+                        temperature = Some(PyDcSweepResult::new_named(results, "TEMP"));
+                        records.push(PyAnalysisRecord::executed(
+                            "temp",
+                            describe_analysis(analysis),
+                        ));
+                    }
+                    AnalysisCommand::Sensitivity {
+                        output_node,
+                        reference_node,
+                        output_is_current,
+                        filters,
+                        ac_sweep,
+                    } => {
+                        if let Some(sweep) = ac_sweep {
+                            let frequencies = ac_sweep_frequencies(
+                                sweep.variation,
+                                sweep.points,
+                                sweep.start_freq,
+                                sweep.stop_freq,
+                            );
+                            let output = NodeIdentifier::Name(output_node.clone());
+                            let reference = reference_node
+                                .as_ref()
+                                .map(|name| NodeIdentifier::Name(name.clone()));
+                            sensitivity_ac = Some(self.sensitivity_ac_complete_impl(
+                                py,
+                                netlist,
+                                &output,
+                                reference.as_ref(),
+                                *output_is_current,
+                                &frequencies,
+                                filters,
+                            )?);
+                            records.push(PyAnalysisRecord::executed(
+                                "sens_ac",
+                                describe_analysis(analysis),
+                            ));
+                        } else {
+                            let output = NodeIdentifier::Name(output_node.clone());
+                            let reference = reference_node
+                                .as_ref()
+                                .map(|name| NodeIdentifier::Name(name.clone()));
+                            sensitivity = Some(self.sensitivity_dc_complete_impl(
+                                py,
+                                netlist,
+                                &output,
+                                reference.as_ref(),
+                                *output_is_current,
+                                filters,
+                            )?);
+                            records.push(PyAnalysisRecord::executed(
+                                "sens",
+                                describe_analysis(analysis),
+                            ));
+                        }
+                    }
+                    AnalysisCommand::Four {
+                        fundamental,
+                        outputs,
+                        num_harmonics,
+                    } => {
+                        pending_fourier.push((*fundamental, outputs.clone(), *num_harmonics));
+                    }
                 }
-                AnalysisCommand::Four {
-                    fundamental,
-                    outputs,
-                    num_harmonics,
-                } => {
-                    pending_fourier.push((*fundamental, outputs.clone(), *num_harmonics));
+                Ok(())
+            })();
+
+            if let Err(error) = outcome {
+                if !continue_on_error {
+                    return Err(error);
                 }
+                // Drop any partial records the failed directive pushed so the
+                // report never claims a half-executed analysis succeeded.
+                records.truncate(records_before);
+                records.push(PyAnalysisRecord::skipped(
+                    analysis_record_kind(analysis),
+                    describe_analysis(analysis),
+                    &crate::errors::describe_pyerr(py, &error),
+                ));
             }
         }
 
@@ -1822,8 +1878,12 @@ impl PyEngine {
                 Some(tran_obj) => {
                     let tran_ref = tran_obj.borrow(py);
                     for output in &outputs {
-                        let node_name = strip_probe_wrapper(output);
-                        match tran_ref.waveform_for(&NodeIdentifier::Name(node_name.to_string())) {
+                        // `.four` addresses node voltages, differential node
+                        // pairs, and branch currents alike.
+                        let waveform = crate::signal::parse_signal_spec(output)
+                            .map_err(crate::errors::value_error)
+                            .and_then(|spec| tran_ref.signal_waveform(&spec));
+                        match waveform {
                             Ok(waveform) => {
                                 let analysis = rspice_core::analysis::FourierAnalysis::new(
                                     rspice_core::analysis::FourierConfig::new(fundamental)
@@ -1840,7 +1900,7 @@ impl PyEngine {
                                 records.push(PyAnalysisRecord::skipped(
                                     "four",
                                     format!(".four {fundamental} {output}"),
-                                    &format!("output not found: {err}"),
+                                    &crate::errors::describe_pyerr(py, &err),
                                 ));
                             }
                         }
@@ -1923,6 +1983,11 @@ impl PyEngine {
             fourier,
             records,
             measurements,
+            all_op,
+            all_dc,
+            all_tran,
+            all_ac,
+            all_noise,
         })
     }
 
@@ -1959,7 +2024,7 @@ impl PyEngine {
                 &sweep.borrow().results,
             ));
         }
-        Err(PyTypeError::new_err(
+        Err(crate::errors::type_error(
             "measure() expects a TransientResult or DcSweepResult",
         ))
     }
@@ -2026,15 +2091,15 @@ impl PyEngine {
         step: f64,
     ) -> PyResult<PyDcSweepResult> {
         if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "sweep bounds must be finite, got start={start}, stop={stop}, step={step}"
             )));
         }
         if step == 0.0 {
-            return Err(PyValueError::new_err("sweep step must be non-zero"));
+            return Err(crate::errors::value_error("sweep step must be non-zero"));
         }
         if (stop > start && step < 0.0) || (stop < start && step > 0.0) {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "sweep step sign must move from start toward stop, got start={start}, stop={stop}, step={step}"
             )));
         }
@@ -2234,19 +2299,19 @@ impl PyEngine {
         start_time: f64,
     ) -> PyResult<PyTransientResult> {
         if !stop_time.is_finite() || stop_time <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "stop_time must be a positive finite number of seconds, got {stop_time}"
             )));
         }
         if let Some(step) = max_step
             && (!step.is_finite() || step <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "max_step must be a positive finite number of seconds, got {step}"
             )));
         }
         if !start_time.is_finite() || start_time < 0.0 || start_time >= stop_time {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "start_time must be finite and satisfy 0 <= start_time < stop_time, got {start_time}"
             )));
         }
@@ -2296,29 +2361,29 @@ impl PyEngine {
         max_interval: f64,
     ) -> PyResult<PyCompressedTransientResult> {
         if !stop_time.is_finite() || stop_time <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "stop_time must be a positive finite number of seconds, got {stop_time}"
             )));
         }
         if let Some(step) = max_step
             && (!step.is_finite() || step <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "max_step must be a positive finite number of seconds, got {step}"
             )));
         }
         if !abs_tol.is_finite() || abs_tol < 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "abs_tol must be finite and non-negative, got {abs_tol}"
             )));
         }
         if !rel_tol.is_finite() || rel_tol < 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "rel_tol must be finite and non-negative, got {rel_tol}"
             )));
         }
         if !max_interval.is_finite() || max_interval < 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "max_interval must be finite and non-negative, got {max_interval}"
             )));
         }
@@ -2358,14 +2423,14 @@ impl PyEngine {
         max_step: Option<f64>,
     ) -> PyResult<(PyTransientResult, PyTransientCheckpoint)> {
         if !stop_time.is_finite() || stop_time <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "stop_time must be a positive finite number of seconds, got {stop_time}"
             )));
         }
         if let Some(step) = max_step
             && (!step.is_finite() || step <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "max_step must be a positive finite number of seconds, got {step}"
             )));
         }
@@ -2400,7 +2465,7 @@ impl PyEngine {
         max_step: Option<f64>,
     ) -> PyResult<(PyTransientResult, PyTransientCheckpoint)> {
         if !stop_time.is_finite() || stop_time <= checkpoint.inner.time {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "stop_time must be finite and greater than checkpoint time {}, got {stop_time}",
                 checkpoint.inner.time
             )));
@@ -2408,7 +2473,7 @@ impl PyEngine {
         if let Some(step) = max_step
             && (!step.is_finite() || step <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "max_step must be a positive finite number of seconds, got {step}"
             )));
         }
@@ -2529,7 +2594,7 @@ impl PyEngine {
             "current" | "cur" | "i" => true,
             "voltage" | "vol" | "v" => false,
             other => {
-                return Err(PyValueError::new_err(format!(
+                return Err(crate::errors::value_error(format!(
                     "input_type must be 'current' or 'voltage', got '{other}'"
                 )));
             }
@@ -2539,7 +2604,7 @@ impl PyEngine {
             "pol" | "poles" => (true, false),
             "zer" | "zeros" => (false, true),
             other => {
-                return Err(PyValueError::new_err(format!(
+                return Err(crate::errors::value_error(format!(
                     "analysis must be 'pz', 'poles', or 'zeros', got '{other}'"
                 )));
             }
@@ -2580,24 +2645,24 @@ impl PyEngine {
         verbose: bool,
     ) -> PyResult<PyPssResult> {
         if harmonics == 0 {
-            return Err(PyValueError::new_err("harmonics must be at least 1"));
+            return Err(crate::errors::value_error("harmonics must be at least 1"));
         }
         if let Some(frequency) = fundamental_frequency
             && (!frequency.is_finite() || frequency <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "fundamental_frequency must be positive and finite, got {frequency}"
             )));
         }
         if !autonomous && fundamental_frequency.is_none() {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "fundamental_frequency is required for driven PSS",
             ));
         }
         if let Some(period) = period_guess
             && (!period.is_finite() || period <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "period_guess must be positive and finite, got {period}"
             )));
         }
@@ -2607,7 +2672,7 @@ impl PyEngine {
         } else if let Some(frequency) = fundamental_frequency {
             PssConfig::new(frequency)
         } else {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "fundamental_frequency is required for driven PSS",
             ));
         };
@@ -2630,7 +2695,7 @@ impl PyEngine {
         config.abstol = abstol;
         config.damping_factor = damping;
         if !max_period_change.is_finite() || max_period_change <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "max_period_change must be positive and finite, got {max_period_change}"
             )));
         }
@@ -2639,7 +2704,7 @@ impl PyEngine {
         config.integration_method = integration_method.map(Into::into);
         config.verbose = verbose;
         config.validate().map_err(|message| {
-            PyValueError::new_err(format!("invalid PSS configuration: {message}"))
+            crate::errors::value_error(format!("invalid PSS configuration: {message}"))
         })?;
 
         let engine = self.engine_for_netlist(&netlist.inner);
@@ -2674,12 +2739,12 @@ impl PyEngine {
         verbose: bool,
     ) -> PyResult<PyHbResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "fundamental_frequency must be positive and finite, got {fundamental_frequency}"
             )));
         }
         if harmonics == 0 {
-            return Err(PyValueError::new_err("harmonics must be at least 1"));
+            return Err(crate::errors::value_error("harmonics must be at least 1"));
         }
         let source_names = source_name.map(|name| vec![name.to_string()]);
         let mut config = hb_config_from_tones(
@@ -2788,22 +2853,22 @@ impl PyEngine {
         abstol: f64,
     ) -> PyResult<PyPacResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "fundamental_frequency must be positive and finite, got {fundamental_frequency}"
             )));
         }
         if input_source.trim().is_empty() {
-            return Err(PyValueError::new_err("input_source must not be empty"));
+            return Err(crate::errors::value_error("input_source must not be empty"));
         }
         if output_node.trim().is_empty() {
-            return Err(PyValueError::new_err("output_node must not be empty"));
+            return Err(crate::errors::value_error("output_node must not be empty"));
         }
         let sweep_type = match variation.to_ascii_lowercase().as_str() {
             "dec" | "decade" => PacSweepType::Decade,
             "oct" | "octave" => PacSweepType::Octave,
             "lin" | "linear" => PacSweepType::Linear,
             other => {
-                return Err(PyValueError::new_err(format!(
+                return Err(crate::errors::value_error(format!(
                     "variation must be 'dec', 'oct', or 'lin', got '{other}'"
                 )));
             }
@@ -2819,12 +2884,12 @@ impl PyEngine {
             .with_output_node(output_node);
         if let Some(reference) = reference_node {
             if reference.trim().is_empty() {
-                return Err(PyValueError::new_err("reference_node must not be empty"));
+                return Err(crate::errors::value_error("reference_node must not be empty"));
             }
             config = config.with_output_ref(reference);
         }
         config.validate().map_err(|message| {
-            PyValueError::new_err(format!("invalid PAC configuration: {message}"))
+            crate::errors::value_error(format!("invalid PAC configuration: {message}"))
         })?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -2848,21 +2913,21 @@ impl PyEngine {
         max_sideband: i32,
     ) -> PyResult<PyPeriodicNoiseResult> {
         if !fundamental_frequency.is_finite() || fundamental_frequency <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "fundamental_frequency must be positive and finite, got {fundamental_frequency}"
             )));
         }
         validate_frequencies(&offsets)?;
         if offsets.contains(&0.0) {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "periodic-noise offsets must be strictly positive",
             ));
         }
         if output_node.trim().is_empty() {
-            return Err(PyValueError::new_err("output_node must not be empty"));
+            return Err(crate::errors::value_error("output_node must not be empty"));
         }
         if max_sideband < 1 {
-            return Err(PyValueError::new_err("max_sideband must be at least 1"));
+            return Err(crate::errors::value_error("max_sideband must be at least 1"));
         }
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -2907,17 +2972,17 @@ impl PyEngine {
     ) -> PyResult<PyOscillatorNoiseResult> {
         validate_frequencies(&offsets)?;
         if offsets.contains(&0.0) {
-            return Err(PyValueError::new_err(
+            return Err(crate::errors::value_error(
                 "oscillator-noise offsets must be strictly positive",
             ));
         }
         if !period_guess.is_finite() || period_guess <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "period_guess must be positive and finite, got {period_guess}"
             )));
         }
         if harmonics == 0 {
-            return Err(PyValueError::new_err("harmonics must be at least 1"));
+            return Err(crate::errors::value_error("harmonics must be at least 1"));
         }
         let mut config = PssConfig::autonomous();
         config.period_guess = period_guess;
@@ -2930,7 +2995,7 @@ impl PyEngine {
         config.abstol = abstol;
         config.damping_factor = damping;
         if !max_period_change.is_finite() || max_period_change <= 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "max_period_change must be positive and finite, got {max_period_change}"
             )));
         }
@@ -2939,7 +3004,7 @@ impl PyEngine {
         config.integration_method = integration_method.map(Into::into);
         config.verbose = verbose;
         config.validate().map_err(|message| {
-            PyValueError::new_err(format!("invalid oscillator PSS configuration: {message}"))
+            crate::errors::value_error(format!("invalid oscillator PSS configuration: {message}"))
         })?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = run_interruptible(py, &self.active_runs, |abort| {
@@ -2987,10 +3052,10 @@ impl PyEngine {
         params: Option<Vec<String>>,
     ) -> PyResult<PyMonteCarloResult> {
         if num_runs == 0 {
-            return Err(PyValueError::new_err("num_runs must be at least 1"));
+            return Err(crate::errors::value_error("num_runs must be at least 1"));
         }
         if !spread.is_finite() || spread < 0.0 {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "spread must be finite and non-negative, got {spread}"
             )));
         }
@@ -3001,7 +3066,7 @@ impl PyEngine {
                 Distribution::WorstCase { tolerance: spread }
             }
             other => {
-                return Err(PyValueError::new_err(format!(
+                return Err(crate::errors::value_error(format!(
                     "distribution must be 'gaussian', 'uniform', or 'worst_case', got '{other}'"
                 )));
             }
@@ -3058,14 +3123,14 @@ impl PyEngine {
         delta: Option<f64>,
     ) -> PyResult<f64> {
         if !param_value.is_finite() {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "param_value must be finite, got {param_value}"
             )));
         }
         if let Some(d) = delta
             && (!d.is_finite() || d <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "delta must be a positive finite number, got {d}"
             )));
         }
@@ -3153,14 +3218,14 @@ impl PyEngine {
     ) -> PyResult<Bound<'py, numpy::PyArray1<f64>>> {
         use numpy::ToPyArray;
         if !param_value.is_finite() {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "param_value must be finite, got {param_value}"
             )));
         }
         if let Some(d) = delta
             && (!d.is_finite() || d <= 0.0)
         {
-            return Err(PyValueError::new_err(format!(
+            return Err(crate::errors::value_error(format!(
                 "delta must be a positive finite number, got {d}"
             )));
         }
@@ -3244,11 +3309,11 @@ impl PyEngine {
         values: Vec<f64>,
     ) -> PyResult<Vec<(f64, PySimulationResult)>> {
         if values.is_empty() {
-            return Err(PyValueError::new_err("values must not be empty"));
+            return Err(crate::errors::value_error("values must not be empty"));
         }
         for (index, value) in values.iter().enumerate() {
             if !value.is_finite() {
-                return Err(PyValueError::new_err(format!(
+                return Err(crate::errors::value_error(format!(
                     "step value at index {index} must be finite, got {value}"
                 )));
             }
@@ -3323,13 +3388,35 @@ impl PyEngine {
     }
 }
 
-/// Strip `V(...)` / `I(...)` probe wrappers from a .four output spec.
-fn strip_probe_wrapper(spec: &str) -> &str {
-    let trimmed = spec.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if (lower.starts_with("v(") || lower.starts_with("i(")) && trimmed.ends_with(')') {
-        &trimmed[2..trimmed.len() - 1]
-    } else {
-        trimmed
+/// Stable `AnalysisRecord.kind` tag for a directive.
+///
+/// Executed records are tagged where they are pushed; this mirrors those tags
+/// for a directive that failed before it could push one.
+fn analysis_record_kind(analysis: &AnalysisCommand) -> &'static str {
+    match analysis {
+        AnalysisCommand::Op => "op",
+        AnalysisCommand::Dc { .. } => "dc",
+        AnalysisCommand::Tran { .. } => "tran",
+        AnalysisCommand::Ac { .. } => "ac",
+        AnalysisCommand::AcData { .. } => "ac_data",
+        AnalysisCommand::Hb { .. } => "hb",
+        AnalysisCommand::Disto { .. } => "disto",
+        AnalysisCommand::Sp { .. } => "sp",
+        AnalysisCommand::Noise { .. } => "noise",
+        AnalysisCommand::NoiseData { .. } => "noise_data",
+        AnalysisCommand::Tf { .. } => "tf",
+        AnalysisCommand::Stb { .. } => "stb",
+        AnalysisCommand::PoleZero { .. } => "pz",
+        AnalysisCommand::MonteCarlo(_) => "mc",
+        AnalysisCommand::Step(_) => "step",
+        AnalysisCommand::Temp { .. } => "temp",
+        AnalysisCommand::Sensitivity { ac_sweep, .. } => {
+            if ac_sweep.is_some() {
+                "sens_ac"
+            } else {
+                "sens"
+            }
+        }
+        AnalysisCommand::Four { .. } => "four",
     }
 }
