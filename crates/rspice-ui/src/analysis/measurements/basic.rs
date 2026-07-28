@@ -58,39 +58,15 @@ impl BasicStats {
 // Basic Amplitude Measurements
 // =============================================================================
 
-/// Calculate minimum value in a region
-pub fn calculate_min(y_data: &[f64]) -> Option<f64> {
-    BasicStats::from_samples(y_data).map(|stats| stats.min)
-}
-
-/// Calculate maximum value in a region
-pub fn calculate_max(y_data: &[f64]) -> Option<f64> {
-    BasicStats::from_samples(y_data).map(|stats| stats.max)
-}
-
-/// Calculate peak-to-peak amplitude
-pub fn calculate_pk_pk(y_data: &[f64]) -> Option<f64> {
-    BasicStats::from_samples(y_data).map(BasicStats::pk_pk)
-}
-
-/// Calculate mean (average) value
-pub fn calculate_mean(y_data: &[f64]) -> Option<f64> {
-    BasicStats::from_samples(y_data).map(|stats| stats.mean)
-}
-
-/// Calculate RMS (root mean square) value
-pub fn calculate_rms(y_data: &[f64]) -> Option<f64> {
-    BasicStats::from_samples(y_data).map(BasicStats::rms)
-}
-
-/// Calculate minimum, maximum, and RMS in a single pass
+/// Calculate minimum, maximum, and RMS in a single pass.
+///
+/// The single-pass form is the only one the readout strip asks for, so the
+/// per-statistic wrappers that used to sit here (`calculate_min`,
+/// `calculate_max`, `calculate_pk_pk`, `calculate_mean`, `calculate_rms`,
+/// `calculate_std_dev`) are gone. Each was one line over [`BasicStats`], which
+/// is still public — reach for it directly rather than reintroducing them.
 pub fn calculate_min_max_rms(y_data: &[f64]) -> Option<(f64, f64, f64)> {
     BasicStats::from_samples(y_data).map(|stats| (stats.min, stats.max, stats.rms()))
-}
-
-/// Calculate standard deviation
-pub fn calculate_std_dev(y_data: &[f64]) -> Option<f64> {
-    BasicStats::from_samples(y_data).and_then(BasicStats::std_dev)
 }
 
 // =============================================================================

@@ -4,7 +4,6 @@
 //!
 //! # Submodules
 //!
-//! - `lib_parser` - SPICE library file parser
 //! - `session_io` - Session state serialization
 //! - `schematic_io` - Schematic file save/load
 //! - `netlist_export` - Netlist generation from schematic
@@ -12,7 +11,6 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod durable_file;
-pub(crate) mod lib_parser;
 pub(crate) mod netlist_export;
 mod project_execution;
 pub(crate) mod project_io;

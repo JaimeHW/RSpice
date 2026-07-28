@@ -11,7 +11,6 @@ mod dialog;
 mod docbar;
 mod form;
 mod pane;
-mod pill;
 mod schematic_command;
 mod section;
 mod select;

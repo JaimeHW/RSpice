@@ -21,11 +21,9 @@ pub(crate) mod bode;
 pub(crate) mod calculator;
 pub(crate) mod eye_diagram;
 pub(crate) mod fft;
-pub(crate) mod hb_tones;
 pub(crate) mod histogram;
 pub(crate) mod measurements;
 pub(crate) mod nyquist;
-pub(crate) mod phase_noise;
 pub(crate) mod pole_zero;
 pub(crate) mod smith_chart;
 
