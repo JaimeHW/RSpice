@@ -28,17 +28,6 @@ nom.workspace = true
 indexmap = "2.7"
 smol_str = { version = "0.3", features = ["serde"] }
 
-# Portable JIT for the canonical CFG. Phase 5 of
-# design/VERILOGA_BACKEND_PLAN.md: the hand-written x64 emitter under `native/`
-# is 21k lines against the *old* IR, and a Cranelift backend covering x64 and
-# wasm makes it redundant rather than something to retarget. Optional so the
-# default build is unchanged.
-cranelift-codegen = { version = "0.115", optional = true }
-cranelift-frontend = { version = "0.115", optional = true }
-cranelift-jit = { version = "0.115", optional = true }
-cranelift-module = { version = "0.115", optional = true }
-cranelift-native = { version = "0.115", optional = true }
-
 # Native JIT executable memory support.
 
 [target.'cfg(windows)'.dependencies]
@@ -59,15 +48,6 @@ native = ["dep:windows-sys", "dep:libc"]
 # Internal contract-test surface for the bytecode-native backend. Production
 # native users must supply canonical IR and must not enable this feature.
 native-bytecode-contract-tests = ["native"]
-# Cranelift JIT over the canonical CFG. Off by default while it is grown to
-# cover what `native/x64` does; see design/VERILOGA_BACKEND_PLAN.md Phase 5.
-cranelift = [
-    "dep:cranelift-codegen",
-    "dep:cranelift-frontend",
-    "dep:cranelift-jit",
-    "dep:cranelift-module",
-    "dep:cranelift-native",
-]
 
 [lints]
 workspace = true
