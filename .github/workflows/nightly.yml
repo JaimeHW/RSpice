@@ -118,10 +118,15 @@ jobs:
         # CMC models. Serial threads and a raised stack because the generated
         # bodies are large enough to overflow the 2 MB the test harness gives a
         # spawned thread.
+        #
+        # The suite lives in rspice-conformance, not rspice-core: it moved there
+        # with the rest of the validation code. Pointed at the old package this
+        # step fails with "no test target named veriloga_golden", which reads
+        # like a missing file rather than a stale path.
         env:
           RUST_MIN_STACK: "67108864"
         run: >-
-          cargo test --locked -p rspice-core --features veriloga-builtins
+          cargo test --locked -p rspice-conformance --features veriloga-builtins
           --test veriloga_golden -- --test-threads=1
       - name: Every model's Jacobian against complex step
         # Phase 7's property gate. `#[ignore]` by default because it compiles

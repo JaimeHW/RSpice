@@ -124,13 +124,29 @@ jobs:
       - name: Test non-UI crates (fast tier)
         run: cargo test --locked -p rspice-cli -p rspice-veriloga -p rspice-bench
       - name: Gate generated Verilog-A Rust resources
+        # Ratchets, not targets. Every budget here is the measured tree plus
+        # roughly 11% — enough headroom to add a model, not enough for a
+        # regression to hide in. Measured 2026-07-28: 50,421,301 bytes total,
+        # 15,228,029 noise, 4,217,493 for the largest model (hisimhv_va), 214
+        # files.
+        #
+        # These were 113 MB / 59 MB / 8.8 MB / 650 until now, sized against the
+        # old backend's 104 MB tree and never re-derived when the rebuild cut it
+        # to 50 MB. A budget sitting 2-4x above reality does not fail when
+        # something regresses; it fails once the tree has doubled.
+        #
+        # The pooled workspace budget is 0 because the measured value is 0 for
+        # every model: the canonical emitter does not allocate one. Zero is
+        # enforced as a bound rather than read as "unset", so this now says "no
+        # model may reintroduce a pooled workspace" instead of allowing 650 kB
+        # of one to appear unnoticed.
         run: >-
           cargo run --locked -p rspice-bench -- generated-rust
-          --max-source-bytes 113000000
-          --max-noise-source-bytes 59000000
-          --max-model-source-bytes 8800000
-          --max-file-count 650
-          --max-pooled-workspace-payload-bytes 650000
+          --max-source-bytes 56000000
+          --max-noise-source-bytes 17000000
+          --max-model-source-bytes 4700000
+          --max-file-count 240
+          --max-pooled-workspace-payload-bytes 0
           --max-stamp-state-payload-bytes 6200
           --top 10
       - name: Test Verilog-A native JIT units (Linux x64)
