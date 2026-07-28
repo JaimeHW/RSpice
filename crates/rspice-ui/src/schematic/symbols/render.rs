@@ -378,7 +378,6 @@ fn draw_path_segment(painter: &Painter, points: &[Pos2], stroke: Stroke) {
 /// Non-uniform scaling is applied BEFORE rotation to ensure the symbol fills
 /// exactly its target dimensions. This guarantees terminals land on grid lines.
 /// Mirroring is applied BEFORE rotation but AFTER scaling.
-#[allow(dead_code)]
 fn transform_point_nonuniform(
     x: f32,
     y: f32,

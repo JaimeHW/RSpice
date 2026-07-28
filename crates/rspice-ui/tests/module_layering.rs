@@ -950,6 +950,39 @@ fn source_files_have_no_byte_order_mark() {
     );
 }
 
+/// Lint suppressions in the crate, frozen at the current count.
+///
+/// There were 110. Removing all 32 `#[allow(dead_code)]` attributes produced
+/// zero new warnings — every one of them suppressed nothing, which is worse
+/// than noise, because a stale suppression silently absorbs the *next* real
+/// warning at that site. `#[allow(unused_mut)]` was stale the same way.
+///
+/// The 77 that remain are load-bearing: removing one produces the warning it
+/// claims to be silencing.
+const MAX_LINT_SUPPRESSIONS: usize = 77;
+
+/// The crate does not accumulate lint suppressions.
+#[test]
+fn lint_suppressions_do_not_grow() {
+    let root = src_dir();
+    let mut suppressions = 0usize;
+    for path in rust_sources(&root) {
+        let source = fs::read_to_string(&path).unwrap_or_default();
+        suppressions += strip_line_comments(&source).matches("[allow(").count();
+    }
+    assert!(
+        suppressions <= MAX_LINT_SUPPRESSIONS,
+        "{suppressions} lint suppressions, ceiling is {MAX_LINT_SUPPRESSIONS}. \
+         Fix what the lint is pointing at, or say in a comment why the lint is \
+         wrong here."
+    );
+    assert_eq!(
+        suppressions, MAX_LINT_SUPPRESSIONS,
+        "{suppressions} lint suppressions, down from {MAX_LINT_SUPPRESSIONS}. \
+         Lower MAX_LINT_SUPPRESSIONS to hold the ground."
+    );
+}
+
 /// Every module says what it is.
 ///
 /// This began as a ceiling over 331 undocumented files, because a burndown

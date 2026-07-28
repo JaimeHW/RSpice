@@ -664,7 +664,6 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
 fn main_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     context_strip(ui, draft);
-    #[allow(unused_mut)]
     let mut action = BodyAction::None;
     let width = ui.available_width();
     let screen_width = ui.ctx().content_rect().width();

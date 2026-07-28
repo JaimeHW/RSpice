@@ -406,7 +406,6 @@ impl PrinterCapabilitySnapshot {
     #[must_use]
     // Retained for authenticated diagnostic/export surfaces; the current
     // dialog intentionally identifies queues by device id and display name.
-    #[allow(dead_code)]
     pub fn port_name(&self) -> &str {
         &self.port_name
     }
@@ -473,7 +472,6 @@ impl PrinterCatalogEntry {
     #[must_use]
     // The raw spooler flags are an authenticated diagnostic value. Product
     // controls consume the normalized readiness state instead.
-    #[allow(dead_code)]
     pub const fn queue_status_flags(&self) -> u32 {
         self.queue_status_flags
     }
@@ -500,7 +498,6 @@ impl PrinterDiscoveryReport {
     #[must_use]
     // Discovery failures are exposed for diagnostics even when the current
     // dialog has at least one usable printer and therefore does not show them.
-    #[allow(dead_code)]
     pub fn failures(&self) -> &[PrinterDiscoveryFailure] {
         &self.failures
     }
@@ -521,7 +518,6 @@ pub struct ResolvedNativePrinterJob {
 // The Windows backend consumes this sealed value by field inside its child
 // module; getters remain the platform-neutral inspection contract and are
 // also exercised by contract tests.
-#[allow(dead_code)]
 impl ResolvedNativePrinterJob {
     #[must_use]
     pub const fn paper_platform_id(&self) -> i16 {
@@ -674,19 +670,16 @@ impl HardcopySpoolFailure {
     }
 
     #[must_use]
-    #[allow(dead_code)]
     pub const fn error(&self) -> &HardcopyPrintError {
         &self.error
     }
 
     #[must_use]
-    #[allow(dead_code)]
     pub const fn pages_completed(&self) -> u32 {
         self.pages_completed
     }
 
     #[must_use]
-    #[allow(dead_code)]
     pub fn failure_outcome(&self) -> HardcopyOutcome {
         self.error.failure_outcome(self.pages_completed)
     }
@@ -1110,7 +1103,6 @@ pub fn handoff_browser_print(
 #[cfg(not(target_arch = "wasm32"))]
 // Kept as the platform-neutral boundary so callers can compile one workflow;
 // desktop builds report the unsupported browser handoff deterministically.
-#[allow(dead_code)]
 pub fn handoff_browser_print(
     _plan: &HardcopyPlan,
     _publication: &RenderedHardcopyPublication,

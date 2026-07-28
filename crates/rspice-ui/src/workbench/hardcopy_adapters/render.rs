@@ -57,13 +57,9 @@ const MAX_METADATA_LINES: usize = 4_096;
 const MAX_PREVIEW_BATCH_PAGES: usize = 2;
 // Browser-worker transport is a cross-target contract. Desktop builds retain
 // it for shared-source parity even though they use the in-process worker.
-#[allow(dead_code)]
 const PREVIEW_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
-#[allow(dead_code)]
 pub(crate) const MAX_PREVIEW_WORKER_MANIFEST_BYTES: usize = 16 * 1_024;
-#[allow(dead_code)]
 pub(crate) const MAX_PREVIEW_WORKER_RGBA_BYTES: usize = 48 * 1_048_576;
-#[allow(dead_code)]
 const MAX_PREVIEW_WORKER_TRANSFER_BYTES: usize = 48 * 1_048_576 + 16 * 1_024;
 const PUBLICATION_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub(crate) const MAX_PUBLICATION_WORKER_MANIFEST_BYTES: usize = 4 * 1_048_576;
@@ -2596,14 +2592,11 @@ pub struct HardcopyPreviewPage {
 /// Transferable browser-worker envelope for a single preview page. Pixels
 /// remain a distinct byte buffer so the WASM boundary can transfer the
 /// backing `ArrayBuffer` without base64 expansion or a JSON pixel copy.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct PreviewWorkerTransfer {
     manifest_json: Vec<u8>,
     rgba: Vec<u8>,
 }
-
-#[allow(dead_code)]
 impl PreviewWorkerTransfer {
     pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<u8>) {
         (self.manifest_json, self.rgba)
@@ -2702,7 +2695,6 @@ impl HardcopyPreviewPage {
     /// The immutable plan, authenticated source, planned page, exact physical
     /// dimensions, DPI, pixel bytes, and renderer preview digest are all
     /// checked before either buffer crosses the worker boundary.
-    #[allow(dead_code)]
     pub(crate) fn into_worker_transfer(
         self,
         plan: &HardcopyPlan,
@@ -2766,7 +2758,6 @@ impl HardcopyPreviewPage {
     /// Reconstruct a renderer-owned preview only after validating the
     /// metadata-only manifest and independently transferred RGBA bytes against
     /// caller-retained plan, source, page, and DPI authority.
-    #[allow(dead_code)]
     pub(crate) fn from_worker_transfer(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,
@@ -2874,8 +2865,6 @@ impl HardcopyPreviewPage {
         Ok(preview)
     }
 }
-
-#[allow(dead_code)]
 fn validate_preview_worker_transfer_budget(
     manifest_bytes: usize,
     rgba_bytes: usize,
@@ -2891,8 +2880,6 @@ fn validate_preview_worker_transfer_budget(
     }
     Ok(())
 }
-
-#[allow(dead_code)]
 fn preview_worker_material_digest(
     material: &PreviewWorkerManifestMaterial<'_>,
 ) -> Result<ContentDigest, HardcopyRenderError> {
@@ -2904,8 +2891,6 @@ fn preview_worker_material_digest(
     digest.update(payload);
     Ok(ContentDigest::from_bytes(digest.finalize().into()))
 }
-
-#[allow(dead_code)]
 fn validate_preview_worker_contract(
     preview: &HardcopyPreviewPage,
     plan: &HardcopyPlan,
@@ -3114,14 +3099,11 @@ pub struct RenderedHardcopyPublication {
 /// Transferable browser-worker envelope. Artifact payloads remain distinct
 /// byte buffers so the WASM boundary can transfer their backing ArrayBuffers
 /// without JSON/base64 expansion or a second aggregate artifact allocation.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct PublicationWorkerTransfer {
     manifest_json: Vec<u8>,
     payloads: Vec<Vec<u8>>,
 }
-
-#[allow(dead_code)]
 impl PublicationWorkerTransfer {
     pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<Vec<u8>>) {
         (self.manifest_json, self.payloads)
@@ -3212,7 +3194,6 @@ impl RenderedHardcopyPublication {
 
     /// Consume a validated publication into a small digest-bound manifest and
     /// independent payload buffers suitable for transferable ArrayBuffers.
-    #[allow(dead_code)]
     pub(crate) fn into_worker_transfer(
         self,
         plan: &HardcopyPlan,
@@ -3271,7 +3252,6 @@ impl RenderedHardcopyPublication {
     /// Reconstruct a renderer-owned publication only after validating the
     /// complete manifest and every independently transferred payload against
     /// the immutable plan and authenticated source.
-    #[allow(dead_code)]
     pub(crate) fn from_worker_transfer(
         plan: &HardcopyPlan,
         source: &ResolvedHardcopyDocument,

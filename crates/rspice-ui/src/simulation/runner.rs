@@ -302,7 +302,6 @@ impl SimulationRunner {
     }
 
     /// Start a simulation from strongly-typed analysis spec.
-    #[allow(dead_code)]
     #[cfg(test)]
     fn start_spec(&mut self, spec: AnalysisSpec, netlist: String) -> Result<(), SimulationError> {
         self.start_spec_with_options_with_source_path(
@@ -314,7 +313,6 @@ impl SimulationRunner {
     }
 
     /// Start a simulation from strongly-typed analysis spec with explicit execution options.
-    #[allow(dead_code)]
     #[cfg(test)]
     fn start_spec_with_options(
         &mut self,
@@ -327,7 +325,6 @@ impl SimulationRunner {
 
     /// Start a simulation from strongly-typed analysis spec with explicit
     /// execution options and a source path for relative include resolution.
-    #[allow(dead_code)]
     #[cfg(test)]
     fn start_spec_with_options_with_source_path(
         &mut self,
@@ -394,7 +391,6 @@ impl SimulationRunner {
     }
 
     /// Run DC operating point analysis
-    #[allow(dead_code)]
     #[cfg(test)]
     fn run_dc_op(&mut self, netlist: String) -> Result<(), SimulationError> {
         self.start(AnalysisConfig::dc_op(), netlist)
@@ -402,7 +398,6 @@ impl SimulationRunner {
 
     /// Run DC operating point analysis with a source path for relative include
     /// resolution.
-    #[allow(dead_code)]
     #[cfg(test)]
     fn run_dc_op_with_source_path(
         &mut self,
