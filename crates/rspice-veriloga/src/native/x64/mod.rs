@@ -17,13 +17,7 @@ pub mod encoder;
 use super::expr::{
     BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateOperator, EntryKind,
     NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
-    canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
-    canonical_cross_slots_for_equation, canonical_ddt_slots_for_equation,
-    canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
-    canonical_laplace_slots_for_equation, canonical_limit_slots_for_equation,
-    canonical_slew_slots_for_equation, canonical_state_slots_for_expression,
-    canonical_table_lookup_slots_for_equation, canonical_timer_slots_for_equation,
-    canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
+    canonical_state_slots_for_expression, canonical_table_lookup_slots_for_equation,
     constant_dynamic_variable_slot, native_op_stack_effect,
 };
 use super::model::{
@@ -200,6 +194,15 @@ fn compile_model_inner(
         let jacobian_limits = base_limits
             .with_available_current_pairs(&jacobian_current_pairs)
             .with_prior_current_probes(&jacobian_prior_current_probes);
+        let jacobian_table_lookup_slots = match canonical_mir {
+            Some(mir) => canonical_table_lookup_slots_for_equation(
+                model.name.clone(),
+                mir,
+                canonical_equation_id(model, stamp_index)?,
+                &stamp.value_program,
+            )?,
+            None => Vec::new(),
+        };
 
         let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_current_dependencies =
@@ -213,9 +216,9 @@ fn compile_model_inner(
                 model,
                 canonical_mir,
                 stamp_index,
-                &stamp.value_program,
                 jacobian,
                 jacobian_limits,
+                &jacobian_table_lookup_slots,
             )?;
             stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
             stamp_jacobian_prior_current_dependencies
@@ -466,19 +469,13 @@ fn lower_jacobian_program(
     model: &CompiledModel,
     canonical_mir: Option<&MirModel>,
     stamp_index: usize,
-    stamp_value_program: &BytecodeProgram,
     jacobian: &JacobianEntry,
     limits: NativeLoweringLimits<'_>,
+    table_lookup_slots: &[(ExprId, usize)],
 ) -> JitResult<NativeProgram> {
     if let Some(mir) = canonical_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
         let axis = canonical_derivative_axis_for_column(model, mir, &jacobian.col_axis)?;
-        let table_lookup_slots = canonical_table_lookup_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            stamp_value_program,
-        )?;
         return NativeProgram::from_mir_derivative(
             model.name.clone(),
             EntryKind::Jacobian,
@@ -2932,103 +2929,14 @@ fn lower_stamp_value_program(
                 detail: format!("stamp index {stamp_index} exceeds canonical equation id range")
                     .into(),
             })?;
-        let ddt_slots = canonical_ddt_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let idt_slots = canonical_idt_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let idtmod_slots = canonical_idtmod_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let transition_slots = canonical_transition_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let slew_slots = canonical_slew_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let absdelay_slots = canonical_absdelay_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let laplace_slots = canonical_laplace_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let zi_slots = canonical_zi_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let cross_slots = canonical_cross_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let above_slots = canonical_above_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let timer_slots = canonical_timer_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let limit_slots = canonical_limit_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let table_lookup_slots = canonical_table_lookup_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
+        let state_slots =
+            CanonicalExpressionStateSlots::for_equation(model, mir, equation_id, bytecode_program)?;
         return NativeProgram::from_mir_equation(
             model.name.clone(),
             EntryKind::StampValue,
             mir,
             equation_id,
-            limits
-                .with_canonical_ddt_slots(&ddt_slots)
-                .with_canonical_idt_slots(&idt_slots)
-                .with_canonical_idtmod_slots(&idtmod_slots)
-                .with_canonical_transition_slots(&transition_slots)
-                .with_canonical_slew_slots(&slew_slots)
-                .with_canonical_absdelay_slots(&absdelay_slots)
-                .with_canonical_laplace_slots(&laplace_slots)
-                .with_canonical_zi_slots(&zi_slots)
-                .with_canonical_cross_slots(&cross_slots)
-                .with_canonical_above_slots(&above_slots)
-                .with_canonical_timer_slots(&timer_slots)
-                .with_canonical_limit_slots(&limit_slots)
-                .with_canonical_table_lookup_slots(&table_lookup_slots),
+            state_slots.apply(limits),
         );
     }
 
@@ -3762,6 +3670,7 @@ fn lower_canonical_assignment_expression_program(
     )
 }
 
+#[derive(Default)]
 struct CanonicalExpressionStateSlots {
     ddt: Vec<(ExprId, usize)>,
     idt: Vec<(ExprId, usize)>,
@@ -3779,12 +3688,51 @@ struct CanonicalExpressionStateSlots {
 }
 
 impl CanonicalExpressionStateSlots {
+    const OPERATORS: [CanonicalStateOperator; 13] = [
+        CanonicalStateOperator::Ddt,
+        CanonicalStateOperator::Idt,
+        CanonicalStateOperator::IdtMod,
+        CanonicalStateOperator::Transition,
+        CanonicalStateOperator::Slew,
+        CanonicalStateOperator::Absdelay,
+        CanonicalStateOperator::Laplace,
+        CanonicalStateOperator::Zi,
+        CanonicalStateOperator::Cross,
+        CanonicalStateOperator::Above,
+        CanonicalStateOperator::Timer,
+        CanonicalStateOperator::Limit,
+        CanonicalStateOperator::TableLookup,
+    ];
+
+    fn for_equation(
+        model: &CompiledModel,
+        mir: &MirModel,
+        equation_id: EquationId,
+        bytecode_program: &BytecodeProgram,
+    ) -> JitResult<Self> {
+        let equation = mir.equations.get(usize::from(equation_id)).ok_or_else(|| {
+            JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("canonical equation {equation_id} is outside MIR equation arena")
+                    .into(),
+            }
+        })?;
+        Self::for_expression(model, mir, equation.expression.id, bytecode_program)
+    }
+
     fn for_expression(
         model: &CompiledModel,
         mir: &MirModel,
         expr_id: ExprId,
         bytecode_program: &BytecodeProgram,
     ) -> JitResult<Self> {
+        if !bytecode_program.instructions.iter().any(|instruction| {
+            Self::OPERATORS
+                .iter()
+                .any(|operator| operator.bytecode_slot(instruction).is_some())
+        }) {
+            return Ok(Self::default());
+        }
         let collect = |operator| {
             canonical_state_slots_for_expression(
                 model.name.clone(),
@@ -4156,15 +4104,21 @@ fn mark_canonical_entry_variable_roots(
         let jacobian_limits = limits
             .with_available_current_pairs(&jacobian_current_pairs)
             .with_prior_current_probes(&jacobian_prior_current_probes);
+        let jacobian_table_lookup_slots = canonical_table_lookup_slots_for_equation(
+            model.name.clone(),
+            mir,
+            canonical_equation_id(model, stamp_index)?,
+            &stamp.value_program,
+        )?;
 
         for jacobian in &stamp.jacobian_programs {
             let program = lower_jacobian_program(
                 model,
                 Some(mir),
                 stamp_index,
-                &stamp.value_program,
                 jacobian,
                 jacobian_limits,
+                &jacobian_table_lookup_slots,
             )?;
             mark_native_program_variable_reads(&program, live);
         }

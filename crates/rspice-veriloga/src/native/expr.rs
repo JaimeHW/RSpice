@@ -1076,7 +1076,7 @@ impl CanonicalStateOperator {
         }
     }
 
-    fn bytecode_slot(self, instruction: &Instruction) -> Option<usize> {
+    pub(crate) fn bytecode_slot(self, instruction: &Instruction) -> Option<usize> {
         match (self, instruction) {
             (Self::Ddt, Instruction::DdtState(slot)) | (Self::Idt, Instruction::IdtState(slot)) => {
                 Some(*slot)
