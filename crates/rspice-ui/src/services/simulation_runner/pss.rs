@@ -11,7 +11,9 @@ use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::{Engine, PssDcOperatingPointSeed};
 use std::path::Path;
@@ -71,27 +73,12 @@ impl PssRunConfig {
     }
 }
 
-/// Run PSS analysis
+/// Run PSS analysis with cooperative cancellation and no source path.
 ///
-/// Finds the periodic steady-state solution of a circuit with autonomous
-/// or driven oscillations. Uses the shooting method with Newton iteration.
-pub fn run_pss_analysis(
-    netlist_text: &str,
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    tolerance: Value,
-) -> Result<PssData, String> {
-    run_pss_analysis_with_abort(
-        netlist_text,
-        fundamental_freq,
-        num_harmonics,
-        tolerance,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Run PSS analysis with cooperative cancellation.
+/// Test-only. PSS ships through
+/// [`run_pss_analysis_with_dc_seed_and_source_path_and_abort`], which the
+/// periodic spec calls with the operating point its dependency produced.
+#[cfg(test)]
 pub fn run_pss_analysis_with_abort(
     netlist_text: &str,
     fundamental_freq: Value,
@@ -109,27 +96,10 @@ pub fn run_pss_analysis_with_abort(
     )
 }
 
-/// Run PSS analysis with a source path used to resolve relative includes and
-/// model file references.
-pub fn run_pss_analysis_with_source_path(
-    netlist_text: &str,
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    tolerance: Value,
-    source_path: Option<&Path>,
-) -> Result<PssData, String> {
-    run_pss_analysis_with_source_path_and_abort(
-        netlist_text,
-        fundamental_freq,
-        num_harmonics,
-        tolerance,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
 /// Run PSS analysis with source-path resolution and cooperative cancellation.
+///
+/// Finds the periodic steady-state solution of a circuit with autonomous or
+/// driven oscillations, using the shooting method with Newton iteration.
 pub fn run_pss_analysis_with_source_path_and_abort(
     netlist_text: &str,
     fundamental_freq: Value,

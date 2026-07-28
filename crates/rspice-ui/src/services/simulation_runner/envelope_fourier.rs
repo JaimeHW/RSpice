@@ -15,7 +15,9 @@ use crate::simulation::multi_run::{
 };
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::{HbConfig, advanced::pss::PssConfig};
 use rspice_core::engine::Engine;
 use std::path::Path;
@@ -104,35 +106,6 @@ pub struct EnvelopeData {
     /// Complex carrier envelopes using
     /// `v(t) = Re{envelope(t) * exp(j*omega*t)}`.
     pub waveforms: Vec<(String, Vec<Complex64>)>,
-}
-
-/// Run the configured envelope analysis.
-pub fn run_envelope_analysis(
-    netlist_text: &str,
-    config: &EnvelopeRunConfig,
-) -> Result<EnvelopeData, String> {
-    run_envelope_analysis_with_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run envelope analysis with cooperative cancellation.
-pub fn run_envelope_analysis_with_abort(
-    netlist_text: &str,
-    config: &EnvelopeRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<EnvelopeData> {
-    run_envelope_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run envelope analysis with a source path used to resolve relative includes
-/// and model file references.
-pub fn run_envelope_analysis_with_source_path(
-    netlist_text: &str,
-    config: &EnvelopeRunConfig,
-    source_path: Option<&Path>,
-) -> Result<EnvelopeData, String> {
-    run_envelope_analysis_with_source_path_and_abort(netlist_text, config, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
 }
 
 /// Run envelope analysis with source-path resolution and cooperative
@@ -1049,16 +1022,12 @@ pub struct FourierData {
     pub output_label: String,
 }
 
-/// Run Fourier analysis by executing transient and computing harmonic decomposition.
-pub fn run_fourier_analysis(
-    netlist_text: &str,
-    config: &FourierRunConfig,
-) -> Result<FourierData, String> {
-    run_fourier_analysis_with_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run Fourier analysis with cooperative cancellation.
+/// Run Fourier analysis with cooperative cancellation and no source path.
+///
+/// Test-only. Fourier decomposition ships through
+/// [`run_fourier_from_signal_with_abort`], which reuses the waveform the
+/// producing analysis already computed instead of re-running transient.
+#[cfg(test)]
 pub fn run_fourier_analysis_with_abort(
     netlist_text: &str,
     config: &FourierRunConfig,
@@ -1067,19 +1036,11 @@ pub fn run_fourier_analysis_with_abort(
     run_fourier_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
 }
 
-/// Run Fourier analysis with a source path used to resolve relative includes
-/// and model file references.
-pub fn run_fourier_analysis_with_source_path(
-    netlist_text: &str,
-    config: &FourierRunConfig,
-    source_path: Option<&Path>,
-) -> Result<FourierData, String> {
-    run_fourier_analysis_with_source_path_and_abort(netlist_text, config, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run Fourier analysis with source-path resolution and cooperative
-/// cancellation through transient solving and harmonic integration.
+/// Run Fourier analysis by executing transient and computing the harmonic
+/// decomposition, with source-path resolution and cooperative cancellation.
+///
+/// Test-only; see [`run_fourier_analysis_with_abort`].
+#[cfg(test)]
 pub fn run_fourier_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: &FourierRunConfig,
@@ -1450,6 +1411,7 @@ fn analyze_fourier_with_abort(
     })
 }
 
+#[cfg(test)]
 fn extract_transient_signal_with_abort(
     transient: &TransientData,
     output_node: &str,
@@ -1501,6 +1463,7 @@ fn extract_transient_signal_with_abort(
     copy_values_with_abort(node_waveform, abort)
 }
 
+#[cfg(test)]
 fn copy_values_with_abort(
     values: &[Value],
     abort: &dyn AbortSignal,
@@ -1515,6 +1478,7 @@ fn copy_values_with_abort(
     Ok(copied)
 }
 
+#[cfg(test)]
 fn find_transient_waveform_with_abort<'a>(
     transient: &'a TransientData,
     node_name: &str,
@@ -1532,6 +1496,7 @@ fn find_transient_waveform_with_abort<'a>(
     Ok(None)
 }
 
+#[cfg(test)]
 fn normalize_waveform_node_name(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.len() >= 3

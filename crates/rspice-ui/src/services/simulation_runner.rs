@@ -27,7 +27,6 @@ mod pole_zero;
 mod pss;
 mod pstb;
 mod reliability;
-mod sensitivity;
 mod soa;
 mod sparameter;
 mod stb;
@@ -41,11 +40,8 @@ pub use disto::{
     run_disto_analysis_with_source_path_and_abort,
 };
 pub use envelope_fourier::{
-    EnvelopeData, EnvelopeRunConfig, FourierData, FourierRunConfig, run_envelope_analysis,
-    run_envelope_analysis_with_abort, run_envelope_analysis_with_source_path,
-    run_envelope_analysis_with_source_path_and_abort, run_fourier_analysis,
-    run_fourier_analysis_with_abort, run_fourier_analysis_with_source_path,
-    run_fourier_analysis_with_source_path_and_abort,
+    EnvelopeData, EnvelopeRunConfig, FourierData, FourierRunConfig,
+    run_envelope_analysis_with_source_path_and_abort,
 };
 pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_signal_with_abort, validate_fourier_output_accessor,
@@ -96,9 +92,8 @@ pub use pole_zero::{
     PoleZeroData, PoleZeroRunSpec, run_pole_zero_analysis_with_source_path_and_abort,
 };
 pub use pss::{
-    PssData, PssRunConfig, run_pss_analysis, run_pss_analysis_with_abort,
-    run_pss_analysis_with_config_and_source_path_and_abort,
-    run_pss_analysis_with_dc_seed_and_source_path_and_abort, run_pss_analysis_with_source_path,
+    PssData, PssRunConfig, run_pss_analysis_with_config_and_source_path_and_abort,
+    run_pss_analysis_with_dc_seed_and_source_path_and_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
 pub use pstb::{PstbData, PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_abort};
@@ -106,10 +101,9 @@ pub use reliability::{
     ReliabilityData, ReliabilityRunConfig,
     run_reliability_analysis_with_config_and_source_path_and_abort,
 };
-pub use sensitivity::{
-    SensitivityData, run_sensitivity_analysis, run_sensitivity_analysis_with_abort,
-    run_sensitivity_analysis_with_source_path, run_sensitivity_analysis_with_source_path_and_abort,
-};
+// Sensitivity has no entry here: it ships through
+// `simulation::engine_bridge::sensitivity`, and the duplicate that used to sit
+// beside these runners was unreachable.
 pub use soa::{SoaData, SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort};
 pub use sparameter::{
     SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep,
@@ -136,10 +130,8 @@ pub(crate) use sweeps::{
 };
 pub use tf::{
     TfAccuracy, TfData, TfGainBasis, TfGainMetadata, TfGainUnit, TfNormalization, TfQuantity,
-    TfRunConfig, run_tf_analysis, run_tf_analysis_with_abort, run_tf_analysis_with_config,
-    run_tf_analysis_with_config_and_abort, run_tf_analysis_with_config_and_source_path,
-    run_tf_analysis_with_config_and_source_path_and_abort, run_tf_analysis_with_source_path,
-    run_tf_analysis_with_source_path_and_abort,
+    TfRunConfig, run_tf_analysis_with_config_and_abort,
+    run_tf_analysis_with_config_and_source_path_and_abort,
 };
 pub use transient::{TransientData, run_transient_analysis_with_source_path_and_abort};
 

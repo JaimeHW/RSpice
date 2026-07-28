@@ -10,7 +10,9 @@ use super::{
     infer_primary_source_name_with_abort, parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::{DampingStrategy, Engine, SimulationConfig};
 use rspice_core::netlist::ElementKind;
 use std::path::Path;
@@ -144,7 +146,12 @@ pub struct TfData {
     pub nominal_output: Option<Value>,
 }
 
-/// Run transfer-function analysis with explicit configuration.
+/// Run transfer-function analysis with explicit configuration, reporting
+/// failures as strings.
+///
+/// Test-only; the shipping path is
+/// [`run_tf_analysis_with_config_and_abort`], which keeps the typed error.
+#[cfg(test)]
 pub fn run_tf_analysis_with_config(
     netlist_text: &str,
     config: &TfRunConfig,
@@ -161,22 +168,6 @@ pub fn run_tf_analysis_with_config_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<TfData> {
     run_tf_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run transfer-function analysis with explicit configuration and a source path
-/// used to resolve relative includes and model file references.
-pub fn run_tf_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &TfRunConfig,
-    source_path: Option<&Path>,
-) -> Result<TfData, String> {
-    run_tf_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run transfer-function analysis with source-path resolution and
@@ -281,31 +272,17 @@ fn retain_resistance(
     Ok(Some(value))
 }
 
-/// Run transfer-function analysis using inferred/default settings.
-pub fn run_tf_analysis(netlist_text: &str) -> Result<TfData, String> {
-    run_tf_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run inferred/default transfer-function analysis with cancellation.
-pub fn run_tf_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<TfData> {
-    run_tf_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run transfer-function analysis using inferred/default settings and a source
-/// path used to resolve relative includes and model file references.
-pub fn run_tf_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<TfData, String> {
-    run_tf_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run inferred/default transfer-function analysis with source-path
-/// resolution and cancellation.
+/// Run transfer-function analysis with the input source and output port
+/// inferred from the netlist, rather than configured by the user.
+///
+/// Unwired, and unlike the retired wrappers around it this is not a duplicate
+/// of anything that ships: [`infer_tf_run_config`] below is reachable from here
+/// and nowhere else, so deleting this would delete the inference itself. The
+/// TF dialog requires the user to name both ports; wiring this up would let a
+/// deck with one obvious source and one obvious output run without that step.
+/// Remove the allow when a caller exists, or remove both when the product
+/// decides inference is not wanted.
+#[allow(dead_code)]
 pub fn run_tf_analysis_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
