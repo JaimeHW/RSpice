@@ -152,21 +152,28 @@ fn select_with_font(
 
     let popup_id = ui.make_persistent_id(("rspice.select", id_salt));
     if response.clicked() {
-        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
     }
 
     let mut picked = keyboard_selection(ui, &response, popup_id, selected, options, disabled);
-    let popup_open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let popup_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_value(selected);
         node.set_expanded(popup_open);
     });
-    egui::popup_below_widget(
-        ui,
-        popup_id,
-        &response,
-        egui::PopupCloseBehavior::CloseOnClick,
-        |ui| {
+    // Spelled out rather than left on `popup_below_widget`, which egui 0.34
+    // deprecated: this is that helper's body verbatim -- justified top-down
+    // layout, memory-tracked open state, bottom-start alignment, and the
+    // trigger's own width -- so the drop-down keeps its exact geometry.
+    egui::Popup::from_response(&response)
+        .id(popup_id)
+        .open_memory(None)
+        .layout(egui::Layout::top_down_justified(egui::Align::LEFT))
+        .align(egui::RectAlign::BOTTOM_START)
+        .width(response.rect.width())
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.set_min_width(ui.available_width());
             ui.set_min_width(width.max(rect.width()));
             ui.spacing_mut().item_spacing.y = 0.0;
             let listbox = ui.scope(|ui| {
@@ -236,8 +243,7 @@ fn select_with_font(
                     node.set_role(egui::accesskit::Role::ListBox);
                     node.set_label(accessible_label);
                 });
-        },
-    );
+        });
     SelectOutput { picked, response }
 }
 

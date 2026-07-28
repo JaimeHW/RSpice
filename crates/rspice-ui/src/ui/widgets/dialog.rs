@@ -669,7 +669,7 @@ impl<'a> Dialog<'a> {
     ) -> DialogChoice {
         let t = Tokens::get(ctx);
         let c = t.color;
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         let id = Id::new(("rspice.dialog", self.title));
         let measured_height_id =
             id.with(("measured-surface-height", self.transaction_state.is_some()));
@@ -738,7 +738,9 @@ impl<'a> Dialog<'a> {
                     .max_rect(layout.surface_rect)
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
-            surface.set_enabled(self.interaction_enabled);
+            if !self.interaction_enabled {
+                surface.disable();
+            }
             surface.set_width(width);
             if layout.fill_height {
                 surface.set_min_height(max_height);

@@ -1373,7 +1373,9 @@ fn qualification_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, write_allowed:
         Some("The project is open read-only. Cancel this authoring transaction to close it.")
     };
     qualification_authoring_error(ui, error);
-    ui.set_enabled(write_allowed);
+    if !write_allowed {
+        ui.disable();
+    }
     dialog_subheading(ui, "Suite and vector identity");
     let [suite_id, suite_name] = qualification_pair_rects(ui);
     qualification_text_field(ui, suite_id, "Suite ID", &mut fields.suite_id, true, true);

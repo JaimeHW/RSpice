@@ -1,8 +1,8 @@
 //! Application title bar and complete implemented menu taxonomy.
 
 use egui::{
-    Align, Align2, Context, Frame, Id, Key, Layout, Modifiers, PointerButton, Popup, Rect,
-    Response, Sense, TopBottomPanel, Ui, Vec2,
+    Align, Align2, Context, Frame, Id, Key, Layout, Modifiers, Panel, PointerButton, Popup, Rect,
+    Response, Sense, Ui, Vec2,
 };
 
 use crate::ui::theme::{self, FontWeight};
@@ -72,7 +72,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let viewport_width = ctx.content_rect().width();
     let menu_projection = MenuProjection::for_layout(viewport_width, layout.compact_shell);
     let large_targets = viewport_width <= 820.0 || layout.coarse_pointer;
-    TopBottomPanel::top("workbench.title_bar")
+    Panel::top("workbench.title_bar")
         .exact_size(layout.title_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)

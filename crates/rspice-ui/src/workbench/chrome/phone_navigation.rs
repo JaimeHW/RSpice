@@ -1,7 +1,7 @@
 //! Phone bottom navigation.  Four task-critical owners remain one tap away;
 //! Project, Models, and Netlist live in a discoverable More sheet.
 
-use egui::{Align2, Context, Frame, TopBottomPanel, Vec2};
+use egui::{Align2, Context, Frame, Panel, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -33,7 +33,7 @@ fn phone_badge_rect(item_rect: egui::Rect) -> egui::Rect {
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
-    let shown = TopBottomPanel::bottom("workbench.phone_navigation")
+    let shown = Panel::bottom("workbench.phone_navigation")
         .exact_size(layout.phone_navigation_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)

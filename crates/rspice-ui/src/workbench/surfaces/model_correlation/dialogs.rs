@@ -52,7 +52,7 @@ pub(super) fn clear_correlation_dialog_runtime(ctx: &egui::Context) {
 }
 
 pub(super) fn dialog_field_width(ui: &Ui) -> f32 {
-    (ui.ctx().screen_rect().width() - 220.0).clamp(140.0, 430.0)
+    (ui.ctx().content_rect().width() - 220.0).clamp(140.0, 430.0)
 }
 
 pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {

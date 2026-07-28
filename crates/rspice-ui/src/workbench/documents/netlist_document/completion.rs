@@ -340,7 +340,7 @@ fn draw_popover(
     let range = output.cursor_range?;
     let caret_rect = output.galley.pos_from_cursor(range.primary);
     let anchor = output.galley_pos + caret_rect.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
-    let geometry = completion_popover_geometry(anchor, ui.ctx().screen_rect());
+    let geometry = completion_popover_geometry(anchor, ui.ctx().content_rect());
 
     egui::Area::new(egui::Id::new("rspice.netlist.completion"))
         .order(egui::Order::Foreground)

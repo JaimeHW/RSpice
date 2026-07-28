@@ -2,7 +2,7 @@
 //! global run state remains visible at the trailing edge.
 
 use egui::containers::menu::MenuButton;
-use egui::{Align, Context, Frame, Layout, TopBottomPanel, Vec2};
+use egui::{Align, Context, Frame, Layout, Panel, Vec2};
 
 use crate::state::{SchematicGridPitch, Tool, ViewType, WireRoutingMode};
 use crate::ui::theme::{self, FontWeight};
@@ -83,7 +83,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             app.state.workbench.workspace,
             Workspace::Design | Workspace::Simulate
         );
-    TopBottomPanel::top("workbench.context_toolbar")
+    Panel::top("workbench.context_toolbar")
         .exact_size(layout.toolbar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)

@@ -407,7 +407,9 @@ pub(super) fn new_section_dialog(
     .secondary("Cancel")
     .primary_enabled(primary_enabled)
     .show(ctx, |ui| {
-        ui.set_enabled(writable);
+        if !writable {
+            ui.disable();
+        }
         model_text_field(
             ui,
             "Section name",
@@ -564,7 +566,9 @@ pub(super) fn correlation_matrix_dialog(
     .secondary("Cancel")
     .primary_enabled(writable)
     .show(ctx, |ui| {
-        ui.set_enabled(writable);
+        if !writable {
+            ui.disable();
+        }
         let matrices = app
             .state
             .workbench

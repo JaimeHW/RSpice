@@ -2,7 +2,7 @@
 //! the shell never fabricates datasets, source files, or verification records.
 
 use egui::containers::menu::MenuButton;
-use egui::{Context, Frame, Layout, Sense, TopBottomPanel, Vec2};
+use egui::{Context, Frame, Layout, Panel, Sense, Vec2};
 
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
@@ -30,7 +30,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
 
     let t = Tokens::get(ctx);
-    TopBottomPanel::top("workbench.document_bar")
+    Panel::top("workbench.document_bar")
         .exact_size(layout.document_bar_height)
         .frame(Frame::new().fill(t.color.bg_app))
         .show_separator_line(false)

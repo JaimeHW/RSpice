@@ -244,7 +244,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     refresh_catalog_if_requested(app);
 
-    let screen = ctx.screen_rect();
+    let screen = ctx.content_rect();
     let layout = LauncherLayout::resolve(screen);
     let large_targets = app.state.workbench.coarse_pointer
         || screen.width() <= LAUNCHER_TOUCH_MAX_WIDTH

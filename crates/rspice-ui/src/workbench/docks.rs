@@ -5,7 +5,7 @@ mod drawers;
 mod inspector;
 mod navigator;
 
-use egui::{Context, Frame, Id, Key, Response, SidePanel, TopBottomPanel, containers::PanelState};
+use egui::{Context, Frame, Id, Key, Panel, Response, containers::PanelState};
 
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
@@ -167,7 +167,7 @@ fn expose_splitter_accessibility(
 
 pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
-    let panel = SidePanel::left(NAVIGATOR_PANEL_ID)
+    let panel = Panel::left(NAVIGATOR_PANEL_ID)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true);
     let panel = if layout.navigator_resizable {
@@ -219,7 +219,7 @@ pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let t = Tokens::get(ctx);
-    let panel = SidePanel::right(INSPECTOR_PANEL_ID)
+    let panel = Panel::right(INSPECTOR_PANEL_ID)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true);
     let panel = if layout.inspector_resizable {
@@ -279,7 +279,7 @@ pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         return;
     }
     let t = Tokens::get(ctx);
-    let panel = TopBottomPanel::bottom(CONSOLE_PANEL_ID)
+    let panel = Panel::bottom(CONSOLE_PANEL_ID)
         .default_size(layout.console_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true);

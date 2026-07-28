@@ -1693,7 +1693,7 @@ fn connectivity_tabs(ui: &mut Ui, active: &mut ConnectivityManagerTab) {
             let selected = *active == tab;
             let response = ui.add_sized(
                 Vec2::new(132.0, 34.0),
-                egui::SelectableLabel::new(selected, tab.label()),
+                egui::Button::selectable(selected, tab.label()),
             );
             if response.clicked() {
                 *active = tab;

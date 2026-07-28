@@ -225,7 +225,7 @@ pub(super) fn unavailable_viewer(
     let t = Tokens::get(ui.ctx());
     let rect = ui.available_rect_before_wrap();
     ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
-    ui.allocate_ui_at_rect(rect.shrink(24.0), |ui| {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(24.0)), |ui| {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
                 let (icon, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());

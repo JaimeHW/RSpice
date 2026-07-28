@@ -40,14 +40,26 @@
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
-// NOTE: this crate previously carried a blanket `#![allow(deprecated)]`. It
-// was hiding 63 real egui 0.34 migration sites across 20 APIs — the panel
-// constructors (`TopBottomPanel`/`SidePanel` -> `Panel::top`/`left`, and
-// `Panel::show(ctx)` -> `show_inside(ui)`), `Frame::rounding`,
-// `Ui::set_enabled`, `Context::screen_rect`, and the `Popup` family. Those
-// warnings are left visible on purpose: the migration is an egui API change
-// with layout consequences that needs its own visual verification pass, and a
-// silent allow is how it stayed invisible in the first place.
+// NOTE: this crate previously carried a blanket `#![allow(deprecated)]`,
+// hiding the egui 0.34 migration entirely. It is left off on purpose.
+//
+// Everything migratable on 0.34 has been migrated: the panel constructors
+// (`TopBottomPanel`/`SidePanel` -> `Panel::top`/`left`), `SelectableLabel` ->
+// `Button::selectable`, `Ui::set_enabled` -> `disable()`,
+// `Context::screen_rect` -> `content_rect`, `Ui::allocate_ui_at_rect` ->
+// `scope_builder`, and `popup_below_widget` -> the `Popup` builder. Each was
+// verified against egui's own body first — every one of those forwards to its
+// replacement with identical arguments, so none of them can move a pixel.
+//
+// What remains is one family: `Panel::show(ctx)` and `CentralPanel::show(ctx)`.
+// Those cannot be migrated on 0.34. `show_inside` takes `&mut Ui`, and the
+// root `Ui` that `show(ctx)` builds for itself needs `Context::pass_state_mut`
+// and `PassState::allocate_central_panel`, both `pub(crate)` in egui. The
+// supported way to obtain that root `Ui` arrives with eframe 0.35, which
+// replaces `App::update(&mut self, ctx, frame)` with
+// `App::ui(&mut self, ui, frame)`. So these warnings are not deferred cleanup
+// — they are the visible edge of an eframe 0.35 upgrade, and they should be
+// resolved by that upgrade rather than by hand-rolling egui internals here.
 // NOTE: closing the public surface (see the visibility note below) turned 192
 // items into `dead_code` warnings. They were never reachable — the compiler
 // simply could not say so while their modules were `pub`. All 192 are dead on
