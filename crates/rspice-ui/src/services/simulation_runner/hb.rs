@@ -203,32 +203,18 @@ impl HbRunConfig {
     }
 }
 
-/// Run Harmonic Balance analysis
-///
-/// Solves for the steady-state response in the frequency domain,
-/// suitable for RF circuits with multiple tones.
-pub fn run_hb_analysis(netlist_text: &str, config: &HbRunConfig) -> Result<HbData, String> {
-    run_hb_analysis_with_abort(netlist_text, config, &NoAbort).map_err(|error| error.to_string())
-}
-
 /// Run Harmonic Balance analysis with cooperative cancellation.
+///
+/// Test-only. The shipping path is
+/// [`run_hb_analysis_with_source_path_and_abort`], reached from
+/// `simulation::runner::spec::periodic`.
+#[cfg(test)]
 pub fn run_hb_analysis_with_abort(
     netlist_text: &str,
     config: &HbRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HbData> {
     run_hb_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run Harmonic Balance analysis with a source path used to resolve relative
-/// includes and model file references.
-pub fn run_hb_analysis_with_source_path(
-    netlist_text: &str,
-    config: &HbRunConfig,
-    source_path: Option<&Path>,
-) -> Result<HbData, String> {
-    run_hb_analysis_with_source_path_and_abort(netlist_text, config, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
 }
 
 /// Run Harmonic Balance analysis with source-path resolution and cooperative

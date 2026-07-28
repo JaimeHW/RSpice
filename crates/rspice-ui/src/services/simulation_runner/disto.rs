@@ -163,37 +163,21 @@ fn poll_disto_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), 
     poll_periodically(abort, index).map_err(|_| DistoRunError::Aborted)
 }
 
-/// Run DISTO analysis using nonlinear HB harmonic extraction.
-///
-/// Primary execution solves HB per sweep point and extracts HD2/HD3/THD from
-/// harmonic spectra. When `f2_over_f1` is configured, it additionally performs
-/// commensurate two-tone HB and derives IMD2/IMD3 from nonlinear sidebands.
-/// Linearized AC fallback is only used when explicitly enabled.
-pub fn run_disto_analysis(
-    netlist_text: &str,
-    config: &DistoRunConfig,
-) -> Result<DistoData, String> {
-    run_disto_analysis_with_abort(netlist_text, config, &NoAbort).map_err(|error| error.to_string())
-}
-
 /// Run DISTO analysis with cooperative cancellation.
+///
+/// Test-only. The shipping path is
+/// [`run_disto_analysis_with_source_path_and_abort`], reached from
+/// `simulation::runner::spec::frequency`. Primary execution solves HB per
+/// sweep point and extracts HD2/HD3/THD from harmonic spectra; when
+/// `f2_over_f1` is configured it additionally performs commensurate two-tone
+/// HB and derives IMD2/IMD3 from nonlinear sidebands.
+#[cfg(test)]
 pub fn run_disto_analysis_with_abort(
     netlist_text: &str,
     config: &DistoRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<DistoData> {
     run_disto_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run DISTO analysis with a source path used to resolve relative includes and
-/// model file references.
-pub fn run_disto_analysis_with_source_path(
-    netlist_text: &str,
-    config: &DistoRunConfig,
-    source_path: Option<&Path>,
-) -> Result<DistoData, String> {
-    run_disto_analysis_with_source_path_and_abort(netlist_text, config, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
 }
 
 /// Run DISTO analysis with source-path resolution and cooperative

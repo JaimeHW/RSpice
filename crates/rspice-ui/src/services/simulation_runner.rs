@@ -37,8 +37,7 @@ mod transient;
 pub use ac::{AcData, run_ac_analysis_with_source_path_and_abort};
 pub use dc_sweep::{DcSweepData, run_dc_sweep_with_source_path_and_abort};
 pub use disto::{
-    DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace, run_disto_analysis,
-    run_disto_analysis_with_abort, run_disto_analysis_with_source_path,
+    DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace,
     run_disto_analysis_with_source_path_and_abort,
 };
 pub use envelope_fourier::{
@@ -53,8 +52,7 @@ pub(crate) use envelope_fourier::{
 };
 pub use error::{ServiceRunError, ServiceRunResult};
 pub use hb::{
-    HbData, HbRunConfig, HbToneRunConfig, run_hb_analysis, run_hb_analysis_with_abort,
-    run_hb_analysis_with_source_path, run_hb_analysis_with_source_path_and_abort,
+    HbData, HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort,
 };
 use helpers::{
     build_voltage_output_expr, generate_freq_points_with_abort,
