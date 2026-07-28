@@ -383,7 +383,7 @@ class CiConfigurationTests(unittest.TestCase):
             test_job,
             "all-feature Clippy must not run after building every Python matrix variant",
         )
-        self.assertIn("python scripts/repair_sdist_lock.py", workflow)
+        self.assertIn("python ../../tools/release/repair_sdist_lock.py", workflow)
         self.assertIn("CARGO_NET_OFFLINE=true", workflow)
         self.assertIn("cp314t wheel (${{ matrix.platform.name }})", workflow)
         self.assertIn("-i python3.14t", workflow)

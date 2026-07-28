@@ -310,7 +310,7 @@ jobs:
         run: |
           python -m pip install -c ci-constraints.txt "maturin==${{ env.MATURIN_VERSION }}"
           maturin sdist --out dist
-          python scripts/repair_sdist_lock.py dist/rspice-*.tar.gz
+          python ../../tools/release/repair_sdist_lock.py dist/rspice-*.tar.gz
       - name: Build and install from source distribution offline
         shell: bash
         working-directory: crates/rspice-python
