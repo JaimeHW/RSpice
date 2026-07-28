@@ -1,0 +1,435 @@
+{
+  "note": "Corpus stamp throughput for the canonical CFG backend. Timings are machine-specific; the ratios against the hand-written reference measured in the same run are the portable part, and are what the gate is stated against. Regenerate with: rspice-bench generated-stamp --out <path>.",
+  "measured_on": "2026-07-28",
+  "commit": "4603c5196",
+  "conditions": "Isolated git worktree, release profile, no compiler running, 19.6 GB free of 31.7 GB. Timings taken while a build is running are invalid -- an earlier reading of hisimhv_va under load was 2.9x its settled value.",
+  "iterations": 2000,
+  "samples": 7,
+  "reference_model": "bsim4v8 (hand-written)",
+  "reference_ns_per_stamp_median": 319.2,
+  "corpus_median_ns": 1627.8,
+  "corpus_median_ratio_vs_reference": 5.0996,
+  "models_above_1_50x": 35,
+  "models": [
+    {
+      "model_name": "asmhemt",
+      "node_count": 23,
+      "branch_count": 57,
+      "linked_slot_count": 6400,
+      "ns_per_stamp_median": 4691.15,
+      "ns_per_stamp_p95": 5374.25,
+      "ns_per_stamp_min": 4504.15,
+      "ratio_vs_reference": 14.6966
+    },
+    {
+      "model_name": "hisimsotb_va",
+      "node_count": 13,
+      "branch_count": 8,
+      "linked_slot_count": 441,
+      "ns_per_stamp_median": 4618.45,
+      "ns_per_stamp_p95": 4846.15,
+      "ns_per_stamp_min": 4583.85,
+      "ratio_vs_reference": 14.4688
+    },
+    {
+      "model_name": "hisimsoi_va__38074d06",
+      "node_count": 19,
+      "branch_count": 19,
+      "linked_slot_count": 1444,
+      "ns_per_stamp_median": 3782.25,
+      "ns_per_stamp_p95": 3965.5999999999995,
+      "ns_per_stamp_min": 3624.7,
+      "ratio_vs_reference": 11.8492
+    },
+    {
+      "model_name": "hisimsoi_va__242bc21d",
+      "node_count": 19,
+      "branch_count": 19,
+      "linked_slot_count": 1444,
+      "ns_per_stamp_median": 3746.35,
+      "ns_per_stamp_p95": 4092.15,
+      "ns_per_stamp_min": 3539.55,
+      "ratio_vs_reference": 11.7367
+    },
+    {
+      "model_name": "hisimsoi_va__5be18005",
+      "node_count": 19,
+      "branch_count": 20,
+      "linked_slot_count": 1521,
+      "ns_per_stamp_median": 3741.1,
+      "ns_per_stamp_p95": 3824.7,
+      "ns_per_stamp_min": 3678.65,
+      "ratio_vs_reference": 11.7202
+    },
+    {
+      "model_name": "mvsg_cmc",
+      "node_count": 30,
+      "branch_count": 36,
+      "linked_slot_count": 4356,
+      "ns_per_stamp_median": 3501.5,
+      "ns_per_stamp_p95": 3673.15,
+      "ns_per_stamp_min": 3456.6,
+      "ratio_vs_reference": 10.9696
+    },
+    {
+      "model_name": "bsimsoi__e2aff994",
+      "node_count": 14,
+      "branch_count": 12,
+      "linked_slot_count": 676,
+      "ns_per_stamp_median": 3059.0,
+      "ns_per_stamp_p95": 3758.1,
+      "ns_per_stamp_min": 2762.95,
+      "ratio_vs_reference": 9.5833
+    },
+    {
+      "model_name": "bsimimg",
+      "node_count": 9,
+      "branch_count": 5,
+      "linked_slot_count": 196,
+      "ns_per_stamp_median": 2846.7,
+      "ns_per_stamp_p95": 3000.2,
+      "ns_per_stamp_min": 2748.95,
+      "ratio_vs_reference": 8.9182
+    },
+    {
+      "model_name": "bsimcmg_va",
+      "node_count": 17,
+      "branch_count": 18,
+      "linked_slot_count": 1225,
+      "ns_per_stamp_median": 2763.95,
+      "ns_per_stamp_p95": 2888.05,
+      "ns_per_stamp_min": 2707.05,
+      "ratio_vs_reference": 8.659
+    },
+    {
+      "model_name": "l_utsoi__485e0ac9",
+      "node_count": 14,
+      "branch_count": 4,
+      "linked_slot_count": 324,
+      "ns_per_stamp_median": 2702.05,
+      "ns_per_stamp_p95": 3107.65,
+      "ns_per_stamp_min": 2654.45,
+      "ratio_vs_reference": 8.4651
+    },
+    {
+      "model_name": "l_utsoi__832ce87d",
+      "node_count": 10,
+      "branch_count": 4,
+      "linked_slot_count": 196,
+      "ns_per_stamp_median": 2535.3,
+      "ns_per_stamp_p95": 2846.35,
+      "ns_per_stamp_min": 2458.45,
+      "ratio_vs_reference": 7.9427
+    },
+    {
+      "model_name": "hisimhv_n5_va",
+      "node_count": 19,
+      "branch_count": 13,
+      "linked_slot_count": 1024,
+      "ns_per_stamp_median": 2486.35,
+      "ns_per_stamp_p95": 2536.3,
+      "ns_per_stamp_min": 2429.55,
+      "ratio_vs_reference": 7.7893
+    },
+    {
+      "model_name": "hisimhv_va",
+      "node_count": 19,
+      "branch_count": 13,
+      "linked_slot_count": 1024,
+      "ns_per_stamp_median": 2473.7,
+      "ns_per_stamp_p95": 2519.9,
+      "ns_per_stamp_min": 2390.55,
+      "ratio_vs_reference": 7.7497
+    },
+    {
+      "model_name": "hisimhv_n4_va",
+      "node_count": 18,
+      "branch_count": 12,
+      "linked_slot_count": 900,
+      "ns_per_stamp_median": 2453.85,
+      "ns_per_stamp_p95": 2509.8,
+      "ns_per_stamp_min": 2449.25,
+      "ratio_vs_reference": 7.6875
+    },
+    {
+      "model_name": "bsimbulk",
+      "node_count": 17,
+      "branch_count": 14,
+      "linked_slot_count": 961,
+      "ns_per_stamp_median": 2380.45,
+      "ns_per_stamp_p95": 2521.65,
+      "ns_per_stamp_min": 2313.75,
+      "ratio_vs_reference": 7.4576
+    },
+    {
+      "model_name": "PSPNQS104VA",
+      "node_count": 21,
+      "branch_count": 25,
+      "linked_slot_count": 2116,
+      "ns_per_stamp_median": 2260.3,
+      "ns_per_stamp_p95": 2612.1,
+      "ns_per_stamp_min": 2168.35,
+      "ratio_vs_reference": 7.0811
+    },
+    {
+      "model_name": "PSP104TVA",
+      "node_count": 13,
+      "branch_count": 7,
+      "linked_slot_count": 400,
+      "ns_per_stamp_median": 2220.05,
+      "ns_per_stamp_p95": 2296.55,
+      "ns_per_stamp_min": 2168.45,
+      "ratio_vs_reference": 6.955
+    },
+    {
+      "model_name": "bjt505t_va",
+      "node_count": 13,
+      "branch_count": 2,
+      "linked_slot_count": 225,
+      "ns_per_stamp_median": 2082.3,
+      "ns_per_stamp_p95": 2146.1,
+      "ns_per_stamp_min": 2040.75,
+      "ratio_vs_reference": 6.5235
+    },
+    {
+      "model_name": "bsimsoi__18c250bc",
+      "node_count": 14,
+      "branch_count": 19,
+      "linked_slot_count": 1089,
+      "ns_per_stamp_median": 2075.05,
+      "ns_per_stamp_p95": 2560.9,
+      "ns_per_stamp_min": 1945.5,
+      "ratio_vs_reference": 6.5008
+    },
+    {
+      "model_name": "PSP104VA",
+      "node_count": 12,
+      "branch_count": 7,
+      "linked_slot_count": 361,
+      "ns_per_stamp_median": 1769.65,
+      "ns_per_stamp_p95": 2199.55,
+      "ns_per_stamp_min": 1715.9,
+      "ratio_vs_reference": 5.544
+    },
+    {
+      "model_name": "bjtd505t_va",
+      "node_count": 12,
+      "branch_count": 2,
+      "linked_slot_count": 196,
+      "ns_per_stamp_median": 1719.1,
+      "ns_per_stamp_p95": 1747.15,
+      "ns_per_stamp_min": 1679.5,
+      "ratio_vs_reference": 5.3857
+    },
+    {
+      "model_name": "bsimsoi_va",
+      "node_count": 13,
+      "branch_count": 9,
+      "linked_slot_count": 484,
+      "ns_per_stamp_median": 1536.5,
+      "ns_per_stamp_p95": 1580.9,
+      "ns_per_stamp_min": 1474.0,
+      "ratio_vs_reference": 4.8136
+    },
+    {
+      "model_name": "vbic13_4t",
+      "node_count": 14,
+      "branch_count": 0,
+      "linked_slot_count": 196,
+      "ns_per_stamp_median": 1450.25,
+      "ns_per_stamp_p95": 1768.85,
+      "ns_per_stamp_min": 1439.4,
+      "ratio_vs_reference": 4.5434
+    },
+    {
+      "model_name": "bjt505_va",
+      "node_count": 12,
+      "branch_count": 2,
+      "linked_slot_count": 196,
+      "ns_per_stamp_median": 1273.7,
+      "ns_per_stamp_p95": 1945.65,
+      "ns_per_stamp_min": 1257.5,
+      "ratio_vs_reference": 3.9903
+    },
+    {
+      "model_name": "vbic13_3t_et",
+      "node_count": 12,
+      "branch_count": 0,
+      "linked_slot_count": 144,
+      "ns_per_stamp_median": 1202.35,
+      "ns_per_stamp_p95": 1257.35,
+      "ns_per_stamp_min": 1152.9,
+      "ratio_vs_reference": 3.7668
+    },
+    {
+      "model_name": "hicumL2va",
+      "node_count": 15,
+      "branch_count": 6,
+      "linked_slot_count": 441,
+      "ns_per_stamp_median": 1167.05,
+      "ns_per_stamp_p95": 1191.9,
+      "ns_per_stamp_min": 1151.35,
+      "ratio_vs_reference": 3.6562
+    },
+    {
+      "model_name": "vbic13",
+      "node_count": 12,
+      "branch_count": 0,
+      "linked_slot_count": 144,
+      "ns_per_stamp_median": 1157.85,
+      "ns_per_stamp_p95": 1371.05,
+      "ns_per_stamp_min": 1104.5,
+      "ratio_vs_reference": 3.6273
+    },
+    {
+      "model_name": "bjtd505_va",
+      "node_count": 11,
+      "branch_count": 2,
+      "linked_slot_count": 169,
+      "ns_per_stamp_median": 1143.7,
+      "ns_per_stamp_p95": 1614.75,
+      "ns_per_stamp_min": 1127.85,
+      "ratio_vs_reference": 3.583
+    },
+    {
+      "model_name": "vbic_4T_et_cf",
+      "node_count": 12,
+      "branch_count": 0,
+      "linked_slot_count": 144,
+      "ns_per_stamp_median": 1039.4,
+      "ns_per_stamp_p95": 1142.8,
+      "ns_per_stamp_min": 1004.9,
+      "ratio_vs_reference": 3.2563
+    },
+    {
+      "model_name": "angelov_gan",
+      "node_count": 19,
+      "branch_count": 19,
+      "linked_slot_count": 1444,
+      "ns_per_stamp_median": 1036.0,
+      "ns_per_stamp_p95": 1424.45,
+      "ns_per_stamp_min": 966.55,
+      "ratio_vs_reference": 3.2456
+    },
+    {
+      "model_name": "asmesd",
+      "node_count": 10,
+      "branch_count": 8,
+      "linked_slot_count": 324,
+      "ns_per_stamp_median": 959.2,
+      "ns_per_stamp_p95": 1222.2,
+      "ns_per_stamp_min": 907.55,
+      "ratio_vs_reference": 3.005
+    },
+    {
+      "model_name": "EPFL_HEMT_10a",
+      "node_count": 12,
+      "branch_count": 3,
+      "linked_slot_count": 225,
+      "ns_per_stamp_median": 956.3,
+      "ns_per_stamp_p95": 1172.95,
+      "ns_per_stamp_min": 944.05,
+      "ratio_vs_reference": 2.9959
+    },
+    {
+      "model_name": "angelov",
+      "node_count": 16,
+      "branch_count": 19,
+      "linked_slot_count": 1225,
+      "ns_per_stamp_median": 890.95,
+      "ns_per_stamp_p95": 1074.3,
+      "ns_per_stamp_min": 841.65,
+      "ratio_vs_reference": 2.7912
+    },
+    {
+      "model_name": "hicumL0va",
+      "node_count": 10,
+      "branch_count": 4,
+      "linked_slot_count": 196,
+      "ns_per_stamp_median": 751.8,
+      "ns_per_stamp_p95": 846.1,
+      "ns_per_stamp_min": 736.5,
+      "ratio_vs_reference": 2.3553
+    },
+    {
+      "model_name": "ekv_va",
+      "node_count": 4,
+      "branch_count": 0,
+      "linked_slot_count": 16,
+      "ns_per_stamp_median": 671.35,
+      "ns_per_stamp_p95": 673.95,
+      "ns_per_stamp_min": 670.7,
+      "ratio_vs_reference": 2.1032
+    },
+    {
+      "model_name": "asmesd_dio",
+      "node_count": 7,
+      "branch_count": 7,
+      "linked_slot_count": 196,
+      "ns_per_stamp_median": 461.55,
+      "ns_per_stamp_p95": 530.65,
+      "ns_per_stamp_min": 459.3,
+      "ratio_vs_reference": 1.446
+    },
+    {
+      "model_name": "mosvar",
+      "node_count": 7,
+      "branch_count": 4,
+      "linked_slot_count": 121,
+      "ns_per_stamp_median": 400.5,
+      "ns_per_stamp_p95": 407.9,
+      "ns_per_stamp_min": 385.95,
+      "ratio_vs_reference": 1.2547
+    },
+    {
+      "model_name": "DIODE_CMC",
+      "node_count": 6,
+      "branch_count": 4,
+      "linked_slot_count": 100,
+      "ns_per_stamp_median": 357.4,
+      "ns_per_stamp_p95": 366.95,
+      "ns_per_stamp_min": 350.65,
+      "ratio_vs_reference": 1.1197
+    },
+    {
+      "model_name": "r3_cmc",
+      "node_count": 6,
+      "branch_count": 2,
+      "linked_slot_count": 64,
+      "ns_per_stamp_median": 316.05,
+      "ns_per_stamp_p95": 436.5,
+      "ns_per_stamp_min": 305.7,
+      "ratio_vs_reference": 0.9901
+    },
+    {
+      "model_name": "JUNCAP200",
+      "node_count": 2,
+      "branch_count": 0,
+      "linked_slot_count": 4,
+      "ns_per_stamp_median": 302.85,
+      "ns_per_stamp_p95": 309.95,
+      "ns_per_stamp_min": 296.8,
+      "ratio_vs_reference": 0.9488
+    },
+    {
+      "model_name": "r2_et_cmc",
+      "node_count": 3,
+      "branch_count": 0,
+      "linked_slot_count": 9,
+      "ns_per_stamp_median": 51.4,
+      "ns_per_stamp_p95": 51.7,
+      "ns_per_stamp_min": 51.25,
+      "ratio_vs_reference": 0.161
+    },
+    {
+      "model_name": "r2_cmc",
+      "node_count": 2,
+      "branch_count": 0,
+      "linked_slot_count": 4,
+      "ns_per_stamp_median": 32.05,
+      "ns_per_stamp_p95": 32.55,
+      "ns_per_stamp_min": 31.85,
+      "ratio_vs_reference": 0.1004
+    }
+  ]
+}
