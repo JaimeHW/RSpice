@@ -2453,23 +2453,24 @@ impl Instance {
             let v12332 = parameters[312];
             let v12344 = parameters[313];
             let v12361 = ddt_scale();
-            let v12381 = node_potentials[7];
-            let v12384 = Lanes([1e0f64; 1]);
-            let v12405 = parameters[25];
-            let v12406 = node_potentials[1];
-            let v12408 = Lanes([1e0f64; 1]);
-            let v12412 = staged[118];
-            let v12415 = Lanes([0e0f64; 2]);
-            let v12420 = staged[119];
-            let v12428 = staged[120];
-            let v12436 = staged[193];
-            let v12596 = 0e0f64;
-            let v12597 = 0e0f64;
-            let v12598 = 0e0f64;
-            let v12599 = 0e0f64;
-            let v12600 = 0e0f64;
-            let v12601 = 0e0f64;
-            let v12602 = 0e0f64;
+            let v12387 = node_potentials[7];
+            let v12390 = Lanes([1e0f64; 1]);
+            let v12411 = parameters[25];
+            let v12412 = node_potentials[1];
+            let v12414 = Lanes([1e0f64; 1]);
+            let v12418 = staged[118];
+            let v12421 = Lanes([0e0f64; 2]);
+            let v12426 = staged[119];
+            let v12434 = staged[120];
+            let v12444 = staged[193];
+            let v12452 = Lanes([0e0f64; 1]);
+            let v12643 = 0e0f64;
+            let v12644 = 0e0f64;
+            let v12645 = 0e0f64;
+            let v12646 = 0e0f64;
+            let v12647 = 0e0f64;
+            let v12648 = 0e0f64;
+            let v12649 = 0e0f64;
             if v3 != 0.0 {
                 if v4 != 0.0 {
                     loop {
@@ -11436,223 +11437,299 @@ impl Instance {
                 v12354 = v60;
                 v12355 = v12057;
             }
-            let v12363 = v17 * (ddt(45332, (v11713 + v12234)));
-            let v12364 = (((Lanes([v11716[0], v11716[1], v11716[2], v11716[3], v11716[4], 0.0, 0.0, v11716[5], v11716[6], v11716[7]])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v12240[0], v12240[1], 0.0, 0.0, 0.0]))) * v12361) * v17;
-            let v12371 = v17 * (ddt(45338, (v12295 + v12296)));
-            let v12372 = (((Lanes([v12301[0], v12301[1], v12301[2], v12301[3], v12301[4], 0.0, v12301[5], v12301[6], v12301[7]])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v12302[0], 0.0, 0.0, 0.0]))) * v12361) * v17;
-            let v12379 = v17 * (ddt(45344, (v12297 + v12235)));
-            let v12380 = (((Lanes([v12303[0], v12303[1], v12303[2], v12303[3], v12303[4], 0.0, v12303[5], v12303[6], v12303[7]])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v12241[0], 0.0, 0.0, 0.0]))) * v12361) * v17;
-            let v12382 = v11782 * v12381;
-            let v12383 = v11784 * v12381;
-            let v12385 = v12384 * v11782;
-            let v12388 = (Lanes([v12383[0], v12383[1], v12383[2], 0.0, v12383[3], v12383[4], v12383[5]])) + (Lanes([0.0, 0.0, 0.0, v12385[0], 0.0, 0.0, 0.0]));
-            let v12389 = v12381 * v11870;
-            let v12390 = v12384 * v11870;
-            let v12391 = v11871 * v12381;
-            let v12394 = (Lanes([0.0, 0.0, 0.0, v12390[0], 0.0, 0.0, 0.0])) + (Lanes([v12391[0], v12391[1], v12391[2], 0.0, v12391[3], v12391[4], v12391[5]]));
-            let v12395 = ddt(45375, v12389);
-            let v12396 = v12394 * v12361;
-            let v12397 = v12381 * v11877;
-            let v12398 = v12384 * v11877;
-            let v12399 = v11878 * v12381;
-            let v12402 = (Lanes([0.0, 0.0, 0.0, v12398[0], 0.0, 0.0, 0.0])) + (Lanes([v12399[0], v12399[1], v12399[2], 0.0, v12399[3], v12399[4], v12399[5]]));
-            let v12403 = ddt(45379, v12397);
-            let v12404 = v12402 * v12361;
-            let v12416: f64;
-            let v12417: Lanes<2>;
-            if v12405 != 0.0 {
-                let v12413 = v12412 * (v12406 - v9);
-                let v12414 = ((Lanes([v12408[0], 0.0])) - (Lanes([0.0, v12[0]]))) * v12412;
-                v12416 = v12413;
-                v12417 = v12414;
+            let v12356 = v11713 + v12234;
+            let v12359 = (Lanes([v11716[0], v11716[1], v11716[2], v11716[3], v11716[4], 0.0, 0.0, v11716[5], v11716[6], v11716[7]])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v12240[0], v12240[1], 0.0, 0.0, 0.0]));
+            let v12363 = v17 * (ddt(45332, v12356));
+            let v12364 = (v12359 * v12361) * v17;
+            let v12365 = v17 * v12356;
+            let v12366 = v12359 * v17;
+            let v12367 = v12295 + v12296;
+            let v12370 = (Lanes([v12301[0], v12301[1], v12301[2], v12301[3], v12301[4], 0.0, v12301[5], v12301[6], v12301[7]])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v12302[0], 0.0, 0.0, 0.0]));
+            let v12373 = v17 * (ddt(45338, v12367));
+            let v12374 = (v12370 * v12361) * v17;
+            let v12375 = v17 * v12367;
+            let v12376 = v12370 * v17;
+            let v12377 = v12297 + v12235;
+            let v12380 = (Lanes([v12303[0], v12303[1], v12303[2], v12303[3], v12303[4], 0.0, v12303[5], v12303[6], v12303[7]])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v12241[0], 0.0, 0.0, 0.0]));
+            let v12383 = v17 * (ddt(45344, v12377));
+            let v12384 = (v12380 * v12361) * v17;
+            let v12385 = v17 * v12377;
+            let v12386 = v12380 * v17;
+            let v12388 = v11782 * v12387;
+            let v12389 = v11784 * v12387;
+            let v12391 = v12390 * v11782;
+            let v12394 = (Lanes([v12389[0], v12389[1], v12389[2], 0.0, v12389[3], v12389[4], v12389[5]])) + (Lanes([0.0, 0.0, 0.0, v12391[0], 0.0, 0.0, 0.0]));
+            let v12395 = v12387 * v11870;
+            let v12396 = v12390 * v11870;
+            let v12397 = v11871 * v12387;
+            let v12400 = (Lanes([0.0, 0.0, 0.0, v12396[0], 0.0, 0.0, 0.0])) + (Lanes([v12397[0], v12397[1], v12397[2], 0.0, v12397[3], v12397[4], v12397[5]]));
+            let v12401 = ddt(45375, v12395);
+            let v12402 = v12400 * v12361;
+            let v12403 = v12387 * v11877;
+            let v12404 = v12390 * v11877;
+            let v12405 = v11878 * v12387;
+            let v12408 = (Lanes([0.0, 0.0, 0.0, v12404[0], 0.0, 0.0, 0.0])) + (Lanes([v12405[0], v12405[1], v12405[2], 0.0, v12405[3], v12405[4], v12405[5]]));
+            let v12409 = ddt(45379, v12403);
+            let v12410 = v12408 * v12361;
+            let v12422: f64;
+            let v12423: Lanes<2>;
+            if v12411 != 0.0 {
+                let v12419 = v12418 * (v12412 - v9);
+                let v12420 = ((Lanes([v12414[0], 0.0])) - (Lanes([0.0, v12[0]]))) * v12418;
+                v12422 = v12419;
+                v12423 = v12420;
             } else {
-                v12416 = v60;
-                v12417 = v12415;
+                v12422 = v60;
+                v12423 = v12421;
             }
-            let v12434: f64;
-            let v12435: Lanes<6>;
+            let v12440: f64;
+            let v12441: f64;
+            let v12442: Lanes<6>;
+            let v12443: Lanes<1>;
             if v58 != 0.0 {
-                let v12424 = (v66 * v12420) * v12361;
-                let v12430 = v66 * v12428;
-                let v12431 = ((-v12311) + (ddt(45429, (v12420 * v59)))) + (v59 * v12428);
-                let v12433 = ((v12312 * v95) + (Lanes([v12424[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) + (Lanes([v12430[0], 0.0, 0.0, 0.0, 0.0, 0.0]));
-                v12434 = v12431;
-                v12435 = v12433;
+                let v12427 = v12426 * v59;
+                let v12428 = v66 * v12426;
+                let v12430 = v12428 * v12361;
+                let v12436 = v66 * v12434;
+                let v12437 = ((-v12311) + (ddt(45429, v12427))) + (v59 * v12434);
+                let v12439 = ((v12312 * v95) + (Lanes([v12430[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) + (Lanes([v12436[0], 0.0, 0.0, 0.0, 0.0, 0.0]));
+                v12440 = v12437;
+                v12441 = v12427;
+                v12442 = v12439;
+                v12443 = v12428;
             } else {
-                v12434 = v60;
-                v12435 = v3227;
+                v12440 = v60;
+                v12441 = v60;
+                v12442 = v3227;
+                v12443 = v62;
             }
-            let v12444: f64;
-            let v12445: Lanes<6>;
-            if v12436 != 0.0 {
-                let v12440 = (v3753 * v69) * v12361;
-                let v12441 = v3235 + (ddt(45445, (v69 * v3751)));
-                let v12443 = v3243 + (Lanes([0.0, 0.0, 0.0, v12440[0], 0.0, 0.0]));
-                v12444 = v12441;
-                v12445 = v12443;
+            let v12453: f64;
+            let v12454: f64;
+            let v12455: Lanes<6>;
+            let v12456: Lanes<1>;
+            if v12444 != 0.0 {
+                let v12445 = v69 * v3751;
+                let v12446 = v3753 * v69;
+                let v12448 = v12446 * v12361;
+                let v12449 = v3235 + (ddt(45445, v12445));
+                let v12451 = v3243 + (Lanes([0.0, 0.0, 0.0, v12448[0], 0.0, 0.0]));
+                v12453 = v12449;
+                v12454 = v12445;
+                v12455 = v12451;
+                v12456 = v12446;
             } else {
-                v12444 = v60;
-                v12445 = v3227;
+                v12453 = v60;
+                v12454 = v60;
+                v12455 = v3227;
+                v12456 = v12452;
             }
-            let v12460: f64;
-            let v12461: f64;
-            let v12462: Lanes<7>;
-            let v12463: Lanes<7>;
+            let v12471: f64;
+            let v12472: f64;
+            let v12473: f64;
+            let v12474: f64;
+            let v12475: Lanes<7>;
+            let v12476: Lanes<7>;
+            let v12477: Lanes<1>;
+            let v12478: Lanes<1>;
             if v65 != 0.0 {
-                let v12449 = (v72 * v69) * v12361;
-                let v12450 = v12236 + (ddt(45453, (v69 * v70)));
-                let v12452 = v12242 + (Lanes([0.0, 0.0, 0.0, v12449[0], 0.0, 0.0, 0.0]));
-                let v12456 = (v76 * v69) * v12361;
-                let v12457 = v12237 + (ddt(45459, (v69 * v74)));
-                let v12459 = v12243 + (Lanes([0.0, 0.0, 0.0, v12456[0], 0.0, 0.0, 0.0]));
-                v12460 = v12450;
-                v12461 = v12457;
-                v12462 = v12452;
-                v12463 = v12459;
+                let v12457 = v69 * v70;
+                let v12458 = v72 * v69;
+                let v12460 = v12458 * v12361;
+                let v12461 = v12236 + (ddt(45453, v12457));
+                let v12463 = v12242 + (Lanes([0.0, 0.0, 0.0, v12460[0], 0.0, 0.0, 0.0]));
+                let v12464 = v69 * v74;
+                let v12465 = v76 * v69;
+                let v12467 = v12465 * v12361;
+                let v12468 = v12237 + (ddt(45459, v12464));
+                let v12470 = v12243 + (Lanes([0.0, 0.0, 0.0, v12467[0], 0.0, 0.0, 0.0]));
+                v12471 = v12461;
+                v12472 = v12468;
+                v12473 = v12457;
+                v12474 = v12464;
+                v12475 = v12463;
+                v12476 = v12470;
+                v12477 = v12458;
+                v12478 = v12465;
             } else {
-                v12460 = v60;
-                v12461 = v60;
-                v12462 = v12230;
-                v12463 = v12231;
+                v12471 = v60;
+                v12472 = v60;
+                v12473 = v60;
+                v12474 = v60;
+                v12475 = v12230;
+                v12476 = v12231;
+                v12477 = v78;
+                v12478 = v79;
             }
-            let v12464 = v12315[0];
-            let v12465 = v12315[1];
-            let v12466 = v12315[2];
-            let v12467 = v12315[3];
-            let v12468 = v12315[4];
-            let v12469 = v12315[5];
-            let v12470 = v12320[0];
-            let v12471 = v12320[1];
-            let v12472 = v12320[2];
-            let v12473 = v12320[3];
-            let v12474 = v12320[4];
-            let v12475 = v12320[5];
-            let v12476 = v12325[0];
-            let v12477 = v12325[1];
-            let v12478 = v12325[2];
-            let v12479 = v12325[3];
-            let v12480 = v12325[4];
-            let v12481 = v12325[5];
-            let v12482 = v12327[0];
-            let v12483 = v12327[1];
-            let v12484 = v12327[2];
-            let v12485 = v12327[3];
-            let v12486 = v12327[4];
-            let v12487 = v12327[5];
-            let v12488 = v12329[0];
-            let v12489 = v12329[1];
-            let v12490 = v12329[2];
-            let v12491 = v12329[3];
-            let v12492 = v12329[4];
-            let v12493 = v12329[5];
-            let v12494 = v12331[0];
-            let v12495 = v12331[1];
-            let v12496 = v12331[2];
-            let v12497 = v12331[3];
-            let v12498 = v12343[0];
-            let v12499 = v12343[1];
-            let v12500 = v12343[2];
-            let v12501 = v12355[0];
-            let v12502 = v12355[1];
-            let v12503 = v12355[2];
-            let v12504 = v12364[0];
-            let v12505 = v12364[1];
-            let v12506 = v12364[2];
-            let v12507 = v12364[3];
-            let v12508 = v12364[4];
-            let v12509 = v12364[5];
-            let v12510 = v12364[6];
-            let v12511 = v12364[7];
-            let v12512 = v12364[8];
-            let v12513 = v12364[9];
-            let v12514 = v12372[0];
-            let v12515 = v12372[1];
-            let v12516 = v12372[2];
-            let v12517 = v12372[3];
-            let v12518 = v12372[4];
-            let v12519 = v12372[5];
-            let v12520 = v12372[6];
-            let v12521 = v12372[7];
-            let v12522 = v12372[8];
-            let v12523 = v12380[0];
-            let v12524 = v12380[1];
-            let v12525 = v12380[2];
-            let v12526 = v12380[3];
-            let v12527 = v12380[4];
-            let v12528 = v12380[5];
-            let v12529 = v12380[6];
-            let v12530 = v12380[7];
-            let v12531 = v12380[8];
-            let v12532 = v12384[0];
-            let v12533 = v12388[0];
-            let v12534 = v12388[1];
-            let v12535 = v12388[2];
-            let v12536 = v12388[3];
-            let v12537 = v12388[4];
-            let v12538 = v12388[5];
-            let v12539 = v12388[6];
-            let v12540 = v12396[0];
-            let v12541 = v12396[1];
-            let v12542 = v12396[2];
-            let v12543 = v12396[3];
-            let v12544 = v12396[4];
-            let v12545 = v12396[5];
-            let v12546 = v12396[6];
-            let v12547 = v12404[0];
-            let v12548 = v12404[1];
-            let v12549 = v12404[2];
-            let v12550 = v12404[3];
-            let v12551 = v12404[4];
-            let v12552 = v12404[5];
-            let v12553 = v12404[6];
-            let v12554 = v12417[0];
-            let v12555 = v12417[1];
-            let v12556 = v12435[0];
-            let v12557 = v12435[1];
-            let v12558 = v12435[2];
-            let v12559 = v12435[3];
-            let v12560 = v12435[4];
-            let v12561 = v12435[5];
-            let v12562 = v12445[0];
-            let v12563 = v12445[1];
-            let v12564 = v12445[2];
-            let v12565 = v12445[3];
-            let v12566 = v12445[4];
-            let v12567 = v12445[5];
-            let v12568 = v12462[0];
-            let v12569 = v12462[1];
-            let v12570 = v12462[2];
-            let v12571 = v12462[3];
-            let v12572 = v12462[4];
-            let v12573 = v12462[5];
-            let v12574 = v12462[6];
-            let v12575 = v12463[0];
-            let v12576 = v12463[1];
-            let v12577 = v12463[2];
-            let v12578 = v12463[3];
-            let v12579 = v12463[4];
-            let v12580 = v12463[5];
-            let v12581 = v12463[6];
-            let v12582 = v12394[0];
-            let v12583 = v12394[1];
-            let v12584 = v12394[2];
-            let v12585 = v12394[3];
-            let v12586 = v12394[4];
-            let v12587 = v12394[5];
-            let v12588 = v12394[6];
-            let v12589 = v12402[0];
-            let v12590 = v12402[1];
-            let v12591 = v12402[2];
-            let v12592 = v12402[3];
-            let v12593 = v12402[4];
-            let v12594 = v12402[5];
-            let v12595 = v12402[6];
+            let v12479 = v12315[0];
+            let v12480 = v12315[1];
+            let v12481 = v12315[2];
+            let v12482 = v12315[3];
+            let v12483 = v12315[4];
+            let v12484 = v12315[5];
+            let v12485 = v12320[0];
+            let v12486 = v12320[1];
+            let v12487 = v12320[2];
+            let v12488 = v12320[3];
+            let v12489 = v12320[4];
+            let v12490 = v12320[5];
+            let v12491 = v12325[0];
+            let v12492 = v12325[1];
+            let v12493 = v12325[2];
+            let v12494 = v12325[3];
+            let v12495 = v12325[4];
+            let v12496 = v12325[5];
+            let v12497 = v12327[0];
+            let v12498 = v12327[1];
+            let v12499 = v12327[2];
+            let v12500 = v12327[3];
+            let v12501 = v12327[4];
+            let v12502 = v12327[5];
+            let v12503 = v12329[0];
+            let v12504 = v12329[1];
+            let v12505 = v12329[2];
+            let v12506 = v12329[3];
+            let v12507 = v12329[4];
+            let v12508 = v12329[5];
+            let v12509 = v12331[0];
+            let v12510 = v12331[1];
+            let v12511 = v12331[2];
+            let v12512 = v12331[3];
+            let v12513 = v12343[0];
+            let v12514 = v12343[1];
+            let v12515 = v12343[2];
+            let v12516 = v12355[0];
+            let v12517 = v12355[1];
+            let v12518 = v12355[2];
+            let v12519 = v12364[0];
+            let v12520 = v12364[1];
+            let v12521 = v12364[2];
+            let v12522 = v12364[3];
+            let v12523 = v12364[4];
+            let v12524 = v12364[5];
+            let v12525 = v12364[6];
+            let v12526 = v12364[7];
+            let v12527 = v12364[8];
+            let v12528 = v12364[9];
+            let v12529 = v12374[0];
+            let v12530 = v12374[1];
+            let v12531 = v12374[2];
+            let v12532 = v12374[3];
+            let v12533 = v12374[4];
+            let v12534 = v12374[5];
+            let v12535 = v12374[6];
+            let v12536 = v12374[7];
+            let v12537 = v12374[8];
+            let v12538 = v12384[0];
+            let v12539 = v12384[1];
+            let v12540 = v12384[2];
+            let v12541 = v12384[3];
+            let v12542 = v12384[4];
+            let v12543 = v12384[5];
+            let v12544 = v12384[6];
+            let v12545 = v12384[7];
+            let v12546 = v12384[8];
+            let v12547 = v12390[0];
+            let v12548 = v12394[0];
+            let v12549 = v12394[1];
+            let v12550 = v12394[2];
+            let v12551 = v12394[3];
+            let v12552 = v12394[4];
+            let v12553 = v12394[5];
+            let v12554 = v12394[6];
+            let v12555 = v12402[0];
+            let v12556 = v12402[1];
+            let v12557 = v12402[2];
+            let v12558 = v12402[3];
+            let v12559 = v12402[4];
+            let v12560 = v12402[5];
+            let v12561 = v12402[6];
+            let v12562 = v12410[0];
+            let v12563 = v12410[1];
+            let v12564 = v12410[2];
+            let v12565 = v12410[3];
+            let v12566 = v12410[4];
+            let v12567 = v12410[5];
+            let v12568 = v12410[6];
+            let v12569 = v12423[0];
+            let v12570 = v12423[1];
+            let v12571 = v12442[0];
+            let v12572 = v12442[1];
+            let v12573 = v12442[2];
+            let v12574 = v12442[3];
+            let v12575 = v12442[4];
+            let v12576 = v12442[5];
+            let v12577 = v12455[0];
+            let v12578 = v12455[1];
+            let v12579 = v12455[2];
+            let v12580 = v12455[3];
+            let v12581 = v12455[4];
+            let v12582 = v12455[5];
+            let v12583 = v12475[0];
+            let v12584 = v12475[1];
+            let v12585 = v12475[2];
+            let v12586 = v12475[3];
+            let v12587 = v12475[4];
+            let v12588 = v12475[5];
+            let v12589 = v12475[6];
+            let v12590 = v12476[0];
+            let v12591 = v12476[1];
+            let v12592 = v12476[2];
+            let v12593 = v12476[3];
+            let v12594 = v12476[4];
+            let v12595 = v12476[5];
+            let v12596 = v12476[6];
+            let v12597 = v12366[0];
+            let v12598 = v12366[1];
+            let v12599 = v12366[2];
+            let v12600 = v12366[3];
+            let v12601 = v12366[4];
+            let v12602 = v12366[5];
+            let v12603 = v12366[6];
+            let v12604 = v12366[7];
+            let v12605 = v12366[8];
+            let v12606 = v12366[9];
+            let v12607 = v12376[0];
+            let v12608 = v12376[1];
+            let v12609 = v12376[2];
+            let v12610 = v12376[3];
+            let v12611 = v12376[4];
+            let v12612 = v12376[5];
+            let v12613 = v12376[6];
+            let v12614 = v12376[7];
+            let v12615 = v12376[8];
+            let v12616 = v12386[0];
+            let v12617 = v12386[1];
+            let v12618 = v12386[2];
+            let v12619 = v12386[3];
+            let v12620 = v12386[4];
+            let v12621 = v12386[5];
+            let v12622 = v12386[6];
+            let v12623 = v12386[7];
+            let v12624 = v12386[8];
+            let v12625 = v12400[0];
+            let v12626 = v12400[1];
+            let v12627 = v12400[2];
+            let v12628 = v12400[3];
+            let v12629 = v12400[4];
+            let v12630 = v12400[5];
+            let v12631 = v12400[6];
+            let v12632 = v12408[0];
+            let v12633 = v12408[1];
+            let v12634 = v12408[2];
+            let v12635 = v12408[3];
+            let v12636 = v12408[4];
+            let v12637 = v12408[5];
+            let v12638 = v12408[6];
+            let v12639 = v12443[0];
+            let v12640 = v12456[0];
+            let v12641 = v12477[0];
+            let v12642 = v12478[0];
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(11),
             Some(12),
             multiplicity * (v12314),
             [4, 5, 6, 10, 11, 12],
-            [v12464, v12465, v12466, v12467, v12468, v12469],
+            [v12479, v12480, v12481, v12482, v12483, v12484],
             [],
             [],
             multiplicity,
@@ -11662,7 +11739,7 @@ impl Instance {
             Some(12),
             multiplicity * (v12319),
             [4, 5, 6, 10, 11, 12],
-            [v12470, v12471, v12472, v12473, v12474, v12475],
+            [v12485, v12486, v12487, v12488, v12489, v12490],
             [],
             [],
             multiplicity,
@@ -11672,7 +11749,7 @@ impl Instance {
             Some(11),
             multiplicity * (v12324),
             [4, 5, 6, 10, 11, 12],
-            [v12476, v12477, v12478, v12479, v12480, v12481],
+            [v12491, v12492, v12493, v12494, v12495, v12496],
             [],
             [],
             multiplicity,
@@ -11682,7 +11759,7 @@ impl Instance {
             Some(12),
             multiplicity * (v12326),
             [4, 5, 6, 10, 11, 12],
-            [v12482, v12483, v12484, v12485, v12486, v12487],
+            [v12497, v12498, v12499, v12500, v12501, v12502],
             [],
             [],
             multiplicity,
@@ -11692,7 +11769,7 @@ impl Instance {
             Some(11),
             multiplicity * (v12328),
             [4, 5, 6, 10, 11, 12],
-            [v12488, v12489, v12490, v12491, v12492, v12493],
+            [v12503, v12504, v12505, v12506, v12507, v12508],
             [],
             [],
             multiplicity,
@@ -11702,7 +11779,7 @@ impl Instance {
             Some(6),
             multiplicity * (v12330),
             [5, 6, 11, 12],
-            [v12494, v12495, v12496, v12497],
+            [v12509, v12510, v12511, v12512],
             [],
             [],
             multiplicity,
@@ -11712,7 +11789,7 @@ impl Instance {
             Some(2),
             multiplicity * (v12342),
             [2, 4, 12],
-            [v12498, v12499, v12500],
+            [v12513, v12514, v12515],
             [],
             [],
             multiplicity,
@@ -11731,7 +11808,7 @@ impl Instance {
             Some(11),
             multiplicity * (v12354),
             [0, 4, 11],
-            [v12501, v12502, v12503],
+            [v12516, v12517, v12518],
             [],
             [],
             multiplicity,
@@ -11750,7 +11827,7 @@ impl Instance {
             Some(12),
             multiplicity * (v12363),
             [0, 2, 4, 5, 6, 8, 9, 10, 11, 12],
-            [v12504, v12505, v12506, v12507, v12508, v12509, v12510, v12511, v12512, v12513],
+            [v12519, v12520, v12521, v12522, v12523, v12524, v12525, v12526, v12527, v12528],
             [],
             [],
             multiplicity,
@@ -11758,9 +11835,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<9, 0>(
             Some(11),
             Some(12),
-            multiplicity * (v12371),
+            multiplicity * (v12373),
             [0, 2, 4, 5, 6, 8, 10, 11, 12],
-            [v12514, v12515, v12516, v12517, v12518, v12519, v12520, v12521, v12522],
+            [v12529, v12530, v12531, v12532, v12533, v12534, v12535, v12536, v12537],
             [],
             [],
             multiplicity,
@@ -11768,9 +11845,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<9, 0>(
             Some(6),
             Some(12),
-            multiplicity * (v12379),
+            multiplicity * (v12383),
             [0, 2, 4, 5, 6, 9, 10, 11, 12],
-            [v12523, v12524, v12525, v12526, v12527, v12528, v12529, v12530, v12531],
+            [v12538, v12539, v12540, v12541, v12542, v12543, v12544, v12545, v12546],
             [],
             [],
             multiplicity,
@@ -11778,7 +11855,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(11),
             Some(12),
-            multiplicity * (v12596),
+            multiplicity * (v12643),
             [],
             [],
             [],
@@ -11788,9 +11865,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(7),
             None,
-            multiplicity * (v12381),
+            multiplicity * (v12387),
             [7],
-            [v12532],
+            [v12547],
             [],
             [],
             multiplicity,
@@ -11798,7 +11875,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             None,
-            multiplicity * (v12597),
+            multiplicity * (v12644),
             [],
             [],
             [],
@@ -11808,7 +11885,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(11),
             Some(12),
-            multiplicity * (v12598),
+            multiplicity * (v12645),
             [],
             [],
             [],
@@ -11818,9 +11895,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(11),
             Some(12),
-            multiplicity * (v12382),
+            multiplicity * (v12388),
             [4, 5, 6, 7, 10, 11, 12],
-            [v12533, v12534, v12535, v12536, v12537, v12538, v12539],
+            [v12548, v12549, v12550, v12551, v12552, v12553, v12554],
             [],
             [],
             multiplicity,
@@ -11828,9 +11905,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(5),
             Some(12),
-            multiplicity * (v12395),
+            multiplicity * (v12401),
             [4, 5, 6, 7, 10, 11, 12],
-            [v12540, v12541, v12542, v12543, v12544, v12545, v12546],
+            [v12555, v12556, v12557, v12558, v12559, v12560, v12561],
             [],
             [],
             multiplicity,
@@ -11838,9 +11915,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(5),
             Some(11),
-            multiplicity * (v12403),
+            multiplicity * (v12409),
             [4, 5, 6, 7, 10, 11, 12],
-            [v12547, v12548, v12549, v12550, v12551, v12552, v12553],
+            [v12562, v12563, v12564, v12565, v12566, v12567, v12568],
             [],
             [],
             multiplicity,
@@ -11868,7 +11945,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(11),
-            multiplicity * (v12599),
+            multiplicity * (v12646),
             [],
             [],
             [],
@@ -11878,7 +11955,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(12),
-            multiplicity * (v12600),
+            multiplicity * (v12647),
             [],
             [],
             [],
@@ -11888,7 +11965,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(6),
-            multiplicity * (v12601),
+            multiplicity * (v12648),
             [],
             [],
             [],
@@ -11898,9 +11975,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(1),
             Some(5),
-            multiplicity * (v12416),
+            multiplicity * (v12422),
             [1, 5],
-            [v12554, v12555],
+            [v12569, v12570],
             [],
             [],
             multiplicity,
@@ -11917,7 +11994,7 @@ impl Instance {
         stamper.stamp_potential_branch_local(Some(3), Some(6), 3, multiplicity);
         stamper.stamp_potential_sparse_local::<0, 0>(
             3,
-            v12602,
+            v12649,
             [],
             [],
             [],
@@ -11926,9 +12003,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(4),
             None,
-            multiplicity * (v12434),
+            multiplicity * (v12440),
             [4, 5, 6, 10, 11, 12],
-            [v12556, v12557, v12558, v12559, v12560, v12561],
+            [v12571, v12572, v12573, v12574, v12575, v12576],
             [],
             [],
             multiplicity,
@@ -11945,9 +12022,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(10),
             None,
-            multiplicity * (v12444),
+            multiplicity * (v12453),
             [4, 5, 6, 10, 11, 12],
-            [v12562, v12563, v12564, v12565, v12566, v12567],
+            [v12577, v12578, v12579, v12580, v12581, v12582],
             [],
             [],
             multiplicity,
@@ -11964,9 +12041,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(8),
             None,
-            multiplicity * (v12460),
+            multiplicity * (v12471),
             [4, 5, 6, 8, 10, 11, 12],
-            [v12568, v12569, v12570, v12571, v12572, v12573, v12574],
+            [v12583, v12584, v12585, v12586, v12587, v12588, v12589],
             [],
             [],
             multiplicity,
@@ -11974,9 +12051,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(9),
             None,
-            multiplicity * (v12461),
+            multiplicity * (v12472),
             [4, 5, 6, 9, 10, 11, 12],
-            [v12575, v12576, v12577, v12578, v12579, v12580, v12581],
+            [v12590, v12591, v12592, v12593, v12594, v12595, v12596],
             [],
             [],
             multiplicity,
@@ -12009,46 +12086,78 @@ impl Instance {
         self.canonical_reactive[7] = staged[194];
         self.canonical_reactive[8] = v12354;
         self.canonical_reactive[9] = staged[195];
-        self.canonical_reactive[10] = v12363;
-        self.canonical_reactive[11] = v12371;
-        self.canonical_reactive[12] = v12379;
-        self.canonical_reactive[13] = v12596;
-        self.canonical_reactive[14] = v12381;
-        self.canonical_reactive[15] = v12597;
-        self.canonical_reactive[16] = v12598;
-        self.canonical_reactive[17] = v12382;
-        self.canonical_reactive[18] = v12389;
-        self.canonical_reactive[19] = v12582;
-        self.canonical_reactive[20] = v12583;
-        self.canonical_reactive[21] = v12584;
-        self.canonical_reactive[22] = v12585;
-        self.canonical_reactive[23] = v12586;
-        self.canonical_reactive[24] = v12587;
-        self.canonical_reactive[25] = v12588;
-        self.canonical_reactive[26] = v12397;
-        self.canonical_reactive[27] = v12589;
-        self.canonical_reactive[28] = v12590;
-        self.canonical_reactive[29] = v12591;
-        self.canonical_reactive[30] = v12592;
-        self.canonical_reactive[31] = v12593;
-        self.canonical_reactive[32] = v12594;
-        self.canonical_reactive[33] = v12595;
-        self.canonical_reactive[34] = staged[196];
-        self.canonical_reactive[35] = staged[197];
-        self.canonical_reactive[36] = v12599;
-        self.canonical_reactive[37] = v12600;
-        self.canonical_reactive[38] = v12601;
-        self.canonical_reactive[39] = v12416;
-        self.canonical_reactive[40] = staged[198];
-        self.canonical_reactive[41] = v12602;
-        self.canonical_reactive[42] = v12434;
-        self.canonical_reactive[43] = staged[199];
-        self.canonical_reactive[44] = v12444;
-        self.canonical_reactive[45] = staged[200];
-        self.canonical_reactive[46] = v12460;
-        self.canonical_reactive[47] = v12461;
-        self.canonical_reactive[48] = staged[201];
-        self.canonical_reactive[49] = staged[202];
+        self.canonical_reactive[10] = v12365;
+        self.canonical_reactive[11] = v12597;
+        self.canonical_reactive[12] = v12598;
+        self.canonical_reactive[13] = v12599;
+        self.canonical_reactive[14] = v12600;
+        self.canonical_reactive[15] = v12601;
+        self.canonical_reactive[16] = v12602;
+        self.canonical_reactive[17] = v12603;
+        self.canonical_reactive[18] = v12604;
+        self.canonical_reactive[19] = v12605;
+        self.canonical_reactive[20] = v12606;
+        self.canonical_reactive[21] = v12375;
+        self.canonical_reactive[22] = v12607;
+        self.canonical_reactive[23] = v12608;
+        self.canonical_reactive[24] = v12609;
+        self.canonical_reactive[25] = v12610;
+        self.canonical_reactive[26] = v12611;
+        self.canonical_reactive[27] = v12612;
+        self.canonical_reactive[28] = v12613;
+        self.canonical_reactive[29] = v12614;
+        self.canonical_reactive[30] = v12615;
+        self.canonical_reactive[31] = v12385;
+        self.canonical_reactive[32] = v12616;
+        self.canonical_reactive[33] = v12617;
+        self.canonical_reactive[34] = v12618;
+        self.canonical_reactive[35] = v12619;
+        self.canonical_reactive[36] = v12620;
+        self.canonical_reactive[37] = v12621;
+        self.canonical_reactive[38] = v12622;
+        self.canonical_reactive[39] = v12623;
+        self.canonical_reactive[40] = v12624;
+        self.canonical_reactive[41] = v12643;
+        self.canonical_reactive[42] = v12387;
+        self.canonical_reactive[43] = v12644;
+        self.canonical_reactive[44] = v12645;
+        self.canonical_reactive[45] = v12388;
+        self.canonical_reactive[46] = v12395;
+        self.canonical_reactive[47] = v12625;
+        self.canonical_reactive[48] = v12626;
+        self.canonical_reactive[49] = v12627;
+        self.canonical_reactive[50] = v12628;
+        self.canonical_reactive[51] = v12629;
+        self.canonical_reactive[52] = v12630;
+        self.canonical_reactive[53] = v12631;
+        self.canonical_reactive[54] = v12403;
+        self.canonical_reactive[55] = v12632;
+        self.canonical_reactive[56] = v12633;
+        self.canonical_reactive[57] = v12634;
+        self.canonical_reactive[58] = v12635;
+        self.canonical_reactive[59] = v12636;
+        self.canonical_reactive[60] = v12637;
+        self.canonical_reactive[61] = v12638;
+        self.canonical_reactive[62] = staged[196];
+        self.canonical_reactive[63] = staged[197];
+        self.canonical_reactive[64] = v12646;
+        self.canonical_reactive[65] = v12647;
+        self.canonical_reactive[66] = v12648;
+        self.canonical_reactive[67] = v12422;
+        self.canonical_reactive[68] = staged[198];
+        self.canonical_reactive[69] = v12649;
+        self.canonical_reactive[70] = v12441;
+        self.canonical_reactive[71] = v12639;
+        self.canonical_reactive[72] = staged[199];
+        self.canonical_reactive[73] = v12454;
+        self.canonical_reactive[74] = v12640;
+        self.canonical_reactive[75] = staged[200];
+        self.canonical_reactive[76] = v12473;
+        self.canonical_reactive[77] = v12641;
+        self.canonical_reactive[78] = v12474;
+        self.canonical_reactive[79] = v12642;
+        self.canonical_reactive[80] = staged[201];
+        self.canonical_reactive[81] = staged[202];
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -12057,8 +12166,35 @@ impl Instance {
         stamper.stamp_current_reactive_indexed_dense_local(
             Some(5),
             Some(12),
+            &[0, 2, 4, 5, 6, 8, 9, 10, 11, 12],
+            &[cached[11], cached[12], cached[13], cached[14], cached[15], cached[16], cached[17], cached[18], cached[19], cached[20]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(11),
+            Some(12),
+            &[0, 2, 4, 5, 6, 8, 10, 11, 12],
+            &[cached[22], cached[23], cached[24], cached[25], cached[26], cached[27], cached[28], cached[29], cached[30]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(6),
+            Some(12),
+            &[0, 2, 4, 5, 6, 9, 10, 11, 12],
+            &[cached[32], cached[33], cached[34], cached[35], cached[36], cached[37], cached[38], cached[39], cached[40]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(12),
             &[4, 5, 6, 7, 10, 11, 12],
-            &[cached[19], cached[20], cached[21], cached[22], cached[23], cached[24], cached[25]],
+            &[cached[47], cached[48], cached[49], cached[50], cached[51], cached[52], cached[53]],
             &[],
             &[],
             multiplicity,
@@ -12067,7 +12203,43 @@ impl Instance {
             Some(5),
             Some(11),
             &[4, 5, 6, 7, 10, 11, 12],
-            &[cached[27], cached[28], cached[29], cached[30], cached[31], cached[32], cached[33]],
+            &[cached[55], cached[56], cached[57], cached[58], cached[59], cached[60], cached[61]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(4),
+            None,
+            &[4],
+            &[cached[71]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(10),
+            None,
+            &[10],
+            &[cached[74]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(8),
+            None,
+            &[8],
+            &[cached[77]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(9),
+            None,
+            &[9],
+            &[cached[79]],
             &[],
             &[],
             multiplicity,

@@ -520,6 +520,7 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+    pub(crate) canonical_reactive: Box<[f64; 102]>,
     pub(crate) canonical_staged: Box<[f64; 231]>,
     pub(crate) canonical_instance_valid: bool,
     pub(crate) canonical_temperature_valid: bool,
@@ -540,6 +541,7 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
+            canonical_reactive: self.canonical_reactive.clone(),
             canonical_staged: self.canonical_staged.clone(),
             canonical_instance_valid: self.canonical_instance_valid,
             canonical_temperature_valid: self.canonical_temperature_valid,
@@ -560,7 +562,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 616;
     pub const DDT_STATE_COUNT: usize = 10;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3540842050e42abfd6c9ee6fee4c461b8a2b5e8ba3801c30ef75be0dbd2abe74";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "f55d27e9172496b37e1df08c8e7cee14d0050589aa38a534a6285bece17339ed";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -578,6 +580,7 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+            canonical_reactive: canonical_boxed_zero_f64(),
             canonical_staged: canonical_boxed_zero_f64(),
             canonical_instance_valid: false,
             canonical_temperature_valid: false,

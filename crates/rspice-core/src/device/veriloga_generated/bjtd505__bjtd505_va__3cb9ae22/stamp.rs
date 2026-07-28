@@ -1523,36 +1523,36 @@ impl Instance {
             let v2731 = staged[130];
             let v2754 = -1e0f64;
             let v2782 = ddt_scale();
-            let v2810 = staged[131];
-            let v2817 = staged[132];
-            let v2830 = staged[133];
-            let v2863 = staged[134];
-            let v2868 = Lanes([0e0f64; 2]);
-            let v2873 = staged[135];
-            let v2878 = Lanes([0e0f64; 2]);
-            let v2887 = staged[179];
-            let v2893 = 0e0f64;
-            let v2907 = staged[136];
-            let v2916 = staged[180];
-            let v2919 = staged[181];
-            let v2924 = parameters[131];
-            let v2935 = node_potentials[10];
-            let v2937 = Lanes([1e0f64; 1]);
-            let v3056 = 0e0f64;
-            let v3057 = 0e0f64;
-            let v3058 = 0e0f64;
-            let v3059 = 0e0f64;
-            let v3060 = 0e0f64;
-            let v3061 = 0e0f64;
-            let v3062 = 0e0f64;
-            let v3063 = 0e0f64;
-            let v3064 = 0e0f64;
-            let v3065 = 0e0f64;
-            let v3066 = 0e0f64;
-            let v3067 = 0e0f64;
-            let v3068 = 0e0f64;
-            let v3069 = 0e0f64;
-            let v3070 = 0e0f64;
+            let v2818 = staged[131];
+            let v2827 = staged[132];
+            let v2842 = staged[133];
+            let v2879 = staged[134];
+            let v2884 = Lanes([0e0f64; 2]);
+            let v2889 = staged[135];
+            let v2894 = Lanes([0e0f64; 2]);
+            let v2903 = staged[179];
+            let v2909 = 0e0f64;
+            let v2923 = staged[136];
+            let v2932 = staged[180];
+            let v2935 = staged[181];
+            let v2940 = parameters[131];
+            let v2951 = node_potentials[10];
+            let v2953 = Lanes([1e0f64; 1]);
+            let v3115 = 0e0f64;
+            let v3116 = 0e0f64;
+            let v3117 = 0e0f64;
+            let v3118 = 0e0f64;
+            let v3119 = 0e0f64;
+            let v3120 = 0e0f64;
+            let v3121 = 0e0f64;
+            let v3122 = 0e0f64;
+            let v3123 = 0e0f64;
+            let v3124 = 0e0f64;
+            let v3125 = 0e0f64;
+            let v3126 = 0e0f64;
+            let v3127 = 0e0f64;
+            let v3128 = 0e0f64;
+            let v3129 = 0e0f64;
             let v1 = ctx.simparam_or("gmin", v0);
             let v14 = v13 * (v5 - v6);
             let v15 = ((Lanes([v8[0], 0.0])) - (Lanes([0.0, v10[0]]))) * v13;
@@ -3417,222 +3417,295 @@ impl Instance {
             let v2766 = ((v59 * v13) / v2195) * v2621;
             let v2771 = ((v13 * v66) / v2179) * v2621;
             let v2772 = ((v67 * v13) / v2179) * v2621;
-            let v2784 = (ddt(12033, (v13 * ((v2260 + v2611) + v2612)))) * v2621;
-            let v2785 = (((((Lanes([v2261[0], v2261[1], 0.0, 0.0])) + v2615) + (Lanes([v2616[0], v2616[1], 0.0, 0.0]))) * v13) * v2782) * v2621;
-            let v2790 = (ddt(12039, (v13 * v2309))) * v2621;
-            let v2791 = ((v2310 * v13) * v2782) * v2621;
-            let v2802 = (ddt(12049, (v13 * ((v2312 + v2613) + v2472)))) * v2621;
-            let v2803 = (((((Lanes([0.0, v2313[0], v2313[1], v2313[2]])) + v2617) + (Lanes([0.0, v2475[0], v2475[1], v2475[2]]))) * v13) * v2782) * v2621;
-            let v2808 = (ddt(12055, (v13 * v2614))) * v2621;
-            let v2809 = ((v2618 * v13) * v2782) * v2621;
-            let v2815 = (ddt(12063, (v2810 * v72))) * v2621;
-            let v2816 = ((v73 * v2810) * v2782) * v2621;
-            let v2822 = (ddt(12071, (v2817 * v80))) * v2621;
-            let v2823 = ((v81 * v2817) * v2782) * v2621;
-            let v2826 = (v13 * v1688) * v2621;
-            let v2827 = (v1692 * v13) * v2621;
-            let v2833 = ((v13 * v121) * v2830) * v2621;
-            let v2834 = ((v124 * v13) * v2830) * v2621;
-            let v2841 = (ddt(12091, (v13 * (v2447 + v2528)))) * v2621;
-            let v2842 = (((v2448 + v2530) * v13) * v2782) * v2621;
-            let v2851 = (v13 * ((v1683 + (v1 * v106)) + v1678)) * v2621;
-            let v2852 = (((v1687 + (v109 * v1)) + v1682) * v13) * v2621;
-            let v2859 = (ddt(12110, (v13 * (v2388 + v2529)))) * v2621;
-            let v2860 = (((v2389 + v2531) * v13) * v2782) * v2621;
-            let v2869: f64;
-            let v2870: Lanes<2>;
+            let v2779 = v13 * ((v2260 + v2611) + v2612);
+            let v2780 = (((Lanes([v2261[0], v2261[1], 0.0, 0.0])) + v2615) + (Lanes([v2616[0], v2616[1], 0.0, 0.0]))) * v13;
+            let v2784 = (ddt(12033, v2779)) * v2621;
+            let v2785 = (v2780 * v2782) * v2621;
+            let v2786 = v2779 * v2621;
+            let v2787 = v2780 * v2621;
+            let v2788 = v13 * v2309;
+            let v2789 = v2310 * v13;
+            let v2792 = (ddt(12039, v2788)) * v2621;
+            let v2793 = (v2789 * v2782) * v2621;
+            let v2794 = v2788 * v2621;
+            let v2795 = v2789 * v2621;
+            let v2802 = v13 * ((v2312 + v2613) + v2472);
+            let v2803 = (((Lanes([0.0, v2313[0], v2313[1], v2313[2]])) + v2617) + (Lanes([0.0, v2475[0], v2475[1], v2475[2]]))) * v13;
+            let v2806 = (ddt(12049, v2802)) * v2621;
+            let v2807 = (v2803 * v2782) * v2621;
+            let v2808 = v2802 * v2621;
+            let v2809 = v2803 * v2621;
+            let v2810 = v13 * v2614;
+            let v2811 = v2618 * v13;
+            let v2814 = (ddt(12055, v2810)) * v2621;
+            let v2815 = (v2811 * v2782) * v2621;
+            let v2816 = v2810 * v2621;
+            let v2817 = v2811 * v2621;
+            let v2819 = v2818 * v72;
+            let v2820 = v73 * v2818;
+            let v2823 = (ddt(12063, v2819)) * v2621;
+            let v2824 = (v2820 * v2782) * v2621;
+            let v2825 = v2819 * v2621;
+            let v2826 = v2820 * v2621;
+            let v2828 = v2827 * v80;
+            let v2829 = v81 * v2827;
+            let v2832 = (ddt(12071, v2828)) * v2621;
+            let v2833 = (v2829 * v2782) * v2621;
+            let v2834 = v2828 * v2621;
+            let v2835 = v2829 * v2621;
+            let v2838 = (v13 * v1688) * v2621;
+            let v2839 = (v1692 * v13) * v2621;
+            let v2845 = ((v13 * v121) * v2842) * v2621;
+            let v2846 = ((v124 * v13) * v2842) * v2621;
+            let v2849 = v13 * (v2447 + v2528);
+            let v2850 = (v2448 + v2530) * v13;
+            let v2853 = (ddt(12091, v2849)) * v2621;
+            let v2854 = (v2850 * v2782) * v2621;
+            let v2855 = v2849 * v2621;
+            let v2856 = v2850 * v2621;
+            let v2865 = (v13 * ((v1683 + (v1 * v106)) + v1678)) * v2621;
+            let v2866 = (((v1687 + (v109 * v1)) + v1682) * v13) * v2621;
+            let v2869 = v13 * (v2388 + v2529);
+            let v2870 = (v2389 + v2531) * v13;
+            let v2873 = (ddt(12110, v2869)) * v2621;
+            let v2874 = (v2870 * v2782) * v2621;
+            let v2875 = v2869 * v2621;
+            let v2876 = v2870 * v2621;
+            let v2885: f64;
+            let v2886: Lanes<2>;
             if v3 != 0.0 {
-                let v2866 = ((v13 * v96) * v2863) * v2621;
-                let v2867 = ((v97 * v13) * v2863) * v2621;
-                v2869 = v2866;
-                v2870 = v2867;
+                let v2882 = ((v13 * v96) * v2879) * v2621;
+                let v2883 = ((v97 * v13) * v2879) * v2621;
+                v2885 = v2882;
+                v2886 = v2883;
             } else {
-                v2869 = v0;
-                v2870 = v2868;
+                v2885 = v0;
+                v2886 = v2884;
             }
-            let v2879: f64;
-            let v2880: Lanes<2>;
+            let v2895: f64;
+            let v2896: Lanes<2>;
             if v4 != 0.0 {
-                let v2876 = ((v13 * v88) * v2873) * v2621;
-                let v2877 = ((v89 * v13) * v2873) * v2621;
-                v2879 = v2876;
-                v2880 = v2877;
+                let v2892 = ((v13 * v88) * v2889) * v2621;
+                let v2893 = ((v89 * v13) * v2889) * v2621;
+                v2895 = v2892;
+                v2896 = v2893;
             } else {
-                v2879 = v0;
-                v2880 = v2878;
+                v2895 = v0;
+                v2896 = v2894;
             }
-            let v2883 = (v885 + v882) / v877;
-            let v2886 = ((v888 + v889) - (v880 * v2883)) / v877;
-            let v2898: f64;
-            let v2899: Lanes<4>;
-            if v2887 != 0.0 {
-                let v2888 = v1816 / v2883;
-                let v2892 = v2888.abs();
-                let v2897 = ((v1817 - (v2886 * v2888)) / v2883) * ((v249 * (if v2888 >= v2893 { 1.0 } else { 0.0 })) - v251);
-                v2898 = v2892;
-                v2899 = v2897;
-            } else {
-                v2898 = v0;
-                v2899 = v1796;
-            }
-            let v2900 = if v2883 > v0 { 1.0 } else { 0.0 };
+            let v2899 = (v885 + v882) / v877;
+            let v2902 = ((v888 + v889) - (v880 * v2899)) / v877;
             let v2914: f64;
             let v2915: Lanes<4>;
-            if v2900 != 0.0 {
-                let v2903 = (v2611 + v2613) / v2883;
-                let v2906 = ((v2615 + v2617) - (v2886 * v2903)) / v2883;
-                v2914 = v2903;
-                v2915 = v2906;
-            } else {
-                let v2908 = v2907 * v1783;
-                let v2910 = v2908 * v877;
-                let v2913 = ((v1784 * v2907) * v877) + (v880 * v2908);
-                v2914 = v2910;
+            if v2903 != 0.0 {
+                let v2904 = v1816 / v2899;
+                let v2908 = v2904.abs();
+                let v2913 = ((v1817 - (v2902 * v2904)) / v2899) * ((v249 * (if v2904 >= v2909 { 1.0 } else { 0.0 })) - v251);
+                v2914 = v2908;
                 v2915 = v2913;
-            }
-            let v2920: f64;
-            let v2921: Lanes<4>;
-            if v2916 != 0.0 {
-                let v2917 = v2726 * v2914;
-                let v2918 = v2915 * v2726;
-                v2920 = v2917;
-                v2921 = v2918;
             } else {
-                let v2927: f64;
-                let v2928: Lanes<4>;
-                if v2919 != 0.0 {
-                    let v2925 = v2924 * v2914;
-                    let v2926 = v2915 * v2924;
-                    v2927 = v2925;
-                    v2928 = v2926;
-                } else {
-                    v2927 = v0;
-                    v2928 = v1796;
-                }
-                v2920 = v2927;
-                v2921 = v2928;
+                v2914 = v0;
+                v2915 = v1796;
             }
-            let v2923 = if (v998 + v1124) < v0 { 1.0 } else { 0.0 };
-            let v2931 = if ((v1170 + v1187) + v1221) < v0 { 1.0 } else { 0.0 };
-            let v2932 = if v1683 < v0 { 1.0 } else { 0.0 };
-            let v2933 = if v1678 < v0 { 1.0 } else { 0.0 };
-            let v2934 = if v1688 < v0 { 1.0 } else { 0.0 };
-            let v2936 = ddt(12363, v2935);
-            let v2939 = v2920 * v2936;
-            let v2940 = v2921 * v2936;
-            let v2941 = (v2937 * v2782) * v2920;
-            let v2944 = (Lanes([v2940[0], v2940[1], v2940[2], v2940[3], 0.0])) + (Lanes([0.0, 0.0, 0.0, 0.0, v2941[0]]));
-            let v2945 = v2898 * v2935;
-            let v2946 = v2899 * v2935;
-            let v2947 = v2937 * v2898;
-            let v2950 = (Lanes([v2946[0], v2946[1], v2946[2], v2946[3], 0.0])) + (Lanes([0.0, 0.0, 0.0, 0.0, v2947[0]]));
-            let v2955 = if ((((v2771 + v2815) + v2822) + v2826) + v2841) == v0 { 1.0 } else { 0.0 };
-            let v2956 = v2623[0];
-            let v2957 = v2623[1];
-            let v2958 = v2623[2];
-            let v2959 = v2627[0];
-            let v2960 = v2627[1];
-            let v2961 = v2627[2];
-            let v2962 = v2627[3];
-            let v2963 = v2635[0];
-            let v2964 = v2635[1];
-            let v2965 = v2656[0];
-            let v2966 = v2656[1];
-            let v2967 = v2656[2];
-            let v2968 = v2656[3];
-            let v2969 = v2748[0];
-            let v2970 = v2748[1];
-            let v2971 = v2748[2];
-            let v2972 = v2749[0];
-            let v2973 = v2749[1];
-            let v2974 = v2749[2];
-            let v2975 = v2753[0];
-            let v2976 = v2753[1];
-            let v2977 = v2753[2];
-            let v2978 = v2753[3];
-            let v2979 = v2753[4];
-            let v2980 = v2760[0];
-            let v2981 = v2760[1];
-            let v2982 = v2760[2];
-            let v2983 = v2760[3];
-            let v2984 = v2766[0];
-            let v2985 = v2766[1];
-            let v2986 = v2772[0];
-            let v2987 = v2772[1];
-            let v2988 = v2785[0];
-            let v2989 = v2785[1];
-            let v2990 = v2785[2];
-            let v2991 = v2785[3];
-            let v2992 = v2791[0];
-            let v2993 = v2791[1];
-            let v2994 = v2803[0];
-            let v2995 = v2803[1];
-            let v2996 = v2803[2];
-            let v2997 = v2803[3];
-            let v2998 = v2809[0];
-            let v2999 = v2809[1];
-            let v3000 = v2809[2];
-            let v3001 = v2809[3];
-            let v3002 = v2809[4];
-            let v3003 = v2816[0];
-            let v3004 = v2816[1];
-            let v3005 = v2823[0];
-            let v3006 = v2823[1];
-            let v3007 = v2827[0];
-            let v3008 = v2827[1];
-            let v3009 = v2827[2];
-            let v3010 = v2827[3];
-            let v3011 = v2827[4];
-            let v3012 = v2827[5];
-            let v3013 = v2827[6];
-            let v3014 = v2827[7];
-            let v3015 = v2834[0];
-            let v3016 = v2834[1];
-            let v3017 = v2834[2];
-            let v3018 = v2834[3];
-            let v3019 = v2834[4];
-            let v3020 = v2834[5];
-            let v3021 = v2834[6];
-            let v3022 = v2834[7];
-            let v3023 = v2842[0];
-            let v3024 = v2842[1];
-            let v3025 = v2842[2];
-            let v3026 = v2842[3];
-            let v3027 = v2842[4];
-            let v3028 = v2842[5];
-            let v3029 = v2842[6];
-            let v3030 = v2842[7];
-            let v3031 = v2852[0];
-            let v3032 = v2852[1];
-            let v3033 = v2852[2];
-            let v3034 = v2852[3];
-            let v3035 = v2852[4];
-            let v3036 = v2860[0];
-            let v3037 = v2860[1];
-            let v3038 = v2860[2];
-            let v3039 = v2860[3];
-            let v3040 = v2860[4];
-            let v3041 = v2870[0];
-            let v3042 = v2870[1];
-            let v3043 = v2880[0];
-            let v3044 = v2880[1];
-            let v3045 = v2937[0];
-            let v3046 = v2944[0];
-            let v3047 = v2944[1];
-            let v3048 = v2944[2];
-            let v3049 = v2944[3];
-            let v3050 = v2944[4];
-            let v3051 = v2950[0];
-            let v3052 = v2950[1];
-            let v3053 = v2950[2];
-            let v3054 = v2950[3];
-            let v3055 = v2950[4];
+            let v2916 = if v2899 > v0 { 1.0 } else { 0.0 };
+            let v2930: f64;
+            let v2931: Lanes<4>;
+            if v2916 != 0.0 {
+                let v2919 = (v2611 + v2613) / v2899;
+                let v2922 = ((v2615 + v2617) - (v2902 * v2919)) / v2899;
+                v2930 = v2919;
+                v2931 = v2922;
+            } else {
+                let v2924 = v2923 * v1783;
+                let v2926 = v2924 * v877;
+                let v2929 = ((v1784 * v2923) * v877) + (v880 * v2924);
+                v2930 = v2926;
+                v2931 = v2929;
+            }
+            let v2936: f64;
+            let v2937: Lanes<4>;
+            if v2932 != 0.0 {
+                let v2933 = v2726 * v2930;
+                let v2934 = v2931 * v2726;
+                v2936 = v2933;
+                v2937 = v2934;
+            } else {
+                let v2943: f64;
+                let v2944: Lanes<4>;
+                if v2935 != 0.0 {
+                    let v2941 = v2940 * v2930;
+                    let v2942 = v2931 * v2940;
+                    v2943 = v2941;
+                    v2944 = v2942;
+                } else {
+                    v2943 = v0;
+                    v2944 = v1796;
+                }
+                v2936 = v2943;
+                v2937 = v2944;
+            }
+            let v2939 = if (v998 + v1124) < v0 { 1.0 } else { 0.0 };
+            let v2947 = if ((v1170 + v1187) + v1221) < v0 { 1.0 } else { 0.0 };
+            let v2948 = if v1683 < v0 { 1.0 } else { 0.0 };
+            let v2949 = if v1678 < v0 { 1.0 } else { 0.0 };
+            let v2950 = if v1688 < v0 { 1.0 } else { 0.0 };
+            let v2952 = ddt(12363, v2951);
+            let v2955 = v2936 * v2952;
+            let v2956 = v2937 * v2952;
+            let v2957 = (v2953 * v2782) * v2936;
+            let v2960 = (Lanes([v2956[0], v2956[1], v2956[2], v2956[3], 0.0])) + (Lanes([0.0, 0.0, 0.0, 0.0, v2957[0]]));
+            let v2961 = v2936 * v2951;
+            let v2962 = v2937 * v2951;
+            let v2963 = v2953 * v2936;
+            let v2966 = (Lanes([v2962[0], v2962[1], v2962[2], v2962[3], 0.0])) + (Lanes([0.0, 0.0, 0.0, 0.0, v2963[0]]));
+            let v2967 = v2914 * v2951;
+            let v2968 = v2915 * v2951;
+            let v2969 = v2953 * v2914;
+            let v2972 = (Lanes([v2968[0], v2968[1], v2968[2], v2968[3], 0.0])) + (Lanes([0.0, 0.0, 0.0, 0.0, v2969[0]]));
+            let v2977 = if ((((v2771 + v2823) + v2832) + v2838) + v2853) == v0 { 1.0 } else { 0.0 };
+            let v2978 = v2623[0];
+            let v2979 = v2623[1];
+            let v2980 = v2623[2];
+            let v2981 = v2627[0];
+            let v2982 = v2627[1];
+            let v2983 = v2627[2];
+            let v2984 = v2627[3];
+            let v2985 = v2635[0];
+            let v2986 = v2635[1];
+            let v2987 = v2656[0];
+            let v2988 = v2656[1];
+            let v2989 = v2656[2];
+            let v2990 = v2656[3];
+            let v2991 = v2748[0];
+            let v2992 = v2748[1];
+            let v2993 = v2748[2];
+            let v2994 = v2749[0];
+            let v2995 = v2749[1];
+            let v2996 = v2749[2];
+            let v2997 = v2753[0];
+            let v2998 = v2753[1];
+            let v2999 = v2753[2];
+            let v3000 = v2753[3];
+            let v3001 = v2753[4];
+            let v3002 = v2760[0];
+            let v3003 = v2760[1];
+            let v3004 = v2760[2];
+            let v3005 = v2760[3];
+            let v3006 = v2766[0];
+            let v3007 = v2766[1];
+            let v3008 = v2772[0];
+            let v3009 = v2772[1];
+            let v3010 = v2785[0];
+            let v3011 = v2785[1];
+            let v3012 = v2785[2];
+            let v3013 = v2785[3];
+            let v3014 = v2793[0];
+            let v3015 = v2793[1];
+            let v3016 = v2807[0];
+            let v3017 = v2807[1];
+            let v3018 = v2807[2];
+            let v3019 = v2807[3];
+            let v3020 = v2815[0];
+            let v3021 = v2815[1];
+            let v3022 = v2815[2];
+            let v3023 = v2815[3];
+            let v3024 = v2815[4];
+            let v3025 = v2824[0];
+            let v3026 = v2824[1];
+            let v3027 = v2833[0];
+            let v3028 = v2833[1];
+            let v3029 = v2839[0];
+            let v3030 = v2839[1];
+            let v3031 = v2839[2];
+            let v3032 = v2839[3];
+            let v3033 = v2839[4];
+            let v3034 = v2839[5];
+            let v3035 = v2839[6];
+            let v3036 = v2839[7];
+            let v3037 = v2846[0];
+            let v3038 = v2846[1];
+            let v3039 = v2846[2];
+            let v3040 = v2846[3];
+            let v3041 = v2846[4];
+            let v3042 = v2846[5];
+            let v3043 = v2846[6];
+            let v3044 = v2846[7];
+            let v3045 = v2854[0];
+            let v3046 = v2854[1];
+            let v3047 = v2854[2];
+            let v3048 = v2854[3];
+            let v3049 = v2854[4];
+            let v3050 = v2854[5];
+            let v3051 = v2854[6];
+            let v3052 = v2854[7];
+            let v3053 = v2866[0];
+            let v3054 = v2866[1];
+            let v3055 = v2866[2];
+            let v3056 = v2866[3];
+            let v3057 = v2866[4];
+            let v3058 = v2874[0];
+            let v3059 = v2874[1];
+            let v3060 = v2874[2];
+            let v3061 = v2874[3];
+            let v3062 = v2874[4];
+            let v3063 = v2886[0];
+            let v3064 = v2886[1];
+            let v3065 = v2896[0];
+            let v3066 = v2896[1];
+            let v3067 = v2953[0];
+            let v3068 = v2960[0];
+            let v3069 = v2960[1];
+            let v3070 = v2960[2];
+            let v3071 = v2960[3];
+            let v3072 = v2960[4];
+            let v3073 = v2972[0];
+            let v3074 = v2972[1];
+            let v3075 = v2972[2];
+            let v3076 = v2972[3];
+            let v3077 = v2972[4];
+            let v3078 = v2787[0];
+            let v3079 = v2787[1];
+            let v3080 = v2787[2];
+            let v3081 = v2787[3];
+            let v3082 = v2795[0];
+            let v3083 = v2795[1];
+            let v3084 = v2809[0];
+            let v3085 = v2809[1];
+            let v3086 = v2809[2];
+            let v3087 = v2809[3];
+            let v3088 = v2817[0];
+            let v3089 = v2817[1];
+            let v3090 = v2817[2];
+            let v3091 = v2817[3];
+            let v3092 = v2817[4];
+            let v3093 = v2826[0];
+            let v3094 = v2826[1];
+            let v3095 = v2835[0];
+            let v3096 = v2835[1];
+            let v3097 = v2856[0];
+            let v3098 = v2856[1];
+            let v3099 = v2856[2];
+            let v3100 = v2856[3];
+            let v3101 = v2856[4];
+            let v3102 = v2856[5];
+            let v3103 = v2856[6];
+            let v3104 = v2856[7];
+            let v3105 = v2876[0];
+            let v3106 = v2876[1];
+            let v3107 = v2876[2];
+            let v3108 = v2876[3];
+            let v3109 = v2876[4];
+            let v3110 = v2966[0];
+            let v3111 = v2966[1];
+            let v3112 = v2966[2];
+            let v3113 = v2966[3];
+            let v3114 = v2966[4];
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(6),
             Some(7),
             multiplicity * (v2622),
             [5, 6, 7],
-            [v2956, v2957, v2958],
+            [v2978, v2979, v2980],
             [],
             [],
             multiplicity,
@@ -3642,7 +3715,7 @@ impl Instance {
             Some(3),
             multiplicity * (v2626),
             [3, 5, 6, 7],
-            [v2959, v2960, v2961, v2962],
+            [v2981, v2982, v2983, v2984],
             [],
             [],
             multiplicity,
@@ -3652,7 +3725,7 @@ impl Instance {
             Some(3),
             multiplicity * (v2634),
             [3, 4],
-            [v2963, v2964],
+            [v2985, v2986],
             [],
             [],
             multiplicity,
@@ -3662,7 +3735,7 @@ impl Instance {
             Some(3),
             multiplicity * (v2655),
             [3, 5, 6, 7],
-            [v2965, v2966, v2967, v2968],
+            [v2987, v2988, v2989, v2990],
             [],
             [],
             multiplicity,
@@ -3672,7 +3745,7 @@ impl Instance {
             Some(6),
             multiplicity * (v2746),
             [4, 5, 6],
-            [v2969, v2970, v2971],
+            [v2991, v2992, v2993],
             [],
             [],
             multiplicity,
@@ -3682,7 +3755,7 @@ impl Instance {
             Some(7),
             multiplicity * (v2747),
             [4, 5, 6],
-            [v2972, v2973, v2974],
+            [v2994, v2995, v2996],
             [],
             [],
             multiplicity,
@@ -3692,7 +3765,7 @@ impl Instance {
             Some(5),
             multiplicity * (v2752),
             [3, 4, 5, 6, 7],
-            [v2975, v2976, v2977, v2978, v2979],
+            [v2997, v2998, v2999, v3000, v3001],
             [],
             [],
             multiplicity,
@@ -3702,7 +3775,7 @@ impl Instance {
             Some(7),
             multiplicity * (v2759),
             [3, 5, 6, 7],
-            [v2980, v2981, v2982, v2983],
+            [v3002, v3003, v3004, v3005],
             [],
             [],
             multiplicity,
@@ -3712,7 +3785,7 @@ impl Instance {
             Some(3),
             multiplicity * (v2765),
             [2, 3],
-            [v2984, v2985],
+            [v3006, v3007],
             [],
             [],
             multiplicity,
@@ -3722,7 +3795,7 @@ impl Instance {
             Some(4),
             multiplicity * (v2771),
             [1, 4],
-            [v2986, v2987],
+            [v3008, v3009],
             [],
             [],
             multiplicity,
@@ -3732,7 +3805,7 @@ impl Instance {
             Some(3),
             multiplicity * (v2784),
             [3, 5, 6, 7],
-            [v2988, v2989, v2990, v2991],
+            [v3010, v3011, v3012, v3013],
             [],
             [],
             multiplicity,
@@ -3740,9 +3813,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(4),
             Some(3),
-            multiplicity * (v2790),
+            multiplicity * (v2792),
             [3, 4],
-            [v2992, v2993],
+            [v3014, v3015],
             [],
             [],
             multiplicity,
@@ -3750,9 +3823,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(7),
-            multiplicity * (v2802),
+            multiplicity * (v2806),
             [3, 5, 6, 7],
-            [v2994, v2995, v2996, v2997],
+            [v3016, v3017, v3018, v3019],
             [],
             [],
             multiplicity,
@@ -3760,9 +3833,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             Some(5),
-            multiplicity * (v2808),
+            multiplicity * (v2814),
             [3, 4, 5, 6, 7],
-            [v2998, v2999, v3000, v3001, v3002],
+            [v3020, v3021, v3022, v3023, v3024],
             [],
             [],
             multiplicity,
@@ -3770,9 +3843,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(1),
             Some(2),
-            multiplicity * (v2815),
+            multiplicity * (v2823),
             [1, 2],
-            [v3003, v3004],
+            [v3025, v3026],
             [],
             [],
             multiplicity,
@@ -3780,9 +3853,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(1),
             Some(0),
-            multiplicity * (v2822),
+            multiplicity * (v2832),
             [0, 1],
-            [v3005, v3006],
+            [v3027, v3028],
             [],
             [],
             multiplicity,
@@ -3790,9 +3863,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(1),
             Some(8),
-            multiplicity * (v2826),
+            multiplicity * (v2838),
             [0, 1, 4, 5, 6, 7, 8, 9],
-            [v3007, v3008, v3009, v3010, v3011, v3012, v3013, v3014],
+            [v3029, v3030, v3031, v3032, v3033, v3034, v3035, v3036],
             [],
             [],
             multiplicity,
@@ -3800,9 +3873,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(0),
             Some(8),
-            multiplicity * (v2833),
+            multiplicity * (v2845),
             [0, 1, 4, 5, 6, 7, 8, 9],
-            [v3015, v3016, v3017, v3018, v3019, v3020, v3021, v3022],
+            [v3037, v3038, v3039, v3040, v3041, v3042, v3043, v3044],
             [],
             [],
             multiplicity,
@@ -3810,9 +3883,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(1),
             Some(8),
-            multiplicity * (v2841),
+            multiplicity * (v2853),
             [0, 1, 4, 5, 6, 7, 8, 9],
-            [v3023, v3024, v3025, v3026, v3027, v3028, v3029, v3030],
+            [v3045, v3046, v3047, v3048, v3049, v3050, v3051, v3052],
             [],
             [],
             multiplicity,
@@ -3820,9 +3893,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             Some(9),
-            multiplicity * (v2851),
+            multiplicity * (v2865),
             [4, 5, 6, 7, 9],
-            [v3031, v3032, v3033, v3034, v3035],
+            [v3053, v3054, v3055, v3056, v3057],
             [],
             [],
             multiplicity,
@@ -3830,9 +3903,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             Some(9),
-            multiplicity * (v2859),
+            multiplicity * (v2873),
             [4, 5, 6, 7, 9],
-            [v3036, v3037, v3038, v3039, v3040],
+            [v3058, v3059, v3060, v3061, v3062],
             [],
             [],
             multiplicity,
@@ -3840,9 +3913,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(8),
             Some(9),
-            multiplicity * (v2869),
+            multiplicity * (v2885),
             [8, 9],
-            [v3041, v3042],
+            [v3063, v3064],
             [],
             [],
             multiplicity,
@@ -3859,9 +3932,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(9),
             Some(6),
-            multiplicity * (v2879),
+            multiplicity * (v2895),
             [6, 9],
-            [v3043, v3044],
+            [v3065, v3066],
             [],
             [],
             multiplicity,
@@ -3878,7 +3951,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(10),
             None,
-            multiplicity * (v3056),
+            multiplicity * (v3115),
             [],
             [],
             [],
@@ -3888,9 +3961,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(10),
             None,
-            multiplicity * (v2935),
+            multiplicity * (v2951),
             [10],
-            [v3045],
+            [v3067],
             [],
             [],
             multiplicity,
@@ -3898,9 +3971,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(3),
-            multiplicity * (v2939),
+            multiplicity * (v2955),
             [3, 5, 6, 7, 10],
-            [v3046, v3047, v3048, v3049, v3050],
+            [v3068, v3069, v3070, v3071, v3072],
             [],
             [],
             multiplicity,
@@ -3908,9 +3981,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(5),
-            multiplicity * (v2945),
+            multiplicity * (v2967),
             [3, 5, 6, 7, 10],
-            [v3051, v3052, v3053, v3054, v3055],
+            [v3073, v3074, v3075, v3076, v3077],
             [],
             [],
             multiplicity,
@@ -3918,9 +3991,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(7),
             Some(3),
-            multiplicity * (v2935),
+            multiplicity * (v2951),
             [10],
-            [v3045],
+            [v3067],
             [],
             [],
             multiplicity,
@@ -3928,7 +4001,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(5),
-            multiplicity * (v3057),
+            multiplicity * (v3116),
             [],
             [],
             [],
@@ -3938,7 +4011,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(3),
-            multiplicity * (v3058),
+            multiplicity * (v3117),
             [],
             [],
             [],
@@ -3948,7 +4021,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(2),
             Some(3),
-            multiplicity * (v3059),
+            multiplicity * (v3118),
             [],
             [],
             [],
@@ -3958,7 +4031,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(4),
-            multiplicity * (v3060),
+            multiplicity * (v3119),
             [],
             [],
             [],
@@ -3968,7 +4041,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(5),
-            multiplicity * (v3061),
+            multiplicity * (v3120),
             [],
             [],
             [],
@@ -3978,7 +4051,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(3),
-            multiplicity * (v3062),
+            multiplicity * (v3121),
             [],
             [],
             [],
@@ -3988,7 +4061,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(3),
-            multiplicity * (v3063),
+            multiplicity * (v3122),
             [],
             [],
             [],
@@ -3998,7 +4071,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(3),
-            multiplicity * (v3064),
+            multiplicity * (v3123),
             [],
             [],
             [],
@@ -4008,7 +4081,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(9),
-            multiplicity * (v3065),
+            multiplicity * (v3124),
             [],
             [],
             [],
@@ -4018,7 +4091,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(9),
-            multiplicity * (v3066),
+            multiplicity * (v3125),
             [],
             [],
             [],
@@ -4028,7 +4101,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(9),
-            multiplicity * (v3067),
+            multiplicity * (v3126),
             [],
             [],
             [],
@@ -4038,7 +4111,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             Some(9),
-            multiplicity * (v3068),
+            multiplicity * (v3127),
             [],
             [],
             [],
@@ -4048,7 +4121,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(8),
-            multiplicity * (v3069),
+            multiplicity * (v3128),
             [],
             [],
             [],
@@ -4058,7 +4131,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(8),
-            multiplicity * (v3070),
+            multiplicity * (v3129),
             [],
             [],
             [],
@@ -4165,9 +4238,183 @@ impl Instance {
             [],
             multiplicity,
         );
+        self.canonical_reactive[0] = v2622;
+        self.canonical_reactive[1] = v2626;
+        self.canonical_reactive[2] = v2634;
+        self.canonical_reactive[3] = v2655;
+        self.canonical_reactive[4] = v2746;
+        self.canonical_reactive[5] = v2747;
+        self.canonical_reactive[6] = v2752;
+        self.canonical_reactive[7] = v2759;
+        self.canonical_reactive[8] = v2765;
+        self.canonical_reactive[9] = v2771;
+        self.canonical_reactive[10] = v2786;
+        self.canonical_reactive[11] = v3078;
+        self.canonical_reactive[12] = v3079;
+        self.canonical_reactive[13] = v3080;
+        self.canonical_reactive[14] = v3081;
+        self.canonical_reactive[15] = v2794;
+        self.canonical_reactive[16] = v3082;
+        self.canonical_reactive[17] = v3083;
+        self.canonical_reactive[18] = v2808;
+        self.canonical_reactive[19] = v3084;
+        self.canonical_reactive[20] = v3085;
+        self.canonical_reactive[21] = v3086;
+        self.canonical_reactive[22] = v3087;
+        self.canonical_reactive[23] = v2816;
+        self.canonical_reactive[24] = v3088;
+        self.canonical_reactive[25] = v3089;
+        self.canonical_reactive[26] = v3090;
+        self.canonical_reactive[27] = v3091;
+        self.canonical_reactive[28] = v3092;
+        self.canonical_reactive[29] = v2825;
+        self.canonical_reactive[30] = v3093;
+        self.canonical_reactive[31] = v3094;
+        self.canonical_reactive[32] = v2834;
+        self.canonical_reactive[33] = v3095;
+        self.canonical_reactive[34] = v3096;
+        self.canonical_reactive[35] = v2838;
+        self.canonical_reactive[36] = v2845;
+        self.canonical_reactive[37] = v2855;
+        self.canonical_reactive[38] = v3097;
+        self.canonical_reactive[39] = v3098;
+        self.canonical_reactive[40] = v3099;
+        self.canonical_reactive[41] = v3100;
+        self.canonical_reactive[42] = v3101;
+        self.canonical_reactive[43] = v3102;
+        self.canonical_reactive[44] = v3103;
+        self.canonical_reactive[45] = v3104;
+        self.canonical_reactive[46] = v2865;
+        self.canonical_reactive[47] = v2875;
+        self.canonical_reactive[48] = v3105;
+        self.canonical_reactive[49] = v3106;
+        self.canonical_reactive[50] = v3107;
+        self.canonical_reactive[51] = v3108;
+        self.canonical_reactive[52] = v3109;
+        self.canonical_reactive[53] = v2885;
+        self.canonical_reactive[54] = staged[184];
+        self.canonical_reactive[55] = v2895;
+        self.canonical_reactive[56] = staged[185];
+        self.canonical_reactive[57] = v3115;
+        self.canonical_reactive[58] = v2951;
+        self.canonical_reactive[59] = v2961;
+        self.canonical_reactive[60] = v3110;
+        self.canonical_reactive[61] = v3111;
+        self.canonical_reactive[62] = v3112;
+        self.canonical_reactive[63] = v3113;
+        self.canonical_reactive[64] = v3114;
+        self.canonical_reactive[65] = v2967;
+        self.canonical_reactive[66] = v2951;
+        self.canonical_reactive[67] = v3116;
+        self.canonical_reactive[68] = v3117;
+        self.canonical_reactive[69] = v3118;
+        self.canonical_reactive[70] = v3119;
+        self.canonical_reactive[71] = v3120;
+        self.canonical_reactive[72] = v3121;
+        self.canonical_reactive[73] = v3122;
+        self.canonical_reactive[74] = v3123;
+        self.canonical_reactive[75] = v3124;
+        self.canonical_reactive[76] = v3125;
+        self.canonical_reactive[77] = v3126;
+        self.canonical_reactive[78] = v3127;
+        self.canonical_reactive[79] = v3128;
+        self.canonical_reactive[80] = v3129;
+        self.canonical_reactive[81] = staged[186];
+        self.canonical_reactive[82] = staged[187];
+        self.canonical_reactive[83] = staged[188];
+        self.canonical_reactive[84] = staged[189];
+        self.canonical_reactive[85] = staged[190];
+        self.canonical_reactive[86] = staged[191];
+        self.canonical_reactive[87] = staged[192];
+        self.canonical_reactive[88] = staged[193];
+        self.canonical_reactive[89] = staged[194];
+        self.canonical_reactive[90] = staged[195];
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
+        let multiplicity = self.multiplicity;
+        let cached = &*self.canonical_reactive;
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(3),
+            &[3, 5, 6, 7],
+            &[cached[11], cached[12], cached[13], cached[14]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(4),
+            Some(3),
+            &[3, 4],
+            &[cached[16], cached[17]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(7),
+            &[3, 5, 6, 7],
+            &[cached[19], cached[20], cached[21], cached[22]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(4),
+            Some(5),
+            &[3, 4, 5, 6, 7],
+            &[cached[24], cached[25], cached[26], cached[27], cached[28]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(1),
+            Some(2),
+            &[1, 2],
+            &[cached[30], cached[31]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(1),
+            Some(0),
+            &[0, 1],
+            &[cached[33], cached[34]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(1),
+            Some(8),
+            &[0, 1, 4, 5, 6, 7, 8, 9],
+            &[cached[38], cached[39], cached[40], cached[41], cached[42], cached[43], cached[44], cached[45]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(4),
+            Some(9),
+            &[4, 5, 6, 7, 9],
+            &[cached[48], cached[49], cached[50], cached[51], cached[52]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(3),
+            &[3, 5, 6, 7, 10],
+            &[cached[60], cached[61], cached[62], cached[63], cached[64]],
+            &[],
+            &[],
+            multiplicity,
+        );
     }
 
 }
