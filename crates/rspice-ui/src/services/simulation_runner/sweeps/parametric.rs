@@ -9,17 +9,23 @@ use super::mapping::{
 };
 use super::sweep_points::expand_step_sweep_values_with_abort;
 use super::types::{CornerBaseMode, ParametricData, TempRunConfig};
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, StepSweep, StepTarget};
 use std::path::Path;
 
-/// Run parametric analysis by executing the first `.STEP` command in the netlist.
+/// Run parametric analysis, reporting failures as strings. Test-only; see
+/// [`run_parametric_analysis_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_parametric_analysis(netlist_text: &str) -> Result<ParametricData, String> {
     run_parametric_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
 }
 
-/// Run parametric analysis with cooperative cancellation.
+/// Run parametric analysis with cooperative cancellation and no source path.
+/// Test-only; see [`run_parametric_analysis`].
+#[cfg(test)]
 pub fn run_parametric_analysis_with_abort(
     netlist_text: &str,
     abort: &dyn AbortSignal,
@@ -28,16 +34,7 @@ pub fn run_parametric_analysis_with_abort(
 }
 
 /// Run parametric analysis by executing the first `.STEP` command in the
-/// netlist, resolving relative includes from the source path when provided.
-pub fn run_parametric_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<ParametricData, String> {
-    run_parametric_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run parametric analysis with source-path resolution and cooperative
+/// netlist, with source-path resolution and cooperative
 /// cancellation through parsing, point expansion, solves, and mapping.
 pub fn run_parametric_analysis_with_source_path_and_abort(
     netlist_text: &str,
@@ -112,41 +109,6 @@ pub fn run_parametric_analysis_with_source_path_and_abort(
     })
 }
 
-
-/// Run temperature sweep analysis with explicit base-mode configuration.
-pub fn run_parametric_analysis_with_config(
-    netlist_text: &str,
-    config: &TempRunConfig,
-) -> Result<ParametricData, String> {
-    run_parametric_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run an explicitly configured temperature sweep with cooperative
-/// cancellation.
-pub fn run_parametric_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &TempRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ParametricData> {
-    run_parametric_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run temperature sweep analysis with explicit base-mode configuration and a
-/// source path used to resolve relative includes and model file references.
-pub fn run_parametric_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &TempRunConfig,
-    source_path: Option<&Path>,
-) -> Result<ParametricData, String> {
-    run_parametric_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
 
 /// Run an explicitly configured temperature sweep with source-path resolution
 /// and cooperative cancellation.

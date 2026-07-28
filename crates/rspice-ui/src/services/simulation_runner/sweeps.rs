@@ -36,17 +36,12 @@ pub(crate) fn expand_corner_pvt_points(
 }
 
 pub use corner::{
-    run_corner_analysis, run_corner_analysis_with_abort, run_corner_analysis_with_config,
-    run_corner_analysis_with_config_and_abort, run_corner_analysis_with_config_and_source_path,
     run_corner_analysis_with_config_and_source_path_and_abort,
-    run_corner_analysis_with_source_path, run_corner_analysis_with_source_path_and_abort,
+    run_corner_analysis_with_source_path_and_abort,
 };
 pub use parametric::{
-    run_parametric_analysis, run_parametric_analysis_with_abort,
-    run_parametric_analysis_with_config, run_parametric_analysis_with_config_and_abort,
-    run_parametric_analysis_with_config_and_source_path,
     run_parametric_analysis_with_config_and_source_path_and_abort,
-    run_parametric_analysis_with_source_path, run_parametric_analysis_with_source_path_and_abort,
+    run_parametric_analysis_with_source_path_and_abort,
 };
 pub use types::{
     CornerBaseMode, CornerData, CornerFrequencySweep, CornerModelBinding, CornerProcess,

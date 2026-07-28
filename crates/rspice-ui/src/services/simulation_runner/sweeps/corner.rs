@@ -13,18 +13,15 @@ use super::sweep_points::extract_temp_points_with_abort;
 use super::types::{
     CornerData, CornerRunConfig, REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END,
 };
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Run corner analysis from `.TEMP` commands in the netlist.
-///
-/// This compatibility entry point executes temperature-only TT/nominal sweeps.
-pub fn run_corner_analysis(netlist_text: &str) -> Result<CornerData, String> {
-    run_corner_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run corner analysis with cooperative cancellation.
+/// Run corner analysis from `.TEMP` commands with cancellation and no source
+/// path. Test-only; see [`run_corner_analysis_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_corner_analysis_with_abort(
     netlist_text: &str,
     abort: &dyn AbortSignal,
@@ -32,17 +29,8 @@ pub fn run_corner_analysis_with_abort(
     run_corner_analysis_with_source_path_and_abort(netlist_text, None, abort)
 }
 
-/// Run corner analysis from `.TEMP` commands in the netlist, resolving relative
-/// includes from the source path when provided.
-pub fn run_corner_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<CornerData, String> {
-    run_corner_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run corner analysis with source-path resolution and cooperative
+/// Run corner analysis from `.TEMP` commands in the netlist -- temperature-only
+/// TT/nominal sweeps -- with source-path resolution and cooperative
 /// cancellation through parsing, point execution, and result mapping.
 pub fn run_corner_analysis_with_source_path_and_abort(
     netlist_text: &str,
@@ -68,7 +56,10 @@ pub fn run_corner_analysis_with_source_path_and_abort(
     run_corner_analysis_with_netlist(&netlist, &config, abort)
 }
 
-/// Run corner analysis with explicit process/voltage/temperature configuration.
+/// Run corner analysis with explicit process/voltage/temperature configuration,
+/// reporting failures as strings. Test-only; see
+/// [`run_corner_analysis_with_config_and_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_corner_analysis_with_config(
     netlist_text: &str,
     config: &CornerRunConfig,
@@ -77,31 +68,15 @@ pub fn run_corner_analysis_with_config(
         .map_err(|error| error.to_string())
 }
 
-/// Run an explicitly configured corner analysis with cooperative
-/// cancellation.
+/// Run an explicitly configured corner analysis with cooperative cancellation
+/// and no source path. Test-only; see [`run_corner_analysis_with_config`].
+#[cfg(test)]
 pub fn run_corner_analysis_with_config_and_abort(
     netlist_text: &str,
     config: &CornerRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<CornerData> {
     run_corner_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run corner analysis with explicit process/voltage/temperature configuration
-/// and a source path used to resolve relative includes and model file
-/// references.
-pub fn run_corner_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &CornerRunConfig,
-    source_path: Option<&Path>,
-) -> Result<CornerData, String> {
-    run_corner_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run an explicitly configured corner analysis with source-path resolution

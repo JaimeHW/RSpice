@@ -99,16 +99,11 @@ pub use sparameter::{
 pub use stb::{StbData, run_stb_analysis_with_sweep_and_source_path_and_abort};
 pub use sweeps::{
     CornerBaseMode, CornerData, CornerFrequencySweep, CornerModelBinding, CornerProcess,
-    CornerRunConfig, ParametricData, TempRunConfig, run_corner_analysis,
-    run_corner_analysis_with_abort, run_corner_analysis_with_config,
-    run_corner_analysis_with_config_and_abort, run_corner_analysis_with_config_and_source_path,
+    CornerRunConfig, ParametricData, TempRunConfig,
     run_corner_analysis_with_config_and_source_path_and_abort,
-    run_corner_analysis_with_source_path, run_corner_analysis_with_source_path_and_abort,
-    run_parametric_analysis, run_parametric_analysis_with_abort,
-    run_parametric_analysis_with_config, run_parametric_analysis_with_config_and_abort,
-    run_parametric_analysis_with_config_and_source_path,
+    run_corner_analysis_with_source_path_and_abort,
     run_parametric_analysis_with_config_and_source_path_and_abort,
-    run_parametric_analysis_with_source_path, run_parametric_analysis_with_source_path_and_abort,
+    run_parametric_analysis_with_source_path_and_abort,
 };
 pub(crate) use sweeps::{
     REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, apply_voltage_corner,
