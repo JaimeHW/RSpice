@@ -76,6 +76,16 @@ jobs:
         run: cargo clippy --locked --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
       - name: Clear check artifacts before tests
         run: cargo clean
+      - name: Core architecture ratchets
+        # Layer order, source reachability, and public-surface size. These
+        # also run inside the fast tier below, but they take under a second
+        # and an architectural regression should be legible on its own line
+        # rather than buried in a multi-minute suite.
+        run: >-
+          cargo test --locked -p rspice-core
+          --test module_layering
+          --test module_reachability
+          --test public_surface
       - name: Test core integration tests (fast tier)
         # No feature flag and no name filter. Both conformance suites live in
         # rspice-conformance now, so this target contains none of them. It
