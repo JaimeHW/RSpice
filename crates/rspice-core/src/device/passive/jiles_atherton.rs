@@ -382,6 +382,11 @@ pub struct JilesAthertonInductor {
 }
 
 impl JilesAthertonInductor {
+    // Xyce 7.10's DeviceOptions uses an independent RELTOL=1e-4 for
+    // device-current/voltage convergence; keep the reduced hidden M/R
+    // equations on that same device-convergence scale.
+    const XYCE_CORE_DEVICE_RELTOL: Value = 1.0e-4;
+
     #[inline]
     fn xyce_endpoint_matches(lhs: Value, rhs: Value) -> bool {
         if lhs == rhs {
@@ -1831,8 +1836,9 @@ impl JilesAthertonInductor {
 
     /// Check the scaled residuals of LEVEL=1's explicit hidden M/R equations
     /// for the most recently assembled Newton endpoint. Xyce scales each row
-    /// by `1e-3`; in physical units the same relative threshold applies to M
-    /// and R. LEVEL=2 has no hidden equations and is always converged here.
+    /// by `1e-3`, while its device convergence RELTOL is `1e-4`; in physical
+    /// units the same device threshold applies to M and R. LEVEL=2 has no
+    /// hidden equations and is always converged here.
     pub(crate) fn xyce_core_trial_converged(&self) -> bool {
         if !self.params.xyce_core || self.params.xyce_core_level2 {
             return true;
@@ -1854,9 +1860,9 @@ impl JilesAthertonInductor {
             .max(1.0);
         (!self.has_xyce_core_m_equation()
             || (trial.level1_residual.is_finite()
-                && trial.level1_residual.abs() <= 1.0e-8 * scale))
+                && trial.level1_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * scale))
             && trial.level1_rate_residual.is_finite()
-            && trial.level1_rate_residual.abs() <= 1.0e-8 * rate_scale
+            && trial.level1_rate_residual.abs() <= Self::XYCE_CORE_DEVICE_RELTOL * rate_scale
     }
 
     pub fn current_value(&self) -> Value {
