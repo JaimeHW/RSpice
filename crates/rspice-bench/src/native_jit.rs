@@ -28,7 +28,7 @@ pub struct NativeJitArgs {
     pub min_speedup: f64,
 
     /// Required full-stamp bytecode/native median speedup.
-    #[arg(long, default_value_t = 0.40)]
+    #[arg(long, default_value_t = 1.50)]
     pub min_full_stamp_speedup: f64,
 
     /// Absolute native p95 budget in ns per benchmark sweep.
