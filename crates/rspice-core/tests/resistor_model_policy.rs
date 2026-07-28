@@ -232,6 +232,23 @@ fn resistor_level1_geometry_still_uses_plain_rsh_path() {
     op_voltage(deck, "out").expect("R LEVEL=1 RSH geometry remains a plain resistor");
 }
 
+// Superseded by `be8f87fc6` ("feat(transient): implement Xyce thermal
+// resistor state"), which made the state this guard was waiting for native.
+// The deck now resolves instead of failing closed, so the guard fails.
+//
+// It is ignored rather than rewritten because the replacement assertion is
+// not yet known to be correct. The deck returns V(out) = 0.999000999000998,
+// which is exactly the *isothermal* divider for R = RESISTIVITY*L/A = 1 ohm
+// against RLOAD = 1k. That is the right answer only if Xyce leaves LEVEL=2
+// self-heating unsolved at the DC operating point; if Xyce instead solves for
+// a steady-state temperature, the resistance — and this voltage — should
+// differ. `be8f87fc6` implemented the *transient* thermal state and says
+// nothing about `.op`.
+//
+// Resolving this needs a Xyce oracle run on this deck, not a value copied
+// from what RSpice currently prints. Pinning the current number would convert
+// an honest red into a false green.
+#[ignore = "superseded by be8f87fc6; replacement needs a Xyce oracle run for DC self-heating"]
 #[test]
 fn xyce_resistor_level2_self_heating_form_fails_closed_until_state_is_native() {
     let deck = "* Xyce R LEVEL=2 self-consistent thermal form needs a state variable\n\

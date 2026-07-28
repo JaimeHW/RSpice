@@ -862,6 +862,24 @@ mod tests {
     }
 
     #[test]
+    fn ltra_finite_length_rc_resolves_with_l_zero() {
+        // An LTRA card with L=0 is an RC line, not a malformed RLC one:
+        // ngspice's LTRA models RLC, RC, LC and RG lines, and the native
+        // convolution runtime implements the finite-length RC case. The
+        // L>0 check therefore applies only outside `is_finite_rc`.
+        for line in [
+            ".model y ltra r=1 l=0 g=0 c=1p length=1",
+            ".model y ltra r=1 g=0 c=1p length=1",
+        ] {
+            let resolved = resolve_test_tline(&format!("title\n{line}\n.end\n"));
+            assert!(resolved.is_finite_rc(), "{line} should resolve as finite RC");
+            assert_eq!(resolved.r, Some(1.0));
+            assert_eq!(resolved.c, Some(1e-12));
+            assert_eq!(resolved.len, Some(1.0));
+        }
+    }
+
+    #[test]
     fn native_xyce_ltra_contract_accepts_zero_length_rc_and_rg_only() {
         for model in [
             ".model y ltra r=0.05 c=20p len=0",
@@ -906,7 +924,6 @@ mod tests {
     #[test]
     fn ltra_rejects_invalid_primary_rlc_values() {
         for (line, expected) in [
-            (".model y ltra r=1 l=0 g=0 c=1p length=1", "invalid L=0"),
             (
                 ".model y ltra r=1 l=1n g=0 c=-1p length=1",
                 "invalid C=-0.000000000001",
