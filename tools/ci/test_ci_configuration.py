@@ -258,10 +258,23 @@ class CiConfigurationTests(unittest.TestCase):
             "--max-stamp-state-payload-bytes 6200",
         ]:
             self.assertIn(budget, workflow)
+        self.assertIn("Compile Verilog-A native JIT tests (Linux x64)", workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --features native native:: --no-run",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --release --features native native:: --no-run",
+            workflow,
+        )
         self.assertIn("Test Verilog-A native JIT units (Linux x64)", workflow)
         self.assertRegex(
             workflow,
             r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
+        )
+        self.assertRegex(
+            workflow,
+            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
         )
         self.assertIn("Test Verilog-A native JIT contracts (Linux x64)", workflow)
         self.assertIn(
@@ -314,6 +327,7 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("runs-on: windows-latest", workflow)
+        self.assertIn("Compile Verilog-A native JIT tests", workflow)
         self.assertIn("Verilog-A native JIT unit tests", workflow)
         self.assertIn("Verilog-A native JIT contract tests", workflow)
         self.assertIn("Verilog-A native multiplicity tests", workflow)
@@ -321,6 +335,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertRegex(
             workflow,
             r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
+        )
+        self.assertRegex(
+            workflow,
+            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
         )
         self.assertIn(
             "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",

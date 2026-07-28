@@ -133,10 +133,14 @@ jobs:
           --max-pooled-workspace-payload-bytes 650000
           --max-stamp-state-payload-bytes 6200
           --top 10
+      - name: Compile Verilog-A native JIT tests (Linux x64)
+        run: |
+          cargo test --locked -p rspice-veriloga --features native native:: --no-run
+          cargo test --locked -p rspice-veriloga --release --features native native:: --no-run
       - name: Test Verilog-A native JIT units (Linux x64)
-        run: >-
-          cargo test --locked -p rspice-veriloga --features native native::
-          -- --test-threads=1
+        run: |
+          cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
       - name: Test Verilog-A native core builder route (Linux x64)
         run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient veriloga_native_builder_uses_canonical_ir_without_bytecode_fallback -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
@@ -171,10 +175,14 @@ jobs:
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
         run: cargo test --locked -p rspice-ui --lib
+      - name: Compile Verilog-A native JIT tests
+        run: |
+          cargo test --locked -p rspice-veriloga --features native native:: --no-run
+          cargo test --locked -p rspice-veriloga --release --features native native:: --no-run
       - name: Verilog-A native JIT unit tests
-        run: >-
-          cargo test --locked -p rspice-veriloga --features native native::
-          -- --test-threads=1
+        run: |
+          cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1
+          cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1
       - name: Verilog-A native JIT contract tests
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Verilog-A native multiplicity tests
