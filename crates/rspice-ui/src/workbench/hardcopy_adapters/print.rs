@@ -25,9 +25,9 @@ use crate::hardcopy::{
     ResolvedOrientation,
 };
 use crate::product::ContentDigest;
-use crate::workbench::hardcopy_adapters::render::{
-    RenderedHardcopyPublication, RenderedPrinterPages,
-};
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
+use crate::workbench::hardcopy_adapters::render::RenderedPrinterPages;
 
 const CAPABILITY_SCHEMA_VERSION: u32 = 1;
 const MAX_PLATFORM_PRINTERS: usize = 4_096;
@@ -404,13 +404,6 @@ impl PrinterCapabilitySnapshot {
     }
 
     #[must_use]
-    // Retained for authenticated diagnostic/export surfaces; the current
-    // dialog intentionally identifies queues by device id and display name.
-    pub fn port_name(&self) -> &str {
-        &self.port_name
-    }
-
-    #[must_use]
     pub fn papers(&self) -> &[PrinterPaperCapability] {
         &self.papers
     }
@@ -468,13 +461,6 @@ impl PrinterCatalogEntry {
     pub const fn is_default(&self) -> bool {
         self.is_default
     }
-
-    #[must_use]
-    // The raw spooler flags are an authenticated diagnostic value. Product
-    // controls consume the normalized readiness state instead.
-    pub const fn queue_status_flags(&self) -> u32 {
-        self.queue_status_flags
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -495,12 +481,6 @@ impl PrinterDiscoveryReport {
         &self.printers
     }
 
-    #[must_use]
-    // Discovery failures are exposed for diagnostics even when the current
-    // dialog has at least one usable printer and therefore does not show them.
-    pub fn failures(&self) -> &[PrinterDiscoveryFailure] {
-        &self.failures
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -532,11 +512,6 @@ impl ResolvedNativePrinterJob {
     #[must_use]
     pub const fn resolution_dpi(&self) -> u16 {
         self.resolution_dpi
-    }
-
-    #[must_use]
-    pub const fn raster_geometry(&self) -> PrinterRasterGeometry {
-        self.raster_geometry
     }
 
     #[must_use]
@@ -667,11 +642,6 @@ impl HardcopySpoolFailure {
             error,
             pages_completed,
         }
-    }
-
-    #[must_use]
-    pub const fn error(&self) -> &HardcopyPrintError {
-        &self.error
     }
 
     #[must_use]
@@ -1089,27 +1059,6 @@ pub(crate) fn finalize_browser_print(
     publication: &RenderedHardcopyPublication,
 ) -> Result<HardcopyOutcome, HardcopyPrintError> {
     browser_backend::finalize_browser_print(reservation, plan, publication)
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn handoff_browser_print(
-    plan: &HardcopyPlan,
-    publication: &RenderedHardcopyPublication,
-) -> Result<HardcopyOutcome, HardcopyPrintError> {
-    let reservation = reserve_browser_print_window()?;
-    finalize_browser_print(reservation, plan, publication)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-// Kept as the platform-neutral boundary so callers can compile one workflow;
-// desktop builds report the unsupported browser handoff deterministically.
-pub fn handoff_browser_print(
-    _plan: &HardcopyPlan,
-    _publication: &RenderedHardcopyPublication,
-) -> Result<HardcopyOutcome, HardcopyPrintError> {
-    Err(HardcopyPrintError::PlatformUnavailable(
-        HardcopyPlatformUnavailableReason::BrowserPrintingRequiresWebAssembly,
-    ))
 }
 
 trait NativeSpoolBackend {

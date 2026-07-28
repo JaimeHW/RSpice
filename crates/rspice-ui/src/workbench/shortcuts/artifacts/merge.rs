@@ -12,7 +12,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::schema::DecodedShortcutArtifact;
-use super::{canonical_json_bytes, hex_digest, sha256};
+use super::{canonical_json_bytes, sha256};
 use crate::workbench::commands::{ShortcutContext, vocabulary::{Command, COMMAND_REGISTRY, CommandPlatform}};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutPreferences,
@@ -92,14 +92,6 @@ pub struct ImportClassSummary {
     pub omitted: usize,
 }
 
-impl ImportClassSummary {
-    #[must_use]
-    pub fn label(&self) -> &'static str {
-        self.binding_class
-            .map_or("Unknown future", ImportBindingClass::label)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutImportConflictKind {
     SameTarget,
@@ -116,7 +108,6 @@ pub enum ShortcutImportDecision {
     KeptCurrent,
     ReplacedCurrent,
     UnboundBoth,
-    Omitted,
     RequiresReview,
 }
 
@@ -139,33 +130,8 @@ impl ShortcutImportConflict {
     }
 
     #[must_use]
-    pub fn command_id(&self) -> &str {
-        &self.command_id
-    }
-
-    #[must_use]
-    pub fn conflicting_command_id(&self) -> Option<&str> {
-        self.conflicting_command_id.as_deref()
-    }
-
-    #[must_use]
-    pub const fn slot(&self) -> Option<ShortcutBindingSlot> {
-        self.slot
-    }
-
-    #[must_use]
     pub const fn platform(&self) -> Option<CommandPlatform> {
         self.platform
-    }
-
-    #[must_use]
-    pub fn current(&self) -> Option<&str> {
-        self.current.as_deref()
-    }
-
-    #[must_use]
-    pub fn imported(&self) -> Option<&str> {
-        self.imported.as_deref()
     }
 
     #[must_use]
@@ -198,30 +164,18 @@ impl Default for ShortcutImportOptions {
 #[derive(Debug, Clone)]
 pub struct ShortcutImportPlan {
     source_name: String,
-    source_digest: [u8; 32],
     base_revision: u64,
     base_digest: [u8; 32],
     candidate_library: ShortcutProfileLibrary,
-    merge_policy: ShortcutMergePolicy,
-    conflict_policy: ShortcutConflictPolicy,
     summaries: Vec<ImportClassSummary>,
     conflicts: Vec<ShortcutImportConflict>,
     audit: ShortcutProfileAudit,
     required_protected_confirmations: BTreeSet<String>,
     omitted_envelope_fields: BTreeSet<String>,
     unresolved_internal_conflict: bool,
-    preset_name: Option<String>,
 }
 
 impl ShortcutImportPlan {
-    #[must_use]
-    pub fn source_name(&self) -> &str {
-        &self.source_name
-    }
-    #[must_use]
-    pub const fn source_digest(&self) -> [u8; 32] {
-        self.source_digest
-    }
     #[must_use]
     pub const fn base_revision(&self) -> u64 {
         self.base_revision
@@ -241,10 +195,6 @@ impl ShortcutImportPlan {
     #[must_use]
     pub fn conflicts(&self) -> &[ShortcutImportConflict] {
         &self.conflicts
-    }
-    #[must_use]
-    pub const fn audit(&self) -> &ShortcutProfileAudit {
-        &self.audit
     }
     #[must_use]
     pub fn required_protected_confirmations(&self) -> &BTreeSet<String> {
@@ -712,7 +662,7 @@ pub fn plan_shortcut_import(
     let audit = working_profile.audit();
 
     let mut candidate_library = base.clone();
-    let preset_name = match options.merge_policy {
+    match options.merge_policy {
         ShortcutMergePolicy::ImportNamedPreset => {
             let name = options
                 .preset_name
@@ -721,32 +671,26 @@ pub fn plan_shortcut_import(
             candidate_library
                 .insert_named_preset(name, working_profile, options.overwrite_existing_preset)
                 .map_err(ShortcutImportPlanError::Preset)?;
-            Some(name.to_owned())
         }
         ShortcutMergePolicy::MergeNonConflicting
         | ShortcutMergePolicy::ReplaceCurrentUserBindings => {
             candidate_library
                 .replace_active(working_profile)
                 .map_err(ShortcutImportPlanError::Library)?;
-            None
         }
-    };
+    }
 
     Ok(ShortcutImportPlan {
         source_name: artifact.source_name().to_owned(),
-        source_digest: artifact.source_digest(),
         base_revision: base.revision(),
         base_digest: shortcut_library_digest(base)?,
         candidate_library,
-        merge_policy: options.merge_policy,
-        conflict_policy: options.conflict_policy,
         summaries: summaries.into_values().collect(),
         conflicts,
         audit,
         required_protected_confirmations,
         omitted_envelope_fields,
         unresolved_internal_conflict,
-        preset_name,
     })
 }
 
@@ -1408,19 +1352,15 @@ pub fn shortcut_library_digest(
         .map_err(|error| ShortcutImportPlanError::Serialization(error.to_string()))
 }
 
+/// What an applied import left behind: enough to name the source in the undo
+/// affordance, and enough to restore the exact predecessor library if the
+/// bindings have not moved on since.
 #[derive(Debug, Clone)]
 pub struct ShortcutImportReceipt {
     id: Uuid,
     source_name: String,
-    source_digest: [u8; 32],
-    merge_policy: ShortcutMergePolicy,
-    conflict_policy: ShortcutConflictPolicy,
-    base_revision: u64,
-    base_digest: [u8; 32],
     applied_revision: u64,
     applied_digest: [u8; 32],
-    preset_name: Option<String>,
-    summaries: Vec<ImportClassSummary>,
     omitted_envelope_fields: BTreeSet<String>,
     predecessor: ShortcutProfileLibrary,
 }
@@ -1433,38 +1373,6 @@ impl ShortcutImportReceipt {
     #[must_use]
     pub fn source_name(&self) -> &str {
         &self.source_name
-    }
-    #[must_use]
-    pub fn source_digest_hex(&self) -> String {
-        hex_digest(self.source_digest)
-    }
-    #[must_use]
-    pub const fn merge_policy(&self) -> ShortcutMergePolicy {
-        self.merge_policy
-    }
-    #[must_use]
-    pub const fn conflict_policy(&self) -> ShortcutConflictPolicy {
-        self.conflict_policy
-    }
-    #[must_use]
-    pub const fn base_revision(&self) -> u64 {
-        self.base_revision
-    }
-    #[must_use]
-    pub fn base_digest_hex(&self) -> String {
-        hex_digest(self.base_digest)
-    }
-    #[must_use]
-    pub const fn applied_revision(&self) -> u64 {
-        self.applied_revision
-    }
-    #[must_use]
-    pub fn preset_name(&self) -> Option<&str> {
-        self.preset_name.as_deref()
-    }
-    #[must_use]
-    pub fn summaries(&self) -> &[ImportClassSummary] {
-        &self.summaries
     }
     #[must_use]
     pub fn omitted_envelope_fields(&self) -> &BTreeSet<String> {
@@ -1528,15 +1436,8 @@ pub fn apply_shortcut_import(
     Ok(ShortcutImportReceipt {
         id: Uuid::new_v4(),
         source_name: plan.source_name.clone(),
-        source_digest: plan.source_digest,
-        merge_policy: plan.merge_policy,
-        conflict_policy: plan.conflict_policy,
-        base_revision: plan.base_revision,
-        base_digest: plan.base_digest,
         applied_revision,
         applied_digest,
-        preset_name: plan.preset_name.clone(),
-        summaries: plan.summaries.clone(),
         omitted_envelope_fields: plan.omitted_envelope_fields.clone(),
         predecessor,
     })
