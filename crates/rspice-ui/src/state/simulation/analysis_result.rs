@@ -1502,13 +1502,6 @@ impl AnalysisResult {
         self
     }
 
-    /// Attach the exact output-contract receipts produced during completion.
-    #[must_use]
-    pub fn with_saved_output_receipts(mut self, receipts: Vec<SavedOutputReceipt>) -> Self {
-        self.saved_output_receipts = receipts;
-        self
-    }
-
     /// Attach the exact prepared task that produced this result.
     #[must_use]
     pub fn with_provenance(mut self, provenance: AnalysisResultProvenance) -> Self {

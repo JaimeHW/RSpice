@@ -29,14 +29,6 @@ impl PdkConfig {
         &self.discovered_files
     }
 
-    /// Get recent files as string references
-    pub fn recent_files(&self) -> Vec<String> {
-        self.recent_files
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect()
-    }
-
     /// Toggle path enabled state
     pub fn toggle_path_enabled(&mut self, index: usize) {
         if let Some(entry) = self.library_paths.get_mut(index) {

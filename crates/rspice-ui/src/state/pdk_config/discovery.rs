@@ -108,22 +108,4 @@ impl PdkConfig {
         Ok(())
     }
 
-    /// Get discovered files filtered by extension
-    pub fn files_by_extension(&self, ext: &str) -> Vec<&DiscoveredFile> {
-        let ext_lower = ext.to_lowercase();
-        self.discovered_files
-            .iter()
-            .filter(|f| f.extension == ext_lower)
-            .collect()
-    }
-
-    /// Get all library files (.lib)
-    pub fn lib_files(&self) -> Vec<&DiscoveredFile> {
-        self.files_by_extension("lib")
-    }
-
-    /// Get all Spectre files (.scs)
-    pub fn scs_files(&self) -> Vec<&DiscoveredFile> {
-        self.files_by_extension("scs")
-    }
 }

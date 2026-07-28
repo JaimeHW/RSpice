@@ -131,12 +131,6 @@ impl SymbolSourceContract {
         Self::BlankExplicitContract
     }
 
-    pub fn ports(&self) -> Option<&[PortSpec]> {
-        match self {
-            Self::Model { ports, .. } | Self::ExistingSchematicPins { ports, .. } => Some(ports),
-            Self::BlankExplicitContract => None,
-        }
-    }
 
     pub const fn is_explicitly_unbound_for_review(&self) -> bool {
         matches!(self, Self::BlankExplicitContract)
@@ -223,14 +217,6 @@ impl SymbolPinDefinition {
         }
     }
 
-    pub fn label(&self) -> String {
-        format!(
-            "{} {}",
-            self.electrical_type.label(),
-            self.direction.keyword()
-        )
-    }
-
     pub fn port_spec(&self) -> PortSpec {
         PortSpec {
             name: self.name.clone(),
@@ -247,21 +233,6 @@ pub enum SymbolGraphicTemplate {
     RfNPort,
 }
 
-impl SymbolGraphicTemplate {
-    pub const ALL: [Self; 3] = [
-        Self::OperationalAmplifier5Pin,
-        Self::RectangularIc,
-        Self::RfNPort,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::OperationalAmplifier5Pin => "Operational amplifier · 5 pin",
-            Self::RectangularIc => "Rectangular IC",
-            Self::RfNPort => "RF N-port",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -50,32 +50,6 @@ impl DiscoveredFile {
         self.path.file_name().and_then(|n| n.to_str()).unwrap_or("")
     }
 
-    /// Get the file stem (name without extension)
-    pub fn file_stem(&self) -> &str {
-        self.path.file_stem().and_then(|n| n.to_str()).unwrap_or("")
-    }
-
-    /// Check if this is a library file (.lib)
-    pub fn is_lib(&self) -> bool {
-        self.extension == "lib"
-    }
-
-    /// Check if this is a Spectre file (.scs)
-    pub fn is_scs(&self) -> bool {
-        self.extension == "scs"
-    }
-
-    /// Human-readable file size
-    pub fn size_display(&self) -> String {
-        if self.size < 1024 {
-            format!("{} B", self.size)
-        } else if self.size < 1024 * 1024 {
-            format!("{:.1} KB", self.size as f64 / 1024.0)
-        } else {
-            format!("{:.1} MB", self.size as f64 / (1024.0 * 1024.0))
-        }
-    }
-
     /// Get file type (alias for extension for dialog compatibility)
     pub fn file_type(&self) -> &str {
         &self.extension

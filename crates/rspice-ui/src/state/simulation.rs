@@ -4,7 +4,6 @@
 
 use super::schematic::Point;
 use crate::services::yield_manager::{YieldAnalysisProvenance, YieldResult};
-use crate::simulation::optimizer::OptimizerState;
 use rspice_core::Value;
 use std::collections::HashMap;
 

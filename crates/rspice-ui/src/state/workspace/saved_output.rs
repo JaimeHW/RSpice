@@ -65,39 +65,6 @@ impl SavedOutputCompatibility {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SavedOutputCompatibilityKind {
-    OpTranAc,
-    AllCompatibleAnalyses,
-    SelectedAnalysis,
-}
-
-impl SavedOutputCompatibilityKind {
-    pub const ALL: [Self; 3] = [
-        Self::OpTranAc,
-        Self::AllCompatibleAnalyses,
-        Self::SelectedAnalysis,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::OpTranAc => "OP + TRAN + AC",
-            Self::AllCompatibleAnalyses => "All compatible analyses",
-            Self::SelectedAnalysis => "Selected analysis only",
-        }
-    }
-}
-
-impl From<&SavedOutputCompatibility> for SavedOutputCompatibilityKind {
-    fn from(value: &SavedOutputCompatibility) -> Self {
-        match value {
-            SavedOutputCompatibility::OpTranAc => Self::OpTranAc,
-            SavedOutputCompatibility::AllCompatibleAnalyses => Self::AllCompatibleAnalyses,
-            SavedOutputCompatibility::SelectedAnalysis { .. } => Self::SelectedAnalysis,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SavedOutputPolicy {

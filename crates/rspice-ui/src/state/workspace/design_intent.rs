@@ -113,43 +113,6 @@ impl DesignVariableScope {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DesignVariableScopeKind {
-    Testbench,
-    Project,
-    SelectedCell,
-    SelectedAnalysis,
-}
-
-impl DesignVariableScopeKind {
-    pub const ALL: [Self; 4] = [
-        Self::Testbench,
-        Self::Project,
-        Self::SelectedCell,
-        Self::SelectedAnalysis,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Testbench => "Lab characterization · testbench",
-            Self::Project => "Project",
-            Self::SelectedCell => "Selected cell",
-            Self::SelectedAnalysis => "Selected analysis only",
-        }
-    }
-}
-
-impl From<&DesignVariableScope> for DesignVariableScopeKind {
-    fn from(value: &DesignVariableScope) -> Self {
-        match value {
-            DesignVariableScope::Testbench => Self::Testbench,
-            DesignVariableScope::Project => Self::Project,
-            DesignVariableScope::SelectedCell { .. } => Self::SelectedCell,
-            DesignVariableScope::SelectedAnalysis { .. } => Self::SelectedAnalysis,
-        }
-    }
-}
-
 /// Inclusive engineering bounds for a variable. Bounds remain expressions so
 /// suffixes and owner variables survive a lossless project round trip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

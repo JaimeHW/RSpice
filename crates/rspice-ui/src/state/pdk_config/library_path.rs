@@ -1,7 +1,6 @@
 //! One entry in the library search path.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 // =============================================================================
 // Library Path Entry
@@ -37,33 +36,6 @@ impl LibraryPathEntry {
         }
     }
 
-    /// Create with a label
-    pub fn with_label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
-    }
-
-    /// Set recursive scanning
-    pub fn with_recursive(mut self, recursive: bool) -> Self {
-        self.recursive = recursive;
-        self
-    }
-
-    /// Set enabled state
-    pub fn with_enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
-    }
-
-    /// Get display name (label or path basename)
-    pub fn display_name(&self) -> &str {
-        self.label.as_deref().unwrap_or_else(|| {
-            Path::new(&self.path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(&self.path)
-        })
-    }
 }
 
 impl Default for LibraryPathEntry {

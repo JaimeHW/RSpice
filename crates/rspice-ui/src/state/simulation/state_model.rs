@@ -78,9 +78,6 @@ pub struct SimulationState {
     /// calculated. `None` means no yield evidence is currently retained.
     pub yield_provenance: Option<YieldAnalysisProvenance>,
 
-    /// Current optimizer state (if running)
-    pub optimizer_state: Option<OptimizerState>,
-
     // =========================================================================
     // Multi-Run Results History (Cadence Spectre PSF-style)
     // =========================================================================

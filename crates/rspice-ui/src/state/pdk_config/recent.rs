@@ -22,9 +22,4 @@ impl PdkConfig {
         // Trim to max size
         self.recent_files.truncate(self.max_recent_files);
     }
-
-    /// Clear recent files
-    pub fn clear_recent_files(&mut self) {
-        self.recent_files.clear();
-    }
 }

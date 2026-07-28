@@ -3,8 +3,6 @@
 //! Order matters: the first path holding a model wins, so adding, removing,
 //! and reordering entries changes which model a design resolves to.
 
-use std::path::PathBuf;
-
 use super::*;
 
 impl PdkConfig {
@@ -20,38 +18,12 @@ impl PdkConfig {
         }
     }
 
-    /// Add a library path entry with full configuration
-    pub fn add_library_path_entry(&mut self, entry: LibraryPathEntry) {
-        if !self.library_paths.iter().any(|e| e.path == entry.path) {
-            self.library_paths.push(entry);
-        }
-    }
-
     /// Remove a library path by index
     pub fn remove_library_path(&mut self, index: usize) -> Option<LibraryPathEntry> {
         if index < self.library_paths.len() {
             Some(self.library_paths.remove(index))
         } else {
             None
-        }
-    }
-
-    /// Get enabled library paths
-    pub fn enabled_paths(&self) -> impl Iterator<Item = &LibraryPathEntry> {
-        self.library_paths.iter().filter(|e| e.enabled)
-    }
-
-    /// Move a library path up in priority
-    pub fn move_path_up(&mut self, index: usize) {
-        if index > 0 && index < self.library_paths.len() {
-            self.library_paths.swap(index, index - 1);
-        }
-    }
-
-    /// Move a library path down in priority
-    pub fn move_path_down(&mut self, index: usize) {
-        if index + 1 < self.library_paths.len() {
-            self.library_paths.swap(index, index + 1);
         }
     }
 
@@ -153,8 +125,4 @@ impl PdkConfig {
         result
     }
 
-    /// Expand a path and convert to PathBuf
-    pub fn expand_path_buf(&self, path: &str) -> PathBuf {
-        PathBuf::from(self.expand_path(path))
-    }
 }

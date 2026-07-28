@@ -70,16 +70,6 @@ impl CrossProbeMapping {
         self.version += 1;
     }
 
-    /// Clear the mapping
-    pub fn clear(&mut self) {
-        self.point_to_net.clear();
-        self.net_to_points.clear();
-        self.net_segments.clear();
-        self.source_reference = None;
-        self.source_topology_version = None;
-        self.version += 1;
-    }
-
     /// Look up net name for a grid point
     ///
     /// Node points answer from the hash; anything else scans the net
@@ -119,16 +109,6 @@ impl CrossProbeMapping {
             .as_ref()
             .is_some_and(|source| source.key().eq_ignore_ascii_case(&reference.key()))
             && self.source_topology_version == Some(topology_version)
-    }
-
-    /// Look up all grid points for a net name
-    ///
-    /// Returns empty slice if net not found
-    pub fn points_for_net(&self, net_name: &str) -> &[Point] {
-        self.net_to_points
-            .get(net_name)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
     }
 
     /// Check if mapping is populated

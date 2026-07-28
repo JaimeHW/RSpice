@@ -51,14 +51,6 @@ impl PropertyValue {
         PropertyValue::Number { value, unit: None }
     }
 
-    /// Create a new number property with a unit
-    pub fn number_with_unit(value: f64, unit: impl Into<String>) -> Self {
-        PropertyValue::Number {
-            value,
-            unit: Some(unit.into()),
-        }
-    }
-
     /// Create a new string property
     pub fn string(value: impl Into<String>) -> Self {
         PropertyValue::String(value.into())
@@ -107,18 +99,6 @@ impl PropertyValue {
         }
     }
 
-    /// Get the raw string value if this is a String
-    pub fn as_string(&self) -> Option<&str> {
-        match self {
-            PropertyValue::String(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    /// Check if this is an expression
-    pub fn is_expression(&self) -> bool {
-        matches!(self, PropertyValue::Expression(_))
-    }
 }
 
 // =============================================================================
@@ -342,37 +322,6 @@ impl PropertyDefinition {
         self
     }
 
-    /// Mark as hidden (never shown in dialog)
-    pub fn hidden(mut self) -> Self {
-        self.display_mode = DisplayMode::Hidden;
-        self
-    }
-
-    /// Set visibility condition
-    pub fn with_visibility(mut self, condition: VisibilityCondition) -> Self {
-        self.visibility_condition = condition;
-        self
-    }
-
-    /// Show only when non-default
-    pub fn show_when_nondefault(mut self) -> Self {
-        self.visibility_condition = VisibilityCondition::WhenNonDefault;
-        self
-    }
-
-    /// Mark to display on schematic symbol
-    pub fn show_on_schematic(mut self) -> Self {
-        self.show_on_schematic = true;
-        self
-    }
-
-    /// Mark as editable directly on schematic
-    pub fn editable_on_schematic(mut self) -> Self {
-        self.editable_on_schematic = true;
-        self.show_on_schematic = true; // Editable implies visible
-        self
-    }
-
     /// Validate a value against this definition
     pub fn validate(&self, value: &PropertyValue) -> Result<(), String> {
         if let PropertyValue::Number { value, .. } = value
@@ -510,28 +459,6 @@ impl PropertySheet {
         &self.order
     }
 
-    /// Get the number of properties
-    pub fn len(&self) -> usize {
-        self.definitions.len()
-    }
-
-    /// Check if empty
-    pub fn is_empty(&self) -> bool {
-        self.definitions.is_empty()
-    }
-
-    /// Get definitions grouped by category
-    pub fn by_category(&self) -> HashMap<String, Vec<&PropertyDefinition>> {
-        let mut result: HashMap<String, Vec<&PropertyDefinition>> = HashMap::new();
-        for def in self.definitions.values() {
-            result.entry(def.category.clone()).or_default().push(def);
-        }
-        // Sort each category by display order
-        for defs in result.values_mut() {
-            defs.sort_by_key(|d| d.display_order);
-        }
-        result
-    }
 }
 
 // =============================================================================

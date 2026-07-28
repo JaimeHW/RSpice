@@ -76,19 +76,6 @@ impl SimulationState {
         Ok(identity)
     }
 
-    /// Clear waveforms and increment version
-    pub fn clear_waveforms(&mut self) {
-        self.replace_waveforms(Vec::new());
-    }
-
-    /// Add a waveform trace and increment version
-    pub fn add_waveform(&mut self, waveform: WaveformData) {
-        let index = self.waveforms.len();
-        self.node_to_waveform.insert(waveform.name.clone(), index);
-        self.waveforms.push(waveform);
-        self.data_version = self.data_version.wrapping_add(1);
-    }
-
     /// Replace the displayed waveform set and rebuild cross-probe mappings.
     pub fn replace_waveforms(&mut self, waveforms: Vec<WaveformData>) {
         self.node_to_waveform.clear();
@@ -203,22 +190,6 @@ impl SimulationState {
             }
         }
         None
-    }
-
-    /// Find waveform names that match a node/net name
-    pub fn find_waveforms_for_node(&self, node_name: &str) -> Vec<String> {
-        self.waveforms
-            .iter()
-            .filter(|wf| {
-                let wf_net = wf
-                    .name
-                    .trim_start_matches("V(")
-                    .trim_start_matches("I(")
-                    .trim_end_matches(')');
-                wf_net.eq_ignore_ascii_case(node_name)
-            })
-            .map(|wf| wf.name.clone())
-            .collect()
     }
 
     // =========================================================================

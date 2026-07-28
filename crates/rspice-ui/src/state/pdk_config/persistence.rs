@@ -71,18 +71,6 @@ impl PdkConfig {
         }
     }
 
-    /// Check if configuration has any content
-    pub fn is_empty(&self) -> bool {
-        self.library_paths.is_empty()
-            && self.environment_variables.is_empty()
-            && self.recent_files.is_empty()
-            && self.layout_database_unit.is_none()
-    }
-
-    /// Get total discovered file count
-    pub fn total_file_count(&self) -> usize {
-        self.discovered_files.len()
-    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

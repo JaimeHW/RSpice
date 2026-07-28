@@ -359,11 +359,6 @@ impl SimulationRun {
         self.elapsed_time = elapsed;
     }
 
-    /// Get count of successful analyses
-    pub fn successful_analyses(&self) -> usize {
-        self.analyses.iter().filter(|a| a.success).count()
-    }
-
     /// Find analysis by type (returns first match)
     pub fn find_analysis(&self, analysis_type: AnalysisType) -> Option<&AnalysisResult> {
         self.analyses

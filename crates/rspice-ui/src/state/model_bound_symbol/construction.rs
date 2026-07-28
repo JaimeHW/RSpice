@@ -39,26 +39,6 @@ pub struct SymbolConstructionPlan {
 }
 
 impl SymbolConstructionPlan {
-    pub fn library(&self) -> &str {
-        &self.library
-    }
-
-    pub fn cell(&self) -> &str {
-        &self.cell
-    }
-
-    pub fn before(&self) -> Option<&Cell> {
-        self.before.as_ref()
-    }
-
-    pub fn after(&self) -> &Cell {
-        &self.after
-    }
-
-    pub fn validation_digest(&self) -> &str {
-        &self.validation_digest
-    }
-
     pub fn commit(
         self,
         library: &mut Library,
@@ -79,14 +59,12 @@ impl SymbolConstructionPlan {
         if observed != self.expected_cell_json {
             return Err(SymbolDefinitionError::StaleTarget(self.cell));
         }
-        library.cells.insert(self.cell.clone(), self.after.clone());
+        library.cells.insert(self.cell.clone(), self.after);
         Ok(SymbolConstructionReceipt {
             library: library.name.clone(),
             cell: self.cell,
             before: self.before,
-            after: self.after,
             after_cell_json: self.after_cell_json,
-            validation_digest: self.validation_digest,
         })
     }
 }
@@ -96,8 +74,6 @@ pub struct SymbolConstructionReceipt {
     pub library: String,
     pub cell: String,
     pub before: Option<Cell>,
-    pub after: Cell,
-    pub validation_digest: String,
     after_cell_json: String,
 }
 
