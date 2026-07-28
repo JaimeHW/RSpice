@@ -125,7 +125,7 @@ impl CircuitData {
 
     #[inline]
     pub(in crate::circuit) fn is_ground_name(name: &str) -> bool {
-        crate::compat::ground::is_spice_ground_name(name)
+        crate::naming::is_spice_ground_name(name)
     }
 
     /// Look up an existing node ID by name.

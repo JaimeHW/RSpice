@@ -139,7 +139,7 @@ impl SolutionDependentCapacitor {
     {
         self.node_bindings = vec![None; self.program.node_map.len()];
         for (name, &local_idx) in &self.program.node_map {
-            let resolved = if crate::compat::ground::is_spice_ground_name(name) {
+            let resolved = if crate::naming::is_spice_ground_name(name) {
                 Some(0usize)
             } else {
                 resolve_node(name)

@@ -1,8 +1,10 @@
 //! SPICE Compatibility Module
 //!
-//! Parsers for standard SPICE file formats.
-
-pub(crate) mod ground;
+//! Readers for foreign simulator file formats.
+//!
+//! The SPICE ground-name rule used to live here too, which put this module
+//! underneath the solver, the device models and the parser. It is a naming
+//! rule rather than a compatibility shim, and now lives in [`crate::naming`].
 
 mod ltspice_raw;
 

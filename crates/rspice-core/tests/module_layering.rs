@@ -70,6 +70,9 @@ const LAYERS: &[(&str, u32)] = &[
     ("resource", 0),
     ("abort_signal", 0),
     ("builtin_lib", 0),
+    // SPICE naming rules. Everything above depends on this, so it depends on
+    // nothing.
+    ("naming", 0),
     // Structured convergence-quality reporting. Wired into the drivers in
     // Phase 5b; it depends only on `Value` and stays a leaf.
     ("diagnostics", 0),
@@ -120,21 +123,19 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // ---------------------------------------------------------------------
     // Phase 2 — foundation leaves.
     //
-    // `compat::ground::is_spice_ground_name` is a fundamental SPICE naming
-    // rule, not a compatibility shim, and five modules below `compat` call it.
-    // Moving it to a layer-0 `naming` leaf retires every edge below except
-    // `analysis -> compat`, which is `waveform_stream` reading a RAW file and
-    // is retired instead by moving `analysis::output` up beside the reader.
+    // The ground-name predicate moved to the layer-0 `naming` leaf, which
+    // retired `device`, `netlist`, `circuit` and `solver` reaching into
+    // `compat`.
     //
+    // `analysis -> compat` is what remains, and it is a different edge:
+    // `waveform_stream` reading an LTspice RAW file. It is retired by moving
+    // `analysis::output` up beside the reader, not by moving anything down.
+    ("analysis", "compat", 2),
     // `expr -> analysis` and `resource -> netlist` are single references each:
     // a temperature conversion and the default include depth, both of which
-    // belong in layer-0 leaves.
-    ("device", "compat", 4),
-    ("netlist", "compat", 3),
+    // belong in layer-0 leaves. The include-depth constant is defined in
+    // `netlist/include.rs`.
     ("expr", "analysis", 3),
-    ("analysis", "compat", 2),
-    ("circuit", "compat", 1),
-    ("solver", "compat", 1),
     ("resource", "netlist", 1),
     // ---------------------------------------------------------------------
     // Phase 3 — extract `config`.

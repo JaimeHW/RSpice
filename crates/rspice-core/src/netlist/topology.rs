@@ -652,7 +652,7 @@ fn node_key(name: &str) -> String {
 }
 
 fn is_ground_name(name: &str) -> bool {
-    crate::compat::ground::is_spice_ground_name(name)
+    crate::naming::is_spice_ground_name(name)
 }
 
 fn should_replace_representative(current: &str, candidate: &str) -> bool {

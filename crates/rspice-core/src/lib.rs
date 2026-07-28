@@ -107,6 +107,9 @@ pub mod diagnostics;
 pub mod engine;
 pub mod expr;
 pub mod library;
+/// SPICE naming rules: what a name means in a deck, independent of dialect.
+/// A leaf — everything else depends on it, so it depends on nothing.
+pub(crate) mod naming;
 pub mod netlist;
 pub mod solver;
 pub mod time_compat;
