@@ -31,6 +31,7 @@ mod builtins;
 mod compact;
 mod device;
 mod discover;
+pub mod emit;
 mod error;
 mod expr;
 mod files;
@@ -38,10 +39,11 @@ mod kernel_ir;
 mod lanes;
 mod manifest;
 mod names;
-mod packed;
 mod noise;
+mod packed;
 mod registry;
 mod scalar;
+pub mod stamp_plan;
 
 pub use builtins::{
     BuiltinBackendFallbackReason, BuiltinBackendSelectionCounts, BuiltinGenerationReport,
