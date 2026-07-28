@@ -706,7 +706,6 @@ impl ModelPlan {
         &self,
         artifact: &CanonicalIrArtifact,
         function: &CfgFunction,
-
         depth: usize,
         out: &mut String,
     ) -> Result<(), RustBackendError> {
@@ -717,6 +716,12 @@ impl ModelPlan {
         }
         // Every stamper call scales by it, whether or not the body reads it.
         wants.multiplicity = true;
+        // And a stamper call can read a slot the body never touches: an output
+        // a coarse stage owns is written straight into the stamp as
+        // `staged[..]`. `I(a, c) <+ bias` in a model that also splits is the
+        // shape — the Newton body has no staged operand at all, and the slot
+        // still has to be in scope.
+        wants.staged |= self.slots > 0;
 
         if wants.parameters {
             let _ = writeln!(out, "{pad}let parameters = &self.params.values;");

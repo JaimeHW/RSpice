@@ -349,6 +349,39 @@ module staged(g, d, s);
 endmodule
 "#,
         ),
+        // The same prologue, plus a contribution that reads no unknown at all.
+        // Its residual is instance-class, so the stamp reads it from a slot —
+        // and the Newton body has no staged operand of its own, which is what
+        // makes the slot array's binding independent of what the body reads.
+        (
+            "staged transistor with a leakage floor",
+            r#"
+module floored(g, d, s);
+    inout g, d, s;
+    electrical g, d, s;
+    parameter real width = 1.0e-6;
+    parameter real vth0 = 0.4;
+    parameter real tnom = 300.15;
+    parameter real ileak = 1.0e-12;
+    real geometry, vth, vov, ids;
+    analog begin
+        geometry = width * width * 1.0e12;
+        if (geometry > 1.0e-3) begin
+            geometry = geometry * 2.0;
+        end
+        vth = vth0 - 1.0e-3 * ($temperature - tnom);
+        vov = V(g, s) - vth;
+        if (vov > 0.0) begin
+            ids = geometry * vov * vov;
+        end else begin
+            ids = 0.0;
+        end
+        I(d, s) <+ 1.0e-6 * ids;
+        I(d, s) <+ ileak * ileak;
+    end
+endmodule
+"#,
+        ),
         // A potential contribution, which stamps through a branch unknown
         // rather than a node pair.
         (
