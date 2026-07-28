@@ -47,24 +47,24 @@ use crate::workbench::export_workflow::{
     ObservedExportDestination, SaveDialogConfig, export_completion_message,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::hardcopy_print::discover_native_printers;
+use crate::workbench::hardcopy_adapters::print::discover_native_printers;
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::hardcopy_print::{
+use crate::workbench::hardcopy_adapters::print::{
     BrowserPrintReservation, finalize_browser_print, reserve_browser_print_window,
 };
-use crate::workbench::hardcopy_print::{HardcopyCancellationToken, PrinterCapabilitySnapshot};
+use crate::workbench::hardcopy_adapters::print::{HardcopyCancellationToken, PrinterCapabilitySnapshot};
 #[cfg(test)]
-use crate::workbench::hardcopy_render::HardcopyRenderer;
+use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::hardcopy_render::RenderedHardcopyPublication;
-use crate::workbench::hardcopy_render::{HardcopyPublicationTimestamp, HardcopySceneMetadata};
-use crate::workbench::hardcopy_sources::ResolvedHardcopyDocument;
+use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
+use crate::workbench::hardcopy_adapters::render::{HardcopyPublicationTimestamp, HardcopySceneMetadata};
+use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static PRINTER_DISCOVERY: std::cell::RefCell<Option<
         std::sync::mpsc::Receiver<Result<
-            crate::workbench::hardcopy_print::PrinterDiscoveryReport,
+            crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport,
             String,
         >>,
     >> = const { std::cell::RefCell::new(None) };
@@ -216,7 +216,7 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
             return;
         }
     };
-    let prepared = match crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
+    let prepared = match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
         &app.state,
         &source_key,
         scope.clone(),
@@ -231,7 +231,7 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
         }
     };
     let candidates =
-        crate::workbench::hardcopy_sources::enumerate_retained_hardcopy_sources(&app.state);
+        crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(&app.state);
     app.state.dialogs.hardcopy.begin_open(workflow, candidates);
     let generation = app
         .state
@@ -256,7 +256,7 @@ pub(super) fn select_retained_source(
     source_key: &str,
     scope: crate::hardcopy::HardcopyScope,
 ) {
-    let prepared = match crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
+    let prepared = match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
         &app.state,
         source_key,
         scope.clone(),
@@ -289,7 +289,7 @@ pub(super) fn select_retained_source(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn start_source_resolution(
-    prepared: crate::workbench::hardcopy_sources::PreparedRetainedHardcopyResolution,
+    prepared: crate::workbench::hardcopy_adapters::sources::PreparedRetainedHardcopyResolution,
     purpose: SourceResolutionPurpose,
     generation: u64,
     source_key: String,
@@ -328,7 +328,7 @@ fn start_source_resolution(
 
 #[cfg(target_arch = "wasm32")]
 fn start_source_resolution(
-    prepared: crate::workbench::hardcopy_sources::PreparedRetainedHardcopyResolution,
+    prepared: crate::workbench::hardcopy_adapters::sources::PreparedRetainedHardcopyResolution,
     purpose: SourceResolutionPurpose,
     generation: u64,
     source_key: String,
@@ -401,7 +401,7 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
     match result {
         Ok(resolved) if expected.is_none() => {
             let prepared =
-                match crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
+                match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
                     &app.state,
                     &source_key,
                     scope.clone(),
@@ -530,7 +530,7 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
     match result {
         Ok(resolved) if expected.is_none() => {
             let prepared =
-                match crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
+                match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
                     &app.state,
                     &source_key,
                     scope.clone(),
@@ -658,8 +658,8 @@ fn apply_open_resolved(
     #[cfg(not(target_arch = "wasm32"))]
     if (workflow == HardcopyWorkflow::Print
         || app.state.dialogs.hardcopy.format == OutputFormat::NativePrinter)
-        && crate::workbench::hardcopy_print::native_print_platform_support()
-            == crate::workbench::hardcopy_print::NativePrintPlatformSupport::Available
+        && crate::workbench::hardcopy_adapters::print::native_print_platform_support()
+            == crate::workbench::hardcopy_adapters::print::NativePrintPlatformSupport::Available
     {
         refresh_printer_catalog(app);
     }
@@ -695,7 +695,7 @@ fn active_retained_source_selection(
     use crate::workbench::SurfaceId;
 
     let candidates =
-        crate::workbench::hardcopy_sources::enumerate_retained_hardcopy_sources(&app.state);
+        crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(&app.state);
     let selected = match app.state.workbench.current_route().surface_id() {
         SurfaceId::Design => candidates.iter().find(|candidate| {
             candidate.source_key.contains(":cell-view:")
@@ -746,7 +746,7 @@ fn active_retained_source_selection(
 fn metadata_for(
     app: &RSpiceApp,
     resolved: &ResolvedHardcopyDocument,
-) -> Result<HardcopySceneMetadata, crate::workbench::hardcopy_render::HardcopyRenderError> {
+) -> Result<HardcopySceneMetadata, crate::workbench::hardcopy_adapters::render::HardcopyRenderError> {
     let mut metadata =
         HardcopySceneMetadata::try_new(resolved.authority().display_name(), "RSpice")?;
     metadata.set_publication_timestamp(HardcopyPublicationTimestamp::from_unix_seconds(
@@ -786,8 +786,8 @@ fn identity_lines(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn refresh_printer_catalog(app: &mut RSpiceApp) {
-    if crate::workbench::hardcopy_print::native_print_platform_support()
-        != crate::workbench::hardcopy_print::NativePrintPlatformSupport::Available
+    if crate::workbench::hardcopy_adapters::print::native_print_platform_support()
+        != crate::workbench::hardcopy_adapters::print::NativePrintPlatformSupport::Available
     {
         app.state.dialogs.hardcopy.printer_report = None;
         app.state.dialogs.hardcopy.printer_capabilities = None;
@@ -877,7 +877,7 @@ pub(super) fn poll_printer_catalog(_app: &mut RSpiceApp) {}
 pub(super) fn select_printer_capabilities(
     app: &mut RSpiceApp,
     capabilities: PrinterCapabilitySnapshot,
-    suggested: Option<crate::workbench::hardcopy_print::PrinterDriverSettingsSuggestion>,
+    suggested: Option<crate::workbench::hardcopy_adapters::print::PrinterDriverSettingsSuggestion>,
 ) {
     let previous = app.state.dialogs.hardcopy.printer_job.clone();
     let media_source = suggested
@@ -931,7 +931,7 @@ pub(super) fn select_printer_capabilities(
         return;
     };
     let orientation = resolved_orientation(app);
-    let raster_geometry = match crate::workbench::hardcopy_print::resolve_native_printer_mode(
+    let raster_geometry = match crate::workbench::hardcopy_adapters::print::resolve_native_printer_mode(
         &capabilities,
         &selected_paper_id,
         resolution,
@@ -1238,7 +1238,7 @@ fn begin_publication_authentication(
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
         return Err("A browser hardcopy publication is already being authenticated.".to_owned());
     }
-    let prepared = crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
+    let prepared = crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
         &app.state,
         pending.opened_source.source_key(),
         pending.opened_source.authority().scope().clone(),
@@ -1269,7 +1269,7 @@ fn begin_publication_authentication(
     if PENDING_PUBLICATION.with(|slot| slot.borrow().is_some()) {
         return Err("A native hardcopy publication is already being authenticated.".to_owned());
     }
-    let prepared = crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
+    let prepared = crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
         &app.state,
         pending.opened_source.source_key(),
         pending.opened_source.authority().scope().clone(),
@@ -1389,7 +1389,7 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
         .build_setup()
         .map_err(|error| error.to_string())?;
     let staged_mapping = stage_print_mapping_persistence(app, setup.print_mapping())?;
-    let prepared = crate::workbench::hardcopy_sources::prepare_retained_hardcopy_resolution(
+    let prepared = crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
         &app.state,
         source.source_key(),
         source.authority().scope().clone(),
@@ -2315,7 +2315,7 @@ fn record_render_failure(app: &mut RSpiceApp, plan: &HardcopyPlan, message: Stri
 fn record_print_failure(
     app: &mut RSpiceApp,
     plan: &HardcopyPlan,
-    error: crate::workbench::hardcopy_print::HardcopyPrintError,
+    error: crate::workbench::hardcopy_adapters::print::HardcopyPrintError,
     pages_completed: u32,
 ) -> String {
     let message = error.to_string();
@@ -2375,7 +2375,7 @@ mod tests {
             .documents
             .activate(WorkspaceDocumentId::CellView(reference));
         let resolved =
-            crate::workbench::hardcopy_sources::resolve_active_app_hardcopy_source(&app.state)
+            crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(&app.state)
                 .expect("active schematic resolves");
         app.state
             .dialogs
@@ -2420,7 +2420,7 @@ mod tests {
             .documents
             .activate(WorkspaceDocumentId::CellView(reference));
         let resolved =
-            crate::workbench::hardcopy_sources::resolve_active_app_hardcopy_source(&app.state)
+            crate::workbench::hardcopy_adapters::sources::resolve_active_app_hardcopy_source(&app.state)
                 .expect("active schematic resolves");
         app.state
             .dialogs
@@ -2444,7 +2444,7 @@ mod tests {
         ));
         app.state.dialogs.hardcopy.source_resolution_generation = 19;
         app.state.dialogs.hardcopy.printer_report =
-            Some(crate::workbench::hardcopy_print::PrinterDiscoveryReport::default());
+            Some(crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport::default());
         app.state.dialogs.hardcopy.printer_job = Some(
             PrinterJobSettings::try_new(
                 ContentDigest::from_bytes([0x50; 32]),

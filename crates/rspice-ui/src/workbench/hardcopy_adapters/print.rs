@@ -25,7 +25,9 @@ use crate::hardcopy::{
     ResolvedOrientation,
 };
 use crate::product::ContentDigest;
-use crate::workbench::hardcopy_render::{RenderedHardcopyPublication, RenderedPrinterPages};
+use crate::workbench::hardcopy_adapters::render::{
+    RenderedHardcopyPublication, RenderedPrinterPages,
+};
 
 const CAPABILITY_SCHEMA_VERSION: u32 = 1;
 const MAX_PLATFORM_PRINTERS: usize = 4_096;
@@ -1123,7 +1125,7 @@ trait NativeSpoolBackend {
     fn start_page(&mut self) -> Result<(), HardcopyPrintError>;
     fn write_page(
         &mut self,
-        page: &crate::workbench::hardcopy_render::PrinterRasterPage,
+        page: &crate::workbench::hardcopy_adapters::render::PrinterRasterPage,
     ) -> Result<(), HardcopyPrintError>;
     fn end_page(&mut self) -> Result<(), HardcopyPrintError>;
     fn finish_job(&mut self) -> Result<(), HardcopyPrintError>;
@@ -2273,7 +2275,7 @@ mod windows_backend {
 
         fn write_page(
             &mut self,
-            page: &crate::workbench::hardcopy_render::PrinterRasterPage,
+            page: &crate::workbench::hardcopy_adapters::render::PrinterRasterPage,
         ) -> Result<(), HardcopyPrintError> {
             if page.width() != self.expected_width || page.height() != self.expected_height {
                 return Err(HardcopyPrintError::PrinterPublicationMismatch(format!(
@@ -2769,7 +2771,7 @@ mod tests {
         TilingMode, TilingSetup, Watermark,
     };
     use crate::product::ObjectRevision;
-    use crate::workbench::hardcopy_render::{
+    use crate::workbench::hardcopy_adapters::render::{
         HardcopyRenderer, HardcopyScene, HardcopySceneMetadata,
     };
 
@@ -3135,7 +3137,7 @@ mod tests {
 
         fn write_page(
             &mut self,
-            _page: &crate::workbench::hardcopy_render::PrinterRasterPage,
+            _page: &crate::workbench::hardcopy_adapters::render::PrinterRasterPage,
         ) -> Result<(), HardcopyPrintError> {
             let mut state = self.state.borrow_mut();
             state.pages_written += 1;

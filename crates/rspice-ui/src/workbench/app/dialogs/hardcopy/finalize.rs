@@ -23,10 +23,10 @@ use crate::product::ContentDigest;
 use crate::workbench::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
 };
-use crate::workbench::hardcopy_print::{
+use crate::workbench::hardcopy_adapters::print::{
     HardcopyCancellationToken, HardcopyPrintError, discover_native_printers, spool_native_hardcopy,
 };
-use crate::workbench::hardcopy_render::{RenderedHardcopyPublication, RenderedPrinterPages};
+use crate::workbench::hardcopy_adapters::render::{RenderedHardcopyPublication, RenderedPrinterPages};
 
 const NATIVE_FINALIZATION_THREAD_NAME: &str = "rspice-hardcopy-finalize";
 const CANCELLED_MESSAGE: &str = "Native hardcopy finalization was cancelled.";
@@ -1212,7 +1212,7 @@ mod tests {
     fn discovery_and_missing_device_failures_have_truthful_print_outcomes() {
         let discovery = FinalizationFailure::Print {
             error: HardcopyPrintError::PlatformUnavailable(
-                crate::workbench::hardcopy_print::HardcopyPlatformUnavailableReason::
+                crate::workbench::hardcopy_adapters::print::HardcopyPlatformUnavailableReason::
                     NativePrintingIsWindowsOnly,
             ),
             pages_completed: 0,

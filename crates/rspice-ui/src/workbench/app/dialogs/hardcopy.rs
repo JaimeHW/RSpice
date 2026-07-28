@@ -13,7 +13,7 @@ use crate::hardcopy::{
 };
 #[cfg(test)]
 use crate::hardcopy::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
-use crate::workbench::hardcopy_sources::ResolvedHardcopyDocument;
+use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod execution;
@@ -119,7 +119,7 @@ pub(crate) enum HardcopySubflowSnapshot {
     Printer {
         printer_id: String,
         printer_job: Option<PrinterJobSettings>,
-        printer_capabilities: Option<crate::workbench::hardcopy_print::PrinterCapabilitySnapshot>,
+        printer_capabilities: Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
         paper: PaperDraft,
     },
     CustomPaper {
@@ -134,7 +134,7 @@ pub(crate) enum HardcopySubflowSnapshot {
         overlap: String,
         printer_id: String,
         printer_job: Option<PrinterJobSettings>,
-        printer_capabilities: Option<crate::workbench::hardcopy_print::PrinterCapabilitySnapshot>,
+        printer_capabilities: Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
     },
     PrintMapping {
         print_mapping: PrintMappingTable,
@@ -156,7 +156,7 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) content_extent: Option<ContentExtent>,
     pub(crate) resolved_document: Option<std::sync::Arc<ResolvedHardcopyDocument>>,
     pub(crate) source_candidates:
-        Vec<crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor>,
+        Vec<crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
     pub(crate) paper: PaperDraft,
     pub(crate) display_unit: LengthUnit,
     pub(crate) orientation: Orientation,
@@ -174,9 +174,9 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) registration_marks: bool,
     pub(crate) printer_id: String,
     pub(crate) printer_job: Option<PrinterJobSettings>,
-    pub(crate) printer_report: Option<crate::workbench::hardcopy_print::PrinterDiscoveryReport>,
+    pub(crate) printer_report: Option<crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport>,
     pub(crate) printer_capabilities:
-        Option<crate::workbench::hardcopy_print::PrinterCapabilitySnapshot>,
+        Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
     pub(crate) printer_discovery_busy: bool,
     pub(crate) format: OutputFormat,
     pub(crate) color_mapping: ColorMapping,
@@ -198,13 +198,13 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) source_resolution_generation: u64,
     pub(crate) preview_plan: Option<std::sync::Arc<HardcopyPlan>>,
     pub(crate) preview:
-        Option<std::sync::Arc<crate::workbench::hardcopy_render::HardcopyPreviewPage>>,
+        Option<std::sync::Arc<crate::workbench::hardcopy_adapters::render::HardcopyPreviewPage>>,
     pub(crate) preview_adjacent:
-        Option<std::sync::Arc<crate::workbench::hardcopy_render::HardcopyPreviewPage>>,
-    pub(crate) metadata: Option<crate::workbench::hardcopy_render::HardcopySceneMetadata>,
+        Option<std::sync::Arc<crate::workbench::hardcopy_adapters::render::HardcopyPreviewPage>>,
+    pub(crate) metadata: Option<crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata>,
     pub(crate) body_scroll_offset: f32,
     pub(crate) busy: bool,
-    pub(crate) cancellation: crate::workbench::hardcopy_print::HardcopyCancellationToken,
+    pub(crate) cancellation: crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken,
     pub(crate) last_receipt: Option<HardcopyReceipt>,
     pub(crate) error: Option<String>,
 }
@@ -230,7 +230,7 @@ impl HardcopyDialogState {
         &mut self,
         workflow: HardcopyWorkflow,
         source_candidates: Vec<
-            crate::workbench::hardcopy_sources::RetainedHardcopySourceDescriptor,
+            crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
         >,
     ) {
         let mut draft = Self::default();
@@ -329,7 +329,7 @@ impl HardcopyDialogState {
             metadata: None,
             body_scroll_offset: 0.0,
             busy: false,
-            cancellation: crate::workbench::hardcopy_print::HardcopyCancellationToken::default(),
+            cancellation: crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken::default(),
             last_receipt: None,
             error: None,
         }
@@ -356,7 +356,7 @@ impl HardcopyDialogState {
         draft.metadata = None;
         draft.body_scroll_offset = 0.0;
         draft.busy = false;
-        draft.cancellation = crate::workbench::hardcopy_print::HardcopyCancellationToken::default();
+        draft.cancellation = crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken::default();
         if workflow == HardcopyWorkflow::Print {
             draft.format = runtime_print_format();
         } else if workflow == HardcopyWorkflow::Export

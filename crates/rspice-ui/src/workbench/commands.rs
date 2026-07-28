@@ -927,11 +927,11 @@ impl Command {
             }
             Self::CloseProject => state.project_lifecycle.project_open,
             Self::PageSetup | Self::ExportActiveView => {
-                crate::workbench::hardcopy_sources::active_app_hardcopy_source_available(state)
+                crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(state)
             }
             Self::PrintHardcopy => {
                 cfg!(any(target_os = "windows", target_arch = "wasm32"))
-                    && crate::workbench::hardcopy_sources::active_app_hardcopy_source_available(
+                    && crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(
                         state,
                     )
             }

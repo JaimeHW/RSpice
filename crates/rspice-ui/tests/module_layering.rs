@@ -422,9 +422,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "shortcut_library_persistence",
     "shortcut_artifacts",
     // Hardcopy adapters: resolve sources, then render, then print.
-    "hardcopy_sources",
-    "hardcopy_render",
-    "hardcopy_print",
+    "hardcopy_adapters/sources",
+    "hardcopy_adapters/render",
+    "hardcopy_adapters/print",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",
@@ -499,7 +499,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "calculator_tool", 1),
     ("app", "cross_probe", 1),
     ("browser_file_import", "app", 1),
-    ("hardcopy_sources", "app", 1),
+    ("hardcopy_adapters/sources", "app", 1),
     ("project_checkpoint", "app", 1),
     // Not new coupling: these were written `use crate::workbench::{A, B};`,
     // and the first version of this table could not read a brace group, so
@@ -543,10 +543,50 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // it, which is what every other chrome transition already does.
     ("app", "frame", 5),
     ("commands", "frame", 1),
+    // Edges that were written `super::x` instead of `crate::workbench::x`.
+    // The first version of this table only read the long form, so 310
+    // references — about 15% of the shell's interior — were scored as zero.
+    // These are not new coupling; they are the coupling that short-form
+    // imports were hiding.
+    //
+    // `state` accounts for ten of them, and they are the interesting ones:
+    // the shell's own persisted state reaches up into routing, presentation,
+    // and the document engines. That is the same inversion the top-level
+    // `state -> *` entries describe, one layer down.
+    ("state", "availability", 6),
+    ("state", "navigation", 4),
+    ("state", "surface_catalog", 2),
+    ("state", "surface_route", 1),
+    ("state", "preferences", 1),
+    ("state", "result_document", 1),
+    ("state", "model_editor", 2),
+    ("state", "model_correlation", 2),
+    ("state", "window_session", 2),
+    ("state", "recovery", 2),
+    ("state", "visualization_studio", 2),
+    // Dispatch reaching the surfaces and tools it should be routing to.
+    ("commands", "visualization_studio", 6),
+    ("commands", "surfaces", 4),
+    ("commands", "account_organization", 1),
+    ("commands", "jobs_manager", 1),
+    ("commands", "preflight", 1),
+    ("commands", "specialist_tool_browser", 1),
+    // Session state naming the document engines whose state it aggregates.
+    ("session", "result_document", 2),
+    ("session", "code_workspace", 1),
+    ("session", "netlist_document", 1),
+    ("session", "cross_probe", 1),
+    // Remaining short-form edges.
+    ("availability", "capability_workflow", 1),
+    ("feature_availability", "design_system", 1),
+    ("recovery_checkpoint", "file_workflow", 3),
+    ("hardcopy_adapters/sources", "visualization_studio", 1),
+    ("surface_route", "surface_catalog", 2),
+    ("surface_route", "capability_workflow", 1),
+    ("surfaces", "visualization_studio", 1),
     // Contracts naming things above them.
     ("state", "capability_workflow", 1),
     ("state", "simulation_analysis_tabs", 1),
-    ("shortcuts", "result_document", 1),
 ];
 
 fn workbench_dir() -> PathBuf {
@@ -571,10 +611,34 @@ fn workbench_rank(module: &str) -> usize {
 /// `src/workbench/app.rs` and `src/workbench/app/dialogs/state.rs` both belong
 /// to `app`. `src/workbench.rs` is the module root and is not scanned: like
 /// the crate root, it is allowed to see everything it declares.
+///
+/// Declared names may be nested — `hardcopy/sources` — so that grouping files
+/// into a directory does not collapse their ranks into one. The longest
+/// declared prefix wins, which keeps `hardcopy/render` distinct from
+/// `hardcopy/print` while a bare `app` still owns everything beneath it.
 fn workbench_owning_module(file: &Path) -> Option<String> {
     let relative = file.strip_prefix(workbench_dir()).ok()?;
-    let first = relative.components().next()?.as_os_str().to_str()?;
-    Some(first.trim_end_matches(".rs").to_owned())
+    let path = relative
+        .to_str()?
+        .replace('\\', "/")
+        .trim_end_matches(".rs")
+        .to_owned();
+    longest_declared_prefix(&path)
+}
+
+/// The longest entry of [`WORKBENCH_LAYERS`] that is a component-wise prefix
+/// of `path`, which is itself `/`-separated.
+fn longest_declared_prefix(path: &str) -> Option<String> {
+    WORKBENCH_LAYERS
+        .iter()
+        .filter(|declared| {
+            path == **declared
+                || path
+                    .strip_prefix(*declared)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .max_by_key(|declared| declared.len())
+        .map(|declared| (*declared).to_owned())
 }
 
 /// Map each name re-exported by `workbench.rs` back to the module that owns it.
@@ -622,6 +686,21 @@ fn workbench_reexports() -> BTreeMap<String, String> {
     map
 }
 
+/// Normalize a Rust path tail to the `/`-separated form the layer table uses,
+/// keeping only the leading identifier run: `hardcopy::sources::Foo` becomes
+/// `hardcopy/sources/Foo`, which [`longest_declared_prefix`] then resolves.
+fn path_segments(item: &str) -> String {
+    item.split("::")
+        .map(|segment| {
+            segment
+                .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                .trim()
+        })
+        .take_while(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Reference counts between `workbench` submodules, keyed `(from, to)`.
 fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
     const PREFIX: &str = "crate::workbench::";
@@ -635,7 +714,20 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
         };
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        let code = strip_line_comments(&source);
+        let mut code = strip_line_comments(&source);
+
+        // A file sitting directly in `src/workbench/` is a module of the
+        // shell, so its `super::` means `crate::workbench::` — the same edge
+        // written the short way. 310 references took that form and went
+        // uncounted, about 15% of the interior. Deeper files are excluded on
+        // purpose: there `super::` names a sibling inside their own module,
+        // which is not a cross-module edge.
+        let names_the_shell_via_super = file
+            .strip_prefix(workbench_dir())
+            .is_ok_and(|relative| relative.components().count() == 1);
+        if names_the_shell_via_super {
+            code = code.replace("super::", PREFIX);
+        }
 
         let mut rest = code.as_str();
         while let Some(index) = rest.find(PREFIX) {
@@ -644,7 +736,7 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
             // `use crate::workbench::{A, b::C};` names two modules in one
             // occurrence. Expanding the group keeps the metric on coupling
             // rather than on whether the author happened to merge imports.
-            let names: Vec<&str> = if rest.starts_with('{') {
+            let names: Vec<String> = if rest.starts_with('{') {
                 let Some(close) = rest.find('}') else {
                     continue;
                 };
@@ -652,30 +744,26 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
                 rest = &rest[close + 1..];
                 group
                     .split(',')
-                    .map(|item| {
-                        let item = item.trim();
-                        let head = item.split("::").next().unwrap_or(item);
-                        head.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
-                    })
+                    .map(|item| path_segments(item.trim()))
                     .filter(|name| !name.is_empty())
                     .collect()
             } else {
                 let end = rest
-                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .find(|c: char| !c.is_alphanumeric() && c != '_' && c != ':')
                     .unwrap_or(rest.len());
-                let name = &rest[..end];
+                let path = &rest[..end];
                 rest = &rest[end..];
-                vec![name]
+                vec![path_segments(path)]
             };
 
             for name in names {
-                // A path names either a submodule directly or a type the root
-                // re-exports from one. Anything else is a function defined in
-                // `workbench.rs` itself, which belongs to the root, not a
-                // module.
-                let to = if declared.contains(&name) {
-                    name.to_owned()
-                } else if let Some(owner) = reexports.get(name) {
+                // A path names either a submodule — possibly nested, as
+                // `hardcopy::sources` — or a type the root re-exports from
+                // one. Anything else is a function defined in `workbench.rs`
+                // itself, which belongs to the root, not a module.
+                let to = if let Some(module) = longest_declared_prefix(&name) {
+                    module
+                } else if let Some(owner) = reexports.get(name.as_str()) {
                     owner.clone()
                 } else {
                     continue;
@@ -908,10 +996,10 @@ fn whole_application_mutable_access_does_not_grow() {
 const LINE_BUDGET: usize = 2500;
 
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("workbench/hardcopy_sources.rs", 8328),
+    ("workbench/hardcopy_adapters/sources.rs", 8326),
     ("simulation/runner/worker_contract.rs", 8226),
     ("io/project_io.rs", 8214),
-    ("workbench/hardcopy_render.rs", 8095),
+    ("workbench/hardcopy_adapters/render.rs", 8091),
     ("state/workspace.rs", 7524),
     ("workbench/visualization_studio.rs", 7601),
     ("state/model_library/qualification.rs", 6924),
@@ -938,7 +1026,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/state.rs", 3507),
     ("schematic/view/interaction.rs", 3491),
     ("workbench/app/actions/workspace.rs", 3400),
-    ("workbench/hardcopy_print.rs", 3355),
+    ("workbench/hardcopy_adapters/print.rs", 3355),
     ("workbench/app/dialogs/hardcopy/render.rs", 3348),
     ("state/schematic/state/editor_ops/array_ops.rs", 3320),
     ("simulation/controller.rs", 3214),

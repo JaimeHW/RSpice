@@ -25,7 +25,7 @@ use sha2::{Digest as _, Sha256};
 use tiff::encoder::{Compression, DeflateLevel, Rational, TiffEncoder, colortype};
 use tiff::tags::ResolutionUnit;
 
-use super::hardcopy_sources::{
+use super::sources::{
     HardcopySemanticDocument, ResolvedHardcopyDocument, SCHEMATIC_UNIT_UM, SemanticAggregate,
     SemanticBounds, SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure,
     SemanticResultSummary, SemanticSchematic, SemanticTable,
@@ -95,9 +95,12 @@ const LEGEND_VERTICAL_PADDING_UM: u64 = 4_000;
 
 // IBM Plex is licensed for embedding under SIL OFL 1.1. The retained license
 // is assets/fonts/OFL-IBMPlex.txt.
-const IBM_PLEX_SANS_REGULAR: &[u8] = include_bytes!("../../assets/fonts/IBMPlexSans-Regular.ttf");
-const IBM_PLEX_SANS_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/IBMPlexSans-SemiBold.ttf");
-const IBM_PLEX_MONO_REGULAR: &[u8] = include_bytes!("../../assets/fonts/IBMPlexMono-Regular.ttf");
+const IBM_PLEX_SANS_REGULAR: &[u8] =
+    include_bytes!("../../../assets/fonts/IBMPlexSans-Regular.ttf");
+const IBM_PLEX_SANS_SEMIBOLD: &[u8] =
+    include_bytes!("../../../assets/fonts/IBMPlexSans-SemiBold.ttf");
+const IBM_PLEX_MONO_REGULAR: &[u8] =
+    include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf");
 
 /// Stable publication timestamp. PDF/A requires this explicit value; the
 /// renderer never substitutes wall-clock time because that would make output
@@ -6715,7 +6718,9 @@ mod tests {
         PrintObjectIdentity, PrinterJobSettings, PrinterMediaSource, RenderSetup, ScaleMode,
         StandardPaper, TilingMode, TilingSetup,
     };
-    use crate::workbench::hardcopy_sources::{SymbolHardcopySource, resolve_symbol_source};
+    use crate::workbench::hardcopy_adapters::sources::{
+        SymbolHardcopySource, resolve_symbol_source,
+    };
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])

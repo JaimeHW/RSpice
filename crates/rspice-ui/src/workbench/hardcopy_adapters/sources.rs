@@ -33,26 +33,26 @@ use crate::state::{
 };
 use crate::workbench::AppState;
 
-use super::SurfaceId;
 use crate::hardcopy::{
     ActiveHardcopySource, ContentExtent, HardcopyContentSection, HardcopyDocumentId,
     HardcopyDocumentKind, HardcopyScope, Length, PrintColor, PrintMappingEntry,
     PrintMappingSaveScope, PrintMappingTable, PrintObjectIdentity, PrintObjectKind,
     PrintRedundancy,
 };
+use crate::workbench::SurfaceId;
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
-use super::result_document::ResultViewer;
-use super::session::SymbolSelection;
-use super::state::{Workspace, WorkspaceDocumentId};
-use super::visualization_studio::{
-    VisualizationAnnotation as StudioAnnotation, VisualizationAutoscale,
-    VisualizationMarker as StudioMarker, VisualizationPane as StudioPane, VisualizationStudioState,
-};
 use crate::hardcopy::sources::{
     DISPLAY_NAME_LIMIT, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
     HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, canonical_digest,
     validate_label,
+};
+use crate::workbench::result_document::ResultViewer;
+use crate::workbench::session::SymbolSelection;
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+use crate::workbench::visualization_studio::{
+    VisualizationAnnotation as StudioAnnotation, VisualizationAutoscale,
+    VisualizationMarker as StudioMarker, VisualizationPane as StudioPane, VisualizationStudioState,
 };
 
 /// Natural physical scale for schematic coordinates: ten editor units are
