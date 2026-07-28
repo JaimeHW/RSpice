@@ -2254,8 +2254,8 @@ pub(super) fn parse_meas_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<crate::analysis::MeasureStatement, ParseError> {
-    use crate::analysis::{MeasureStatement, MeasureType};
+) -> Result<crate::netlist::measure::MeasureStatement, ParseError> {
+    use crate::netlist::measure::{MeasureStatement, MeasureType};
 
     // Parse analysis type (TRAN, AC, DC)
     let parsed_analysis = expect_ident(stream, line_num)?.to_ascii_uppercase();
@@ -2369,9 +2369,9 @@ pub(super) fn parse_meas_command(
                 measured,
                 comparison,
                 norm: if measure_type_key == "ERR2" {
-                    crate::analysis::ErrorFunctionNorm::MeanAbsolute
+                    crate::netlist::measure::ErrorFunctionNorm::MeanAbsolute
                 } else {
-                    crate::analysis::ErrorFunctionNorm::RootMeanSquare
+                    crate::netlist::measure::ErrorFunctionNorm::RootMeanSquare
                 },
                 from: options.from,
                 to: options.to,
@@ -2486,7 +2486,7 @@ pub(super) fn parse_meas_command(
                     let (from, to, td, occurrence) =
                         parse_measure_when_event_options(stream, line_num, params)?;
                     MeasureType::When {
-                        condition: crate::analysis::WhenCondition {
+                        condition: crate::netlist::measure::WhenCondition {
                             left: signal.clone(),
                             right,
                             occurrence,
@@ -2520,7 +2520,7 @@ pub(super) fn parse_meas_command(
 
 struct PointMeasureOptions {
     at: Option<Value>,
-    when: Option<crate::analysis::WhenCondition>,
+    when: Option<crate::netlist::measure::WhenCondition>,
     from: Option<Value>,
     to: Option<Value>,
     td: Option<Value>,
@@ -2548,7 +2548,7 @@ fn parse_point_measure_options(
     params: &ParamContext,
     measure_type: &str,
 ) -> Result<PointMeasureOptions, ParseError> {
-    use crate::analysis::WhenCondition;
+    use crate::netlist::measure::WhenCondition;
 
     let mut options = PointMeasureOptions {
         at: None,
@@ -2607,7 +2607,7 @@ fn parse_point_measure_options(
                 options.when = Some(WhenCondition {
                     left,
                     right,
-                    occurrence: crate::analysis::EventOccurrence::default(),
+                    occurrence: crate::netlist::measure::EventOccurrence::default(),
                 });
             }
             "RISE" | "FALL" | "CROSS" => {
@@ -2634,11 +2634,11 @@ fn parse_point_measure_options(
                         message: format!("Expected '=' after {keyword} in .MEAS {measure_type}"),
                     });
                 }
-                condition.occurrence = crate::analysis::EventOccurrence {
+                condition.occurrence = crate::netlist::measure::EventOccurrence {
                     edge: match keyword.as_str() {
-                        "RISE" => crate::analysis::EdgeType::Rise,
-                        "FALL" => crate::analysis::EdgeType::Fall,
-                        "CROSS" => crate::analysis::EdgeType::Cross,
+                        "RISE" => crate::netlist::measure::EdgeType::Rise,
+                        "FALL" => crate::netlist::measure::EdgeType::Fall,
+                        "CROSS" => crate::netlist::measure::EdgeType::Cross,
                         _ => unreachable!(),
                     },
                     number: parse_measure_event_occurrence(stream, line_num, params, &keyword)?,
@@ -2661,8 +2661,8 @@ fn parse_measure_when_operand(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<crate::analysis::MeasureOperand, ParseError> {
-    use crate::analysis::MeasureOperand;
+) -> Result<crate::netlist::measure::MeasureOperand, ParseError> {
+    use crate::netlist::measure::MeasureOperand;
 
     match &stream.peek().kind {
         TokenKind::Expression(_) => Ok(MeasureOperand::Waveform(parse_meas_signal(
@@ -2732,7 +2732,7 @@ fn parse_measure_error_function_options(
     let mut options = ErrorFunctionOptions {
         from: None,
         to: None,
-        minval: crate::analysis::measure::XYCE_DEFAULT_MEASURE_MINVAL,
+        minval: crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL,
         ymin: 1.0e-15,
         ymax: 1.0e15,
         weight: None,
@@ -2809,7 +2809,7 @@ fn parse_measure_error_function_options(
 
 struct FileErrorOptions {
     file: String,
-    norm: crate::analysis::FileErrorNorm,
+    norm: crate::netlist::measure::FileErrorNorm,
     independent_column: Option<isize>,
     dependent_column: usize,
 }
@@ -2819,7 +2819,7 @@ fn parse_measure_file_error_options(
     line_num: usize,
     params: &ParamContext,
 ) -> Result<FileErrorOptions, ParseError> {
-    use crate::analysis::FileErrorNorm;
+    use crate::netlist::measure::FileErrorNorm;
 
     let mut file = None;
     let mut norm = FileErrorNorm::L2;
@@ -3004,14 +3004,14 @@ fn parse_measure_when_event_options(
         Option<crate::Value>,
         Option<crate::Value>,
         Option<crate::Value>,
-        crate::analysis::EventOccurrence,
+        crate::netlist::measure::EventOccurrence,
     ),
     ParseError,
 > {
     let mut from = None;
     let mut to = None;
     let mut td = None;
-    let mut occurrence = crate::analysis::EventOccurrence::default();
+    let mut occurrence = crate::netlist::measure::EventOccurrence::default();
     let mut occurrence_given = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -3057,11 +3057,11 @@ fn parse_measure_when_event_options(
                             .to_string(),
                     });
                 }
-                occurrence = crate::analysis::EventOccurrence {
+                occurrence = crate::netlist::measure::EventOccurrence {
                     edge: match keyword.as_str() {
-                        "RISE" => crate::analysis::EdgeType::Rise,
-                        "FALL" => crate::analysis::EdgeType::Fall,
-                        "CROSS" => crate::analysis::EdgeType::Cross,
+                        "RISE" => crate::netlist::measure::EdgeType::Rise,
+                        "FALL" => crate::netlist::measure::EdgeType::Fall,
+                        "CROSS" => crate::netlist::measure::EdgeType::Cross,
                         _ => unreachable!(),
                     },
                     number: parse_measure_event_occurrence(stream, line_num, params, &keyword)?,
@@ -3157,7 +3157,7 @@ fn scan_meas_statement_options(
         Option<Value>,
         Option<Value>,
         Option<Value>,
-        crate::analysis::MeasurePrintPolicy,
+        crate::netlist::measure::MeasurePrintPolicy,
         Value,
     ),
     ParseError,
@@ -3166,8 +3166,8 @@ fn scan_meas_statement_options(
     let mut goal = None;
     let mut tolerance = None;
     let mut default_value = None;
-    let mut print_policy = crate::analysis::MeasurePrintPolicy::All;
-    let mut minval = crate::analysis::measure::XYCE_DEFAULT_MEASURE_MINVAL;
+    let mut print_policy = crate::netlist::measure::MeasurePrintPolicy::All;
+    let mut minval = crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         let base_assignment_ahead = matches!(stream.peek().kind, TokenKind::Ident(_))
             && matches!(stream.peek_n(1).kind, TokenKind::Equals);
@@ -3195,7 +3195,7 @@ fn scan_meas_statement_options(
 
 enum ParsedMeasStatementQualifier {
     Numeric { key: String, value: Value },
-    Print(crate::analysis::MeasurePrintPolicy),
+    Print(crate::netlist::measure::MeasurePrintPolicy),
 }
 
 fn consume_meas_statement_qualifier(
@@ -3223,12 +3223,12 @@ fn consume_meas_statement_qualifier(
     if key == "PRINT" {
         let value = expect_ident(stream, line_num)?;
         let policy = match value.to_ascii_uppercase().as_str() {
-            "ALL" => crate::analysis::MeasurePrintPolicy::All,
-            "STDOUT" => crate::analysis::MeasurePrintPolicy::Stdout,
-            "NONE" => crate::analysis::MeasurePrintPolicy::None,
+            "ALL" => crate::netlist::measure::MeasurePrintPolicy::All,
+            "STDOUT" => crate::netlist::measure::MeasurePrintPolicy::Stdout,
+            "NONE" => crate::netlist::measure::MeasurePrintPolicy::None,
             // Xyce leaves the constructor's ALL default in place for an
             // unrecognized per-measure PRINT value.
-            _ => crate::analysis::MeasurePrintPolicy::All,
+            _ => crate::netlist::measure::MeasurePrintPolicy::All,
         };
         return Ok(Some(ParsedMeasStatementQualifier::Print(policy)));
     }
@@ -3254,8 +3254,8 @@ pub(super) fn parse_meas_delay_spec(
     params: &ParamContext,
     section_name: &str,
     stop_at_targ: bool,
-) -> Result<crate::analysis::TrigSpec, ParseError> {
-    use crate::analysis::{EdgeType, EventOccurrence, TrigSpec, TriggerEvent, WhenCondition};
+) -> Result<crate::netlist::measure::TrigSpec, ParseError> {
+    use crate::netlist::measure::{EdgeType, EventOccurrence, TrigSpec, TriggerEvent, WhenCondition};
 
     let event = if matches!(&stream.peek().kind, TokenKind::Ident(value) if value.eq_ignore_ascii_case("AT"))
         && matches!(stream.peek_n(1).kind, TokenKind::Equals)
@@ -3461,11 +3461,11 @@ fn parse_measure_extrema_options(
     (
         Option<crate::Value>,
         Option<crate::Value>,
-        crate::analysis::ExtremaOutput,
+        crate::netlist::measure::ExtremaOutput,
     ),
     ParseError,
 > {
-    use crate::analysis::ExtremaOutput;
+    use crate::netlist::measure::ExtremaOutput;
 
     let mut from = None;
     let mut to = None;
@@ -4733,7 +4733,7 @@ mod tests {
         .expect("statement-wide qualifiers parse around derived qualifiers");
         let statement = &netlist.measurements[0];
         assert_eq!(statement.default_value, Some(3.0));
-        let crate::analysis::MeasureType::Avg { signal, from, to } = &statement.measure_type else {
+        let crate::netlist::measure::MeasureType::Avg { signal, from, to } = &statement.measure_type else {
             panic!("expected AVG measurement");
         };
         assert_eq!(signal, "V(DEFAULT_VAL)");
@@ -4742,7 +4742,7 @@ mod tests {
 
     #[test]
     fn continuous_measure_modes_types_and_print_policies_are_typed() {
-        use crate::analysis::MeasurePrintPolicy;
+        use crate::netlist::measure::MeasurePrintPolicy;
 
         let netlist = Netlist::parse(
             "continuous measures\n\

@@ -985,15 +985,15 @@ fn is_symbol_char(ch: char) -> bool {
 }
 
 fn collect_measure_sources<'a>(statement: &'a MeasureStatement, output: &mut Vec<&'a str>) {
-    use crate::analysis::{MeasureOperand, MeasureType, TriggerEvent};
+    use crate::netlist::measure::{MeasureOperand, MeasureType, TriggerEvent};
 
-    fn condition<'a>(condition: &'a crate::analysis::WhenCondition, output: &mut Vec<&'a str>) {
+    fn condition<'a>(condition: &'a crate::netlist::measure::WhenCondition, output: &mut Vec<&'a str>) {
         output.push(condition.left.as_str());
         if let MeasureOperand::Waveform(source) = &condition.right {
             output.push(source.as_str());
         }
     }
-    fn trigger<'a>(trigger: &'a crate::analysis::TrigSpec, output: &mut Vec<&'a str>) {
+    fn trigger<'a>(trigger: &'a crate::netlist::measure::TrigSpec, output: &mut Vec<&'a str>) {
         if let TriggerEvent::When(when) = &trigger.event {
             condition(when, output);
         }
@@ -1436,7 +1436,7 @@ mod tests {
                 .iter()
                 .any(|dependency| dependency.symbol.eq_ignore_ascii_case("GND!"))
         }));
-        let crate::analysis::MeasureType::Param { expression } =
+        let crate::netlist::measure::MeasureType::Param { expression } =
             &netlist.measurements[0].measure_type
         else {
             panic!("expected PARAM measurement");

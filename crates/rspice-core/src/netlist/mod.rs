@@ -21,6 +21,7 @@ pub mod hierarchy_path;
 pub mod include;
 mod initcond;
 pub mod lexer;
+pub mod measure;
 pub mod multi_run;
 mod mutual_inductor;
 mod output_symbols;
@@ -440,7 +441,7 @@ pub(crate) fn map_abort_parse_error(
     }
 }
 
-use crate::analysis::MeasureStatement;
+use measure::MeasureStatement;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -2081,7 +2082,7 @@ impl Netlist {
         };
         for (index, measurement) in self.measurements.iter_mut().enumerate() {
             poll_parse_abort(abort, index)?;
-            let crate::analysis::MeasureType::FileError { file, .. } =
+            let crate::netlist::measure::MeasureType::FileError { file, .. } =
                 &mut measurement.measure_type
             else {
                 continue;
@@ -2854,7 +2855,7 @@ mod tests {
             assert_eq!(measurement.goal, Some(4.0), "title={title}");
             assert_eq!(measurement.tolerance, Some(0.1), "title={title}");
             match &measurement.measure_type {
-                crate::analysis::MeasureType::Max {
+                crate::netlist::measure::MeasureType::Max {
                     signal,
                     from,
                     to,
@@ -2863,7 +2864,7 @@ mod tests {
                     assert_eq!(signal, "V(OUT)");
                     assert_eq!(*from, None);
                     assert_eq!(*to, None);
-                    assert_eq!(*output, crate::analysis::ExtremaOutput::Value);
+                    assert_eq!(*output, crate::netlist::measure::ExtremaOutput::Value);
                 }
                 other => panic!("expected MAX measurement, got {other:?}"),
             }
@@ -2883,7 +2884,7 @@ mod tests {
 
         assert_eq!(netlist.measurements.len(), 1);
         match &netlist.measurements[0].measure_type {
-            crate::analysis::MeasureType::Integ { signal, from, to } => {
+            crate::netlist::measure::MeasureType::Integ { signal, from, to } => {
                 assert_eq!(signal, "VM(OUT)");
                 assert_eq!(*from, Some(10.0));
                 assert_eq!(*to, Some(100.0));
@@ -2921,7 +2922,7 @@ mod tests {
         .expect("waveform-valued DERIV condition parses");
 
         match &netlist.measurements[0].measure_type {
-            crate::analysis::MeasureType::Derivative {
+            crate::netlist::measure::MeasureType::Derivative {
                 signal,
                 at,
                 when,
@@ -2937,7 +2938,7 @@ mod tests {
                 assert_eq!(when.left, "V(TWO)");
                 assert_eq!(
                     when.right,
-                    crate::analysis::MeasureOperand::Waveform("{2*V(one)}".to_string())
+                    crate::netlist::measure::MeasureOperand::Waveform("{2*V(one)}".to_string())
                 );
             }
             other => panic!("expected DERIV measurement, got {other:?}"),
@@ -2960,7 +2961,7 @@ mod tests {
         let expected = [100.0, 10_000.0, 50_000.0];
         assert_eq!(netlist.measurements.len(), expected.len());
         for (statement, expected_at) in netlist.measurements.iter().zip(expected) {
-            let crate::analysis::MeasureType::Find { at, .. } = statement.measure_type else {
+            let crate::netlist::measure::MeasureType::Find { at, .. } = statement.measure_type else {
                 panic!(
                     "expected FIND measurement, got {:?}",
                     statement.measure_type
@@ -2984,7 +2985,7 @@ mod tests {
         .expect("standalone WHEN conditions parse");
 
         match &netlist.measurements[0].measure_type {
-            crate::analysis::MeasureType::When {
+            crate::netlist::measure::MeasureType::When {
                 condition,
                 from,
                 to,
@@ -2993,21 +2994,21 @@ mod tests {
                 assert_eq!(condition.left, "V(ONE)");
                 assert_eq!(
                     condition.right,
-                    crate::analysis::MeasureOperand::Waveform("{2*V(two)}".to_string())
+                    crate::netlist::measure::MeasureOperand::Waveform("{2*V(two)}".to_string())
                 );
                 assert_eq!(*from, Some(4.0));
                 assert_eq!(*to, Some(2.0));
-                assert_eq!(condition.occurrence.edge, crate::analysis::EdgeType::Cross);
+                assert_eq!(condition.occurrence.edge, crate::netlist::measure::EdgeType::Cross);
                 assert_eq!(condition.occurrence.number, 2);
             }
             other => panic!("expected standalone WHEN measurement, got {other:?}"),
         }
         match &netlist.measurements[1].measure_type {
-            crate::analysis::MeasureType::When { condition, .. } => {
+            crate::netlist::measure::MeasureType::When { condition, .. } => {
                 assert_eq!(condition.left, "V(ONE)");
                 assert_eq!(
                     condition.right,
-                    crate::analysis::MeasureOperand::Constant(2.5)
+                    crate::netlist::measure::MeasureOperand::Constant(2.5)
                 );
             }
             other => panic!("expected standalone WHEN measurement, got {other:?}"),
@@ -3025,11 +3026,11 @@ mod tests {
         )
         .expect("point-event occurrence parses");
         match &netlist.measurements[0].measure_type {
-            crate::analysis::MeasureType::Find {
+            crate::netlist::measure::MeasureType::Find {
                 when: Some(condition),
                 ..
             } => {
-                assert_eq!(condition.occurrence.edge, crate::analysis::EdgeType::Rise);
+                assert_eq!(condition.occurrence.edge, crate::netlist::measure::EdgeType::Rise);
                 assert_eq!(condition.occurrence.number, 2);
             }
             other => panic!("expected FIND-WHEN measurement, got {other:?}"),
@@ -3058,21 +3059,21 @@ mod tests {
         )
         .expect("typed trigger/target clauses parse");
 
-        let crate::analysis::MeasureType::Delay { trig, targ, .. } =
+        let crate::netlist::measure::MeasureType::Delay { trig, targ, .. } =
             &netlist.measurements[0].measure_type
         else {
             panic!("expected trigger/target delay measurement");
         };
-        assert_eq!(trig.event, crate::analysis::TriggerEvent::At(1.5));
+        assert_eq!(trig.event, crate::netlist::measure::TriggerEvent::At(1.5));
         assert_eq!(trig.td, Some(2.0));
         match &targ.event {
-            crate::analysis::TriggerEvent::When(condition) => {
+            crate::netlist::measure::TriggerEvent::When(condition) => {
                 assert_eq!(condition.left, "{V(one)}");
                 assert_eq!(
                     condition.right,
-                    crate::analysis::MeasureOperand::Waveform("{V(two)+1}".to_string())
+                    crate::netlist::measure::MeasureOperand::Waveform("{V(two)+1}".to_string())
                 );
-                assert_eq!(condition.occurrence.edge, crate::analysis::EdgeType::Fall);
+                assert_eq!(condition.occurrence.edge, crate::netlist::measure::EdgeType::Fall);
                 assert_eq!(condition.occurrence.number, -1);
             }
             other => panic!("expected conditional target, got {other:?}"),
@@ -3094,7 +3095,7 @@ mod tests {
         )
         .expect("conditional MINVAL options parse");
 
-        let crate::analysis::MeasureType::Find {
+        let crate::netlist::measure::MeasureType::Find {
             when: Some(_),
             minval,
             ..
@@ -3104,21 +3105,21 @@ mod tests {
         };
         assert_eq!(*minval, 2.0e-15);
 
-        let crate::analysis::MeasureType::When { minval, .. } =
+        let crate::netlist::measure::MeasureType::When { minval, .. } =
             &netlist.measurements[1].measure_type
         else {
             panic!("expected WHEN measurement");
         };
         assert_eq!(*minval, 3.0e-15);
 
-        let crate::analysis::MeasureType::Delay { trig, targ, minval } =
+        let crate::netlist::measure::MeasureType::Delay { trig, targ, minval } =
             &netlist.measurements[2].measure_type
         else {
             panic!("expected TRIG/TARG measurement");
         };
         assert_eq!(*minval, 4.0e-15);
         for clause in [trig, targ] {
-            let crate::analysis::TriggerEvent::When(_) = &clause.event else {
+            let crate::netlist::measure::TriggerEvent::When(_) = &clause.event else {
                 panic!("expected conditional TRIG/TARG clause");
             };
         }
@@ -3153,17 +3154,17 @@ mod tests {
         )
         .expect("point measurement TD options parse");
 
-        let crate::analysis::MeasureType::Find { td, .. } = &netlist.measurements[0].measure_type
+        let crate::netlist::measure::MeasureType::Find { td, .. } = &netlist.measurements[0].measure_type
         else {
             panic!("expected FIND measurement");
         };
         assert!(td.is_some_and(|td| (td - 2.0e-9).abs() < 1.0e-24));
-        let crate::analysis::MeasureType::When { td, .. } = &netlist.measurements[1].measure_type
+        let crate::netlist::measure::MeasureType::When { td, .. } = &netlist.measurements[1].measure_type
         else {
             panic!("expected WHEN measurement");
         };
         assert!(td.is_some_and(|td| (td - 3.0e-9).abs() < 1.0e-24));
-        let crate::analysis::MeasureType::Derivative { td, .. } =
+        let crate::netlist::measure::MeasureType::Derivative { td, .. } =
             &netlist.measurements[2].measure_type
         else {
             panic!("expected DERIV measurement");
@@ -3198,7 +3199,7 @@ mod tests {
         .expect("ERR-family measurements parse");
 
         match &netlist.measurements[0].measure_type {
-            crate::analysis::MeasureType::ErrorFunction {
+            crate::netlist::measure::MeasureType::ErrorFunction {
                 measured,
                 comparison,
                 norm,
@@ -3211,7 +3212,7 @@ mod tests {
             } => {
                 assert_eq!(measured, "{V(one)*V(one)}");
                 assert_eq!(comparison, "V(ONE)");
-                assert_eq!(*norm, crate::analysis::ErrorFunctionNorm::RootMeanSquare);
+                assert_eq!(*norm, crate::netlist::measure::ErrorFunctionNorm::RootMeanSquare);
                 assert_eq!((*from, *to), (Some(4.0), Some(0.0)));
                 assert_eq!((*minval, *ymin, *ymax), (1.5, 2.5, 3.5));
                 assert_eq!(*weight, Some(2.0));
@@ -3219,8 +3220,8 @@ mod tests {
             other => panic!("expected ERR1 measurement, got {other:?}"),
         }
         match &netlist.measurements[1].measure_type {
-            crate::analysis::MeasureType::ErrorFunction { norm, ymin, .. } => {
-                assert_eq!(*norm, crate::analysis::ErrorFunctionNorm::MeanAbsolute);
+            crate::netlist::measure::MeasureType::ErrorFunction { norm, ymin, .. } => {
+                assert_eq!(*norm, crate::netlist::measure::ErrorFunctionNorm::MeanAbsolute);
                 assert_eq!(*ymin, 2.5);
             }
             other => panic!("expected ERR2 measurement, got {other:?}"),
@@ -3243,7 +3244,7 @@ mod tests {
         .expect("file-backed ERROR measurement parses");
 
         match &netlist.measurements[0].measure_type {
-            crate::analysis::MeasureType::FileError {
+            crate::netlist::measure::MeasureType::FileError {
                 signal,
                 file,
                 norm,
@@ -3259,7 +3260,7 @@ mod tests {
                         .join("Reference.MixedCase.prn")
                         .to_string_lossy()
                 );
-                assert_eq!(*norm, crate::analysis::FileErrorNorm::Infinity);
+                assert_eq!(*norm, crate::netlist::measure::FileErrorNorm::Infinity);
                 assert_eq!(*independent_column, Some(-1));
                 assert_eq!(*dependent_column, 2);
             }
@@ -3279,8 +3280,8 @@ mod tests {
         .expect("OUTPUT FREQ parses without an equals sign");
 
         match &netlist.measurements[0].measure_type {
-            crate::analysis::MeasureType::Max { output, .. } => {
-                assert_eq!(*output, crate::analysis::ExtremaOutput::IndependentAxis)
+            crate::netlist::measure::MeasureType::Max { output, .. } => {
+                assert_eq!(*output, crate::netlist::measure::ExtremaOutput::IndependentAxis)
             }
             other => panic!("expected MAX measurement, got {other:?}"),
         }

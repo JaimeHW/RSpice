@@ -153,14 +153,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // with `SpiceDialect`.
     ("expr", "netlist", 1),
     // ---------------------------------------------------------------------
-    // Phase 4 — `.MEAS` statement types are AST, not results.
-    //
-    // `MeasureStatement`, `MeasureType`, `EdgeType`, `WhenCondition`,
-    // `TrigSpec` and the rest are parsed deck syntax. The parser reaches nine
-    // layers up for them. Moving the types into `netlist::ast` — leaving the
-    // evaluator in `analysis` — is the whole fix.
-    ("netlist", "analysis", 77),
-    // ---------------------------------------------------------------------
     // Phase 5 — numerics.
     //
     // `CompanionCoefficients` is an integration-method primitive that lives in

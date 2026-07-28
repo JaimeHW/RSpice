@@ -66,7 +66,7 @@ use state::*;
 use tlines::*;
 use values::*;
 
-type MeasureStatement = crate::analysis::MeasureStatement;
+type MeasureStatement = crate::netlist::measure::MeasureStatement;
 
 //=============================================================================
 // Main Parser
