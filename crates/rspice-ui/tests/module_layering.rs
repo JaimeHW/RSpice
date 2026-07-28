@@ -768,6 +768,41 @@ fn workbench_references_respect_the_layer_order() {
     assert!(failures.is_empty(), "{failures}");
 }
 
+/// The crate's public surface, frozen at its current size.
+///
+/// `rspice-ui` is an application, not a library: its only consumers are its
+/// own `main.rs`, the three wasm entry points in `lib.rs`, the integration
+/// tests, and the `license_tool` example. Everything else being `pub` meant
+/// no item was ever safely removable, and the layering tables above were
+/// standing in for a visibility boundary the compiler could have enforced.
+///
+/// The count is a ceiling: it may fall, never rise. Prefer `pub(crate)`, and
+/// prefer a re-export at the crate root over widening a module.
+const MAX_PUBLIC_MODULES: usize = 132;
+
+#[test]
+fn the_public_module_surface_does_not_grow() {
+    let root = src_dir();
+    let mut count = 0;
+    for file in rust_sources(&root) {
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+        count += strip_line_comments(&source)
+            .lines()
+            .filter(|line| line.trim_start().starts_with("pub mod "))
+            .count();
+    }
+    assert!(
+        count <= MAX_PUBLIC_MODULES,
+        "`pub mod` declarations rose to {count}, ceiling is {MAX_PUBLIC_MODULES}.\n\
+         A public module cannot be refactored without checking the whole \
+         world. Use `pub(crate) mod`, and re-export from the crate root if an \
+         integration test or example genuinely needs the item.\n\
+         If a reduction elsewhere justifies the change, lower \
+         MAX_PUBLIC_MODULES in tests/module_layering.rs."
+    );
+}
+
 /// No source file starts with a UTF-8 byte-order mark.
 ///
 /// Three did. A BOM is invisible in every editor that matters, survives

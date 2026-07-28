@@ -10,7 +10,7 @@ use crate::workbench::AppState;
 
 mod baseline;
 mod completion;
-pub mod diagnostics;
+pub(crate) mod diagnostics;
 mod editor;
 mod highlight;
 mod summary;

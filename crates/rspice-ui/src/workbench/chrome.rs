@@ -1,6 +1,6 @@
-pub mod activity_rail;
-pub mod document_bar;
-pub mod phone_navigation;
-pub mod status_bar;
-pub mod title_bar;
-pub mod toolbar;
+pub(crate) mod activity_rail;
+pub(crate) mod document_bar;
+pub(crate) mod phone_navigation;
+pub(crate) mod status_bar;
+pub(crate) mod title_bar;
+pub(crate) mod toolbar;

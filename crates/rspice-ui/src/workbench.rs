@@ -11,30 +11,30 @@ use std::time::Duration;
 // mutually recursive with the workbench across a module boundary that did not
 // describe a real seam: the workflows reach for `AppState`, and `AppState`
 // reaches back for the workflows. They are one layer, so they are one module.
-pub mod app;
+pub(crate) mod app;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod browser_accessibility;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod browser_download;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) mod browser_file_import;
-pub mod examples;
+pub(crate) mod examples;
 pub(crate) mod export_workflow;
 pub(crate) mod file_actions;
 pub(crate) mod file_workflow;
 pub(crate) mod hardcopy_print;
-pub mod logging;
-pub mod menu_bar;
+pub(crate) mod logging;
+pub(crate) mod menu_bar;
 pub(crate) mod netlist_workflow;
 pub(crate) mod project_checkpoint;
 pub(crate) mod project_lifecycle;
 pub(crate) mod project_workflow;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod recovery_checkpoint;
-pub mod shortcut_artifacts;
-pub mod shortcut_library_persistence;
-pub mod shortcut_profile_workflow;
-pub mod simulation_analysis_tabs;
+pub(crate) mod shortcut_artifacts;
+pub(crate) mod shortcut_library_persistence;
+pub(crate) mod shortcut_profile_workflow;
+pub(crate) mod simulation_analysis_tabs;
 
 pub use app::{AppState, RSpiceApp};
 
@@ -51,53 +51,47 @@ pub(crate) fn spawn_or_inline(work: impl FnOnce() + Send + 'static) {
     }
 }
 
-pub mod panels;
+pub(crate) mod panels;
 pub(crate) mod account_organization;
-pub mod availability;
-pub mod browser_navigation;
-pub mod calculator_tool;
-pub mod capability_workflow;
-pub mod code_workspace;
-pub mod commands;
+pub(crate) mod availability;
+pub(crate) mod browser_navigation;
+pub(crate) mod calculator_tool;
+pub(crate) mod capability_workflow;
+pub(crate) mod code_workspace;
+pub(crate) mod commands;
 mod cross_probe;
-pub mod design_system;
+pub(crate) mod design_system;
 mod feature_availability;
-pub mod feature_availability_data;
-pub mod hardcopy_render;
-pub mod hardcopy_sources;
-pub mod model_correlation;
-pub mod navigation;
-pub mod netlist_document;
-pub mod result_document;
-pub mod state;
-pub mod surface_catalog;
-pub mod surface_route;
-pub mod window_session;
+pub(crate) mod feature_availability_data;
+pub(crate) mod hardcopy_render;
+pub(crate) mod hardcopy_sources;
+pub(crate) mod model_correlation;
+pub(crate) mod navigation;
+pub(crate) mod netlist_document;
+pub(crate) mod result_document;
+pub(crate) mod state;
+pub(crate) mod surface_catalog;
+pub(crate) mod surface_route;
+pub(crate) mod window_session;
 
 pub(crate) mod chrome;
 mod docks;
 mod jobs_manager;
 mod layout;
-pub mod model_editor;
+pub(crate) mod model_editor;
 mod notification_center;
 mod preferences;
 mod preflight;
 mod project_launcher;
 mod recovery;
 mod session;
-pub mod shortcuts;
+pub(crate) mod shortcuts;
 mod specialist_tool_browser;
 mod surfaces;
 pub(crate) mod visualization_family;
 pub(crate) mod visualization_studio;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-pub use crate::quantity::{
-    AngleDisplay, CopiedValueFormat, DecimalSeparatorInput, EngineeringSuffixPolicy,
-    FrequencyDisplay, LayoutCoordinateDisplay, QuantityInputError, QuantityInputKind,
-    QuantityPresentationPolicy, TemperatureDisplay, TimeFrequencyInput, UiNumberLocale, UnitSystem,
-    UnitsPreferences, parse_ui_quantity,
-};
 pub use availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
 };

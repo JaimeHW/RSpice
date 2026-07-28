@@ -4,10 +4,10 @@
 //! console, calculator) and the structured log model consumed by the workbench
 //! console.
 
-pub mod calculator;
-pub mod pdk_settings_dialog;
-pub mod properties_panel;
-pub mod script_console;
+pub(crate) mod calculator;
+pub(crate) mod pdk_settings_dialog;
+pub(crate) mod properties_panel;
+pub(crate) mod script_console;
 
 pub use pdk_settings_dialog::{
     PdkSettingsDialogResult, PdkSettingsDialogState, render_pdk_settings_dialog,

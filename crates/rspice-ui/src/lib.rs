@@ -80,14 +80,14 @@
 pub mod analysis;
 
 /// Schematic editor - Canvas, export, toolbar, symbol library
-pub mod schematic;
+pub(crate) mod schematic;
 
 /// Simulation management - Controller, dialogs, netlist generation
 pub mod simulation;
 
 
 /// Property editing - Component properties and design variables
-pub mod properties;
+pub(crate) mod properties;
 
 /// The RSpice design system - tokens, palettes, fonts, icons, widgets
 pub mod ui;
@@ -95,11 +95,11 @@ pub mod ui;
 /// Persisted page-setup contracts and deterministic pagination. Document
 /// adapters, scene rendering, the platform print boundary, and the dialogs
 /// live in `workbench::hardcopy`; this is the layer `state` can persist.
-pub mod hardcopy;
+pub(crate) mod hardcopy;
 
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.
-pub mod workbench;
+pub(crate) mod workbench;
 
 /// Versioned visualization documents, immutable dataset bindings, exact-data
 /// queries, viewer compatibility, and progressive result operations.
@@ -111,7 +111,7 @@ pub mod product;
 
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
-pub mod automation_workflow;
+pub(crate) mod automation_workflow;
 
 // =============================================================================
 // Core Infrastructure
@@ -129,15 +129,15 @@ pub mod state;
 /// Unit-safe user presentation and UI quantity-input policy. Values entering
 /// or leaving this module are always expressed in their documented SI base
 /// units; deck dialect and PDK database-unit semantics live elsewhere.
-pub mod quantity;
+pub(crate) mod quantity;
 
 /// Diagnostics the application reports about itself: the console message
 /// model and the structured, filterable application log.
-pub mod diagnostics;
+pub(crate) mod diagnostics;
 
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
-pub mod time_compat;
+pub(crate) mod time_compat;
 
 /// Shared output specification helpers for analysis/sensitivity paths
 pub(crate) mod output_spec;
@@ -148,6 +148,10 @@ pub(crate) mod output_spec;
 
 /// Re-export the main application type
 pub use workbench::RSpiceApp;
+
+/// Native logging environment for the desktop binary.
+#[cfg(not(target_arch = "wasm32"))]
+pub use workbench::logging::native_log_env;
 
 #[cfg(target_arch = "wasm32")]
 pub fn run_rspice_ui_worker_request(
