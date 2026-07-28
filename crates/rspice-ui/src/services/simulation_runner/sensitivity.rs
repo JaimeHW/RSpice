@@ -8,9 +8,10 @@ use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };
 use crate::output_spec::{
-    OutputSpec, OutputVoltageSpec, ac_output_value, collect_sensitivity_parameters,
-    dc_output_value, normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
-    sensitivity_delta, validate_sensitivity_output_spec,
+    OutputSpec, OutputVoltageSpec, SensitivityMathError, ac_output_value,
+    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
+    validate_sensitivity_output_spec,
 };
 use num_complex::Complex64;
 use rspice_core::Value;
@@ -271,40 +272,24 @@ fn run_dc_output_sensitivity_with_abort(
     Ok(pos_sensitivity - neg_sensitivity)
 }
 
+impl From<SensitivityMathError> for ServiceRunError {
+    fn from(error: SensitivityMathError) -> Self {
+        match error {
+            SensitivityMathError::Aborted => Self::Aborted,
+            other => Self::Failure(other.message().to_owned()),
+        }
+    }
+}
+
 fn finite_difference_derivative_with_abort<F>(
     param_value: Value,
     abort: &dyn AbortSignal,
-    mut evaluate_output: F,
+    evaluate_output: F,
 ) -> ServiceRunResult<Value>
 where
     F: FnMut(Value) -> ServiceRunResult<Value>,
 {
-    ensure_not_aborted(abort)?;
-    if !param_value.is_finite() {
-        return Err(ServiceRunError::Failure(
-            "Sensitivity parameter value must be finite".to_string(),
-        ));
-    }
-
-    let delta = sensitivity_delta(param_value);
-    let plus = evaluate_output(param_value + delta)?;
-    ensure_not_aborted(abort)?;
-    let minus = evaluate_output(param_value - delta)?;
-    ensure_not_aborted(abort)?;
-    if !plus.is_finite() || !minus.is_finite() {
-        return Err(ServiceRunError::Failure(
-            "Sensitivity perturbation produced non-finite outputs".to_string(),
-        ));
-    }
-
-    let derivative = (plus - minus) / (2.0 * delta);
-    if !derivative.is_finite() {
-        return Err(ServiceRunError::Failure(
-            "Sensitivity finite-difference derivative is non-finite".to_string(),
-        ));
-    }
-    ensure_not_aborted(abort)?;
-    Ok(derivative)
+    finite_difference_derivative(param_value, abort, evaluate_output)
 }
 
 #[cfg(test)]

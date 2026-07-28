@@ -8,9 +8,10 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::output_spec::{
-    OutputSpec, OutputVoltageSpec, ac_output_value, collect_sensitivity_parameters,
-    dc_output_value, normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
-    sensitivity_delta, validate_sensitivity_output_spec,
+    OutputSpec, OutputVoltageSpec, SensitivityMathError, ac_output_value,
+    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
+    validate_sensitivity_output_spec,
 };
 use crate::simulation::config::SensitivityConfig;
 use crate::simulation::results::SimulationResult;
@@ -224,46 +225,24 @@ impl EngineBridge {
     }
 }
 
+impl From<SensitivityMathError> for SimulationError {
+    fn from(error: SensitivityMathError) -> Self {
+        match error {
+            SensitivityMathError::Aborted => Self::Aborted,
+            other => Self::InvalidConfig(other.message().to_owned()),
+        }
+    }
+}
+
 fn finite_difference_derivative_with_abort<F>(
     param_value: Value,
     abort: &dyn AbortSignal,
-    mut evaluate_output: F,
+    evaluate_output: F,
 ) -> Result<Value, SimulationError>
 where
     F: FnMut(Value) -> Result<Value, SimulationError>,
 {
-    ensure_not_aborted(abort)?;
-    if !param_value.is_finite() {
-        return Err(SimulationError::InvalidConfig(
-            "Sensitivity parameter value must be finite".to_string(),
-        ));
-    }
-
-    let delta = sensitivity_delta(param_value);
-    let plus = evaluate_output(param_value + delta)?;
-    ensure_not_aborted(abort)?;
-    let minus = evaluate_output(param_value - delta)?;
-    ensure_not_aborted(abort)?;
-    if !plus.is_finite() || !minus.is_finite() {
-        return Err(SimulationError::InvalidConfig(
-            "Sensitivity perturbation produced non-finite outputs".to_string(),
-        ));
-    }
-
-    let derivative = (plus - minus) / (2.0 * delta);
-    if !derivative.is_finite() {
-        return Err(SimulationError::InvalidConfig(
-            "Sensitivity finite-difference derivative is non-finite".to_string(),
-        ));
-    }
-    // Matches the duplicate of this function in
-    // `services::simulation_runner::sensitivity`, which has always polled here.
-    // The window this closes is small -- the poll after `minus` already
-    // rejects any cancellation raised during either perturbation -- so this is
-    // for keeping the two copies byte-identical until one of them is deleted,
-    // not for a behaviour a caller can observe on its own.
-    ensure_not_aborted(abort)?;
-    Ok(derivative)
+    finite_difference_derivative(param_value, abort, evaluate_output)
 }
 
 #[cfg(test)]
