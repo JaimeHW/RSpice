@@ -316,7 +316,7 @@ impl CircuitData {
                     .unwrap_or(Value::NAN)
             };
             if !d_mid_d_current.is_finite()
-                || (!binding.device.is_xyce_core_level2() && hidden_partials.is_none())
+                || (binding.device.has_xyce_core_m_equation() && hidden_partials.is_none())
             {
                 self.xyce_core_trial_invalid = true;
                 continue;
@@ -620,7 +620,7 @@ impl CircuitData {
             } else {
                 None
             };
-            if !group.device.is_xyce_core_level2() && hidden_partials.is_none() {
+            if group.device.has_xyce_core_m_equation() && hidden_partials.is_none() {
                 self.xyce_core_trial_invalid = true;
                 continue;
             }
@@ -1035,19 +1035,21 @@ impl CircuitData {
             }
             let branch_matrix_index = num_nodes + binding.branch_ordinal;
             binding.device.set_branch_index(branch_matrix_index);
-            let hidden_state = binding.hidden_m_slot.map(|slot| {
-                let magnetization = solution
-                    .get(hidden_base + slot)
-                    .copied()
-                    .unwrap_or(0.0)
-                    * XYCE_CORE_M_VAR_SCALING;
+            let hidden_state = if !binding.device.is_xyce_core_level2() {
+                let magnetization = binding
+                    .hidden_m_slot
+                    .and_then(|slot| solution.get(hidden_base + slot).copied())
+                    .map(|value| value * XYCE_CORE_M_VAR_SCALING)
+                    .unwrap_or_else(|| binding.device.magnetization());
                 let rate = binding
                     .hidden_r_slot
                     .and_then(|rate_slot| solution.get(hidden_base + rate_slot).copied())
                     .unwrap_or(0.0)
                     * XYCE_CORE_R_VAR_SCALING;
-                (magnetization, rate)
-            });
+                Some((magnetization, rate))
+            } else {
+                None
+            };
             binding
                 .device
                 .commit_xyce_core_solution(solution, hidden_state, dt, one_step_order2);
@@ -1081,19 +1083,21 @@ impl CircuitData {
                 self.inductors.node_pos[first.inductor_index],
                 self.inductors.node_neg[first.inductor_index],
             );
-            let hidden_state = group.hidden_m_slot.map(|slot| {
-                let magnetization = solution
-                    .get(hidden_base + slot)
-                    .copied()
-                    .unwrap_or(0.0)
-                    * XYCE_CORE_M_VAR_SCALING;
+            let hidden_state = if !group.device.is_xyce_core_level2() {
+                let magnetization = group
+                    .hidden_m_slot
+                    .and_then(|slot| solution.get(hidden_base + slot).copied())
+                    .map(|value| value * XYCE_CORE_M_VAR_SCALING)
+                    .unwrap_or_else(|| group.device.magnetization());
                 let rate = group
                     .hidden_r_slot
                     .and_then(|rate_slot| solution.get(hidden_base + rate_slot).copied())
                     .unwrap_or(0.0)
                     * XYCE_CORE_R_VAR_SCALING;
-                (magnetization, rate)
-            });
+                Some((magnetization, rate))
+            } else {
+                None
+            };
             group.device.commit_xyce_core_group_solution(
                 happ,
                 happ - previous_happ,

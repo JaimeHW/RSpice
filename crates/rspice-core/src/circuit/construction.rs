@@ -632,7 +632,9 @@ impl CircuitData {
         core_output_name: String,
         core_bh_si_units: bool,
     ) {
-        let hidden_m_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
+        let hidden_m_slot = device
+            .has_xyce_core_m_equation()
+            .then(|| self.allocate_hidden_state());
         let hidden_r_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
         self.jiles_atherton_inductors.push(JilesAthertonBinding {
             inductor_index,
@@ -655,7 +657,9 @@ impl CircuitData {
         coupling: Value,
         core_bh_si_units: bool,
     ) {
-        let hidden_m_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
+        let hidden_m_slot = device
+            .has_xyce_core_m_equation()
+            .then(|| self.allocate_hidden_state());
         let hidden_r_slot = (!device.is_xyce_core_level2()).then(|| self.allocate_hidden_state());
         self.xyce_core_groups.push(XyceCoreGroupBinding {
             core_output_name,

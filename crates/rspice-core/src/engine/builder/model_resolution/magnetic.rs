@@ -134,6 +134,8 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
         gap: 0.0,
         xyce_core: true,
         xyce_core_level2: false,
+        xyce_core_clim: 0.005,
+        xyce_core_include_m_equation: true,
         delta_v: 0.1,
         v_inf: 1.0,
         delta_v_scaling: 1.0e3,
@@ -167,6 +169,14 @@ pub(in crate::engine::builder) fn resolve_xyce_core_model_params(
     }
     if let Some(gap_cm) = nonnegative_model_param(model_def, &["GAP"], "GAP")? {
         params.gap = gap_cm * 1.0e-2;
+    }
+    if let Some(clim) = nonnegative_model_param(model_def, &["CLIM"], "CLIM")? {
+        params.xyce_core_clim = clim;
+    }
+    if let Some(include_m_equation) =
+        nonnegative_model_param(model_def, &["INCLUDEMEQU"], "INCLUDEMEQU")?
+    {
+        params.xyce_core_include_m_equation = include_m_equation != 0.0;
     }
     if let Some(beta_h) = positive_model_param(model_def, &["BETAH"], "BETAH")? {
         params.beta_h = beta_h;

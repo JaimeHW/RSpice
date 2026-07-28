@@ -649,6 +649,42 @@ impl Engine {
             }
         }
 
+        // A LEVEL=1 Core with C <= CLIM retains Xyce's hidden R equation but
+        // has no M unknown.  Reserve the rate diagonal and branch-current
+        // columns separately so the sparse matrix can accept that canonical
+        // rate-only stamp without fabricating an M equation.
+        for binding in &circuit.jiles_atherton_inductors {
+            if binding.hidden_m_slot.is_some() {
+                continue;
+            }
+            let Some(rate_slot) = binding.hidden_r_slot else {
+                continue;
+            };
+            let hidden_r = circuit.get_hidden_state_matrix_index(rate_slot);
+            let hidden_r_idx = hidden_r - 1;
+            let index = binding.inductor_index;
+            let branch = circuit.get_branch_matrix_index(circuit.inductors.branch_indices[index]);
+            triplets.push((hidden_r_idx, hidden_r_idx, 0.0));
+            triplets.push((hidden_r_idx, branch - 1, 0.0));
+        }
+        for group in &circuit.xyce_core_groups {
+            if group.hidden_m_slot.is_some() {
+                continue;
+            }
+            let Some(rate_slot) = group.hidden_r_slot else {
+                continue;
+            };
+            let hidden_r = circuit.get_hidden_state_matrix_index(rate_slot);
+            let hidden_r_idx = hidden_r - 1;
+            triplets.push((hidden_r_idx, hidden_r_idx, 0.0));
+            for winding in &group.windings {
+                let index = winding.inductor_index;
+                let branch =
+                    circuit.get_branch_matrix_index(circuit.inductors.branch_indices[index]);
+                triplets.push((hidden_r_idx, branch - 1, 0.0));
+            }
+        }
+
         // Coupled inductor pair stamps.
         for binding in &circuit.coupled_inductor_pairs {
             let device = &binding.device;

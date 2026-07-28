@@ -85,6 +85,12 @@ pub struct JilesAthertonParams {
     /// different state equations in Xyce even though their constitutive
     /// expressions share the same anhysteretic curve.
     pub xyce_core_level2: bool,
+    /// Xyce MutIndNonLin drops its hidden magnetization equation when the
+    /// domain-flexing coefficient C is at or below CLIM.  Keep both the
+    /// authored switch and the threshold so the runtime can reproduce that
+    /// model-construction decision without conflating LEVEL=1 with LEVEL=2.
+    pub xyce_core_clim: Value,
+    pub xyce_core_include_m_equation: bool,
     /// Xyce LEVEL=2 voltage scaling used by the smooth irreversible branch.
     pub delta_v: Value,
     /// Xyce LEVEL=2 voltage normalization.
@@ -146,6 +152,8 @@ impl Default for JilesAthertonParams {
             gap: 0.0,
             xyce_core: false,
             xyce_core_level2: false,
+            xyce_core_clim: 0.005,
+            xyce_core_include_m_equation: true,
             delta_v: 0.1,
             v_inf: 1.0,
             delta_v_scaling: 1.0e3,
@@ -170,6 +178,8 @@ impl JilesAthertonParams {
             gap: 0.0,
             xyce_core: false,
             xyce_core_level2: false,
+            xyce_core_clim: 0.005,
+            xyce_core_include_m_equation: true,
             delta_v: 0.1,
             v_inf: 1.0,
             delta_v_scaling: 1.0e3,
@@ -192,6 +202,8 @@ impl JilesAthertonParams {
             gap: 0.0,
             xyce_core: false,
             xyce_core_level2: false,
+            xyce_core_clim: 0.005,
+            xyce_core_include_m_equation: true,
             delta_v: 0.1,
             v_inf: 1.0,
             delta_v_scaling: 1.0e3,
@@ -214,6 +226,8 @@ impl JilesAthertonParams {
             gap: 0.0,
             xyce_core: false,
             xyce_core_level2: false,
+            xyce_core_clim: 0.005,
+            xyce_core_include_m_equation: true,
             delta_v: 0.1,
             v_inf: 1.0,
             delta_v_scaling: 1.0e3,
@@ -434,6 +448,19 @@ impl JilesAthertonInductor {
     /// Whether this core uses Xyce's LEVEL=2 state update.
     pub fn is_xyce_core_level2(&self) -> bool {
         self.params.xyce_core && self.params.xyce_core_level2
+    }
+
+    /// Whether Xyce's LEVEL=1 hidden magnetization equation is present.
+    ///
+    /// MutIndNonLin always keeps its hidden rate equation, but its model
+    /// constructor removes the M equation when `C <= CLIM` (or when the
+    /// authored `INCLUDEMEQU` switch is false).  LEVEL=2 has no hidden M/R
+    /// equations at all and is intentionally excluded here.
+    pub fn has_xyce_core_m_equation(&self) -> bool {
+        self.params.xyce_core
+            && !self.params.xyce_core_level2
+            && self.params.xyce_core_include_m_equation
+            && self.params.c > self.params.xyce_core_clim
     }
 
     /// Set initial current
@@ -1032,7 +1059,7 @@ impl JilesAthertonInductor {
         dt: Value,
         one_step_order2: bool,
     ) -> Option<(Value, Value, Value, Value)> {
-        if !self.params.xyce_core || self.params.xyce_core_level2 || !dt.is_finite() || dt <= 0.0 {
+        if !self.has_xyce_core_m_equation() || !dt.is_finite() || dt <= 0.0 {
             return None;
         }
         let gap_path = self.params.gap / self.params.length;
@@ -1142,8 +1169,15 @@ impl JilesAthertonInductor {
             magnetization,
             self.xyce_tanh_qv(voltage),
         );
-        let residual =
-            magnetization - self.state.m - integration_scale * (p * rate + previous_product);
+        // When Xyce drops the M equation (`C <= CLIM`), `latestMag` comes
+        // from the accepted state vector and is not a Newton unknown.  The
+        // constitutive endpoint still uses that fixed magnetization, while
+        // only the explicit R equation remains part of the DAE.
+        let residual = if self.has_xyce_core_m_equation() {
+            magnetization - self.state.m - integration_scale * (p * rate + previous_product)
+        } else {
+            0.0
+        };
         let rate_target = self.xyce_core_level1_rate_target(delta_happ, dt, one_step_order2)?;
         let rate_residual = rate - rate_target;
         let mid = 1.0 + (1.0 - gap_path) * p;
@@ -1818,8 +1852,9 @@ impl JilesAthertonInductor {
             .abs()
             .max(trial.level1_rate.abs())
             .max(1.0);
-        trial.level1_residual.is_finite()
-            && trial.level1_residual.abs() <= 1.0e-8 * scale
+        (!self.has_xyce_core_m_equation()
+            || (trial.level1_residual.is_finite()
+                && trial.level1_residual.abs() <= 1.0e-8 * scale))
             && trial.level1_rate_residual.is_finite()
             && trial.level1_rate_residual.abs() <= 1.0e-8 * rate_scale
     }
