@@ -22,19 +22,12 @@ pub struct DcSweepData {
     pub num_points: usize,
 }
 
-/// Run DC sweep analysis
-pub fn run_dc_sweep(
-    netlist_text: &str,
-    source_name: &str,
-    start: Value,
-    stop: Value,
-    step: Value,
-) -> Result<DcSweepData, String> {
-    run_dc_sweep_with_abort(netlist_text, source_name, start, stop, step, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
 /// Run DC sweep analysis with cooperative cancellation.
+///
+/// Test-only. The shipping path is
+/// [`run_dc_sweep_with_source_path_and_abort`]; this wrapper exists so tests
+/// can omit the source path.
+#[cfg(test)]
 pub fn run_dc_sweep_with_abort(
     netlist_text: &str,
     source_name: &str,
@@ -52,28 +45,6 @@ pub fn run_dc_sweep_with_abort(
         None,
         abort,
     )
-}
-
-/// Run DC sweep analysis with a source path used to resolve relative includes
-/// and model file references.
-pub fn run_dc_sweep_with_source_path(
-    netlist_text: &str,
-    source_name: &str,
-    start: Value,
-    stop: Value,
-    step: Value,
-    source_path: Option<&Path>,
-) -> Result<DcSweepData, String> {
-    run_dc_sweep_with_source_path_and_abort(
-        netlist_text,
-        source_name,
-        start,
-        stop,
-        step,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run DC sweep analysis with source-path resolution and cooperative

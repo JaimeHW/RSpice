@@ -13,7 +13,7 @@ pub(crate) mod yield_manager;
 pub use safety::{SoAManager, SoAViolation, ViolationSeverity};
 pub use simulation_runner::{
     AcData, DcSweepData, HbData, NoiseData, PssData, PstbData, SimulationResult, SimulationStats,
-    StbData, TransientData, run_dc_sweep, run_hb_analysis, run_noise_analysis,
+    StbData, TransientData, run_hb_analysis, run_noise_analysis,
     run_pole_zero_analysis, run_pss_analysis, run_pstb_analysis, run_sensitivity_analysis,
     run_simulation, run_stb_analysis,
 };
