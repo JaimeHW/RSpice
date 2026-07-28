@@ -9215,13 +9215,13 @@ impl Instance {
             let v40870 = Lanes([0e0f64; 2]);
             let v40871 = Lanes([0e0f64; 2]);
             let v40890 = staged[357];
-            let v40909 = Lanes([0e0f64; 1]);
-            let v41155 = 0e0f64;
-            let v41156 = 0e0f64;
-            let v41157 = 0e0f64;
-            let v41158 = 0e0f64;
-            let v41159 = 0e0f64;
-            let v41160 = 0e0f64;
+            let v40913 = Lanes([0e0f64; 1]);
+            let v41164 = 0e0f64;
+            let v41165 = 0e0f64;
+            let v41166 = 0e0f64;
+            let v41167 = 0e0f64;
+            let v41168 = 0e0f64;
+            let v41169 = 0e0f64;
             let v5: f64;
             if v1 != 0.0 {
                 v5 = v2;
@@ -48266,10 +48266,14 @@ impl Instance {
             let v40900: f64;
             let v40901: f64;
             let v40902: f64;
-            let v40903: Lanes<6>;
-            let v40904: Lanes<6>;
-            let v40905: Lanes<1>;
-            let v40906: Lanes<1>;
+            let v40903: f64;
+            let v40904: f64;
+            let v40905: Lanes<6>;
+            let v40906: Lanes<6>;
+            let v40907: Lanes<1>;
+            let v40908: Lanes<1>;
+            let v40909: Lanes<1>;
+            let v40910: Lanes<1>;
             if v101 != 0.0 {
                 let v40895 = ddt(217816, v102);
                 let v40896 = v104 * v38569;
@@ -48279,284 +48283,301 @@ impl Instance {
                 v40900 = v40596;
                 v40901 = v40895;
                 v40902 = v40897;
-                v40903 = v40600;
-                v40904 = v40601;
-                v40905 = v40896;
-                v40906 = v40898;
+                v40903 = v102;
+                v40904 = v103;
+                v40905 = v40600;
+                v40906 = v40601;
+                v40907 = v40896;
+                v40908 = v40898;
+                v40909 = v104;
+                v40910 = v105;
             } else {
                 v40899 = v3;
                 v40900 = v3;
                 v40901 = v3;
                 v40902 = v3;
-                v40903 = v40590;
-                v40904 = v40591;
-                v40905 = v106;
-                v40906 = v107;
+                v40903 = v3;
+                v40904 = v3;
+                v40905 = v40590;
+                v40906 = v40591;
+                v40907 = v106;
+                v40908 = v107;
+                v40909 = v106;
+                v40910 = v107;
             }
-            let v40910: f64;
-            let v40911: f64;
-            let v40912: Lanes<8>;
-            let v40913: Lanes<1>;
+            let v40914: f64;
+            let v40915: f64;
+            let v40916: f64;
+            let v40917: Lanes<8>;
+            let v40918: Lanes<1>;
+            let v40919: Lanes<1>;
             if v39156 != 0.0 {
-                let v40907 = ddt(217826, v39188);
-                let v40908 = v39190 * v38569;
-                v40910 = v39179;
-                v40911 = v40907;
-                v40912 = v39182;
-                v40913 = v40908;
+                let v40911 = ddt(217826, v39188);
+                let v40912 = v39190 * v38569;
+                v40914 = v39179;
+                v40915 = v40911;
+                v40916 = v39188;
+                v40917 = v39182;
+                v40918 = v40912;
+                v40919 = v39190;
             } else {
-                v40910 = v3;
-                v40911 = v3;
-                v40912 = v39176;
-                v40913 = v40909;
+                v40914 = v3;
+                v40915 = v3;
+                v40916 = v3;
+                v40917 = v39176;
+                v40918 = v40913;
+                v40919 = v40913;
             }
-            let v40914 = v38585[0];
-            let v40915 = v38585[1];
-            let v40916 = v38585[2];
-            let v40917 = v38585[3];
-            let v40918 = v38586[0];
-            let v40919 = v38586[1];
-            let v40920 = v38586[2];
-            let v40921 = v38586[3];
-            let v40922 = v38597[0];
-            let v40923 = v38597[1];
-            let v40924 = v38597[2];
-            let v40925 = v40662[0];
-            let v40926 = v40662[1];
-            let v40927 = v40662[2];
-            let v40928 = v40662[3];
-            let v40929 = v40662[4];
-            let v40930 = v40662[5];
-            let v40931 = v40662[6];
-            let v40932 = v40666[0];
-            let v40933 = v40666[1];
-            let v40934 = v40666[2];
-            let v40935 = v40666[3];
-            let v40936 = v40675[0];
-            let v40937 = v40675[1];
-            let v40938 = v40675[2];
-            let v40939 = v40675[3];
-            let v40940 = v40675[4];
-            let v40941 = v40675[5];
-            let v40942 = v40675[6];
-            let v40943 = v40675[7];
-            let v40944 = v40684[0];
-            let v40945 = v40684[1];
-            let v40946 = v40684[2];
-            let v40947 = v40684[3];
-            let v40948 = v40684[4];
-            let v40949 = v40684[5];
-            let v40950 = v40684[6];
-            let v40951 = v40684[7];
-            let v40952 = v40686[0];
-            let v40953 = v40686[1];
-            let v40954 = v40686[2];
-            let v40955 = v40686[3];
-            let v40956 = v40686[4];
-            let v40957 = v40686[5];
-            let v40958 = v40686[6];
-            let v40959 = v40688[0];
-            let v40960 = v40688[1];
-            let v40961 = v40688[2];
-            let v40962 = v40688[3];
-            let v40963 = v40688[4];
-            let v40964 = v40688[5];
-            let v40965 = v40688[6];
-            let v40966 = v40648[0];
-            let v40967 = v40648[1];
-            let v40968 = v40646[0];
-            let v40969 = v40646[1];
-            let v40970 = v40692[0];
-            let v40971 = v40692[1];
-            let v40972 = v40692[2];
-            let v40973 = v40692[3];
-            let v40974 = v40692[4];
-            let v40975 = v40696[0];
-            let v40976 = v40696[1];
-            let v40977 = v40696[2];
-            let v40978 = v40696[3];
-            let v40979 = v40696[4];
-            let v40980 = v40696[5];
-            let v40981 = v40696[6];
-            let v40982 = v40696[7];
-            let v40983 = v40709[0];
-            let v40984 = v40709[1];
-            let v40985 = v40709[2];
-            let v40986 = v40710[0];
-            let v40987 = v40710[1];
-            let v40988 = v40710[2];
-            let v40989 = v40711[0];
-            let v40990 = v40711[1];
-            let v40991 = v40711[2];
-            let v40992 = v40711[3];
-            let v40993 = v40711[4];
-            let v40994 = v40712[0];
-            let v40995 = v40712[1];
-            let v40996 = v40712[2];
-            let v40997 = v40712[3];
-            let v40998 = v40712[4];
-            let v40999 = v40723[0];
-            let v41000 = v40723[1];
-            let v41001 = v40723[2];
-            let v41002 = v40723[3];
-            let v41003 = v40723[4];
-            let v41004 = v40724[0];
-            let v41005 = v40724[1];
-            let v41006 = v40724[2];
-            let v41007 = v40724[3];
-            let v41008 = v40724[4];
-            let v41009 = v40725[0];
-            let v41010 = v40725[1];
-            let v41011 = v40725[2];
-            let v41012 = v40725[3];
-            let v41013 = v40725[4];
-            let v41014 = v40734[0];
-            let v41015 = v40734[1];
-            let v41016 = v40734[2];
-            let v41017 = v40734[3];
-            let v41018 = v40734[4];
-            let v41019 = v40734[5];
-            let v41020 = v40734[6];
-            let v41021 = v40745[0];
-            let v41022 = v40745[1];
-            let v41023 = v40745[2];
-            let v41024 = v40745[3];
-            let v41025 = v40745[4];
-            let v41026 = v40745[5];
-            let v41027 = v40753[0];
-            let v41028 = v40753[1];
-            let v41029 = v40753[2];
-            let v41030 = v40753[3];
-            let v41031 = v40753[4];
-            let v41032 = v40753[5];
-            let v41033 = v40753[6];
-            let v41034 = v40753[7];
-            let v41035 = v40753[8];
-            let v41036 = v40753[9];
-            let v41037 = v40761[0];
-            let v41038 = v40761[1];
-            let v41039 = v40761[2];
-            let v41040 = v40761[3];
-            let v41041 = v40761[4];
-            let v41042 = v40761[5];
-            let v41043 = v40761[6];
-            let v41044 = v40761[7];
-            let v41045 = v40761[8];
-            let v41046 = v40776[0];
-            let v41047 = v40776[1];
-            let v41048 = v40776[2];
-            let v41049 = v40776[3];
-            let v41050 = v40776[4];
-            let v41051 = v40776[5];
-            let v41052 = v40776[6];
-            let v41053 = v40776[7];
-            let v41054 = v40776[8];
-            let v41055 = v40776[9];
-            let v41056 = v40780[0];
-            let v41057 = v40780[1];
-            let v41058 = v40780[2];
-            let v41059 = v40780[3];
-            let v41060 = v40780[4];
-            let v41061 = v40780[5];
-            let v41062 = v40780[6];
-            let v41063 = v40784[0];
-            let v41064 = v40784[1];
-            let v41065 = v40784[2];
-            let v41066 = v40784[3];
-            let v41067 = v40784[4];
-            let v41068 = v40784[5];
-            let v41069 = v40784[6];
-            let v41070 = v40788[0];
-            let v41071 = v40788[1];
-            let v41072 = v40788[2];
-            let v41073 = v40788[3];
-            let v41074 = v40788[4];
-            let v41075 = v40788[5];
-            let v41076 = v40788[6];
-            let v41077 = v40793[0];
-            let v41078 = v40793[1];
-            let v41079 = v40793[2];
-            let v41080 = v40797[0];
-            let v41081 = v40797[1];
-            let v41082 = v40807[0];
-            let v41083 = v40811[0];
-            let v41084 = v40811[1];
-            let v41085 = v40811[2];
-            let v41086 = v40811[3];
-            let v41087 = v40811[4];
-            let v41088 = v40811[5];
-            let v41089 = v40819[0];
-            let v41090 = v40819[1];
-            let v41091 = v40819[2];
-            let v41092 = v40819[3];
-            let v41093 = v40819[4];
-            let v41094 = v40819[5];
-            let v41095 = v40827[0];
-            let v41096 = v40827[1];
-            let v41097 = v40827[2];
-            let v41098 = v40827[3];
-            let v41099 = v40827[4];
-            let v41100 = v40827[5];
-            let v41101 = v40844[0];
-            let v41102 = v40844[1];
-            let v41103 = v40875[0];
-            let v41104 = v40875[1];
-            let v41105 = v40876[0];
-            let v41106 = v40876[1];
-            let v41107 = v40877[0];
-            let v41108 = v40877[1];
-            let v41109 = v40887[0];
-            let v41110 = v40888[0];
-            let v41111 = v40888[1];
-            let v41112 = v40888[2];
-            let v41113 = v40888[3];
-            let v41114 = v40888[4];
-            let v41115 = v40888[5];
-            let v41116 = v40888[6];
-            let v41117 = v40889[0];
-            let v41118 = v40894[0];
-            let v41119 = v40903[0];
-            let v41120 = v40903[1];
-            let v41121 = v40903[2];
-            let v41122 = v40903[3];
-            let v41123 = v40903[4];
-            let v41124 = v40903[5];
-            let v41125 = v40904[0];
-            let v41126 = v40904[1];
-            let v41127 = v40904[2];
-            let v41128 = v40904[3];
-            let v41129 = v40904[4];
-            let v41130 = v40904[5];
-            let v41131 = v40905[0];
-            let v41132 = v40906[0];
-            let v41133 = v40912[0];
-            let v41134 = v40912[1];
-            let v41135 = v40912[2];
-            let v41136 = v40912[3];
-            let v41137 = v40912[4];
-            let v41138 = v40912[5];
-            let v41139 = v40912[6];
-            let v41140 = v40912[7];
-            let v41141 = v40913[0];
-            let v41142 = v40817[0];
-            let v41143 = v40817[1];
-            let v41144 = v40817[2];
-            let v41145 = v40817[3];
-            let v41146 = v40817[4];
-            let v41147 = v40817[5];
-            let v41148 = v40825[0];
-            let v41149 = v40825[1];
-            let v41150 = v40825[2];
-            let v41151 = v40825[3];
-            let v41152 = v40825[4];
-            let v41153 = v40825[5];
-            let v41154 = v40892[0];
+            let v40920 = v38585[0];
+            let v40921 = v38585[1];
+            let v40922 = v38585[2];
+            let v40923 = v38585[3];
+            let v40924 = v38586[0];
+            let v40925 = v38586[1];
+            let v40926 = v38586[2];
+            let v40927 = v38586[3];
+            let v40928 = v38597[0];
+            let v40929 = v38597[1];
+            let v40930 = v38597[2];
+            let v40931 = v40662[0];
+            let v40932 = v40662[1];
+            let v40933 = v40662[2];
+            let v40934 = v40662[3];
+            let v40935 = v40662[4];
+            let v40936 = v40662[5];
+            let v40937 = v40662[6];
+            let v40938 = v40666[0];
+            let v40939 = v40666[1];
+            let v40940 = v40666[2];
+            let v40941 = v40666[3];
+            let v40942 = v40675[0];
+            let v40943 = v40675[1];
+            let v40944 = v40675[2];
+            let v40945 = v40675[3];
+            let v40946 = v40675[4];
+            let v40947 = v40675[5];
+            let v40948 = v40675[6];
+            let v40949 = v40675[7];
+            let v40950 = v40684[0];
+            let v40951 = v40684[1];
+            let v40952 = v40684[2];
+            let v40953 = v40684[3];
+            let v40954 = v40684[4];
+            let v40955 = v40684[5];
+            let v40956 = v40684[6];
+            let v40957 = v40684[7];
+            let v40958 = v40686[0];
+            let v40959 = v40686[1];
+            let v40960 = v40686[2];
+            let v40961 = v40686[3];
+            let v40962 = v40686[4];
+            let v40963 = v40686[5];
+            let v40964 = v40686[6];
+            let v40965 = v40688[0];
+            let v40966 = v40688[1];
+            let v40967 = v40688[2];
+            let v40968 = v40688[3];
+            let v40969 = v40688[4];
+            let v40970 = v40688[5];
+            let v40971 = v40688[6];
+            let v40972 = v40648[0];
+            let v40973 = v40648[1];
+            let v40974 = v40646[0];
+            let v40975 = v40646[1];
+            let v40976 = v40692[0];
+            let v40977 = v40692[1];
+            let v40978 = v40692[2];
+            let v40979 = v40692[3];
+            let v40980 = v40692[4];
+            let v40981 = v40696[0];
+            let v40982 = v40696[1];
+            let v40983 = v40696[2];
+            let v40984 = v40696[3];
+            let v40985 = v40696[4];
+            let v40986 = v40696[5];
+            let v40987 = v40696[6];
+            let v40988 = v40696[7];
+            let v40989 = v40709[0];
+            let v40990 = v40709[1];
+            let v40991 = v40709[2];
+            let v40992 = v40710[0];
+            let v40993 = v40710[1];
+            let v40994 = v40710[2];
+            let v40995 = v40711[0];
+            let v40996 = v40711[1];
+            let v40997 = v40711[2];
+            let v40998 = v40711[3];
+            let v40999 = v40711[4];
+            let v41000 = v40712[0];
+            let v41001 = v40712[1];
+            let v41002 = v40712[2];
+            let v41003 = v40712[3];
+            let v41004 = v40712[4];
+            let v41005 = v40723[0];
+            let v41006 = v40723[1];
+            let v41007 = v40723[2];
+            let v41008 = v40723[3];
+            let v41009 = v40723[4];
+            let v41010 = v40724[0];
+            let v41011 = v40724[1];
+            let v41012 = v40724[2];
+            let v41013 = v40724[3];
+            let v41014 = v40724[4];
+            let v41015 = v40725[0];
+            let v41016 = v40725[1];
+            let v41017 = v40725[2];
+            let v41018 = v40725[3];
+            let v41019 = v40725[4];
+            let v41020 = v40734[0];
+            let v41021 = v40734[1];
+            let v41022 = v40734[2];
+            let v41023 = v40734[3];
+            let v41024 = v40734[4];
+            let v41025 = v40734[5];
+            let v41026 = v40734[6];
+            let v41027 = v40745[0];
+            let v41028 = v40745[1];
+            let v41029 = v40745[2];
+            let v41030 = v40745[3];
+            let v41031 = v40745[4];
+            let v41032 = v40745[5];
+            let v41033 = v40753[0];
+            let v41034 = v40753[1];
+            let v41035 = v40753[2];
+            let v41036 = v40753[3];
+            let v41037 = v40753[4];
+            let v41038 = v40753[5];
+            let v41039 = v40753[6];
+            let v41040 = v40753[7];
+            let v41041 = v40753[8];
+            let v41042 = v40753[9];
+            let v41043 = v40761[0];
+            let v41044 = v40761[1];
+            let v41045 = v40761[2];
+            let v41046 = v40761[3];
+            let v41047 = v40761[4];
+            let v41048 = v40761[5];
+            let v41049 = v40761[6];
+            let v41050 = v40761[7];
+            let v41051 = v40761[8];
+            let v41052 = v40776[0];
+            let v41053 = v40776[1];
+            let v41054 = v40776[2];
+            let v41055 = v40776[3];
+            let v41056 = v40776[4];
+            let v41057 = v40776[5];
+            let v41058 = v40776[6];
+            let v41059 = v40776[7];
+            let v41060 = v40776[8];
+            let v41061 = v40776[9];
+            let v41062 = v40780[0];
+            let v41063 = v40780[1];
+            let v41064 = v40780[2];
+            let v41065 = v40780[3];
+            let v41066 = v40780[4];
+            let v41067 = v40780[5];
+            let v41068 = v40780[6];
+            let v41069 = v40784[0];
+            let v41070 = v40784[1];
+            let v41071 = v40784[2];
+            let v41072 = v40784[3];
+            let v41073 = v40784[4];
+            let v41074 = v40784[5];
+            let v41075 = v40784[6];
+            let v41076 = v40788[0];
+            let v41077 = v40788[1];
+            let v41078 = v40788[2];
+            let v41079 = v40788[3];
+            let v41080 = v40788[4];
+            let v41081 = v40788[5];
+            let v41082 = v40788[6];
+            let v41083 = v40793[0];
+            let v41084 = v40793[1];
+            let v41085 = v40793[2];
+            let v41086 = v40797[0];
+            let v41087 = v40797[1];
+            let v41088 = v40807[0];
+            let v41089 = v40811[0];
+            let v41090 = v40811[1];
+            let v41091 = v40811[2];
+            let v41092 = v40811[3];
+            let v41093 = v40811[4];
+            let v41094 = v40811[5];
+            let v41095 = v40819[0];
+            let v41096 = v40819[1];
+            let v41097 = v40819[2];
+            let v41098 = v40819[3];
+            let v41099 = v40819[4];
+            let v41100 = v40819[5];
+            let v41101 = v40827[0];
+            let v41102 = v40827[1];
+            let v41103 = v40827[2];
+            let v41104 = v40827[3];
+            let v41105 = v40827[4];
+            let v41106 = v40827[5];
+            let v41107 = v40844[0];
+            let v41108 = v40844[1];
+            let v41109 = v40875[0];
+            let v41110 = v40875[1];
+            let v41111 = v40876[0];
+            let v41112 = v40876[1];
+            let v41113 = v40877[0];
+            let v41114 = v40877[1];
+            let v41115 = v40887[0];
+            let v41116 = v40888[0];
+            let v41117 = v40888[1];
+            let v41118 = v40888[2];
+            let v41119 = v40888[3];
+            let v41120 = v40888[4];
+            let v41121 = v40888[5];
+            let v41122 = v40888[6];
+            let v41123 = v40889[0];
+            let v41124 = v40894[0];
+            let v41125 = v40905[0];
+            let v41126 = v40905[1];
+            let v41127 = v40905[2];
+            let v41128 = v40905[3];
+            let v41129 = v40905[4];
+            let v41130 = v40905[5];
+            let v41131 = v40906[0];
+            let v41132 = v40906[1];
+            let v41133 = v40906[2];
+            let v41134 = v40906[3];
+            let v41135 = v40906[4];
+            let v41136 = v40906[5];
+            let v41137 = v40907[0];
+            let v41138 = v40908[0];
+            let v41139 = v40917[0];
+            let v41140 = v40917[1];
+            let v41141 = v40917[2];
+            let v41142 = v40917[3];
+            let v41143 = v40917[4];
+            let v41144 = v40917[5];
+            let v41145 = v40917[6];
+            let v41146 = v40917[7];
+            let v41147 = v40918[0];
+            let v41148 = v40817[0];
+            let v41149 = v40817[1];
+            let v41150 = v40817[2];
+            let v41151 = v40817[3];
+            let v41152 = v40817[4];
+            let v41153 = v40817[5];
+            let v41154 = v40825[0];
+            let v41155 = v40825[1];
+            let v41156 = v40825[2];
+            let v41157 = v40825[3];
+            let v41158 = v40825[4];
+            let v41159 = v40825[5];
+            let v41160 = v40892[0];
+            let v41161 = v40909[0];
+            let v41162 = v40910[0];
+            let v41163 = v40919[0];
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(15),
             None,
             multiplicity * (v38581),
             [0, 4, 9, 15],
-            [v40914, v40915, v40916, v40917],
+            [v40920, v40921, v40922, v40923],
             [],
             [],
             multiplicity,
@@ -48566,7 +48587,7 @@ impl Instance {
             None,
             multiplicity * (v38582),
             [0, 4, 9, 16],
-            [v40918, v40919, v40920, v40921],
+            [v40924, v40925, v40926, v40927],
             [],
             [],
             multiplicity,
@@ -48594,7 +48615,7 @@ impl Instance {
             None,
             multiplicity * (v38595),
             [0, 9, 17],
-            [v40922, v40923, v40924],
+            [v40928, v40929, v40930],
             [],
             [],
             multiplicity,
@@ -48613,7 +48634,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40661),
             [0, 2, 4, 5, 6, 7, 8],
-            [v40925, v40926, v40927, v40928, v40929, v40930, v40931],
+            [v40931, v40932, v40933, v40934, v40935, v40936, v40937],
             [],
             [],
             multiplicity,
@@ -48623,7 +48644,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40665),
             [0, 2, 4, 6],
-            [v40932, v40933, v40934, v40935],
+            [v40938, v40939, v40940, v40941],
             [],
             [],
             multiplicity,
@@ -48633,7 +48654,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40674),
             [0, 2, 4, 5, 6, 7, 8, 10],
-            [v40936, v40937, v40938, v40939, v40940, v40941, v40942, v40943],
+            [v40942, v40943, v40944, v40945, v40946, v40947, v40948, v40949],
             [],
             [],
             multiplicity,
@@ -48643,7 +48664,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40683),
             [0, 2, 4, 5, 6, 7, 8, 10],
-            [v40944, v40945, v40946, v40947, v40948, v40949, v40950, v40951],
+            [v40950, v40951, v40952, v40953, v40954, v40955, v40956, v40957],
             [],
             [],
             multiplicity,
@@ -48653,7 +48674,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40685),
             [0, 2, 4, 5, 6, 7, 8],
-            [v40952, v40953, v40954, v40955, v40956, v40957, v40958],
+            [v40958, v40959, v40960, v40961, v40962, v40963, v40964],
             [],
             [],
             multiplicity,
@@ -48663,7 +48684,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40687),
             [0, 2, 4, 5, 6, 7, 8],
-            [v40959, v40960, v40961, v40962, v40963, v40964, v40965],
+            [v40965, v40966, v40967, v40968, v40969, v40970, v40971],
             [],
             [],
             multiplicity,
@@ -48673,7 +48694,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40647),
             [2, 4, 10],
-            [v40966, v40967, v40654],
+            [v40972, v40973, v40654],
             [],
             [],
             multiplicity,
@@ -48683,7 +48704,7 @@ impl Instance {
             Some(0),
             multiplicity * (v40645),
             [0, 4, 9],
-            [v40968, v40969, v40653],
+            [v40974, v40975, v40653],
             [],
             [],
             multiplicity,
@@ -48693,7 +48714,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40691),
             [2, 4, 7, 8, 10],
-            [v40970, v40971, v40972, v40973, v40974],
+            [v40976, v40977, v40978, v40979, v40980],
             [],
             [],
             multiplicity,
@@ -48703,7 +48724,7 @@ impl Instance {
             Some(0),
             multiplicity * (v40695),
             [0, 4, 5, 8, 9, 15, 16, 17],
-            [v40975, v40976, v40977, v40978, v40979, v40980, v40981, v40982],
+            [v40981, v40982, v40983, v40984, v40985, v40986, v40987, v40988],
             [],
             [],
             multiplicity,
@@ -48713,7 +48734,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40705),
             [4, 7, 8],
-            [v40983, v40984, v40985],
+            [v40989, v40990, v40991],
             [],
             [],
             multiplicity,
@@ -48723,7 +48744,7 @@ impl Instance {
             Some(5),
             multiplicity * (v40706),
             [4, 5, 8],
-            [v40986, v40987, v40988],
+            [v40992, v40993, v40994],
             [],
             [],
             multiplicity,
@@ -48733,7 +48754,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40707),
             [2, 4, 7, 8, 10],
-            [v40989, v40990, v40991, v40992, v40993],
+            [v40995, v40996, v40997, v40998, v40999],
             [],
             [],
             multiplicity,
@@ -48743,7 +48764,7 @@ impl Instance {
             Some(5),
             multiplicity * (v40708),
             [0, 4, 5, 8, 9],
-            [v40994, v40995, v40996, v40997, v40998],
+            [v41000, v41001, v41002, v41003, v41004],
             [],
             [],
             multiplicity,
@@ -48753,7 +48774,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40720),
             [4, 5, 6, 7, 8],
-            [v40999, v41000, v41001, v41002, v41003],
+            [v41005, v41006, v41007, v41008, v41009],
             [],
             [],
             multiplicity,
@@ -48763,7 +48784,7 @@ impl Instance {
             Some(5),
             multiplicity * (v40721),
             [4, 5, 6, 7, 8],
-            [v41004, v41005, v41006, v41007, v41008],
+            [v41010, v41011, v41012, v41013, v41014],
             [],
             [],
             multiplicity,
@@ -48773,7 +48794,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40722),
             [4, 5, 6, 7, 8],
-            [v41009, v41010, v41011, v41012, v41013],
+            [v41015, v41016, v41017, v41018, v41019],
             [],
             [],
             multiplicity,
@@ -48783,7 +48804,7 @@ impl Instance {
             Some(5),
             multiplicity * (v40732),
             [0, 2, 4, 5, 6, 7, 8],
-            [v41014, v41015, v41016, v41017, v41018, v41019, v41020],
+            [v41020, v41021, v41022, v41023, v41024, v41025, v41026],
             [],
             [],
             multiplicity,
@@ -48802,7 +48823,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40743),
             [0, 2, 4, 6, 7, 8],
-            [v41021, v41022, v41023, v41024, v41025, v41026],
+            [v41027, v41028, v41029, v41030, v41031, v41032],
             [],
             [],
             multiplicity,
@@ -48821,7 +48842,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40752),
             [0, 2, 4, 5, 6, 7, 8, 11, 12, 13],
-            [v41027, v41028, v41029, v41030, v41031, v41032, v41033, v41034, v41035, v41036],
+            [v41033, v41034, v41035, v41036, v41037, v41038, v41039, v41040, v41041, v41042],
             [],
             [],
             multiplicity,
@@ -48831,7 +48852,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40760),
             [0, 2, 4, 5, 6, 7, 8, 11, 13],
-            [v41037, v41038, v41039, v41040, v41041, v41042, v41043, v41044, v41045],
+            [v41043, v41044, v41045, v41046, v41047, v41048, v41049, v41050, v41051],
             [],
             [],
             multiplicity,
@@ -48841,7 +48862,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40775),
             [0, 2, 4, 5, 6, 7, 8, 11, 12, 13],
-            [v41046, v41047, v41048, v41049, v41050, v41051, v41052, v41053, v41054, v41055],
+            [v41052, v41053, v41054, v41055, v41056, v41057, v41058, v41059, v41060, v41061],
             [],
             [],
             multiplicity,
@@ -48851,7 +48872,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40779),
             [0, 2, 4, 5, 6, 7, 8],
-            [v41056, v41057, v41058, v41059, v41060, v41061, v41062],
+            [v41062, v41063, v41064, v41065, v41066, v41067, v41068],
             [],
             [],
             multiplicity,
@@ -48861,7 +48882,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40783),
             [0, 2, 4, 5, 6, 7, 8],
-            [v41063, v41064, v41065, v41066, v41067, v41068, v41069],
+            [v41069, v41070, v41071, v41072, v41073, v41074, v41075],
             [],
             [],
             multiplicity,
@@ -48871,7 +48892,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40787),
             [0, 2, 4, 5, 6, 7, 8],
-            [v41070, v41071, v41072, v41073, v41074, v41075, v41076],
+            [v41076, v41077, v41078, v41079, v41080, v41081, v41082],
             [],
             [],
             multiplicity,
@@ -48881,7 +48902,7 @@ impl Instance {
             Some(0),
             multiplicity * (v40792),
             [0, 2, 6],
-            [v41077, v41078, v41079],
+            [v41083, v41084, v41085],
             [],
             [],
             multiplicity,
@@ -48891,7 +48912,7 @@ impl Instance {
             Some(2),
             multiplicity * (v40796),
             [2, 6],
-            [v41080, v41081],
+            [v41086, v41087],
             [],
             [],
             multiplicity,
@@ -48899,7 +48920,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(7),
-            multiplicity * (v41155),
+            multiplicity * (v41164),
             [],
             [],
             [],
@@ -48911,7 +48932,7 @@ impl Instance {
             None,
             multiplicity * (v40804),
             [14],
-            [v41082],
+            [v41088],
             [],
             [],
             multiplicity,
@@ -48919,7 +48940,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(14),
             None,
-            multiplicity * (v41156),
+            multiplicity * (v41165),
             [],
             [],
             [],
@@ -48929,7 +48950,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(7),
-            multiplicity * (v41157),
+            multiplicity * (v41166),
             [],
             [],
             [],
@@ -48941,7 +48962,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40805),
             [4, 5, 6, 7, 8, 14],
-            [v41083, v41084, v41085, v41086, v41087, v41088],
+            [v41089, v41090, v41091, v41092, v41093, v41094],
             [],
             [],
             multiplicity,
@@ -48951,7 +48972,7 @@ impl Instance {
             Some(7),
             multiplicity * (v40818),
             [4, 5, 6, 7, 8, 14],
-            [v41089, v41090, v41091, v41092, v41093, v41094],
+            [v41095, v41096, v41097, v41098, v41099, v41100],
             [],
             [],
             multiplicity,
@@ -48961,7 +48982,7 @@ impl Instance {
             Some(5),
             multiplicity * (v40826),
             [4, 5, 6, 7, 8, 14],
-            [v41095, v41096, v41097, v41098, v41099, v41100],
+            [v41101, v41102, v41103, v41104, v41105, v41106],
             [],
             [],
             multiplicity,
@@ -48989,7 +49010,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(5),
-            multiplicity * (v41158),
+            multiplicity * (v41167),
             [],
             [],
             [],
@@ -48999,7 +49020,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(7),
-            multiplicity * (v41159),
+            multiplicity * (v41168),
             [],
             [],
             [],
@@ -49009,7 +49030,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(8),
-            multiplicity * (v41160),
+            multiplicity * (v41169),
             [],
             [],
             [],
@@ -49021,7 +49042,7 @@ impl Instance {
             Some(6),
             multiplicity * (v40843),
             [1, 6],
-            [v41101, v41102],
+            [v41107, v41108],
             [],
             [],
             multiplicity,
@@ -49040,7 +49061,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40872),
             [8, 10],
-            [v41103, v41104],
+            [v41109, v41110],
             [],
             [],
             multiplicity,
@@ -49050,7 +49071,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40873),
             [8, 9],
-            [v41105, v41106],
+            [v41111, v41112],
             [],
             [],
             multiplicity,
@@ -49060,7 +49081,7 @@ impl Instance {
             Some(8),
             multiplicity * (v40874),
             [3, 8],
-            [v41107, v41108],
+            [v41113, v41114],
             [],
             [],
             multiplicity,
@@ -49097,7 +49118,7 @@ impl Instance {
             None,
             multiplicity * (v40884),
             [4],
-            [v41109],
+            [v41115],
             [],
             [],
             multiplicity,
@@ -49107,7 +49128,7 @@ impl Instance {
             None,
             multiplicity * (v40885),
             [0, 2, 4, 5, 6, 7, 8],
-            [v41110, v41111, v41112, v41113, v41114, v41115, v41116],
+            [v41116, v41117, v41118, v41119, v41120, v41121, v41122],
             [],
             [],
             multiplicity,
@@ -49117,7 +49138,7 @@ impl Instance {
             None,
             multiplicity * (v40886),
             [4],
-            [v41117],
+            [v41123],
             [],
             [],
             multiplicity,
@@ -49127,7 +49148,7 @@ impl Instance {
             None,
             multiplicity * (v40893),
             [4],
-            [v41118],
+            [v41124],
             [],
             [],
             multiplicity,
@@ -49137,7 +49158,7 @@ impl Instance {
             None,
             multiplicity * (v40899),
             [4, 5, 6, 7, 8, 11],
-            [v41119, v41120, v41121, v41122, v41123, v41124],
+            [v41125, v41126, v41127, v41128, v41129, v41130],
             [],
             [],
             multiplicity,
@@ -49147,7 +49168,7 @@ impl Instance {
             None,
             multiplicity * (v40900),
             [4, 5, 6, 7, 8, 12],
-            [v41125, v41126, v41127, v41128, v41129, v41130],
+            [v41131, v41132, v41133, v41134, v41135, v41136],
             [],
             [],
             multiplicity,
@@ -49157,7 +49178,7 @@ impl Instance {
             None,
             multiplicity * (v40901),
             [11],
-            [v41131],
+            [v41137],
             [],
             [],
             multiplicity,
@@ -49167,7 +49188,7 @@ impl Instance {
             None,
             multiplicity * (v40902),
             [12],
-            [v41132],
+            [v41138],
             [],
             [],
             multiplicity,
@@ -49193,9 +49214,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(13),
             None,
-            multiplicity * (v40910),
+            multiplicity * (v40914),
             [0, 2, 4, 5, 6, 7, 8, 13],
-            [v41133, v41134, v41135, v41136, v41137, v41138, v41139, v41140],
+            [v41139, v41140, v41141, v41142, v41143, v41144, v41145, v41146],
             [],
             [],
             multiplicity,
@@ -49203,9 +49224,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(13),
             None,
-            multiplicity * (v40911),
+            multiplicity * (v40915),
             [13],
-            [v41141],
+            [v41147],
             [],
             [],
             multiplicity,
@@ -49254,30 +49275,30 @@ impl Instance {
         self.canonical_reactive[32] = v40787;
         self.canonical_reactive[33] = v40792;
         self.canonical_reactive[34] = v40796;
-        self.canonical_reactive[35] = v41155;
+        self.canonical_reactive[35] = v41164;
         self.canonical_reactive[36] = v40804;
-        self.canonical_reactive[37] = v41156;
-        self.canonical_reactive[38] = v41157;
+        self.canonical_reactive[37] = v41165;
+        self.canonical_reactive[38] = v41166;
         self.canonical_reactive[39] = v40805;
         self.canonical_reactive[40] = v40812;
-        self.canonical_reactive[41] = v41142;
-        self.canonical_reactive[42] = v41143;
-        self.canonical_reactive[43] = v41144;
-        self.canonical_reactive[44] = v41145;
-        self.canonical_reactive[45] = v41146;
-        self.canonical_reactive[46] = v41147;
+        self.canonical_reactive[41] = v41148;
+        self.canonical_reactive[42] = v41149;
+        self.canonical_reactive[43] = v41150;
+        self.canonical_reactive[44] = v41151;
+        self.canonical_reactive[45] = v41152;
+        self.canonical_reactive[46] = v41153;
         self.canonical_reactive[47] = v40820;
-        self.canonical_reactive[48] = v41148;
-        self.canonical_reactive[49] = v41149;
-        self.canonical_reactive[50] = v41150;
-        self.canonical_reactive[51] = v41151;
-        self.canonical_reactive[52] = v41152;
-        self.canonical_reactive[53] = v41153;
+        self.canonical_reactive[48] = v41154;
+        self.canonical_reactive[49] = v41155;
+        self.canonical_reactive[50] = v41156;
+        self.canonical_reactive[51] = v41157;
+        self.canonical_reactive[52] = v41158;
+        self.canonical_reactive[53] = v41159;
         self.canonical_reactive[54] = v40829;
         self.canonical_reactive[55] = v40831;
-        self.canonical_reactive[56] = v41158;
-        self.canonical_reactive[57] = v41159;
-        self.canonical_reactive[58] = v41160;
+        self.canonical_reactive[56] = v41167;
+        self.canonical_reactive[57] = v41168;
+        self.canonical_reactive[58] = v41169;
         self.canonical_reactive[59] = v40843;
         self.canonical_reactive[60] = staged[865];
         self.canonical_reactive[61] = v40872;
@@ -49290,16 +49311,19 @@ impl Instance {
         self.canonical_reactive[68] = v40885;
         self.canonical_reactive[69] = v40886;
         self.canonical_reactive[70] = v40891;
-        self.canonical_reactive[71] = v41154;
+        self.canonical_reactive[71] = v41160;
         self.canonical_reactive[72] = v40899;
         self.canonical_reactive[73] = v40900;
-        self.canonical_reactive[74] = v40901;
-        self.canonical_reactive[75] = v40902;
-        self.canonical_reactive[76] = staged[869];
-        self.canonical_reactive[77] = staged[870];
-        self.canonical_reactive[78] = v40910;
-        self.canonical_reactive[79] = v40911;
-        self.canonical_reactive[80] = staged[871];
+        self.canonical_reactive[74] = v40903;
+        self.canonical_reactive[75] = v41161;
+        self.canonical_reactive[76] = v40904;
+        self.canonical_reactive[77] = v41162;
+        self.canonical_reactive[78] = staged[869];
+        self.canonical_reactive[79] = staged[870];
+        self.canonical_reactive[80] = v40914;
+        self.canonical_reactive[81] = v40916;
+        self.canonical_reactive[82] = v41163;
+        self.canonical_reactive[83] = staged[871];
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -49328,6 +49352,33 @@ impl Instance {
             None,
             &[4],
             &[cached[71]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(11),
+            None,
+            &[11],
+            &[cached[75]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(12),
+            None,
+            &[12],
+            &[cached[77]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(13),
+            None,
+            &[13],
+            &[cached[82]],
             &[],
             &[],
             multiplicity,

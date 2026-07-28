@@ -499,7 +499,7 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) canonical_reactive: Box<[f64; 53]>,
+    pub(crate) canonical_reactive: Box<[f64; 54]>,
     pub(crate) canonical_staged: Box<[f64; 95]>,
     pub(crate) canonical_instance_valid: bool,
     pub(crate) canonical_temperature_valid: bool,
@@ -541,7 +541,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 386;
     pub const DDT_STATE_COUNT: usize = 9;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "14f4b557b2ea057d6b7a15e232d5b872bd227bfcfa4ff4e91e66bd4137b79961";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "a1b64d8f526d253763c1cd2c74e162b1b9a39d4c61d5c47981d0b098f6e04272";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
