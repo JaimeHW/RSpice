@@ -1027,9 +1027,10 @@ fn source_files_have_no_byte_order_mark() {
 ///
 /// Same rule: wire them up or delete them, and drop the attribute either way.
 ///
-/// Lowered 85 -> 77 when the two clusters above were deleted. The four
+/// Lowered 85 -> 77 when the two clusters above were deleted, then 77 -> 76
+/// with the `dc_sweep`/`noise`/`pole_zero` runner duplicates. The four
 /// inference entries are the only additions still standing.
-const MAX_LINT_SUPPRESSIONS: usize = 77;
+const MAX_LINT_SUPPRESSIONS: usize = 76;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

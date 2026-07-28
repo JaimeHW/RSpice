@@ -533,4 +533,24 @@ R3 n 0 3k
             (None, None)
         );
     }
+
+    /// A sweep that yields no frequencies must be refused, not reported as a
+    /// successful run with an empty spectrum -- an empty noise result reads as
+    /// "no noise", which is the opposite of "not measured".
+    #[test]
+    fn a_degenerate_sweep_is_refused_rather_than_returned_empty() {
+        let netlist = rspice_core::Netlist::parse(DIFFERENTIAL_NOISE_DECK).expect("deck parses");
+        let mut config = exact_noise_config("v1");
+        config.num_points = 0;
+        assert!(
+            config.generate_frequencies().is_empty(),
+            "the sweep under test must actually be degenerate"
+        );
+
+        let error = EngineBridge::new()
+            .run_noise(&netlist, &config, &NoAbort)
+            .expect_err("an empty sweep is a configuration error");
+
+        assert!(matches!(error, SimulationError::InvalidConfig(_)));
+    }
 }

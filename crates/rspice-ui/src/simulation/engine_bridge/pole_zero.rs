@@ -141,3 +141,89 @@ fn canonicalize_port(
     }
     Ok((neg, None, -1.0))
 }
+
+#[cfg(test)]
+mod tests {
+    use rspice_core::abort_signal::ImmediateAbort;
+
+    use super::*;
+
+    const DECK: &str = "\
+pole-zero bridge
+V1 in 0 1
+R1 in out 1k
+C1 out 0 1n
+.end
+";
+
+    fn config() -> PoleZeroConfig {
+        PoleZeroConfig {
+            input_node: "in".to_string(),
+            input_ref: "0".to_string(),
+            output_node: "out".to_string(),
+            output_ref: "0".to_string(),
+            transfer_type: "VOL".to_string(),
+            analysis_type: PzAnalysisType::PoleZero,
+        }
+    }
+
+    /// Pins the ordering, not the leading guard: node resolution happens after
+    /// the abort-aware operating point, so a cancelled run reports `Aborted`
+    /// rather than the configuration error it would also have hit. Verified to
+    /// discriminate by moving resolution above the DC op -- it then fails with
+    /// `InvalidConfig`. Deleting the `ensure_not_aborted` at the top of `run_pz`
+    /// does *not* fail this test, because the core's own abort already
+    /// surfaces through `translate_error`.
+    #[test]
+    fn a_cancelled_run_is_not_reported_as_a_configuration_error() {
+        let netlist = rspice_core::Netlist::parse(DECK).expect("deck parses");
+        let mut invalid = config();
+        invalid.input_node = "no_such_node".to_string();
+
+        let result = EngineBridge::new().run_pz(&netlist, &invalid, &ImmediateAbort);
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+    }
+
+    #[test]
+    fn a_ground_referenced_port_keeps_its_sign() {
+        let (pos, neg, sign) = canonicalize_port(3, 0, "input").expect("node-to-ground is a port");
+
+        assert_eq!((pos, neg), (3, None));
+        assert_eq!(sign, 1.0);
+    }
+
+    #[test]
+    fn an_inverted_port_is_canonicalized_and_carries_the_sign() {
+        // V(0, n) is measured as -V(n, 0); the port is flipped and the sign
+        // is what puts the measurement back the right way up.
+        let (pos, neg, sign) = canonicalize_port(0, 4, "output").expect("ground-to-node is a port");
+
+        assert_eq!((pos, neg), (4, None));
+        assert_eq!(sign, -1.0);
+    }
+
+    #[test]
+    fn degenerate_ports_are_rejected_rather_than_solved() {
+        assert!(matches!(
+            canonicalize_port(2, 2, "input"),
+            Err(SimulationError::InvalidConfig(_))
+        ));
+        assert!(matches!(
+            canonicalize_port(0, 0, "output"),
+            Err(SimulationError::InvalidConfig(_))
+        ));
+    }
+
+    #[test]
+    fn nodes_resolve_by_name_index_and_ground_alias() {
+        let names = vec!["0".to_string(), "in".to_string(), "out".to_string()];
+
+        assert_eq!(resolve_node_or_ground("OUT", &names), Some(2));
+        assert_eq!(resolve_node_or_ground("1", &names), Some(1));
+        assert_eq!(resolve_node_or_ground("gnd", &names), Some(0));
+        assert_eq!(resolve_node_or_ground("ground", &names), Some(0));
+        assert_eq!(resolve_node_or_ground("", &names), None);
+        assert_eq!(resolve_node_or_ground("missing", &names), None);
+    }
+}

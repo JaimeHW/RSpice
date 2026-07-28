@@ -11,19 +11,16 @@ use harmonic_basis::{
 };
 
 mod ac;
-mod dc_sweep;
 mod disto;
 mod envelope_fourier;
 mod error;
 mod hb;
 mod helpers;
 mod monte_carlo;
-mod noise;
 mod optimization;
 mod pac_pxf;
 mod pnoise;
 mod pnoise_sideband;
-mod pole_zero;
 mod pss;
 mod pstb;
 mod reliability;
@@ -34,7 +31,6 @@ mod sweeps;
 mod tf;
 mod transient;
 pub use ac::{AcData, run_ac_analysis_with_source_path_and_abort};
-pub use dc_sweep::{DcSweepData, run_dc_sweep_with_source_path_and_abort};
 pub use disto::{
     DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace,
     run_disto_analysis_with_source_path_and_abort,
@@ -59,9 +55,6 @@ use helpers::{
 pub use monte_carlo::{
     MonteCarloData, MonteCarloVariableData, run_monte_carlo_analysis_with_source_path_and_abort,
 };
-pub use noise::{
-    NoiseData, NoiseRunSpec, run_noise_analysis_with_source_path_and_abort,
-};
 pub use optimization::{
     OptimizationAlgorithmMode, OptimizationData, OptimizationGoalMode, OptimizationRunConfig,
     OptimizationVariable, run_optimization_analysis_with_config_and_source_path_and_abort,
@@ -75,9 +68,6 @@ pub use pnoise::{
     PnoiseData, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     run_pnoise_analysis_from_pss_with_source_path_and_abort,
 };
-pub use pole_zero::{
-    PoleZeroData, PoleZeroRunSpec, run_pole_zero_analysis_with_source_path_and_abort,
-};
 pub use pss::{
     PssData, PssRunConfig, run_pss_analysis_with_config_and_source_path_and_abort,
     run_pss_analysis_with_dc_seed_and_source_path_and_abort,
@@ -88,9 +78,12 @@ pub use reliability::{
     ReliabilityData, ReliabilityRunConfig,
     run_reliability_analysis_with_config_and_source_path_and_abort,
 };
-// Sensitivity has no entry here: it ships through
-// `simulation::engine_bridge::sensitivity`, and the duplicate that used to sit
-// beside these runners was unreachable.
+// DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
+// the module boundary rather than an omission. The seven fundamental analyses
+// -- DC op, DC sweep, transient, AC, noise, pole-zero, sensitivity -- ship
+// through `simulation::engine_bridge`, dispatched from `AnalysisConfig`. This
+// module is the RF and advanced layer. Duplicates of all four once sat here
+// unreachable; adding a fifth would mean the same thing again.
 pub use soa::{SoaData, SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort};
 pub use sparameter::{
     SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep,
