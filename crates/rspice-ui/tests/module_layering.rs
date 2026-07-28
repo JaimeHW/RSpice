@@ -1110,7 +1110,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/surfaces/project.rs", 2923),
     ("workbench/feature_availability_data.rs", 3003),
     ("workbench/state.rs", 2648),
-    ("workbench/app/dialogs/hardcopy/render.rs", 3338),
+    ("workbench/app/dialogs/hardcopy/render.rs", 2797),
     ("workbench/lifecycle/project_lifecycle/persistence.rs", 3002),
     ("workbench/feature_availability.rs", 2981),
     ("workbench/tools/project_launcher.rs", 2925),
