@@ -1040,7 +1040,9 @@ fn source_files_have_no_byte_order_mark() {
 /// a tab index.
 /// Back to 76 when `simulation::multi_run::{plan, run_state}` went — a dead
 /// pair that kept each other reachable, and carried a suppression between them.
-const MAX_LINT_SUPPRESSIONS: usize = 76;
+/// 76 -> 73 with the three unreferenced `ModelsPage` source aliases, each of
+/// which needed an `allow(non_upper_case_globals)` to exist at all.
+const MAX_LINT_SUPPRESSIONS: usize = 73;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

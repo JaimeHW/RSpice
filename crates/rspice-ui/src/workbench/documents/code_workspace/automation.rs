@@ -404,7 +404,7 @@ fn finish_run(
     app.state.ui.code_workspace.automation.artifacts = artifacts;
     app.state.ui.code_workspace.automation.last_error = None;
     app.state.ui.code_workspace.automation.execution =
-        AutomationExecutionState::Complete { run_id, passed };
+        AutomationExecutionState::Complete { passed };
     let message = if passed {
         "Automation workflow completed; every release gate passed."
     } else {

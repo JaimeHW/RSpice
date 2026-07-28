@@ -1027,16 +1027,6 @@ impl PreviewPage {
     }
 
     #[must_use]
-    pub const fn row(&self) -> u16 {
-        self.row
-    }
-
-    #[must_use]
-    pub const fn column(&self) -> u16 {
-        self.column
-    }
-
-    #[must_use]
     pub fn coordinate(&self) -> &str {
         &self.coordinate
     }
@@ -1270,16 +1260,6 @@ impl PreviewPagination {
     #[must_use]
     pub const fn geometry(&self) -> ValidatedPageGeometry {
         self.geometry
-    }
-
-    #[must_use]
-    pub const fn scale(&self) -> ScaleRatio {
-        self.scale
-    }
-
-    #[must_use]
-    pub const fn scaled_content(&self) -> ContentExtent {
-        self.scaled_content
     }
 
     #[must_use]
@@ -1687,11 +1667,6 @@ impl HardcopyReceipt {
             outcome,
             content_digest,
         })
-    }
-
-    #[must_use]
-    pub const fn id(&self) -> HardcopyReceiptId {
-        self.id
     }
 
     #[must_use]

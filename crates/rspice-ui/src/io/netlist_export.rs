@@ -67,14 +67,6 @@ impl NetlistFormat {
         }
     }
 
-    /// Parameter assignment operator
-    pub fn param_op(&self) -> &'static str {
-        match self {
-            NetlistFormat::Spectre => "=",
-            _ => "=",
-        }
-    }
-
     /// File extension
     pub fn extension(&self) -> &'static str {
         match self {
@@ -169,18 +161,6 @@ impl ComponentInstance {
         }
     }
 
-    /// Set model
-    pub fn with_model(mut self, model: impl Into<String>) -> Self {
-        self.model = Some(model.into());
-        self
-    }
-
-    /// Add parameter
-    pub fn with_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.params.insert(name.into(), value.into());
-        self
-    }
-
     /// Format for Spectre
     fn format_spectre(&self) -> String {
         let mut s = self.name.clone();
@@ -257,20 +237,6 @@ pub struct SubcircuitExport {
 }
 
 impl SubcircuitExport {
-    /// Create new subcircuit
-    pub fn new(name: impl Into<String>, ports: Vec<String>) -> Self {
-        Self {
-            name: name.into(),
-            ports,
-            ..Default::default()
-        }
-    }
-
-    /// Add instance
-    pub fn add_instance(&mut self, inst: ComponentInstance) {
-        self.instances.push(inst);
-    }
-
     /// Format for given format
     pub fn format(&self, fmt: NetlistFormat, options: &ExportOptions) -> String {
         let mut s = String::new();
@@ -364,30 +330,9 @@ impl NetlistExporter {
         }
     }
 
-    /// Set title
-    pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = title.into();
-        self
-    }
-
-    /// Add subcircuit
-    pub fn add_subcircuit(&mut self, subckt: SubcircuitExport) {
-        self.subcircuits.push(subckt);
-    }
-
     /// Add top-level instance
     pub fn add_instance(&mut self, inst: ComponentInstance) {
         self.instances.push(inst);
-    }
-
-    /// Add analysis command
-    pub fn add_analysis(&mut self, cmd: impl Into<String>) {
-        self.analyses.push(cmd.into());
-    }
-
-    /// Add global node
-    pub fn add_global(&mut self, node: impl Into<String>) {
-        self.global_nodes.insert(node.into());
     }
 
     /// Generate netlist string

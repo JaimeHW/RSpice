@@ -167,17 +167,6 @@ impl Workspace {
         }
     }
 
-    pub const fn navigator_title(self) -> &'static str {
-        match self {
-            Self::Project => "Project navigator",
-            Self::Design => "Design navigator",
-            Self::Simulate => "Simulation plan",
-            Self::Results => "Results navigator",
-            Self::Verify => "Verification navigator",
-            Self::Models => "Models and libraries",
-            Self::Netlist => "Code and automation",
-        }
-    }
 
     pub const fn inspector_title(self) -> &'static str {
         match self {
@@ -418,16 +407,8 @@ impl WidthClass {
         }
     }
 
-    pub const fn is_phone(self) -> bool {
-        matches!(self, Self::Phone)
-    }
-
     pub const fn uses_bottom_navigation(self) -> bool {
         matches!(self, Self::Phone | Self::Tablet)
-    }
-
-    pub const fn navigator_uses_drawer(self) -> bool {
-        self.uses_bottom_navigation()
     }
 
     pub const fn inspector_uses_drawer(self) -> bool {
@@ -640,14 +621,6 @@ pub enum ProjectPage {
 }
 
 impl ProjectPage {
-    pub const ALL: [Self; 5] = [
-        Self::Dashboard,
-        Self::Configuration,
-        Self::Technology,
-        Self::Dependencies,
-        Self::Recovery,
-    ];
-
     pub const fn label(self) -> &'static str {
         match self {
             Self::Dashboard => "Project overview",
@@ -896,13 +869,6 @@ pub struct WorkbenchState {
     /// data, and the retained undo snapshot belongs to this process.
     #[serde(skip)]
     pub inline_edit: InlineEdit,
-    /// Transactional project-name editor buffer. Runtime-only so a partially
-    /// entered value can never be restored as authoritative project identity.
-    #[serde(skip)]
-    pub project_name_draft: String,
-    /// Last project metadata validation error.
-    #[serde(skip)]
-    pub project_name_error: Option<String>,
     #[serde(skip)]
     pub drawer: Option<Drawer>,
     /// One-frame request to focus the workspace navigator filter.
@@ -1035,8 +1001,6 @@ impl Default for WorkbenchState {
             navigator_query: String::new(),
             command_query: String::new(),
             inline_edit: InlineEdit::default(),
-            project_name_draft: String::new(),
-            project_name_error: None,
             drawer: None,
             focus_navigator_search: false,
             placement_query: String::new(),
@@ -1392,6 +1356,8 @@ impl WorkbenchState {
         self.navigation.back_entries().len()
     }
 
+    /// Only the browser build reads this: `app::apply_browser_history_delta`
+    /// refuses a forward jump that would leave the in-app task stack.
     #[must_use]
     pub fn forward_route_count(&self) -> usize {
         self.navigation.forward_entries().len()

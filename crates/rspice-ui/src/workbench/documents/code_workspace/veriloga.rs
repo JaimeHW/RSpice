@@ -213,7 +213,6 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
                 return;
             }
         };
-        app.state.ui.code_workspace.veriloga.import_in_progress = true;
         let extensions: &[&str] = if dependency_import {
             &["va", "vams"]
         } else {
@@ -238,7 +237,6 @@ fn poll_browser_import_completion(app: &mut RSpiceApp) {
     let Some(completion) = BROWSER_IMPORT_COMPLETION.with(|slot| slot.borrow_mut().take()) else {
         return;
     };
-    app.state.ui.code_workspace.veriloga.import_in_progress = false;
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return;
     }
@@ -727,7 +725,6 @@ fn receipt_from_report(
         analog_ports: report.abi.analog_port_count(),
         noise_sources: report.abi.noise_source_count,
         state_variables: report.abi.state_variable_count,
-        semantic_ir_digest: report.canonical_ir.hir_digest.to_string(),
         bytecode_available: report.targets.is_available(RuntimeTarget::BytecodeVm),
         native_jit: target_qualification(report.targets.get(RuntimeTarget::NativeX64Jit)),
         wasm_interpreter: target_qualification(report.targets.get(RuntimeTarget::WasmInterpreter)),

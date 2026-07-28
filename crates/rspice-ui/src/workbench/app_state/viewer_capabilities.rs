@@ -408,7 +408,6 @@ mod tests {
             ExprSeries {
                 version: 10,
                 series: Err("stale".to_string()),
-                y_extremes: Some((0.0, 1.0)),
             },
         );
         results.rf_pin.insert(ResultViewer::Smith, (0, 1));

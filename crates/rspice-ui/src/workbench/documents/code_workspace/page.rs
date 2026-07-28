@@ -66,7 +66,6 @@ pub struct VerilogACompileReceipt {
     pub analog_ports: usize,
     pub noise_sources: usize,
     pub state_variables: usize,
-    pub semantic_ir_digest: String,
     pub bytecode_available: bool,
     pub native_jit: TargetQualification,
     pub wasm_interpreter: TargetQualification,
@@ -125,15 +124,12 @@ pub enum TargetQualification {
 #[derive(Debug, Clone, Default)]
 pub struct VerilogAWorkbenchState {
     pub import_requested: bool,
-    pub import_in_progress: bool,
     /// A dependency import is bound to the exact bundle/importer that launched
     /// the asynchronous picker. `None` retains File > Import's root-source
     /// replacement behavior.
     pub import_target: Option<VerilogAImportTarget>,
     /// Selected source document in the model-project navigator.
     pub selected_file: Option<VerilogAFileSelection>,
-    /// Inline add/rename transaction currently being authored.
-    pub file_editor: Option<VerilogAFileEditorState>,
     /// Explicit module selection for multi-file Code Workspace bundles. Cell
     /// views continue to use their governed `veriloga.module` metadata.
     pub selected_module: String,
@@ -153,21 +149,6 @@ pub struct VerilogAImportTarget {
 pub struct VerilogAFileSelection {
     pub bundle_id: crate::state::ProjectSourceId,
     pub logical_path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VerilogAFileEditorKind {
-    Add { importer_path: String },
-    Rename { current_path: String },
-    Delete { current_path: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerilogAFileEditorState {
-    pub bundle_id: crate::state::ProjectSourceId,
-    pub kind: VerilogAFileEditorKind,
-    pub logical_path: String,
-    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -228,7 +209,6 @@ pub enum AutomationExecutionState {
         snapshot: AutomationDispatchSnapshot,
     },
     Complete {
-        run_id: crate::product::RunId,
         passed: bool,
     },
     Failed,
@@ -256,12 +236,6 @@ pub struct CodeWorkspaceRuntimeState {
     pub page: CodeWorkspacePage,
     pub veriloga: VerilogAWorkbenchState,
     pub automation: AutomationWorkbenchState,
-}
-
-impl CodeWorkspaceRuntimeState {
-    pub fn application_modal_open(&self) -> bool {
-        false
-    }
 }
 
 use super::CodeEditorDiagnostic;

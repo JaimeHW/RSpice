@@ -61,16 +61,8 @@ impl CheckEvidence {
         &self.id
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     pub const fn outcome(&self) -> CheckOutcome {
         self.outcome
-    }
-
-    pub const fn duration_ms(&self) -> u64 {
-        self.duration_ms
     }
 
     pub fn detail(&self) -> &str {
@@ -172,10 +164,6 @@ impl ComparisonEvidence {
         })
     }
 
-    pub fn baseline(&self) -> &str {
-        &self.baseline
-    }
-
     pub const fn waveform_count(&self) -> u64 {
         self.waveform_count
     }
@@ -190,10 +178,6 @@ impl ComparisonEvidence {
 
     pub const fn missing_waveform_count(&self) -> u64 {
         self.missing_waveform_count
-    }
-
-    pub fn tolerance_policy_digest(&self) -> &str {
-        &self.tolerance_policy_digest
     }
 
     pub fn detail(&self) -> &str {
@@ -285,26 +269,6 @@ impl CompletedEvidence {
             checks,
             comparison,
         })
-    }
-
-    pub const fn plan_digest(&self) -> SourceDigest {
-        self.plan_digest
-    }
-
-    pub fn project_revision(&self) -> &str {
-        &self.project_revision
-    }
-
-    pub fn run_id(&self) -> &str {
-        &self.run_id
-    }
-
-    pub fn checks(&self) -> &[CheckEvidence] {
-        &self.checks
-    }
-
-    pub const fn comparison(&self) -> &ComparisonEvidence {
-        &self.comparison
     }
 
     pub fn passed(&self) -> bool {
@@ -438,10 +402,6 @@ impl RenderedArtifact {
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
-    }
-
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes
     }
 }
 

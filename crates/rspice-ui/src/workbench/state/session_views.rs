@@ -206,21 +206,12 @@ impl ModelsPage {
         }
     }
 
-    // Transitional source aliases keep code outside the new shell compiling
-    // while persisted sessions migrate through the serde aliases above. They
-    // are intentionally excluded from `ALL`, command routing, and rendering.
+    // The last transitional source alias still named outside the new shell;
+    // persisted sessions migrate through the serde aliases above instead. It
+    // is intentionally excluded from `ALL`, command routing, and rendering.
     #[doc(hidden)]
     #[allow(non_upper_case_globals)]
     pub const Catalog: Self = Self::Models;
-    #[doc(hidden)]
-    #[allow(non_upper_case_globals)]
-    pub const Libraries: Self = Self::Symbols;
-    #[doc(hidden)]
-    #[allow(non_upper_case_globals)]
-    pub const Pdk: Self = Self::Corners;
-    #[doc(hidden)]
-    #[allow(non_upper_case_globals)]
-    pub const Behavioral: Self = Self::Include;
 }
 
 /// Destination that can resolve a blocking simulation-preflight finding.

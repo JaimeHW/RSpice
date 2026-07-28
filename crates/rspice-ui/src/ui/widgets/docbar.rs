@@ -3,8 +3,7 @@
 
 use egui::{InnerResponse, Ui, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::ui::tokens::Tokens;
 
 const RESULTS_DOCBAR_INSET: f32 = 8.0;
 

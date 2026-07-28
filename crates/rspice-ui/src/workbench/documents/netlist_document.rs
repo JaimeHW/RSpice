@@ -81,19 +81,6 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
     true
 }
 
-/// Open a separate immutable `generated.diff` document comparing the newest
-/// retained predecessor with the current generated artifact.
-pub fn compare_latest_generated_revision(state: &mut AppState) -> Result<(), String> {
-    let index = state
-        .ui
-        .netlist
-        .generated_history
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| "No prior generated revision is retained for comparison.".to_owned())?;
-    compare_generated_revision(state, index)
-}
-
 pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<(), String> {
     let previous = state
         .ui
@@ -319,12 +306,8 @@ pub struct NetlistDocumentState {
     pub pending_manual_run_id: Option<u64>,
     /// Zero-based line containing the caret.
     pub cursor_line: usize,
-    /// Whether parameter tuning re-runs on every slider movement.
-    pub tuner_live: bool,
     /// A re-run requested while the engine was busy.
     pub rerun_queued: bool,
-    /// Stable parameter slider ranges.
-    pub param_ranges: HashMap<String, (f64, f64)>,
     /// Whether the completion popover was open last frame.
     pub completion_open: bool,
     /// Selected completion row.
@@ -372,16 +355,6 @@ pub fn prepare(state: &mut AppState) {
     }
 }
 
-pub(super) fn request_run(state: &mut AppState) {
-    if let Some(reason) = state.manual_deck_run_block_reason() {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-            "Netlist run blocked: {reason}"
-        )));
-    } else {
-        state.request_netlist_manual_deck_run();
-    }
-}
-
 pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
     let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() else {
         return;
@@ -390,7 +363,3 @@ pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
         baseline::changed_lines_against_baseline(&state.simulation.netlist_content, baseline);
 }
 
-/// Numeric assignments in the active source, used by automation and tests.
-pub fn buffer_assignments(buffer: &str) -> Vec<(String, usize, usize)> {
-    param_scan::buffer_assignments(buffer)
-}

@@ -289,7 +289,7 @@ pub(super) fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index:
                 return;
             }
             let sample_selection = state.ui.results.sample_selection.clone();
-            let (series, extremes) = evaluate_expression(
+            let series = evaluate_expression(
                 &state.simulation,
                 analysis_index,
                 &text,
@@ -305,7 +305,6 @@ pub(super) fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index:
                                 sample_selection.as_ref(),
                             ),
                             series: Ok(series),
-                            y_extremes: extremes,
                         },
                     );
                     state
@@ -331,8 +330,6 @@ pub(super) fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index:
     }
 }
 
-pub(super) type ExpressionEvaluation = (WaveformSeriesResult, Option<(f64, f64)>);
-
 /// Evaluate one expression against an analysis' waveforms. Scalars become a
 /// constant trace across the analysis' x span.
 pub(super) fn evaluate_expression(
@@ -340,12 +337,12 @@ pub(super) fn evaluate_expression(
     analysis_index: usize,
     text: &str,
     selection: Option<&SourceSampleSelection>,
-) -> ExpressionEvaluation {
+) -> WaveformSeriesResult {
     let Some(run) = simulation.active_run() else {
-        return (Err("analysis no longer exists".to_owned()), None);
+        return Err("analysis no longer exists".to_owned());
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
-        return (Err("analysis no longer exists".to_owned()), None);
+        return Err("analysis no longer exists".to_owned());
     };
     let selection = selection.filter(|selection| {
         selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
@@ -354,7 +351,7 @@ pub(super) fn evaluate_expression(
     let ctx = calculator::WaveformsContext::new(&analysis.waveforms);
     let expr = match calculator::parser::try_parse(text) {
         Ok(expr) => expr,
-        Err(error) => return (Err(format!("parse error: {error}")), None),
+        Err(error) => return Err(format!("parse error: {error}")),
     };
     match calculator::evaluator::evaluate(&expr, &ctx) {
         Ok(calculator::CalcValue::Waveform(x, y)) if !x.is_empty() => {
@@ -382,19 +379,15 @@ pub(super) fn evaluate_expression(
                         )
                     }
                     Some(_) => {
-                        return (
-                        Err("expression sample count does not match the retained family manifest"
-                            .to_owned()),
-                        None,
-                    );
+                        return Err(
+                            "expression sample count does not match the retained family manifest"
+                                .to_owned(),
+                        );
                     }
                 };
-            let extremes = super::super::finite_extremes(&y);
-            (Ok((x.into(), y.into())), extremes)
+            Ok((x.into(), y.into()))
         }
-        Ok(calculator::CalcValue::Waveform(..)) => {
-            (Err("expression produced no samples".to_owned()), None)
-        }
+        Ok(calculator::CalcValue::Waveform(..)) => Err("expression produced no samples".to_owned()),
         Ok(calculator::CalcValue::Scalar(value)) => {
             if let Some(selection) = selection {
                 let selected_x = analysis.waveforms.first().and_then(|waveform| {
@@ -403,12 +396,9 @@ pub(super) fn evaluate_expression(
                 return match selected_x {
                     Some(x) if !x.is_empty() => {
                         let y = vec![value; x.len()];
-                        (Ok((x, y.into())), Some((value, value)))
+                        Ok((x, y.into()))
                     }
-                    _ => (
-                        Err("scalar result with no selected X rows".to_owned()),
-                        None,
-                    ),
+                    _ => Err("scalar result with no selected X rows".to_owned()),
                 };
             }
             let span = analysis.waveforms.first().and_then(|waveform| {
@@ -416,14 +406,11 @@ pub(super) fn evaluate_expression(
                 (x.len() >= 2).then(|| (x[0], x[x.len() - 1]))
             });
             match span {
-                Some((x0, x1)) => (
-                    Ok((vec![x0, x1].into(), vec![value, value].into())),
-                    Some((value, value)),
-                ),
-                None => (Err("scalar result with no x span".to_owned()), None),
+                Some((x0, x1)) => Ok((vec![x0, x1].into(), vec![value, value].into())),
+                None => Err("scalar result with no x span".to_owned()),
             }
         }
-        Err(error) => (Err(error.to_string()), None),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -479,7 +466,7 @@ pub(super) fn resolve_strip_exprs(
             .get(&key)
             .is_some_and(|s| s.version == version);
         if !fresh {
-            let (series, extremes) = evaluate_expression(
+            let series = evaluate_expression(
                 &state.simulation,
                 model.analysis_index,
                 &expr.text,
@@ -493,11 +480,7 @@ pub(super) fn resolve_strip_exprs(
             }
             state.ui.results.expr_cache.insert(
                 key.clone(),
-                ExprSeries {
-                    version,
-                    series,
-                    y_extremes: extremes,
-                },
+                ExprSeries { version, series },
             );
         }
         if !expr.visible {

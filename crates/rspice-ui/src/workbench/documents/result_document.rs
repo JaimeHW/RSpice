@@ -107,26 +107,6 @@ impl ResultViewer {
         }
     }
 
-    /// Status-bar summary fragment.
-    fn status(self) -> &'static str {
-        match self {
-            ResultViewer::Waves => "waves",
-            ResultViewer::Bode => "bode",
-            ResultViewer::Fft => "fft",
-            ResultViewer::Eye => "eye",
-            ResultViewer::Hist => "mc",
-            ResultViewer::Op => "op info",
-            ResultViewer::NoiseContrib => "noise contributors",
-            ResultViewer::Contribution => "sensitivity contributions",
-            ResultViewer::TransferFunction => "transfer function",
-            ResultViewer::Specs => "specs matrix",
-            ResultViewer::Table => "sample table",
-            ResultViewer::Nyquist => "nyquist",
-            ResultViewer::Smith => "smith",
-            ResultViewer::PoleZero => "pole-zero",
-        }
-    }
-
     const PRIMARY: [ResultViewer; 11] = [
         ResultViewer::Waves,
         ResultViewer::Bode,
@@ -444,8 +424,6 @@ pub struct ExprSeries {
     pub version: u64,
     /// Evaluation result, or the error to show on the strip.
     pub series: WaveformSeriesResult,
-    /// Finite (min, max) of y, for the automatic fit.
-    pub y_extremes: Option<(f64, f64)>,
 }
 
 impl ResultsState {
@@ -1992,14 +1970,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-/// Status-bar summary for the results workspace.
-pub fn status_summary(state: &AppState) -> String {
-    let viewer = state.ui.results.viewer;
-    match state.simulation.active_run() {
-        Some(run) => format!("{} · run #{}", viewer.status(), run.id),
-        None => viewer.status().to_owned(),
-    }
-}
 
 #[cfg(test)]
 mod availability_tests {

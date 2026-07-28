@@ -114,10 +114,6 @@ impl DiagnosticSet {
     pub fn as_slice(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
-
-    pub fn into_vec(self) -> Vec<Diagnostic> {
-        self.diagnostics
-    }
 }
 
 impl fmt::Display for DiagnosticSet {
@@ -200,14 +196,6 @@ pub enum ArtifactKind {
 }
 
 impl ArtifactKind {
-    pub const fn request_name(self) -> &'static str {
-        match self {
-            Self::JunitXml => "junit",
-            Self::SummaryJson => "summary.json",
-            Self::VerificationPdf => "report.pdf",
-        }
-    }
-
     pub const fn file_name(self) -> &'static str {
         match self {
             Self::JunitXml => "junit.xml",
