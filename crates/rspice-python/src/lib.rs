@@ -108,6 +108,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Core classes
     m.add_class::<netlist::PyNetlist>()?;
+    m.add_class::<netlist::PyElement>()?;
     m.add_class::<netlist::PyParseDiagnostic>()?;
     m.add_class::<netlist::PyNetlistSourceLocation>()?;
     m.add_class::<netlist::PyStartupDirectiveScope>()?;
@@ -192,6 +193,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "__version__",
             "__author__",
             "Netlist",
+            "Element",
             "ParseDiagnostic",
             "NetlistSourceLocation",
             "StartupDirectiveScope",

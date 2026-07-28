@@ -19,6 +19,7 @@
 //!   permissive AST parsing remains an explicit core-only tooling facility.
 
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use rspice_core::netlist::{AnalysisCommand, DcSecondSweep, DcSweepMode};
 use rspice_core::{Netlist, Value};
 use std::borrow::Cow;
@@ -181,6 +182,270 @@ impl From<&rspice_core::netlist::StartupDiagnostic> for PyStartupDiagnostic {
             canonical_nodes: diagnostic.canonical_nodes.clone(),
         }
     }
+}
+
+/// One device instance from the parsed netlist.
+///
+/// This is a read-only projection of the parsed element, not a handle into
+/// the netlist: mutating it changes nothing. Use `Netlist.with_parameters`
+/// to produce a modified netlist.
+#[pyclass(name = "Element", module = "rspice", frozen, from_py_object)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PyElement {
+    /// Instance name as authored, for example `R1` or `Xamp`.
+    #[pyo3(get)]
+    pub name: String,
+    /// Device family, for example `Resistor`, `Mosfet`, or `Subcircuit`.
+    #[pyo3(get)]
+    pub kind: String,
+    /// Connected nodes in the order the instance line declared them.
+    #[pyo3(get)]
+    pub nodes: Vec<String>,
+    /// Resolved primary value for elements that carry one (R, C, L).
+    #[pyo3(get)]
+    pub value: Option<f64>,
+    /// Unevaluated `{...}` expression behind `value`, when the deck used one.
+    #[pyo3(get)]
+    pub value_expr: Option<String>,
+    /// `.MODEL` name this instance references, when it references one.
+    #[pyo3(get)]
+    pub model: Option<String>,
+    instance_params: Vec<(String, f64)>,
+}
+
+#[pymethods]
+impl PyElement {
+    /// Resolved instance parameters (for example `W`, `L`, `TEMP`).
+    #[getter]
+    fn instance_params<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let result = PyDict::new(py);
+        for (name, value) in &self.instance_params {
+            result.set_item(name, value)?;
+        }
+        Ok(result)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Element(name='{}', kind='{}', nodes={:?})",
+            self.name, self.kind, self.nodes
+        )
+    }
+}
+
+/// Device-family name for an element.
+///
+/// Taken from the Rust variant name rather than a hand-written table: the
+/// variant set is core's public device vocabulary and grows with every new
+/// device, and a mapping here would silently fall out of date or force this
+/// crate to be edited for every core addition.
+fn element_kind_name(kind: &rspice_core::netlist::ElementKind) -> String {
+    let rendered = format!("{kind:?}");
+    rendered
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .next()
+        .unwrap_or("Unknown")
+        .to_string()
+}
+
+/// Project a parsed element onto the read-only Python view.
+fn describe_element(element: &rspice_core::netlist::Element) -> PyElement {
+    use rspice_core::netlist::ElementKind;
+
+    let (value, value_expr, model, instance_params) = match &element.kind {
+        ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        }
+        | ElementKind::Capacitor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        }
+        | ElementKind::Inductor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } => (
+            Some(*value),
+            value_expr.clone(),
+            model.clone(),
+            instance_params.clone(),
+        ),
+        ElementKind::JilesAthertonInductor { value, model, .. } => {
+            (Some(*value), None, Some(model.clone()), Vec::new())
+        }
+        ElementKind::Diode {
+            model,
+            instance_params,
+            ..
+        }
+        | ElementKind::Bjt {
+            model,
+            instance_params,
+            ..
+        }
+        | ElementKind::Mosfet {
+            model,
+            instance_params,
+            ..
+        }
+        | ElementKind::Jfet {
+            model,
+            instance_params,
+            ..
+        }
+        | ElementKind::Mesfet {
+            model,
+            instance_params,
+            ..
+        }
+        | ElementKind::XyceMemristor {
+            model,
+            instance_params,
+            ..
+        } => (
+            None,
+            None,
+            Some(model.clone()),
+            instance_params.clone(),
+        ),
+        _ => (None, None, None, Vec::new()),
+    };
+
+    PyElement {
+        name: element.name.clone(),
+        kind: element_kind_name(&element.kind),
+        nodes: element.nodes.clone(),
+        value,
+        value_expr,
+        model,
+        instance_params,
+    }
+}
+
+/// Rewrite top-level `.PARAM` assignments in a deck.
+///
+/// Assignments are replaced in place so the result is independent of the
+/// parameter-redefinition policy in force, which appending a second
+/// definition would not be. Names with no existing top-level definition get
+/// a fresh `.param` card immediately after the title, so they are defined
+/// before any line that reads them.
+///
+/// Definitions inside a `.SUBCKT` body are deliberately left alone: those
+/// are scoped to the subcircuit, and rewriting them would change a different
+/// parameter that merely shares a name.
+fn override_param_source(source: &str, overrides: &[(String, f64)]) -> (String, Vec<String>) {
+    let mut applied: Vec<String> = Vec::new();
+    let mut depth = 0usize;
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        let lowered = trimmed.to_ascii_lowercase();
+        if lowered.starts_with(".subckt") {
+            depth += 1;
+        } else if lowered.starts_with(".ends") || lowered.starts_with(".eom") {
+            depth = depth.saturating_sub(1);
+        }
+
+        let is_top_level_param =
+            depth == 0 && (lowered.starts_with(".param") || lowered.starts_with(".csparam"));
+        if !is_top_level_param {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let mut rewritten = String::with_capacity(line.len());
+        for (index, token) in split_outside_braces(line).into_iter().enumerate() {
+            if index > 0 {
+                rewritten.push(' ');
+            }
+            match token.split_once('=') {
+                Some((name, _)) => {
+                    let candidate = name.trim();
+                    match overrides
+                        .iter()
+                        .find(|(target, _)| target.eq_ignore_ascii_case(candidate))
+                    {
+                        Some((target, value)) => {
+                            rewritten.push_str(&format!("{candidate}={value:.17e}"));
+                            if !applied.iter().any(|seen| seen.eq_ignore_ascii_case(target)) {
+                                applied.push(target.clone());
+                            }
+                        }
+                        None => rewritten.push_str(token),
+                    }
+                }
+                None => rewritten.push_str(token),
+            }
+        }
+        lines.push(rewritten);
+    }
+
+    let missing: Vec<&(String, f64)> = overrides
+        .iter()
+        .filter(|(name, _)| !applied.iter().any(|seen| seen.eq_ignore_ascii_case(name)))
+        .collect();
+    if !missing.is_empty() {
+        // The first line is the title; new cards go directly beneath it.
+        let insert_at = usize::from(!lines.is_empty());
+        let cards: Vec<String> = missing
+            .iter()
+            .map(|(name, value)| format!(".param {name}={value:.17e}"))
+            .collect();
+        lines.splice(insert_at..insert_at, cards);
+    }
+
+    let mut rendered = lines.join("\n");
+    if source.ends_with('\n') {
+        rendered.push('\n');
+    }
+    (rendered, applied)
+}
+
+/// Split a line on whitespace that is not inside `{...}`, `'...'`, or `"..."`.
+///
+/// A `.param` value may be a brace expression containing spaces, so naive
+/// whitespace splitting would tear one assignment into several tokens.
+fn split_outside_braces(line: &str) -> Vec<&str> {
+    let bytes = line.as_bytes();
+    let mut tokens = Vec::new();
+    let (mut start, mut depth) = (None::<usize>, 0usize);
+    let mut quote: Option<u8> = None;
+
+    for (index, byte) in bytes.iter().enumerate() {
+        if let Some(open) = quote {
+            if *byte == open {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(*byte),
+            b'{' | b'(' => depth += 1,
+            b'}' | b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if byte.is_ascii_whitespace() && depth == 0 && quote.is_none() {
+            if let Some(begin) = start.take() {
+                tokens.push(&line[begin..index]);
+            }
+        } else if start.is_none() {
+            start = Some(index);
+        }
+    }
+    if let Some(begin) = start {
+        tokens.push(&line[begin..]);
+    }
+    tokens
 }
 
 /// Prepend a synthetic title unless the content already starts with a
@@ -578,6 +843,142 @@ impl PyNetlist {
     #[getter]
     fn element_names(&self) -> Vec<String> {
         self.inner.elements.iter().map(|e| e.name.clone()).collect()
+    }
+
+    /// Every device instance, in netlist order
+    ///
+    /// Returns:
+    ///     list[Element]: Name, family, nodes, value, model, and instance
+    ///     parameters for each instance
+    ///
+    /// Example:
+    ///     >>> [e.name for e in netlist.elements if e.kind == "Mosfet"]
+    #[getter]
+    fn elements(&self) -> Vec<PyElement> {
+        self.inner.elements.iter().map(describe_element).collect()
+    }
+
+    /// Look up one device instance by name (case-insensitive)
+    ///
+    /// Raises:
+    ///     KeyError: If no instance carries that name
+    fn element(&self, name: &str) -> PyResult<PyElement> {
+        self.inner
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .map(describe_element)
+            .ok_or_else(|| crate::errors::key_error(format!("unknown element '{name}'")))
+    }
+
+    /// Every node the netlist references, sorted, excluding ground
+    ///
+    /// This is the authored node set. Node numbering used by result objects
+    /// comes from the built circuit and is available as `result.node_names`.
+    #[getter]
+    fn node_names(&self) -> Vec<String> {
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for element in &self.inner.elements {
+            for node in &element.nodes {
+                if !crate::results::is_ground_name(node) {
+                    seen.insert(node.clone());
+                }
+            }
+        }
+        seen.into_iter().collect()
+    }
+
+    /// Numeric `.PARAM` definitions visible at the top level
+    ///
+    /// Keys are the canonical upper-case names the parser resolves against,
+    /// not the authored spelling. Use `parameter()` for a case-insensitive
+    /// lookup that matches how a deck refers to them.
+    ///
+    /// Returns:
+    ///     dict[str, float]: Canonical parameter name to resolved value
+    ///
+    /// Example:
+    ///     >>> netlist.parameters
+    ///     {'RVAL': 1000.0}
+    #[getter]
+    fn parameters<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let result = PyDict::new(py);
+        for (name, value) in self.inner.params.numeric_parameters() {
+            result.set_item(name, value)?;
+        }
+        Ok(result)
+    }
+
+    /// Read one `.PARAM` value by name (case-insensitive)
+    ///
+    /// Raises:
+    ///     KeyError: If no numeric parameter carries that name
+    ///
+    /// Example:
+    ///     >>> netlist.parameter("rval")
+    ///     1000.0
+    fn parameter(&self, name: &str) -> PyResult<f64> {
+        self.inner
+            .params
+            .numeric_parameters()
+            .into_iter()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value)
+            .ok_or_else(|| crate::errors::key_error(format!("unknown parameter '{name}'")))
+    }
+
+    /// Derive a new netlist with different `.PARAM` values
+    ///
+    /// Existing top-level assignments are rewritten in place and the deck is
+    /// re-parsed, so the result is a fully independent netlist rather than a
+    /// mutated view. A name with no existing top-level definition gets a new
+    /// `.param` card. Definitions inside a `.SUBCKT` are left alone, because
+    /// those are scoped to the subcircuit.
+    ///
+    /// Args:
+    ///     parameters: Mapping of parameter name to new value
+    ///
+    /// Returns:
+    ///     Netlist: A new netlist parsed under the same resource policy
+    ///
+    /// Raises:
+    ///     ValueError: If a value is not finite, or the netlist did not
+    ///                 retain its source text
+    ///     ParseError: If the rewritten deck no longer parses
+    ///
+    /// Example:
+    ///     >>> for r in (1e3, 2e3, 5e3):
+    ///     ...     corner = netlist.with_parameters({"rval": r})
+    ///     ...     print(engine.run_dc_op(corner).voltage("out"))
+    fn with_parameters(&self, parameters: std::collections::HashMap<String, f64>) -> PyResult<Self> {
+        if parameters.is_empty() {
+            return Err(crate::errors::value_error(
+                "with_parameters requires at least one parameter",
+            ));
+        }
+        // Sorted so the derived deck is byte-identical for the same mapping,
+        // which a HashMap iteration order would not be.
+        let mut overrides: Vec<(String, f64)> = parameters.into_iter().collect();
+        overrides.sort_by(|left, right| left.0.cmp(&right.0));
+        for (name, value) in &overrides {
+            if !value.is_finite() {
+                return Err(crate::errors::value_error(format!(
+                    "parameter '{name}' must be finite, got {value}"
+                )));
+            }
+        }
+
+        let source = self.inner.source_text.as_deref().ok_or_else(|| {
+            crate::errors::value_error(
+                "this netlist did not retain its source text, so its parameters cannot be overridden",
+            )
+        })?;
+        let (rewritten, _) = override_param_source(source, &overrides);
+        let limits = PyResourceLimits::from_core(self.resource_limits);
+        match self.inner.source_path.clone() {
+            Some(path) => Self::parse_file_source(&rewritten, &path, limits),
+            None => Self::parse_spice(&rewritten, Some(limits)),
+        }
     }
 
     /// Names of all .MODEL definitions

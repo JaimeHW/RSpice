@@ -1,7 +1,7 @@
 """Type stubs for the rspice extension module."""
 
 import os
-from typing import Any, Iterator, Literal, Sequence, final
+from typing import Any, Iterator, Literal, Mapping, Sequence, final
 
 import numpy as np
 import numpy.typing as npt
@@ -12,6 +12,7 @@ __all__ = [
     "__version__",
     "__author__",
     "Netlist",
+    "Element",
     "ParseDiagnostic",
     "NetlistSourceLocation",
     "StartupDirectiveScope",
@@ -211,6 +212,25 @@ def ac_frequencies(
 ) -> npt.NDArray[np.float64]: ...
 
 @final
+class Element:
+    """One device instance projected out of a parsed netlist."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def kind(self) -> str: ...
+    @property
+    def nodes(self) -> list[str]: ...
+    @property
+    def value(self) -> float | None: ...
+    @property
+    def value_expr(self) -> str | None: ...
+    @property
+    def model(self) -> str | None: ...
+    @property
+    def instance_params(self) -> dict[str, float]: ...
+
+@final
 class ParseDiagnostic:
     @property
     def line(self) -> int: ...
@@ -292,6 +312,15 @@ class Netlist:
         *,
         resource_limits: ResourceLimits | None = None,
     ) -> Netlist: ...
+    @property
+    def elements(self) -> list[Element]: ...
+    def element(self, name: str) -> Element: ...
+    @property
+    def node_names(self) -> list[str]: ...
+    @property
+    def parameters(self) -> dict[str, float]: ...
+    def parameter(self, name: str) -> float: ...
+    def with_parameters(self, parameters: Mapping[str, float]) -> Netlist: ...
     @property
     def source(self) -> str | None: ...
     @property
