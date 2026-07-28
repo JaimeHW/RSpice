@@ -12,18 +12,15 @@ mod outline;
 mod search;
 
 pub use document::{
-    DependencyMetadata, DependencyResolution, DiagnosticSeverity, DocumentError, DocumentOwnership,
+    DependencyMetadata, DependencyResolution, DiagnosticSeverity, DocumentOwnership,
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
-    ImportedProvenance, NetlistDocument, NetlistDocumentId, SaveAcknowledgement, SourceLocator,
-    SourcePosition, SourceProvenance, TransitionReceipt, ValidationDiagnostic, ValidationReport,
-    content_digest,
+    NetlistDocument, NetlistDocumentId, SourceLocator, ValidationDiagnostic, content_digest,
 };
 pub(crate) use outline::parse_include_directives;
 pub use outline::{
-    IncludeDirective, IncludeKind, NetlistOutline, OutlineEntry, OutlineEntryKind, OutlineSection,
-    OutlineSectionKind,
+    NetlistOutline, OutlineEntry, OutlineEntryKind,
 };
 pub use search::{
-    FindDirection, FindError, FindMatch, FindOptions, ReplaceOutcome, ReplaceScope,
-    find_all_in_source, find_in_source, replace_in_source,
+    FindDirection, FindError, FindMatch, FindOptions, ReplaceScope, find_all_in_source,
+    replace_in_source,
 };

@@ -17,9 +17,4 @@ mod parsed;
 mod parser;
 mod types;
 
-pub use lexer::{Lexer, Token};
 pub use parsed::ParsedLibrary;
-pub use parser::LibraryParser;
-pub use types::{
-    IncludeDirective, IncludeType, LibrarySection, ModelDef, ParamValue, SubcircuitDef,
-};
