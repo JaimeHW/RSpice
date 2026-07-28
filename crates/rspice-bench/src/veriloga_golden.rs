@@ -262,10 +262,50 @@ fn relative(left: f64, right: f64) -> f64 {
 /// is a coverage gap rather than a failure, and a gap only matters where the
 /// entry is large enough for a solver to notice. This is that rule, applied to
 /// the replay.
-const NEGLIGIBLE: f64 = 1.0e-20;
+/// Absolute floors, one per quantity, taken from the simulator's own tolerances
+/// rather than chosen.
+///
+/// Per-array significance alone is not enough, and `hisimsotb_va` is why: its
+/// residual at one bias holds exactly two entries, both about 8e-16 A, and they
+/// differ by 6%. Judged against their own array they are the largest thing in
+/// it and so fully significant; judged against the solver they are four orders
+/// below `abstol` and cannot change any decision it makes. When a whole record
+/// is noise, a relative rule declares the noise significant.
+///
+/// The floors differ because the quantities do. A current or a conductance two
+/// orders below `abstol`/`GMIN` — both 1e-12 — is beneath the gmin conductance
+/// every node already carries in parallel. A *capacitance* of 1e-15 F is an
+/// ordinary device, so charge is floored near `chgtol` instead; getting this
+/// wrong in the other direction would silently retire the capacitance checks
+/// that found today's defects.
+const CURRENT_FLOOR: f64 = 1.0e-14;
+const CONDUCTANCE_FLOOR: f64 = 1.0e-14;
+const CHARGE_FLOOR: f64 = 1.0e-21;
 
-fn negligible(left: f64, right: f64) -> bool {
-    left.abs().max(right.abs()) <= NEGLIGIBLE
+/// Share of the largest entry in the same record below which an entry carries
+/// no information.
+///
+/// A flat absolute floor cannot serve here, and trying one is how this was got
+/// wrong the first time: a residual is amps and a capacitance is farads, so the
+/// same number means "cancellation noise" in one and "a real device" in the
+/// other. `mvsg_cmc` disagrees on two residual entries of 1.39e-17 — which is
+/// 2^-56, the residue of subtracting two numbers that nearly cancel — against a
+/// row whose largest entry is 0.2. `angelov_gan` has genuine capacitances of
+/// 1e-15 against a row scale of the same order. Judged against their own row,
+/// the first is 7e-17 of it and the second is most of it.
+const SIGNIFICANCE: f64 = 1.0e-12;
+
+/// The largest magnitude in a record, which is what an entry is judged against.
+fn record_scale(expected: &[f64], actual: &[f64]) -> f64 {
+    expected
+        .iter()
+        .chain(actual)
+        .filter(|value| value.is_finite())
+        .fold(0.0f64, |scale, value| scale.max(value.abs()))
+}
+
+fn negligible(left: f64, right: f64, scale: f64, floor: f64) -> bool {
+    left.abs().max(right.abs()) <= (scale * SIGNIFICANCE).max(floor)
 }
 
 fn compare_point(
@@ -274,6 +314,7 @@ fn compare_point(
     actual: &GoldenPoint,
     deviation: &mut Deviation,
 ) {
+    let rhs_scale = record_scale(&expected.record.rhs, &actual.record.rhs);
     for (index, (want, got)) in expected
         .record
         .rhs
@@ -289,12 +330,13 @@ fn compare_point(
                 .structural
                 .push(format!("{label}: rhs[{index}] finiteness changed"));
         }
-        if negligible(*want, *got) {
+        if negligible(*want, *got, rhs_scale, CURRENT_FLOOR) {
             continue;
         }
         deviation.worst_primal = deviation.worst_primal.max(relative(*want, *got));
     }
 
+    let jacobian_scale = record_scale(&expected.record.jacobian, &actual.record.jacobian);
     for (index, (want, got)) in expected
         .record
         .jacobian
@@ -302,7 +344,7 @@ fn compare_point(
         .zip(actual.record.jacobian.iter())
         .enumerate()
     {
-        if negligible(*want, *got) {
+        if negligible(*want, *got, jacobian_scale, CONDUCTANCE_FLOOR) {
             continue;
         }
         if (*want == 0.0) != (*got == 0.0) {
@@ -313,6 +355,7 @@ fn compare_point(
         deviation.worst_jacobian = deviation.worst_jacobian.max(relative(*want, *got));
     }
 
+    let capacitance_scale = record_scale(&expected.record.capacitance, &actual.record.capacitance);
     for (index, (want, got)) in expected
         .record
         .capacitance
@@ -320,7 +363,7 @@ fn compare_point(
         .zip(actual.record.capacitance.iter())
         .enumerate()
     {
-        if negligible(*want, *got) {
+        if negligible(*want, *got, capacitance_scale, CHARGE_FLOOR) {
             continue;
         }
         if (*want == 0.0) != (*got == 0.0) {
