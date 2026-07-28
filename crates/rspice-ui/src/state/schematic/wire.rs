@@ -16,15 +16,13 @@
 //! # Module Organization
 //!
 //! - `segment` - WireSegment and WireHitResult for geometric operations
-//! - `types` - WireDragMode, DragConstraint, SnapTarget, JunctionType
-//! - `drag` - WireDragContext for active drag operations
+//! - `types` - JunctionType
 //! - `wire` - Core Wire polyline type
 //! - `routing` - WireRoutingMode and route optimization functions
 //! - `drawing` - WireDrawing interactive state machine
 //! - `connection` - WireConnection for terminal connections
 
 mod connection;
-mod drag;
 mod drawing;
 mod routing;
 mod segment;
@@ -45,20 +43,10 @@ pub use wire::Wire;
 // Module-level convenience functions
 // =============================================================================
 
-/// Create a simple two-point wire
-pub fn create_wire(id: u64, start: super::point::Point, end: super::point::Point) -> Wire {
-    Wire::segment(id, start, end)
-}
-
-/// Check if two wires are connected at any endpoint
-pub fn wires_connected(wire1: &Wire, wire2: &Wire) -> bool {
-    wire1.connects_to(wire2)
-}
-
-/// Find all intersection points between two wires
-pub fn find_wire_intersections(wire1: &Wire, wire2: &Wire) -> Vec<super::point::Point> {
-    wire1.intersections_with_wire(wire2)
-}
+// `create_wire`, `wires_connected`, and `find_wire_intersections` used to sit
+// here: one-line free-function wrappers over `Wire::segment`,
+// `Wire::connects_to`, and `Wire::intersections_with_wire`. Every caller used
+// the methods.
 
 // =============================================================================
 // Tests
