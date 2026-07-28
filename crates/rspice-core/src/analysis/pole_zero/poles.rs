@@ -95,7 +95,7 @@ impl PoleZeroAnalyzer {
     /// Cx' + Gx = 0
     /// Split x into dynamic/algebraic variables and eliminate algebraic states.
     /// This yields x_d' = A x_d where A is used for pole extraction.
-    pub(in crate::analysis::advanced::pole_zero) fn build_descriptor_state_matrix(
+    pub(in crate::analysis::pole_zero) fn build_descriptor_state_matrix(
         &self,
     ) -> Option<Matrix> {
         let partition = self.partition_descriptor()?;
@@ -115,7 +115,7 @@ impl PoleZeroAnalyzer {
         Some(a)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn partition_descriptor(
+    pub(in crate::analysis::pole_zero) fn partition_descriptor(
         &self,
     ) -> Option<DescriptorPartition> {
         let n = self.num_nodes;
@@ -151,7 +151,7 @@ impl PoleZeroAnalyzer {
         })
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn reduced_g_matrix(
+    pub(in crate::analysis::pole_zero) fn reduced_g_matrix(
         &self,
         partition: &DescriptorPartition,
     ) -> Option<Matrix> {
@@ -165,7 +165,7 @@ impl PoleZeroAnalyzer {
         Some(self.matrix_subtract(&partition.g_dd, &correction))
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn partition_is_regular(
+    pub(in crate::analysis::pole_zero) fn partition_is_regular(
         &self,
         partition: &DescriptorPartition,
     ) -> bool {
@@ -180,7 +180,7 @@ impl PoleZeroAnalyzer {
         self.matrix_has_stable_inverse(&partition.g_aa)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn extract_subvector(
+    pub(in crate::analysis::pole_zero) fn extract_subvector(
         &self,
         values: &[Value],
         indices: &[usize],
@@ -188,7 +188,7 @@ impl PoleZeroAnalyzer {
         indices.iter().map(|&idx| values[idx]).collect()
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn vector_to_column_matrix(
+    pub(in crate::analysis::pole_zero) fn vector_to_column_matrix(
         &self,
         values: &[Value],
     ) -> Matrix {
@@ -199,14 +199,14 @@ impl PoleZeroAnalyzer {
         column
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn column_matrix_to_vector(
+    pub(in crate::analysis::pole_zero) fn column_matrix_to_vector(
         &self,
         column: &Matrix,
     ) -> Vec<Value> {
         (0..column.rows).map(|row| column.data[row][0]).collect()
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn row_vector_times_matrix(
+    pub(in crate::analysis::pole_zero) fn row_vector_times_matrix(
         &self,
         row: &[Value],
         matrix: &Matrix,
@@ -224,7 +224,7 @@ impl PoleZeroAnalyzer {
         out
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn build_state_space(
+    pub(in crate::analysis::pole_zero) fn build_state_space(
         &self,
         input_vec: &[Value],
         output_vec: &[Value],

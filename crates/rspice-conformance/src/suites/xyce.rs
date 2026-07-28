@@ -2655,7 +2655,7 @@ struct XyceStaticDcSensitivitySideOutput {
 struct XyceDcSensitivityEvaluation {
     netlist: Netlist,
     point: DcSweepPointResult,
-    objectives: Vec<rspice_core::analysis::advanced::SensitivityResult>,
+    objectives: Vec<rspice_core::analysis::SensitivityResult>,
     step_index: usize,
     local_index: usize,
 }

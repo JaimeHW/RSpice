@@ -1267,8 +1267,8 @@ impl XyceTestRunner {
                 }
             };
             let measurements =
-                rspice_core::analysis::advanced::evaluate_ac_measurements(&netlist, &results);
-            let continuous = rspice_core::analysis::advanced::evaluate_ac_continuous_measurements(
+                rspice_core::analysis::evaluate_ac_measurements(&netlist, &results);
+            let continuous = rspice_core::analysis::evaluate_ac_continuous_measurements(
                 &netlist, &results,
             );
             let mismatches = match self.compare_analysis_measurement_outputs(
@@ -1458,9 +1458,9 @@ impl XyceTestRunner {
                 || !plan.continuous_measurement_reference_paths.is_empty()
             {
                 let measurements =
-                    rspice_core::analysis::advanced::evaluate_ac_measurements(&netlist, &results);
+                    rspice_core::analysis::evaluate_ac_measurements(&netlist, &results);
                 let continuous =
-                    rspice_core::analysis::advanced::evaluate_ac_continuous_measurements(
+                    rspice_core::analysis::evaluate_ac_continuous_measurements(
                         &netlist, &results,
                     );
                 let measurement_mismatches = match self.compare_analysis_measurement_outputs(
@@ -1809,9 +1809,9 @@ impl XyceTestRunner {
                 || !plan.continuous_measurement_reference_paths.is_empty())
         {
             let scalar =
-                rspice_core::analysis::advanced::evaluate_noise_measurements(&netlist, &results);
+                rspice_core::analysis::evaluate_noise_measurements(&netlist, &results);
             let continuous =
-                rspice_core::analysis::advanced::evaluate_noise_continuous_measurements(
+                rspice_core::analysis::evaluate_noise_continuous_measurements(
                     &netlist, &results,
                 );
             match self.compare_analysis_measurement_outputs(
@@ -2215,7 +2215,7 @@ impl XyceTestRunner {
             }
 
             if let Some(reference_path) = plan.measurement_reference_paths.get(step_index) {
-                let measurements = rspice_core::analysis::advanced::evaluate_noise_measurements(
+                let measurements = rspice_core::analysis::evaluate_noise_measurements(
                     &run.netlist,
                     &results,
                 );
@@ -2231,7 +2231,7 @@ impl XyceTestRunner {
                     )
                 } else {
                     let continuous =
-                        rspice_core::analysis::advanced::evaluate_noise_continuous_measurements(
+                        rspice_core::analysis::evaluate_noise_continuous_measurements(
                             &run.netlist,
                             &results,
                         );
@@ -3023,8 +3023,8 @@ impl XyceTestRunner {
                 }
             };
             let measurements =
-                rspice_core::analysis::advanced::evaluate_ac_measurements(&run.netlist, &results);
-            let continuous = rspice_core::analysis::advanced::evaluate_ac_continuous_measurements(
+                rspice_core::analysis::evaluate_ac_measurements(&run.netlist, &results);
+            let continuous = rspice_core::analysis::evaluate_ac_continuous_measurements(
                 &run.netlist,
                 &results,
             );
@@ -3411,7 +3411,7 @@ impl XyceTestRunner {
                     .map(|row| row.netlist.params.clone())
                     .collect::<Vec<_>>();
                 let measurements =
-                    rspice_core::analysis::advanced::evaluate_dc_measurements_with_parameter_contexts(
+                    rspice_core::analysis::evaluate_dc_measurements_with_parameter_contexts(
                         &netlist,
                         &measurement_sweep,
                         &point_params,
@@ -3524,18 +3524,18 @@ impl XyceTestRunner {
                 .iter()
                 .any(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
             {
-                rspice_core::analysis::advanced::evaluate_dc_measurements(
+                rspice_core::analysis::evaluate_dc_measurements(
                     &netlist,
                     &measurement_sweep,
                 )
             } else {
-                rspice_core::analysis::advanced::unevaluated_measurements(
+                rspice_core::analysis::unevaluated_measurements(
                     &netlist,
                     "DC",
                     "DC measurement requires an explicit .DC analysis",
                 )
             };
-            let continuous = rspice_core::analysis::advanced::evaluate_dc_continuous_measurements(
+            let continuous = rspice_core::analysis::evaluate_dc_continuous_measurements(
                 &netlist,
                 &measurement_sweep,
             );
@@ -5001,31 +5001,31 @@ impl XyceTestRunner {
                     .any(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
             {
                 if point_params.is_empty() {
-                    rspice_core::analysis::advanced::evaluate_dc_measurements(
+                    rspice_core::analysis::evaluate_dc_measurements(
                         &run.netlist,
                         &measurement_sweep,
                     )
                 } else {
-                    rspice_core::analysis::advanced::evaluate_dc_measurements_with_parameter_contexts(
+                    rspice_core::analysis::evaluate_dc_measurements_with_parameter_contexts(
                         &run.netlist,
                         &measurement_sweep,
                         &point_params,
                     )
                 }
             } else {
-                rspice_core::analysis::advanced::unevaluated_measurements(
+                rspice_core::analysis::unevaluated_measurements(
                     &run.netlist,
                     "DC",
                     "DC measurement requires an explicit .DC analysis",
                 )
             };
             let continuous = if point_params.is_empty() {
-                rspice_core::analysis::advanced::evaluate_dc_continuous_measurements(
+                rspice_core::analysis::evaluate_dc_continuous_measurements(
                     &run.netlist,
                     &measurement_sweep,
                 )
             } else {
-                rspice_core::analysis::advanced::evaluate_dc_continuous_measurements_with_parameter_contexts(
+                rspice_core::analysis::evaluate_dc_continuous_measurements_with_parameter_contexts(
                     &run.netlist,
                     &measurement_sweep,
                     &point_params,

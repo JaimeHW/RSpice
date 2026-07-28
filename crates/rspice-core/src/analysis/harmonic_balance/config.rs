@@ -59,7 +59,7 @@ impl HbTone {
 ///
 /// ## Single-tone analysis
 /// ```
-/// use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
+/// use rspice_core::analysis::harmonic_balance::HbConfig;
 ///
 /// let config = HbConfig::new(1e9)  // 1 GHz fundamental
 ///     .with_harmonics(9)           // DC through 9th harmonic
@@ -68,7 +68,7 @@ impl HbTone {
 ///
 /// ## Multi-tone analysis (mixer)
 /// ```
-/// use rspice_core::analysis::advanced::harmonic_balance::{HbConfig, HbTone};
+/// use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
 ///
 /// let config = HbConfig::multi_tone(vec![
 ///     HbTone::new(900e6, 5).with_name("RF"),   // 900 MHz RF

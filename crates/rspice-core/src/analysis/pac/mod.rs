@@ -38,7 +38,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use rspice_core::analysis::advanced::pac::PacConfig;
+//! use rspice_core::analysis::pac::PacConfig;
 //!
 //! let pac_config = PacConfig::new()
 //!     .with_fundamental(1e9)         // 1 GHz LO

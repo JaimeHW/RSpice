@@ -253,7 +253,7 @@ fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(),
 
             ctx.record_measurements(
                 "AC",
-                rspice_core::analysis::advanced::evaluate_ac_measurements(ctx.netlist, &results),
+                rspice_core::analysis::evaluate_ac_measurements(ctx.netlist, &results),
             );
 
             if !ctx.quiet {
@@ -326,7 +326,7 @@ pub(super) fn run_stb(
     stop_freq: f64,
     probe: &str,
 ) -> Result<(), CliError> {
-    use rspice_core::analysis::advanced::{StbConfig, StbSweepType};
+    use rspice_core::analysis::{StbConfig, StbSweepType};
     use rspice_core::netlist::FreqVariation;
 
     if !ctx.quiet {
@@ -603,7 +603,7 @@ fn finish_noise(
 
             ctx.record_measurements(
                 "NOISE",
-                rspice_core::analysis::advanced::evaluate_noise_measurements(ctx.netlist, &results),
+                rspice_core::analysis::evaluate_noise_measurements(ctx.netlist, &results),
             );
 
             if !ctx.quiet {
@@ -776,8 +776,8 @@ pub(super) fn run_pz(
 /// point with one complex variable per pole/zero (`pole(1)`, `zero(1)`, ...).
 fn report_pz(
     ctx: &RunContext<'_>,
-    poles: &[rspice_core::analysis::advanced::pole_zero::Complex],
-    zeros: &[rspice_core::analysis::advanced::pole_zero::Complex],
+    poles: &[rspice_core::analysis::pole_zero::Complex],
+    zeros: &[rspice_core::analysis::pole_zero::Complex],
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!("✓ Pole-Zero analysis complete");
@@ -816,7 +816,7 @@ fn report_pz(
         let singularity =
             |label: &str,
              index: usize,
-             value: &rspice_core::analysis::advanced::pole_zero::Complex| {
+             value: &rspice_core::analysis::pole_zero::Complex| {
                 ExportColumn {
                     name: format!("{label}({})", index + 1),
                     var_type: "frequency".to_string(),

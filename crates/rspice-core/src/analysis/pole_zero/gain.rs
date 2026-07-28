@@ -20,7 +20,7 @@ impl PoleZeroAnalyzer {
         Some(x[output_node])
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn dc_gain_from_config(
+    pub(in crate::analysis::pole_zero) fn dc_gain_from_config(
         &self,
         config: &PoleZeroConfig,
     ) -> Option<Value> {
@@ -49,7 +49,7 @@ impl PoleZeroAnalyzer {
     }
 
     /// Solve linear system using Gaussian elimination
-    pub(in crate::analysis::advanced::pole_zero) fn solve_linear(
+    pub(in crate::analysis::pole_zero) fn solve_linear(
         &self,
         a: &Matrix,
         b: &[Value],

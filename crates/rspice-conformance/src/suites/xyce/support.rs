@@ -3221,7 +3221,7 @@ impl XyceTestRunner {
     }
 
     pub(super) fn xyce_dc_sensitivity_trace_matches(
-        trace: &rspice_core::analysis::advanced::Sensitivity,
+        trace: &rspice_core::analysis::Sensitivity,
         parameter: &str,
     ) -> bool {
         trace.vector_name.eq_ignore_ascii_case(parameter)
@@ -3958,7 +3958,7 @@ impl XyceTestRunner {
         result: &TransientResult,
     ) -> Result<Option<Vec<Value>>, String> {
         let traces =
-            rspice_core::analysis::advanced::evaluate_tran_equation_measurements(netlist, result)?;
+            rspice_core::analysis::evaluate_tran_equation_measurements(netlist, result)?;
         if let Some(trace) = traces
             .iter()
             .find(|trace| trace.name.eq_ignore_ascii_case(probe))
@@ -4945,9 +4945,7 @@ impl XyceTestRunner {
     }
 
     pub(super) fn thermal_voltage_celsius(temp_c: Value) -> Value {
-        rspice_core::constants::thermal_voltage(
-            rspice_core::analysis::temperature::celsius_to_kelvin(temp_c),
-        )
+        rspice_core::constants::thermal_voltage(rspice_core::constants::celsius_to_kelvin(temp_c))
     }
 
     pub(super) fn resistor_voltage_drop(

@@ -3,7 +3,7 @@
 //! Data structures for storing and accessing PSS analysis results.
 
 use crate::Value;
-use crate::analysis::advanced::fourier::HarmonicComponent;
+use crate::analysis::fourier::HarmonicComponent;
 use std::f64::consts::PI;
 
 /// Result of Periodic Steady-State analysis

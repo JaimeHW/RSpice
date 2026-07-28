@@ -1107,7 +1107,7 @@ impl XyceTestRunner {
                 .filter(|candidate| candidate.analysis.eq_ignore_ascii_case("NOISE_CONT"))
                 .count()
                 - 1;
-            let evaluated = rspice_core::analysis::advanced::evaluate_noise_continuous_measurements(
+            let evaluated = rspice_core::analysis::evaluate_noise_continuous_measurements(
                 &trace_netlist,
                 results,
             );

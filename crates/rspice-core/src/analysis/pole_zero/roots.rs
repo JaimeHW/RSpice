@@ -1,7 +1,7 @@
 use super::*;
 
 impl PoleZeroAnalyzer {
-    pub(in crate::analysis::advanced::pole_zero) fn build_port_vectors(
+    pub(in crate::analysis::pole_zero) fn build_port_vectors(
         &self,
         config: &PoleZeroConfig,
     ) -> Option<(Vec<Value>, Vec<Value>)> {
@@ -38,7 +38,7 @@ impl PoleZeroAnalyzer {
         Some((input_vec, output_vec))
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn is_direct_voltage_port_measurement(
+    pub(in crate::analysis::pole_zero) fn is_direct_voltage_port_measurement(
         &self,
         config: &PoleZeroConfig,
     ) -> bool {
@@ -51,7 +51,7 @@ impl PoleZeroAnalyzer {
                 && config.output_pos == config.input_neg.unwrap_or(usize::MAX))
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn is_same_root(
+    pub(in crate::analysis::pole_zero) fn is_same_root(
         a: &Complex,
         b: &Complex,
         tol: Value,
@@ -61,7 +61,7 @@ impl PoleZeroAnalyzer {
         (a.re - b.re).abs() <= tol * re_scale && (a.im - b.im).abs() <= tol * im_scale
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn sort_roots(&self, roots: &mut [Complex]) {
+    pub(in crate::analysis::pole_zero) fn sort_roots(&self, roots: &mut [Complex]) {
         roots.sort_by(|a, b| {
             let a_re = if a.re.is_finite() {
                 a.re
@@ -87,7 +87,7 @@ impl PoleZeroAnalyzer {
         });
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn round_to_significant_digits(
+    pub(in crate::analysis::pole_zero) fn round_to_significant_digits(
         &self,
         value: Value,
         digits: i32,
@@ -101,7 +101,7 @@ impl PoleZeroAnalyzer {
         (value * scale).round() / scale
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn canonicalize_real_roots(
+    pub(in crate::analysis::pole_zero) fn canonicalize_real_roots(
         &self,
         roots: &mut [Complex],
     ) {
@@ -122,7 +122,7 @@ impl PoleZeroAnalyzer {
         }
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn canonicalize_near_real_zero_pairs(
+    pub(in crate::analysis::pole_zero) fn canonicalize_near_real_zero_pairs(
         &self,
         zeros: &mut [Complex],
     ) {
@@ -157,14 +157,14 @@ impl PoleZeroAnalyzer {
         self.canonicalize_real_roots(zeros);
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn finite_pole_count(&self) -> usize {
+    pub(in crate::analysis::pole_zero) fn finite_pole_count(&self) -> usize {
         self.matrix_rank(
             &self.c_matrix,
             self.relative_matrix_tolerance(&self.c_matrix, 1e-9),
         )
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn has_complete_pole_set(
+    pub(in crate::analysis::pole_zero) fn has_complete_pole_set(
         &self,
         poles: &[Complex],
         expected: usize,
@@ -175,7 +175,7 @@ impl PoleZeroAnalyzer {
         poles.len() == expected
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn relative_matrix_tolerance(
+    pub(in crate::analysis::pole_zero) fn relative_matrix_tolerance(
         &self,
         matrix: &Matrix,
         relative_tolerance: Value,
@@ -193,7 +193,7 @@ impl PoleZeroAnalyzer {
         }
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn matrix_eigen_scale(
+    pub(in crate::analysis::pole_zero) fn matrix_eigen_scale(
         &self,
         matrix: &Matrix,
     ) -> Value {
@@ -206,7 +206,7 @@ impl PoleZeroAnalyzer {
             .max(1.0)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn scale_matrix(
+    pub(in crate::analysis::pole_zero) fn scale_matrix(
         &self,
         matrix: &Matrix,
         factor: Value,
@@ -220,7 +220,7 @@ impl PoleZeroAnalyzer {
         scaled
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn triangular_diagonal_eigenvalues(
+    pub(in crate::analysis::pole_zero) fn triangular_diagonal_eigenvalues(
         &self,
         matrix: &Matrix,
         tolerance: Value,
@@ -234,7 +234,7 @@ impl PoleZeroAnalyzer {
         )
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn triangular_kind(
+    pub(in crate::analysis::pole_zero) fn triangular_kind(
         &self,
         matrix: &Matrix,
         tolerance: Value,
@@ -266,7 +266,7 @@ impl PoleZeroAnalyzer {
         }
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn solve_triangular(
+    pub(in crate::analysis::pole_zero) fn solve_triangular(
         &self,
         a: &Matrix,
         b: &[Value],
@@ -308,7 +308,7 @@ impl PoleZeroAnalyzer {
         Some(x)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn matrix_has_stable_inverse(
+    pub(in crate::analysis::pole_zero) fn matrix_has_stable_inverse(
         &self,
         matrix: &Matrix,
     ) -> bool {
@@ -342,7 +342,7 @@ impl PoleZeroAnalyzer {
         max_residual <= 1e-6
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn matrix_rank(
+    pub(in crate::analysis::pole_zero) fn matrix_rank(
         &self,
         matrix: &Matrix,
         tolerance: Value,

@@ -14,7 +14,7 @@ use crate::Value;
 ///
 /// ## Driven Circuit (known fundamental)
 /// ```
-/// use rspice_core::analysis::advanced::pss::PssConfig;
+/// use rspice_core::analysis::pss::PssConfig;
 ///
 /// let config = PssConfig::new(1e9)  // 1 GHz fundamental
 ///     .with_harmonics(9)
@@ -23,7 +23,7 @@ use crate::Value;
 ///
 /// ## Autonomous Oscillator (period detection)
 /// ```
-/// use rspice_core::analysis::advanced::pss::PssConfig;
+/// use rspice_core::analysis::pss::PssConfig;
 ///
 /// let config = PssConfig::autonomous()
 ///     .with_period_guess(1e-9)  // ~1 GHz expected
@@ -95,7 +95,7 @@ pub struct PssConfig {
 
     /// Integration method override for transient shooting.
     /// None uses the engine default (typically TrapGear).
-    pub integration_method: Option<crate::analysis::IntegrationMethod>,
+    pub integration_method: Option<crate::numerics::integration::IntegrationMethod>,
 
     /// Points per period for internal waveform storage.
     /// Higher values give better accuracy but use more memory.
@@ -115,7 +115,7 @@ impl PssConfig {
     ///
     /// # Example
     /// ```
-    /// use rspice_core::analysis::advanced::pss::PssConfig;
+    /// use rspice_core::analysis::pss::PssConfig;
     /// let config = PssConfig::new(1e9);  // 1 GHz
     /// assert_eq!(config.period(), 1e-9);
     /// ```
@@ -146,7 +146,7 @@ impl PssConfig {
     ///
     /// # Example
     /// ```
-    /// use rspice_core::analysis::advanced::pss::PssConfig;
+    /// use rspice_core::analysis::pss::PssConfig;
     /// let config = PssConfig::autonomous()
     ///     .with_period_guess(1e-9);  // ~1 GHz expected
     /// ```
@@ -284,7 +284,7 @@ impl PssConfig {
     }
 
     /// Set integration method for transient shooting.
-    pub fn with_integration_method(mut self, method: crate::analysis::IntegrationMethod) -> Self {
+    pub fn with_integration_method(mut self, method: crate::numerics::integration::IntegrationMethod) -> Self {
         self.integration_method = Some(method);
         self
     }

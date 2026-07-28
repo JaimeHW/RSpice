@@ -167,7 +167,7 @@ impl<'a> RunContext<'a> {
                 }
                 other => format!("unknown .MEAS analysis kind '{other}'"),
             };
-            let results = rspice_core::analysis::advanced::unevaluated_measurements(
+            let results = rspice_core::analysis::unevaluated_measurements(
                 self.netlist,
                 &analysis,
                 &reason,

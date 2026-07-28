@@ -1,7 +1,7 @@
 use super::*;
 
 impl PoleZeroAnalyzer {
-    pub(in crate::analysis::advanced::pole_zero) fn extract_submatrix(
+    pub(in crate::analysis::pole_zero) fn extract_submatrix(
         &self,
         m: &Matrix,
         rows: &[usize],
@@ -16,7 +16,7 @@ impl PoleZeroAnalyzer {
         out
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn matrix_subtract(
+    pub(in crate::analysis::pole_zero) fn matrix_subtract(
         &self,
         a: &Matrix,
         b: &Matrix,
@@ -32,7 +32,7 @@ impl PoleZeroAnalyzer {
         out
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn matrix_multiply(
+    pub(in crate::analysis::pole_zero) fn matrix_multiply(
         &self,
         a: &Matrix,
         b: &Matrix,
@@ -51,7 +51,7 @@ impl PoleZeroAnalyzer {
         out
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn solve_matrix_columns_regularized(
+    pub(in crate::analysis::pole_zero) fn solve_matrix_columns_regularized(
         &self,
         a: &Matrix,
         b: &Matrix,
@@ -91,7 +91,7 @@ impl PoleZeroAnalyzer {
         None
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn solve_matrix_columns(
+    pub(in crate::analysis::pole_zero) fn solve_matrix_columns(
         &self,
         a: &Matrix,
         b: &Matrix,
@@ -115,7 +115,7 @@ impl PoleZeroAnalyzer {
         Some(out)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn qr_eigenvalues(
+    pub(in crate::analysis::pole_zero) fn qr_eigenvalues(
         &self,
         matrix: &Matrix,
     ) -> Vec<Complex> {
@@ -200,7 +200,7 @@ impl PoleZeroAnalyzer {
             .collect()
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn eigenvalues_2x2(
+    pub(in crate::analysis::pole_zero) fn eigenvalues_2x2(
         &self,
         a00: Value,
         a01: Value,
@@ -226,7 +226,7 @@ impl PoleZeroAnalyzer {
         }
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn qr_decompose(
+    pub(in crate::analysis::pole_zero) fn qr_decompose(
         &self,
         a: &[Vec<Value>],
     ) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
@@ -258,7 +258,7 @@ impl PoleZeroAnalyzer {
         (q, r)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn matrix_multiply_raw(
+    pub(in crate::analysis::pole_zero) fn matrix_multiply_raw(
         &self,
         a: &[Vec<Value>],
         b: &[Vec<Value>],
@@ -278,7 +278,7 @@ impl PoleZeroAnalyzer {
     }
 
     /// Fallback pole estimator for highly singular systems.
-    pub(in crate::analysis::advanced::pole_zero) fn eigenvalues_diagonal_fallback(
+    pub(in crate::analysis::pole_zero) fn eigenvalues_diagonal_fallback(
         &self,
         config: &PoleZeroConfig,
     ) -> Vec<Complex> {

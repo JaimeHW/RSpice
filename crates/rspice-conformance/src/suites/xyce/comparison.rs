@@ -2878,7 +2878,7 @@ impl XyceTestRunner {
                 .map(|point| (point.sweep_value, point.result.clone()))
                 .collect::<Vec<_>>();
             let equation_traces =
-                rspice_core::analysis::advanced::evaluate_dc_equation_measurements(
+                rspice_core::analysis::evaluate_dc_equation_measurements(
                     &batch.netlist,
                     &equation_sweep,
                 )?;
@@ -2906,7 +2906,7 @@ impl XyceTestRunner {
                 "DC_CONT",
                 &segment_starts,
                 |trace_netlist| {
-                    rspice_core::analysis::advanced::evaluate_dc_continuous_measurements(
+                    rspice_core::analysis::evaluate_dc_continuous_measurements(
                         trace_netlist,
                         &equation_sweep,
                     )
@@ -3992,11 +3992,11 @@ impl XyceTestRunner {
         }
 
         let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
-        let series = rspice_core::analysis::advanced::NoiseSweepSeries::from_sweep(results)?
+        let series = rspice_core::analysis::NoiseSweepSeries::from_sweep(results)?
             .ok_or_else(|| "NOISE simulation produced no points".to_string())?;
         let signals = series.signal_map();
         let equation_traces =
-            rspice_core::analysis::advanced::evaluate_noise_equation_measurements(
+            rspice_core::analysis::evaluate_noise_equation_measurements(
                 netlist, results,
             )?;
         let measurement_output_traces =
@@ -4389,7 +4389,7 @@ impl XyceTestRunner {
 
         let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
         let equation_traces =
-            rspice_core::analysis::advanced::evaluate_ac_equation_measurements(netlist, results)?;
+            rspice_core::analysis::evaluate_ac_equation_measurements(netlist, results)?;
         let measurement_output_traces = Self::measurement_output_traces(
             netlist,
             &results
@@ -4403,7 +4403,7 @@ impl XyceTestRunner {
             "AC_CONT",
             &[],
             |trace_netlist| {
-                rspice_core::analysis::advanced::evaluate_ac_continuous_measurements(
+                rspice_core::analysis::evaluate_ac_continuous_measurements(
                     trace_netlist,
                     results,
                 )
@@ -4693,7 +4693,7 @@ impl XyceTestRunner {
             "TRAN_CONT",
             &[],
             |trace_netlist| {
-                rspice_core::analysis::advanced::evaluate_tran_continuous_measurements(
+                rspice_core::analysis::evaluate_tran_continuous_measurements(
                     trace_netlist,
                     result,
                 )

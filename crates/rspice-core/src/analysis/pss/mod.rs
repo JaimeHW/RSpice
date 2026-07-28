@@ -24,7 +24,7 @@
 //!
 //! # Example
 //! ```ignore
-//! use rspice_core::analysis::advanced::pss::{PssConfig, PssAnalysis};
+//! use rspice_core::analysis::pss::{PssConfig, PssAnalysis};
 //!
 //! let config = PssConfig::new(1e9)  // 1 GHz fundamental
 //!     .with_harmonics(9)

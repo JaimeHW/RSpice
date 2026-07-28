@@ -1,7 +1,7 @@
 use super::*;
 
 impl PoleZeroAnalyzer {
-    pub(in crate::analysis::advanced::pole_zero) fn numerator_roots_raw(
+    pub(in crate::analysis::pole_zero) fn numerator_roots_raw(
         &self,
         input_vec: &[Value],
         output_vec: &[Value],
@@ -45,7 +45,7 @@ impl PoleZeroAnalyzer {
             .unwrap_or_default()
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn to_faer_matrix(
+    pub(in crate::analysis::pole_zero) fn to_faer_matrix(
         &self,
         matrix: &Matrix,
     ) -> Mat<f64> {
@@ -58,7 +58,7 @@ impl PoleZeroAnalyzer {
         out
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn eigenvalues_from_matrix(
+    pub(in crate::analysis::pole_zero) fn eigenvalues_from_matrix(
         &self,
         matrix: &Matrix,
     ) -> Option<Vec<Complex>> {
@@ -89,7 +89,7 @@ impl PoleZeroAnalyzer {
         Some(eigenvalues)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn generalized_eigenvalues(
+    pub(in crate::analysis::pole_zero) fn generalized_eigenvalues(
         &self,
         g_matrix: &Matrix,
         c_matrix: &Matrix,
@@ -145,7 +145,7 @@ impl PoleZeroAnalyzer {
         Some(eigenvalues)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn zeros_from_state_space(
+    pub(in crate::analysis::pole_zero) fn zeros_from_state_space(
         &self,
         model: &StateSpaceModel,
         poles: &[Complex],
@@ -177,7 +177,7 @@ impl PoleZeroAnalyzer {
         self.finalize_zero_roots(zeros, poles, config)
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn build_voltage_input_transfer_system(
+    pub(in crate::analysis::pole_zero) fn build_voltage_input_transfer_system(
         &self,
         config: &PoleZeroConfig,
         output_vec: &[Value],
@@ -231,7 +231,7 @@ impl PoleZeroAnalyzer {
         Some((PoleZeroAnalyzer::new(g_ext, c_ext), drive_vec, output_ext))
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn finalize_zero_roots(
+    pub(in crate::analysis::pole_zero) fn finalize_zero_roots(
         &self,
         mut zeros: Vec<Complex>,
         poles: &[Complex],
@@ -246,7 +246,7 @@ impl PoleZeroAnalyzer {
         zeros
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn numerator_root_2x2(
+    pub(in crate::analysis::pole_zero) fn numerator_root_2x2(
         &self,
         input_vec: &[Value],
         output_vec: &[Value],
@@ -284,7 +284,7 @@ impl PoleZeroAnalyzer {
         }
     }
 
-    pub(in crate::analysis::advanced::pole_zero) fn finite_zero_limit(
+    pub(in crate::analysis::pole_zero) fn finite_zero_limit(
         &self,
         poles: &[Complex],
         config: &PoleZeroConfig,

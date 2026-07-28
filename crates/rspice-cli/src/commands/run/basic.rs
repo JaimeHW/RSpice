@@ -353,7 +353,7 @@ pub(super) fn run_dc_sweep(
 
             ctx.record_measurements(
                 "DC",
-                rspice_core::analysis::advanced::evaluate_dc_measurements(ctx.netlist, &results),
+                rspice_core::analysis::evaluate_dc_measurements(ctx.netlist, &results),
             );
 
             if let Some(ref output_path) = ctx.output_path_for("dc") {
@@ -577,7 +577,7 @@ pub(super) fn run_transient(
 
             ctx.record_measurements(
                 "TRAN",
-                rspice_core::analysis::advanced::evaluate_tran_measurements(ctx.netlist, &result),
+                rspice_core::analysis::evaluate_tran_measurements(ctx.netlist, &result),
             );
 
             if let Some(ref output_path) = ctx.output_path_for("tran") {

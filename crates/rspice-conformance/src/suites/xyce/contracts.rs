@@ -309,13 +309,13 @@ impl XyceTestRunner {
             scientific_precision,
         )?;
         let original_scalar =
-            rspice_core::analysis::advanced::evaluate_tran_measurements(netlist, result);
+            rspice_core::analysis::evaluate_tran_measurements(netlist, result);
         let original_continuous =
-            rspice_core::analysis::advanced::evaluate_tran_continuous_measurements(netlist, result);
+            rspice_core::analysis::evaluate_tran_continuous_measurements(netlist, result);
         let remeasured_scalar =
-            rspice_core::analysis::advanced::evaluate_tran_measurements(netlist, &serialized);
+            rspice_core::analysis::evaluate_tran_measurements(netlist, &serialized);
         let remeasured_continuous =
-            rspice_core::analysis::advanced::evaluate_tran_continuous_measurements(
+            rspice_core::analysis::evaluate_tran_continuous_measurements(
                 netlist,
                 &serialized,
             );

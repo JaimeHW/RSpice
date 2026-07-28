@@ -2142,7 +2142,7 @@ mod tests {
         frequency: Value,
         scale: Value,
     ) -> crate::analysis::NoiseResult {
-        use crate::analysis::advanced::NoiseContribution;
+        use crate::analysis::NoiseContribution;
         use crate::analysis::{NoiseSourceIdentity, NoiseSourceType};
 
         crate::analysis::NoiseResult {

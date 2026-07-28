@@ -11,7 +11,7 @@
 //! Corner sweeps re-elaborate the deck per corner on `--jobs` workers,
 //! tagging each corner's output so workers never collide.
 
-use rspice_core::analysis::advanced::s_param;
+use rspice_core::analysis::s_param;
 
 use super::RunContext;
 use super::basic::{run_dc_op, run_temp};
