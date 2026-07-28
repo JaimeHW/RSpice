@@ -7400,6 +7400,23 @@ endmodule
         for (terminal, node) in nodes.iter().copied().enumerate() {
             solution[node - 1] = shipped_device_terminal_bias(name, terminal);
         }
+        let canonical_internal_nodes = runtime
+            .canonical_ir
+            .mir
+            .nodes
+            .iter()
+            .filter(|node| !node.is_external)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            canonical_internal_nodes.len(),
+            device.num_internal_nodes(),
+            "{name}: canonical and runtime internal-node counts must match"
+        );
+        for (ordinal, node) in canonical_internal_nodes.into_iter().enumerate() {
+            if let Some(value) = shipped_device_internal_bias(name, node.name.as_str()) {
+                solution[terminal_count + ordinal] = value;
+            }
+        }
 
         device
             .try_update_all_voltages(&solution)
@@ -7522,7 +7539,11 @@ endmodule
             "r3_cmc" => [0.1, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "diode_cmc" => [0.7, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "vbic13_4t" => [0.2, 0.75, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
-            "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
+            "bsimimg" => [0.15, 0.7, 0.05, -0.05, 0.01]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
@@ -7548,6 +7569,15 @@ endmodule
                 .copied()
                 .unwrap_or(0.0),
             _ => 0.0,
+        }
+    }
+
+    fn shipped_device_internal_bias(name: &str, node: &str) -> Option<f64> {
+        match (name, node.to_ascii_lowercase().as_str()) {
+            ("bsimimg", "di") => Some(shipped_device_terminal_bias(name, 0)),
+            ("bsimimg", "si") => Some(shipped_device_terminal_bias(name, 2)),
+            ("bsimimg", "ge" | "gi") => Some(shipped_device_terminal_bias(name, 1)),
+            _ => None,
         }
     }
 
