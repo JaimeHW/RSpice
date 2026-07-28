@@ -15,16 +15,45 @@ path = "src/main.rs"
 
 [features]
 # Opt-in: pulls the whole generated built-in corpus into this binary, which
-# costs minutes of build time. Off by default so the process-level benchmarks
-# stay cheap to build.
-generated-stamp = ["dep:rspice-core", "dep:rspice-conformance"]
+# costs roughly 40 minutes of build time and peaks near 10 GB in one `rustc`.
+# Off by default so the process-level benchmarks stay cheap to build.
+generated-stamp = ["dep:rspice-core", "dep:rspice-conformance", "corpus-all"]
+
+# The same rig over five models instead of forty-two, for iterating.
+#
+# The model set used to be pinned in the `rspice-core` dependency entry below,
+# which meant every run of the stamp benchmark cost the full corpus build and
+# there was no way to ask for less. That is most of why the plan's headline
+# runtime gate went unmeasured for so long: measuring it was never a
+# ten-minute job, so it was never a routine one. Selecting the models through
+# a feature makes a signal available in about ninety seconds; keep
+# `generated-stamp` for any number that is quoted as the gate, because the
+# gate is a median over the whole corpus and a subset cannot produce one.
+#
+# The five are chosen to span the cost range rather than to be typical:
+# `vbic13` because it is the one model with a published ngspice C anchor to
+# compare against, `r2_cmc` as the cheapest in the corpus, `diode_cmc` and
+# `juncap200` for their parameter-processing prologues, and `epfl_hemt_10a`
+# because its complex-step evaluation overflows and has caught measurement
+# bugs before.
+generated-stamp-subset = ["dep:rspice-core", "dep:rspice-conformance", "corpus-five"]
+
+corpus-all = ["rspice-core/veriloga-builtins-models"]
+corpus-five = [
+    "rspice-core/veriloga-model-vbic13",
+    "rspice-core/veriloga-model-r2-cmc",
+    "rspice-core/veriloga-model-diode-cmc",
+    "rspice-core/veriloga-model-juncap200",
+    "rspice-core/veriloga-model-epfl-hemt-10a",
+]
 
 [dependencies]
 blake3 = "1.5"
 clap.workspace = true
-rspice-core = { path = "../rspice-core", version = "0.1.0", optional = true, default-features = false, features = [
-    "veriloga-builtins-models",
-] }
+# No `features` here on purpose: the model set is selected by `corpus-all` or
+# `corpus-five` above. Pinning it in the dependency entry made the full corpus
+# unconditional whenever this dependency was enabled at all.
+rspice-core = { path = "../rspice-core", version = "0.1.0", optional = true, default-features = false }
 # The stamp bench and golden-fingerprint capture live with the Verilog-A suite
 # in rspice-conformance, not in the library they measure. This crate is a
 # benchmark rig rather than a shipping frontend, so depending on a conformance
