@@ -89,6 +89,48 @@ jobs:
           path: conformance.log
           if-no-files-found: error
 
+  veriloga-corpus:
+    name: Verilog-A corpus gates (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: veriloga-corpus
+      - name: Generated built-ins are current
+        # The manifest's generator digest covers the generator's own source and
+        # the workspace lockfile, so this catches a corpus that was not
+        # regenerated after either changed -- which is silent otherwise until a
+        # numeric gate fails for a reason that has nothing to do with numerics.
+        run: >-
+          cargo run --locked --profile generator -p rspice-veriloga
+          --bin rspice-veriloga-gen -- check-builtins
+      - name: Corpus golden gates (42 models)
+        # The four correctness gates: finite evaluation away from known defects,
+        # gmin reaching the devices that read it, stamped Jacobians against a
+        # numerical derivative of the stamped currents, and stamped reactive
+        # blocks against a numerical derivative of the recovered charge.
+        #
+        # Nightly rather than per-commit because the feature compiles all 42
+        # CMC models. Serial threads and a raised stack because the generated
+        # bodies are large enough to overflow the 2 MB the test harness gives a
+        # spawned thread.
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked -p rspice-core --features veriloga-builtins
+          --test veriloga_golden -- --test-threads=1
+      - name: Every model's Jacobian against complex step
+        # Phase 7's property gate. `#[ignore]` by default because it compiles
+        # the whole model tree through the front end; this is the run that makes
+        # it mean something.
+        run: >-
+          cargo test --locked --release -p rspice-veriloga --test cfg_derivatives
+          the_whole_corpus_matches_complex_step -- --ignored --nocapture
+
   release-build:
     name: Release build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
