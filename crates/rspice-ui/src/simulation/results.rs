@@ -79,6 +79,12 @@ pub enum SimulationResult {
         /// Exact shooting-PSS numerical state when this transient-shaped
         /// result was produced by PSS. Ordinary transient results carry none.
         periodic_state: Option<std::sync::Arc<rspice_core::engine::PssOperatingPoint>>,
+        /// What the solver had to do to produce these waveforms.
+        ///
+        /// Travels with the data because it qualifies it: a force-accepted
+        /// point is a sample the solver could not converge and kept anyway,
+        /// so a curve that looks smooth can still be wrong there.
+        convergence: rspice_core::diagnostics::ConvergenceQuality,
     },
 
     /// AC analysis results

@@ -1835,6 +1835,7 @@ mod tests {
             ]),
             measurements: Vec::new(),
             periodic_state: None,
+            convergence: Default::default(),
         }
     }
 
@@ -1899,6 +1900,7 @@ mod tests {
             )]),
             measurements: Vec::new(),
             periodic_state: Some(Arc::new(operating_point)),
+            convergence: Default::default(),
         }
     }
 
@@ -2156,6 +2158,7 @@ mod tests {
             )]),
             measurements: Vec::new(),
             periodic_state: None,
+            convergence: Default::default(),
         };
         let artifact = ExecutionArtifactEnvelope::from_transient_result(
             snapshot,

@@ -263,6 +263,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         )]),
         measurements: Vec::new(),
         periodic_state: None,
+        convergence: Default::default(),
     };
     let artifact = ExecutionArtifactEnvelope::from_transient_result(
         snapshot_digest,
@@ -709,6 +710,7 @@ fn worker_response_rejects_payloads_that_exceed_transport_limit() {
         )]),
         measurements: Vec::new(),
         periodic_state: None,
+        convergence: Default::default(),
     };
 
     let accepted = worker_outcome_from_result(Ok(result.clone()), 48);
@@ -735,6 +737,7 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
         )]),
         measurements: Vec::new(),
         periodic_state: None,
+        convergence: Default::default(),
     };
 
     let legacy = worker_outcome_from_result(Ok(result.clone()), 47);
@@ -1750,6 +1753,7 @@ fn worker_result_round_trip() {
             "target not found",
         )],
         periodic_state: None,
+        convergence: Default::default(),
     };
     let transient = round_trip_result(transient);
     match transient {

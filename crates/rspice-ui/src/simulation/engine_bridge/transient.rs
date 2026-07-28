@@ -27,8 +27,17 @@ impl EngineBridge {
         let tran_result = engine
             .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
             .map_err(|e| self.translate_error(e))?;
+        let convergence = engine.convergence_quality();
 
-        convert_transient_result(netlist, tran_result, config.start_time, abort)
+        let mut converted =
+            convert_transient_result(netlist, tran_result, config.start_time, abort)?;
+        if let SimulationResult::Transient {
+            convergence: slot, ..
+        } = &mut converted
+        {
+            *slot = convergence;
+        }
+        Ok(converted)
     }
 }
 
@@ -251,6 +260,8 @@ fn convert_transient_result(
         waveforms,
         measurements,
         periodic_state: None,
+        // The engine is not in scope here; `run_transient` fills this in.
+        convergence: Default::default(),
     })
 }
 

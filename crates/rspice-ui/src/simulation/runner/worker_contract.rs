@@ -1189,6 +1189,13 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 waveforms,
                 measurements,
                 periodic_state,
+                // Convergence metrics do not cross the worker boundary yet:
+                // `WorkerSimulationResult` is a serde wire format and
+                // `ConvergenceQuality` is not serializable. The browser build
+                // therefore reports no convergence warnings. Bound explicitly
+                // rather than swallowed by `..` so adding a field to this
+                // result forces a decision here.
+                convergence: _,
             } => match periodic_state {
                 Some(operating_point) => {
                     validate_pss_display_contract(&time, &waveforms, &operating_point)?;
@@ -1414,6 +1421,8 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
                 periodic_state: None,
+                // See the outbound conversion: not carried over the wire.
+                convergence: Default::default(),
             },
             WorkerSimulationResult::Pss {
                 measurements,

@@ -548,6 +548,7 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
             waveforms,
             measurements: Vec::new(),
             periodic_state: None,
+            convergence: Default::default(),
         }))
         .expect("seed completed transient result");
 

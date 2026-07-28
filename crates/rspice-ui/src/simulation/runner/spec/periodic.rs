@@ -222,6 +222,9 @@ fn run_pss(
         waveforms,
         measurements: Vec::new(),
         periodic_state: Some(periodic_state),
+        // A shooting-PSS result is not produced by the transient driver, so
+        // the driver's convergence metrics would not describe it.
+        convergence: Default::default(),
     })
 }
 
@@ -300,6 +303,8 @@ fn run_envelope(
         waveforms,
         measurements: Vec::new(),
         periodic_state: None,
+        // As above: this waveform comes from the periodic solver.
+        convergence: Default::default(),
     })
 }
 

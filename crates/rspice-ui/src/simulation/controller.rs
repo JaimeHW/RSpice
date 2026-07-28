@@ -1243,10 +1243,22 @@ impl SimulationController {
 
                     self.apply_result_side_effects(state, &sim_result);
                     if let crate::simulation::SimulationResult::Transient {
-                        time, waveforms, ..
+                        time,
+                        waveforms,
+                        convergence,
+                        ..
                     } = &sim_result
                     {
                         self.populate_transient_post_views(state, time, waveforms);
+                        // Only when the solver needed help. A clean run says
+                        // nothing, so the console stays a signal rather than a
+                        // per-run receipt.
+                        if convergence.has_issues() {
+                            state.push_sim_message(ConsoleMessage::warning(format!(
+                                "{current_label}: {}",
+                                convergence.summary()
+                            )));
+                        }
                     }
 
                     // Optional Touchstone export for S-parameter analyses.
