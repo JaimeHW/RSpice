@@ -160,7 +160,7 @@ pub(in crate::simulation) fn operating_point_effective_source_digest(
     run_point: OpRunPointContext,
 ) -> ContentDigest {
     let mut writer = CanonicalWriter::new("rspice.op-effective-source/v1");
-    writer.digest(crate::workbench::netlist_document::source_content_digest(
+    writer.digest(crate::workbench::documents::netlist_document::source_content_digest(
         source,
     ));
     writer.option(run_point.supply_voltage.as_ref(), |writer, value| {

@@ -8,7 +8,7 @@ pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice
 /// sealed dependency closure and execution-target contract. A later Run must
 /// match this one-shot authorized snapshot byte for byte.
 pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
-    use crate::workbench::netlist_document::{
+    use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, NetlistValidationReceipt, source_content_digest,
     };
 
@@ -101,7 +101,7 @@ fn acknowledge_canonical_dependencies(
     sealed: &[rspice_core::netlist::ResolvedIncludeDependency],
 ) -> Result<(), String> {
     let dependencies_belong_to_generated_base = state.ui.netlist.active_document
-        == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         && state
             .workspace
             .netlist_descriptor
@@ -114,26 +114,26 @@ fn acknowledge_canonical_dependencies(
                 )
             });
     let document = match state.ui.netlist.active_document {
-        crate::workbench::netlist_document::ActiveNetlistDocument::Generated => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.ui.netlist.generated_document.as_mut()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
     }
     .ok_or_else(|| "The active source has no canonical document identity.".to_owned())?;
 
     use std::collections::HashSet;
 
     let source_origin = match state.ui.netlist.active_document {
-        crate::workbench::netlist_document::ActiveNetlistDocument::Generated => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.schematic.current_file.as_deref()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.workspace.netlist_source_path.as_deref()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
     };
     let root = source_origin.map(dependency_root_path).transpose()?;
     let root_directory = root
@@ -247,7 +247,7 @@ fn acknowledge_canonical_dependencies(
     }
 
     if state.ui.netlist.active_document
-        == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     {
         state.workspace.netlist_document = state.ui.netlist.owned_document.clone();
     }
@@ -350,7 +350,7 @@ fn external_dependency_locators(source: &str) -> Vec<String> {
 
 fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> {
     let owned = state.ui.netlist.active_document
-        == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource;
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     let narrow_owned = owned
         && state
             .workspace
@@ -373,13 +373,13 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
             .iter()
             .map(|diagnostic| {
                 let severity = match diagnostic.severity {
-                    crate::workbench::netlist_document::DiagnosticSeverity::Info => {
+                    crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
                         crate::state::DiagnosticSeverity::Info
                     }
-                    crate::workbench::netlist_document::DiagnosticSeverity::Warning => {
+                    crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
                         crate::state::DiagnosticSeverity::Warning
                     }
-                    crate::workbench::netlist_document::DiagnosticSeverity::Error => {
+                    crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
                         crate::state::DiagnosticSeverity::Error
                     }
                 };
@@ -394,13 +394,13 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
             .map_err(|error| error.to_string())?
     };
     let document = match state.ui.netlist.active_document {
-        crate::workbench::netlist_document::ActiveNetlistDocument::Generated => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.ui.netlist.generated_document.as_mut()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
     }
     .ok_or_else(|| "The active source has no canonical document identity.".to_owned())?;
     document
@@ -414,19 +414,19 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
 
 fn invalidate_canonical_validation(state: &mut AppState) {
     let document = match state.ui.netlist.active_document {
-        crate::workbench::netlist_document::ActiveNetlistDocument::Generated => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.ui.netlist.generated_document.as_mut()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_mut()
         }
-        crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
     };
     if let Some(document) = document {
         let _ = document.invalidate_validation(document.content_digest());
     }
     if state.ui.netlist.active_document
-        == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     {
         state.workspace.netlist_document = state.ui.netlist.owned_document.clone();
     }
@@ -619,7 +619,7 @@ pub(crate) fn save_owned_netlist_source(
         ));
         return false;
     }
-    let visible_digest = crate::workbench::netlist_document::source_content_digest(source);
+    let visible_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
     let Some(validation) = state.ui.netlist.validation.as_ref().filter(|receipt| {
         receipt.visible_content_digest == visible_digest
             && receipt.project_revision == state.workspace.project.revision().get()
@@ -786,7 +786,7 @@ pub(crate) fn apply_imported_netlist(
                 return false;
             }
         };
-    let source_digest = crate::workbench::netlist_document::source_content_digest(&source);
+    let source_digest = crate::workbench::documents::netlist_document::source_content_digest(&source);
     state.workspace.netlist_source = Some(source.clone());
     state.workspace.netlist_document = Some(document.clone());
     state.workspace.netlist_descriptor = Some(descriptor);
@@ -796,10 +796,10 @@ pub(crate) fn apply_imported_netlist(
     state.ui.netlist.owned_document = Some(document);
     state.ui.netlist.externally_saved_content_digest = Some(source_digest);
     state.ui.netlist.active_document =
-        crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource;
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    crate::workbench::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
+    crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut state.ui.netlist);
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
@@ -826,7 +826,7 @@ fn canonical_import_document(
         NetlistDocumentId, SourceLocator,
     };
 
-    let source_digest = crate::workbench::netlist_document::source_content_digest(source);
+    let source_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
     let provenance = GeneratedProvenance::try_new(
         "rspice-import-baseline/v1",
         GenerationInput::new(state.workspace.project.revision(), source_digest),
@@ -1267,7 +1267,7 @@ mod tests {
         assert!(app.state.ui.netlist.validation.is_some());
         assert_eq!(
             app.state.ui.netlist.externally_saved_content_digest,
-            Some(crate::workbench::netlist_document::source_content_digest(
+            Some(crate::workbench::documents::netlist_document::source_content_digest(
                 source
             ))
         );
@@ -1395,7 +1395,7 @@ mod tests {
         app.state.workspace.netlist_source_path = Some(root.clone());
         app.state.ui.netlist.owned_document = app.state.workspace.netlist_document.clone();
         app.state.ui.netlist.active_document =
-            crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource;
+            crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
         app.state.ui.netlist.active_document_initialized = true;
         app.state.simulation.netlist_content = parameter_source.to_owned();
 
@@ -1423,7 +1423,7 @@ mod tests {
         app.state.workspace.netlist_source_path = Some(root);
         app.state.ui.netlist.owned_document = app.state.workspace.netlist_document.clone();
         app.state.ui.netlist.active_document =
-            crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource;
+            crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
         app.state.ui.netlist.active_document_initialized = true;
         app.state.simulation.netlist_content = include_source.to_owned();
 

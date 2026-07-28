@@ -47,10 +47,10 @@ use crate::hardcopy::sources::{
     HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, canonical_digest,
     validate_label,
 };
-use crate::workbench::result_document::ResultViewer;
+use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
-use crate::workbench::visualization_studio::{
+use crate::workbench::documents::visualization_studio::{
     VisualizationAnnotation as StudioAnnotation, VisualizationAutoscale,
     VisualizationMarker as StudioMarker, VisualizationPane as StudioPane, VisualizationStudioState,
 };

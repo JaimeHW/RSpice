@@ -971,7 +971,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
                 });
         });
     if add_measurement {
-        super::super::visualization_studio::open_measurement_editor(app);
+        crate::workbench::documents::visualization_studio::open_measurement_editor(app);
     }
 }
 

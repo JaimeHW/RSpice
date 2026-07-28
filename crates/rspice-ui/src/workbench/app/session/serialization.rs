@@ -935,7 +935,7 @@ mod tests {
         let mut state = AppState::default();
         state.ui.results.exprs.insert(
             0,
-            vec![crate::workbench::result_document::ExprTrace {
+            vec![crate::workbench::documents::result_document::ExprTrace {
                 text: "V(out)/V(in)".to_string(),
                 visible: true,
             }],

@@ -28,7 +28,7 @@ use crate::state::model_library::{
 use crate::workbench::RSpiceApp;
 use sha2::{Digest as _, Sha256};
 
-use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ModelEditorSection {

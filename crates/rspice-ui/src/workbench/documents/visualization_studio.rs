@@ -46,14 +46,13 @@ use crate::ui::{
 };
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::{
+use crate::workbench::{
     ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference, SurfaceId,
-    SurfaceRoute,
-    design_system::WorkbenchIcon,
-    result_document,
-    state::Workspace,
-    visualization_family::{FamilyManifest, FamilyValueKind, SourceSampleSelection},
+    SurfaceRoute, design_system::WorkbenchIcon, state::Workspace,
 };
+
+use super::result_document;
+use super::visualization_family::{FamilyManifest, FamilyValueKind, SourceSampleSelection};
 
 const SUMMARY: &str = "Compose waveform, tabular, statistical, RF, eye, field, and report-page views with family slicing, exact axes, annotations, measurements, and large-data policies.";
 const EVIDENCE: &str = "Implemented visualization entities retain dataset and analysis identities, viewer type, pane/page placement, links, exact markers, scalar measurements, and annotations without mutating source samples.";

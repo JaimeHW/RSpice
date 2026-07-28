@@ -731,11 +731,11 @@ pub struct UiSessionState {
     /// [`super::WorkbenchState`].
     pub(crate) full_screen_request: Option<bool>,
     /// Results workspace state (viewer, cursors, plot caches).
-    pub results: super::result_document::ResultsState,
+    pub results: crate::workbench::documents::result_document::ResultsState,
     /// Netlist editor state (diagnostics, diff pips, tuner mode).
-    pub netlist: super::netlist_document::NetlistDocumentState,
+    pub netlist: crate::workbench::documents::netlist_document::NetlistDocumentState,
     /// Visible Code & Automation page and revision-bound operation receipts.
-    pub code_workspace: super::code_workspace::CodeWorkspaceRuntimeState,
+    pub code_workspace: crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState,
     /// Runtime state for the Schematic-family symbol editor surface.
     pub symbol: SymbolUiState,
     /// In-flight inspector edit session, if any.
@@ -829,7 +829,7 @@ pub struct UiSessionStateSer {
     #[serde(default)]
     browser_spoken_feedback: bool,
     #[serde(default)]
-    result_viewer: super::result_document::ResultViewer,
+    result_viewer: crate::workbench::documents::result_document::ResultViewer,
 }
 
 fn default_autosave_minutes() -> u8 {

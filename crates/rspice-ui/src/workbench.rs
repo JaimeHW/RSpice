@@ -27,6 +27,7 @@
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/module_layering.rs`, not by this file.
+pub(crate) mod documents;
 pub(crate) mod account_organization;
 pub(crate) mod app;
 pub(crate) mod availability;
@@ -34,7 +35,6 @@ pub(crate) mod browser;
 pub(crate) mod calculator_tool;
 pub(crate) mod capability_workflow;
 pub(crate) mod chrome;
-pub(crate) mod code_workspace;
 pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod design_system;
@@ -51,10 +51,7 @@ mod jobs_manager;
 mod layout;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
-pub(crate) mod model_correlation;
-pub(crate) mod model_editor;
 pub(crate) mod navigation;
-pub(crate) mod netlist_document;
 pub(crate) mod netlist_workflow;
 mod notification_center;
 pub(crate) mod panels;
@@ -68,7 +65,6 @@ pub(crate) mod project_workflow;
 mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod recovery_checkpoint;
-pub(crate) mod result_document;
 mod session;
 pub(crate) mod shortcut_artifacts;
 pub(crate) mod shortcut_library_persistence;
@@ -80,8 +76,6 @@ pub(crate) mod state;
 pub(crate) mod surface_catalog;
 pub(crate) mod surface_route;
 mod surfaces;
-pub(crate) mod visualization_family;
-pub(crate) mod visualization_studio;
 pub(crate) mod window_session;
 
 pub use availability::{
@@ -91,13 +85,13 @@ pub use capability_workflow::{
     CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
 };
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
-pub use model_correlation::{
+pub use documents::model_correlation::{
     CorrelationAggregationDraft, CorrelationCalculationDraft, CorrelationDatasetClassDraft,
     CorrelationDatasetDraft, CorrelationMetricDraft, CorrelationReleaseRoleDraft,
     CorrelationReviewDraft, ModelCorrelationDialog, ModelCorrelationSection,
     ModelCorrelationWorkspaceState,
 };
-pub use model_editor::{
+pub use documents::model_editor::{
     ModelDefinitionDelta, ModelEditorDraft, ModelEditorSection, ModelEditorState,
     ModelFieldDiagnostic, ModelParameterDraft, ModelParameterKind, ModelValidationEvidence,
 };
@@ -110,7 +104,7 @@ pub use preferences::{
     ResultPresentationPolicy, ResultsPreferences, ScalarPreference, TogglePreference,
     UserPreferences, WorkspacePreferences, WorkspacePreset,
 };
-pub use result_document::{ResultViewer, ResultsState};
+pub use documents::result_document::{ResultViewer, ResultsState};
 pub use session::{
     InspectorEdit, SavedSelectionBulkFilter, SelectionBulkFilter, SelectionBulkFilterSession,
     SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard, SymbolDocumentSnapshot,

@@ -109,7 +109,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
-    use super::super::code_workspace::CodeWorkspacePage;
+    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
     let t = Tokens::get(ui.ctx());
     let touch = app.state.workbench.coarse_pointer;
@@ -675,7 +675,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     if analysis_active {
                         for signal in analysis.signals {
                             let t = Tokens::get(ui.ctx());
-                            let color = super::super::result_document::trace_color(
+                            let color = crate::workbench::documents::result_document::trace_color(
                                 &signal.color,
                                 t.color.traces[signal.waveform_index % t.color.traces.len()],
                             );
@@ -687,7 +687,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 signal.visible,
                             );
                             if response.clicked() {
-                                super::super::result_document::toggle_visibility(
+                                crate::workbench::documents::result_document::toggle_visibility(
                                     &mut app.state,
                                     analysis.analysis_index,
                                     signal.waveform_index,
@@ -1627,7 +1627,7 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.ui.netlist.active_document
-        == super::super::netlist_document::ActiveNetlistDocument::GeneratedDiff
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
     {
         netlist_diff(ui, app);
         return;
@@ -1638,7 +1638,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         &app.state.workbench.navigator_query,
         &root_label,
         app.state.ui.netlist.active_document
-            == super::super::netlist_document::ActiveNetlistDocument::Generated,
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated,
     );
     let active_line = app.state.ui.netlist.cursor_line.saturating_add(1);
     let touch_targets =
@@ -1699,10 +1699,10 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn active_netlist_artifact_name(state: &crate::workbench::AppState) -> String {
     match state.ui.netlist.active_document {
-        super::super::netlist_document::ActiveNetlistDocument::Generated => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             "generated.sp".to_owned()
         }
-        super::super::netlist_document::ActiveNetlistDocument::OwnedSource => state
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => state
             .workspace
             .netlist_descriptor
             .as_ref()
@@ -1716,7 +1716,7 @@ fn active_netlist_artifact_name(state: &crate::workbench::AppState) -> String {
                     .map(|name| name.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| "owned-source.sp".to_owned()),
-        super::super::netlist_document::ActiveNetlistDocument::GeneratedDiff => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => {
             "generated.diff".to_owned()
         }
     }
@@ -1726,13 +1726,13 @@ fn active_canonical_netlist_document(
     state: &crate::workbench::AppState,
 ) -> Option<&crate::state::NetlistDocument> {
     match state.ui.netlist.active_document {
-        super::super::netlist_document::ActiveNetlistDocument::Generated => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.ui.netlist.generated_document.as_ref()
         }
-        super::super::netlist_document::ActiveNetlistDocument::OwnedSource => {
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.ui.netlist.owned_document.as_ref()
         }
-        super::super::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff => None,
     }
 }
 

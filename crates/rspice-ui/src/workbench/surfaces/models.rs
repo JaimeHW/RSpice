@@ -26,7 +26,7 @@ use super::super::commands::{Command, CommandAvailability};
 use super::super::design_system::{
     property_card, property_row, property_row_toned, workspace_title_row,
 };
-use super::super::model_editor::{self, ModelEditorSection};
+use crate::workbench::documents::model_editor::{self, ModelEditorSection};
 use super::super::state::{ModelsPage, Workspace};
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 

@@ -73,7 +73,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
             return Err("the selected model is external; create an editable project copy first");
         }
     }
-    super::model_editor::resolve_project_model_for_editor(
+    crate::workbench::documents::model_editor::resolve_project_model_for_editor(
         &app.state.model_library_manager,
         library_name,
         model_name,
@@ -1211,7 +1211,7 @@ impl Command {
             Self::ValidateCodeDocument => {
                 state.workbench.workspace == Workspace::Netlist
                     && state.ui.netlist.active_document
-                        != super::netlist_document::ActiveNetlistDocument::GeneratedDiff
+                        != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
                     && !state.simulation.netlist_content.trim().is_empty()
             }
             Self::CompareGeneratedRevisions => {
@@ -1231,7 +1231,7 @@ impl Command {
             // compatibility contract used by the in-workspace viewer tabs.
             Self::ResultViewer(crate::workbench::ResultViewer::Waves) => true,
             Self::ResultViewer(viewer) => {
-                super::result_document::viewer_is_available(state, viewer)
+                crate::workbench::documents::result_document::viewer_is_available(state, viewer)
             }
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
@@ -1371,7 +1371,7 @@ impl Command {
             Self::Save => {
                 if app.state.workbench.workspace == Workspace::Netlist
                     && app.state.ui.netlist.active_document
-                        == super::netlist_document::ActiveNetlistDocument::OwnedSource
+                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
                 {
                     app.state.ui.netlist.save_dialog.open = true;
                     app.state.ui.netlist.save_dialog.error = None;
@@ -1430,7 +1430,7 @@ impl Command {
             }
             Self::Copy => {
                 if app.state.workbench.workspace == Workspace::Results {
-                    if let Some(text) = super::result_document::copy_cursor_text(&mut app.state) {
+                    if let Some(text) = crate::workbench::documents::result_document::copy_cursor_text(&mut app.state) {
                         app.state.ui.clipboard_text_request = Some(text);
                     }
                 } else if active_symbol_editor(app) {
@@ -2049,13 +2049,13 @@ impl Command {
             Self::WaveformCalculator => app.state.dialogs.waveform_calculator_dialog = true,
             Self::ResultViewer(viewer) => {
                 if viewer == crate::workbench::ResultViewer::Waves
-                    || super::result_document::viewer_is_available(&app.state, viewer)
+                    || crate::workbench::documents::result_document::viewer_is_available(&app.state, viewer)
                 {
                     app.state.ui.results.viewer = viewer;
                     activate_workspace(app, Workspace::Results);
                 } else {
                     let reason =
-                        super::result_document::viewer_unavailability_reason(&app.state, viewer)
+                        crate::workbench::documents::result_document::viewer_unavailability_reason(&app.state, viewer)
                             .unwrap_or("the active dataset is incompatible with this viewer");
                     app.state
                         .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
@@ -2066,7 +2066,7 @@ impl Command {
             }
             Self::EditSpecifications => {
                 app.state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
-                crate::workbench::result_document::open_specification_editor(&mut app.state);
+                crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
                 activate_workspace(app, Workspace::Results);
             }
             Self::VerificationPage(VerificationPage::Drc) => {
@@ -2094,7 +2094,7 @@ impl Command {
                     let library_name = library_name.to_owned();
                     let model_name = model_name.to_owned();
                     if let Err(error) =
-                        super::model_editor::open_project_model(app, &library_name, &model_name)
+                        crate::workbench::documents::model_editor::open_project_model(app, &library_name, &model_name)
                     {
                         app.state
                             .push_user_message(crate::diagnostics::ConsoleMessage::warning(
@@ -2162,37 +2162,37 @@ impl Command {
             Self::CompileVerilogA => {
                 activate_workspace(app, Workspace::Netlist);
                 app.state.ui.code_workspace.page =
-                    super::code_workspace::CodeWorkspacePage::VerilogA;
+                    crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
             }
             Self::AutomationConsole => {
                 activate_workspace(app, Workspace::Netlist);
                 app.state.ui.code_workspace.page =
-                    super::code_workspace::CodeWorkspacePage::Automation;
+                    crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
             }
             Self::CommandPalette => app.state.dialogs.command_palette.open(),
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
             Self::AccountOrganization => super::account_organization::open(app),
             Self::License => app.open_license_dialog(),
             Self::SpecialistToolBrowser => super::specialist_tool_browser::open(app),
-            Self::VisualizationStudio => super::visualization_studio::open(app),
+            Self::VisualizationStudio => crate::workbench::documents::visualization_studio::open(app),
             Self::ReportAuthoring => super::surfaces::report_authoring::open(app),
             Self::SaveReportDocument => super::surfaces::report_authoring::save_document(app),
             Self::AddReportPage => super::surfaces::report_authoring::open_add_page(app),
             Self::ReportPageProperties => {
                 super::surfaces::report_authoring::open_page_properties(app);
             }
-            Self::AddVisualizationPane => super::visualization_studio::open_add_pane(app),
+            Self::AddVisualizationPane => crate::workbench::documents::visualization_studio::open_add_pane(app),
             Self::VisualizationTraceManager => {
-                super::visualization_studio::open_trace_manager(app);
+                crate::workbench::documents::visualization_studio::open_trace_manager(app);
             }
             Self::VisualizationCursorManager => {
-                super::visualization_studio::open_cursor_manager(app);
+                crate::workbench::documents::visualization_studio::open_cursor_manager(app);
             }
             Self::VisualizationDocumentProperties => {
-                super::visualization_studio::open_document_properties(app);
+                crate::workbench::documents::visualization_studio::open_document_properties(app);
             }
             Self::ExportVisualizationDocument => {
-                super::visualization_studio::export_document(app);
+                crate::workbench::documents::visualization_studio::export_document(app);
             }
             Self::FeatureAvailability => {
                 let route = super::SurfaceRoute::surface(super::SurfaceId::FeatureAvailability);

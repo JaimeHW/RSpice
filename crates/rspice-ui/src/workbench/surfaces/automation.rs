@@ -10,7 +10,7 @@ use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::ScalarPreference;
 
-use super::super::code_workspace::{
+use crate::workbench::documents::code_workspace::{
     AutomationExecutionState, CodeEditorLanguage, CodeWorkspacePage, show_code_editor,
 };
 use super::super::design_system::{
@@ -28,7 +28,7 @@ fn title_actions_stack(available_width: f32) -> bool {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    super::super::code_workspace::poll_automation_workflow(app);
+    crate::workbench::documents::code_workspace::poll_automation_workflow(app);
     let t = Tokens::get(ui.ctx());
     let document = app
         .state
@@ -188,7 +188,7 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        let _ = super::super::netlist_document::open_generated_primary(&mut app.state);
+        let _ = crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
         app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
     }
 }
@@ -201,7 +201,7 @@ fn run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        super::super::code_workspace::start_automation_workflow(app);
+        crate::workbench::documents::code_workspace::start_automation_workflow(app);
     }
 }
 
@@ -237,7 +237,7 @@ fn code_pane(
     app: &mut RSpiceApp,
     document: &crate::state::ProjectSourceDocument,
     source: &mut String,
-    diagnostics: &[super::super::code_workspace::CodeEditorDiagnostic],
+    diagnostics: &[crate::workbench::documents::code_workspace::CodeEditorDiagnostic],
 ) {
     let t = Tokens::get(ui.ctx());
     let (toolbar, _) = ui.allocate_exact_size(
@@ -524,7 +524,7 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
                 || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
         });
     if (response.clicked() || keyboard_activate) && available {
-        super::super::code_workspace::export_automation_artifact(app, kind);
+        crate::workbench::documents::code_workspace::export_automation_artifact(app, kind);
     }
 }
 

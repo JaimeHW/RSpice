@@ -126,12 +126,12 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     let analysis = app.state.simulation.active_analysis_idx.unwrap_or(0);
     let traces = app.state.ui.results.exprs.entry(analysis).or_default();
     if !traces.iter().any(|trace| trace.text == expression) {
-        traces.push(crate::workbench::result_document::ExprTrace {
+        traces.push(crate::workbench::documents::result_document::ExprTrace {
             text: expression.clone(),
             visible: true,
         });
     }
-    app.state.ui.results.viewer = crate::workbench::result_document::ResultViewer::Waves;
+    app.state.ui.results.viewer = crate::workbench::documents::result_document::ResultViewer::Waves;
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);

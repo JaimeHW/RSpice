@@ -919,7 +919,7 @@ fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let generated = app.state.ui.netlist.active_document
-        == crate::workbench::netlist_document::ActiveNetlistDocument::Generated;
+        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
     toolbar_text_command(
         ui,
         app,

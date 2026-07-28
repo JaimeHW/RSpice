@@ -31,7 +31,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.workbench.current_route().surface_id() == super::SurfaceId::VisualizationStudio {
-        super::visualization_studio::show(ui, app);
+        crate::workbench::documents::visualization_studio::show(ui, app);
         return;
     }
     if app.state.workbench.current_route().surface_id() == super::SurfaceId::ReportAuthoring {
@@ -56,11 +56,11 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
         Workspace::Netlist => {
             netlist::prepare_workspace(app);
             match app.state.ui.code_workspace.page {
-                super::code_workspace::CodeWorkspacePage::Netlist => {
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     netlist::show_prepared(ui, app)
                 }
-                super::code_workspace::CodeWorkspacePage::VerilogA => veriloga::show(ui, app),
-                super::code_workspace::CodeWorkspacePage::Automation => automation::show(ui, app),
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => veriloga::show(ui, app),
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => automation::show(ui, app),
             }
         }
     }
@@ -120,7 +120,7 @@ fn show_split_with_results(ui: &mut Ui, app: &mut RSpiceApp) {
     results.set_clip_rect(results_rect);
     results.set_min_size(results_rect.size());
     results.set_max_size(results_rect.size());
-    crate::workbench::result_document::show_compact_split(&mut results, app);
+    crate::workbench::documents::result_document::show_compact_split(&mut results, app);
 }
 
 fn register_results_split_region(ui: &mut Ui, results_rect: Rect) {

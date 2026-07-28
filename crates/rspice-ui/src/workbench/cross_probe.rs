@@ -13,7 +13,7 @@ use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_wit
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
 use crate::workbench::AppState;
 use crate::workbench::TogglePreference;
-use crate::workbench::result_document::SelectedResultTrace;
+use crate::workbench::documents::result_document::SelectedResultTrace;
 
 /// Stable logical subject selected in the active schematic document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +38,7 @@ struct SynchronizationKey {
     result_data_version: u64,
     active_dataset: Option<crate::product::DatasetId>,
     active_analysis_index: Option<usize>,
-    active_netlist_document: crate::workbench::netlist_document::ActiveNetlistDocument,
+    active_netlist_document: crate::workbench::documents::netlist_document::ActiveNetlistDocument,
     generated_input_digest: Option<ContentDigest>,
 }
 
@@ -124,7 +124,7 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
     state.ui.netlist.cross_probe_line = source_line;
     if source_line.is_some()
         && state.ui.netlist.active_document
-            == crate::workbench::netlist_document::ActiveNetlistDocument::Generated
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
     {
         state.ui.netlist.requested_line = source_line;
     }

@@ -345,7 +345,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let receipt = crate::workbench::code_workspace::compile_project_bundle_receipt(
+        let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
             project_id,
             &bundle,
             Some("worker_owned"),

@@ -26,14 +26,14 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransac
 use crate::workbench::RSpiceApp;
 
 use super::super::design_system;
-use super::super::model_correlation::{
+use crate::workbench::documents::model_correlation::{
     CorrelationAggregationDraft, CorrelationAlignmentDraft, CorrelationCalculationDraft,
     CorrelationDatasetClassDraft, CorrelationDatasetDraft, CorrelationExtrapolationDraft,
     CorrelationMetricDraft, CorrelationOutlierDecisionDraft, CorrelationOutlierDraft,
     CorrelationReleaseRoleDraft, CorrelationReviewDecisionDraft, CorrelationReviewDraft,
     ModelCorrelationDialog, ModelCorrelationSection,
 };
-use super::super::model_editor::{
+use crate::workbench::documents::model_editor::{
     ModelEditorSection, open_project_model, resolve_project_model_for_editor,
 };
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};

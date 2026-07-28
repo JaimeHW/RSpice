@@ -24,7 +24,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
 use crate::workbench::AppState;
-use crate::workbench::visualization_family::{
+use crate::workbench::documents::visualization_family::{
     FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
 };
 use crate::workbench::{
@@ -3248,7 +3248,7 @@ mod tests {
         WaveformData,
     };
     use crate::workbench::ChoicePreference;
-    use crate::workbench::visualization_family::FamilyManifest;
+    use crate::workbench::documents::visualization_family::FamilyManifest;
 
     fn assert_editor_spans_disjoint(left: EditorSpan, right: EditorSpan) {
         assert!(

@@ -432,12 +432,12 @@ impl AppState {
         let active_document = if self.ui.netlist.active_document_initialized {
             self.ui.netlist.active_document
         } else if self.workspace.netlist_source.is_some() {
-            crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+            crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         } else {
-            crate::workbench::netlist_document::ActiveNetlistDocument::Generated
+            crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
         };
         let source = if active_document
-            == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         {
             self.workspace
                 .netlist_source
@@ -450,12 +450,12 @@ impl AppState {
             return Some("Enter a netlist before running".to_string());
         }
         if active_document
-            == crate::workbench::netlist_document::ActiveNetlistDocument::GeneratedDiff
+            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         {
             return Some("Generated comparison documents cannot be executed".to_owned());
         }
-        let current_digest = crate::workbench::netlist_document::source_content_digest(source);
-        if active_document == crate::workbench::netlist_document::ActiveNetlistDocument::Generated
+        let current_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
+        if active_document == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
             && (self.ui.netlist.generation_error.is_some()
                 || self.ui.netlist.generated_input_digest
                     != self.ui.netlist.current_generation_input_digest)
@@ -477,7 +477,7 @@ impl AppState {
                 "Validate the exact current source and project revision before running".to_owned(),
             );
         }
-        if active_document == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+        if active_document == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
             && self.ui.netlist.externally_saved_content_digest != Some(current_digest)
         {
             return Some("Save the validated owned source deck before running".to_owned());

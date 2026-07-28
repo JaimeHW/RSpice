@@ -89,7 +89,7 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::ImportVerilogA => {
             state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
             state.ui.code_workspace.page =
-                crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
             state.ui.code_workspace.veriloga.import_requested = true;
         }
         FileMenuAction::Exit => request_exit(state),

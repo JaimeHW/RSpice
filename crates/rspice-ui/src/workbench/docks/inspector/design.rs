@@ -1381,7 +1381,7 @@ fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
                         ComponentModelSourceTarget::VerilogA(reference) => {
                             app.state.open_workspace_view(reference.clone());
                             app.state.ui.code_workspace.page =
-                                crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+                                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
                             app.state.workbench.activate(Workspace::Netlist);
                         }
                     }

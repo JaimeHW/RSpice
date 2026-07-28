@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn clearing_design_execution_context_clears_project_scoped_results_state() {
-        use crate::workbench::result_document::{
+        use crate::workbench::documents::result_document::{
             ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer,
         };
 

@@ -2507,7 +2507,7 @@ fn envelope_source_catalog_input_digest(app: &RSpiceApp) -> ContentDigest {
         app.state.sim_setup.options.to_spice_options(),
         model_library_identity,
     );
-    crate::workbench::netlist_document::source_content_digest(&material)
+    crate::workbench::documents::netlist_document::source_content_digest(&material)
 }
 
 fn build_envelope_source_catalog_with_digest(

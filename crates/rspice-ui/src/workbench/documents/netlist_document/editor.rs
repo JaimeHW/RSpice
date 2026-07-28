@@ -1409,7 +1409,7 @@ mod tests {
             column: Some(11),
             message: "Unknown model `nchh` in this deck.".to_string(),
             fix: Some(
-                crate::workbench::netlist_document::diagnostics::DiagnosticFix {
+                crate::workbench::documents::netlist_document::diagnostics::DiagnosticFix {
                     label: "Replace with nch".to_string(),
                     span: 18..22,
                     replacement: "nch".to_string(),

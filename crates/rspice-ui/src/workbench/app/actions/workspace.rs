@@ -1603,7 +1603,7 @@ impl AppState {
         };
         self.open_workspace_view(reference);
         self.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        self.ui.code_workspace.page = crate::workbench::code_workspace::CodeWorkspacePage::VerilogA;
+        self.ui.code_workspace.page = crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
         true
     }
 

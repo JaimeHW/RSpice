@@ -30,7 +30,7 @@ use super::super::commands::{
     set_model_editor_workflow_error,
 };
 use super::super::design_system::{self, WorkbenchIcon};
-use super::super::model_editor::{
+use crate::workbench::documents::model_editor::{
     ModelComparisonDisposition, ModelEditorSection, ModelParameterKind,
     QualificationAuthoringAnalysis, QualificationAuthoringProbe, QualificationAuthoringSample,
 };
@@ -224,7 +224,7 @@ impl DisplayCell {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    super::super::model_editor::advance_qualification_execution(app);
+    crate::workbench::documents::model_editor::advance_qualification_execution(app);
     if app
         .state
         .workbench
@@ -1610,7 +1610,7 @@ fn qualification_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<Q
 fn bound_platform_run<'a>(
     state: &'a ModelQualificationState,
     suite: &QualificationSuite,
-    draft: Option<&super::super::model_editor::ModelEditorDraft>,
+    draft: Option<&crate::workbench::documents::model_editor::ModelEditorDraft>,
     platform: QualificationPlatform,
 ) -> Option<&'a QualificationPlatformRun> {
     let draft = draft?;
@@ -1668,7 +1668,7 @@ fn platform_run_summary(run: Option<&QualificationPlatformRun>) -> String {
 fn bound_suite_evidence<'a>(
     state: &'a ModelQualificationState,
     suite: &QualificationSuite,
-    draft: Option<&super::super::model_editor::ModelEditorDraft>,
+    draft: Option<&crate::workbench::documents::model_editor::ModelEditorDraft>,
 ) -> Option<&'a QualificationEvidence> {
     let draft = draft?;
     if draft.definition_is_dirty() {
@@ -2122,7 +2122,7 @@ fn save_revision_workflow(
     });
     match choice {
         DialogChoice::Primary if writable && dirty => {
-            match super::super::model_editor::save_open_candidate(app) {
+            match crate::workbench::documents::model_editor::save_open_candidate(app) {
                 Ok(revision) => {
                     app.state.push_user_message(
                         crate::diagnostics::ConsoleMessage::info(format!(
@@ -2225,7 +2225,7 @@ fn validation_review_workflow(
     };
     match choice {
         DialogChoice::Primary if !prepared => {
-            super::super::model_editor::validate_open_candidate(app);
+            crate::workbench::documents::model_editor::validate_open_candidate(app);
             prepare_model_editor_workflow();
         }
         DialogChoice::Primary | DialogChoice::Secondary | DialogChoice::Cancelled => {
@@ -2410,7 +2410,7 @@ fn qualification_run_workflow(
     });
     match choice {
         DialogChoice::Primary if runnable => {
-            match super::super::model_editor::start_qualification_execution(app) {
+            match crate::workbench::documents::model_editor::start_qualification_execution(app) {
                 Ok(()) => close_model_editor_workflow(),
                 Err(error) => set_model_editor_workflow_error(error),
             }
@@ -3711,7 +3711,7 @@ fn qualification_plan_actions(
     if qualification_plan_button(&mut actions, "Run suite", 104.0, run_enabled && suite_exact) {
         if let Some(suite) = suite {
             plan.action_error =
-                super::super::model_editor::start_qualification_suite_execution(app, &suite.id)
+                crate::workbench::documents::model_editor::start_qualification_suite_execution(app, &suite.id)
                     .err();
         }
     }
@@ -3722,7 +3722,7 @@ fn qualification_plan_actions(
         run_enabled && source_exact,
     ) {
         if let (Some(suite), Some(vector)) = (suite, vector) {
-            plan.action_error = super::super::model_editor::start_qualification_vector_execution(
+            plan.action_error = crate::workbench::documents::model_editor::start_qualification_vector_execution(
                 app, &suite.id, &vector.id,
             )
             .err();
@@ -3822,7 +3822,7 @@ fn qualification_vector_is_current(app: &RSpiceApp, vector: &QualificationVector
 }
 
 fn qualification_vector_binding_matches_draft(
-    draft: &super::super::model_editor::ModelEditorDraft,
+    draft: &crate::workbench::documents::model_editor::ModelEditorDraft,
     vector: &QualificationVector,
 ) -> bool {
     vector
@@ -4515,7 +4515,7 @@ fn qualification_execution_status(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some((suite_id, completed_suites, total_suites, progress, evidence_count)) =
         execution.as_ref()
     {
-        let platform = super::super::model_editor::qualification_platform_label(progress.platform);
+        let platform = crate::workbench::documents::model_editor::qualification_platform_label(progress.platform);
         let title = format!(
             "{platform} · suite {} / {} · {}",
             completed_suites + 1,
@@ -4637,7 +4637,7 @@ fn qualification_execution_status(ui: &mut Ui, app: &mut RSpiceApp) {
         node.set_label(accessible_status);
     });
     if cancel_clicked {
-        super::super::model_editor::cancel_qualification_execution(app);
+        crate::workbench::documents::model_editor::cancel_qualification_execution(app);
     }
 }
 
@@ -4981,7 +4981,7 @@ fn cancel_qualification_authoring(app: &mut RSpiceApp) {
 }
 
 fn qualification_normalize_authoring_domains(
-    fields: &mut super::super::model_editor::QualificationAuthoringDraft,
+    fields: &mut crate::workbench::documents::model_editor::QualificationAuthoringDraft,
 ) {
     let probes = qualification_authoring_probe_options(fields.analysis);
     if !probes.iter().any(|(probe, _)| *probe == fields.probe) {
@@ -5613,7 +5613,7 @@ fn promotion_review_dialog(
     match choice {
         DialogChoice::Primary if promotable => {
             if let Some(candidate) = candidate.as_ref() {
-                super::super::model_editor::promote_open_candidate(app, &candidate.identity.id);
+                crate::workbench::documents::model_editor::promote_open_candidate(app, &candidate.identity.id);
             }
         }
         DialogChoice::Primary if authoring || editing => {
@@ -6723,7 +6723,7 @@ mod tests {
 
     #[test]
     fn qualification_authoring_normalizes_probe_and_sample_without_resizing_form() {
-        let mut fields = super::super::super::model_editor::QualificationAuthoringDraft {
+        let mut fields = crate::workbench::documents::model_editor::QualificationAuthoringDraft {
             analysis: QualificationAuthoringAnalysis::Noise,
             probe: QualificationAuthoringProbe::NodeVoltage,
             sample: QualificationAuthoringSample::OperatingPoint,

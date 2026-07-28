@@ -1783,7 +1783,7 @@ pub struct WorkbenchState {
     /// stable viewer composition and annotation identities only; immutable
     /// result samples remain owned by the result datasets.
     #[serde(default)]
-    pub visualization_studio: super::visualization_studio::VisualizationStudioState,
+    pub visualization_studio: crate::workbench::documents::visualization_studio::VisualizationStudioState,
     /// Session-local selection and editor drafts for the project-owned report
     /// documents.
     #[serde(default)]
@@ -1792,12 +1792,12 @@ pub struct WorkbenchState {
     /// device-model editor. Committed source and qualification records remain
     /// in the project model-library domain.
     #[serde(skip)]
-    pub model_editor: super::model_editor::ModelEditorState,
+    pub model_editor: crate::workbench::documents::model_editor::ModelEditorState,
     /// Runtime-only selection and transactional drafts for measurement
     /// correlation. Committed suites and evidence remain in the project-owned
     /// model-library domain.
     #[serde(skip)]
-    pub model_correlation: super::model_correlation::ModelCorrelationWorkspaceState,
+    pub model_correlation: crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -1897,10 +1897,10 @@ impl Default for WorkbenchState {
             preflight: PreflightDialogState::default(),
             jobs_manager: JobsManagerState::default(),
             specialist_tool_browser: SpecialistToolBrowserState::default(),
-            visualization_studio: super::visualization_studio::VisualizationStudioState::default(),
+            visualization_studio: crate::workbench::documents::visualization_studio::VisualizationStudioState::default(),
             report_authoring: ReportAuthoringState::default(),
-            model_editor: super::model_editor::ModelEditorState::default(),
-            model_correlation: super::model_correlation::ModelCorrelationWorkspaceState::default(),
+            model_editor: crate::workbench::documents::model_editor::ModelEditorState::default(),
+            model_correlation: crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             capability_matrix: CapabilityMatrixState::default(),
@@ -2620,8 +2620,8 @@ mod tests {
     fn visualization_studio_presentation_round_trips_with_the_workbench() {
         let mut state = WorkbenchState::default();
         state.visualization_studio.section =
-            super::super::visualization_studio::VisualizationSection::Axes;
-        state.visualization_studio.tool = super::super::visualization_studio::ViewerTool::Pan;
+            crate::workbench::documents::visualization_studio::VisualizationSection::Axes;
+        state.visualization_studio.tool = crate::workbench::documents::visualization_studio::ViewerTool::Pan;
         state.visualization_studio.zoom = 2.5;
         state.visualization_studio.selected_viewer_document = "viewer-bode".to_owned();
 
@@ -2631,11 +2631,11 @@ mod tests {
 
         assert_eq!(
             restored.visualization_studio.section,
-            super::super::visualization_studio::VisualizationSection::Axes
+            crate::workbench::documents::visualization_studio::VisualizationSection::Axes
         );
         assert_eq!(
             restored.visualization_studio.tool,
-            super::super::visualization_studio::ViewerTool::Pan
+            crate::workbench::documents::visualization_studio::ViewerTool::Pan
         );
         assert_eq!(restored.visualization_studio.zoom, 2.5);
         assert_eq!(
@@ -2663,7 +2663,7 @@ mod tests {
 
     #[test]
     fn restored_visualization_document_repairs_bounds_and_identities() {
-        use super::super::visualization_studio::{VisualizationAnnotation, VisualizationPane};
+        use crate::workbench::documents::visualization_studio::{VisualizationAnnotation, VisualizationPane};
         use crate::product::DatasetId;
 
         let mut state = WorkbenchState::default();

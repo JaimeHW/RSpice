@@ -145,7 +145,7 @@ impl RSpiceApp {
             ShortcutCommand::Save => {
                 if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
                     && self.state.ui.netlist.active_document
-                        == crate::workbench::netlist_document::ActiveNetlistDocument::OwnedSource
+                        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
                 {
                     self.state.ui.netlist.save_dialog.open = true;
                     self.state.ui.netlist.save_dialog.error = None;

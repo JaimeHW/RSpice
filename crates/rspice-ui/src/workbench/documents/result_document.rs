@@ -44,7 +44,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, docbar_at_height};
 use crate::workbench::app::ActiveViewer;
-use crate::workbench::visualization_family::SourceSampleSelection;
+use super::visualization_family::SourceSampleSelection;
 use crate::workbench::{AppState, RSpiceApp};
 
 pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);

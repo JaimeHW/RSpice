@@ -21,13 +21,13 @@ use crate::state::model_library::{
 use crate::state::{AnalysisType, SimulationRunLifecycle, WaveformData};
 use crate::workbench::RSpiceApp;
 
-use super::super::model_correlation::{
+use crate::workbench::documents::model_correlation::{
     CorrelationAggregationDraft, CorrelationAlignmentDraft, CorrelationCalculationDraft,
     CorrelationDatasetClassDraft, CorrelationDatasetDraft, CorrelationExtrapolationDraft,
     CorrelationMetricDraft, CorrelationOutlierDecisionDraft, CorrelationOutlierDraft,
     CorrelationReleaseRoleDraft, CorrelationReviewDecisionDraft, CorrelationReviewDraft,
 };
-use super::super::model_editor::resolve_project_model_for_editor;
+use crate::workbench::documents::model_editor::resolve_project_model_for_editor;
 
 #[derive(Debug, Clone)]
 struct CorrelationContext {

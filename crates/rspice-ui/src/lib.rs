@@ -178,7 +178,7 @@ pub fn run_rspice_ui_worker_request(
 pub fn run_rspice_ui_veriloga_compile_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    workbench::code_workspace::run_veriloga_worker_request_value(value)
+    workbench::documents::code_workspace::run_veriloga_worker_request_value(value)
 }
 
 #[cfg(target_arch = "wasm32")]

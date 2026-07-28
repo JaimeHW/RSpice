@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn browser_worker_script_has_a_separate_compile_protocol() {
-        let source = include_str!("../../../web/simulation-worker.js");
+        let source = include_str!("../../../../web/simulation-worker.js");
         assert!(source.contains("compile-veriloga"));
         assert!(source.contains("runRspiceUiVerilogACompileRequest"));
         assert!(source.contains("veriloga-result"));
