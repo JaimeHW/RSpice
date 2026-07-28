@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 #[cfg(any(test, target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
 
-use crate::workbench::surface_route::{SurfaceRoute, SurfaceRouteParseError};
+use crate::workbench::routing::surface_route::{SurfaceRoute, SurfaceRouteParseError};
 
 const VIEW_KEY: &str = "view";
 const SURFACE_KEY: &str = "surface";
@@ -1135,7 +1135,7 @@ mod tests {
     use crate::product::{ObjectRef, ProductObjectKind};
 
     use super::*;
-    use crate::workbench::surface_catalog::SurfaceId;
+    use crate::workbench::routing::surface_catalog::SurfaceId;
     use crate::workbench::workflows::capability_workflow::CapabilityWorkflowId;
 
     fn object_route(surface_id: SurfaceId) -> SurfaceRoute {

@@ -1979,7 +1979,7 @@ impl WorkbenchState {
         route: SurfaceRoute,
         source: RouteTransitionSource,
     ) -> Result<RouteTransition, super::SurfaceRouteUnavailable> {
-        super::availability::require_available(route)?;
+        crate::workbench::routing::availability::require_available(route)?;
         let previous = self.navigation.current();
         self.reconcile_workspace_layout(previous, route);
         let transition = self.navigation.navigate(route, source);
@@ -2000,7 +2000,7 @@ impl WorkbenchState {
         route: SurfaceRoute,
         source: RouteTransitionSource,
     ) -> Result<(), super::SurfaceRouteUnavailable> {
-        super::availability::require_available(route)?;
+        crate::workbench::routing::availability::require_available(route)?;
         let previous = self.navigation.current();
         self.reconcile_workspace_layout(previous, route);
         self.navigation.replace(route, source);
@@ -2053,7 +2053,7 @@ impl WorkbenchState {
             self.navigation_schema_version = NAVIGATION_SCHEMA_VERSION;
         } else {
             let current = self.navigation.current();
-            if let Err(error) = super::availability::require_available(current) {
+            if let Err(error) = crate::workbench::routing::availability::require_available(current) {
                 self.route_diagnostic = Some(format!(
                     "The restored route was not opened because its executor is unavailable: {error}"
                 ));
@@ -2067,7 +2067,7 @@ impl WorkbenchState {
         }
         let removed = self
             .navigation
-            .retain_history(|route| super::availability::route_availability(route).can_open());
+            .retain_history(|route| crate::workbench::routing::availability::route_availability(route).can_open());
         if removed && self.route_diagnostic.is_none() {
             self.route_diagnostic = Some(
                 "Unavailable routes were removed from restored task history; project and document state were preserved."

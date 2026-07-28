@@ -20,15 +20,15 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, IconButton, s
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::{RecentFile, RecentKind};
 
-use super::commands::Command;
-use super::design_system::WorkbenchIcon;
+use crate::workbench::commands::Command;
+use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
     discard_checkpoint, open_comparison, open_diagnostics_folder,
     recovery_replacement_block_reason, refresh_catalog_if_requested, software_rendering_supported,
     start_local_safe_mode,
 };
-use super::state::{
+use crate::workbench::state::{
     LocalSafeModeOptions, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
     Workspace,
 };
@@ -232,7 +232,7 @@ impl LauncherLayout {
     }
 }
 
-pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if !app.state.workbench.project_launcher_open {
         show_discard_confirmation(ctx, app);
         return;
@@ -453,24 +453,24 @@ pub(super) fn show(ctx: &Context, app: &mut RSpiceApp) {
 /// browser-back traversal from immediately reopening a dismissed launcher.
 fn dismiss_launcher(app: &mut RSpiceApp) {
     app.state.workbench.project_launcher_open = false;
-    if app.state.workbench.current_route().surface_id() != super::SurfaceId::ProjectLauncher {
+    if app.state.workbench.current_route().surface_id() != crate::workbench::SurfaceId::ProjectLauncher {
         return;
     }
     if app
         .state
         .workbench
-        .navigate_back(super::RouteTransitionSource::User)
+        .navigate_back(crate::workbench::RouteTransitionSource::User)
         .is_some()
     {
         return;
     }
-    let fallback = super::SurfaceRoute::surface(super::SurfaceId::from_workspace(
+    let fallback = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::from_workspace(
         app.state.workbench.workspace,
     ));
     if let Err(error) = app
         .state
         .workbench
-        .replace_route(fallback, super::RouteTransitionSource::User)
+        .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
     {
         app.state.workbench.record_route_diagnostic(format!(
             "The Project Launcher closed, but its fallback workspace could not be restored: {error}"
@@ -483,11 +483,11 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
 /// `popstate` would clear the push and restore the launcher's predecessor.
 fn replace_launcher_with_workspace(app: &mut RSpiceApp, workspace: Workspace) {
     app.state.workbench.project_launcher_open = false;
-    let destination = super::SurfaceRoute::surface(super::SurfaceId::from_workspace(workspace));
+    let destination = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::from_workspace(workspace));
     if let Err(error) = app
         .state
         .workbench
-        .replace_route(destination, super::RouteTransitionSource::User)
+        .replace_route(destination, crate::workbench::RouteTransitionSource::User)
     {
         app.state.workbench.record_route_diagnostic(format!(
             "The Project Launcher could not continue into the selected workspace: {error}"
@@ -2629,7 +2629,7 @@ mod tests {
 
         assert_eq!(
             app.state.workbench.current_route().surface_id(),
-            super::super::SurfaceId::ProjectLauncher
+            crate::workbench::SurfaceId::ProjectLauncher
         );
         assert!(app.state.workbench.project_launcher_open);
 
@@ -2637,7 +2637,7 @@ mod tests {
 
         assert_eq!(
             app.state.workbench.current_route().surface_id(),
-            super::super::SurfaceId::Results
+            crate::workbench::SurfaceId::Results
         );
         assert!(!app.state.workbench.project_launcher_open);
     }
@@ -2648,8 +2648,8 @@ mod tests {
         app.state
             .workbench
             .replace_route(
-                super::super::SurfaceRoute::surface(super::super::SurfaceId::ProjectLauncher),
-                super::super::RouteTransitionSource::BrowserPop,
+                crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::ProjectLauncher),
+                crate::workbench::RouteTransitionSource::BrowserPop,
             )
             .expect("Project Launcher has a canonical executor");
         app.state.workbench.project_launcher_open = true;
@@ -2658,7 +2658,7 @@ mod tests {
 
         assert_eq!(
             app.state.workbench.current_route().surface_id(),
-            super::super::SurfaceId::Design
+            crate::workbench::SurfaceId::Design
         );
         assert!(!app.state.workbench.project_launcher_open);
     }
@@ -2670,21 +2670,21 @@ mod tests {
         app.state.workbench.activate(Workspace::Project);
         assert!(matches!(
             app.state.workbench.take_browser_history_effect(),
-            Some(super::super::BrowserHistoryEffect::Push(_))
+            Some(crate::workbench::BrowserHistoryEffect::Push(_))
         ));
         app.state.workbench.open_project_launcher();
         assert!(matches!(
             app.state.workbench.take_browser_history_effect(),
-            Some(super::super::BrowserHistoryEffect::Push(_))
+            Some(crate::workbench::BrowserHistoryEffect::Push(_))
         ));
 
         replace_launcher_with_workspace(&mut app, Workspace::Project);
 
-        let destination = super::super::SurfaceRoute::surface(super::super::SurfaceId::Project);
+        let destination = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Project);
         assert_eq!(app.state.workbench.current_route(), destination);
         assert_eq!(
             app.state.workbench.take_browser_history_effect(),
-            Some(super::super::BrowserHistoryEffect::Replace(destination))
+            Some(crate::workbench::BrowserHistoryEffect::Replace(destination))
         );
         assert!(app.state.workbench.take_browser_history_effect().is_none());
         assert!(!app.state.workbench.project_launcher_open);

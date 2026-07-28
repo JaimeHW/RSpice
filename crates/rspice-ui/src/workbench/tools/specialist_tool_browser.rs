@@ -22,7 +22,7 @@ use crate::ui::{
 };
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::{
+use crate::workbench::{
     RouteTransitionSource, SurfaceExecutionAvailability, SurfaceId, SurfaceRoute,
     design_system::WorkbenchIcon,
     feature_availability_data::{SPECIALIST_WORKSPACE_ROWS, SpecialistWorkspaceRow},
@@ -113,7 +113,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 fn execute_action(app: &mut RSpiceApp, action: BrowserAction) {
     match action {
         BrowserAction::Unavailable(surface) => {
-            let reason = match super::surface_availability(surface) {
+            let reason = match crate::workbench::surface_availability(surface) {
                 SurfaceExecutionAvailability::Unavailable { reason } => reason,
                 SurfaceExecutionAvailability::Available { .. } => {
                     "This specialist workspace is not currently available."

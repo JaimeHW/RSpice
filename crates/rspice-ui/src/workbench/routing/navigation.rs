@@ -1,6 +1,6 @@
 //! Durable, object-aware navigation state for canonical workbench surfaces.
 //!
-//! The seven [`Workspace`](super::state::Workspace) values remain a rendering
+//! The seven [`Workspace`](crate::workbench::state::Workspace) values remain a rendering
 //! projection for the primary shell. Navigation identity, browser history,
 //! source return, and recent-task history are owned here and always use stable
 //! [`SurfaceRoute`] values.
@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::{SurfaceId, SurfaceRoute};
+use crate::workbench::{SurfaceId, SurfaceRoute};
 
 const HISTORY_LIMIT: usize = 32;
 const RECENT_LIMIT: usize = 16;

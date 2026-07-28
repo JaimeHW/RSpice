@@ -10,10 +10,10 @@ use crate::simulation::plan::AnalysisKind;
 
 use super::{
     CapabilityWorkflowId,
-    availability::{SurfaceExecutionAvailability, surface_availability},
     state::{EngineeringProfile, InteroperabilityDomain, InteroperabilitySupportLevel, Workspace},
-    surface_catalog::{CanonicalTier, SurfaceId},
 };
+use super::routing::availability::{SurfaceExecutionAvailability, surface_availability};
+use super::routing::surface_catalog::{CanonicalTier, SurfaceId};
 
 /// Deliberate state vocabulary shared by the versioned readiness fixture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

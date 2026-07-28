@@ -9,7 +9,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::state::Workspace;
+use crate::workbench::state::Workspace;
 
 /// Canonical composition family for a GUI surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

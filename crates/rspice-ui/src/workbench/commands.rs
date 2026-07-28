@@ -2005,7 +2005,7 @@ impl Command {
                     );
                 }
             }
-            Self::JobsManager => super::jobs_manager::open(app),
+            Self::JobsManager => crate::workbench::tools::jobs_manager::open(app),
             Self::PreflightChecks => super::preflight::run(app),
             Self::SimulationOptions => {
                 crate::workbench::menu_bar::open_simulation_options(&mut app.state)
@@ -2173,7 +2173,7 @@ impl Command {
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
             Self::AccountOrganization => super::account_organization::open(app),
             Self::License => app.open_license_dialog(),
-            Self::SpecialistToolBrowser => super::specialist_tool_browser::open(app),
+            Self::SpecialistToolBrowser => crate::workbench::tools::specialist_tool_browser::open(app),
             Self::VisualizationStudio => crate::workbench::documents::visualization_studio::open(app),
             Self::ReportAuthoring => super::surfaces::report_authoring::open(app),
             Self::SaveReportDocument => super::surfaces::report_authoring::save_document(app),

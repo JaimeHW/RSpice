@@ -12,9 +12,9 @@ use crate::ui::widgets::{
 };
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::design_system::{WorkbenchIcon, elide_text};
-use super::state::NotificationFilter;
-use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use crate::workbench::design_system::{WorkbenchIcon, elide_text};
+use crate::workbench::state::NotificationFilter;
+use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const TOOLBAR_MIN_HEIGHT: f32 = 41.0;
 const TOOLBAR_PADDING_X: i8 = 10;
@@ -39,7 +39,7 @@ const FOOTER_ACTIVITY_COPY: &str =
     "Simulation, file, validation, and export activity is retained for this application session.";
 const LARGE_TARGET_MAX_WIDTH: f32 = 820.0;
 
-pub(super) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     let route_owned =
         app.state.workbench.current_route().surface_id() == SurfaceId::NotificationCenter;
     if !app.state.workbench.notification_center_open && !route_owned {

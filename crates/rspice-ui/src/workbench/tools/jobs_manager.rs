@@ -24,7 +24,7 @@ use crate::ui::{
 };
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::{RouteTransitionSource, SurfaceId, SurfaceRoute, commands::Command};
+use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute, commands::Command};
 
 const DESCRIPTION: &str = "Review active execution, retained run history, immutable run authority, qualified targets, and exact run-manifest exports.";
 const TABLE_MIN_WIDTH: f32 = 800.0;
@@ -547,15 +547,15 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
         .inner_margin(Margin::same(0))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            super::design_system::property_card(ui, "Execution target", |ui| {
-                super::design_system::property_row_toned(ui, "Readiness", "Ready", t.color.ok);
-                super::design_system::property_row(ui, "Runtime", snapshot.current_target.label());
-                super::design_system::property_row(
+            crate::workbench::design_system::property_card(ui, "Execution target", |ui| {
+                crate::workbench::design_system::property_row_toned(ui, "Readiness", "Ready", t.color.ok);
+                crate::workbench::design_system::property_row(ui, "Runtime", snapshot.current_target.label());
+                crate::workbench::design_system::property_row(
                     ui,
                     "Parallel slots",
                     "1 qualified analysis slot",
                 );
-                super::design_system::property_row(
+                crate::workbench::design_system::property_row(
                     ui,
                     "Memory budget",
                     if cfg!(target_arch = "wasm32") {
@@ -564,43 +564,43 @@ fn render_inspector(ui: &mut Ui, snapshot: &JobsSnapshot) {
                         "Process managed"
                     },
                 );
-                super::design_system::property_row(
+                crate::workbench::design_system::property_row(
                     ui,
                     "Failure policy",
                     "Exact per-analysis outcome",
                 );
             });
-            super::design_system::property_card(ui, "Selected run manifest", |ui| {
+            crate::workbench::design_system::property_card(ui, "Selected run manifest", |ui| {
                 if let Some(row) = snapshot.selected() {
-                    super::design_system::property_row(
+                    crate::workbench::design_system::property_row(
                         ui,
                         "Job ID",
                         row.job_id.as_deref().unwrap_or("Not retained (legacy run)"),
                     );
-                    super::design_system::property_row(
+                    crate::workbench::design_system::property_row(
                         ui,
                         "Stable run ID",
                         &row.run_id.to_string(),
                     );
-                    super::design_system::property_row(ui, "Input revision", &row.source_revision);
-                    super::design_system::property_row(
+                    crate::workbench::design_system::property_row(ui, "Input revision", &row.source_revision);
+                    crate::workbench::design_system::property_row(
                         ui,
                         "Analyses",
                         &row.analysis_count.to_string(),
                     );
-                    super::design_system::property_row(ui, "Run-set ID", &row.run_set_id);
-                    super::design_system::property_row(ui, "Tasks", &row.task_count.to_string());
-                    super::design_system::property_row_toned(
+                    crate::workbench::design_system::property_row(ui, "Run-set ID", &row.run_set_id);
+                    crate::workbench::design_system::property_row(ui, "Tasks", &row.task_count.to_string());
+                    crate::workbench::design_system::property_row_toned(
                         ui,
                         "Status",
                         &row.status,
                         row.tone.color(&t),
                     );
                 } else {
-                    super::design_system::property_row(ui, "Status", "No retained run selected");
+                    crate::workbench::design_system::property_row(ui, "Status", "No retained run selected");
                 }
             });
-            super::design_system::property_card(ui, "Execution targets", |ui| {
+            crate::workbench::design_system::property_card(ui, "Execution targets", |ui| {
                 target_row(
                     ui,
                     snapshot.current_target.label(),
@@ -655,9 +655,9 @@ fn target_row(ui: &mut Ui, label: &str, status: &str, selected: bool) {
         .x;
     let (label_rect, status_rect) = trailing_text_regions(rect, 22.0, 9.0, status_desired);
     let visible_label =
-        super::design_system::elide_text(ui, label, &label_font, label_rect.width());
+        crate::workbench::design_system::elide_text(ui, label, &label_font, label_rect.width());
     let visible_status =
-        super::design_system::elide_text(ui, status, &status_font, status_rect.width());
+        crate::workbench::design_system::elide_text(ui, status, &status_font, status_rect.width());
     ui.painter().with_clip_rect(label_rect).text(
         label_rect.left_center(),
         Align2::LEFT_CENTER,
@@ -770,9 +770,9 @@ fn section_head(ui: &mut Ui, title: &str, status: &str, tone: Color32) {
         .x;
     let (title_rect, status_rect) = trailing_text_regions(rect, 10.0, 10.0, status_desired);
     let visible_title =
-        super::design_system::elide_text(ui, title, &title_font, title_rect.width());
+        crate::workbench::design_system::elide_text(ui, title, &title_font, title_rect.width());
     let visible_status =
-        super::design_system::elide_text(ui, status, &status_font, status_rect.width());
+        crate::workbench::design_system::elide_text(ui, status, &status_font, status_rect.width());
     ui.painter().with_clip_rect(title_rect).text(
         title_rect.left_center(),
         Align2::LEFT_CENTER,

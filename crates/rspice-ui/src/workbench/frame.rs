@@ -161,9 +161,9 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     } else if !launcher_route_active && app.state.workbench.project_launcher_open {
         app.state.workbench.project_launcher_open = false;
     }
-    project_launcher::show(ctx, app);
+    tools::project_launcher::show(ctx, app);
     preflight::show(ctx, app);
-    notification_center::show(ctx, app);
+    tools::notification_center::show(ctx, app);
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
     if std::mem::take(&mut app.state.ui.export_csv_requested) {
@@ -323,8 +323,8 @@ pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, ti
 /// retained underneath and can be restored on Close.
 pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
     account_organization::show(ctx, app);
-    jobs_manager::show(ctx, app);
-    specialist_tool_browser::show(ctx, app);
+    tools::jobs_manager::show(ctx, app);
+    tools::specialist_tool_browser::show(ctx, app);
     feature_availability::show(ctx, app);
 }
 

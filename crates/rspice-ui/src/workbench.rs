@@ -27,14 +27,14 @@
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/module_layering.rs`, not by this file.
+pub(crate) mod routing;
+pub(crate) mod tools;
 pub(crate) mod workflows;
 pub(crate) mod lifecycle;
 pub(crate) mod documents;
 pub(crate) mod account_organization;
 pub(crate) mod app;
-pub(crate) mod availability;
 pub(crate) mod browser;
-pub(crate) mod calculator_tool;
 pub(crate) mod chrome;
 pub(crate) mod commands;
 mod cross_probe;
@@ -45,29 +45,22 @@ mod feature_availability;
 pub(crate) mod feature_availability_data;
 pub(crate) mod frame;
 pub(crate) mod hardcopy_adapters;
-mod jobs_manager;
 mod layout;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
-pub(crate) mod navigation;
-mod notification_center;
 pub(crate) mod panels;
 pub(crate) mod platform;
 mod preferences;
 mod preflight;
-mod project_launcher;
 pub(crate) mod shortcut_artifacts;
 pub(crate) mod shortcut_library_persistence;
 pub(crate) mod shortcut_profile_workflow;
 pub(crate) mod shortcuts;
 pub(crate) mod simulation_analysis_tabs;
-mod specialist_tool_browser;
 pub(crate) mod state;
-pub(crate) mod surface_catalog;
-pub(crate) mod surface_route;
 mod surfaces;
 
-pub use availability::{
+pub use routing::availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
 };
 pub use workflows::capability_workflow::{
@@ -84,7 +77,7 @@ pub use documents::model_editor::{
     ModelDefinitionDelta, ModelEditorDraft, ModelEditorSection, ModelEditorState,
     ModelFieldDiagnostic, ModelParameterDraft, ModelParameterKind, ModelValidationEvidence,
 };
-pub use navigation::{
+pub use routing::navigation::{
     BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
 };
 pub use preferences::{
@@ -110,11 +103,11 @@ pub use shortcuts::{
     ShortcutStroke, SingleKeyCanvasPolicy, shortcut_context_precedence_rank,
 };
 pub use state::{EngineeringProfile, WorkbenchState};
-pub use surface_catalog::{
+pub use routing::surface_catalog::{
     CanonicalTier, NonPrimarySurface, ReleaseStatus, SurfaceArchetype, SurfaceId,
     SurfaceIdParseError, SurfaceMetadata,
 };
-pub use surface_route::{SurfaceRoute, SurfaceRouteParseError};
+pub use routing::surface_route::{SurfaceRoute, SurfaceRouteParseError};
 pub use lifecycle::window_session::{
     ApplicationWindowBounds, ApplicationWindowId, ApplicationWindowState, WindowSessionError,
     WindowSessionRegistry,
