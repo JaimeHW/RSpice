@@ -29,15 +29,6 @@ impl NyquistPoint {
         }
     }
 
-    /// Create from magnitude and phase
-    pub fn from_polar(frequency: f64, magnitude: f64, phase_rad: f64) -> Self {
-        Self {
-            frequency,
-            real: magnitude * phase_rad.cos(),
-            imag: magnitude * phase_rad.sin(),
-        }
-    }
-
     /// Magnitude
     pub fn magnitude(&self) -> f64 {
         (self.real * self.real + self.imag * self.imag).sqrt()
@@ -73,32 +64,11 @@ pub struct NyquistData {
 }
 
 impl NyquistData {
-    /// Create new empty data
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            points: Vec::new(),
-        }
-    }
-
     /// Create from frequency, real, imag arrays
     pub fn from_arrays(name: &str, freq: &[f64], real: &[f64], imag: &[f64]) -> Self {
         let n = freq.len().min(real.len()).min(imag.len());
         let points: Vec<NyquistPoint> = (0..n)
             .map(|i| NyquistPoint::new(freq[i], real[i], imag[i]))
-            .collect();
-
-        Self {
-            name: name.to_string(),
-            points,
-        }
-    }
-
-    /// Create from Bode data (frequency, magnitude, phase_rad)
-    pub fn from_bode(name: &str, freq: &[f64], mag: &[f64], phase: &[f64]) -> Self {
-        let n = freq.len().min(mag.len()).min(phase.len());
-        let points: Vec<NyquistPoint> = (0..n)
-            .map(|i| NyquistPoint::from_polar(freq[i], mag[i], phase[i]))
             .collect();
 
         Self {
@@ -115,41 +85,6 @@ impl NyquistData {
     /// Is empty
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
-    }
-
-    /// Add a point
-    pub fn add_point(&mut self, point: NyquistPoint) {
-        self.points.push(point);
-    }
-
-    /// Frequency range
-    pub fn frequency_range(&self) -> Option<(f64, f64)> {
-        if self.points.is_empty() {
-            return None;
-        }
-        let min = self.points.first()?.frequency;
-        let max = self.points.last()?.frequency;
-        Some((min, max))
-    }
-
-    /// Real axis range
-    pub fn real_range(&self) -> Option<(f64, f64)> {
-        if self.points.is_empty() {
-            return None;
-        }
-        let min = self.points.iter().map(|p| p.real).fold(f64::MAX, f64::min);
-        let max = self.points.iter().map(|p| p.real).fold(f64::MIN, f64::max);
-        Some((min, max))
-    }
-
-    /// Imaginary axis range
-    pub fn imag_range(&self) -> Option<(f64, f64)> {
-        if self.points.is_empty() {
-            return None;
-        }
-        let min = self.points.iter().map(|p| p.imag).fold(f64::MAX, f64::min);
-        let max = self.points.iter().map(|p| p.imag).fold(f64::MIN, f64::max);
-        Some((min, max))
     }
 
     /// Minimum distance from critical point (-1, 0)
@@ -196,10 +131,6 @@ impl NyquistData {
     }
 
     /// Check if system is stable (no encirclement of -1,0 for open-loop stable)
-    pub fn is_stable_open_loop(&self) -> bool {
-        self.count_encirclements() == 0
-    }
-
     /// Gain margin (at phase = -180°)
     pub fn gain_margin(&self) -> Option<f64> {
         // Find where curve crosses negative real axis (imag ≈ 0, real < 0)
