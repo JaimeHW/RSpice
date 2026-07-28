@@ -56,7 +56,7 @@ pub(super) fn workflow_purpose_line(ui: &mut Ui, purpose: &str) {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 let (icon_rect, icon_response) =
                     ui.allocate_exact_size(vec2(15.0, 15.0), Sense::hover());
-                super::super::design_system::WorkbenchIcon::Info.paint(
+                crate::workbench::design_system::WorkbenchIcon::Info.paint(
                     ui.painter(),
                     Rect::from_center_size(icon_rect.center(), vec2(13.0, 13.0)),
                     t.color.info,
