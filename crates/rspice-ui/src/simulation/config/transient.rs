@@ -5,8 +5,6 @@
 // Transient Analysis Configuration
 //=============================================================================
 
-use crate::simulation::dialog::TransientConfig;
-
 /// Transient analysis configuration
 #[derive(Debug, Clone)]
 pub struct TransientAnalysisConfig {
@@ -87,14 +85,3 @@ impl TransientAnalysisConfig {
     }
 }
 
-impl From<TransientConfig> for TransientAnalysisConfig {
-    fn from(cfg: TransientConfig) -> Self {
-        Self {
-            stop_time: cfg.stop_time,
-            step_time: cfg.max_step.unwrap_or(cfg.stop_time / 100.0),
-            start_time: cfg.start_time,
-            max_timestep: cfg.max_step,
-            uic: cfg.uic,
-        }
-    }
-}

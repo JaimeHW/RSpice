@@ -3,8 +3,6 @@
 // AC Analysis Configuration
 //=============================================================================
 
-use crate::simulation::dialog::AcConfig;
-
 /// AC sweep type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AcSweepType {
@@ -114,19 +112,3 @@ impl AcAnalysisConfig {
     }
 }
 
-impl From<AcConfig> for AcAnalysisConfig {
-    fn from(cfg: AcConfig) -> Self {
-        use crate::simulation::dialog::ac::FrequencySweep;
-        let sweep_type = match cfg.sweep_type {
-            FrequencySweep::Octave => AcSweepType::Octave,
-            FrequencySweep::Linear => AcSweepType::Linear,
-            FrequencySweep::Decade => AcSweepType::Decade,
-        };
-        Self {
-            sweep_type,
-            num_points: cfg.num_points as usize,
-            start_freq: cfg.start_freq,
-            stop_freq: cfg.stop_freq,
-        }
-    }
-}

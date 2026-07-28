@@ -14,11 +14,7 @@
 //! - **Post-Processing**: Fourier, Envelope
 
 // Core
-pub(crate) mod ac;
-pub(crate) mod dc;
-pub(crate) mod noise;
 pub(crate) mod op;
-pub(crate) mod transient;
 
 // Transfer/Stability
 pub(crate) mod pz;
@@ -58,15 +54,16 @@ pub(crate) mod soa;
 // Options
 pub(crate) mod options;
 
-// Re-exports - Core
-pub use ac::AcConfig;
-pub use dc::DcConfig;
-pub use noise::NoiseConfig;
+// Re-exports - Core. Only the operating point keeps a config type here, and it
+// is the one the engine actually takes: `engine_bridge`, `execution`, and
+// `multi_run` all pass `OpConfig` itself. AC, DC, noise, and transient had a
+// second config apiece in this module -- their own `to_spice`, `validate`, and
+// `total_points`, reachable from nothing but a `From` impl that nobody called.
+// Execution takes the `simulation::config` types, so those four are gone.
 pub use op::{
     OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpDialogState, OpHomotopy, OpInitialGuess,
     OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
 };
-pub use transient::TransientConfig;
 
 // Re-exports. Each analysis re-exports the dialog state its panel owns. The
 // matching `*Config` types are deliberately absent: a dialog's config is its

@@ -3,7 +3,6 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use super::AcSweepType;
-use crate::simulation::dialog::NoiseConfig;
 
 /// Sweep mode exposed by the Simulation Studio noise form.
 ///
@@ -475,31 +474,6 @@ fn is_single_spice_node_token(value: &str) -> bool {
         expected_start = token.span.end;
     }
     expected_start == value.len()
-}
-
-impl From<NoiseConfig> for NoiseAnalysisConfig {
-    fn from(cfg: NoiseConfig) -> Self {
-        use crate::simulation::dialog::ac::FrequencySweep;
-        let sweep_type = match cfg.sweep_type {
-            FrequencySweep::Octave => AcSweepType::Octave,
-            FrequencySweep::Linear => AcSweepType::Linear,
-            FrequencySweep::Decade => AcSweepType::Decade,
-        };
-        Self {
-            output_node: cfg.output_node,
-            reference_node: cfg.reference_node,
-            input_source: cfg.input_source,
-            sweep_type,
-            num_points: cfg.num_points as usize,
-            start_freq: cfg.start_freq,
-            stop_freq: cfg.stop_freq,
-            explicit_frequencies: None,
-            data_table_name: None,
-            contribution_detail: NoiseContributionDetail::Top50,
-            integration_mode: NoiseIntegrationMode::Enabled,
-            temperature_kelvin: rspice_core::constants::TEMP_REFERENCE,
-        }
-    }
 }
 
 #[cfg(test)]

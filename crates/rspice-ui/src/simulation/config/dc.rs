@@ -4,8 +4,6 @@
 // DC Sweep Configuration
 //=============================================================================
 
-use crate::simulation::dialog::DcConfig;
-
 /// DC sweep analysis configuration
 #[derive(Debug, Clone)]
 pub struct DcSweepConfig {
@@ -104,30 +102,5 @@ impl DcSweepConfig {
             return 0;
         }
         ((self.stop - self.start) / self.step).abs() as usize + 1
-    }
-}
-
-impl From<DcConfig> for DcSweepConfig {
-    fn from(cfg: DcConfig) -> Self {
-        let (source2, start2, stop2, step2) = if let Some(src2) = cfg.source2 {
-            (
-                Some(src2.name),
-                Some(src2.start),
-                Some(src2.stop),
-                Some(src2.step),
-            )
-        } else {
-            (None, None, None, None)
-        };
-        Self {
-            source: cfg.source1.name,
-            start: cfg.source1.start,
-            stop: cfg.source1.stop,
-            step: cfg.source1.step,
-            source2,
-            start2,
-            stop2,
-            step2,
-        }
     }
 }
