@@ -1,21 +1,13 @@
 //! Whole-corpus generation: discover, compile, emit, write, manifest.
 //!
 //! The orchestration layer behind `rspice-veriloga-gen`. It walks a model
-//! tree, compiles each module to canonical IR, emits a device through the best
-//! available backend tier, writes the result, and records what happened in
+//! tree, compiles each module to canonical IR, emits a device through the
+//! canonical CFG emitter, writes the result, and records what happened in
 //! `manifest.txt`.
 //!
-//! Two properties matter more than speed here. Generation is *complete*: a
-//! full regeneration rewrites every device plus `registry.rs` and the
-//! manifest, which is why subset generation is a separate entry point that
-//! refuses to touch either. And it is *accountable*: every device that could
-//! not take the scalar backend surfaces a [`BuiltinBackendFallbackReason`],
-//! and `REQUIRE_SCALAR_BUILTINS_ENV` promotes those to errors so a silent
-//! regression off the fast tier cannot land.
-//!
-//! Both of those describe the tier cascade, and the corpus no longer goes
-//! through it: [`builtin_transpiler`] selects the canonical CFG emitter
-//! outright.
+//! Generation is *complete*: a full regeneration rewrites every device plus
+//! `registry.rs` and the manifest, which is why subset generation is a
+//! separate entry point that refuses to touch either.
 
 use std::collections::VecDeque;
 use std::env;
@@ -31,7 +23,7 @@ use crate::{CompilerOptions, VerilogACompiler};
 use super::{
     GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION, GeneratedBuiltinManifest,
     GeneratedBuiltinManifestDevice, GeneratedBuiltinManifestFile,
-    GeneratedBuiltinWorkspaceResources, GeneratedRustDevice, RustBackendSelection, RustTranspiler,
+    GeneratedBuiltinWorkspaceResources, GeneratedRustDevice, RustTranspiler,
     VERILOGA_DISCOVERY_SKIP_MARKER, VerilogACompileProfile, VerilogASourceCandidate,
     cleanup_stale_generated_device_folders, discover_veriloga_sources,
     parse_generated_builtin_manifest, render_generated_builtin_manifest,
@@ -42,7 +34,6 @@ type BuiltinResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub const GENERATED_BUILTIN_MANIFEST_FILE_NAME: &str = "manifest.txt";
 pub const REGENERATE_BUILTINS_COMMAND: &str = "cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins";
-pub const REQUIRE_SCALAR_BUILTINS_ENV: &str = "RSPICE_RUST_BACKEND_REQUIRE_SCALAR_BUILTINS";
 
 const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "../../Cargo.toml",
@@ -70,39 +61,19 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/zfilter.rs",
 ];
 
+/// What a full regeneration produced.
+///
+/// The manifest is the whole result. This used to also carry per-tier counts
+/// and a list of fallbacks; with one emitter there is nothing to count and
+/// nothing to fall back to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltinGenerationReport {
     pub manifest: GeneratedBuiltinManifest,
-    pub backend_counts: BuiltinBackendSelectionCounts,
-    pub fallback_reasons: Vec<BuiltinBackendFallbackReason>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltinSubsetGenerationReport {
     pub device_count: usize,
-    pub backend_counts: BuiltinBackendSelectionCounts,
-    pub fallback_reasons: Vec<BuiltinBackendFallbackReason>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BuiltinBackendFallbackReason {
-    pub source: PathBuf,
-    pub module: String,
-    pub backend: RustBackendSelection,
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BuiltinBackendSelectionCounts {
-    pub canonical: usize,
-}
-
-impl BuiltinBackendSelectionCounts {
-    fn record(&mut self, selection: RustBackendSelection) {
-        match selection {
-            RustBackendSelection::CanonicalCfg => self.canonical += 1,
-        }
-    }
 }
 
 pub fn regenerate_generated_builtins(
@@ -139,7 +110,7 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
 
     let source_tree_digest = tree_digest(model_root, false)?;
     let generator_digest = generator_digest(generator_root, false)?;
-    let (devices, backend_counts, fallback_reasons, manifest_devices) =
+    let (devices, manifest_devices) =
         generate_devices_with_stack(model_root.to_path_buf(), None, progress, jobs)?;
     if devices.is_empty() {
         return Err(format!(
@@ -162,11 +133,7 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
     )?;
     write_generated_manifest(generated_root, &manifest)?;
 
-    Ok(BuiltinGenerationReport {
-        manifest,
-        backend_counts,
-        fallback_reasons,
-    })
+    Ok(BuiltinGenerationReport { manifest })
 }
 
 pub fn generate_generated_builtin_subset_with_progress(
@@ -193,7 +160,7 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
 ) -> BuiltinResult<BuiltinSubsetGenerationReport> {
     validate_model_root(model_root)?;
 
-    let (devices, backend_counts, fallback_reasons, _) = generate_devices_with_stack(
+    let (devices, _) = generate_devices_with_stack(
         model_root.to_path_buf(),
         Some(filter.to_string()),
         progress,
@@ -213,8 +180,6 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
 
     Ok(BuiltinSubsetGenerationReport {
         device_count: devices.len(),
-        backend_counts,
-        fallback_reasons,
     })
 }
 
@@ -654,12 +619,7 @@ fn generate_devices(
     filter: Option<&str>,
     progress: bool,
     requested_jobs: Option<usize>,
-) -> BuiltinResult<(
-    Vec<GeneratedRustDevice>,
-    BuiltinBackendSelectionCounts,
-    Vec<BuiltinBackendFallbackReason>,
-    Vec<GeneratedBuiltinManifestDevice>,
-)> {
+) -> BuiltinResult<(Vec<GeneratedRustDevice>, Vec<GeneratedBuiltinManifestDevice>)> {
     let model_root = model_root
         .canonicalize()
         .unwrap_or_else(|_| model_root.to_path_buf());
@@ -684,22 +644,13 @@ fn generate_devices(
     };
 
     let mut devices = Vec::with_capacity(generated.len());
-    let mut backend_counts = BuiltinBackendSelectionCounts::default();
-    let mut fallback_reasons = Vec::new();
     let mut manifest_devices = Vec::with_capacity(generated.len());
     for generated in generated {
-        backend_counts.record(generated.backend);
-        let fallback_reason = generated
-            .fallback_reason
-            .as_ref()
-            .map(|reason| reason.reason.clone());
         let workspace = generated_workspace_resources(&generated.device)?;
         manifest_devices.push(GeneratedBuiltinManifestDevice {
             module_name: generated.device.module_name.clone(),
             public_model_name: generated.device.public_model_name.clone(),
             folder_name: generated.device.folder_name.clone(),
-            backend: generated.backend,
-            fallback_reason,
             file_count: generated.device.files.len(),
             source_bytes: generated
                 .device
@@ -709,9 +660,6 @@ fn generate_devices(
                 .sum(),
             workspace,
         });
-        if let Some(reason) = generated.fallback_reason {
-            fallback_reasons.push(reason);
-        }
         devices.push(generated.device);
     }
 
@@ -725,7 +673,7 @@ fn generate_devices(
             .cmp(&right.public_model_name)
             .then_with(|| left.folder_name.cmp(&right.folder_name))
     });
-    Ok((devices, backend_counts, fallback_reasons, manifest_devices))
+    Ok((devices, manifest_devices))
 }
 
 fn generated_workspace_resources(
@@ -940,20 +888,9 @@ fn dense_reactive_workspace_payload_bytes(
         + 32
 }
 
-/// The backend every shipped built-in is emitted through.
-///
-/// The canonical CFG emitter, selected outright rather than through `Auto`.
-/// It carries all 42 corpus models, so the tier cascade has nothing left to
-/// catch, and a cascade that can still catch something is a cascade that can
-/// silently downgrade a model back onto a tier this rebuild exists to remove.
-///
-/// `Auto` and the tiers behind it are left in place rather than rewired,
-/// because Phase 6 deletes them along with `RustBackendSelection` itself.
-/// Pointing them at the canonical emitter first would be work done only to be
-/// deleted; taking their last production caller away is what makes that
-/// deletion a removal rather than a migration.
+/// The transpiler every shipped built-in is emitted through.
 fn builtin_transpiler() -> RustTranspiler {
-    RustTranspiler::new_canonical(Default::default())
+    RustTranspiler::new(Default::default())
 }
 
 fn generate_devices_sequential(
@@ -1124,42 +1061,21 @@ fn generate_device_work_item(
             ),
         );
     }
-    let report = transpiler.transpile_with_report(&compiled.artifact)?;
-    let fallback_reason =
-        report
-            .fallback_reason
-            .as_ref()
-            .map(|reason| BuiltinBackendFallbackReason {
-                source: relative_source.clone(),
-                module: item.module.clone(),
-                backend: report.backend,
-                reason: reason.clone(),
-            });
+    let device = transpiler.transpile(&compiled.artifact)?;
     if progress {
-        let fallback = report
-            .fallback_reason
-            .as_ref()
-            .map(|reason| format!(", fallback: {reason}"))
-            .unwrap_or_default();
         log_generation_progress(
             progress_lock,
             format!(
-                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:?}{fallback}, transpile {:.2?}, total {:.2?})",
+                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} (transpile {:.2?}, total {:.2?})",
                 relative_source.display(),
                 item.module,
-                report.backend,
                 transpile_started.elapsed(),
                 started.elapsed()
             ),
         );
     }
 
-    Ok(GeneratedBuiltinModule {
-        index,
-        device: report.device,
-        backend: report.backend,
-        fallback_reason,
-    })
+    Ok(GeneratedBuiltinModule { index, device })
 }
 
 fn log_generation_progress(progress_lock: Option<&Mutex<()>>, message: String) {
@@ -1217,8 +1133,6 @@ fn validate_requested_generator_jobs(requested: Option<usize>) -> BuiltinResult<
 struct GeneratedBuiltinModule {
     index: usize,
     device: GeneratedRustDevice,
-    backend: RustBackendSelection,
-    fallback_reason: Option<BuiltinBackendFallbackReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1286,12 +1200,7 @@ fn generate_devices_with_stack(
     progress: bool,
     jobs: Option<usize>,
 ) -> Result<
-    (
-        Vec<GeneratedRustDevice>,
-        BuiltinBackendSelectionCounts,
-        Vec<BuiltinBackendFallbackReason>,
-        Vec<GeneratedBuiltinManifestDevice>,
-    ),
+    (Vec<GeneratedRustDevice>, Vec<GeneratedBuiltinManifestDevice>),
     Box<dyn std::error::Error + Send + Sync>,
 > {
     std::thread::Builder::new()
@@ -1398,8 +1307,6 @@ mod tests {
                 module_name: "fixture".to_string(),
                 public_model_name: "fixture".to_string(),
                 folder_name: "fixture__fixture__12345678".to_string(),
-                backend: RustBackendSelection::CanonicalCfg,
-                fallback_reason: None,
                 file_count: 1,
                 source_bytes: 3,
                 workspace: Default::default(),

@@ -239,10 +239,12 @@ regeneration command when either has moved.
 
 Two markers steer discovery inside the model tree: a `.rspice-veriloga-skip`
 file excludes a directory, and a `.rspice-veriloga-profile` file supplies
-the `defines`/`undefines` a source needs to preprocess. Setting
-`RSPICE_RUST_BACKEND_REQUIRE_SCALAR_BUILTINS=1` turns any fallback off the
-direct scalar backend into a hard error, which is how a regression away
-from the fastest backend tier gets caught.
+the `defines`/`undefines` a source needs to preprocess.
+
+There is one emitter and no tier to select. A model either lowers through the
+canonical CFG backend or generation fails naming the construct that stopped it;
+there is no fallback to regress onto and no environment variable that changes
+which emitter runs.
 
 ## Building and testing
 
@@ -250,7 +252,6 @@ from the fastest backend tier gets caught.
 cargo build -p rspice-veriloga
 cargo test  -p rspice-veriloga                      # interpreter paths
 cargo test  -p rspice-veriloga --features native    # + native JIT contract
-cargo test  -p rspice-veriloga --test rust_backend  # generated-Rust backend
 ```
 
 The integration tests under `tests/` group into five bands.

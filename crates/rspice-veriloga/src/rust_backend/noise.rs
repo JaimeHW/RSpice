@@ -1033,8 +1033,6 @@ fn unsupported(artifact: &CanonicalIrArtifact, feature: &str) -> RustBackendErro
 }
 
 fn noise_variables(artifact: &CanonicalIrArtifact) -> HashMap<String, LoweredVariable> {
-    let node_zeros = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-    let branch_zeros = vec!["0.0".to_string(); artifact.mir.branch_unknowns.len()];
     artifact
         .hir
         .variables
@@ -1046,12 +1044,6 @@ fn noise_variables(artifact: &CanonicalIrArtifact) -> HashMap<String, LoweredVar
                 LoweredVariable {
                     value: format!("w[{index}]"),
                     condition: None,
-                    derivatives: node_zeros.clone(),
-                    branch_derivatives: branch_zeros.clone(),
-                    has_reactive: false,
-                    reactive_value: "0.0".to_string(),
-                    reactive_derivatives: node_zeros.clone(),
-                    reactive_branch_derivatives: branch_zeros.clone(),
                 },
             )
         })

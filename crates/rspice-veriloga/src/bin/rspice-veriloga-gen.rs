@@ -22,7 +22,7 @@ use std::env;
 use std::path::PathBuf;
 
 use rspice_veriloga::rust_backend::{
-    BuiltinBackendFallbackReason, generate_generated_builtin_subset_with_progress_and_jobs,
+    generate_generated_builtin_subset_with_progress_and_jobs,
     regenerate_generated_builtins_with_progress_and_jobs, validate_generated_builtins,
 };
 
@@ -78,11 +78,6 @@ fn run() -> CommandResult<()> {
                 options.generated_root.display()
             );
             println!(
-                "backend selection: canonical-cfg={}",
-                report.backend_counts.canonical
-            );
-            print_fallback_reasons(&report.fallback_reasons);
-            println!(
                 "manifest: source_tree_digest={}, generator_digest={}",
                 report.manifest.source_tree_digest, report.manifest.generator_digest
             );
@@ -104,11 +99,6 @@ fn run() -> CommandResult<()> {
                 options.generated_root.display()
             );
             println!("[partial output: registry.rs and manifest.txt were not rewritten]");
-            println!(
-                "backend selection: canonical-cfg={}",
-                report.backend_counts.canonical
-            );
-            print_fallback_reasons(&report.fallback_reasons);
         }
         Command::CheckBuiltins => {
             if options.filter.is_some() {
@@ -132,21 +122,6 @@ fn run() -> CommandResult<()> {
     Ok(())
 }
 
-fn print_fallback_reasons(reasons: &[BuiltinBackendFallbackReason]) {
-    if reasons.is_empty() {
-        return;
-    }
-    println!("fallback reasons:");
-    for reason in reasons {
-        println!(
-            "  {} :: {} -> {:?}: {}",
-            reason.source.display(),
-            reason.module,
-            reason.backend,
-            reason.reason
-        );
-    }
-}
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Options>> {
     let mut args = args.into_iter();

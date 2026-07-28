@@ -3,15 +3,16 @@
 //! The manifest is the record `check-builtins` reads to decide whether the
 //! checked-in output is current: it pairs a digest of the model sources with
 //! the generator's own source digest, so a change to either side is detected.
-//! It also lists every emitted file and the backend tier each device took,
-//! which is what makes a regression off the scalar tier visible in review.
+//! It also lists every emitted file and what each device costs in workspace
+//! footprint, which is what makes a size regression visible in review.
 //!
 //! Rendering and parsing are both here and both exact — an unparseable
 //! manifest is treated as stale rather than guessed at.
 
-use super::RustBackendSelection;
-
-pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 3;
+/// Schema 4 dropped the per-device `backend` and `fallback_reason` fields.
+/// They recorded which of five emitter tiers wrote a device; there is one
+/// emitter now, so both were constants written 42 times.
+pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedBuiltinManifestFile {
@@ -25,8 +26,6 @@ pub struct GeneratedBuiltinManifestDevice {
     pub module_name: String,
     pub public_model_name: String,
     pub folder_name: String,
-    pub backend: RustBackendSelection,
-    pub fallback_reason: Option<String>,
     pub file_count: usize,
     pub source_bytes: u64,
     pub workspace: GeneratedBuiltinWorkspaceResources,

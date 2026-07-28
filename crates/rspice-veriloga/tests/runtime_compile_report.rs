@@ -90,13 +90,12 @@ fn target_matrix_is_exhaustive_and_truthful() {
     assert_eq!(rust.is_available(), report.generated_rust.is_some());
     if let Some(generated) = &report.generated_rust {
         assert_eq!(
-            generated.device.source_digest,
+            generated.source_digest,
             report.canonical_ir.metadata.source_digest
         );
-        assert!(!generated.device.files.is_empty());
+        assert!(!generated.files.is_empty());
         assert!(
             generated
-                .device
                 .files
                 .iter()
                 .all(|file| !file.relative_path.is_empty() && !file.contents.is_empty())

@@ -1,76 +1,38 @@
-//! Lowering canonical IR expressions to Rust expression text.
+//! Lowering canonical IR *values* to Rust expression text, for noise.
 //!
-//! Every emitter in this backend ultimately calls in here to turn an OptIR
-//! value into a Rust expression, together with the derivative lanes that value
-//! contributes to. A [`LoweredExpr`] therefore carries more than a string: it
-//! reports which scratch values and which state slots the expression needs, so
-//! the caller can declare them before use.
+//! This used to be the shared expression emitter for the whole backend, and it
+//! carried a derivative lane per node and per branch unknown alongside every
+//! value. The canonical CFG emitter took that job: it differentiates over the
+//! CFG, where a guard is a branch rather than a flattened product, and it does
+//! not call in here.
 //!
-//! Branch currents and `ddt` slots get dedicated handling because they are the
-//! two cases where an expression's value depends on solver state rather than
-//! on other emitted values.
+//! What remains is the one caller left — [`super::noise`], lowering PSDs, their
+//! exponents, and the conditions guarding them. Those are values; nothing in a
+//! noise block is differentiated. So a [`LoweredExpr`] is a value and the lines
+//! that bind it, and the derivative machinery that used to live here is gone
+//! rather than dormant.
+//!
+//! Branch currents still get dedicated handling, because a branch unknown is
+//! the one case where an expression's value comes from solver state rather than
+//! from another emitted value. `ddt` and `idt` are refused: a noise expression
+//! has no state table to bind a slot in.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::canonical_ir::{
-    CanonicalIrArtifact, ExprId, HirAnalogOperator, HirExprKind, MirBranchRef,
-};
+use crate::canonical_ir::{CanonicalIrArtifact, ExprId, HirAnalogOperator, HirExprKind};
 
-use super::{RustBackendError, sanitize_identifier};
+use super::RustBackendError;
 
 #[derive(Debug, Clone)]
 pub struct LoweredExpr {
     pub lines: Vec<String>,
     pub value: String,
-    pub derivatives: Vec<String>,
-    pub branch_derivatives: Vec<String>,
-    pub has_reactive: bool,
-    pub reactive_value: String,
-    pub reactive_derivatives: Vec<String>,
-    pub reactive_branch_derivatives: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct LoweredVariable {
     pub value: String,
     pub condition: Option<String>,
-    pub derivatives: Vec<String>,
-    pub branch_derivatives: Vec<String>,
-    pub has_reactive: bool,
-    pub reactive_value: String,
-    pub reactive_derivatives: Vec<String>,
-    pub reactive_branch_derivatives: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct DdtSlots {
-    slots: HashMap<ExprId, usize>,
-    idt_slots: HashMap<ExprId, usize>,
-}
-
-impl DdtSlots {
-    pub fn with_idt_slots(
-        slots: HashMap<ExprId, usize>,
-        idt_slots: HashMap<ExprId, usize>,
-    ) -> Self {
-        Self { slots, idt_slots }
-    }
-
-    pub fn len(&self) -> usize {
-        self.slots.len()
-    }
-
-    pub fn idt_len(&self) -> usize {
-        self.idt_slots.len()
-    }
-
-    pub(crate) fn slot_for(&self, expr: ExprId) -> Option<usize> {
-        self.slots.get(&expr).copied()
-    }
-
-    pub(crate) fn idt_slot_for(&self, expr: ExprId) -> Option<usize> {
-        self.idt_slots.get(&expr).copied()
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -101,78 +63,14 @@ pub(crate) fn branch_pair_key(pos: Option<usize>, neg: Option<usize>) -> String 
     format!("\u{0}branch-pair:{pos:?}:{neg:?}")
 }
 
-pub(crate) fn lower_equation_expr_with_branch_currents(
-    artifact: &CanonicalIrArtifact,
-    expr: ExprId,
-    prefix: &str,
-    parameter_fields: &HashMap<String, String>,
-    variables: &HashMap<String, LoweredVariable>,
-    ddt_slots: &DdtSlots,
-    branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
-) -> Result<LoweredExpr, RustBackendError> {
-    lower_expr_with_variables(
-        artifact,
-        expr,
-        prefix,
-        parameter_fields,
-        variables,
-        ddt_slots,
-        branch_currents,
-        branch_current_unknowns,
-        ExprMode::Transient,
-        DerivativeEmission::Materialize,
-    )
-}
-
-pub(crate) fn lower_assignment_expr_with_branch_currents(
-    artifact: &CanonicalIrArtifact,
-    expr: ExprId,
-    prefix: &str,
-    parameter_fields: &HashMap<String, String>,
-    variables: &HashMap<String, LoweredVariable>,
-    ddt_slots: &DdtSlots,
-    branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
-) -> Result<LoweredExpr, RustBackendError> {
-    lower_expr_with_variables(
-        artifact,
-        expr,
-        prefix,
-        parameter_fields,
-        variables,
-        ddt_slots,
-        branch_currents,
-        branch_current_unknowns,
-        ExprMode::Transient,
-        DerivativeEmission::Inline,
-    )
-}
-
-pub(crate) fn lower_value_assignment_expr_with_branch_currents(
-    artifact: &CanonicalIrArtifact,
-    expr: ExprId,
-    prefix: &str,
-    parameter_fields: &HashMap<String, String>,
-    variables: &HashMap<String, LoweredVariable>,
-    ddt_slots: &DdtSlots,
-    branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
-) -> Result<LoweredExpr, RustBackendError> {
-    lower_expr_with_variables(
-        artifact,
-        expr,
-        prefix,
-        parameter_fields,
-        variables,
-        ddt_slots,
-        branch_currents,
-        branch_current_unknowns,
-        ExprMode::Transient,
-        DerivativeEmission::None,
-    )
-}
-
+/// Lower one noise expression to straight-line Rust.
+///
+/// The only entry point into this emitter. Phase 6 deleted the five siblings
+/// it used to share `lower_expr_with_variables` with — equation, assignment,
+/// value-assignment and the two reactive forms — when the canonical CFG
+/// emitter took over every path that produced a derivative. What is left
+/// lowers a *value*: noise PSDs, their exponents, and the conditions guarding
+/// them. Nothing here differentiates anything.
 pub(crate) fn lower_noise_value_expr(
     artifact: &CanonicalIrArtifact,
     expr: ExprId,
@@ -181,90 +79,12 @@ pub(crate) fn lower_noise_value_expr(
     variables: &HashMap<String, LoweredVariable>,
     branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
 ) -> Result<LoweredExpr, RustBackendError> {
-    lower_expr_with_variables(
-        artifact,
-        expr,
-        prefix,
-        parameter_fields,
-        variables,
-        &DdtSlots::default(),
-        &HashMap::new(),
-        branch_current_unknowns,
-        ExprMode::Transient,
-        DerivativeEmission::None,
-    )
-}
-
-pub(crate) fn lower_reactive_expr_with_branch_currents(
-    artifact: &CanonicalIrArtifact,
-    expr: ExprId,
-    prefix: &str,
-    parameter_fields: &HashMap<String, String>,
-    variables: &HashMap<String, LoweredVariable>,
-    ddt_slots: &DdtSlots,
-    branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
-) -> Result<LoweredExpr, RustBackendError> {
-    lower_expr_with_variables(
-        artifact,
-        expr,
-        prefix,
-        parameter_fields,
-        variables,
-        ddt_slots,
-        branch_currents,
-        branch_current_unknowns,
-        ExprMode::Reactive,
-        DerivativeEmission::Materialize,
-    )
-}
-
-pub(crate) fn lower_reactive_assignment_expr_with_branch_currents(
-    artifact: &CanonicalIrArtifact,
-    expr: ExprId,
-    prefix: &str,
-    parameter_fields: &HashMap<String, String>,
-    variables: &HashMap<String, LoweredVariable>,
-    ddt_slots: &DdtSlots,
-    branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
-) -> Result<LoweredExpr, RustBackendError> {
-    lower_expr_with_variables(
-        artifact,
-        expr,
-        prefix,
-        parameter_fields,
-        variables,
-        ddt_slots,
-        branch_currents,
-        branch_current_unknowns,
-        ExprMode::Reactive,
-        DerivativeEmission::Inline,
-    )
-}
-
-fn lower_expr_with_variables(
-    artifact: &CanonicalIrArtifact,
-    expr: ExprId,
-    prefix: &str,
-    parameter_fields: &HashMap<String, String>,
-    variables: &HashMap<String, LoweredVariable>,
-    ddt_slots: &DdtSlots,
-    branch_currents: &HashMap<String, LoweredVariable>,
-    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
-    mode: ExprMode,
-    derivative_emission: DerivativeEmission,
-) -> Result<LoweredExpr, RustBackendError> {
     let mut emitter = ExprEmitter {
         artifact,
         prefix,
         parameter_fields,
         variables,
-        ddt_slots,
-        branch_currents,
         branch_current_unknowns,
-        mode,
-        derivative_emission,
         emitted: HashMap::new(),
         lines: Vec::new(),
     };
@@ -272,37 +92,12 @@ fn lower_expr_with_variables(
     Ok(LoweredExpr {
         lines: emitter.lines,
         value: value.value,
-        derivatives: value.derivatives,
-        branch_derivatives: value.branch_derivatives,
-        has_reactive: value.has_reactive,
-        reactive_value: value.reactive_value,
-        reactive_derivatives: value.reactive_derivatives,
-        reactive_branch_derivatives: value.reactive_branch_derivatives,
     })
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ExprMode {
-    Transient,
-    Reactive,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum DerivativeEmission {
-    Materialize,
-    Inline,
-    None,
 }
 
 #[derive(Debug, Clone)]
 struct ExprValue {
     value: String,
-    derivatives: Vec<String>,
-    branch_derivatives: Vec<String>,
-    has_reactive: bool,
-    reactive_value: String,
-    reactive_derivatives: Vec<String>,
-    reactive_branch_derivatives: Vec<String>,
 }
 
 struct ExprEmitter<'a> {
@@ -310,11 +105,7 @@ struct ExprEmitter<'a> {
     prefix: &'a str,
     parameter_fields: &'a HashMap<String, String>,
     variables: &'a HashMap<String, LoweredVariable>,
-    ddt_slots: &'a DdtSlots,
-    branch_currents: &'a HashMap<String, LoweredVariable>,
     branch_current_unknowns: &'a HashMap<String, BranchCurrentSlot>,
-    mode: ExprMode,
-    derivative_emission: DerivativeEmission,
     emitted: HashMap<ExprId, ExprValue>,
     lines: Vec<String>,
 }
@@ -331,8 +122,6 @@ impl ExprEmitter<'_> {
             .expressions
             .get(usize::from(id))
             .ok_or_else(|| self.internal(format!("expression {id} is outside MIR arena")))?;
-        let node_count = self.artifact.mir.nodes.len();
-        let branch_axis_count = branch_derivative_axis_count(self.branch_current_unknowns);
         let base = format!("{}_e{}", self.prefix, id.index());
 
         if let HirExprKind::Conditional {
@@ -483,601 +272,7 @@ impl ExprEmitter<'_> {
             }
         };
 
-        if matches!(self.derivative_emission, DerivativeEmission::None) {
-            let lowered = ExprValue {
-                value: value_expr,
-                derivatives: zero_derivatives(node_count),
-                branch_derivatives: zero_derivatives(branch_axis_count),
-                has_reactive: false,
-                reactive_value: "0.0".to_string(),
-                reactive_derivatives: zero_derivatives(node_count),
-                reactive_branch_derivatives: zero_derivatives(branch_axis_count),
-            };
-            self.emitted.insert(id, lowered.clone());
-            return Ok(lowered);
-        }
-
-        let derivatives = match &expression.kind {
-            HirExprKind::Number { .. } => zero_derivatives(node_count),
-            HirExprKind::Identifier { name } => {
-                if let Some(variable) = self.variables.get(name.as_str()) {
-                    variable.derivatives.clone()
-                } else {
-                    zero_derivatives(node_count)
-                }
-            }
-            HirExprKind::BranchAccess { access, pos, neg } => {
-                self.branch_access_derivatives(access.as_str(), pos.as_str(), neg.as_deref())?
-            }
-            HirExprKind::NamedBranchAccess { access, name } => {
-                if access.as_str() == "I" {
-                    if let Some(current) = self.branch_currents.get(name.as_str()) {
-                        current.derivatives.clone()
-                    } else if self.branch_current_unknowns.contains_key(name.as_str()) {
-                        zero_derivatives(node_count)
-                    } else if matches!(self.mode, ExprMode::Reactive) {
-                        zero_derivatives(node_count)
-                    } else {
-                        return Err(self.unsupported(format!(
-                            "named branch current access '{name}' before a current contribution is available"
-                        )));
-                    }
-                } else {
-                    let branch = self
-                        .artifact
-                        .mir
-                        .branches
-                        .iter()
-                        .find(|branch| branch.name.as_str() == name)
-                        .ok_or_else(|| {
-                            self.unsupported(format!("unknown named branch access '{name}'"))
-                        })?;
-                    self.branch_ref_derivatives(
-                        access,
-                        &MirBranchRef {
-                            label: branch.name.clone(),
-                            declared_name: Some(branch.name.clone()),
-                            pos_node: branch.pos_node,
-                            neg_node: branch.neg_node,
-                        },
-                    )?
-                }
-            }
-            HirExprKind::Unary { op, operand } => {
-                if op.as_str() == "Not" {
-                    zero_derivatives(node_count)
-                } else {
-                    let operand = self
-                        .emitted
-                        .get(operand)
-                        .expect("operand must be emitted before unary derivative");
-                    operand
-                        .derivatives
-                        .iter()
-                        .map(|derivative| {
-                            unary_value(op.as_str(), derivative)
-                                .map_err(|_| self.unsupported(format!("unary operator {op}")))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
-                }
-            }
-            HirExprKind::Binary { op, left, right } => {
-                if comparison_operator(op.as_str()).is_some()
-                    || op.as_str() == "And"
-                    || op.as_str() == "Or"
-                {
-                    zero_derivatives(node_count)
-                } else {
-                    let left = self
-                        .emitted
-                        .get(left)
-                        .expect("left operand must be emitted before binary derivative");
-                    let right = self
-                        .emitted
-                        .get(right)
-                        .expect("right operand must be emitted before binary derivative");
-                    binary_derivatives(op.as_str(), &value_expr, left, right)
-                        .map_err(|_| self.unsupported(format!("binary operator {op}")))?
-                }
-            }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                let condition = self.lower_condition(*condition)?;
-                let then_value = self
-                    .emitted
-                    .get(then_expr)
-                    .expect("then expression must be emitted before conditional derivative");
-                let else_value = self
-                    .emitted
-                    .get(else_expr)
-                    .expect("else expression must be emitted before conditional derivative");
-                then_value
-                    .derivatives
-                    .iter()
-                    .zip(&else_value.derivatives)
-                    .map(|(then_derivative, else_derivative)| {
-                        conditional_expr(&condition, then_derivative, else_derivative)
-                    })
-                    .collect()
-            }
-            HirExprKind::SystemFunction { name, args } => {
-                self.system_function_derivatives(name.as_str(), args.as_slice())?
-            }
-            HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
-                self.ddt_derivatives(id, args.as_slice())?
-            }
-            HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
-                let (expr, _) = self.idt_operands(args.as_slice())?;
-                self.idt_derivatives(expr)?
-            }
-            HirExprKind::Call { name, .. } if is_analysis_name(name.as_str()) => {
-                zero_derivatives(node_count)
-            }
-            HirExprKind::Call { name, .. } if is_ddx_name(name.as_str()) => {
-                zero_derivatives(node_count)
-            }
-            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
-                zero_derivatives(node_count)
-            }
-            HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
-                self.intrinsic_derivatives(name.as_str(), args.as_slice(), &value_expr)?
-            }
-            HirExprKind::NoiseSource { .. } => zero_derivatives(node_count),
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Ddt { expr, abstol },
-            } => {
-                if abstol.is_some() {
-                    return Err(self.unsupported("ddt abstol argument"));
-                }
-                self.ddt_derivatives(id, &[*expr])?
-            }
-            HirExprKind::AnalogOperator {
-                op:
-                    HirAnalogOperator::Idt {
-                        expr,
-                        assert,
-                        abstol,
-                        ..
-                    },
-            } => {
-                if assert.is_some() || abstol.is_some() {
-                    return Err(self.unsupported("idt assert/abstol argument"));
-                }
-                self.idt_derivatives(*expr)?
-            }
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Ddx { .. },
-            } => zero_derivatives(node_count),
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Limexp { expr },
-            } => {
-                let arg = self
-                    .emitted
-                    .get(expr)
-                    .expect("limexp operand must be emitted before derivative");
-                arg.derivatives
-                    .iter()
-                    .map(|d| mul_expr(&limexp_derivative_scale_expr(&arg.value), d))
-                    .collect()
-            }
-            _ => unreachable!("unsupported expression kinds returned earlier"),
-        };
-
-        let branch_derivatives = match &expression.kind {
-            HirExprKind::Number { .. } => zero_derivatives(branch_axis_count),
-            HirExprKind::Identifier { name } => {
-                if let Some(variable) = self.variables.get(name.as_str()) {
-                    variable.branch_derivatives.clone()
-                } else {
-                    zero_derivatives(branch_axis_count)
-                }
-            }
-            HirExprKind::BranchAccess { access, .. } => {
-                if access == "I" {
-                    if let HirExprKind::BranchAccess { pos, neg, .. } = &expression.kind
-                        && let Some(slot) =
-                            self.branch_current_slot_for_nodes(pos.as_str(), neg.as_deref())?
-                    {
-                        let mut derivatives = zero_derivatives(branch_axis_count);
-                        derivatives[slot.slot] = format_f64(slot.sign);
-                        derivatives
-                    } else {
-                        return Err(
-                            self.unsupported(format!("branch access '{access}' in expression"))
-                        );
-                    }
-                } else {
-                    zero_derivatives(branch_axis_count)
-                }
-            }
-            HirExprKind::NamedBranchAccess { access, name } => {
-                if access.as_str() == "I" {
-                    if let Some(current) = self.branch_currents.get(name.as_str()) {
-                        current.branch_derivatives.clone()
-                    } else if let Some(slot) = self.branch_current_unknowns.get(name.as_str()) {
-                        let mut derivatives = zero_derivatives(branch_axis_count);
-                        derivatives[slot.slot] = format_f64(slot.sign);
-                        derivatives
-                    } else if matches!(self.mode, ExprMode::Reactive) {
-                        zero_derivatives(branch_axis_count)
-                    } else {
-                        return Err(self.unsupported(format!(
-                            "named branch current access '{name}' before a current contribution is available"
-                        )));
-                    }
-                } else {
-                    zero_derivatives(branch_axis_count)
-                }
-            }
-            HirExprKind::Unary { op, operand } => {
-                if op.as_str() == "Not" {
-                    zero_derivatives(branch_axis_count)
-                } else {
-                    let operand = self
-                        .emitted
-                        .get(operand)
-                        .expect("operand must be emitted before unary branch derivative");
-                    operand
-                        .branch_derivatives
-                        .iter()
-                        .map(|derivative| {
-                            unary_value(op.as_str(), derivative)
-                                .map_err(|_| self.unsupported(format!("unary operator {op}")))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
-                }
-            }
-            HirExprKind::Binary { op, left, right } => {
-                if comparison_operator(op.as_str()).is_some()
-                    || op.as_str() == "And"
-                    || op.as_str() == "Or"
-                {
-                    zero_derivatives(branch_axis_count)
-                } else {
-                    let left = self
-                        .emitted
-                        .get(left)
-                        .expect("left operand must be emitted before binary branch derivative");
-                    let right = self
-                        .emitted
-                        .get(right)
-                        .expect("right operand must be emitted before binary branch derivative");
-                    binary_derivatives_for(
-                        op.as_str(),
-                        &value_expr,
-                        &left.value,
-                        &right.value,
-                        &left.branch_derivatives,
-                        &right.branch_derivatives,
-                    )
-                    .map_err(|_| self.unsupported(format!("binary operator {op}")))?
-                }
-            }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                let condition = self.lower_condition(*condition)?;
-                let then_value = self
-                    .emitted
-                    .get(then_expr)
-                    .expect("then expression must be emitted before conditional branch derivative");
-                let else_value = self
-                    .emitted
-                    .get(else_expr)
-                    .expect("else expression must be emitted before conditional branch derivative");
-                then_value
-                    .branch_derivatives
-                    .iter()
-                    .zip(&else_value.branch_derivatives)
-                    .map(|(then_derivative, else_derivative)| {
-                        conditional_expr(&condition, then_derivative, else_derivative)
-                    })
-                    .collect()
-            }
-            HirExprKind::SystemFunction { name, args } => {
-                self.system_function_branch_derivatives(name.as_str(), args.as_slice())?
-            }
-            HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
-                self.ddt_branch_derivatives(args.as_slice())?
-            }
-            HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
-                let (expr, _) = self.idt_operands(args.as_slice())?;
-                self.idt_branch_derivatives(expr)?
-            }
-            HirExprKind::Call { name, .. } if is_analysis_name(name.as_str()) => {
-                zero_derivatives(branch_axis_count)
-            }
-            HirExprKind::Call { name, .. } if is_ddx_name(name.as_str()) => {
-                zero_derivatives(branch_axis_count)
-            }
-            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
-                zero_derivatives(branch_axis_count)
-            }
-            HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
-                self.intrinsic_branch_derivatives(name.as_str(), args.as_slice(), &value_expr)?
-            }
-            HirExprKind::NoiseSource { .. } => zero_derivatives(branch_axis_count),
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Ddt { expr, abstol },
-            } => {
-                if abstol.is_some() {
-                    return Err(self.unsupported("ddt abstol argument"));
-                }
-                self.ddt_branch_derivatives(&[*expr])?
-            }
-            HirExprKind::AnalogOperator {
-                op:
-                    HirAnalogOperator::Idt {
-                        expr,
-                        assert,
-                        abstol,
-                        ..
-                    },
-            } => {
-                if assert.is_some() || abstol.is_some() {
-                    return Err(self.unsupported("idt assert/abstol argument"));
-                }
-                self.idt_branch_derivatives(*expr)?
-            }
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Ddx { .. },
-            } => zero_derivatives(branch_axis_count),
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Limexp { expr },
-            } => {
-                let arg = self
-                    .emitted
-                    .get(expr)
-                    .expect("limexp operand must be emitted before branch derivative");
-                arg.branch_derivatives
-                    .iter()
-                    .map(|d| mul_expr(&limexp_derivative_scale_expr(&arg.value), d))
-                    .collect()
-            }
-            _ => unreachable!("unsupported expression kinds returned earlier"),
-        };
-
-        let reactive = if matches!(self.mode, ExprMode::Reactive) {
-            match &expression.kind {
-                HirExprKind::Number { .. } | HirExprKind::BranchAccess { .. } => {
-                    ReactiveValue::none(zero_derivatives(node_count))
-                }
-                HirExprKind::NamedBranchAccess { access, name } => {
-                    if access.as_str() == "I" {
-                        if let Some(current) = self.branch_currents.get(name.as_str()) {
-                            ReactiveValue {
-                                has_reactive: current.has_reactive,
-                                value: current.reactive_value.clone(),
-                                derivatives: current.reactive_derivatives.clone(),
-                                branch_derivatives: current.reactive_branch_derivatives.clone(),
-                            }
-                        } else {
-                            ReactiveValue::none(zero_derivatives(node_count))
-                        }
-                    } else {
-                        ReactiveValue::none(zero_derivatives(node_count))
-                    }
-                }
-                HirExprKind::Identifier { name } => {
-                    if let Some(variable) = self.variables.get(name.as_str()) {
-                        ReactiveValue {
-                            has_reactive: variable.has_reactive,
-                            value: variable.reactive_value.clone(),
-                            derivatives: variable.reactive_derivatives.clone(),
-                            branch_derivatives: variable.reactive_branch_derivatives.clone(),
-                        }
-                    } else {
-                        ReactiveValue::none(zero_derivatives(node_count))
-                    }
-                }
-                HirExprKind::Unary { op, operand } => {
-                    if op.as_str() == "Not" {
-                        ReactiveValue::none(zero_derivatives(node_count))
-                    } else {
-                        let operand = self
-                            .emitted
-                            .get(operand)
-                            .expect("operand must be emitted before unary reactive derivative");
-                        reactive_unary(op.as_str(), operand)
-                            .map_err(|_| self.unsupported(format!("unary operator {op}")))?
-                    }
-                }
-                HirExprKind::Binary { op, left, right } => {
-                    if comparison_operator(op.as_str()).is_some()
-                        || op.as_str() == "And"
-                        || op.as_str() == "Or"
-                    {
-                        ReactiveValue::none(zero_derivatives(node_count))
-                    } else {
-                        let left = self.emitted.get(left).expect(
-                            "left operand must be emitted before binary reactive derivative",
-                        );
-                        let right = self.emitted.get(right).expect(
-                            "right operand must be emitted before binary reactive derivative",
-                        );
-                        reactive_binary(op.as_str(), left, right)
-                            .map_err(|_| self.unsupported(format!("binary operator {op}")))?
-                    }
-                }
-                HirExprKind::Conditional {
-                    condition,
-                    then_expr,
-                    else_expr,
-                } => {
-                    let condition = self.lower_condition(*condition)?;
-                    let then_value = self.emitted.get(then_expr).expect(
-                        "then expression must be emitted before conditional reactive derivative",
-                    );
-                    let else_value = self.emitted.get(else_expr).expect(
-                        "else expression must be emitted before conditional reactive derivative",
-                    );
-                    let has_reactive = then_value.has_reactive || else_value.has_reactive;
-                    if has_reactive {
-                        let zero_node_derivatives = zero_derivatives(node_count);
-                        let then_derivatives = if then_value.has_reactive {
-                            &then_value.reactive_derivatives
-                        } else {
-                            &zero_node_derivatives
-                        };
-                        let else_derivatives = if else_value.has_reactive {
-                            &else_value.reactive_derivatives
-                        } else {
-                            &zero_node_derivatives
-                        };
-                        let zero_branch_derivatives = zero_derivatives(branch_axis_count);
-                        let then_branch_derivatives = if then_value.has_reactive {
-                            &then_value.reactive_branch_derivatives
-                        } else {
-                            &zero_branch_derivatives
-                        };
-                        let else_branch_derivatives = if else_value.has_reactive {
-                            &else_value.reactive_branch_derivatives
-                        } else {
-                            &zero_branch_derivatives
-                        };
-                        ReactiveValue {
-                            has_reactive: true,
-                            value: format!(
-                                "if {condition} {{ {} }} else {{ {} }}",
-                                then_value.reactive_value, else_value.reactive_value
-                            ),
-                            derivatives: then_derivatives
-                                .iter()
-                                .zip(else_derivatives)
-                                .map(|(then_derivative, else_derivative)| {
-                                    conditional_expr(&condition, then_derivative, else_derivative)
-                                })
-                                .collect(),
-                            branch_derivatives: then_branch_derivatives
-                                .iter()
-                                .zip(else_branch_derivatives)
-                                .map(|(then_derivative, else_derivative)| {
-                                    conditional_expr(&condition, then_derivative, else_derivative)
-                                })
-                                .collect(),
-                        }
-                    } else {
-                        ReactiveValue::none(zero_derivatives(node_count))
-                    }
-                }
-                HirExprKind::SystemFunction { name, args } => {
-                    self.system_function_reactive_value(name.as_str(), args.as_slice())?
-                }
-                HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
-                    self.ddt_reactive_value(args.as_slice())?
-                }
-                HirExprKind::Call { name, .. } if is_idt_name(name.as_str()) => {
-                    ReactiveValue::none(zero_derivatives(node_count))
-                }
-                HirExprKind::Call { name, .. } if is_ddx_name(name.as_str()) => {
-                    ReactiveValue::none(zero_derivatives(node_count))
-                }
-                HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => {
-                    ReactiveValue::none(zero_derivatives(node_count))
-                }
-                HirExprKind::Call { name, .. } if is_analysis_name(name.as_str()) => {
-                    ReactiveValue::none(zero_derivatives(node_count))
-                }
-                HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
-                    self.intrinsic_reactive_value(args.as_slice())?
-                }
-                HirExprKind::NoiseSource { .. } => {
-                    ReactiveValue::none(zero_derivatives(node_count))
-                }
-                HirExprKind::AnalogOperator {
-                    op: HirAnalogOperator::Ddt { expr, abstol },
-                } => {
-                    if abstol.is_some() {
-                        return Err(self.unsupported("ddt abstol argument"));
-                    }
-                    self.ddt_reactive_value(&[*expr])?
-                }
-                HirExprKind::AnalogOperator {
-                    op: HirAnalogOperator::Idt { .. },
-                } => ReactiveValue::none(zero_derivatives(node_count)),
-                HirExprKind::AnalogOperator {
-                    op: HirAnalogOperator::Ddx { .. },
-                } => ReactiveValue::none(zero_derivatives(node_count)),
-                HirExprKind::AnalogOperator {
-                    op: HirAnalogOperator::Limexp { expr },
-                } => self.intrinsic_reactive_value(&[*expr])?,
-                _ => unreachable!("unsupported expression kinds returned earlier"),
-            }
-        } else {
-            ReactiveValue::none(zero_derivatives(node_count))
-        };
-
-        let mut derivative_aliases = HashMap::new();
-        let mut derivative_vars = Vec::with_capacity(derivatives.len());
-        for (index, derivative) in derivatives.into_iter().enumerate() {
-            derivative_vars.push(materialize_derivative_expr(
-                &mut self.lines,
-                format!("{base}_d_n{index}"),
-                derivative,
-                self.derivative_emission,
-                &mut derivative_aliases,
-            ));
-        }
-        let mut branch_derivative_vars = Vec::with_capacity(branch_derivatives.len());
-        for (index, derivative) in branch_derivatives.into_iter().enumerate() {
-            branch_derivative_vars.push(materialize_derivative_expr(
-                &mut self.lines,
-                format!("{base}_d_b{index}"),
-                derivative,
-                self.derivative_emission,
-                &mut derivative_aliases,
-            ));
-        }
-
-        let (reactive_value, reactive_derivatives, reactive_branch_derivatives) = if reactive
-            .has_reactive
-        {
-            let value_var = format!("{base}_q");
-            self.lines
-                .push(format!("let {value_var}: f64 = {};", reactive.value));
-            let mut derivative_vars = Vec::with_capacity(reactive.derivatives.len());
-            for (index, derivative) in reactive.derivatives.into_iter().enumerate() {
-                derivative_vars.push(materialize_derivative_expr(
-                    &mut self.lines,
-                    format!("{base}_q_d_n{index}"),
-                    derivative,
-                    self.derivative_emission,
-                    &mut derivative_aliases,
-                ));
-            }
-            let mut branch_derivative_vars = Vec::with_capacity(reactive.branch_derivatives.len());
-            for (index, derivative) in reactive.branch_derivatives.into_iter().enumerate() {
-                branch_derivative_vars.push(materialize_derivative_expr(
-                    &mut self.lines,
-                    format!("{base}_q_d_b{index}"),
-                    derivative,
-                    self.derivative_emission,
-                    &mut derivative_aliases,
-                ));
-            }
-            (value_var, derivative_vars, branch_derivative_vars)
-        } else {
-            (
-                "0.0".to_string(),
-                zero_derivatives(node_count),
-                zero_derivatives(branch_axis_count),
-            )
-        };
-
-        let lowered = ExprValue {
-            value: value_expr,
-            derivatives: derivative_vars,
-            branch_derivatives: branch_derivative_vars,
-            has_reactive: reactive.has_reactive,
-            reactive_value,
-            reactive_derivatives,
-            reactive_branch_derivatives,
-        };
+        let lowered = ExprValue { value: value_expr };
         self.emitted.insert(id, lowered.clone());
         Ok(lowered)
     }
@@ -1095,16 +290,8 @@ impl ExprEmitter<'_> {
     }
 
     fn zero_value(&self) -> ExprValue {
-        let node_count = self.artifact.mir.nodes.len();
-        let branch_axis_count = branch_derivative_axis_count(self.branch_current_unknowns);
         ExprValue {
             value: "0.0".to_string(),
-            derivatives: zero_derivatives(node_count),
-            branch_derivatives: zero_derivatives(branch_axis_count),
-            has_reactive: false,
-            reactive_value: "0.0".to_string(),
-            reactive_derivatives: zero_derivatives(node_count),
-            reactive_branch_derivatives: zero_derivatives(branch_axis_count),
         }
     }
 
@@ -1131,10 +318,9 @@ impl ExprEmitter<'_> {
                 .variables
                 .get(name.as_str())
                 .is_some_and(lowered_variable_is_constant_zero)),
-            HirExprKind::NamedBranchAccess { access, name } if access.as_str() == "I" => Ok(self
-                .branch_currents
-                .get(name.as_str())
-                .is_some_and(lowered_variable_is_constant_zero)),
+            // A branch current is never a known zero here: noise lowering runs
+            // with no contributions in scope, so there is nothing to inspect.
+            HirExprKind::NamedBranchAccess { access, .. } if access.as_str() == "I" => Ok(false),
             HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Pos" | "Neg") => {
                 self.expression_value_is_known_zero(*operand, visited)
             }
@@ -1232,16 +418,10 @@ impl ExprEmitter<'_> {
         name: &str,
     ) -> Result<String, RustBackendError> {
         if access == "I" {
-            if let Some(current) = self.branch_currents.get(name) {
-                return Ok(current.value.clone());
-            }
             if let Some(slot) = self.branch_current_unknowns.get(name) {
                 return Ok(
                     slot.signed_value(format!("ctx.branch_current(self.branches[{}])", slot.slot))
                 );
-            }
-            if matches!(self.mode, ExprMode::Reactive) {
-                return Ok("0.0".to_string());
             }
             return Err(self.unsupported(format!(
                 "named branch current access '{name}' before a current contribution is available"
@@ -1292,50 +472,6 @@ impl ExprEmitter<'_> {
         Ok(format!("ctx.node_voltage(self.nodes[{}])", node.id.index()))
     }
 
-    fn branch_access_derivatives(
-        &self,
-        access: &str,
-        pos: &str,
-        neg: Option<&str>,
-    ) -> Result<Vec<String>, RustBackendError> {
-        if access == "I" {
-            if self.branch_current_slot_for_nodes(pos, neg)?.is_some() {
-                return Ok(zero_derivatives(self.artifact.mir.nodes.len()));
-            }
-            return Err(self.unsupported(format!("branch access '{access}' in expression")));
-        }
-
-        let mut derivatives = zero_derivatives(self.artifact.mir.nodes.len());
-        if let Some(index) = self.node_index(pos)? {
-            derivatives[index] = "1.0".to_string();
-        }
-        if let Some(neg) = neg
-            && let Some(index) = self.node_index(neg)?
-        {
-            derivatives[index] = "-1.0".to_string();
-        }
-        Ok(derivatives)
-    }
-
-    fn branch_ref_derivatives(
-        &self,
-        access: &str,
-        branch: &MirBranchRef,
-    ) -> Result<Vec<String>, RustBackendError> {
-        if access == "I" {
-            return Err(self.unsupported(format!("named branch access '{access}' in expression")));
-        }
-
-        let mut derivatives = zero_derivatives(self.artifact.mir.nodes.len());
-        if let Some(node) = branch.pos_node {
-            derivatives[usize::from(node)] = "1.0".to_string();
-        }
-        if let Some(node) = branch.neg_node {
-            derivatives[usize::from(node)] = "-1.0".to_string();
-        }
-        Ok(derivatives)
-    }
-
     fn node_index(&self, name: &str) -> Result<Option<usize>, RustBackendError> {
         if self.is_ground(name) {
             return Ok(None);
@@ -1374,8 +510,6 @@ impl ExprEmitter<'_> {
         let condition = self.lower_condition(condition)?;
         let then_branch = self.lower_isolated_branch(then_expr)?;
         let else_branch = self.lower_isolated_branch(else_expr)?;
-        let node_count = self.artifact.mir.nodes.len();
-        let branch_axis_count = branch_derivative_axis_count(self.branch_current_unknowns);
         let base = format!("{}_e{}", self.prefix, id.index());
 
         let mut names = Vec::new();
@@ -1392,115 +526,6 @@ impl ExprEmitter<'_> {
             else_branch.value.value.clone(),
         );
 
-        let mut derivatives = Vec::with_capacity(node_count);
-        if matches!(self.derivative_emission, DerivativeEmission::None) {
-            derivatives = zero_derivatives(node_count);
-        } else {
-            for index in 0..node_count {
-                let then_derivative = &then_branch.value.derivatives[index];
-                let else_derivative = &else_branch.value.derivatives[index];
-                if is_zero_derivative(then_derivative) && is_zero_derivative(else_derivative) {
-                    derivatives.push("0.0".to_string());
-                    continue;
-                }
-                derivatives.push(push_conditional_tuple_binding(
-                    &mut names,
-                    &mut then_values,
-                    &mut else_values,
-                    &mut tuple_aliases,
-                    format!("{base}_d_n{index}"),
-                    then_derivative.clone(),
-                    else_derivative.clone(),
-                ));
-            }
-        }
-
-        let mut branch_derivatives = Vec::with_capacity(branch_axis_count);
-        if matches!(self.derivative_emission, DerivativeEmission::None) {
-            branch_derivatives = zero_derivatives(branch_axis_count);
-        } else {
-            for index in 0..branch_axis_count {
-                let then_derivative = &then_branch.value.branch_derivatives[index];
-                let else_derivative = &else_branch.value.branch_derivatives[index];
-                if is_zero_derivative(then_derivative) && is_zero_derivative(else_derivative) {
-                    branch_derivatives.push("0.0".to_string());
-                    continue;
-                }
-                branch_derivatives.push(push_conditional_tuple_binding(
-                    &mut names,
-                    &mut then_values,
-                    &mut else_values,
-                    &mut tuple_aliases,
-                    format!("{base}_d_b{index}"),
-                    then_derivative.clone(),
-                    else_derivative.clone(),
-                ));
-            }
-        }
-
-        let has_reactive = then_branch.value.has_reactive || else_branch.value.has_reactive;
-        let (reactive_value, reactive_derivatives, reactive_branch_derivatives) = if has_reactive {
-            let reactive_value = push_conditional_tuple_binding(
-                &mut names,
-                &mut then_values,
-                &mut else_values,
-                &mut tuple_aliases,
-                format!("{base}_q"),
-                then_branch.value.reactive_value.clone(),
-                else_branch.value.reactive_value.clone(),
-            );
-
-            let mut reactive_derivatives = Vec::with_capacity(node_count);
-            for index in 0..node_count {
-                let then_derivative = &then_branch.value.reactive_derivatives[index];
-                let else_derivative = &else_branch.value.reactive_derivatives[index];
-                if is_zero_derivative(then_derivative) && is_zero_derivative(else_derivative) {
-                    reactive_derivatives.push("0.0".to_string());
-                    continue;
-                }
-                reactive_derivatives.push(push_conditional_tuple_binding(
-                    &mut names,
-                    &mut then_values,
-                    &mut else_values,
-                    &mut tuple_aliases,
-                    format!("{base}_q_d_n{index}"),
-                    then_derivative.clone(),
-                    else_derivative.clone(),
-                ));
-            }
-
-            let mut reactive_branch_derivatives = Vec::with_capacity(branch_axis_count);
-            for index in 0..branch_axis_count {
-                let then_derivative = &then_branch.value.reactive_branch_derivatives[index];
-                let else_derivative = &else_branch.value.reactive_branch_derivatives[index];
-                if is_zero_derivative(then_derivative) && is_zero_derivative(else_derivative) {
-                    reactive_branch_derivatives.push("0.0".to_string());
-                    continue;
-                }
-                reactive_branch_derivatives.push(push_conditional_tuple_binding(
-                    &mut names,
-                    &mut then_values,
-                    &mut else_values,
-                    &mut tuple_aliases,
-                    format!("{base}_q_d_b{index}"),
-                    then_derivative.clone(),
-                    else_derivative.clone(),
-                ));
-            }
-
-            (
-                reactive_value,
-                reactive_derivatives,
-                reactive_branch_derivatives,
-            )
-        } else {
-            (
-                "0.0".to_string(),
-                zero_derivatives(node_count),
-                zero_derivatives(branch_axis_count),
-            )
-        };
-
         self.lines.push(lazy_conditional_tuple(
             &names,
             &condition,
@@ -1510,15 +535,7 @@ impl ExprEmitter<'_> {
             &else_values,
         ));
 
-        Ok(ExprValue {
-            value: base,
-            derivatives,
-            branch_derivatives,
-            has_reactive,
-            reactive_value,
-            reactive_derivatives,
-            reactive_branch_derivatives,
-        })
+        Ok(ExprValue { value: base })
     }
 
     fn lower_isolated_branch(&self, expr: ExprId) -> Result<ConditionalBranch, RustBackendError> {
@@ -1527,11 +544,7 @@ impl ExprEmitter<'_> {
             prefix: self.prefix,
             parameter_fields: self.parameter_fields,
             variables: self.variables,
-            ddt_slots: self.ddt_slots,
-            branch_currents: self.branch_currents,
             branch_current_unknowns: self.branch_current_unknowns,
-            mode: self.mode,
-            derivative_emission: self.derivative_emission,
             emitted: self.emitted.clone(),
             lines: Vec::new(),
         };
@@ -1761,129 +774,6 @@ impl ExprEmitter<'_> {
         Ok(self.emit_value(base, value))
     }
 
-    fn system_function_derivatives(
-        &self,
-        name: &str,
-        args: &[ExprId],
-    ) -> Result<Vec<String>, RustBackendError> {
-        let normalized = name.to_ascii_lowercase();
-        match normalized.as_str() {
-            "$vt" | "$thermal_vt" if args.len() == 1 => {
-                let temperature = self
-                    .emitted
-                    .get(&args[0])
-                    .expect("thermal voltage argument must be emitted before derivative");
-                Ok(temperature
-                    .derivatives
-                    .iter()
-                    .map(|derivative| format!("({derivative} * THERMAL_VOLTAGE_PER_K)"))
-                    .collect())
-            }
-            "$simparam" if args.len() >= 2 => {
-                let default = self
-                    .emitted
-                    .get(&args[1])
-                    .expect("simparam default must be emitted before derivative");
-                Ok(default.derivatives.clone())
-            }
-            "$temperature" | "$abstime" | "$realtime" | "$mfactor" | "$vt" | "$thermal_vt"
-            | "$simparam" | "$param_given" | "$port_connected" => {
-                Ok(zero_derivatives(self.artifact.mir.nodes.len()))
-            }
-            _ => Err(self.unsupported(format!("system function '{name}'"))),
-        }
-    }
-
-    fn system_function_branch_derivatives(
-        &self,
-        name: &str,
-        args: &[ExprId],
-    ) -> Result<Vec<String>, RustBackendError> {
-        let normalized = name.to_ascii_lowercase();
-        let branch_axis_count = branch_derivative_axis_count(self.branch_current_unknowns);
-        match normalized.as_str() {
-            "$vt" | "$thermal_vt" if args.len() == 1 => {
-                let temperature = self
-                    .emitted
-                    .get(&args[0])
-                    .expect("thermal voltage argument must be emitted before derivative");
-                Ok(temperature
-                    .branch_derivatives
-                    .iter()
-                    .map(|derivative| format!("({derivative} * THERMAL_VOLTAGE_PER_K)"))
-                    .collect())
-            }
-            "$simparam" if args.len() >= 2 => {
-                let default = self
-                    .emitted
-                    .get(&args[1])
-                    .expect("simparam default must be emitted before derivative");
-                Ok(default.branch_derivatives.clone())
-            }
-            "$temperature" | "$abstime" | "$realtime" | "$mfactor" | "$vt" | "$thermal_vt"
-            | "$simparam" | "$param_given" | "$port_connected" => {
-                Ok(zero_derivatives(branch_axis_count))
-            }
-            _ => Err(self.unsupported(format!("system function '{name}'"))),
-        }
-    }
-
-    fn system_function_reactive_value(
-        &self,
-        name: &str,
-        args: &[ExprId],
-    ) -> Result<ReactiveValue, RustBackendError> {
-        let normalized = name.to_ascii_lowercase();
-        let count = self.artifact.mir.nodes.len();
-        match normalized.as_str() {
-            "$vt" | "$thermal_vt" if args.len() == 1 => {
-                let temperature = self
-                    .emitted
-                    .get(&args[0])
-                    .expect("thermal voltage argument must be emitted before reactive derivative");
-                if temperature.has_reactive {
-                    Ok(ReactiveValue {
-                        has_reactive: true,
-                        value: format!("({} * THERMAL_VOLTAGE_PER_K)", temperature.reactive_value),
-                        derivatives: temperature
-                            .reactive_derivatives
-                            .iter()
-                            .map(|derivative| format!("({derivative} * THERMAL_VOLTAGE_PER_K)"))
-                            .collect(),
-                        branch_derivatives: temperature
-                            .reactive_branch_derivatives
-                            .iter()
-                            .map(|derivative| format!("({derivative} * THERMAL_VOLTAGE_PER_K)"))
-                            .collect(),
-                    })
-                } else {
-                    Ok(ReactiveValue::none(zero_derivatives(count)))
-                }
-            }
-            "$simparam" if args.len() >= 2 => {
-                let default = self
-                    .emitted
-                    .get(&args[1])
-                    .expect("simparam default must be emitted before reactive derivative");
-                if default.has_reactive {
-                    Ok(ReactiveValue {
-                        has_reactive: true,
-                        value: default.reactive_value.clone(),
-                        derivatives: default.reactive_derivatives.clone(),
-                        branch_derivatives: default.reactive_branch_derivatives.clone(),
-                    })
-                } else {
-                    Ok(ReactiveValue::none(zero_derivatives(count)))
-                }
-            }
-            "$temperature" | "$abstime" | "$realtime" | "$mfactor" | "$vt" | "$thermal_vt"
-            | "$simparam" | "$param_given" | "$port_connected" => {
-                Ok(ReactiveValue::none(zero_derivatives(count)))
-            }
-            _ => Err(self.unsupported(format!("system function '{name}'"))),
-        }
-    }
-
     fn lower_simparam_value(&mut self, args: &[ExprId]) -> Result<String, RustBackendError> {
         match args {
             [name] => Ok(format_f64(self.simparam_default(*name)?)),
@@ -2004,43 +894,6 @@ impl ExprEmitter<'_> {
         }
     }
 
-    fn intrinsic_derivatives(
-        &self,
-        name: &str,
-        args: &[ExprId],
-        value: &str,
-    ) -> Result<Vec<String>, RustBackendError> {
-        let normalized = name.to_ascii_lowercase();
-        let args = self.emitted_intrinsic_args(&normalized, args)?;
-        intrinsic_derivatives_from_values(name, &args, value, |value| &value.derivatives)
-    }
-
-    fn intrinsic_branch_derivatives(
-        &self,
-        name: &str,
-        args: &[ExprId],
-        value: &str,
-    ) -> Result<Vec<String>, RustBackendError> {
-        let normalized = name.to_ascii_lowercase();
-        let args = self.emitted_intrinsic_args(&normalized, args)?;
-        intrinsic_derivatives_from_values(name, &args, value, |value| &value.branch_derivatives)
-    }
-
-    fn intrinsic_reactive_value(&self, args: &[ExprId]) -> Result<ReactiveValue, RustBackendError> {
-        for arg in args {
-            let value = self
-                .emitted
-                .get(arg)
-                .expect("intrinsic argument must be emitted before reactive derivative");
-            if value.has_reactive {
-                return Err(self.unsupported("ddt() inside intrinsic math call"));
-            }
-        }
-        Ok(ReactiveValue::none(zero_derivatives(
-            self.artifact.mir.nodes.len(),
-        )))
-    }
-
     fn lower_intrinsic_args(
         &mut self,
         normalized: &str,
@@ -2048,23 +901,6 @@ impl ExprEmitter<'_> {
     ) -> Result<Vec<ExprValue>, RustBackendError> {
         self.validate_intrinsic_arity(normalized, args)?;
         args.iter().map(|arg| self.lower(*arg)).collect()
-    }
-
-    fn emitted_intrinsic_args(
-        &self,
-        normalized: &str,
-        args: &[ExprId],
-    ) -> Result<Vec<ExprValue>, RustBackendError> {
-        self.validate_intrinsic_arity(normalized, args)?;
-        Ok(args
-            .iter()
-            .map(|arg| {
-                self.emitted
-                    .get(arg)
-                    .expect("intrinsic argument must be emitted before derivative")
-                    .clone()
-            })
-            .collect())
     }
 
     fn validate_intrinsic_arity(
@@ -2094,74 +930,16 @@ impl ExprEmitter<'_> {
         base: &str,
     ) -> Result<String, RustBackendError> {
         let operand_id = self.ddt_operand(args)?;
-        let operand = self.lower(operand_id)?;
-        match self.mode {
-            ExprMode::Transient => {
-                let slot = self.ddt_slots.slot_for(id).ok_or_else(|| {
-                    self.internal(format!("ddt expression {id} has no generated state slot"))
-                })?;
-                Ok(self.emit_value(
-                    base,
-                    format!(
-                        "eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, {slot}, {})",
-                        operand.value
-                    ),
-                ))
-            }
-            ExprMode::Reactive => Ok(operand.value),
-        }
-    }
-
-    fn ddt_derivatives(
-        &mut self,
-        _id: ExprId,
-        args: &[ExprId],
-    ) -> Result<Vec<String>, RustBackendError> {
-        let operand_id = self.ddt_operand(args)?;
-        let operand = self
-            .emitted
-            .get(&operand_id)
-            .expect("ddt operand must be emitted before derivative");
-        let operand_derivatives = operand.derivatives.clone();
-        let derivatives = match self.mode {
-            ExprMode::Transient => operand_derivatives
-                .iter()
-                .map(|derivative| self.ddt_jacobian_expr(derivative))
-                .collect(),
-            ExprMode::Reactive => operand_derivatives,
-        };
-        Ok(derivatives)
-    }
-
-    fn ddt_branch_derivatives(&mut self, args: &[ExprId]) -> Result<Vec<String>, RustBackendError> {
-        let operand_id = self.ddt_operand(args)?;
-        let operand = self
-            .emitted
-            .get(&operand_id)
-            .expect("ddt operand must be emitted before branch derivative");
-        let operand_branch_derivatives = operand.branch_derivatives.clone();
-        let derivatives = match self.mode {
-            ExprMode::Transient => operand_branch_derivatives
-                .iter()
-                .map(|derivative| self.ddt_jacobian_expr(derivative))
-                .collect(),
-            ExprMode::Reactive => operand_branch_derivatives,
-        };
-        Ok(derivatives)
-    }
-
-    fn ddt_reactive_value(&self, args: &[ExprId]) -> Result<ReactiveValue, RustBackendError> {
-        let operand_id = self.ddt_operand(args)?;
-        let operand = self
-            .emitted
-            .get(&operand_id)
-            .expect("ddt operand must be emitted before reactive derivative");
-        Ok(ReactiveValue {
-            has_reactive: true,
-            value: operand.value.clone(),
-            derivatives: operand.derivatives.clone(),
-            branch_derivatives: operand.branch_derivatives.clone(),
-        })
+        // Lowered for its side effects — the operand's own diagnostics fire
+        // before this one, exactly as they did when a slot lookup followed.
+        self.lower(operand_id)?;
+        let _ = base;
+        // Noise lowering carries no `ddt` state table, so there is no slot to
+        // bind. The refusal, and its wording, are what the empty table
+        // produced before the table itself was removed.
+        Err(self.internal(format!(
+            "ddt expression {id} has no generated state slot"
+        )))
     }
 
     fn ddt_operand(&self, args: &[ExprId]) -> Result<ExprId, RustBackendError> {
@@ -2179,59 +957,19 @@ impl ExprEmitter<'_> {
         ic: Option<ExprId>,
         base: &str,
     ) -> Result<String, RustBackendError> {
-        let operand = self.lower(expr)?;
-        let ic_value = if let Some(ic) = ic {
-            self.lower(ic)?.value
-        } else {
-            "0.0".to_string()
-        };
-        match self.mode {
-            ExprMode::Transient => {
-                let slot = self.ddt_slots.idt_slot_for(id).ok_or_else(|| {
-                    self.internal(format!("idt expression {id} has no generated state slot"))
-                })?;
-                Ok(self.emit_value(
-                    base,
-                    format!(
-                        "eval_idt(idt_state_current, idt_state_previous, idt_state_initialized, ddt_active, idt_scale, {slot}, {}, {ic_value})",
-                        operand.value
-                    ),
-                ))
-            }
-            ExprMode::Reactive => Ok(ic_value),
+        // Both operands are lowered for their side effects, so their own
+        // diagnostics still fire first, exactly as they did when a slot lookup
+        // followed them.
+        self.lower(expr)?;
+        if let Some(ic) = ic {
+            self.lower(ic)?;
         }
-    }
-
-    fn idt_derivatives(&mut self, expr: ExprId) -> Result<Vec<String>, RustBackendError> {
-        let operand = self
-            .emitted
-            .get(&expr)
-            .expect("idt operand must be emitted before derivative");
-        let operand_derivatives = operand.derivatives.clone();
-        let derivatives = match self.mode {
-            ExprMode::Transient => operand_derivatives
-                .iter()
-                .map(|derivative| self.idt_jacobian_expr(derivative))
-                .collect(),
-            ExprMode::Reactive => zero_derivatives(operand_derivatives.len()),
-        };
-        Ok(derivatives)
-    }
-
-    fn idt_branch_derivatives(&mut self, expr: ExprId) -> Result<Vec<String>, RustBackendError> {
-        let operand = self
-            .emitted
-            .get(&expr)
-            .expect("idt operand must be emitted before branch derivative");
-        let operand_branch_derivatives = operand.branch_derivatives.clone();
-        let derivatives = match self.mode {
-            ExprMode::Transient => operand_branch_derivatives
-                .iter()
-                .map(|derivative| self.idt_jacobian_expr(derivative))
-                .collect(),
-            ExprMode::Reactive => zero_derivatives(operand_branch_derivatives.len()),
-        };
-        Ok(derivatives)
+        let _ = base;
+        // As for `ddt`: noise lowering has no `idt` state table to bind a slot
+        // in, and this is the refusal the empty table produced.
+        Err(self.internal(format!(
+            "idt expression {id} has no generated state slot"
+        )))
     }
 
     fn idt_operands(&self, args: &[ExprId]) -> Result<(ExprId, Option<ExprId>), RustBackendError> {
@@ -2251,16 +989,19 @@ impl ExprEmitter<'_> {
         probe: ExprId,
         base: &str,
     ) -> Result<String, RustBackendError> {
-        let expr = self.lower(expr)?;
-        let projection = self.ddx_projection(&expr.derivatives, probe)?;
+        self.lower(expr)?;
+        let projection = self.ddx_projection(probe)?;
         Ok(self.emit_value(base, projection))
     }
 
-    fn ddx_projection(
-        &self,
-        derivatives: &[String],
-        probe: ExprId,
-    ) -> Result<String, RustBackendError> {
+    /// The value of a `ddx` inside a noise expression.
+    ///
+    /// This emitter carries no derivative lanes, so every lane the projection
+    /// could select is zero and the result is a constant. The probe is still
+    /// resolved and validated — an unknown branch or a current probe is an
+    /// error here exactly as it was when the lanes were real — and the text
+    /// returned is what projecting over a zero vector used to produce.
+    fn ddx_projection(&self, probe: ExprId) -> Result<String, RustBackendError> {
         let expression = self
             .artifact
             .mir
@@ -2296,18 +1037,11 @@ impl ExprEmitter<'_> {
                 )));
             }
         };
-        let pos = pos
-            .and_then(|index| derivatives.get(index))
-            .cloned()
-            .unwrap_or_else(|| "0.0".to_string());
-        if let Some(neg) = neg {
-            let neg = derivatives
-                .get(neg)
-                .cloned()
-                .unwrap_or_else(|| "0.0".to_string());
-            Ok(format!("(0.5 * ({pos} - {neg}))"))
+        let _ = pos;
+        if neg.is_some() {
+            Ok("(0.5 * (0.0 - 0.0))".to_string())
         } else {
-            Ok(pos)
+            Ok("0.0".to_string())
         }
     }
 
@@ -2316,20 +1050,6 @@ impl ExprEmitter<'_> {
             [expr, probe] => Ok((*expr, *probe)),
             _ => Err(self.unsupported(format!("ddx expects two operands, found {}", args.len()))),
         }
-    }
-
-    fn ddt_jacobian_expr(&mut self, derivative: &str) -> String {
-        if is_zero_derivative(derivative) {
-            return "0.0".to_string();
-        }
-        scaled_derivative_expr(derivative, "ddt_scale")
-    }
-
-    fn idt_jacobian_expr(&mut self, derivative: &str) -> String {
-        if is_zero_derivative(derivative) {
-            return "0.0".to_string();
-        }
-        scaled_derivative_expr(derivative, "idt_scale")
     }
 
     fn unsupported(&self, feature: impl Into<String>) -> RustBackendError {
@@ -2426,25 +1146,6 @@ fn tuple_values(values: &[String]) -> String {
     format!("({},)", values.join(", "))
 }
 
-#[derive(Debug, Clone)]
-struct ReactiveValue {
-    has_reactive: bool,
-    value: String,
-    derivatives: Vec<String>,
-    branch_derivatives: Vec<String>,
-}
-
-impl ReactiveValue {
-    fn none(derivatives: Vec<String>) -> Self {
-        Self {
-            has_reactive: false,
-            value: "0.0".to_string(),
-            derivatives,
-            branch_derivatives: Vec::new(),
-        }
-    }
-}
-
 pub fn parameter_field_names(artifact: &CanonicalIrArtifact) -> HashMap<String, String> {
     artifact
         .mir
@@ -2455,75 +1156,8 @@ pub fn parameter_field_names(artifact: &CanonicalIrArtifact) -> HashMap<String, 
         .collect()
 }
 
-pub fn unique_identifiers(names: &[String]) -> HashMap<String, String> {
-    let mut used: HashMap<String, usize> = HashMap::new();
-    let mut fields = HashMap::new();
-
-    for name in names {
-        let base = sanitize_identifier(name);
-        let count = used.entry(base.clone()).or_insert(0);
-        let field = if *count == 0 {
-            base.clone()
-        } else {
-            format!("{base}_{count}")
-        };
-        *count += 1;
-        fields.insert(name.clone(), field);
-    }
-
-    fields
-}
-
-fn zero_derivatives(count: usize) -> Vec<String> {
-    vec!["0.0".to_string(); count]
-}
-
-fn materialize_derivative_expr(
-    lines: &mut Vec<String>,
-    local: String,
-    derivative: String,
-    derivative_emission: DerivativeEmission,
-    aliases: &mut HashMap<String, String>,
-) -> String {
-    if is_zero_derivative(&derivative) {
-        return "0.0".to_string();
-    }
-    if is_inline_derivative_expr(&derivative)
-        || matches!(derivative_emission, DerivativeEmission::Inline)
-    {
-        return derivative;
-    }
-
-    let key = derivative.trim().to_string();
-    if let Some(alias) = aliases.get(&key) {
-        return alias.clone();
-    }
-
-    lines.push(format!("let {local}: f64 = {derivative};"));
-    aliases.insert(key, local.clone());
-    local
-}
-
 fn lowered_variable_is_constant_zero(variable: &LoweredVariable) -> bool {
     is_zero_derivative(&variable.value)
-        && variable
-            .derivatives
-            .iter()
-            .all(|derivative| is_zero_derivative(derivative))
-        && variable
-            .branch_derivatives
-            .iter()
-            .all(|derivative| is_zero_derivative(derivative))
-        && (!variable.has_reactive
-            || (is_zero_derivative(&variable.reactive_value)
-                && variable
-                    .reactive_derivatives
-                    .iter()
-                    .all(|derivative| is_zero_derivative(derivative))
-                && variable
-                    .reactive_branch_derivatives
-                    .iter()
-                    .all(|derivative| is_zero_derivative(derivative))))
 }
 
 fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
@@ -2692,38 +1326,15 @@ fn push_zi_children(kind: &crate::canonical_ir::HirZiKind, children: &mut Vec<Ex
     }
 }
 
-fn branch_derivative_axis_count(
-    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
-) -> usize {
-    branch_current_unknowns
-        .values()
-        .map(|slot| slot.slot)
-        .max()
-        .map(|slot| slot + 1)
-        .unwrap_or(0)
-}
-
 fn limexp_value_expr(arg: &str) -> String {
     format!(
         "{{ let limexp_arg = {arg}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ LIMEXP_MAX * (1.0 + (limexp_arg - 80.0)) }} }}"
     )
 }
 
-fn limexp_derivative_scale_expr(arg: &str) -> String {
-    format!(
-        "{{ let limexp_arg = {arg}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ LIMEXP_MAX }} }}"
-    )
-}
-
 fn limited_exp_value_expr(arg: &str) -> String {
     format!(
         "{{ let limited_exp_arg = {arg}; if limited_exp_arg > 80.0 {{ LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) }} else if limited_exp_arg < -80.0 {{ 1.804851387e-35 }} else {{ limited_exp_arg.exp() }} }}"
-    )
-}
-
-fn limited_exp_derivative_scale_expr(arg: &str) -> String {
-    format!(
-        "{{ let limited_exp_arg = {arg}; if limited_exp_arg > 80.0 {{ LIMEXP_MAX }} else if limited_exp_arg < -80.0 {{ 0.0 }} else {{ limited_exp_arg.exp() }} }}"
     )
 }
 
@@ -2738,33 +1349,6 @@ fn is_one_derivative(derivative: &str) -> bool {
 
 fn is_negative_one_derivative(derivative: &str) -> bool {
     derivative.trim() == "-1.0"
-}
-
-fn is_inline_derivative_expr(derivative: &str) -> bool {
-    let derivative = derivative.trim();
-    is_zero_derivative(derivative)
-        || is_one_derivative(derivative)
-        || is_negative_one_derivative(derivative)
-        || is_generated_scratch_derivative_access(derivative)
-        || is_dynamic_operator_scaled_inline_derivative_expr(derivative)
-        || is_scaled_generated_scratch_derivative_access(derivative)
-        || is_simple_inline_operand(derivative)
-        || is_negated_simple_inline_operand(derivative)
-        || is_rust_identifier(derivative)
-}
-
-fn is_dynamic_operator_scaled_inline_derivative_expr(derivative: &str) -> bool {
-    dynamic_operator_scaled_operand(derivative, "ddt_scale")
-        .or_else(|| dynamic_operator_scaled_operand(derivative, "idt_scale"))
-        .is_some_and(|operand| {
-            is_simple_inline_operand(operand) || is_negated_simple_inline_operand(operand)
-        })
-}
-
-fn dynamic_operator_scaled_operand<'a>(derivative: &'a str, scale: &str) -> Option<&'a str> {
-    let derivative = derivative.trim();
-    let inner = derivative.strip_prefix('(')?.strip_suffix(')')?.trim();
-    inner.strip_suffix(&format!(" * {scale}")).map(str::trim)
 }
 
 fn product_derivative_has_zero_factor(derivative: &str) -> bool {
@@ -2821,87 +1405,6 @@ fn outer_parens_wrap_entire_expr(value: &str) -> bool {
     depth == 0
 }
 
-fn is_simple_inline_operand(value: &str) -> bool {
-    is_generated_scratch_derivative_access(value)
-        || is_rust_identifier(value)
-        || is_simple_generated_access(value)
-        || is_simple_numeric_literal(value)
-}
-
-fn is_negated_simple_inline_operand(value: &str) -> bool {
-    let value = value.trim();
-    let Some(inner) = value
-        .strip_prefix("(-")
-        .and_then(|inner| inner.strip_suffix(')'))
-    else {
-        return false;
-    };
-    is_simple_inline_operand(inner.trim())
-}
-
-fn is_generated_scratch_derivative_access(value: &str) -> bool {
-    let value = value.trim();
-    let has_known_prefix = value.starts_with("scratch.node_derivatives[")
-        || value.starts_with("scratch.branch_derivatives[")
-        || value.starts_with("scratch.reactive_node_derivatives[")
-        || value.starts_with("scratch.reactive_branch_derivatives[");
-    has_known_prefix
-        && value.ends_with(']')
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '[' | ']'))
-}
-
-fn is_simple_generated_access(value: &str) -> bool {
-    let value = value.trim();
-    if value.is_empty()
-        || value.contains(' ')
-        || value.starts_with('.')
-        || value.starts_with('[')
-        || !(value.contains('.') || value.contains('['))
-    {
-        return false;
-    }
-    value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '[' | ']'))
-}
-
-fn is_simple_numeric_literal(value: &str) -> bool {
-    let value = value.trim();
-    !value.is_empty()
-        && value.bytes().any(|byte| byte.is_ascii_digit())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'e' | b'E' | b'+' | b'-'))
-        && value.parse::<f64>().is_ok()
-}
-
-fn is_scaled_generated_scratch_derivative_access(value: &str) -> bool {
-    let value = trim_enclosing_parentheses(value.trim());
-    let Some((left, right)) = split_top_level_multiplication(value) else {
-        return false;
-    };
-    let left = trim_enclosing_parentheses(left.trim());
-    let right = trim_enclosing_parentheses(right.trim());
-    (is_generated_scratch_derivative_access(left) && is_simple_scaled_derivative_factor(right))
-        || (is_simple_scaled_derivative_factor(left)
-            && is_generated_scratch_derivative_access(right))
-}
-
-fn split_top_level_multiplication(expr: &str) -> Option<(&str, &str)> {
-    let mut depth = 0usize;
-    for (index, ch) in expr.char_indices() {
-        match ch {
-            '(' => depth = depth.saturating_add(1),
-            ')' => depth = depth.saturating_sub(1),
-            '*' if depth == 0 => return Some((&expr[..index], &expr[index + 1..])),
-            _ => {}
-        }
-    }
-    None
-}
-
 fn trim_enclosing_parentheses(mut expr: &str) -> &str {
     loop {
         let trimmed = expr.trim();
@@ -2930,33 +1433,9 @@ fn trim_enclosing_parentheses(mut expr: &str) -> &str {
     }
 }
 
-fn is_simple_scaled_derivative_factor(value: &str) -> bool {
-    let value = value.trim();
-    is_rust_identifier(value)
-        || is_simple_generated_access(value)
-        || is_simple_numeric_literal(value)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{binary_value, is_inline_derivative_expr, pow_derivative_expr, power_value_expr};
-
-    #[test]
-    fn inline_derivative_expr_accepts_scaled_scratch_rows() {
-        assert!(is_inline_derivative_expr(
-            "(scratch.node_derivatives[12][0] * ddt_scale)"
-        ));
-        assert!(is_inline_derivative_expr(
-            "(params.p32 * scratch.branch_derivatives[4][1])"
-        ));
-    }
-
-    #[test]
-    fn inline_derivative_expr_rejects_expensive_scaled_scratch_rows() {
-        assert!(!is_inline_derivative_expr(
-            "(scratch.node_derivatives[12][0] * expensive_scale())"
-        ));
-    }
+    use super::{binary_value, power_value_expr};
 
     #[test]
     fn expression_backend_specializes_integer_power_values() {
@@ -2975,59 +1454,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn expression_backend_specializes_integer_power_derivatives() {
-        assert_eq!(pow_derivative_expr("value", "x", "0.0", "dx", "0.0"), "0.0");
-        assert_eq!(pow_derivative_expr("value", "x", "1.0", "dx", "0.0"), "dx");
-        assert_eq!(
-            pow_derivative_expr("value", "x", "2.0", "dx", "0.0"),
-            "(dx * (2.0 * x))"
-        );
-        assert_eq!(
-            pow_derivative_expr("value", "x", "3.0_f64", "dx", "0.0"),
-            "(dx * (3.0 * {let pb=x;pb*pb}))"
-        );
-        assert_eq!(
-            pow_derivative_expr("value", "x", "4.0", "dx", "0.0"),
-            "(dx * (4.0 * {let pb=x;pb*pb*pb}))"
-        );
-        assert!(!pow_derivative_expr("value", "x", "0.5", "dx", "0.0").contains("powi"));
-
-        let nonzero_exponent_derivative = pow_derivative_expr("value", "x", "y", "dx", "1.0");
-        assert_eq!(
-            nonzero_exponent_derivative,
-            "(value * ((x).ln() + (y * (dx / x))))"
-        );
-        assert!(!nonzero_exponent_derivative.contains("if "));
-
-        let dynamic_exponent_derivative = pow_derivative_expr("value", "x", "y", "dx", "dy");
-        assert!(dynamic_exponent_derivative.contains("dy == 0.0"));
-        assert!(dynamic_exponent_derivative.contains("if "));
-    }
-}
-
-fn scaled_derivative_expr(derivative: &str, scale: &str) -> String {
-    let derivative = derivative.trim();
-    if is_zero_derivative(derivative) {
-        "0.0".to_string()
-    } else if is_one_derivative(derivative) {
-        scale.to_string()
-    } else if is_negative_one_derivative(derivative) {
-        format!("-{scale}")
-    } else {
-        mul_expr(derivative, scale)
-    }
-}
-
-fn is_rust_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn unary_value(op: &str, operand: &str) -> Result<String, RustBackendError> {
@@ -3193,12 +1619,6 @@ fn integer_power_exponent_literal(value: &str) -> Option<i32> {
     integer_power_exponent_value(value.parse::<f64>().ok()?)
 }
 
-fn nonzero_numeric_literal(value: &str) -> bool {
-    let value = trim_enclosing_parentheses(value);
-    let value = value.strip_suffix("_f64").unwrap_or(value);
-    value.parse::<f64>().is_ok_and(|value| value != 0.0)
-}
-
 fn integer_power_exponent_value(value: f64) -> Option<i32> {
     if !value.is_finite() || value.fract() != 0.0 {
         return None;
@@ -3207,682 +1627,6 @@ fn integer_power_exponent_value(value: f64) -> Option<i32> {
         return None;
     }
     Some(value as i32)
-}
-
-fn div_derivative_expr(
-    left_value: &str,
-    right_value: &str,
-    left_derivative: &str,
-    right_derivative: &str,
-) -> String {
-    if is_zero_derivative(left_derivative) && is_zero_derivative(right_derivative) {
-        "0.0".to_string()
-    } else if is_zero_derivative(right_derivative) {
-        div_expr(left_derivative, right_value)
-    } else if is_zero_derivative(left_derivative) {
-        unary_value(
-            "Neg",
-            &div_expr(
-                &mul_expr(left_value, right_derivative),
-                &mul_expr(right_value, right_value),
-            ),
-        )
-        .expect("negation is supported")
-    } else {
-        div_expr(
-            &sub_expr(
-                &mul_expr(left_derivative, right_value),
-                &mul_expr(left_value, right_derivative),
-            ),
-            &mul_expr(right_value, right_value),
-        )
-    }
-}
-
-fn mod_derivative_expr(
-    left_value: &str,
-    right_value: &str,
-    left_derivative: &str,
-    right_derivative: &str,
-) -> String {
-    if is_zero_derivative(left_derivative) && is_zero_derivative(right_derivative) {
-        "0.0".to_string()
-    } else if is_zero_derivative(right_derivative) {
-        left_derivative.to_string()
-    } else {
-        let quotient = format!("(({left_value} / {right_value}).trunc())");
-        sub_expr(left_derivative, &mul_expr(&quotient, right_derivative))
-    }
-}
-
-fn binary_derivatives(
-    op: &str,
-    value: &str,
-    left: &ExprValue,
-    right: &ExprValue,
-) -> Result<Vec<String>, RustBackendError> {
-    binary_derivatives_for(
-        op,
-        value,
-        &left.value,
-        &right.value,
-        &left.derivatives,
-        &right.derivatives,
-    )
-}
-
-fn binary_derivatives_for(
-    op: &str,
-    value: &str,
-    left_value: &str,
-    right_value: &str,
-    left_derivatives: &[String],
-    right_derivatives: &[String],
-) -> Result<Vec<String>, RustBackendError> {
-    left_derivatives
-        .iter()
-        .zip(right_derivatives)
-        .map(|(left_derivative, right_derivative)| match op {
-            "Add" => Ok(add_expr(left_derivative, right_derivative)),
-            "Sub" => Ok(sub_expr(left_derivative, right_derivative)),
-            "Mul" => Ok(add_expr(
-                &mul_expr(left_derivative, right_value),
-                &mul_expr(left_value, right_derivative),
-            )),
-            "Div" => Ok(div_derivative_expr(
-                left_value,
-                right_value,
-                left_derivative,
-                right_derivative,
-            )),
-            "Mod" => Ok(mod_derivative_expr(
-                left_value,
-                right_value,
-                left_derivative,
-                right_derivative,
-            )),
-            "Pow" => Ok(pow_derivative_expr(
-                value,
-                left_value,
-                right_value,
-                left_derivative,
-                right_derivative,
-            )),
-            _ => Err(RustBackendError::unsupported(
-                "<generated>",
-                "<expr>",
-                format!("binary operator {op}"),
-            )),
-        })
-        .collect()
-}
-
-fn intrinsic_derivatives_from_values(
-    name: &str,
-    args: &[ExprValue],
-    value: &str,
-    axis: impl Fn(&ExprValue) -> &[String],
-) -> Result<Vec<String>, RustBackendError> {
-    let normalized = name.to_ascii_lowercase();
-    let derivatives = match normalized.as_str() {
-        "abs" | "fabs" => axis(&args[0])
-            .iter()
-            .map(|d| {
-                let negated = unary_value("Neg", d)?;
-                Ok(conditional_expr(
-                    &format!("{} >= 0.0", args[0].value),
-                    d,
-                    &negated,
-                ))
-            })
-            .collect::<Result<Vec<_>, RustBackendError>>()?,
-        "sqrt" => axis(&args[0])
-            .iter()
-            .map(|d| div_expr(d, &format!("(2.0 * {value})")))
-            .collect(),
-        "exp" => axis(&args[0]).iter().map(|d| mul_expr(value, d)).collect(),
-        "limexp" => axis(&args[0])
-            .iter()
-            .map(|d| mul_expr(&limexp_derivative_scale_expr(&args[0].value), d))
-            .collect(),
-        "__rspice_limited_exp" => axis(&args[0])
-            .iter()
-            .map(|d| mul_expr(&limited_exp_derivative_scale_expr(&args[0].value), d))
-            .collect(),
-        "ln" | "log" => axis(&args[0])
-            .iter()
-            .map(|d| div_expr(d, &args[0].value))
-            .collect(),
-        "log10" => axis(&args[0])
-            .iter()
-            .map(|d| div_expr(d, &format!("({} * std::f64::consts::LN_10)", args[0].value)))
-            .collect(),
-        "sin" => axis(&args[0])
-            .iter()
-            .map(|d| mul_expr(&format!("({}).cos()", args[0].value), d))
-            .collect(),
-        "cos" => axis(&args[0])
-            .iter()
-            .map(|d| mul_expr(&format!("-({}).sin()", args[0].value), d))
-            .collect(),
-        "tan" => axis(&args[0])
-            .iter()
-            .map(|d| {
-                div_expr(
-                    d,
-                    &format!("(({}).cos() * ({}).cos())", args[0].value, args[0].value),
-                )
-            })
-            .collect(),
-        "atan" => axis(&args[0])
-            .iter()
-            .map(|d| {
-                div_expr(
-                    d,
-                    &format!("(1.0 + ({} * {}))", args[0].value, args[0].value),
-                )
-            })
-            .collect(),
-        "sinh" => axis(&args[0])
-            .iter()
-            .map(|d| mul_expr(&format!("({}).cosh()", args[0].value), d))
-            .collect(),
-        "cosh" => axis(&args[0])
-            .iter()
-            .map(|d| mul_expr(&format!("({}).sinh()", args[0].value), d))
-            .collect(),
-        "tanh" => axis(&args[0])
-            .iter()
-            .map(|d| {
-                div_expr(
-                    d,
-                    &format!("(({}).cosh() * ({}).cosh())", args[0].value, args[0].value),
-                )
-            })
-            .collect(),
-        "asinh" => axis(&args[0])
-            .iter()
-            .map(|d| {
-                div_expr(
-                    d,
-                    &format!("(({} * {}) + 1.0).sqrt()", args[0].value, args[0].value),
-                )
-            })
-            .collect(),
-        "acosh" => axis(&args[0])
-            .iter()
-            .map(|d| {
-                div_expr(
-                    d,
-                    &format!(
-                        "(({} - 1.0).sqrt() * ({} + 1.0).sqrt())",
-                        args[0].value, args[0].value
-                    ),
-                )
-            })
-            .collect(),
-        "atanh" => axis(&args[0])
-            .iter()
-            .map(|d| {
-                div_expr(
-                    d,
-                    &format!("(1.0 - ({} * {}))", args[0].value, args[0].value),
-                )
-            })
-            .collect(),
-        "floor" | "ceil" => zero_derivatives(axis(&args[0]).len()),
-        "pow" => axis(&args[0])
-            .iter()
-            .zip(axis(&args[1]))
-            .map(|(dx, dy)| pow_derivative_expr(value, &args[0].value, &args[1].value, dx, dy))
-            .collect(),
-        "min" => axis(&args[0])
-            .iter()
-            .zip(axis(&args[1]))
-            .map(|(left, right)| {
-                conditional_expr(
-                    &format!("{} <= {}", args[0].value, args[1].value),
-                    left,
-                    right,
-                )
-            })
-            .collect(),
-        "max" => axis(&args[0])
-            .iter()
-            .zip(axis(&args[1]))
-            .map(|(left, right)| {
-                conditional_expr(
-                    &format!("{} >= {}", args[0].value, args[1].value),
-                    left,
-                    right,
-                )
-            })
-            .collect(),
-        "hypot" => axis(&args[0])
-            .iter()
-            .zip(axis(&args[1]))
-            .map(|(dx, dy)| {
-                div_expr(
-                    &add_expr(&mul_expr(&args[0].value, dx), &mul_expr(&args[1].value, dy)),
-                    value,
-                )
-            })
-            .collect(),
-        "atan2" => axis(&args[0])
-            .iter()
-            .zip(axis(&args[1]))
-            .map(|(dy, dx)| {
-                div_expr(
-                    &sub_expr(&mul_expr(&args[1].value, dy), &mul_expr(&args[0].value, dx)),
-                    &add_expr(
-                        &mul_expr(&args[1].value, &args[1].value),
-                        &mul_expr(&args[0].value, &args[0].value),
-                    ),
-                )
-            })
-            .collect(),
-        _ => {
-            return Err(RustBackendError::unsupported(
-                "<generated>",
-                "<expr>",
-                format!("intrinsic function '{name}'"),
-            ));
-        }
-    };
-    Ok(derivatives)
-}
-
-fn pow_derivative_expr(
-    value: &str,
-    base: &str,
-    exponent: &str,
-    dbase: &str,
-    dexponent: &str,
-) -> String {
-    if is_zero_derivative(dexponent)
-        && let Some(exponent) = integer_power_exponent_literal(exponent)
-        && let Some(derivative) = integer_power_derivative_expr(base, exponent, dbase)
-    {
-        return derivative;
-    }
-
-    let base_receiver = f64_binary_receiver(base);
-    let integer_exponent_derivative = conditional_expr(
-        &format!("{exponent} == 0.0"),
-        "0.0",
-        &mul_expr(
-            exponent,
-            &mul_expr(&format!("{base_receiver}.powf({exponent} - 1.0)"), dbase),
-        ),
-    );
-    let general_derivative = mul_expr(
-        value,
-        &add_expr(
-            &mul_expr(dexponent, &format!("{base_receiver}.ln()")),
-            &mul_expr(exponent, &div_expr(dbase, base)),
-        ),
-    );
-    if nonzero_numeric_literal(dexponent) {
-        return general_derivative;
-    }
-
-    conditional_expr(
-        &format!(
-            "{dexponent} == 0.0 && (({exponent}) as f64).is_finite() && (({exponent}) as f64).fract() == 0.0"
-        ),
-        &integer_exponent_derivative,
-        &general_derivative,
-    )
-}
-
-fn integer_power_derivative_expr(base: &str, exponent: i32, dbase: &str) -> Option<String> {
-    if exponent == 0 || is_zero_derivative(dbase) {
-        return Some("0.0".to_string());
-    }
-    if exponent == 1 {
-        return Some(dbase.to_string());
-    }
-    let derivative_power = exponent.checked_sub(1)?;
-    let exponent_scale = format!("{exponent}.0");
-    let derivative_scale = mul_expr(
-        &exponent_scale,
-        &constant_integer_power_value_expr(base, derivative_power),
-    );
-    Some(scaled_derivative_expr(dbase, &derivative_scale))
-}
-
-fn reactive_unary(op: &str, operand: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
-    if !operand.has_reactive {
-        return Ok(ReactiveValue::none(zero_derivatives(
-            operand.derivatives.len(),
-        )));
-    }
-    let value = unary_value(op, &operand.reactive_value)?;
-    let derivatives = operand
-        .reactive_derivatives
-        .iter()
-        .map(|derivative| unary_value(op, derivative))
-        .collect::<Result<Vec<_>, _>>()?;
-    let branch_derivatives = operand
-        .reactive_branch_derivatives
-        .iter()
-        .map(|derivative| unary_value(op, derivative))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(ReactiveValue {
-        has_reactive: true,
-        value,
-        derivatives,
-        branch_derivatives,
-    })
-}
-
-fn reactive_binary(
-    op: &str,
-    left: &ExprValue,
-    right: &ExprValue,
-) -> Result<ReactiveValue, RustBackendError> {
-    let count = left.derivatives.len();
-    match op {
-        "Add" => reactive_add_sub(left, right, "+"),
-        "Sub" => reactive_add_sub(left, right, "-"),
-        "Mul" => reactive_mul(left, right),
-        "Div" => reactive_div(left, right),
-        "Mod" => reactive_mod(left, right),
-        _ => Err(RustBackendError::unsupported(
-            "<generated>",
-            "<expr>",
-            format!("binary operator {op}"),
-        )),
-    }
-    .or_else(|err| {
-        if !left.has_reactive && !right.has_reactive {
-            Ok(ReactiveValue::none(zero_derivatives(count)))
-        } else {
-            Err(err)
-        }
-    })
-}
-
-fn reactive_add_sub(
-    left: &ExprValue,
-    right: &ExprValue,
-    op: &str,
-) -> Result<ReactiveValue, RustBackendError> {
-    match (left.has_reactive, right.has_reactive) {
-        (false, false) => Ok(ReactiveValue::none(zero_derivatives(
-            left.derivatives.len(),
-        ))),
-        (true, false) if op == "+" => Ok(ReactiveValue {
-            has_reactive: true,
-            value: left.reactive_value.clone(),
-            derivatives: left.reactive_derivatives.clone(),
-            branch_derivatives: left.reactive_branch_derivatives.clone(),
-        }),
-        (true, false) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: left.reactive_value.clone(),
-            derivatives: left.reactive_derivatives.clone(),
-            branch_derivatives: left.reactive_branch_derivatives.clone(),
-        }),
-        (false, true) if op == "+" => Ok(ReactiveValue {
-            has_reactive: true,
-            value: right.reactive_value.clone(),
-            derivatives: right.reactive_derivatives.clone(),
-            branch_derivatives: right.reactive_branch_derivatives.clone(),
-        }),
-        (false, true) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: unary_value("Neg", &right.reactive_value)?,
-            derivatives: right
-                .reactive_derivatives
-                .iter()
-                .map(|derivative| unary_value("Neg", derivative))
-                .collect::<Result<Vec<_>, _>>()?,
-            branch_derivatives: right
-                .reactive_branch_derivatives
-                .iter()
-                .map(|derivative| unary_value("Neg", derivative))
-                .collect::<Result<Vec<_>, _>>()?,
-        }),
-        (true, true) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: if op == "+" {
-                add_expr(&left.reactive_value, &right.reactive_value)
-            } else {
-                sub_expr(&left.reactive_value, &right.reactive_value)
-            },
-            derivatives: left
-                .reactive_derivatives
-                .iter()
-                .zip(&right.reactive_derivatives)
-                .map(|(left, right)| {
-                    if op == "+" {
-                        add_expr(left, right)
-                    } else {
-                        sub_expr(left, right)
-                    }
-                })
-                .collect(),
-            branch_derivatives: left
-                .reactive_branch_derivatives
-                .iter()
-                .zip(&right.reactive_branch_derivatives)
-                .map(|(left, right)| {
-                    if op == "+" {
-                        add_expr(left, right)
-                    } else {
-                        sub_expr(left, right)
-                    }
-                })
-                .collect(),
-        }),
-    }
-}
-
-fn reactive_mul(left: &ExprValue, right: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
-    match (left.has_reactive, right.has_reactive) {
-        (false, false) => Ok(ReactiveValue::none(zero_derivatives(
-            left.derivatives.len(),
-        ))),
-        (true, false) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: mul_expr(&left.reactive_value, &right.value),
-            derivatives: left
-                .reactive_derivatives
-                .iter()
-                .zip(&right.derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    add_expr(
-                        &mul_expr(left_derivative, &right.value),
-                        &mul_expr(&left.reactive_value, right_derivative),
-                    )
-                })
-                .collect(),
-            branch_derivatives: left
-                .reactive_branch_derivatives
-                .iter()
-                .zip(&right.branch_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    add_expr(
-                        &mul_expr(left_derivative, &right.value),
-                        &mul_expr(&left.reactive_value, right_derivative),
-                    )
-                })
-                .collect(),
-        }),
-        (false, true) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: mul_expr(&left.value, &right.reactive_value),
-            derivatives: left
-                .derivatives
-                .iter()
-                .zip(&right.reactive_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    add_expr(
-                        &mul_expr(left_derivative, &right.reactive_value),
-                        &mul_expr(&left.value, right_derivative),
-                    )
-                })
-                .collect(),
-            branch_derivatives: left
-                .branch_derivatives
-                .iter()
-                .zip(&right.reactive_branch_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    add_expr(
-                        &mul_expr(left_derivative, &right.reactive_value),
-                        &mul_expr(&left.value, right_derivative),
-                    )
-                })
-                .collect(),
-        }),
-        (true, true) => Err(RustBackendError::unsupported(
-            "<generated>",
-            "<expr>",
-            "ddt() on both sides of a product",
-        )),
-    }
-}
-
-fn reactive_mod(left: &ExprValue, right: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
-    match (left.has_reactive, right.has_reactive) {
-        (false, false) => Ok(ReactiveValue::none(zero_derivatives(
-            left.derivatives.len(),
-        ))),
-        (true, false) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: mod_expr(&left.reactive_value, &right.value),
-            derivatives: left
-                .reactive_derivatives
-                .iter()
-                .zip(&right.derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    mod_derivative_expr(
-                        &left.reactive_value,
-                        &right.value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-            branch_derivatives: left
-                .reactive_branch_derivatives
-                .iter()
-                .zip(&right.branch_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    mod_derivative_expr(
-                        &left.reactive_value,
-                        &right.value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-        }),
-        (false, true) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: mod_expr(&left.value, &right.reactive_value),
-            derivatives: left
-                .derivatives
-                .iter()
-                .zip(&right.reactive_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    mod_derivative_expr(
-                        &left.value,
-                        &right.reactive_value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-            branch_derivatives: left
-                .branch_derivatives
-                .iter()
-                .zip(&right.reactive_branch_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    mod_derivative_expr(
-                        &left.value,
-                        &right.reactive_value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-        }),
-        (true, true) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: mod_expr(&left.reactive_value, &right.reactive_value),
-            derivatives: left
-                .reactive_derivatives
-                .iter()
-                .zip(&right.reactive_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    mod_derivative_expr(
-                        &left.reactive_value,
-                        &right.reactive_value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-            branch_derivatives: left
-                .reactive_branch_derivatives
-                .iter()
-                .zip(&right.reactive_branch_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    mod_derivative_expr(
-                        &left.reactive_value,
-                        &right.reactive_value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-        }),
-    }
-}
-
-fn reactive_div(left: &ExprValue, right: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
-    match (left.has_reactive, right.has_reactive) {
-        (false, false) => Ok(ReactiveValue::none(zero_derivatives(
-            left.derivatives.len(),
-        ))),
-        (true, false) => Ok(ReactiveValue {
-            has_reactive: true,
-            value: div_expr(&left.reactive_value, &right.value),
-            derivatives: left
-                .reactive_derivatives
-                .iter()
-                .zip(&right.derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    div_derivative_expr(
-                        &left.reactive_value,
-                        &right.value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-            branch_derivatives: left
-                .reactive_branch_derivatives
-                .iter()
-                .zip(&right.branch_derivatives)
-                .map(|(left_derivative, right_derivative)| {
-                    div_derivative_expr(
-                        &left.reactive_value,
-                        &right.value,
-                        left_derivative,
-                        right_derivative,
-                    )
-                })
-                .collect(),
-        }),
-        (false, true) | (true, true) => Err(RustBackendError::unsupported(
-            "<generated>",
-            "<expr>",
-            "ddt() in denominator of reactive expression",
-        )),
-    }
 }
 
 pub(super) fn is_ddt_name(name: &str) -> bool {

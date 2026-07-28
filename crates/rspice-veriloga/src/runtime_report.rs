@@ -14,9 +14,7 @@ use thiserror::Error;
 use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType};
 use crate::codegen::CompiledModel;
 use crate::error::CompileError;
-use crate::rust_backend::{
-    GeneratedRustDeviceReport, RustBackendSelection, RustTranspileOptions, RustTranspiler,
-};
+use crate::rust_backend::{GeneratedRustDevice, RustTranspileOptions, RustTranspiler};
 use crate::source::Span;
 
 /// The complete, mutually consistent output of an in-memory runtime compile.
@@ -31,7 +29,7 @@ pub struct RuntimeCompileReport {
     /// Qualification result for every target advertised by the workbench.
     pub targets: RuntimeTargetQualifications,
     /// Generated Rust source, present only when in-memory transpilation passed.
-    pub generated_rust: Option<GeneratedRustDeviceReport>,
+    pub generated_rust: Option<GeneratedRustDevice>,
 }
 
 impl RuntimeCompileReport {
@@ -292,25 +290,19 @@ fn qualification(
 fn qualify_runtime_targets(
     model: &CompiledModel,
     canonical_ir: &CanonicalIrArtifact,
-) -> (
-    RuntimeTargetQualifications,
-    Option<GeneratedRustDeviceReport>,
-) {
+) -> (RuntimeTargetQualifications, Option<GeneratedRustDevice>) {
     let generated_result =
-        RustTranspiler::new(RustTranspileOptions::default()).transpile_with_report(canonical_ir);
+        RustTranspiler::new(RustTranspileOptions::default()).transpile(canonical_ir);
     let (generated_qualification, generated_rust) = match generated_result {
-        Ok(report) => {
-            let backend = rust_backend_name(report.backend);
-            (
-                qualification(
-                    RuntimeTarget::GeneratedRust,
-                    RuntimeTargetReadiness::Available,
-                    RuntimeTargetMaturity::QualificationOnly,
-                    format!("qualified with {backend}"),
-                ),
-                Some(report),
-            )
-        }
+        Ok(device) => (
+            qualification(
+                RuntimeTarget::GeneratedRust,
+                RuntimeTargetReadiness::Available,
+                RuntimeTargetMaturity::QualificationOnly,
+                "qualified with the canonical CFG backend",
+            ),
+            Some(device),
+        ),
         Err(error) => (
             qualification(
                 RuntimeTarget::GeneratedRust,
@@ -346,12 +338,6 @@ fn qualify_runtime_targets(
     ];
 
     (RuntimeTargetQualifications::new(entries), generated_rust)
-}
-
-fn rust_backend_name(backend: RustBackendSelection) -> &'static str {
-    match backend {
-        RustBackendSelection::CanonicalCfg => "canonical CFG backend",
-    }
 }
 
 #[cfg(all(feature = "native", target_arch = "x86_64"))]
@@ -402,29 +388,29 @@ fn qualify_native_x64(
 }
 
 fn validate_generated_rust(
-    generated: &GeneratedRustDeviceReport,
+    generated: &GeneratedRustDevice,
     canonical_module: &str,
     canonical_digest: &str,
 ) -> Result<(), RuntimeArtifactIntegrityError> {
-    if generated.device.module_name != canonical_module {
+    if generated.module_name != canonical_module {
         return Err(RuntimeArtifactIntegrityError::GeneratedRustModuleMismatch {
-            generated: generated.device.module_name.clone(),
+            generated: generated.module_name.clone(),
             canonical: canonical_module.to_owned(),
         });
     }
-    if generated.device.source_digest != canonical_digest {
+    if generated.source_digest != canonical_digest {
         return Err(RuntimeArtifactIntegrityError::SourceDigestMismatch {
             artifact: "generated Rust",
             expected: canonical_digest.to_owned(),
-            actual: generated.device.source_digest.clone(),
+            actual: generated.source_digest.clone(),
         });
     }
-    if generated.device.files.is_empty() {
+    if generated.files.is_empty() {
         return Err(RuntimeArtifactIntegrityError::GeneratedRustHasNoFiles);
     }
 
     let mut paths = BTreeSet::new();
-    for file in &generated.device.files {
+    for file in &generated.files {
         let path = Path::new(&file.relative_path);
         let safe = !file.relative_path.is_empty()
             && !path.is_absolute()

@@ -7,15 +7,13 @@
 //! does not link this crate at all. The [`crate`] README documents the
 //! `rspice-veriloga-gen` binary that drives it.
 //!
-//! ## Backend tiers
+//! ## One emitter
 //!
-//! [`RustBackendSelection`] records how a device was emitted. `ScalarOptIr` is
-//! the target: OptIR lowered to straight-line scalar Rust, which optimizes
-//! best. Models whose derivative structure makes that impractical fall back
-//! through sparse-local and structured kernels to the legacy device emitter,
-//! and every fallback is reported as a [`BuiltinBackendFallbackReason`] rather
-//! than silently taken. Setting `RSPICE_RUST_BACKEND_REQUIRE_SCALAR_BUILTINS`
-//! turns any fallback into a hard error.
+//! There is a single path from canonical IR to Rust: [`canonical`], which
+//! lowers the CFG with its control flow intact and packed derivative lanes.
+//! There is no tier to select, no fallback to report, and no environment
+//! variable that changes which emitter runs — a model either lowers or the
+//! generator fails with the construct that stopped it.
 //!
 //! ## Determinism
 //!
@@ -42,8 +40,7 @@ mod state_file;
 pub mod stamp_plan;
 
 pub use builtins::{
-    BuiltinBackendFallbackReason, BuiltinBackendSelectionCounts, BuiltinGenerationReport,
-    BuiltinSubsetGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
+    BuiltinGenerationReport, BuiltinSubsetGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
     REGENERATE_BUILTINS_COMMAND, generate_generated_builtin_subset_with_progress,
     generate_generated_builtin_subset_with_progress_and_jobs, regenerate_generated_builtins,
     regenerate_generated_builtins_with_progress,
@@ -83,27 +80,6 @@ pub struct GeneratedRustDevice {
     pub source_digest: String,
 }
 
-/// Which emitter produced a device.
-///
-/// One variant, and it stays an enum rather than collapsing to nothing so the
-/// manifest keeps a field that says what wrote the tree. Phase 6 deleted the
-/// four tiers this used to choose between — `ScalarOptIr`, `SparseLocalKernel`,
-/// `StructuredKernel`, `ScalarHybrid` and `LegacyDevice` — after the corpus had
-/// been regenerated through the canonical emitter with `legacy-device=0`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum RustBackendSelection {
-    /// The canonical CFG emitter — control flow, packed derivatives, and only
-    /// the stamp entries that exist.
-    CanonicalCfg,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct GeneratedRustDeviceReport {
-    pub device: GeneratedRustDevice,
-    pub backend: RustBackendSelection,
-    pub fallback_reason: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustTranspileOptions {
     pub runtime_path: String,
@@ -127,75 +103,13 @@ impl RustTranspiler {
         Self { options }
     }
 
-    /// Retained as a name after Phase 6 collapsed the tiers.
-    ///
-    /// There is one emitter now, so this and [`Self::new`] are the same thing.
-    /// Kept because "canonical" is what callers meant when they asked for it,
-    /// and a call site that says so still reads correctly.
-    pub fn new_canonical(options: RustTranspileOptions) -> Self {
-        Self::new(options)
-    }
-
     pub fn transpile(
         &self,
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDevice, RustBackendError> {
-        self.transpile_with_report(artifact)
-            .map(|report| report.device)
+        let mut device = canonical::generate_device(artifact, &self.options)?;
+        state_file::finalize_checkpoint_identity(&mut device)?;
+        Ok(device)
     }
-
-    pub fn transpile_with_report(
-        &self,
-        artifact: &CanonicalIrArtifact,
-    ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
-        let mut report = GeneratedRustDeviceReport {
-            device: canonical::generate_device(artifact, &self.options)?,
-            backend: RustBackendSelection::CanonicalCfg,
-            fallback_reason: None,
-        };
-        state_file::finalize_checkpoint_identity(&mut report.device)?;
-        Ok(report)
-    }
-}
-
-fn combined_structured_tier_error(
-    artifact: &CanonicalIrArtifact,
-    local_error: &RustBackendError,
-    structured_error: &RustBackendError,
-) -> RustBackendError {
-    RustBackendError::unsupported(
-        artifact.metadata.source_package.as_str(),
-        artifact.mir.module_name.as_str(),
-        format!(
-            "sparse local kernel path: {}; structured kernel path: {}",
-            unsupported_detail(local_error),
-            unsupported_detail(structured_error)
-        ),
-    )
-}
-
-fn auto_backend_unsupported(
-    artifact: &CanonicalIrArtifact,
-    scalar_error: &RustBackendError,
-    structured_error: &RustBackendError,
-    hybrid_error: &RustBackendError,
-) -> RustBackendError {
-    RustBackendError::unsupported(
-        artifact.metadata.source_package.as_str(),
-        artifact.mir.module_name.as_str(),
-        format!(
-            "model cannot be lowered by optimized generated Rust backends; direct scalar path: {}; structured kernel path: {}; hybrid scalar path: {}",
-            unsupported_detail(scalar_error),
-            unsupported_detail(structured_error),
-            unsupported_detail(hybrid_error),
-        ),
-    )
-}
-
-fn unsupported_detail(error: &RustBackendError) -> &str {
-    error
-        .message
-        .strip_prefix("unsupported Verilog-A construct for Rust backend: ")
-        .unwrap_or(error.message.as_str())
 }
 
