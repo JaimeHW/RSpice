@@ -1101,12 +1101,7 @@ fn budgeted_lines(source: &str) -> usize {
         .count()
 }
 
-const OVERSIZED_FILES: &[(&str, usize)] = &[
-    (
-        "workbench/app/dialogs/preferences/shortcut_preferences.rs",
-        2530,
-    ),
-];
+const OVERSIZED_FILES: &[(&str, usize)] = &[];
 
 #[test]
 fn source_files_stay_within_the_line_budget() {
