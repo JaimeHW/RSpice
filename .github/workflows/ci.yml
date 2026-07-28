@@ -156,6 +156,7 @@ jobs:
           --samples 9
           --min-speedup 1.10
           --min-full-stamp-speedup 1.50
+          --max-native-setup-ms 50
           --max-native-p95-ns-per-sweep 25000
           --max-relative-stddev 0.25
       - name: Clear non-UI test artifacts
@@ -201,6 +202,7 @@ jobs:
           --samples 9
           --min-speedup 1.10
           --min-full-stamp-speedup 1.50
+          --max-native-setup-ms 50
           --max-native-p95-ns-per-sweep 25000
           --max-relative-stddev 0.25
 

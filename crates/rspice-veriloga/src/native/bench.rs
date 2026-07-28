@@ -73,6 +73,7 @@ pub struct NativeBenchConfig {
     pub samples: usize,
     pub min_speedup: f64,
     pub min_full_stamp_speedup: f64,
+    pub max_native_setup_ms: Option<f64>,
     pub max_native_p95_ns_per_sweep: Option<f64>,
     pub max_relative_stddev: Option<f64>,
 }
@@ -84,6 +85,7 @@ impl Default for NativeBenchConfig {
             samples: DEFAULT_SAMPLES,
             min_speedup: 1.10,
             min_full_stamp_speedup: 1.50,
+            max_native_setup_ms: None,
             max_native_p95_ns_per_sweep: None,
             max_relative_stddev: None,
         }
@@ -99,6 +101,7 @@ pub struct NativeBenchReport {
     pub samples: usize,
     pub min_speedup: f64,
     pub min_full_stamp_speedup: f64,
+    pub max_native_setup_ms: Option<f64>,
     pub max_native_p95_ns_per_sweep: Option<f64>,
     pub max_relative_stddev: Option<f64>,
     pub cases: Vec<NativeBenchCaseReport>,
@@ -157,6 +160,12 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
         return Err("native JIT full-stamp minimum speedup must be finite and non-negative".into());
     }
     if config
+        .max_native_setup_ms
+        .is_some_and(|budget| !budget.is_finite() || budget <= 0.0)
+    {
+        return Err("native JIT setup budget must be finite and greater than zero".into());
+    }
+    if config
         .max_native_p95_ns_per_sweep
         .is_some_and(|budget| !budget.is_finite() || budget <= 0.0)
     {
@@ -191,6 +200,7 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
         samples: config.samples,
         min_speedup: config.min_speedup,
         min_full_stamp_speedup: config.min_full_stamp_speedup,
+        max_native_setup_ms: config.max_native_setup_ms,
         max_native_p95_ns_per_sweep: config.max_native_p95_ns_per_sweep,
         max_relative_stddev: config.max_relative_stddev,
         cases,
@@ -274,6 +284,7 @@ fn run_dense_entrypoint_case(config: NativeBenchConfig) -> Result<NativeBenchCas
     let failures = benchmark_failures(
         config,
         config.min_speedup,
+        native_setup_ns,
         native_stats,
         speedup_median,
         native_checksum,
@@ -376,6 +387,7 @@ fn run_device_evaluate_case(config: NativeBenchConfig) -> Result<NativeBenchCase
     let failures = benchmark_failures(
         config,
         config.min_speedup,
+        native_setup_ns,
         native_stats,
         speedup_median,
         native_checksum,
@@ -474,6 +486,7 @@ fn run_device_stamp_case(config: NativeBenchConfig) -> Result<NativeBenchCaseRep
     let failures = benchmark_failures(
         config,
         config.min_full_stamp_speedup,
+        native_setup_ns,
         native_stats,
         speedup_median,
         native_checksum,
@@ -1296,6 +1309,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
 fn benchmark_failures(
     config: NativeBenchConfig,
     required_speedup: f64,
+    native_setup_ns: f64,
     native_stats: TimingStats,
     speedup_median: f64,
     native_checksum: f64,
@@ -1306,6 +1320,15 @@ fn benchmark_failures(
         failures.push(format!(
             "median speedup {:.3}x is below required {:.3}x",
             speedup_median, required_speedup
+        ));
+    }
+    if let Some(max_native_setup_ms) = config.max_native_setup_ms
+        && native_setup_ns > max_native_setup_ms * 1_000_000.0
+    {
+        failures.push(format!(
+            "native setup {:.3} ms exceeds {:.3} ms",
+            native_setup_ns / 1_000_000.0,
+            max_native_setup_ms
         ));
     }
     if let Some(max_native_p95) = config.max_native_p95_ns_per_sweep
@@ -1386,7 +1409,7 @@ fn take_native_error(phase: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        NativeBenchConfig, run_dense_entrypoint_case, run_device_evaluate_case,
+        NativeBenchConfig, benchmark_failures, run_dense_entrypoint_case, run_device_evaluate_case,
         run_device_stamp_case, timing_stats,
     };
 
@@ -1396,6 +1419,7 @@ mod tests {
             samples: 1,
             min_speedup: 0.0,
             min_full_stamp_speedup: 0.0,
+            max_native_setup_ms: None,
             max_native_p95_ns_per_sweep: None,
             max_relative_stddev: None,
         }
@@ -1438,6 +1462,26 @@ mod tests {
         assert!(
             (stats.relative_standard_deviation - stats.standard_deviation / 2.0).abs()
                 <= f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn benchmark_gate_rejects_native_setup_budget_regression() {
+        let mut config = smoke_config();
+        config.max_native_setup_ms = Some(1.0);
+        let failures = benchmark_failures(
+            config,
+            0.0,
+            2_000_000.0,
+            timing_stats(vec![1.0]),
+            1.0,
+            0.0,
+            0.0,
+        );
+
+        assert_eq!(
+            failures,
+            ["native setup 2.000 ms exceeds 1.000 ms".to_string()]
         );
     }
 }

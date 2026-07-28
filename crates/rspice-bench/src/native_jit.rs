@@ -31,6 +31,10 @@ pub struct NativeJitArgs {
     #[arg(long, default_value_t = 1.50)]
     pub min_full_stamp_speedup: f64,
 
+    /// Maximum canonical-to-native setup time in milliseconds for each case.
+    #[arg(long, value_name = "MS", default_value_t = 50.0)]
+    pub max_native_setup_ms: f64,
+
     /// Absolute native p95 budget in ns per benchmark sweep.
     #[arg(long, value_name = "NS", default_value_t = 25_000.0)]
     pub max_native_p95_ns_per_sweep: f64,
@@ -50,6 +54,7 @@ pub fn run(args: &NativeJitArgs) -> Result<ExitCode, BenchError> {
         samples: args.samples,
         min_speedup: args.min_speedup,
         min_full_stamp_speedup: args.min_full_stamp_speedup,
+        max_native_setup_ms: Some(args.max_native_setup_ms),
         max_native_p95_ns_per_sweep: Some(args.max_native_p95_ns_per_sweep),
         max_relative_stddev: Some(args.max_relative_stddev),
     };

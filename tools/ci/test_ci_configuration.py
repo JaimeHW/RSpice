@@ -298,7 +298,8 @@ class CiConfigurationTests(unittest.TestCase):
             r"--iterations 100000\s+"
             r"--samples 9\s+"
             r"--min-speedup 1\.10\s+"
-            r"--min-full-stamp-speedup 0\.40\s+"
+            r"--min-full-stamp-speedup 1\.50\s+"
+            r"--max-native-setup-ms 50\s+"
             r"--max-native-p95-ns-per-sweep 25000\s+"
             r"--max-relative-stddev 0\.25",
         )
@@ -360,7 +361,8 @@ class CiConfigurationTests(unittest.TestCase):
             r"--iterations 100000\s+"
             r"--samples 9\s+"
             r"--min-speedup 1\.10\s+"
-            r"--min-full-stamp-speedup 0\.40\s+"
+            r"--min-full-stamp-speedup 1\.50\s+"
+            r"--max-native-setup-ms 50\s+"
             r"--max-native-p95-ns-per-sweep 25000\s+"
             r"--max-relative-stddev 0\.25",
         )
