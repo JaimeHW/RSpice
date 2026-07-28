@@ -115,7 +115,8 @@ fn plan(source: &str, name: &str) -> StampPlan {
         })
         .collect();
 
-    let mut plan = StampPlan::new(&artifact.mir, &cfg.residuals, &rows);
+    // No fixture here limits, so no lane is reserved for the correction.
+    let mut plan = StampPlan::new(&artifact.mir, &cfg.residuals, &rows, None);
     let (optimized, wanted) = optimize_cfg(&differentiated.function, &plan.wanted());
     plan.remap(&wanted);
     plan.drop_zeros(&optimized);

@@ -444,6 +444,14 @@ fn write_device_subset(
     Ok(())
 }
 
+const EMPTY_KERNEL_RUNTIME: &str = "\
+//! Shared runtime support for the generated Verilog-A built-ins.
+//!
+//! Empty: every generated device carries the helpers it uses. The scratch
+//! interpreter this module existed for belonged to the backend tiers, and
+//! nothing is emitted through them any more.
+";
+
 fn write_kernel_runtime(generated_root: &Path) -> BuiltinResult<()> {
     let mut generated_files = Vec::new();
     collect_tree_files(generated_root, &mut generated_files)?;
@@ -456,9 +464,22 @@ fn write_kernel_runtime(generated_root: &Path) -> BuiltinResult<()> {
         }
         generated_sources.push(fs::read_to_string(path)?);
     }
-    let runtime = super::device::render_runtime_support_module_for_generated_sources(
-        generated_sources.iter().map(String::as_str),
-    );
+    // Nothing left to support. The canonical emitter's devices carry their own
+    // helpers, so no generated source names this module at all, and the pruner
+    // that trims it method by method cannot express "all of it": it leaves the
+    // `Index`/`IndexMut` impls of a scratch matrix whose accessors it has just
+    // removed, which does not compile. An empty module is the honest answer,
+    // and it is what Phase 6 deletes outright.
+    let referenced = generated_sources
+        .iter()
+        .any(|source| source.contains("kernel_runtime"));
+    let runtime = if referenced {
+        super::device::render_runtime_support_module_for_generated_sources(
+            generated_sources.iter().map(String::as_str),
+        )
+    } else {
+        EMPTY_KERNEL_RUNTIME.to_string()
+    };
     write_text_file_if_changed(generated_root.join("kernel_runtime.rs"), &runtime)?;
     let support = generated_root.join("support.rs");
     if support.is_file() {

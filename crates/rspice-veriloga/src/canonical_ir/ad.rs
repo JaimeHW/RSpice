@@ -71,6 +71,18 @@ use super::{BlockId, BranchUnknownId, NodeId, ShapeId, ValueId};
 pub enum AdSeed {
     NodePotential(NodeId),
     BranchUnknownFlow(BranchUnknownId),
+    /// Not an unknown at all, and it must not reach the matrix.
+    ///
+    /// It is the directional affine correction stateful Newton limiting
+    /// introduces: the displacement `$limit` moved the operating point by,
+    /// carried through the same chain rule as the real lanes so that a residual
+    /// built from a limited value knows how much of itself is limiter and not
+    /// physics. The `Limit` arm of the derivative rules says why the convention
+    /// needs it.
+    ///
+    /// Nothing seeds it. Every `$limit` *injects* into it, which is why it is
+    /// the one lane whose liveness does not follow from the value graph.
+    LimiterCorrection,
 }
 
 /// A function extended with the derivatives of its values.
@@ -150,6 +162,18 @@ pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<us
         live[usize::from(*value)].insert(*lane);
     }
 
+    // Every `$limit` carries the correction lane whether or not what it limits
+    // depends on an unknown: the displacement it introduces is a fact about the
+    // iterate, not about the model's dependence on the solution.
+    let correction = correction_lane(lanes);
+    if let Some(correction) = correction {
+        for value in &function.values {
+            if matches!(value.kind, CfgValueKind::Limit { .. }) {
+                live[usize::from(value.id)].insert(correction);
+            }
+        }
+    }
+
     // Which edge arguments feed which block parameter, computed once.
     let incoming = incoming_arguments(function);
 
@@ -165,6 +189,12 @@ pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<us
                         .collect(),
                     None => HashSet::new(),
                 },
+                // Only `proposed`, not the limiter body: the rule chains through
+                // the value that was offered, so a lane only the body can reach
+                // would be a structural zero taking up a slot.
+                CfgValueKind::Limit { proposed, .. } => {
+                    live[usize::from(*proposed)].iter().copied().collect()
+                }
                 kind if differentiable(kind) => kind
                     .operands()
                     .into_iter()
@@ -198,6 +228,9 @@ fn differentiable(kind: &CfgValueKind) -> bool {
                 | CfgUnaryOp::LimitedExpDerivative
         ),
         CfgValueKind::Binary { op, .. } => !is_predicate(*op),
+        // `$limit` is differentiable, but [`lane_liveness`] answers it ahead of
+        // this rather than through it: its lanes are `proposed`'s plus the
+        // correction lane, not every operand's.
         CfgValueKind::Ddt { .. } | CfgValueKind::Idt { .. } | CfgValueKind::Limit { .. } => true,
         // The previous iterate is a constant as far as this iteration's Newton
         // step is concerned; that is what makes limiting a damping and not a
@@ -223,6 +256,11 @@ fn is_predicate(op: CfgBinaryOp) -> bool {
             | CfgBinaryOp::And
             | CfgBinaryOp::Or
     )
+}
+
+/// Which lane, if any, the caller reserved for the limiter correction.
+fn correction_lane(lanes: &[AdSeed]) -> Option<usize> {
+    lanes.iter().position(|seed| *seed == AdSeed::LimiterCorrection)
 }
 
 fn seed_lanes(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<(ValueId, usize)> {
@@ -328,6 +366,11 @@ struct AdBuilder<'a> {
     /// resistive model carries no reference to it.
     ddt_scale: Option<ValueId>,
     idt_scale: Option<ValueId>,
+    /// The lane reserved for [`AdSeed::LimiterCorrection`], if the caller asked
+    /// for one. Without it a `$limit` differentiates to its proposed value's
+    /// row and the displacement is dropped, which is what a consumer that does
+    /// not apply the correction should get.
+    correction_lane: Option<u32>,
     /// Derivative parameters each block gained: the position of the primal
     /// parameter they follow, and the shape they merge into.
     added_params: HashMap<BlockId, Vec<(usize, ShapeId)>>,
@@ -359,6 +402,8 @@ impl<'a> AdBuilder<'a> {
             one,
             ddt_scale: None,
             idt_scale: None,
+            correction_lane: correction_lane(lanes)
+                .map(|lane| u32::try_from(lane).expect("lane count fits a u32")),
             added_params: HashMap::new(),
             emitted: Vec::new(),
         };
@@ -694,10 +739,48 @@ impl<'a> AdBuilder<'a> {
                 let scale = self.idt_scale();
                 Some(self.scale(derivative, scale))
             }
-            // The limiter body is what actually computes the returned value, so
-            // the chain runs through it. The affine correction limiting also
-            // wants is not yet modelled; see the plan's Phase 7.
-            CfgValueKind::Limit { candidate, .. } => self.derivatives[usize::from(*candidate)],
+            // The classic SPICE convention, and the one OptIR pins: what
+            // `$limit` returned takes the *proposed* value's slope. `dL/dv := 1`
+            // rather than the limiter body's own derivative.
+            //
+            // Chaining through the body reads better and is wrong for a solver.
+            // A saturating limiter has slope zero wherever its clamp is active,
+            // so the device would linearise as disconnected exactly on the
+            // iterations that needed help, and the equations Newton sees would
+            // change with the iterate. Limiting is damping applied to a step,
+            // not a change to the equations being solved.
+            //
+            // The price of that pretence is here: the returned value really is
+            // `proposed + (candidate - proposed)`, and the second term is a
+            // displacement the residual has to be corrected by. It goes into its
+            // own lane rather than into the matrix, because it is not a partial
+            // with respect to any unknown — the stamp subtracts it once, at the
+            // linearisation point, and only while limiting is enabled.
+            CfgValueKind::Limit {
+                proposed,
+                candidate,
+                ..
+            } => {
+                let base = self.derivatives[usize::from(*proposed)];
+                let Some(lane) = self.correction_lane else {
+                    return base;
+                };
+                let displacement = self.push_binary(CfgBinaryOp::Sub, *candidate, *proposed);
+                let shape = self.intern(vec![lane]);
+                // One-lane packed value holding the displacement. `1.0 *` is
+                // exact and this is the only way to lift a scalar into a lane
+                // without a kind that exists for one construct.
+                let unit = self.splat(1.0, shape);
+                let injected = self.scale(unit, displacement);
+                Some(match base {
+                    // Nested limiters accumulate: an outer displacement adds to
+                    // whatever an inner one already put in the lane, which is
+                    // what makes the correction the total offset rather than the
+                    // last one applied.
+                    Some(base) => self.lane_binary(CfgBinaryOp::Add, base, injected, target),
+                    None => injected,
+                })
+            }
             _ => None,
         }
     }

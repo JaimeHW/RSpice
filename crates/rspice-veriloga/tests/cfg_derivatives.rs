@@ -34,6 +34,16 @@ const SIGNIFICANCE: f64 = 1.0e-9;
 
 const COARSE_STEP: f64 = 1.0e-3;
 
+/// Neither oracle here is seeded with [`AdSeed::LimiterCorrection`], and neither
+/// could be: the correction is a displacement Newton limiting chose, not a
+/// partial with respect to anything a difference can perturb. Limiting is
+/// damping applied to a step rather than part of the equations, which is also
+/// why the interpreter these oracles run on evaluates `$limit` as the value that
+/// was proposed. The correction is checked in `cfg_limit.rs`, where it is
+/// applied.
+const NO_CORRECTION_LANE: &str =
+    "a difference oracle has no unknown to perturb for the limiter correction lane";
+
 #[test]
 fn every_jacobian_entry_matches_a_richardson_difference() {
     for (name, source) in fixtures() {
@@ -101,6 +111,7 @@ fn difference(function: &CfgFunction, bias: &BiasPoint, seed: AdSeed, residual: 
         // Branch unknowns are currents; perturbing them by a volt-sized step
         // would leave the model's operating point entirely.
         AdSeed::BranchUnknownFlow(_) => COARSE_STEP * 1.0e-3,
+        AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
     };
     let coarse = central(function, bias, seed, residual, step);
     let fine = central(function, bias, seed, residual, step / 2.0);
@@ -132,6 +143,7 @@ fn at(
         AdSeed::BranchUnknownFlow(unknown) => {
             perturbed.branch_unknown_flows[usize::from(unknown)] += delta;
         }
+        AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
     }
     evaluate_cfg(function, &inputs(&perturbed))
         .expect("the perturbed bias must still evaluate")
@@ -391,6 +403,7 @@ fn complex_step(function: &CfgFunction, bias: &BiasPoint, seed: AdSeed, residual
             inputs.branch_unknown_flows[index] =
                 ComplexStep::seed(bias.branch_unknown_flows[index]);
         }
+        AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
     }
     evaluate_cfg(function, &inputs)
         .expect("the complex evaluation follows the same path")

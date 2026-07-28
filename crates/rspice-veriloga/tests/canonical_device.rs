@@ -494,6 +494,42 @@ module noisy_transistor(d, g, s);
 endmodule
 "#,
         ),
+        // Parameter arithmetic *inside* a guard, read by a bias-dependent
+        // expression inside the same guard. That makes the split's export a
+        // value defined in an `if` arm, which has no name after it in Rust —
+        // and the export list is emitted at the end of the stage.
+        //
+        // Every fixture above is one function deep, so none of them reaches
+        // this and the corpus shipped source that would not compile. The
+        // arithmetic is deliberately several operations long: `worth_splitting`
+        // only slices when a stage removes enough work, and a two-line
+        // instance section would decline and prove nothing.
+        (
+            "a guarded stage export",
+            r#"
+module guarded_stage_export(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real sel = 1.0;
+    parameter real a = 2.0;
+    parameter real b = 3.0;
+    real t1, t2, t3, t4, t5, t6;
+    analog begin
+        if (sel > 0.5) begin
+            t1 = a * b;
+            t2 = sqrt(t1 + a);
+            t3 = ln(t2 + b);
+            t4 = exp(t3 * 0.1);
+            t5 = t4 * t3 + t2;
+            t6 = t5 / (t1 + 1.0);
+            I(p, n) <+ t6 * V(p, n);
+        end else begin
+            I(p, n) <+ a * V(p, n);
+        end
+    end
+endmodule
+"#,
+        ),
     ]
 }
 
