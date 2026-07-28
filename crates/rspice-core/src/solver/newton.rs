@@ -5,7 +5,7 @@ use crate::Value;
 
 /// Newton-Raphson solver configuration
 #[derive(Debug, Clone)]
-pub struct NewtonConfig {
+pub(crate) struct NewtonConfig {
     /// Absolute tolerance for convergence
     pub abs_tol: Value,
     /// Relative tolerance for convergence
@@ -33,7 +33,7 @@ impl Default for NewtonConfig {
 /// Newton-Raphson iteration state
 ///
 /// Uses double-buffering to avoid allocation during convergence checks.
-pub struct NewtonSolver {
+pub(crate) struct NewtonSolver {
     config: NewtonConfig,
     /// Previous solution vector (buffer A)
     x_prev: Vec<Value>,
@@ -81,7 +81,7 @@ impl NewtonSolver {
     /// Uses double-buffering with O(1) swap instead of allocation.
     /// When compiled with the `simd` feature, uses SIMD-accelerated
     /// max-difference calculations for 2-3x faster convergence checks.
-    pub fn check_convergence(&mut self, x_new: &[Value]) -> bool {
+    pub(crate) fn check_convergence(&mut self, x_new: &[Value]) -> bool {
         // Handle size mismatch (should only happen on first call if init wasn't called properly)
         if self.x_prev.len() != x_new.len() {
             self.x_prev = x_new.to_vec();
@@ -136,7 +136,7 @@ impl NewtonSolver {
     /// reduced for large updates to improve convergence stability.
     ///
     /// When compiled with the `simd` feature, uses SIMD acceleration.
-    pub fn apply_damping(&self, x_old: &[Value], delta: &[Value]) -> Vec<Value> {
+    pub(crate) fn apply_damping(&self, x_old: &[Value], delta: &[Value]) -> Vec<Value> {
         if !self.config.damping {
             let mut result = x_old.to_vec();
             #[cfg(feature = "simd")]
@@ -176,7 +176,7 @@ impl NewtonSolver {
     }
 
     /// Check if max iterations reached
-    pub fn is_maxed_out(&self) -> bool {
+    pub(crate) fn is_maxed_out(&self) -> bool {
         self.iteration >= self.config.max_iter
     }
 
@@ -191,7 +191,7 @@ impl NewtonSolver {
 }
 
 /// Limit voltage changes to prevent numerical issues
-pub fn limit_voltage_step(v_old: Value, v_new: Value, v_crit: Value) -> Value {
+pub(crate) fn limit_voltage_step(v_old: Value, v_new: Value, v_crit: Value) -> Value {
     let v_diff = v_new - v_old;
 
     if v_diff.abs() > v_crit {
@@ -203,7 +203,7 @@ pub fn limit_voltage_step(v_old: Value, v_new: Value, v_crit: Value) -> Value {
 }
 
 /// Limit junction voltage for PN devices (diodes, BJTs)
-pub fn limit_pn_voltage(v_old: Value, v_new: Value, vt: Value) -> Value {
+pub(crate) fn limit_pn_voltage(v_old: Value, v_new: Value, vt: Value) -> Value {
     // Critical voltage is typically 10 * thermal voltage
     let v_crit = 10.0 * vt;
 

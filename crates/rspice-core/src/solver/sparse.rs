@@ -304,7 +304,7 @@ impl StaticMatrix {
     ///
     /// This is used for residual probes that must stamp into an independent
     /// numeric workspace while preserving O(1) matrix-entry lookup.
-    pub fn clone_structure(&self) -> Self {
+    pub(crate) fn clone_structure(&self) -> Self {
         Self {
             nrows: self.nrows,
             ncols: self.ncols,
@@ -332,7 +332,7 @@ impl StaticMatrix {
     /// position-map rehash, and probe solves reuse the cached symbolic
     /// analysis and numeric workspace. (A subsequent live solve refactorizes
     /// from the restored values, so workspace sharing is safe.)
-    pub fn with_probe_values<R>(&mut self, f: impl FnOnce(&mut Self, &mut [Value]) -> R) -> R {
+    pub(crate) fn with_probe_values<R>(&mut self, f: impl FnOnce(&mut Self, &mut [Value]) -> R) -> R {
         let mut scratch = self.probe_values.take().unwrap_or_default();
         scratch.resize(self.values.len(), 0.0);
         scratch.fill(0.0);
@@ -475,7 +475,7 @@ impl StaticMatrix {
 
     /// Checked add for callers that want an immediate structural error.
     #[inline]
-    pub fn try_add(&mut self, row: usize, col: usize, value: Value) -> Result<(), SolverError> {
+    pub(crate) fn try_add(&mut self, row: usize, col: usize, value: Value) -> Result<(), SolverError> {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
             None => {
@@ -504,7 +504,7 @@ impl StaticMatrix {
 
     /// Rows whose entries are all exactly zero (or absent): the immediate
     /// structural suspects when factorization reports a singular system.
-    pub fn deficient_rows(&self) -> Vec<usize> {
+    pub(crate) fn deficient_rows(&self) -> Vec<usize> {
         let mut row_max = vec![0.0f64; self.nrows];
         for (&(row, _col), &idx) in &self.position_map {
             let magnitude = self.values[idx].abs();
@@ -536,7 +536,7 @@ impl StaticMatrix {
     ///
     /// The sparsity pattern remains frozen; callers use this for temporary
     /// operating-point constraints such as `.NODESET` startup solves.
-    pub fn force_identity_row(&mut self, row: usize) -> Result<(), SolverError> {
+    pub(crate) fn force_identity_row(&mut self, row: usize) -> Result<(), SolverError> {
         if row >= self.nrows || row >= self.ncols {
             return Err(SolverError::InvalidCircuit(format!(
                 "identity row {} outside {}x{} matrix",
@@ -587,7 +587,7 @@ impl StaticMatrix {
     ///
     /// Takes `&mut self` to reuse the internal A*x scratch buffer; this is
     /// evaluated once or twice per Newton iteration (merit + convergence).
-    pub fn scaled_residual_inf_norm(
+    pub(crate) fn scaled_residual_inf_norm(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -599,7 +599,7 @@ impl StaticMatrix {
 
     /// Compute infinity norm of the scaled residual `A*x-b` with row-specific
     /// absolute tolerances.
-    pub fn scaled_residual_inf_norm_by_row<F>(
+    pub(crate) fn scaled_residual_inf_norm_by_row<F>(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -689,7 +689,7 @@ impl StaticMatrix {
     }
 
     /// Compute the unscaled infinity norm of `A*x-b` without allocating.
-    pub fn raw_residual_inf_norm(
+    pub(crate) fn raw_residual_inf_norm(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -705,7 +705,7 @@ impl StaticMatrix {
     /// large and small residual components cannot overflow or underflow an
     /// otherwise finite norm. Xyce's transient NOX status tests use both norms
     /// at every nonlinear iterate.
-    pub fn raw_residual_norms(
+    pub(crate) fn raw_residual_norms(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -768,7 +768,7 @@ impl StaticMatrix {
     }
 
     /// Compute raw residual vector `A*x - b`.
-    pub fn residual_vector(
+    pub(crate) fn residual_vector(
         &self,
         solution: &[Value],
         rhs: &[Value],
@@ -871,7 +871,7 @@ impl StaticMatrix {
     /// Dynamic-device callers may subsequently replace their own rows with a
     /// constitutive residual evaluated from state differences, avoiding loss
     /// that already occurred while forming a large absolute history source.
-    pub fn correction_rhs(
+    pub(crate) fn correction_rhs(
         &self,
         rhs: &[Value],
         iterate: &[Value],
@@ -1309,21 +1309,21 @@ impl ComplexMatrix {
 
     /// Direct real add using a precomputed CSC index.
     #[inline]
-    pub fn stamp_direct_real(&mut self, idx: CscIndex, value: Value) {
+    pub(crate) fn stamp_direct_real(&mut self, idx: CscIndex, value: Value) {
         self.values[idx.0] += Complex64::new(value, 0.0);
         self.factorization_valid = false;
     }
 
     /// Direct imaginary add using a precomputed CSC index.
     #[inline]
-    pub fn stamp_direct_imag(&mut self, idx: CscIndex, value: Value) {
+    pub(crate) fn stamp_direct_imag(&mut self, idx: CscIndex, value: Value) {
         self.values[idx.0] += Complex64::new(0.0, value);
         self.factorization_valid = false;
     }
 
     /// Checked real add for callers that want an immediate structural error.
     #[inline]
-    pub fn try_add_real(
+    pub(crate) fn try_add_real(
         &mut self,
         row: usize,
         col: usize,
@@ -1344,7 +1344,7 @@ impl ComplexMatrix {
 
     /// Checked complex add for callers that want an immediate structural error.
     #[inline]
-    pub fn try_add(&mut self, row: usize, col: usize, value: Complex64) -> Result<(), SolverError> {
+    pub(crate) fn try_add(&mut self, row: usize, col: usize, value: Complex64) -> Result<(), SolverError> {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
             None => {
@@ -1360,7 +1360,7 @@ impl ComplexMatrix {
 
     /// Checked imaginary add for callers that want an immediate structural error.
     #[inline]
-    pub fn try_add_imag(
+    pub(crate) fn try_add_imag(
         &mut self,
         row: usize,
         col: usize,
@@ -1562,12 +1562,12 @@ impl TripletMatrix {
     }
 
     /// Number of entries
-    pub fn nnz(&self) -> usize {
+    pub(crate) fn nnz(&self) -> usize {
         self.values.len()
     }
 
     /// Convert to StaticMatrix (freezes structure)
-    pub fn to_static(&self) -> Result<StaticMatrix, SolverError> {
+    pub(crate) fn to_static(&self) -> Result<StaticMatrix, SolverError> {
         let triplets: Vec<_> = self
             .row_indices
             .iter()
@@ -1580,7 +1580,7 @@ impl TripletMatrix {
     }
 
     /// Convert to faer sparse column matrix (legacy path)
-    pub fn to_sparse_col_mat(&self) -> Result<SparseColMat<usize, Value>, SolverError> {
+    pub(crate) fn to_sparse_col_mat(&self) -> Result<SparseColMat<usize, Value>, SolverError> {
         self.to_static().map(|s| s.to_sparse_col_mat())
     }
 }
@@ -1649,7 +1649,7 @@ impl SparseLuSolver {
     }
 
     /// Clear cached symbolic factorization (call when matrix structure changes)
-    pub fn clear_cache(&mut self) {
+    pub(crate) fn clear_cache(&mut self) {
         self.symbolic_lu = None;
     }
 }
@@ -1661,14 +1661,14 @@ impl Default for SparseLuSolver {
 }
 
 /// Solve a sparse system Ax = b (convenience function)
-pub fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+pub(crate) fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
     let sparse_mat = triplets.to_sparse_col_mat()?;
     let mut solver = SparseLuSolver::new();
     solver.solve(&sparse_mat, rhs)
 }
 
 /// Simple Gaussian elimination for small systems or fallback
-pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Value>, SolverError> {
+pub(crate) fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Value>, SolverError> {
     let n = b.len();
 
     if n == 0 {

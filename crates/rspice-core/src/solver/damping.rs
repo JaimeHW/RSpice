@@ -29,21 +29,21 @@ use crate::Value;
 //=============================================================================
 
 /// Maximum voltage change per Newton step for semiconductor junctions
-pub const VMAX_JUNCTION: Value = 0.5; // 500 mV max per iteration
+pub(crate) const VMAX_JUNCTION: Value = 0.5; // 500 mV max per iteration
 /// Critical voltage threshold for limiting (thermal voltage ~26mV at 300K)
-pub const VT_THERMAL: Value = 0.02585;
+pub(crate) const VT_THERMAL: Value = 0.02585;
 /// Minimum damping factor
-pub const DAMP_MIN: Value = 0.1;
+pub(crate) const DAMP_MIN: Value = 0.1;
 /// Maximum damping factor (1.0 = no damping)
-pub const DAMP_MAX: Value = 1.0;
+pub(crate) const DAMP_MAX: Value = 1.0;
 /// Initial damping factor for Bank-Rose
-pub const DAMP_INITIAL: Value = 1.0;
+pub(crate) const DAMP_INITIAL: Value = 1.0;
 /// Armijo condition parameter (sufficient decrease)
-pub const ARMIJO_C1: Value = 1e-4;
+pub(crate) const ARMIJO_C1: Value = 1e-4;
 /// Maximum line search iterations
-pub const LINE_SEARCH_MAX_ITERS: usize = 10;
+pub(crate) const LINE_SEARCH_MAX_ITERS: usize = 10;
 /// Line search backtrack factor
-pub const LINE_SEARCH_FACTOR: Value = 0.5;
+pub(crate) const LINE_SEARCH_FACTOR: Value = 0.5;
 
 //=============================================================================
 // Damping Strategy
@@ -75,7 +75,7 @@ pub enum DampingStrategy {
 ///
 /// Manages damping for Newton-Raphson iterations to improve convergence.
 #[derive(Debug, Clone)]
-pub struct DampingController {
+pub(crate) struct DampingController {
     /// Active damping strategy
     strategy: DampingStrategy,
 
@@ -111,7 +111,7 @@ impl DampingController {
     }
 
     /// Create with specific strategy
-    pub fn with_strategy(strategy: DampingStrategy) -> Self {
+    pub(crate) fn with_strategy(strategy: DampingStrategy) -> Self {
         Self {
             strategy,
             alpha: DAMP_INITIAL,
@@ -126,7 +126,7 @@ impl DampingController {
     }
 
     /// Create with custom voltage limits
-    pub fn with_voltage_limits(mut self, vmax: Value, vt: Value) -> Self {
+    pub(crate) fn with_voltage_limits(mut self, vmax: Value, vt: Value) -> Self {
         self.vmax_junction = vmax;
         self.vt = vt;
         self
@@ -145,7 +145,7 @@ impl DampingController {
     }
 
     /// Set strategy
-    pub fn set_strategy(&mut self, strategy: DampingStrategy) {
+    pub(crate) fn set_strategy(&mut self, strategy: DampingStrategy) {
         self.strategy = strategy;
     }
 
@@ -168,7 +168,7 @@ impl DampingController {
     ///
     /// # Returns
     /// Limited voltage change
-    pub fn limit_junction_voltage(&mut self, v_old: Value, dv: Value) -> Value {
+    pub(crate) fn limit_junction_voltage(&mut self, v_old: Value, dv: Value) -> Value {
         // SPICE-style junction voltage limiting
         // Based on the diode equation: I = Is * (exp(V/Vt) - 1)
 
@@ -212,7 +212,7 @@ impl DampingController {
     ///
     /// # Returns
     /// Modified update vector with limited junction voltages
-    pub fn limit_update_vector(
+    pub(crate) fn limit_update_vector(
         &mut self,
         x_old: &[Value],
         dx: &[Value],
@@ -240,7 +240,7 @@ impl DampingController {
     ///
     /// # Returns
     /// Recommended damping factor
-    pub fn bank_rose_damping(&mut self, current_residual: Value) -> Value {
+    pub(crate) fn bank_rose_damping(&mut self, current_residual: Value) -> Value {
         if self.prev_residual.is_infinite() {
             // First iteration
             self.prev_residual = current_residual;
@@ -322,7 +322,7 @@ impl DampingController {
     ///
     /// # Returns
     /// Recommended damping factor
-    pub fn get_damping_factor(&mut self, residual_norm: Value) -> Value {
+    pub(crate) fn get_damping_factor(&mut self, residual_norm: Value) -> Value {
         match self.strategy {
             DampingStrategy::None => 1.0,
             DampingStrategy::Fixed => 0.5,
@@ -342,7 +342,7 @@ impl DampingController {
 
     /// Apply damping to Newton update
     #[inline]
-    pub fn damp_update(&self, dx: &[Value]) -> Vec<Value> {
+    pub(crate) fn damp_update(&self, dx: &[Value]) -> Vec<Value> {
         dx.iter().map(|&d| d * self.alpha).collect()
     }
 
@@ -368,7 +368,7 @@ impl Default for DampingController {
 
 /// Damping statistics
 #[derive(Debug, Clone, Default)]
-pub struct DampingStatistics {
+pub(crate) struct DampingStatistics {
     /// Total line search iterations across all Newton steps
     pub total_line_search_iters: usize,
     /// Number of steps where voltage limiting was applied

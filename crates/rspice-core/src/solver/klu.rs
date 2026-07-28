@@ -82,7 +82,7 @@ impl KluSolver {
     }
 
     /// Whether the symbolic analysis matches this pattern instance.
-    pub fn is_analyzed_for(&self, n: usize) -> bool {
+    pub(crate) fn is_analyzed_for(&self, n: usize) -> bool {
         self.n == n && !self.col_perm.is_empty()
     }
 
