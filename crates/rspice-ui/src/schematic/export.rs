@@ -73,10 +73,22 @@ impl Default for SvgDesignContext<'static> {
 }
 
 /// Export a schematic to SVG format
+/// Export with no resolved symbols and a default design context.
+///
+/// Test-only. The shipping path is
+/// [`export_to_svg_with_symbol_resolver_and_context`], which is what
+/// `menu_bar::export_actions` calls; this and the two wrappers below exist so
+/// tests can skip building a resolver. They are gated rather than deleted
+/// because a test that exercises a convenience wrapper production never takes
+/// is still exercising the same renderer underneath.
+#[cfg(test)]
 pub fn export_to_svg(state: &SchematicState, config: &SvgExportConfig) -> String {
     export_to_svg_with_resolved_symbol_entries(state, config, &[], SvgDesignContext::default())
 }
 
+/// Export with a resolver but a default design context. Test-only; see
+/// [`export_to_svg`].
+#[cfg(test)]
 pub fn export_to_svg_with_symbol_resolver(
     state: &SchematicState,
     config: &SvgExportConfig,
@@ -118,6 +130,9 @@ pub fn export_to_svg_with_symbol_resolver_and_context(
     export_to_svg_with_resolved_symbol_entries(state, config, &entries, context)
 }
 
+/// Export from pre-resolved symbols with a default design context. Test-only;
+/// see [`export_to_svg`].
+#[cfg(test)]
 pub fn export_to_svg_with_resolved_symbols(
     state: &SchematicState,
     config: &SvgExportConfig,

@@ -25,6 +25,6 @@ pub(crate) mod symbols;
 pub(crate) mod view;
 
 // Re-export main types
-pub use export::{SvgExportConfig, export_to_svg};
+pub use export::SvgExportConfig;
 pub use symbols::{Symbol, SymbolLibrary, draw_symbol};
 pub use view::render_schematic_view;
