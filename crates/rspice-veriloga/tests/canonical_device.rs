@@ -124,6 +124,39 @@ endmodule
     );
 }
 
+/// A charge stored under a guard still reaches the reactive matrix.
+///
+/// `EPFL_HEMT_10a` writes `if (rth != 0) Pwr(t) <+ ddt(cth * Temp(t))`, and the
+/// golden replay caught the whole capacitance entry going missing. A guarded
+/// contribution arrives at its equation as a *merge* — the `ddt` from the arm
+/// that ran, zero from the arm that did not — so a rule that matches the
+/// residual against `Ddt` finds nothing and drops the charge silently. It is
+/// silent in DC too: only AC and transient ever read the reactive matrix, which
+/// is why a whole corpus of DC-shaped fixtures never noticed. Self-heating
+/// blocks are guarded as a matter of course, so this is the common shape.
+#[test]
+fn a_guarded_charge_still_reaches_the_reactive_matrix() {
+    let guarded = r#"
+module guarded_cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1.0e-12;
+    parameter real enable = 1.0;
+    analog begin
+        if (enable != 0.0) begin
+            I(p, n) <+ ddt(c * V(p, n));
+        end
+        I(p, n) <+ V(p, n) * 1.0e-6;
+    end
+endmodule
+"#;
+    let stamp = stamp_of(guarded, "guarded_cap");
+    assert!(
+        stamp.contains("stamp_current_reactive_indexed_dense_local"),
+        "a guarded capacitor still stores charge on the path that runs:\n{stamp}"
+    );
+}
+
 /// How far the canonical backend gets across the shipped models, and why it
 /// stops where it does.
 ///
