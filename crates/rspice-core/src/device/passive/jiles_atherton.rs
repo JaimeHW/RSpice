@@ -1613,6 +1613,14 @@ impl JilesAthertonInductor {
                 trial
             }
         };
+        // LEVEL=2's MutIndNonLin2 keeps the `MagVarUpdate` endpoint across
+        // acceptStep.  The common cached-trial path above is the normal
+        // accepted Newton endpoint, so update the carry here as well as in
+        // the cache-miss fallbacks; otherwise every accepted step reuses the
+        // previous step's predictor instead of Xyce's newly computed delta.
+        if self.params.xyce_core_level2 {
+            self.xyce_mag_update = trial.magnetization_update;
+        }
         let m_new = trial.magnetization;
         self.xyce_accepted_mid = if trial.mid.is_finite() && trial.mid.abs() > 1.0e-12 {
             trial.mid
