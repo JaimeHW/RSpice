@@ -212,6 +212,19 @@ impl X64Encoder {
         self.emit_modrm(0b11, 0b010, target.code());
     }
 
+    /// Emits `call rel32` and returns the displacement field offset.
+    ///
+    /// The caller must patch the returned four-byte field relative to the
+    /// instruction immediately following it. Native image drivers use this
+    /// form to call sibling entry points without materializing absolute
+    /// addresses or consuming a scratch register.
+    pub(crate) fn call_rel32_placeholder(&mut self) -> usize {
+        self.emit_u8(0xE8);
+        let offset = self.position();
+        self.emit_i32(0);
+        offset
+    }
+
     pub(crate) fn sub_rsp_imm32(&mut self, value: i32) {
         self.emit_rsp_adjust_imm32(0b101, value);
     }
@@ -1118,6 +1131,17 @@ mod tests {
                 0xD0, 0x48, 0x83, 0xC4, 0x58, 0x41, 0x5D, 0x41, 0x5C,
             ]
         );
+    }
+
+    #[test]
+    fn encodes_patchable_relative_call() {
+        let mut encoder = X64Encoder::new();
+
+        let displacement = encoder.call_rel32_placeholder();
+        encoder.patch_i32(displacement, -0x1020_3040);
+
+        assert_eq!(displacement, 1);
+        assert_eq!(encoder.into_bytes(), [0xE8, 0xC0, 0xCF, 0xDF, 0xEF]);
     }
 
     #[test]
