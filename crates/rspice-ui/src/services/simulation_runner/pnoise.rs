@@ -20,7 +20,9 @@ use super::{
 };
 use crate::output_spec::resolve_node_or_ground_index;
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::Engine;
 use std::fmt;
@@ -202,38 +204,18 @@ pub struct PnoiseData {
     pub warnings: Vec<String>,
 }
 
-/// Run PNoise analysis with explicit configuration.
-pub fn run_pnoise_analysis_with_config(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run PNoise analysis with explicit configuration and cancellation.
+/// Run PNoise analysis standalone -- computing its own periodic solution
+/// rather than receiving one -- with explicit configuration and cancellation.
+///
+/// Test-only. PNOISE ships as a dependent task through
+/// [`run_pnoise_analysis_from_pss_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_pnoise_analysis_with_config_and_abort(
     netlist_text: &str,
     config: &PnoiseRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
     run_pnoise_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run PNoise analysis with explicit configuration and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_pnoise_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-    source_path: Option<&Path>,
-) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run PNoise analysis with source-path resolution and cooperative
@@ -245,23 +227,6 @@ pub fn run_pnoise_analysis_with_config_and_source_path_and_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
     run_pnoise_analysis_impl(netlist_text, config, source_path, None, abort)
-}
-
-/// Run PNOISE from the exact authenticated numerical state produced by the
-/// prerequisite PSS task.
-pub fn run_pnoise_analysis_from_pss_with_abort(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_from_pss_with_source_path_and_abort(
-        netlist_text,
-        config,
-        operating_point,
-        None,
-        abort,
-    )
 }
 
 /// Run PNOISE from an exact retained PSS state while resolving any unsealed
@@ -670,31 +635,17 @@ fn compute_input_referred_pnoise(
     fold_input_density(&core_results)
 }
 
-/// Run PNoise analysis using inferred/default settings.
-pub fn run_pnoise_analysis(netlist_text: &str) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run inferred/default PNoise analysis with cancellation.
-pub fn run_pnoise_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run PNoise analysis using inferred/default settings and a source path used
-/// to resolve relative includes and model file references.
-pub fn run_pnoise_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run inferred/default PNoise analysis with source-path resolution and
-/// cancellation.
+/// Run PNoise analysis with the input source and output node inferred from the
+/// netlist, rather than configured by the user.
+///
+/// Unwired, and part of the same unshipped capability as the TF, PAC, and PXF
+/// inference entries: the dialogs require the user to name both ports, and
+/// wiring these up would let an unambiguous deck run without that step. This
+/// entry owns the only reachable use of
+/// [`infer_primary_output_node_with_abort`] beside those three. Remove the
+/// allow when a caller exists, or remove all four when the product decides
+/// inference is not wanted.
+#[allow(dead_code)]
 pub fn run_pnoise_analysis_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,

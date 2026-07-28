@@ -1013,14 +1013,24 @@ fn source_files_have_no_byte_order_mark() {
 /// attribute rather than leaving it to absorb the next real warning -- that is
 /// exactly how the previous 32 became worthless.
 ///
-/// Raised 81 -> 82 on 2026-07-28 for `simulation_runner::tf`'s
-/// `run_tf_analysis_with_source_path_and_abort`. Retiring the runner overload
-/// ladders removed every other unreachable entry point in that module by
-/// deleting it, but this one is not a duplicate of anything that ships:
-/// `infer_tf_run_config` is reachable from it and nowhere else, so deleting it
-/// would delete TF port inference itself. Same rule as the four above -- wire it
-/// up or delete it, and drop the attribute either way.
-const MAX_LINT_SUPPRESSIONS: usize = 82;
+/// Raised 81 -> 85 on 2026-07-28 for the four "inferred/default" analysis
+/// entry points left standing after the runner overload ladders were retired:
+/// `tf::run_tf_analysis_with_source_path_and_abort`,
+/// `pnoise::run_pnoise_analysis_with_source_path_and_abort`,
+/// `pac_pxf::pac::run_pac_analysis_auto_with_source_path_and_abort`, and
+/// `pac_pxf::pxf::run_pxf_analysis_with_source_path_and_abort`.
+///
+/// Every other unreachable entry in those modules was a wrapper that forwarded
+/// to a shipping function, so deleting it cost nothing. These four are not:
+/// each infers the input source and output node from the netlist instead of
+/// requiring the user to name them, and together they hold the only reachable
+/// uses of `helpers::infer_primary_output_node_with_abort` and
+/// `tf::infer_tf_run_config`. Deleting them would delete the capability, not a
+/// duplicate of one -- which is a product decision rather than a cleanup.
+///
+/// Same rule as the four above: wire them up or delete them, and drop the
+/// attribute either way.
+const MAX_LINT_SUPPRESSIONS: usize = 85;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

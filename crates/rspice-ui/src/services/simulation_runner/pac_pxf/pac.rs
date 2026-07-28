@@ -7,7 +7,7 @@ use std::path::Path;
 
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
@@ -232,35 +232,18 @@ fn run_pac_internal_impl(
     })
 }
 
-/// Run PAC analysis by first solving PSS and then linearizing around the periodic solution.
-pub fn run_pac_analysis(netlist_text: &str, config: &PacRunConfig) -> Result<PacData, String> {
-    run_pac_analysis_with_abort(netlist_text, config, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run PAC analysis with cooperative cancellation.
+/// Run PAC standalone -- solving its own PSS and then linearizing around that
+/// periodic solution -- with cooperative cancellation.
+///
+/// Test-only. PAC ships as a dependent task through
+/// [`run_pac_analysis_from_pss_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_pac_analysis_with_abort(
     netlist_text: &str,
     config: &PacRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
     run_pac_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run PAC from the exact authenticated numerical state produced by the
-/// prerequisite PSS task.
-pub fn run_pac_analysis_from_pss_with_abort(
-    netlist_text: &str,
-    config: &PacRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    run_pac_analysis_from_pss_with_source_path_and_abort(
-        netlist_text,
-        config,
-        operating_point,
-        None,
-        abort,
-    )
 }
 
 /// Run PAC from an exact retained PSS state with direct-call source-relative
@@ -281,19 +264,11 @@ pub fn run_pac_analysis_from_pss_with_source_path_and_abort(
     )
 }
 
-/// Run PAC analysis by first solving PSS and then linearizing around the
-/// periodic solution, resolving relative includes from the source path when
-/// provided.
-pub fn run_pac_analysis_with_source_path(
-    netlist_text: &str,
-    config: &PacRunConfig,
-    source_path: Option<&Path>,
-) -> Result<PacData, String> {
-    run_pac_analysis_with_source_path_and_abort(netlist_text, config, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run PAC analysis with source-path resolution and cooperative cancellation.
+/// Run PAC analysis with source-path resolution and cooperative cancellation,
+/// solving its own PSS.
+///
+/// Test-only; see [`run_pac_analysis_with_abort`].
+#[cfg(test)]
 pub fn run_pac_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: &PacRunConfig,
@@ -369,31 +344,14 @@ fn run_pac_analysis_for_netlist_with_operating_point_abort(
     })
 }
 
-/// Run PAC analysis using inferred/default settings.
-pub fn run_pac_analysis_auto(netlist_text: &str) -> Result<PacData, String> {
-    run_pac_analysis_auto_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run inferred/default PAC analysis with cancellation.
-pub fn run_pac_analysis_auto_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    run_pac_analysis_auto_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run PAC analysis using inferred/default settings and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_pac_analysis_auto_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<PacData, String> {
-    run_pac_analysis_auto_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run inferred/default PAC analysis with source-path resolution and
-/// cancellation.
+/// Run PAC analysis with the input source and output node inferred from the
+/// netlist, rather than configured by the user.
+///
+/// Unwired, and part of the same unshipped capability as the TF, PXF, and
+/// PNOISE inference entries; see
+/// [`super::super::pnoise::run_pnoise_analysis_with_source_path_and_abort`] for
+/// the shared removal condition.
+#[allow(dead_code)]
 pub fn run_pac_analysis_auto_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,

@@ -7,7 +7,7 @@ use std::path::Path;
 
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 
 use super::super::error::{ensure_not_aborted, poll_periodically};
@@ -180,39 +180,18 @@ pub struct PxfData {
     pub warnings: Vec<String>,
 }
 
-/// Run PXF analysis with explicit configuration.
-pub fn run_pxf_analysis_with_config(
-    netlist_text: &str,
-    config: &PxfRunConfig,
-) -> Result<PxfData, String> {
-    run_pxf_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run PXF analysis with explicit configuration and cancellation.
+/// Run PXF standalone -- solving its own periodic solution rather than
+/// receiving one -- with explicit configuration and cancellation.
+///
+/// Test-only. PXF ships as a dependent task through
+/// [`run_pxf_analysis_from_pss_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_pxf_analysis_with_config_and_abort(
     netlist_text: &str,
     config: &PxfRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
     run_pxf_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run PXF from the exact authenticated numerical state produced by the
-/// prerequisite PSS task.
-pub fn run_pxf_analysis_from_pss_with_abort(
-    netlist_text: &str,
-    config: &PxfRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    run_pxf_analysis_from_pss_with_source_path_and_abort(
-        netlist_text,
-        config,
-        operating_point,
-        None,
-        abort,
-    )
 }
 
 /// Run PXF from an exact retained PSS state with direct-call source-relative
@@ -233,23 +212,11 @@ pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
     )
 }
 
-/// Run PXF analysis with explicit configuration and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_pxf_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &PxfRunConfig,
-    source_path: Option<&Path>,
-) -> Result<PxfData, String> {
-    run_pxf_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Run PXF analysis with source-path resolution and cancellation.
+/// Run PXF analysis with source-path resolution and cancellation, solving its
+/// own periodic solution.
+///
+/// Test-only; see [`run_pxf_analysis_with_config_and_abort`].
+#[cfg(test)]
 pub fn run_pxf_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &PxfRunConfig,
@@ -550,31 +517,14 @@ fn pxf_group_delay_with_abort(
     Ok(group_delay)
 }
 
-/// Run PXF analysis using inferred/default settings.
-pub fn run_pxf_analysis(netlist_text: &str) -> Result<PxfData, String> {
-    run_pxf_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run inferred/default PXF analysis with cancellation.
-pub fn run_pxf_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    run_pxf_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run PXF analysis using inferred/default settings and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_pxf_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<PxfData, String> {
-    run_pxf_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run inferred/default PXF analysis with source-path resolution and
-/// cancellation.
+/// Run PXF analysis with the input source and output node inferred from the
+/// netlist, rather than configured by the user.
+///
+/// Unwired, and part of the same unshipped capability as the TF, PAC, and
+/// PNOISE inference entries; see
+/// [`super::super::pnoise::run_pnoise_analysis_with_source_path_and_abort`] for
+/// the shared removal condition.
+#[allow(dead_code)]
 pub fn run_pxf_analysis_with_source_path_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
