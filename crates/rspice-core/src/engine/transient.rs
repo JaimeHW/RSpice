@@ -2410,9 +2410,16 @@ impl Engine {
                     {
                         step_target = step_target.min(breakpoint);
                     }
-                    if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
-                        step_target = step_target.min(t + hinted_max_step);
-                    }
+                    // `hinted_max_step` is deliberately not applied here. It
+                    // descends from the caller's `max_step` and `.OPTIONS`
+                    // bounds -- adaptive step-selection input, which is exactly
+                    // what a locked grid replaces. Clamping to it subdivides
+                    // the prescribed schedule, and any device whose state is a
+                    // function of the accepted-step sequence rather than of
+                    // time alone then diverges from the reference: the generic
+                    // switch reads its hysteresis band from the store vector
+                    // two accepted points back, so extra points between two
+                    // reference samples silently pick the wrong band.
                     locked_step_lands_on_grid = (step_target - target).abs() <= tolerance;
                     let mut locked_dt = step_target - t;
                     if locked_schedule_aligned
