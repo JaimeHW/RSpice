@@ -1104,7 +1104,7 @@ fn budgeted_lines(source: &str) -> usize {
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/hardcopy_adapters/sources.rs", 4959),
     ("simulation/runner/worker_contract.rs", 5357),
-    ("io/project_io.rs", 5810),
+    ("io/project_io/tests.rs", 4156),
     ("workbench/hardcopy_adapters/render.rs", 3956),
     ("workbench/hardcopy_adapters/render/publication.rs", 4123),
     ("state/workspace.rs", 5423),
