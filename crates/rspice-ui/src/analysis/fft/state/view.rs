@@ -89,7 +89,6 @@ impl FftState {
 
     pub(super) fn mark_spectrum_changed(&mut self) {
         self.spectrum_revision = self.spectrum_revision.wrapping_add(1);
-        self.peak_cache = PeakCache::default();
     }
 }
 

@@ -12,15 +12,6 @@ mod view;
 
 pub use modes::{FrequencyScale, InputFidelity, MagnitudeScale};
 const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
-const MAX_USER_MARKERS: usize = 16;
-const MARKER_MERGE_EPS_HZ: f64 = 1e-12;
-
-#[derive(Debug, Clone, Default)]
-struct PeakCache {
-    spectrum_revision: u64,
-    threshold_bits: u64,
-    peak_indices: Vec<usize>,
-}
 
 #[derive(Debug, Clone)]
 pub struct FftSourceCache {
@@ -66,14 +57,6 @@ pub struct FftState {
     pub sample_count_auto: bool,
     /// Manual FFT sample count target.
     pub sample_count: usize,
-    /// Show grid
-    pub show_grid: bool,
-    /// Show peaks
-    pub show_peaks: bool,
-    /// Show harmonics
-    pub show_harmonics: bool,
-    /// Peak threshold (dB)
-    pub peak_threshold_db: f64,
     /// Number of harmonics to analyze
     pub num_harmonics: usize,
     /// Magnitude axis min (dB)
@@ -92,14 +75,8 @@ pub struct FftState {
     pub z0: f64,
     /// Interactive marker frequencies (Hz) placed by user.
     pub marker_frequencies: Vec<f64>,
-    /// Optional user-resized right info pane width in pixels. `None` means auto-fit.
-    pub info_pane_width: Option<f32>,
-    /// Runtime auto-fit width hint captured from rendered content.
-    pub info_pane_auto_width_hint: f32,
     /// Runtime spectrum revision for display caches.
     spectrum_revision: u64,
-    /// Cached local-maximum bins for the current threshold and spectrum revision.
-    peak_cache: PeakCache,
 }
 
 impl Default for FftState {
@@ -119,10 +96,6 @@ impl Default for FftState {
             time_window_end: 0.0,
             sample_count_auto: true,
             sample_count: DEFAULT_MANUAL_SAMPLE_COUNT,
-            show_grid: true,
-            show_peaks: true,
-            show_harmonics: true,
-            peak_threshold_db: -60.0,
             num_harmonics: 10,
             mag_min: -120.0,
             mag_max: 0.0,
@@ -132,10 +105,7 @@ impl Default for FftState {
             freq_auto: true,
             z0: 50.0,
             marker_frequencies: Vec::new(),
-            info_pane_width: None,
-            info_pane_auto_width_hint: 0.0,
             spectrum_revision: 0,
-            peak_cache: PeakCache::default(),
         }
     }
 }

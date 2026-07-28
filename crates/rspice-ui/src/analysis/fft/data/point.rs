@@ -45,11 +45,6 @@ impl FftPoint {
         }
     }
 
-    /// Magnitude in dBV (reference 1V)
-    pub fn magnitude_dbv(&self) -> f64 {
-        self.magnitude_db()
-    }
-
     /// Magnitude in dBm (reference 1mW into 50Ω)
     pub fn magnitude_dbm(&self, z0: f64) -> f64 {
         if self.magnitude <= 0.0 {
@@ -61,8 +56,4 @@ impl FftPoint {
         }
     }
 
-    /// Phase in degrees
-    pub fn phase_deg(&self) -> f64 {
-        self.phase * 180.0 / PI
-    }
 }

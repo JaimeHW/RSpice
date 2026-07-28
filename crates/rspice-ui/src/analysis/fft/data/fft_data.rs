@@ -177,11 +177,6 @@ impl FftData {
         self.normalization = target;
     }
 
-    /// Number of frequency bins
-    pub fn len(&self) -> usize {
-        self.points.len()
-    }
-
     /// Is empty
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
@@ -211,33 +206,6 @@ impl FftData {
         ))
     }
 
-    /// Magnitude range in dB
-    pub fn magnitude_range_db(&self) -> Option<(f64, f64)> {
-        let mut min_db = f64::INFINITY;
-        let mut max_db = f64::NEG_INFINITY;
-        let mut has_finite = false;
-
-        for point in &self.points {
-            let db = point.magnitude_db();
-            if !db.is_finite() {
-                continue;
-            }
-            has_finite = true;
-            min_db = min_db.min(db);
-            max_db = max_db.max(db);
-        }
-
-        if !has_finite {
-            return None;
-        }
-        Some((min_db, max_db))
-    }
-
-    /// DC component (bin 0)
-    pub fn dc(&self) -> Option<&FftPoint> {
-        self.points.first()
-    }
-
     /// Find peak magnitude bin (excluding DC)
     pub fn find_peak(&self) -> Option<(usize, &FftPoint)> {
         if self.points.len() < 2 {
@@ -252,51 +220,4 @@ impl FftData {
             .max_by(|(_, a), (_, b)| a.magnitude.total_cmp(&b.magnitude))
     }
 
-    /// Find peak bin indices above threshold.
-    pub fn find_peak_indices(&self, threshold_db: f64) -> Vec<usize> {
-        let mut peaks = Vec::new();
-
-        for i in 1..self.points.len().saturating_sub(1) {
-            let prev = self.points[i - 1].magnitude;
-            let curr = self.points[i].magnitude;
-            let next = self.points[i + 1].magnitude;
-
-            if curr > prev && curr > next && self.points[i].magnitude_db() > threshold_db {
-                peaks.push(i);
-            }
-        }
-
-        peaks
-    }
-
-    /// Find all peaks above threshold
-    pub fn find_peaks(&self, threshold_db: f64) -> Vec<(usize, &FftPoint)> {
-        self.find_peak_indices(threshold_db)
-            .into_iter()
-            .map(|index| (index, &self.points[index]))
-            .collect()
-    }
-
-    /// Interpolate magnitude at specific frequency
-    pub fn interpolate(&self, frequency: f64) -> Option<FftPoint> {
-        if self.points.is_empty() {
-            return None;
-        }
-
-        for window in self.points.windows(2) {
-            if frequency >= window[0].frequency && frequency <= window[1].frequency {
-                let t =
-                    (frequency - window[0].frequency) / (window[1].frequency - window[0].frequency);
-
-                return Some(FftPoint {
-                    frequency,
-                    magnitude: window[0].magnitude
-                        + t * (window[1].magnitude - window[0].magnitude),
-                    phase: window[0].phase + t * (window[1].phase - window[0].phase),
-                });
-            }
-        }
-
-        None
-    }
 }

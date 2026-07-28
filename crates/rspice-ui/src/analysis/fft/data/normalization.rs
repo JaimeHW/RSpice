@@ -15,19 +15,6 @@ pub enum SpectrumNormalization {
 
 impl SpectrumNormalization {
     #[inline]
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Peak => "Peak",
-            Self::Rms => "RMS",
-        }
-    }
-
-    #[inline]
-    pub fn all() -> &'static [SpectrumNormalization] {
-        &[Self::Rms, Self::Peak]
-    }
-
-    #[inline]
     pub(super) fn scale_from_peak(&self) -> f64 {
         match self {
             Self::Peak => 1.0,

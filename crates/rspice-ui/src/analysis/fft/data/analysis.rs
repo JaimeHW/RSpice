@@ -234,19 +234,4 @@ impl SpectrumAnalysis {
         }
     }
 
-    /// Format THD for display
-    pub fn format_thd(&self) -> String {
-        match self.thd_percent {
-            Some(thd) if thd.is_finite() => format!("{:.3}%", thd),
-            _ => "N/A".to_string(),
-        }
-    }
-
-    /// Format SFDR for display
-    pub fn format_sfdr(&self) -> String {
-        match self.sfdr_db {
-            Some(sfdr) if sfdr.is_finite() => format!("{:.1} dB", sfdr),
-            _ => "N/A".to_string(),
-        }
-    }
 }
