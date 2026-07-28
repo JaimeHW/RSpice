@@ -1,35 +1,24 @@
-//! Convergence Helpers for DC Operating Point Analysis
+//! Continuation Controllers for Nonlinear Solves
 //!
-//! Implements multiple strategies to achieve convergence in difficult circuits:
+//! Two homotopy controllers that walk a hard nonlinear problem to its final
+//! operating point one tractable step at a time:
 //!
-//! 1. **Source Stepping**: Gradually ramp voltage/current sources from 0 to final value
-//! 2. **Gmin Stepping**: Add conductances to ground, progressively remove them
-//! 3. **Pseudo-Transient**: Use timestep-based damping (capacitors to ground)
-//! 4. **Continuation Methods**: Combine multiple strategies with fallback
+//! - **Source Stepping**: Gradually ramp voltage/current sources from 0 to
+//!   their final values
+//! - **Pseudo-Transient**: Use timestep-based damping (capacitors to ground)
 //!
-//! # Algorithm
-//! The DC solver attempts convergence in this order:
-//! 1. Direct Newton-Raphson (fastest)
-//! 2. Source stepping if direct fails
-//! 3. Gmin stepping if source stepping fails
-//! 4. Pseudo-transient as last resort
-//!
-//! This is similar to the robust approach of "trying everything" to converge.
+//! Each controller only tracks the continuation parameter and its step-size
+//! policy; the caller owns the Newton loop and reports success or failure
+//! back through `advance_on_success` / `reduce_on_failure`. Harmonic balance
+//! drives both (see `analysis::advanced::harmonic_balance::solver`), and the
+//! engine's DC convergence aids in `engine::convergence` drive the
+//! pseudo-transient path.
 
 use crate::Value;
 
 //=============================================================================
 // Constants
 //=============================================================================
-
-/// Default initial Gmin value (conductance added to each node)
-pub const GMIN_INITIAL: Value = 1e-12;
-/// Default final Gmin value (should be negligible)  
-pub const GMIN_FINAL: Value = 1e-15;
-/// Gmin reduction factor per step
-pub const GMIN_FACTOR: Value = 10.0;
-/// Maximum Gmin stepping iterations
-pub const GMIN_MAX_STEPS: usize = 10;
 
 /// Default source stepping factor
 pub const SOURCE_STEP_INITIAL: Value = 0.1;
@@ -48,36 +37,6 @@ pub const PTRAN_DT_FACTOR: Value = 2.0;
 pub const PTRAN_DT_MAX: Value = 1e-3;
 /// Maximum pseudo-transient steps
 pub const PTRAN_MAX_STEPS: usize = 100;
-
-//=============================================================================
-// Convergence Strategy
-//=============================================================================
-
-/// Convergence strategy that succeeded
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConvergenceMethod {
-    /// Direct Newton-Raphson (no aids)
-    Direct,
-    /// Source stepping was used
-    SourceStepping,
-    /// Gmin stepping was used
-    GminStepping,
-    /// Pseudo-transient was used
-    PseudoTransient,
-}
-
-/// Result of convergence attempt
-#[derive(Debug, Clone)]
-pub struct ConvergenceResult {
-    /// Method that succeeded
-    pub method: ConvergenceMethod,
-    /// Total iterations across all attempts
-    pub total_iterations: usize,
-    /// Number of continuation steps (source/gmin/ptran steps)
-    pub continuation_steps: usize,
-    /// Final Gmin value (if gmin stepping was used)
-    pub final_gmin: Option<Value>,
-}
 
 //=============================================================================
 // Source Stepping
@@ -192,132 +151,6 @@ impl SourceStepper {
 }
 
 impl Default for SourceStepper {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-//=============================================================================
-// Gmin Stepping
-//=============================================================================
-
-/// Gmin Stepping Controller
-///
-/// Adds small conductances from each node to ground to aid convergence.
-/// The conductances are progressively reduced until negligible.
-///
-/// This is especially helpful for circuits with floating nodes or
-/// high-impedance paths.
-#[derive(Debug, Clone)]
-pub struct GminStepper {
-    /// Current Gmin value
-    current_gmin: Value,
-    /// Target (final) Gmin value
-    target_gmin: Value,
-    /// Reduction factor per step
-    factor: Value,
-    /// Number of steps taken
-    steps: usize,
-    /// Maximum steps allowed
-    max_steps: usize,
-    /// Whether stepping is complete
-    complete: bool,
-}
-
-impl GminStepper {
-    /// Create a new Gmin stepper
-    pub fn new() -> Self {
-        Self {
-            current_gmin: GMIN_INITIAL,
-            target_gmin: GMIN_FINAL,
-            factor: GMIN_FACTOR,
-            steps: 0,
-            max_steps: GMIN_MAX_STEPS,
-            complete: false,
-        }
-    }
-
-    /// Create with custom parameters
-    pub fn with_params(initial: Value, target: Value, factor: Value) -> Self {
-        Self {
-            current_gmin: initial,
-            target_gmin: target,
-            factor,
-            steps: 0,
-            max_steps: GMIN_MAX_STEPS,
-            complete: false,
-        }
-    }
-
-    /// Get current Gmin value
-    #[inline]
-    pub fn gmin(&self) -> Value {
-        self.current_gmin
-    }
-
-    /// Check if stepping is complete
-    #[inline]
-    pub fn is_complete(&self) -> bool {
-        self.complete
-    }
-
-    /// Get number of steps taken
-    #[inline]
-    pub fn steps(&self) -> usize {
-        self.steps
-    }
-
-    /// Called when Newton-Raphson converged at current Gmin
-    /// Reduces Gmin for next step
-    pub fn advance_on_success(&mut self) {
-        if self.complete {
-            return;
-        }
-
-        self.current_gmin /= self.factor;
-        self.steps += 1;
-
-        if self.current_gmin <= self.target_gmin {
-            self.current_gmin = self.target_gmin;
-            self.complete = true;
-        }
-    }
-
-    /// Called when Newton-Raphson failed
-    /// Increases Gmin and retries
-    /// Returns false if Gmin is already at maximum
-    pub fn increase_on_failure(&mut self) -> bool {
-        if self.steps >= self.max_steps {
-            return false;
-        }
-
-        // Increase Gmin
-        self.current_gmin *= self.factor;
-
-        // If Gmin is getting too large, give up
-        if self.current_gmin > 1e-6 {
-            return false;
-        }
-
-        true
-    }
-
-    /// Reset for a new solve attempt
-    pub fn reset(&mut self) {
-        self.current_gmin = GMIN_INITIAL;
-        self.steps = 0;
-        self.complete = false;
-    }
-
-    /// Stamp Gmin to diagonal of matrix for a node
-    /// Returns the conductance value to add
-    #[inline]
-    pub fn stamp_value(&self) -> Value {
-        self.current_gmin
-    }
-}
-
-impl Default for GminStepper {
     fn default() -> Self {
         Self::new()
     }
@@ -482,130 +315,3 @@ impl Default for PseudoTransient {
         Self::new()
     }
 }
-
-//=============================================================================
-// Unified Convergence Controller
-//=============================================================================
-
-/// Unified controller that manages all convergence strategies
-#[derive(Debug, Clone)]
-pub struct ConvergenceController {
-    /// Source stepping controller
-    pub source_stepper: SourceStepper,
-    /// Gmin stepping controller
-    pub gmin_stepper: GminStepper,
-    /// Pseudo-transient controller
-    pub pseudo_transient: PseudoTransient,
-    /// Currently active method
-    active_method: ConvergenceMethod,
-    /// Total iterations across all methods
-    total_iterations: usize,
-    /// Whether any method succeeded
-    succeeded: bool,
-}
-
-impl ConvergenceController {
-    /// Create a new convergence controller
-    pub fn new() -> Self {
-        Self {
-            source_stepper: SourceStepper::new(),
-            gmin_stepper: GminStepper::new(),
-            pseudo_transient: PseudoTransient::new(),
-            active_method: ConvergenceMethod::Direct,
-            total_iterations: 0,
-            succeeded: false,
-        }
-    }
-
-    /// Get currently active method
-    #[inline]
-    pub fn active_method(&self) -> ConvergenceMethod {
-        self.active_method
-    }
-
-    /// Set active method (called when switching strategies)
-    pub fn set_method(&mut self, method: ConvergenceMethod) {
-        self.active_method = method;
-        match method {
-            ConvergenceMethod::Direct => {
-                // No special setup
-            }
-            ConvergenceMethod::SourceStepping => {
-                self.source_stepper.reset();
-            }
-            ConvergenceMethod::GminStepping => {
-                self.gmin_stepper.reset();
-            }
-            ConvergenceMethod::PseudoTransient => {
-                self.pseudo_transient.reset();
-            }
-        }
-    }
-
-    /// Record iterations from a Newton-Raphson attempt
-    pub fn add_iterations(&mut self, iters: usize) {
-        self.total_iterations += iters;
-    }
-
-    /// Mark as succeeded
-    pub fn mark_success(&mut self) {
-        self.succeeded = true;
-    }
-
-    /// Check if convergence has been achieved
-    pub fn is_complete(&self) -> bool {
-        match self.active_method {
-            ConvergenceMethod::Direct => self.succeeded,
-            ConvergenceMethod::SourceStepping => {
-                self.source_stepper.is_complete() && self.succeeded
-            }
-            ConvergenceMethod::GminStepping => self.gmin_stepper.is_complete() && self.succeeded,
-            ConvergenceMethod::PseudoTransient => {
-                self.pseudo_transient.is_complete() && self.succeeded
-            }
-        }
-    }
-
-    /// Get result summary
-    pub fn result(&self) -> ConvergenceResult {
-        let continuation_steps = match self.active_method {
-            ConvergenceMethod::Direct => 0,
-            ConvergenceMethod::SourceStepping => self.source_stepper.steps(),
-            ConvergenceMethod::GminStepping => self.gmin_stepper.steps(),
-            ConvergenceMethod::PseudoTransient => self.pseudo_transient.steps(),
-        };
-
-        let final_gmin = if self.active_method == ConvergenceMethod::GminStepping {
-            Some(self.gmin_stepper.gmin())
-        } else {
-            None
-        };
-
-        ConvergenceResult {
-            method: self.active_method,
-            total_iterations: self.total_iterations,
-            continuation_steps,
-            final_gmin,
-        }
-    }
-
-    /// Reset all controllers for a new solve
-    pub fn reset(&mut self) {
-        self.source_stepper.reset();
-        self.gmin_stepper.reset();
-        self.pseudo_transient.reset();
-        self.active_method = ConvergenceMethod::Direct;
-        self.total_iterations = 0;
-        self.succeeded = false;
-    }
-}
-
-impl Default for ConvergenceController {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-//=============================================================================
-// Tests
-//=============================================================================
