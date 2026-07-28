@@ -534,11 +534,25 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 .staged
                 .get(slot as usize)
                 .ok_or(CfgEvalError::MissingInput("staged value", slot as usize))?,
-            // The candidate is the limiter body, so this runs it. With no
-            // previous iterate the body is a no-op, which is what makes a
-            // reference stamp a function of the present iterate alone.
-            CfgValueKind::Limit { candidate, .. } => self.read(candidate)?,
-            CfgValueKind::LimitPrevious { proposed, .. } => self.read(proposed)?,
+            // The proposed value, not the limiter body — this interpreter is the
+            // limiting-disabled semantics, which is what the generated device
+            // does when `ctx.limiting_enabled()` is false.
+            //
+            // It is not a simplification for the reference's convenience. A
+            // limited evaluation is a function of the bias *and* the previous
+            // iterate, so differentiating one differentiates the limiter, and
+            // both oracles built on this interpreter exist to check the model's
+            // Jacobian. Running the body here would make them measure `dL/dv`
+            // and disagree with the `dL/dv := 1` convention the stamp uses —
+            // which is the same reason the Phase 0 golden oracle requires
+            // limiting off. Limiting is damping applied to a step; the equations
+            // are what this evaluates.
+            //
+            // The limiter body is still lowered, still differentiated, and still
+            // emitted: what it produces is the correction lane, and that is
+            // checked where it is applied rather than here.
+            CfgValueKind::Limit { proposed, .. }
+            | CfgValueKind::LimitPrevious { proposed, .. } => self.read(proposed)?,
             // Reading a lane the derivative pass has not created. A `ddx` that
             // survives to evaluation is an un-differentiated function, and the
             // honest answer is that its Jacobian entry does not exist yet.

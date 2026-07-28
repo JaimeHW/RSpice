@@ -44,7 +44,7 @@
 //! `rustc` promotes the small fixed array inside it to registers, so none of
 //! this is a loop at run time.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::canonical_ir::cfg::{CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind};
@@ -152,11 +152,22 @@ pub fn emit_body(
         loop_headers: back_edge_targets(function),
         post_dominators: immediate_post_dominators(function),
         inlined: HashMap::new(),
+        wanted: outputs.iter().copied().collect(),
+        captured: BTreeMap::new(),
     };
     emitter.plan_inlining(outputs);
     emitter.leaves()?;
+    // Captures are declared between the leaves and the body: they have to be in
+    // scope for the whole body, and which of them are needed is only known once
+    // the body has been walked, so the text is spliced in afterwards.
+    let splice = emitter.source.len();
     emitter.block(function.entry, None, 1)?;
-    let names = outputs.iter().map(|value| value_name(*value)).collect();
+    let declarations = emitter.capture_declarations();
+    emitter.source.insert_str(splice, &declarations);
+    let names = outputs
+        .iter()
+        .map(|value| emitter.output_name(*value))
+        .collect();
     Ok((emitter.source, names))
 }
 
@@ -279,6 +290,26 @@ struct Emitter<'a> {
     /// small, and without it the emitted source is several times larger for no
     /// difference in the compiled code.
     inlined: HashMap<ValueId, String>,
+    /// The values the caller asked for.
+    wanted: HashSet<ValueId>,
+    /// Wanted values that a guarded or looping region defines, and the name
+    /// each is copied out into.
+    ///
+    /// Rust's scoping is lexical and the emitted control flow is real, so a
+    /// value bound inside an `if` arm has no name after it. Every other value
+    /// in the graph is fine — an operand is read where it is defined or arrives
+    /// through a block parameter, which is declared outside the construct —
+    /// but a value the *caller* reads has no such path. A stage export is
+    /// exactly that: a coarse stage computes something inside a guard and a
+    /// finer stage reads it back through a slot.
+    ///
+    /// The copy starts at zero, which is what a reader sees if the region never
+    /// runs. That is unobservable rather than merely convenient: the reader is
+    /// control-dependent on the same guard, so its own stage carries a copy of
+    /// that guard and only reads the slot on the path that wrote it. A reader
+    /// that were *not* control-dependent on it would have been raised into this
+    /// value's class by the scheduler and would not be reading a slot at all.
+    captured: BTreeMap<ValueId, String>,
 }
 
 impl Emitter<'_> {
@@ -546,6 +577,11 @@ impl Emitter<'_> {
     }
 
     fn instructions(&mut self, block: BlockId, depth: usize) -> Result<(), EmitError> {
+        // A parameter is assigned by the edge that arrived here, so its value is
+        // already the one this block sees.
+        for param in &self.function.block(block).params.clone() {
+            self.capture(*param, depth);
+        }
         for instruction in &self.function.block(block).instructions.clone() {
             let expression = self.expression(instruction.result)?;
             // Parenthesised because it is about to be dropped into the middle of
@@ -558,8 +594,52 @@ impl Emitter<'_> {
                 depth,
                 &format!("let {} = {expression};", value_name(instruction.result)),
             );
+            self.capture(instruction.result, depth);
         }
         Ok(())
+    }
+
+    /// Copy a wanted value out of the region that defines it.
+    ///
+    /// `depth` is the lexical nesting of the statement being emitted: one is the
+    /// body's own level, where a binding outlives the walk and needs no copy.
+    /// Anything deeper is inside an `if` arm or a `loop`, and the copy is the
+    /// only way its value reaches the caller. Inside a loop the assignment runs
+    /// every iteration and what survives is the last one, which is what "the
+    /// value after the loop" means.
+    fn capture(&mut self, value: ValueId, depth: usize) {
+        if depth <= 1 || !self.wanted.contains(&value) || self.captured.contains_key(&value) {
+            return;
+        }
+        let name = format!("out{}", usize::from(value));
+        self.line(depth, &format!("{name} = {};", value_name(value)));
+        self.captured.insert(value, name);
+    }
+
+    fn capture_declarations(&self) -> String {
+        let mut out = String::new();
+        for value in self.captured.keys() {
+            let (declared_type, initial) = match self.function.lanes_of(*value) {
+                Some(lanes) => (
+                    format!("Lanes<{}>", lanes.len()),
+                    format!("Lanes([0.0; {}])", lanes.len()),
+                ),
+                None => ("f64".to_string(), "0.0".to_string()),
+            };
+            let _ = writeln!(
+                out,
+                "    let mut out{}: {declared_type} = {initial};",
+                usize::from(*value)
+            );
+        }
+        out
+    }
+
+    fn output_name(&self, value: ValueId) -> String {
+        self.captured
+            .get(&value)
+            .cloned()
+            .unwrap_or_else(|| value_name(value))
     }
 
     /// Assign a successor's parameters from the arguments on this edge.

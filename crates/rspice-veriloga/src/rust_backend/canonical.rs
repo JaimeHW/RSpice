@@ -57,7 +57,9 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use crate::canonical_ir::cfg::{CfgBinaryOp, CfgFunction, CfgTerminator, CfgValueKind};
+use crate::canonical_ir::cfg::{
+    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind,
+};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::schedule::{InvalidationClass, Stage, schedule, split, worth_splitting};
 use crate::canonical_ir::{
@@ -66,7 +68,7 @@ use crate::canonical_ir::{
 
 use super::emit::{EmitBindings, RUNTIME_PRELUDE, emit_body};
 use super::expr::parameter_field_names;
-use super::stamp_plan::{StampPlan, StampRow};
+use super::stamp_plan::{StampPlan, StampRow, split_row};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
 use super::{RustTranspileOptions, device};
 
@@ -157,6 +159,9 @@ struct Stamps {
     /// Parallel to `rows`: `(residual, one per surviving derivative)`, as
     /// indices into [`ModelPlan::outputs`].
     positions: Vec<(usize, Vec<usize>)>,
+    /// Parallel to `rows`: where each row's limiter correction landed, for the
+    /// rows that have one.
+    corrections: Vec<Option<usize>>,
 }
 
 struct ModelPlan {
@@ -201,6 +206,10 @@ struct ModelPlan {
     ddt_slots: HashMap<ExprId, usize>,
     /// One history slot per `idt`, allocated from the CFG for the same reason.
     idt_slots: HashMap<ExprId, usize>,
+    /// One anchor slot per `$limit`, holding what it returned on the previous
+    /// Newton iteration. `Limit` and its `LimitPrevious` readers carry the same
+    /// operator id, so they resolve to the same slot by construction.
+    limit_slots: HashMap<ExprId, usize>,
 }
 
 impl ModelPlan {
@@ -224,6 +233,7 @@ impl ModelPlan {
         // property of the model rather than of a hash map's iteration.
         let mut ddt_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut idt_slots: HashMap<ExprId, usize> = HashMap::new();
+        let mut limit_slots: HashMap<ExprId, usize> = HashMap::new();
         for value in &cfg.function.values {
             match &value.kind {
                 CfgValueKind::Ddt { operator, .. } => {
@@ -234,17 +244,35 @@ impl ModelPlan {
                     let next = idt_slots.len();
                     idt_slots.entry(*operator).or_insert(next);
                 }
+                // `LimitPrevious` is included so a `$limit` whose body reads the
+                // previous iterate before the `Limit` value is built still finds
+                // a slot; both carry the id of the same `$limit` call.
+                CfgValueKind::Limit { operator, .. }
+                | CfgValueKind::LimitPrevious { operator, .. } => {
+                    let next = limit_slots.len();
+                    limit_slots.entry(*operator).or_insert(next);
+                }
                 _ => {}
             }
         }
 
+        // The correction lane goes last, and only where the model limits, so a
+        // model without `$limit` carries no lane for it and every other lane
+        // index still means "unknown number n".
+        let limits = cfg
+            .function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::Limit { .. }));
         let seeds: Vec<AdSeed> = (0..artifact.mir.nodes.len())
             .map(|index| AdSeed::NodePotential(index.into()))
             .chain(
                 (0..artifact.mir.branch_unknowns.len())
                     .map(|index| AdSeed::BranchUnknownFlow(index.into())),
             )
+            .chain(limits.then_some(AdSeed::LimiterCorrection))
             .collect();
+        let correction_lane = limits.then(|| seeds.len() - 1);
         let mut differentiated = differentiate(&cfg.function, &seeds)
             .map_err(|error| unsupported(artifact, format!("differentiation: {error}")))?;
 
@@ -297,8 +325,14 @@ impl ModelPlan {
             .map(|(charge, residual)| charge.unwrap_or(*residual))
             .collect();
 
-        let mut conduction = plan_stamps(artifact, &residuals, &conduction_rows);
-        let mut reactive = plan_stamps(artifact, &charge_values, &reactive_rows);
+        let mut conduction = plan_stamps(artifact, &residuals, &conduction_rows, correction_lane);
+        // The reactive matrix stamps no residual, so a charge's correction lane
+        // has nothing to correct: it is split out and dropped rather than
+        // written.
+        let mut reactive = plan_stamps(artifact, &charge_values, &reactive_rows, correction_lane);
+        for row in &mut reactive.rows {
+            row.correction = None;
+        }
         for (index, charge) in charges.iter().enumerate() {
             if charge.is_none() {
                 reactive.rows[index].derivatives.clear();
@@ -364,6 +398,7 @@ impl ModelPlan {
             noise,
             ddt_slots,
             idt_slots,
+            limit_slots,
         })
     }
 }
@@ -531,6 +566,7 @@ fn plan_stamps(
     artifact: &CanonicalIrArtifact,
     values: &[ValueId],
     rows: &[Vec<Option<ValueId>>],
+    correction_lane: Option<usize>,
 ) -> StampPlan {
     let mut plan = StampPlan {
         rows: Vec::with_capacity(artifact.mir.equations.len()),
@@ -539,18 +575,15 @@ fn plan_stamps(
     };
     for (index, equation) in artifact.mir.equations.iter().enumerate() {
         let row = rows.get(index).cloned().unwrap_or_default();
-        plan.structurally_absent += row.iter().filter(|entry| entry.is_none()).count();
-        plan.rows.push(StampRow {
-            pos: equation.branch.pos_node,
-            neg: equation.branch.neg_node,
-            kind: equation.kind,
-            residual: values[index],
-            derivatives: row
-                .into_iter()
-                .enumerate()
-                .filter_map(|(unknown, entry)| Some((unknown, entry?)))
-                .collect(),
-        });
+        plan.rows.push(split_row(
+            equation.branch.pos_node,
+            equation.branch.neg_node,
+            equation.kind,
+            values[index],
+            row,
+            correction_lane,
+            &mut plan.structurally_absent,
+        ));
     }
     plan
 }
@@ -560,6 +593,7 @@ impl Stamps {
     /// each row's landed.
     fn place(plan: StampPlan, outputs: &mut Vec<ValueId>) -> Self {
         let mut positions = Vec::with_capacity(plan.rows.len());
+        let mut corrections = Vec::with_capacity(plan.rows.len());
         for row in &plan.rows {
             let residual = outputs.len();
             outputs.push(row.residual);
@@ -571,11 +605,16 @@ impl Stamps {
                     outputs.len() - 1
                 })
                 .collect();
+            corrections.push(row.correction.map(|value| {
+                outputs.push(value);
+                outputs.len() - 1
+            }));
             positions.push((residual, derivatives));
         }
         Self {
             rows: plan.rows,
             positions,
+            corrections,
         }
     }
 
@@ -703,6 +742,15 @@ impl ModelPlan {
         out.push_str(
             "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
         );
+        // Cleared per evaluation, so "was this device limited?" is a question
+        // about *this* iteration. Only when limiting is on: with it off the flag
+        // is never set, and clearing it would erase a damped step recorded by
+        // the iteration that is about to be re-judged.
+        if !self.limit_slots.is_empty() {
+            out.push_str(
+                "        if ctx.limiting_enabled() {\n            self.canonical_limit.active = false;\n        }\n",
+            );
+        }
         for stage in &self.stages {
             if stage.class == InvalidationClass::Newton {
                 continue;
@@ -721,9 +769,10 @@ impl ModelPlan {
 
         for (index, row) in self.conduction.rows.iter().enumerate() {
             let (residual, derivatives) = &self.conduction.positions[index];
+            let residual = self.corrected_residual(index, &values, *residual);
             self.emit_row(
                 row,
-                &values[*residual],
+                &residual,
                 &derivatives
                     .iter()
                     .map(|at| values[*at].clone())
@@ -822,15 +871,26 @@ impl ModelPlan {
             "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor}};\n",
             options.runtime_path, options.runtime_path
         );
-        // A resolved `ddx` is a lane read, so a magnitude that uses one needs
-        // the same packed-value support `stamp.rs` carries. Emitted only where
-        // the body has one: on a model whose magnitudes are plain arithmetic it
-        // would be a page of unused types in every device.
-        if function
-            .values
-            .iter()
-            .any(|value| value.value_type.shape().is_some())
-        {
+        // Emitted only where the body reaches something in it: on a model whose
+        // magnitudes are plain arithmetic it would be a page of unused types in
+        // every device. Two things reach it, and the second is what the corpus
+        // found — a resolved `ddx` is a lane read, so a magnitude using one
+        // needs the packed-value support `stamp.rs` carries, *and* the clamped
+        // exponentials are functions in here rather than method calls, so a
+        // magnitude with a diode in it needs the prelude with no packed value
+        // anywhere. Twenty of the corpus models are the second case.
+        if function.values.iter().any(|value| {
+            value.value_type.shape().is_some()
+                || matches!(
+                    value.kind,
+                    CfgValueKind::Unary {
+                        op: CfgUnaryOp::LimExp
+                            | CfgUnaryOp::LimitedExp
+                            | CfgUnaryOp::LimitedExpDerivative,
+                        ..
+                    }
+                )
+        }) {
             out.push_str(RUNTIME_PRELUDE);
         }
         out.push_str(&super::noise::descriptor_table(artifact));
@@ -1003,6 +1063,20 @@ impl ModelPlan {
                  \x20       let ddt_scale = move || ddt_scale_value;\n",
             );
         }
+        // `evaluate_noise_sources` takes `&self`, runs at a fixed operating
+        // point, and is not a Newton step — there is nothing to damp and no
+        // history it may write. Both bindings are therefore the
+        // limiting-disabled ones, which is what the device itself does when
+        // `ctx.limiting_enabled()` is false, so a magnitude that reads a limited
+        // voltage reads the proposed one.
+        if wants.limit {
+            out.push_str(
+                "        let limit = |_operator: usize, proposed: f64, _candidate: f64| proposed;\n",
+            );
+        }
+        if wants.limit_previous {
+            out.push_str("        let limit_previous = |_operator: usize, proposed: f64| proposed;\n");
+        }
     }
 
     /// Where equation `index`'s reactive values start in the cache.
@@ -1072,6 +1146,31 @@ impl ModelPlan {
     }
 
     /// One equation's stamper calls.
+    /// The residual as the matrix wants it, with the limiter's displacement
+    /// taken back out.
+    ///
+    /// The model evaluated its currents at the limited operating point `L`
+    /// while the solver is asking about `v`, and the Jacobian reported is
+    /// `dI/dv` at `L` by the `dL/dv := 1` convention. Linearising there gives
+    /// `I(L) + G*(v - L)`, so what has to be subtracted is `G*(L - v)` — the
+    /// directional derivative along the displacement, which is exactly what the
+    /// correction lane accumulated. Any `ddt` scaling is already inside it,
+    /// because this pass differentiates the residual rather than the charge.
+    ///
+    /// Guarded on `limiting_enabled` because a probe with limiting off must see
+    /// the undamped equations: that is the mode the derivative oracles measure,
+    /// and correcting there would make the stamp disagree with its own
+    /// currents.
+    fn corrected_residual(&self, equation: usize, values: &[String], residual: usize) -> String {
+        match self.conduction.corrections.get(equation).copied().flatten() {
+            Some(at) => format!(
+                "(({}) - (if ctx.limiting_enabled() {{ {} }} else {{ 0.0 }}))",
+                values[residual], values[at]
+            ),
+            None => values[residual].clone(),
+        }
+    }
+
     fn emit_row(
         &self,
         row: &StampRow,
@@ -1258,6 +1357,14 @@ impl ModelPlan {
                  {pad}let idt_scale = move || idt_scale_value;"
             );
         }
+        // One binding for both operators, and before either closure is built.
+        // `idt` used to bind it itself unless `ddt` was going to, which put the
+        // binding *after* the closure that read it whenever a model had both —
+        // and only PSP-NQS has both, so nothing caught it until the corpus was
+        // compiled. The two closures reach disjoint fields through it.
+        if wants.ddt || wants.idt {
+            let _ = writeln!(out, "{pad}let ddt_state = self.stamp_state.as_mut();");
+        }
         if wants.idt {
             let mut arms: Vec<String> = Vec::new();
             for value in &function.values {
@@ -1284,9 +1391,6 @@ impl ModelPlan {
                     .unwrap_or_else(|| "usize::MAX".to_string()),
                 _ => format!("match operator {{ {}_ => usize::MAX }}", arms.concat()),
             };
-            if !wants.ddt {
-                let _ = writeln!(out, "{pad}let ddt_state = self.stamp_state.as_mut();");
-            }
             let _ = writeln!(
                 out,
                 "{pad}let idt_active = self.ddt_coefficients.active;\n\
@@ -1339,7 +1443,6 @@ impl ModelPlan {
                     .unwrap_or_else(|| "usize::MAX".to_string()),
                 _ => format!("match operator {{ {}_ => usize::MAX }}", arms.concat()),
             };
-            let _ = writeln!(out, "{pad}let ddt_state = self.stamp_state.as_mut();");
             let _ = writeln!(
                 out,
                 "{pad}let ddt_active = self.ddt_coefficients.active;\n\
@@ -1365,11 +1468,100 @@ impl ModelPlan {
                  {pad}}};"
             );
         }
+        if wants.limit || wants.limit_previous {
+            let resolve = self.limit_slot_resolver(artifact, function)?;
+            // The anchors are *copied* out before any write, which is what makes
+            // "the value this `$limit` returned on the previous iteration" mean
+            // that regardless of emission order. Reading the live array instead
+            // would hand a `$limit` its own current value the moment a body read
+            // the previous iterate after the limiter had already run, and
+            // arrays this small are one register-width memcpy.
+            //
+            // It also settles the borrow: the reader closes over copies, so the
+            // writer can hold the state mutably without the two colliding.
+            let _ = writeln!(
+                out,
+                "{pad}let limiting_enabled = ctx.limiting_enabled();\n\
+                 {pad}let limit_state = self.canonical_limit.as_mut();\n\
+                 {pad}let limit_anchor = limit_state.previous;\n\
+                 {pad}let limit_initialized = limit_state.initialized;"
+            );
+            if wants.limit_previous {
+                let _ = writeln!(
+                    out,
+                    "{pad}let limit_previous = move |operator: usize, proposed: f64| -> f64 {{\n\
+                     {pad}    let _ = operator;\n\
+                     {pad}    let slot = {resolve};\n\
+                     {pad}    if limiting_enabled && limit_initialized[slot] {{\n\
+                     {pad}        limit_anchor[slot]\n\
+                     {pad}    }} else {{\n\
+                     {pad}        proposed\n\
+                     {pad}    }}\n\
+                     {pad}}};"
+                );
+            }
+            if wants.limit {
+                let _ = writeln!(
+                    out,
+                    "{pad}let mut limit = |operator: usize, proposed: f64, candidate: f64| -> f64 {{\n\
+                     {pad}    let _ = operator;\n\
+                     {pad}    if !limiting_enabled {{\n\
+                     {pad}        return proposed;\n\
+                     {pad}    }}\n\
+                     {pad}    let slot = {resolve};\n\
+                     {pad}    limit_state.active |= candidate != proposed;\n\
+                     {pad}    limit_state.previous[slot] = candidate;\n\
+                     {pad}    limit_state.initialized[slot] = true;\n\
+                     {pad}    candidate\n\
+                     {pad}}};"
+                );
+            }
+        }
         Ok(())
+    }
+
+    /// A `match` from an operator id to the state slot it was assigned, or the
+    /// bare slot when there is only one.
+    ///
+    /// The fallback resolves to an out-of-range slot rather than to zero, for
+    /// the reason `ddt` gives: reading or writing the wrong history is the one
+    /// failure that looks like a converged answer.
+    fn limit_slot_resolver(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        function: &CfgFunction,
+    ) -> Result<String, RustBackendError> {
+        let mut arms: Vec<String> = Vec::new();
+        for value in &function.values {
+            let (CfgValueKind::Limit { operator, .. }
+            | CfgValueKind::LimitPrevious { operator, .. }) = &value.kind
+            else {
+                continue;
+            };
+            let operator = *operator;
+            let slot = self.limit_slots.get(&operator).copied().ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!("a $limit at {operator} with no generated state slot"),
+                )
+            })?;
+            let arm = format!("{} => {slot}usize, ", usize::from(operator));
+            if !arms.contains(&arm) {
+                arms.push(arm);
+            }
+        }
+        Ok(match arms.len() {
+            1 => arms[0]
+                .split_once("=> ")
+                .map(|(_, slot)| slot.trim_end_matches(", ").to_string())
+                .unwrap_or_else(|| "usize::MAX".to_string()),
+            _ => format!("match operator {{ {}_ => usize::MAX }}", arms.concat()),
+        })
     }
 
     fn state_extensions(&self) -> device::StateFileExtensions {
         let mut extensions = device::StateFileExtensions::default();
+        self.push_limit_state_fields(&mut extensions);
         if self.slots > 0 || self.reactive.width() > 0 {
             extensions.support_types.push_str(
                 "fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {\n\
@@ -1428,6 +1620,88 @@ impl ModelPlan {
         );
         extensions
     }
+
+    /// Per-instance limiter state: the anchor each `$limit` returned last, and
+    /// whether the device was limited at all on this iteration.
+    ///
+    /// The `active` flag is the engine's, not this backend's — it is how a
+    /// device says "do not call this converged, the step I was given was
+    /// damped" — so the rollback and checkpoint wiring around it matches the
+    /// tier being replaced field for field. Getting that wrong does not fail to
+    /// compile; it converges early.
+    fn push_limit_state_fields(&self, extensions: &mut device::StateFileExtensions) {
+        let count = self.limit_slots.len();
+        if count == 0 {
+            return;
+        }
+        extensions.support_types.push_str(
+            "#[derive(Clone)]\n\
+             pub(crate) struct CanonicalLimitState<const N: usize> {\n\
+             \x20   pub(crate) previous: [f64; N],\n\
+             \x20   pub(crate) initialized: [bool; N],\n\
+             \x20   pub(crate) active: bool,\n\
+             }\n\n\
+             impl<const N: usize> CanonicalLimitState<N> {\n\
+             \x20   fn new_box() -> Box<Self> {\n\
+             \x20       let mut boxed = Box::<Self>::new_uninit();\n\
+             \x20       unsafe {\n\
+             \x20           // SAFETY: every field is an f64, a bool, or an array of them; all-zero bytes are valid values.\n\
+             \x20           std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);\n\
+             \x20           boxed.assume_init()\n\
+             \x20       }\n\
+             \x20   }\n\
+             }\n\n",
+        );
+        let _ = write!(
+            extensions.instance_fields,
+            "    pub(crate) canonical_limit: Box<CanonicalLimitState<{count}>>,\n"
+        );
+        extensions
+            .clone_fields
+            .push_str("            canonical_limit: self.canonical_limit.clone(),\n");
+        extensions
+            .new_initializers
+            .push_str("            canonical_limit: CanonicalLimitState::new_box(),\n");
+        extensions.limiter_converged_expr = "!self.canonical_limit.active".to_string();
+        extensions.rollback_value_count = count;
+        extensions.rollback_flag_count = count + 1;
+        extensions
+            .rollback_capture_values
+            .push_str("        values.extend_from_slice(&self.canonical_limit.previous);\n");
+        extensions.rollback_capture_flags.push_str(
+            "        flags.extend_from_slice(&self.canonical_limit.initialized);\n\
+             \x20       flags.push(self.canonical_limit.active);\n",
+        );
+        let _ = write!(
+            extensions.rollback_restore_fields,
+            "        let (field, remaining) = rollback_values.split_at({count});\n\
+             \x20       self.canonical_limit.previous.copy_from_slice(field);\n\
+             \x20       rollback_values = remaining;\n\
+             \x20       let (field, remaining) = rollback_flags.split_at({count});\n\
+             \x20       self.canonical_limit.initialized.copy_from_slice(field);\n\
+             \x20       rollback_flags = remaining;\n\
+             \x20       let (active, remaining) = rollback_flags.split_first().expect(\"generated limiter rollback active flag\");\n\
+             \x20       self.canonical_limit.active = *active;\n\
+             \x20       rollback_flags = remaining;\n"
+        );
+        extensions.checkpoint_capture_fields =
+            "            limiter_anchor: self.canonical_limit.previous.to_vec(),\n\
+             \x20           limiter_initialized: self.canonical_limit.initialized.to_vec(),\n"
+                .to_string();
+        let _ = write!(
+            extensions.checkpoint_shape_checks,
+            "        if state.limiter_anchor.len() != {count} || state.limiter_initialized.len() != {count} {{\n\
+             \x20           return Err(format!(\"generated limiter checkpoint shape mismatch: expected {count}, found {{}} / {{}}\", state.limiter_anchor.len(), state.limiter_initialized.len()));\n\
+             \x20       }}\n"
+        );
+        // Restored state is a fresh operating point, not a damped step, so the
+        // flag starts clear rather than being carried across.
+        extensions.checkpoint_restore_fields.push_str(
+            "        self.canonical_limit.previous.copy_from_slice(&state.limiter_anchor);\n\
+             \x20       self.canonical_limit.initialized.copy_from_slice(&state.limiter_initialized);\n\
+             \x20       self.canonical_limit.active = false;\n",
+        );
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1451,6 +1725,8 @@ struct Wants {
     ddt_scale: bool,
     idt: bool,
     idt_scale: bool,
+    limit: bool,
+    limit_previous: bool,
     staged: bool,
 }
 
@@ -1469,6 +1745,8 @@ impl Wants {
             CfgValueKind::DdtScale => self.ddt_scale = true,
             CfgValueKind::Idt { .. } => self.idt = true,
             CfgValueKind::IdtScale => self.idt_scale = true,
+            CfgValueKind::Limit { .. } => self.limit = true,
+            CfgValueKind::LimitPrevious { .. } => self.limit_previous = true,
             CfgValueKind::Staged { .. } => self.staged = true,
             _ => {}
         }
@@ -1516,12 +1794,6 @@ fn reject_unsupported_kinds(
 ) -> Result<(), RustBackendError> {
     for value in &function.values {
         match &value.kind {
-            CfgValueKind::Limit { selector, .. } => {
-                return Err(unsupported(
-                    artifact,
-                    format!("$limit ({selector}) has no state slot in the canonical backend yet"),
-                ));
-            }
             CfgValueKind::BranchFlow(branch) => {
                 return Err(unsupported(
                     artifact,
