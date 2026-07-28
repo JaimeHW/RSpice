@@ -1356,13 +1356,41 @@ impl Engine {
                 self.dc_nodal_gmin_floor(circuit)
             };
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
-        let mut solution = self
+        let mut use_transient_current_seed = false;
+        let mut solution = match self
             .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
                 Self::stamp_transient_operating_point_linear(
                     circuit, matrix, rhs, time, 0.0, false,
                 );
-            })
-            .unwrap_or_else(|| vec![0.0; size]);
+            }) {
+            Some(solution) => solution,
+            None if self.config.spice_dialect == SpiceDialect::Xyce
+                && circuit.has_xyce_core_inductors() =>
+            {
+                // Xyce permits a zero-valued transient source in parallel with
+                // an inductor-backed Core winding.  The ordinary DC-short
+                // startup matrix is intentionally singular because that
+                // branch current is not a DC observable.  Reuse the
+                // simulator's canonical current-seeded transient startup
+                // equations for the nonlinear operating-point walk so the
+                // seed remains deterministic without weakening ordinary DC
+                // topology validation.
+                let seeded = self.linear_presolve_for_guess_with_linear_stamp(
+                    circuit,
+                    matrix,
+                    |circuit, matrix, rhs| {
+                        Self::stamp_transient_current_seed_linear(
+                            circuit, matrix, rhs, time, 0.0,
+                        );
+                    },
+                );
+                if seeded.is_some() {
+                    use_transient_current_seed = true;
+                }
+                seeded.unwrap_or_else(|| vec![0.0; size])
+            }
+            None => vec![0.0; size],
+        };
 
         for &(node_id, voltage) in node_hints {
             if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
@@ -1421,9 +1449,19 @@ impl Engine {
             rhs.fill(0.0);
 
             circuit.refresh_jiles_atherton_inductances(&solution);
-            Self::stamp_transient_operating_point_linear(
-                circuit, matrix, &mut rhs, time, gmin_floor, false,
-            );
+            if use_transient_current_seed {
+                Self::stamp_transient_current_seed_linear(
+                    circuit,
+                    matrix,
+                    &mut rhs,
+                    time,
+                    gmin_floor,
+                );
+            } else {
+                Self::stamp_transient_operating_point_linear(
+                    circuit, matrix, &mut rhs, time, gmin_floor, false,
+                );
+            }
             self.try_stamp_nonlinear_devices_for_operating_point(
                 circuit,
                 matrix,
@@ -1436,6 +1474,23 @@ impl Engine {
 
             let raw_solution = match matrix.solve(&rhs) {
                 Ok(solution) => solution,
+                Err(err)
+                    if !use_transient_current_seed
+                        && self.config.spice_dialect == SpiceDialect::Xyce
+                        && circuit.has_xyce_core_inductors() =>
+                {
+                    // The regular transient operating-point equations retain
+                    // ideal inductor shorts.  If that matrix is singular,
+                    // switch the remainder of this startup walk to the
+                    // canonical current-seeded transient equations; this is
+                    // the same deterministic fallback used by the linear
+                    // startup path and is only enabled for Xyce Core devices.
+                    log::debug!(
+                        "Xyce Core transient operating-point short solve failed ({err}); retrying with current-seeded startup equations"
+                    );
+                    use_transient_current_seed = true;
+                    continue;
+                }
                 Err(err) => {
                     if let Some(startup_solution) = nodeset_startup_solution.as_ref() {
                         log::debug!(
@@ -1503,9 +1558,19 @@ impl Engine {
                     junction_gmin,
                     |circuit, matrix, rhs| {
                         circuit.refresh_jiles_atherton_inductances(&new_solution);
-                        Self::stamp_transient_operating_point_linear(
-                            circuit, matrix, rhs, time, gmin_floor, false,
-                        );
+                        if use_transient_current_seed {
+                            Self::stamp_transient_current_seed_linear(
+                                circuit,
+                                matrix,
+                                rhs,
+                                time,
+                                gmin_floor,
+                            );
+                        } else {
+                            Self::stamp_transient_operating_point_linear(
+                                circuit, matrix, rhs, time, gmin_floor, false,
+                            );
+                        }
                     },
                 );
 
