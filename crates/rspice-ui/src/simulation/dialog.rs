@@ -68,43 +68,43 @@ pub use op::{
 };
 pub use transient::TransientConfig;
 
-// Re-exports - Steady-State
-pub use hb::{HbConfig, HbDialogState, HbSolverType, HbToneConfig};
+// Re-exports. Each analysis re-exports the dialog state its panel owns. The
+// matching `*Config` types are deliberately absent: a dialog's config is its
+// own business, and execution takes `simulation::config` types instead, so
+// re-exporting both here only invited the two to be confused.
+pub use hb::{HbDialogState, HbSolverType};
 pub use pss::{PssConfig, PssDialogState, PssSolverMethod};
 
 // Re-exports - Periodic Small-Signal
-pub use pac::{PacConfig, PacDialogState, PacSweepType};
-pub use pnoise::{NoiseReferenceType, PnoiseConfig, PnoiseDialogState, PnoiseSweepType};
-pub use pstb::{PstbConfig, PstbDialogState};
-pub use pxf::{PxfConfig, PxfDialogState, PxfSweepType};
+pub use pac::PacDialogState;
+pub use pnoise::{NoiseReferenceType, PnoiseDialogState};
+pub use pstb::PstbDialogState;
+pub use pxf::PxfDialogState;
 
 // Re-exports - RF/Microwave
-pub use sp::{SpConfig, SpDialogState, SpPortConfig, SpSweepType};
+pub use sp::{SpConfig, SpDialogState};
 
 // Re-exports - Transfer Function
-pub use pz::{PzAnalysisType, PzConfig, PzDialogState, PzTransferType};
-pub use xf::{XfAccuracy, XfConfig, XfDialogState, XfNormalization};
+pub use pz::PzDialogState;
+pub use xf::{XfAccuracy, XfDialogState, XfNormalization};
 
 // Re-exports - Stability/Sensitivity
-pub use sens::{SensConfig, SensDialogState, SensType};
-pub use stb::{StbConfig, StbDialogState};
+pub use sens::{SensDialogState, SensType};
+pub use stb::StbDialogState;
 
 // Re-exports - Statistical/Parametric
-pub use corner::{CornerBaseAnalysis, CornerConfig, CornerDialogState, ProcessCorner};
-pub use mc::{McBaseAnalysis, McConfig, McDialogState, McDistribution};
+pub use corner::CornerDialogState;
+pub use mc::McDialogState;
 
 // Re-exports - Temperature
-pub use temp::{TempBaseAnalysis, TempConfig, TempDialogState};
+pub use temp::TempDialogState;
 
 // Re-exports - Envelope/Fourier
-pub use envelope::{EnvelopeConfig, EnvelopeDialogState};
-pub use fourier::{FourierConfig, FourierDialogState};
-pub use optimization::{
-    OptimizationAlgorithmMode, OptimizationConfig, OptimizationDialogState, OptimizationGoalMode,
-    OptimizationVariableConfig,
-};
-pub use reliability::{ReliabilityConfig, ReliabilityDialogState};
-pub use soa::{SoaConfig, SoaDialogState};
+pub use envelope::EnvelopeDialogState;
+pub use fourier::FourierDialogState;
+pub use optimization::OptimizationDialogState;
+pub use reliability::ReliabilityDialogState;
+pub use soa::SoaDialogState;
 
 // Re-exports - Framework
 pub use options::{

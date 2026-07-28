@@ -43,58 +43,52 @@ mod validated_revision;
 mod visibility;
 mod wire;
 
-// Re-export all public types for backwards compatibility
+// Re-exports. This block used to say "re-export all public types for backwards
+// compatibility", which an application crate has no one to keep compatibility
+// with -- nothing outside `rspice-ui` consumes it. A name earns a line here by
+// having a caller; the rest are reachable through their own module.
 pub use array::{
-    MAX_SCHEMATIC_ARRAY_MEMBERS, SchematicArrayCount, SchematicArrayError, SchematicArrayImpact,
-    SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNameRange, SchematicArrayNaming,
-    SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
+    SchematicArrayCount, SchematicArrayError, SchematicArrayImpact, SchematicArrayKind,
+    SchematicArrayNameAtom, SchematicArrayNaming, SchematicArrayPlacement, SchematicArrayPlan,
+    SchematicArrayPreview,
 };
 pub(crate) use bus::nearest_lattice_point_on_segment;
 pub use bus::{
-    Bus, BusDeclaration, BusDirection, BusDrawing, BusMember, BusNotation, BusParseError,
-    BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX,
-    PendingBusTap,
+    Bus, BusDeclaration, BusDirection, BusNotation, BusParseError, BusPropertyImpact, BusSlice,
+    BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, PendingBusTap,
 };
-pub use canvas_cache::CanvasCache;
 pub use clipboard::ClipboardData;
 pub use component::{
     Component, ComponentDisplayMode, LibraryCellInstance, validate_library_netlist_template,
 };
 pub use component_type::ComponentType;
 pub use design_note::{
-    DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, DesignNotePlacementAuthority,
-    DesignNoteRenderContext, DesignReviewEvidence, DesignReviewMessage, DesignReviewMutation,
-    DesignReviewRecord, DesignReviewState, MAX_DESIGN_NOTE_TEXT_LEN, MAX_DESIGN_REVIEW_EVIDENCE,
-    MAX_DESIGN_REVIEW_EVIDENCE_IDENTITY_LEN, MAX_DESIGN_REVIEW_EVIDENCE_LABEL_LEN,
-    MAX_DESIGN_REVIEW_IDENTITY_LEN, MAX_DESIGN_REVIEW_MESSAGE_LEN, MAX_DESIGN_REVIEW_MESSAGES,
-    PendingDesignNotePlacement, RequirementTarget,
+    DesignNote, DesignNoteKind, DesignNoteLayer, DesignNoteRenderContext, DesignReviewMutation,
+    DesignReviewState, PendingDesignNotePlacement, RequirementTarget,
 };
 pub use document_policy::{
     NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
-    SchematicGridPitch, SchematicPageOrientation, SchematicPageSize, SelectionCrossingPolicy,
-    WireJunctionPolicy,
+    SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,
 };
 pub(crate) use documentation_shape::clamped_documentation_shape_translation;
 pub use documentation_shape::{
-    DocumentationShape, DocumentationShapeDrawing, DocumentationShapeError,
-    DocumentationShapeGeometry, DocumentationShapeKind, DocumentationShapeLayer,
-    DocumentationShapePlacementAuthority, MAX_DOCUMENTATION_POLYGON_POINTS,
-    PendingDocumentationShapePlacement, arc_parameters, geometry_from_points,
+    DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
+    DocumentationShapeKind, DocumentationShapeLayer, PendingDocumentationShapePlacement,
+    arc_parameters, geometry_from_points,
 };
 pub(crate) use hierarchy::SheetMoveConnectivityPlan;
 pub use hierarchy::{
-    HierarchyExtractionCandidate, HierarchyExtractionError, HierarchyExtractionPlan,
-    HierarchyExtractionPort, HierarchyExtractionTerminal, HierarchyNetConnectivity,
+    HierarchyExtractionPlan, HierarchyExtractionTerminal, HierarchyNetConnectivity,
     hierarchy_terminal_direction, hierarchy_terminal_discipline,
 };
 pub use net_highlight::{NetGraph, NetHighlightState};
 pub use net_label::{Junction, NetLabel};
-pub use point::{LabelPosition, Point};
+pub use point::Point;
 pub use port::{
     PendingPortPlacement, PortContract, PortDirection, PortDirectionType, PortDiscipline,
-    PortPlacementAuthority, PortPlacementError, PortSignalType, PortSpec,
+    PortSignalType, PortSpec,
 };
-pub use probe::{MAX_SCHEMATIC_PROBE_REFERENCE_LEN, SchematicProbe};
+pub use probe::SchematicProbe;
 pub use replacement::{
     SchematicReplacementAuthority, SchematicReplacementCompatibility, SchematicReplacementError,
     SchematicReplacementImpact, SchematicReplacementMappingStatus, SchematicReplacementParameter,
@@ -109,18 +103,14 @@ pub(crate) use replacement::{
     valid_replacement_parameter_name,
 };
 pub use rotation::Rotation;
-pub use selection::{
-    JunctionSelection, SchematicSelectionFilter, Selection, WireSegmentSelection,
-    WireVertexSelection,
-};
-pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
+pub use selection::{JunctionSelection, SchematicSelectionFilter, Selection};
+pub use snap::SnapEngine;
 pub use state::{
-    MoveSelectionError, MoveSelectionMode, SchematicState, StretchOrthogonalPolicy,
-    StretchSelectionError, StretchTarget,
+    MoveSelectionMode, SchematicState, StretchOrthogonalPolicy, StretchTarget,
 };
-pub use symbol_gen::{GeneratedPin, GeneratedSymbol, generate_symbol};
+pub use symbol_gen::generate_symbol;
 pub use tool::Tool;
-pub use undo_history::{MAX_UNDO_STEPS, SchematicSnapshot, UndoHistory};
+pub use undo_history::SchematicSnapshot;
 pub use validated_revision::{
     AdvisoryDisposition, AdvisoryDispositionKind, MAX_ADVISORY_DISPOSITION_REASON_LEN,
     MAX_VALIDATED_REVISION_IDENTITY_LEN, MAX_VALIDATED_REVISION_NOTE_LEN,
