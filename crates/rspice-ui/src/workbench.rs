@@ -13,7 +13,7 @@
 //! shell's shape. Rendering now lives in [`frame`], platform branching in
 //! [`platform`].
 //!
-//! Four kinds of view container appear here, and the distinction is load
+//! Five kinds of view container appear here, and the distinction is load
 //! bearing:
 //!
 //! - `chrome` — the frame around everything: title bar, activity rail,
@@ -22,16 +22,15 @@
 //!   inspector, console, drawers). Dismissible; they never own a document.
 //! - `surfaces` — the canonical task owners that fill the central area. One
 //!   is active at a time, and it is what the current route names.
-//! - `panels` — dialog-hosted panels (PDK settings, property dialog, script
-//!   console, calculator). Hosted inside a dialog, not by the layout.
+//! - `tools` — application-modal tools that float above the active surface
+//!   (project launcher, jobs list, specialist-tool browser, calculator,
+//!   notification centre). They own neither a route nor a document: they
+//!   open over whatever is beneath, do one job, and close.
+//! - `app/dialogs` — modal dialogs. They block the surface beneath until
+//!   dismissed, which is what separates them from a `tools` float.
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/module_layering.rs`, not by this file.
-pub(crate) mod routing;
-pub(crate) mod tools;
-pub(crate) mod workflows;
-pub(crate) mod lifecycle;
-pub(crate) mod documents;
 pub(crate) mod account_organization;
 pub(crate) mod app;
 pub(crate) mod app_state;
@@ -41,22 +40,27 @@ pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod design_system;
 mod docks;
+pub(crate) mod documents;
 pub(crate) mod examples;
 mod feature_availability;
 pub(crate) mod feature_availability_data;
 pub(crate) mod frame;
 pub(crate) mod hardcopy_adapters;
 mod layout;
+pub(crate) mod lifecycle;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) mod panels;
 pub(crate) mod platform;
 mod preferences;
 mod preflight;
+pub(crate) mod routing;
 pub(crate) mod shortcuts;
 pub(crate) mod simulation_analysis_tabs;
 pub(crate) mod state;
 mod surfaces;
+pub(crate) mod tools;
+pub(crate) mod workflows;
 
 pub use routing::availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
