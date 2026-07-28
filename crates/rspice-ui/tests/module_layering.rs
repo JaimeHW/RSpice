@@ -1101,27 +1101,13 @@ fn budgeted_lines(source: &str) -> usize {
         .count()
 }
 
-const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("workbench/hardcopy_adapters/sources.rs", 3654),
+const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("io/project_io/tests.rs", 4156),
     ("workbench/hardcopy_adapters/render.rs", 3956),
-    ("workbench/hardcopy_adapters/render/publication.rs", 3528),
-    ("state/workspace.rs", 3475),
-    ("workbench/documents/visualization_studio.rs", 3501),
-    ("state/model_library/qualification.rs", 3766),
-    ("workbench/surfaces/model_editor.rs", 2708),
-    ("workbench/surfaces/verify.rs", 3540),
-    ("workbench/surfaces/simulate.rs", 3483),
-    ("results/visualization_document.rs", 3435),
-    ("workbench/documents/model_editor.rs", 3915),
-    ("results/report_document.rs", 3655),
-    ("io/durable_file.rs", 4682),
-    ("simulation/plan/model.rs", 3718),
-    ("workbench/surfaces/models.rs", 2724),
-    ("workbench/documents/result_document/waves.rs", 2932),
-    ("state/model_library/manager.rs", 3810),
-    ("state/model_library/correlation.rs", 2655),
-    ("hardcopy/contract.rs", 3229),
+    ("workbench/hardcopy_adapters/render/publication.rs", 3528),
+    ("workbench/documents/visualization_studio.rs", 3501),
+    ("io/durable_file.rs", 4682),
+    ("state/model_library/manager.rs", 3810),
     ("workbench/docks/inspector/design.rs", 3985),
     ("workbench/surfaces/project.rs", 3988),
     ("workbench/feature_availability_data.rs", 3864),
