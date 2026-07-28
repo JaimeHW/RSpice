@@ -96,7 +96,6 @@ struct SourceCategory {
 struct ModelSize {
     module_name: String,
     public_model_name: String,
-    backend: String,
     files: usize,
     bytes: u64,
     retained_workspace_bytes_per_instance: u64,
@@ -209,7 +208,6 @@ fn build_report(
         .map(|device| ModelSize {
             module_name: device.module_name.clone(),
             public_model_name: device.public_model_name.clone(),
-            backend: format!("{:?}", device.backend),
             files: device.file_count,
             bytes: device.source_bytes,
             retained_workspace_bytes_per_instance: device
@@ -434,7 +432,7 @@ fn print_report(report: &GeneratedRustReport) {
         println!("  largest models:");
         for model in &report.largest_models {
             println!(
-                "    {:<32} {:>12} source {:>10} pooled {:>10} legacy-dense {:>8} state {:>1}/{:>1} allocs {:>3} files {}",
+                "    {:<32} {:>12} source {:>10} pooled {:>10} legacy-dense {:>8} state {:>1}/{:>1} allocs {:>3} files",
                 model.module_name,
                 model.bytes,
                 model.pooled_workspace_payload_bytes_per_thread,
@@ -443,7 +441,6 @@ fn print_report(report: &GeneratedRustReport) {
                 model.stamp_state_heap_allocations_per_instance,
                 model.legacy_stamp_state_heap_allocations_per_instance,
                 model.files,
-                model.backend
             );
         }
     }
