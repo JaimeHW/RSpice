@@ -131,30 +131,6 @@ impl ReliabilityEngine {
         }
     }
 
-    /// Run reliability analysis for a circuit session
-    pub fn analyze_circuit(
-        &self,
-        stress_data: &HashMap<String, StressMetrics>,
-        target_years: &[f64],
-    ) -> Vec<ReliabilityResult> {
-        let mut results = Vec::new();
-
-        for (device_id, stress) in stress_data {
-            let mut shifts = HashMap::new();
-            for &years in target_years {
-                let label = format!("{}y", years);
-                shifts.insert(label, self.calculate_shift(stress, years));
-            }
-
-            results.push(ReliabilityResult {
-                device_id: device_id.clone(),
-                stress: stress.clone(),
-                shifts,
-            });
-        }
-
-        results
-    }
 }
 
 // =============================================================================

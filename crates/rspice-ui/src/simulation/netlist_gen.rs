@@ -465,11 +465,6 @@ impl Net {
         }
     }
 
-    /// Check if this net contains a point
-    pub fn contains(&self, point: Point) -> bool {
-        self.points.contains(&point)
-    }
-
     /// Add a point to this net
     pub fn add_point(&mut self, point: Point) {
         self.points.insert(point);
@@ -766,10 +761,6 @@ impl<'a> NetlistGenerator<'a> {
         self.ground_net
     }
 
-    /// Check if schematic has ground
-    pub fn has_ground(&self) -> bool {
-        self.ground_net.is_some()
-    }
 }
 fn chrono_lite_timestamp() -> String {
     // Use system time for a basic timestamp

@@ -140,31 +140,6 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
-    /// Create a new log entry
-    pub fn new(
-        id: u64,
-        timestamp: Duration,
-        severity: LogSeverity,
-        source: LogSource,
-        message: impl Into<String>,
-    ) -> Self {
-        Self {
-            id,
-            timestamp,
-            severity,
-            source,
-            message: message.into(),
-            context: None,
-            anchor: None,
-        }
-    }
-
-    /// Add context to the entry
-    pub fn with_context(mut self, context: impl Into<String>) -> Self {
-        self.context = Some(context.into());
-        self
-    }
-
     /// Format timestamp as HH:MM:SS.mmm
     pub fn format_timestamp(&self) -> String {
         let total_secs = self.timestamp.as_secs();
@@ -175,18 +150,6 @@ impl LogEntry {
         format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
     }
 
-    /// Check if entry matches a text filter
-    pub fn matches_filter(&self, filter: &str) -> bool {
-        if filter.is_empty() {
-            return true;
-        }
-        let lower_filter = filter.to_lowercase();
-        self.message.to_lowercase().contains(&lower_filter)
-            || self
-                .context
-                .as_ref()
-                .is_some_and(|c| c.to_lowercase().contains(&lower_filter))
-    }
 }
 
 // =============================================================================
@@ -244,11 +207,6 @@ impl LogBuffer {
         }
     }
 
-    /// Set minimum severity level to store
-    pub fn set_min_severity(&mut self, severity: LogSeverity) {
-        self.min_severity = severity;
-    }
-
     /// Log a message with full parameters
     pub fn log(
         &mut self,
@@ -297,44 +255,14 @@ impl LogBuffer {
         self.entries.push_back(entry);
     }
 
-    /// Convenience: Log an error
-    pub fn error(&mut self, source: LogSource, message: impl Into<String>) {
-        self.log(LogSeverity::Error, source, message, None);
-    }
-
     /// Convenience: Log a warning
     pub fn warning(&mut self, source: LogSource, message: impl Into<String>) {
         self.log(LogSeverity::Warning, source, message, None);
     }
 
-    /// Convenience: Log info
-    pub fn info(&mut self, source: LogSource, message: impl Into<String>) {
-        self.log(LogSeverity::Info, source, message, None);
-    }
-
-    /// Convenience: Log debug
-    pub fn debug(&mut self, source: LogSource, message: impl Into<String>) {
-        self.log(LogSeverity::Debug, source, message, None);
-    }
-
-    /// Convenience: Log with context
-    pub fn info_with_context(
-        &mut self,
-        source: LogSource,
-        message: impl Into<String>,
-        context: impl Into<String>,
-    ) {
-        self.log(LogSeverity::Info, source, message, Some(context.into()));
-    }
-
     /// Get all entries
     pub fn entries(&self) -> impl Iterator<Item = &LogEntry> {
         self.entries.iter()
-    }
-
-    /// Get an entry by position (oldest = 0), for virtualized rendering.
-    pub fn entry(&self, index: usize) -> Option<&LogEntry> {
-        self.entries.get(index)
     }
 
     /// Monotonic revision: changes whenever the buffer contents change
@@ -349,16 +277,6 @@ impl LogBuffer {
     /// preserve the event's original age when mapping it onto another clock.
     pub fn session_elapsed(&self) -> Duration {
         self.session_start.elapsed()
-    }
-
-    /// Get entries filtered by severity
-    pub fn entries_by_severity(
-        &self,
-        min_severity: LogSeverity,
-    ) -> impl Iterator<Item = &LogEntry> {
-        self.entries
-            .iter()
-            .filter(move |e| e.severity <= min_severity)
     }
 
     /// Get entries filtered by source
@@ -397,11 +315,6 @@ impl LogBuffer {
     /// Count entries by severity (O(1) — maintained on log/evict/clear)
     pub fn count_by_severity(&self, severity: LogSeverity) -> usize {
         self.severity_counts[severity_index(severity)]
-    }
-
-    /// Get error count (useful for status bar)
-    pub fn error_count(&self) -> usize {
-        self.count_by_severity(LogSeverity::Error)
     }
 
     /// Get warning count (useful for status bar)

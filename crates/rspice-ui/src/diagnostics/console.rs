@@ -1,15 +1,14 @@
 //! Console messages.
 //!
 //! The legacy console value model. New messages should be logged through
-//! [`crate::diagnostics::LogBuffer`], which this mirrors into.
+//! [`crate::diagnostics::LogBuffer`], which this mirrors into and which
+//! carries the timestamp the console renders.
 
 /// Console message with severity level.
 #[derive(Debug, Clone)]
 pub struct ConsoleMessage {
     /// Message severity.
     pub level: ConsoleLevel,
-    /// Timestamp (epoch seconds).
-    pub timestamp: f64,
     /// Message content.
     pub message: String,
 }
@@ -23,15 +22,10 @@ pub enum ConsoleLevel {
 }
 
 impl ConsoleMessage {
-    fn current_timestamp() -> f64 {
-        crate::time_compat::unix_epoch().as_secs_f64()
-    }
-
     /// Create an info message.
     pub fn info(message: impl Into<String>) -> Self {
         Self {
             level: ConsoleLevel::Info,
-            timestamp: Self::current_timestamp(),
             message: message.into(),
         }
     }
@@ -40,7 +34,6 @@ impl ConsoleMessage {
     pub fn warning(message: impl Into<String>) -> Self {
         Self {
             level: ConsoleLevel::Warning,
-            timestamp: Self::current_timestamp(),
             message: message.into(),
         }
     }
@@ -49,7 +42,6 @@ impl ConsoleMessage {
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             level: ConsoleLevel::Error,
-            timestamp: Self::current_timestamp(),
             message: message.into(),
         }
     }

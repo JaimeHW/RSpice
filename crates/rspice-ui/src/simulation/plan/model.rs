@@ -460,11 +460,6 @@ impl AnalysisTombstone {
     }
 
     #[must_use]
-    pub const fn last_modified_revision(&self) -> ObjectRevision {
-        self.last_modified_revision
-    }
-
-    #[must_use]
     pub const fn removed_revision(&self) -> ObjectRevision {
         self.removed_revision
     }

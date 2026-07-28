@@ -4,7 +4,6 @@
 //! the UI dialog state and converted to rspice-core analysis parameters.
 
 use crate::simulation::dialog::OpConfig;
-use crate::state::AnalysisType;
 
 mod ac;
 mod dc;
@@ -55,19 +54,6 @@ impl AnalysisConfig {
     #[must_use]
     pub fn dc_op() -> Self {
         Self::DcOp(OpConfig::default())
-    }
-
-    /// Get the analysis type
-    pub fn analysis_type(&self) -> AnalysisType {
-        match self {
-            AnalysisConfig::DcOp(_) => AnalysisType::DcOp,
-            AnalysisConfig::DcSweep(_) => AnalysisType::DcSweep,
-            AnalysisConfig::Transient(_) => AnalysisType::Transient,
-            AnalysisConfig::Ac(_) => AnalysisType::Ac,
-            AnalysisConfig::Noise(_) => AnalysisType::Noise,
-            AnalysisConfig::PoleZero(_) => AnalysisType::PoleZero,
-            AnalysisConfig::Sensitivity(_) => AnalysisType::Sensitivity,
-        }
     }
 
     /// Generate SPICE analysis command

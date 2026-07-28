@@ -96,11 +96,4 @@ impl DcSweepConfig {
         }
     }
 
-    /// Calculate number of points
-    pub fn num_points(&self) -> usize {
-        if self.step == 0.0 {
-            return 0;
-        }
-        ((self.stop - self.start) / self.step).abs() as usize + 1
-    }
 }

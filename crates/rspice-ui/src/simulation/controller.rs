@@ -1507,10 +1507,6 @@ impl SimulationController {
         self.runner.abort();
     }
 
-    /// Get current status
-    pub fn status(&self) -> SimulationStatus {
-        self.runner.status()
-    }
 }
 
 

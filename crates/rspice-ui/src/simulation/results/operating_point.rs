@@ -51,19 +51,6 @@ impl DcOpResult {
         })
     }
 
-    /// Get current through a branch
-    pub fn current(&self, branch: &str) -> Option<f64> {
-        self.branch_currents.get(branch).copied().or_else(|| {
-            self.branch_currents.iter().find_map(|(name, value)| {
-                (name.eq_ignore_ascii_case(branch)
-                    || name
-                        .strip_prefix("I(")
-                        .and_then(|name| name.strip_suffix(')'))
-                        .is_some_and(|name| name.eq_ignore_ascii_case(branch)))
-                .then_some(*value)
-            })
-        })
-    }
 }
 
 /// Operating point data for a device

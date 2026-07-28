@@ -76,12 +76,5 @@ impl TransientAnalysisConfig {
         }
     }
 
-    /// Calculate approximate number of output points
-    pub fn num_points(&self) -> usize {
-        if self.step_time <= 0.0 {
-            return 0;
-        }
-        ((self.stop_time - self.start_time) / self.step_time) as usize + 1
-    }
 }
 

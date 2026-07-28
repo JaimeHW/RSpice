@@ -93,11 +93,6 @@ impl AcAnalysisConfig {
         }
     }
 
-    /// Calculate total number of frequency points
-    pub fn total_points(&self) -> usize {
-        self.generate_frequencies().len()
-    }
-
     /// Generate array of frequency points based on sweep configuration
     ///
     /// Delegates to the core ngspice-exact generator so interactive runs
