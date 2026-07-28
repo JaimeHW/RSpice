@@ -34,6 +34,7 @@
 //! - [`xspice`] — XSPICE code-model subsystem and bundled models
 //! - [`compat`] — compatibility readers (LTspice RAW)
 //! - [`constants`] — physical and simulation constants
+//! - [`diagnostics`] — structured warnings and convergence-quality metrics
 //! - [`abort_signal`] — cooperative cancellation for long runs
 //! - [`resource`] — resource limits for untrusted input
 //! - [`time_compat`] — wall-clock shim (`wasm32` has no clock)
@@ -102,6 +103,7 @@ pub mod circuit;
 pub mod compat;
 pub mod constants;
 pub mod device;
+pub mod diagnostics;
 pub mod engine;
 pub mod expr;
 pub mod library;
@@ -121,7 +123,7 @@ pub mod simd;
 // Re-export primary types for convenience
 pub use abort_signal::{AbortSignal, AtomicAbort, NoAbort};
 pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, MeasureResult};
-pub use circuit::{Circuit, CircuitData, Node, NodeId};
+pub use circuit::{Circuit, CircuitData, NodeId};
 pub use device::{Device, DeviceModel};
 pub use engine::{
     ConvergenceConfig, ConvergencePreset, DampingStrategy, Engine, EngineHealthReport,

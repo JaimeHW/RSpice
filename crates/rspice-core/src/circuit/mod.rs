@@ -525,16 +525,6 @@ impl Default for CircuitData {
     }
 }
 
-//=============================================================================
-// Legacy re-exports for compatibility
-//=============================================================================
-
-/// Circuit node (legacy compatibility)
-#[derive(Debug, Clone)]
-pub struct Node {
-    pub name: String,
-    pub id: NodeId,
-}
-
-/// Circuit (legacy compatibility wrapper)
+/// Shorter spelling of [`CircuitData`], used by the periodic analyses where
+/// the type appears in nearly every signature.
 pub type Circuit = CircuitData;
