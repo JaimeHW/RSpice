@@ -383,7 +383,7 @@ pub struct TransientResultCompressed {
     pub node_names: Vec<String>,
 
     /// Typed non-solution device store waveforms.
-    pub store_traces: Vec<crate::engine::TransientStoreTrace>,
+    pub store_traces: Vec<super::TransientStoreTrace>,
 
     /// Compression ratio achieved
     pub compression_ratio: Value,

@@ -18,7 +18,6 @@
 // Subdirectories
 pub mod advanced;
 mod core;
-mod output;
 
 // Waveform measurement module - Spectre/ADE-style calculator functions
 pub mod measurements;
@@ -45,9 +44,6 @@ pub use core::dc;
 pub use core::laplace;
 pub use core::temperature;
 pub use core::transient;
-pub use output::raw_export;
-pub use output::waveform;
-pub use output::waveform_stream;
 
 // Re-export key types from core
 pub use core::{
@@ -88,13 +84,6 @@ pub use advanced::harmonic_balance::{
     HbPhaseProjectionError, HbPhaseState, HbReactiveKind, HbReactivePhaseState, HbReactiveSpectrum,
     HbResult, HbSolver, HbSolverState, HbTone, MultiToneConfig, SpectralBranchCurrent,
     SpectralVoltage,
-};
-
-// Re-export key types from output
-pub use output::{
-    CompressionConfig, RawExporter, RawFormat, RawVariable, StreamingWaveformReader,
-    StreamingWaveformWriter, TransientResultCompressed, VariableType, WaveformRecorder,
-    WaveformStreamError, export_dc_sweep, export_transient,
 };
 
 use crate::Value;

@@ -27,12 +27,12 @@
 //! - [`engine`] — the orchestrator: one driver per analysis family, matrix
 //!   assembly, configuration, convergence aids
 //! - [`analysis`] — analysis algorithms and result types, `.MEAS`
-//!   evaluation, post-processing, and result export
+//!   evaluation, and post-processing
 //! - [`expr`] — expression parser, bytecode compiler, and VM for behavioral
 //!   sources and parameters
 //! - [`library`] — `.lib` model-library parsing and Verilog-A pack discovery
 //! - [`xspice`] — XSPICE code-model subsystem and bundled models
-//! - [`compat`] — compatibility readers (LTspice RAW)
+//! - [`io`] — SPICE RAW waveform files, read and written
 //! - [`constants`] — physical and simulation constants
 //! - [`diagnostics`] — structured warnings and convergence-quality metrics
 //! - [`abort_signal`] — cooperative cancellation for long runs
@@ -100,12 +100,12 @@ pub mod analysis;
 /// that library, netlist and engine can all share one copy.
 pub(crate) mod builtin_lib;
 pub mod circuit;
-pub mod compat;
 pub mod constants;
 pub mod device;
 pub mod diagnostics;
 pub mod engine;
 pub mod expr;
+pub mod io;
 pub mod library;
 /// SPICE naming rules: what a name means in a deck, independent of dialect.
 /// A leaf — everything else depends on it, so it depends on nothing.

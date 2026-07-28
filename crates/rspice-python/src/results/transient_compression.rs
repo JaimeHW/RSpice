@@ -12,11 +12,11 @@ use super::*;
 #[pyclass(name = "CompressedTransientResult", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyCompressedTransientResult {
-    inner: rspice_core::analysis::TransientResultCompressed,
+    inner: rspice_core::engine::TransientResultCompressed,
 }
 
 impl PyCompressedTransientResult {
-    pub fn new(inner: rspice_core::analysis::TransientResultCompressed) -> Self {
+    pub fn new(inner: rspice_core::engine::TransientResultCompressed) -> Self {
         Self { inner }
     }
 
@@ -155,7 +155,7 @@ impl PyCompressedTransientResult {
         compression_ratio: f64,
         input_points: usize,
     ) -> Self {
-        Self::new(rspice_core::analysis::TransientResultCompressed {
+        Self::new(rspice_core::engine::TransientResultCompressed {
             time,
             voltages,
             num_nodes,

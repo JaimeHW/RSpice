@@ -241,15 +241,15 @@ fn export_step_sweep(
                 .collect();
             let node_waveforms: Vec<Vec<f64>> =
                 signals.iter().map(|signal| signal.values.clone()).collect();
-            rspice_core::analysis::export_dc_sweep(
+            rspice_core::io::export_dc_sweep(
                 output_path,
                 &sweep_vals,
                 step_name,
                 &node_names,
                 &node_waveforms,
                 match ctx.format {
-                    crate::cli::OutputFormat::RawAscii => rspice_core::analysis::RawFormat::Ascii,
-                    _ => rspice_core::analysis::RawFormat::Binary,
+                    crate::cli::OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
+                    _ => rspice_core::io::RawFormat::Binary,
                 },
             )
             .map_err(|e| CliError::OutputError {
@@ -589,14 +589,14 @@ fn export_pss(
                 .collect();
             let waveforms: Vec<Vec<f64>> =
                 signals.iter().map(|signal| signal.values.clone()).collect();
-            rspice_core::analysis::export_transient(
+            rspice_core::io::export_transient(
                 output_path,
                 &result.time,
                 &node_names,
                 &waveforms,
                 match ctx.format {
-                    crate::cli::OutputFormat::RawAscii => rspice_core::analysis::RawFormat::Ascii,
-                    _ => rspice_core::analysis::RawFormat::Binary,
+                    crate::cli::OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
+                    _ => rspice_core::io::RawFormat::Binary,
                 },
             )
             .map_err(|e| CliError::OutputError {

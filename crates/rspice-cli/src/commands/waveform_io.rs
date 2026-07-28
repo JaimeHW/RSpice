@@ -99,7 +99,7 @@ fn validate_values(path: &Path, signal: &str, part: &str, values: &[f64]) -> Res
 }
 
 fn load_rawfile(path: &Path) -> Result<ExportTable, CliError> {
-    let data = rspice_core::compat::parse_raw_file(path).map_err(|e| conversion_error(path, e))?;
+    let data = rspice_core::io::parse_raw_file(path).map_err(|e| conversion_error(path, e))?;
 
     let mut waveforms = data.waveforms.into_iter();
     let Some(scale) = waveforms.next() else {

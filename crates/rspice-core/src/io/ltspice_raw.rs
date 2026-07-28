@@ -1,7 +1,8 @@
-//! Third-party .raw File Parser
+//! SPICE .raw file reader.
 //!
-//! Parses standard simulation output files (.raw format).
-//! Supports both ASCII and binary (IEEE 754) formats.
+//! Parses simulation output files written by RSpice or by another simulator —
+//! LTspice and ngspice both emit this format. Supports ASCII and binary
+//! (IEEE 754) payloads. [`super::raw_export`] writes the same format.
 //!
 //! ## Format Overview
 //!

@@ -1,6 +1,6 @@
 //! Public time-domain result types.
 
-use crate::analysis::waveform::TransientResultCompressed;
+use crate::engine::waveform::TransientResultCompressed;
 use crate::xspice::DigitalValue;
 use crate::{NodeId, Value};
 use std::collections::HashMap;

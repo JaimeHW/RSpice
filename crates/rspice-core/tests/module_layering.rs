@@ -82,6 +82,12 @@ const LAYERS: &[(&str, u32)] = &[
     // coefficients and LTE machinery that `analysis::core::transient` owns
     // today.
     ("simd", 1),
+    // SPICE RAW waveform files, read and written. A leaf by construction:
+    // `raw_export` names nothing in the crate at all and the reader needs only
+    // `resource` for its read limits, so a format module never has to move
+    // when a result type changes. It shares rank 1 with `simd` because neither
+    // references the other.
+    ("io", 1),
     // Numerics shared by every analysis. `integration` holds the integration
     // method and the companion-model coefficients that the circuit store, the
     // device models and XSPICE all stamp with. `crate::solver` joins it as
@@ -109,9 +115,6 @@ const LAYERS: &[(&str, u32)] = &[
     // Analysis algorithms and result types. Phase 6 merges the `engine::X` /
     // `analysis::X` twins into one module per analysis.
     ("analysis", 10),
-    // Foreign-format IO: the LTspice RAW reader. `analysis::output` joins it
-    // here, which is what retires the last `analysis -> compat` edge.
-    ("compat", 11),
     // The facade: configuration resolution, dispatch, health, abort plumbing.
     // Phase 3 moves `SimulationConfig` and friends out to their own low rank;
     // Phase 7 moves `engine::builder` out to `elab`.
@@ -128,12 +131,10 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     //
     // The ground-name predicate moved to the layer-0 `naming` leaf, which
     // retired `device`, `netlist`, `circuit` and `solver` reaching into
-    // `compat`.
+    // `compat`. `compat` itself is gone: its RAW reader now sits in `io`
+    // beside the RAW writers that used to live in `analysis::output`, which
+    // retired `analysis -> compat` as well.
     //
-    // `analysis -> compat` is what remains, and it is a different edge:
-    // `waveform_stream` reading an LTspice RAW file. It is retired by moving
-    // `analysis::output` up beside the reader, not by moving anything down.
-    ("analysis", "compat", 2),
     // `expr -> analysis` is retired: it was the Celsius/Kelvin conversions,
     // which now live in `constants` beside the physical constants they are
     // arithmetic on.
@@ -160,10 +161,12 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // ---------------------------------------------------------------------
     // Phase 6 — one module per analysis.
     //
-    // `analysis` reaching for `TransientResult` and `TransientStoreTrace`,
-    // which are driver-side result types today. The merge puts each analysis's
-    // result type in the same module as its driver.
-    ("analysis", "engine", 2),
+    // `analysis::advanced::measure_signals` reaching for `TransientResult`,
+    // a driver-side result type. The merge puts each analysis's result type in
+    // the same module as its driver. The other half of this edge is gone:
+    // `TransientResultCompressed` named `TransientStoreTrace` from across the
+    // boundary, and now sits beside it in `engine::waveform`.
+    ("analysis", "engine", 1),
     // ---------------------------------------------------------------------
     // Phase 7 — elaboration.
     //

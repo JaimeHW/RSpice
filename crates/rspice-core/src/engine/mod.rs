@@ -57,9 +57,8 @@ mod stamping;
 mod stb;
 mod transfer;
 mod transient;
+pub mod waveform;
 
-// Re-export CompressionConfig for public API
-pub use crate::analysis::waveform::CompressionConfig;
 pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use advanced::{MaterializedStepRun, StepPlan, StepPlanLimits};
 #[cfg(feature = "veriloga")]
@@ -94,6 +93,7 @@ pub use pss::{
 };
 pub use pss_noise::OscPnoiseResult;
 pub use result::{TransientDeviceOpTrace, TransientResult, TransientStoreTrace};
+pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
 pub use stb::StbAnalysisResult;
 pub use transient::{TransientCheckpoint, netlist_fingerprint};
 

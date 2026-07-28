@@ -654,7 +654,7 @@ impl PyEngine {
             )));
         }
         let max_step = max_step.unwrap_or(stop_time / 50.0);
-        let compression = rspice_core::analysis::CompressionConfig {
+        let compression = rspice_core::engine::CompressionConfig {
             abs_tol,
             rel_tol,
             enabled: true,

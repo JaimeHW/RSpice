@@ -652,7 +652,7 @@ mod tests {
         assert!(contents.contains("Values:\n"));
         assert!(!contents.contains("Binary:\n"));
         assert!(contents.contains("No. Points: 00000000000000000005\n"));
-        let parsed = crate::compat::parse_raw_file(&path)
+        let parsed = crate::io::ltspice_raw::parse_raw_file(&path)
             .expect("ASCII output must round-trip through the raw reader");
         assert_eq!(parsed.header.no_points, 5);
         assert_eq!(parsed.waveforms[1].y, vec![0.5, 1.5, 2.5, 3.5, 4.5]);
@@ -720,7 +720,7 @@ mod tests {
         assert_eq!(streamed.num_points(), 1);
         assert_eq!(streamed.times(), vec![0.0]);
         assert_eq!(streamed.channel(0), vec![1.0]);
-        let parsed = crate::compat::parse_raw_file(&path)
+        let parsed = crate::io::ltspice_raw::parse_raw_file(&path)
             .expect("binary output must round-trip through the raw reader");
         assert!(parsed.header.is_double);
         assert_eq!(parsed.header.no_points, 1);
