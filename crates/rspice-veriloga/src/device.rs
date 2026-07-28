@@ -648,6 +648,12 @@ impl VerilogADevice {
         self.native_model.plan_stats()
     }
 
+    /// Size of this model's shared immutable native executable image.
+    #[cfg(feature = "native")]
+    pub fn native_code_size_bytes(&self) -> usize {
+        self.native_model.code_size_bytes()
+    }
+
     /// Check if this device is using native compiled code
     #[cfg(not(feature = "native"))]
     pub fn is_using_native(&self) -> bool {

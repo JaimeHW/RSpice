@@ -235,6 +235,19 @@ pub struct PlanStats {
     pub noise_source_entry_points: usize,
 }
 
+impl PlanStats {
+    /// Total number of callable entry points in the executable image.
+    pub const fn total_entry_points(self) -> usize {
+        self.assignment_entry_points
+            + self.parameter_default_entry_points
+            + self.static_condition_entry_points
+            + self.stamp_value_entry_points
+            + self.jacobian_entry_points
+            + self.reactive_jacobian_entry_points
+            + self.noise_source_entry_points
+    }
+}
+
 pub struct NativeModel {
     pub num_terminals: usize,
     pub num_internal_nodes: usize,
@@ -1158,6 +1171,11 @@ impl NativeModel {
         self.stats.stamp_value_entry_points
     }
 
+    /// Size of the immutable executable image, including entry alignment and literals.
+    pub fn code_size_bytes(&self) -> usize {
+        self.image.len()
+    }
+
     pub fn plan_stats(&self) -> PlanStats {
         self.stats
     }
@@ -1191,6 +1209,8 @@ mod tests {
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
         assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 0);
+        assert_eq!(model.plan_stats().total_entry_points(), 4);
+        assert!(model.code_size_bytes() > 0);
     }
 
     #[test]
