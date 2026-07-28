@@ -14,8 +14,8 @@
 //!
 //! Follows Cadence-style AC analysis visualization.
 
-pub mod data;
-pub mod state;
+pub(crate) mod data;
+pub(crate) mod state;
 
 pub use data::{BodeData, FrequencyResponse};
 pub use state::{BodeDisplayMode, BodePlotState};

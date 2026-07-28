@@ -10,17 +10,17 @@
 //! - `netlist_export` - Netlist generation from schematic
 //! - `waveform_io` - Waveform file formats (PSF, NUTMEG, CSV)
 
-pub mod binary_io;
+pub(crate) mod binary_io;
 mod cadence_psf;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod durable_file;
-pub mod lib_parser;
-pub mod netlist_export;
+pub(crate) mod lib_parser;
+pub(crate) mod netlist_export;
 mod project_execution;
-pub mod project_io;
-pub mod schematic_io;
+pub(crate) mod project_io;
+pub(crate) mod schematic_io;
 
-pub mod waveform_io;
+pub(crate) mod waveform_io;
 
 // Re-exports
 pub use binary_io::{PsfHeader, PsfReader, PsfWriter};

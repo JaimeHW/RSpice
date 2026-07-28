@@ -16,14 +16,14 @@
 //! - [`plot`] — the strip-plot engine (axes, traces, markers, cursors)
 
 pub(crate) mod accessibility;
-pub mod fonts;
-pub mod icons;
-pub mod palette;
-pub mod plot;
-pub mod theme;
-pub mod tokens;
+pub(crate) mod fonts;
+pub(crate) mod icons;
+pub(crate) mod palette;
+pub(crate) mod plot;
+pub(crate) mod theme;
+pub(crate) mod tokens;
 pub(crate) mod viewport;
-pub mod widgets;
+pub(crate) mod widgets;
 
 pub use theme::{EngineeringCanvasTheme, FontWeight, Theme};
 pub use tokens::{Density, Direction, Mode, Tokens};

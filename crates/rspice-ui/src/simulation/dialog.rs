@@ -14,49 +14,49 @@
 //! - **Post-Processing**: Fourier, Envelope
 
 // Core
-pub mod ac;
-pub mod dc;
-pub mod noise;
-pub mod op;
-pub mod transient;
+pub(crate) mod ac;
+pub(crate) mod dc;
+pub(crate) mod noise;
+pub(crate) mod op;
+pub(crate) mod transient;
 
 // Transfer/Stability
-pub mod pz;
-pub mod sens;
-pub mod stb;
+pub(crate) mod pz;
+pub(crate) mod sens;
+pub(crate) mod stb;
 
 // Steady-state
-pub mod hb;
-pub mod pss;
+pub(crate) mod hb;
+pub(crate) mod pss;
 
 // Periodic small-signal
-pub mod pac;
-pub mod pnoise;
-pub mod pstb;
-pub mod pxf;
+pub(crate) mod pac;
+pub(crate) mod pnoise;
+pub(crate) mod pstb;
+pub(crate) mod pxf;
 
 // RF/Microwave
-pub mod sp;
+pub(crate) mod sp;
 
 // Transfer function
-pub mod xf;
+pub(crate) mod xf;
 
 // Statistical/Parametric
-pub mod corner;
-pub mod mc;
+pub(crate) mod corner;
+pub(crate) mod mc;
 
 // Sweep
-pub mod temp;
+pub(crate) mod temp;
 
 // Envelope/Fourier
-pub mod envelope;
-pub mod fourier;
-pub mod optimization;
-pub mod reliability;
-pub mod soa;
+pub(crate) mod envelope;
+pub(crate) mod fourier;
+pub(crate) mod optimization;
+pub(crate) mod reliability;
+pub(crate) mod soa;
 
 // Options
-pub mod options;
+pub(crate) mod options;
 
 // Re-exports - Core
 pub use ac::AcConfig;

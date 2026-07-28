@@ -18,9 +18,9 @@
 //! This follows the same architecture as Cadence Virtuoso ADE and
 //! other commercial RF design tools.
 
-pub mod complex;
-pub mod impedance;
-pub mod state;
+pub(crate) mod complex;
+pub(crate) mod impedance;
+pub(crate) mod state;
 
 pub use complex::Complex;
 pub use impedance::{Admittance, Impedance};

@@ -3,11 +3,11 @@
 //! Backend services for the RSpice UI application.
 //! Contains specialized processing and analysis utilities.
 
-pub mod drc;
-pub mod license;
-pub mod safety;
-pub mod simulation_runner;
-pub mod yield_manager;
+pub(crate) mod drc;
+pub(crate) mod license;
+pub(crate) mod safety;
+pub(crate) mod simulation_runner;
+pub(crate) mod yield_manager;
 
 // Re-export main types for convenient access
 pub use safety::{SoAManager, SoAViolation, ViolationSeverity};

@@ -11,10 +11,10 @@
 //! - `pwl_editor` - Piecewise-linear waveform editor
 
 
-pub mod model_browser;
-pub mod property_bridge;
-pub mod pwl_editor;
-pub mod tabbed_dialog;
+pub(crate) mod model_browser;
+pub(crate) mod property_bridge;
+pub(crate) mod pwl_editor;
+pub(crate) mod tabbed_dialog;
 
 // Re-export main types
 

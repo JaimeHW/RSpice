@@ -4,7 +4,7 @@
 //! PDK/layout database units. It converts immutable SI values at the UI edge;
 //! it never changes stored engineering data.
 
-pub mod engineering;
+pub(crate) mod engineering;
 mod format;
 mod layout;
 mod locale;

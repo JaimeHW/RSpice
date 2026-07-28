@@ -17,17 +17,17 @@
 //! compute pipelines). Rendering lives in `crate::workbench::documents::result_document`, built on
 //! the `crate::ui::plot` engine.
 
-pub mod bode;
-pub mod calculator;
-pub mod eye_diagram;
-pub mod fft;
-pub mod hb_tones;
-pub mod histogram;
-pub mod measurements;
-pub mod nyquist;
-pub mod phase_noise;
-pub mod pole_zero;
-pub mod smith_chart;
+pub(crate) mod bode;
+pub(crate) mod calculator;
+pub(crate) mod eye_diagram;
+pub(crate) mod fft;
+pub(crate) mod hb_tones;
+pub(crate) mod histogram;
+pub(crate) mod measurements;
+pub(crate) mod nyquist;
+pub(crate) mod phase_noise;
+pub(crate) mod pole_zero;
+pub(crate) mod smith_chart;
 
 // Re-export main types for convenience (optional - users can also access via submodule)
 // Bode

@@ -6,20 +6,20 @@
 mod configuration_set;
 mod connectivity_contract;
 mod design_management;
-pub mod params_string;
-pub mod engineering_table;
-pub mod library_browser;
+pub(crate) mod params_string;
+pub(crate) mod engineering_table;
+pub(crate) mod library_browser;
 mod model_bound_symbol;
-pub mod model_library;
-pub mod pdk_config;
+pub(crate) mod model_library;
+pub(crate) mod pdk_config;
 mod project_sources;
-pub mod property_types;
+pub(crate) mod property_types;
 mod schematic;
 mod simulation;
 mod symbol;
-pub mod netlist_document;
-pub mod symbol_resolver;
-pub mod workspace;
+pub(crate) mod netlist_document;
+pub(crate) mod symbol_resolver;
+pub(crate) mod workspace;
 
 pub use configuration_set::{
     ALLOWED_EXECUTABLE_VIEW_TYPES, CONFIGURATION_SET_CATALOG_SCHEMA_VERSION,

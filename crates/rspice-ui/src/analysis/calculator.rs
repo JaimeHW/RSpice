@@ -8,11 +8,11 @@
 //! - Vector arithmetic handling
 //! - Automatic interpolation for mismatched time bases
 
-pub mod ast;
-pub mod evaluator;
-pub mod functions;
-pub mod interpolation;
-pub mod parser;
+pub(crate) mod ast;
+pub(crate) mod evaluator;
+pub(crate) mod functions;
+pub(crate) mod interpolation;
+pub(crate) mod parser;
 
 pub use ast::CalculatorExpr;
 pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};

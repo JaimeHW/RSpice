@@ -14,8 +14,8 @@
 //!
 //! Integrates with Bode data for AC/STB analysis.
 
-pub mod data;
-pub mod state;
+pub(crate) mod data;
+pub(crate) mod state;
 
 pub use data::NyquistData;
 pub use state::NyquistState;

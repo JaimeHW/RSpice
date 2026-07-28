@@ -912,17 +912,28 @@ fn workbench_references_respect_the_layer_order() {
     assert!(failures.is_empty(), "{failures}");
 }
 
-/// The crate's public surface, frozen at its current size.
+/// The crate has no `pub mod` declarations, and must not gain one.
 ///
 /// `rspice-ui` is an application, not a library: its only consumers are its
 /// own `main.rs`, the three wasm entry points in `lib.rs`, the integration
-/// tests, and the `license_tool` example. Everything else being `pub` meant
-/// no item was ever safely removable, and the layering tables above were
-/// standing in for a visibility boundary the compiler could have enforced.
+/// tests, and the `license_tool` example. Everything they need is re-exported
+/// from the crate root, so no module needs to be public at all.
 ///
-/// The count is a ceiling: it may fall, never rise. Prefer `pub(crate)`, and
-/// prefer a re-export at the crate root over widening a module.
-const MAX_PUBLIC_MODULES: usize = 124;
+/// This is not a style preference. A `pub` module is one the compiler must
+/// assume has callers it cannot see, so it will not report an unreachable
+/// item inside it. While the eight domain roots were `pub`, dead-code
+/// analysis was disabled across 262k lines -- 45% of the crate -- and the
+/// layering tables above were standing in for a visibility boundary the
+/// compiler could have enforced. Closing them took reported dead code from
+/// 259 to 1531.
+///
+/// The count went 132 -> 124 (the roots) -> 0 (the nested declarations,
+/// which were no-ops: a `pub mod` inside a `pub(crate) mod` is already
+/// crate-visible and nothing more).
+///
+/// To reach something from a test, add a re-export in `lib.rs`. Adding a
+/// `pub mod` re-opens the hole for that whole subtree.
+const MAX_PUBLIC_MODULES: usize = 0;
 
 #[test]
 fn the_public_module_surface_does_not_grow() {

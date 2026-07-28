@@ -15,9 +15,9 @@
 //!
 //! Follows Cadence-style statistical analysis workflow.
 
-pub mod data;
-pub mod state;
-pub mod statistics;
+pub(crate) mod data;
+pub(crate) mod state;
+pub(crate) mod statistics;
 
 pub use data::{Histogram, HistogramBuilder};
 pub use state::{HistogramDisplayMode, HistogramState};

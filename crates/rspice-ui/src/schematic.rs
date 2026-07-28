@@ -18,11 +18,11 @@ pub(crate) mod bus_connectivity;
 pub(crate) mod bus_geometry;
 mod component_palette;
 pub use component_palette::{ComponentPaletteEntry, ComponentPaletteSection, component_palette};
-pub mod export;
+pub(crate) mod export;
 mod source_labels;
 pub(crate) mod symbol_editor;
-pub mod symbols;
-pub mod view;
+pub(crate) mod symbols;
+pub(crate) mod view;
 
 // Re-export main types
 pub use export::{SvgExportConfig, export_to_svg};

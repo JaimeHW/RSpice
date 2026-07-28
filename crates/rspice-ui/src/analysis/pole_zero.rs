@@ -15,8 +15,8 @@
 //!
 //! Follows Cadence Spectre's pole-zero analysis visualization.
 
-pub mod data;
-pub mod state;
+pub(crate) mod data;
+pub(crate) mod state;
 
 pub use data::{ComplexRoot, PoleZeroData, RootType};
 pub use state::PoleZeroState;

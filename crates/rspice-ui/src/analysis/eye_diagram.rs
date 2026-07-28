@@ -26,7 +26,7 @@
 //!
 //! Follows Cadence-style signal integrity analysis workflow.
 
-pub mod state;
+pub(crate) mod state;
 
 pub use rspice_core::analysis::signal_integrity::{
     AmplitudeStats, Edge, EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, calculate_edge_rate,

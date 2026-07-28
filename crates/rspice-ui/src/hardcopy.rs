@@ -24,9 +24,9 @@
 //! Splitting on persistence rather than on feature keeps `state` from having
 //! to reach up into application chrome to describe its own saved data.
 
-pub mod contract;
-pub mod mappings;
-pub mod sources;
+pub(crate) mod contract;
+pub(crate) mod mappings;
+pub(crate) mod sources;
 
 pub use contract::*;
 pub use sources::{

@@ -16,11 +16,11 @@
 //!
 //! Follows Cadence Spectre's spectral analysis approach.
 
-pub mod compute;
-pub mod data;
-pub mod pipeline;
-pub mod state;
-pub mod window;
+pub(crate) mod compute;
+pub(crate) mod data;
+pub(crate) mod pipeline;
+pub(crate) mod state;
+pub(crate) mod window;
 
 pub use compute::{FftResult, compute_fft};
 pub use data::{FftData, FftPoint, SpectrumAnalysis};
