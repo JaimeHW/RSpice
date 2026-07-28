@@ -2507,6 +2507,54 @@ impl NativeProgram {
         })
     }
 
+    pub(crate) fn from_mir_expression_third_derivative(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        mir: &MirModel,
+        equation_id: EquationId,
+        expr_id: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Self> {
+        let model = model.into();
+        mir.validate()
+            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| "MIR validation failed".into())
+                    .into(),
+            })?;
+
+        let mut lowerer =
+            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
+        lowerer.lower_third_derivative(expr_id, first, second, third)?;
+
+        if lowerer.depth != 1 {
+            return Err(stack_error(
+                model.clone(),
+                entry_kind,
+                format!("final stack depth {}, expected 1", lowerer.depth),
+            ));
+        }
+        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
+        let optimized_max_stack_depth =
+            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
+        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
+
+        Ok(Self {
+            ops: lowerer.ops,
+            max_stack_depth: optimized_max_stack_depth,
+            current_pair_dependencies: lowerer.current_pair_dependencies,
+            prior_current_dependencies: lowerer.prior_current_dependencies,
+            branch_unknown_dependencies,
+        })
+    }
+
     pub(crate) fn from_mir_derivative(
         model: impl Into<SmolStr>,
         entry_kind: EntryKind,
@@ -2978,6 +3026,30 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_ddx_projection_second_derivative(
+        &mut self,
+        expr: ExprId,
+        probe: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let (pos, neg) = self.ddx_probe_nodes(probe)?;
+        if let Some(pos) = pos {
+            self.lower_third_derivative(expr, CanonicalDerivativeAxis::Node(pos), first, second)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+
+        if let Some(neg) = neg {
+            self.lower_third_derivative(expr, CanonicalDerivativeAxis::Node(neg), first, second)?;
+            self.append_arithmetic("Sub")?;
+            self.push(NativeOp::Const(0.5))?;
+            self.append_arithmetic("Mul")?;
+        }
+
+        Ok(())
+    }
+
     fn ddx_probe_nodes(&self, probe: ExprId) -> JitResult<(Option<NodeId>, Option<NodeId>)> {
         let expression = self.expression(probe)?;
         match &expression.kind {
@@ -3126,6 +3198,122 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_scaled_second_derivative(*expr, first, second, gain)
             }
         }
+    }
+
+    fn lower_third_derivative(
+        &mut self,
+        expr_id: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::NoiseSource { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => self.push(NativeOp::Const(0.0)),
+            HirExprKind::Identifier { name } => {
+                self.lower_identifier_third_derivative(name.as_str(), first, second, third)
+            }
+            HirExprKind::Unary { op, operand } => match op.as_str() {
+                "Pos" => self.lower_third_derivative(*operand, first, second, third),
+                "Neg" => {
+                    self.lower_third_derivative(*operand, first, second, third)?;
+                    self.append_unary(NativeOp::Neg)
+                }
+                "Not" | "BitNot" => self.push(NativeOp::Const(0.0)),
+                _ => Err(self.unsupported(format!("third derivative of unary operator {op}"))),
+            },
+            HirExprKind::Binary { op, left, right } => match op.as_str() {
+                "Add" | "Sub" => {
+                    self.lower_third_derivative(*left, first, second, third)?;
+                    self.lower_third_derivative(*right, first, second, third)?;
+                    self.append_arithmetic(op.as_str())
+                }
+                "Mul" => self.lower_mul_third_derivative(*left, *right, first, second, third),
+                "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd"
+                | "BitOr" | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+                _ => Err(self.unsupported(format!("third derivative of binary operator {op}"))),
+            },
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.lower(*condition)?;
+                self.lower_third_derivative(*then_expr, first, second, third)?;
+                self.lower_third_derivative(*else_expr, first, second, third)?;
+                self.append_ifelse()
+            }
+            HirExprKind::ArrayAccess { array, index } => self.lower_array_access_third_derivative(
+                array.as_str(),
+                *index,
+                first,
+                second,
+                third,
+            ),
+            HirExprKind::SystemFunction { name, .. } | HirExprKind::Call { name, .. } => {
+                Err(self.unsupported(format!("third derivative of intrinsic function '{name}'")))
+            }
+            HirExprKind::AnalogOperator { op } => Err(self.unsupported(format!(
+                "third derivative of analog operator {}",
+                analog_operator_name(op)
+            ))),
+            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. } => {
+                Err(self.unsupported("third derivative of stateful operator"))
+            }
+        }
+    }
+
+    fn lower_mul_third_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_third_derivative(left, first, second, third)?;
+        self.lower(right)?;
+        self.append_arithmetic("Mul")?;
+
+        self.lower_second_derivative(left, first, second)?;
+        self.lower_derivative(right, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_second_derivative(left, first, third)?;
+        self.lower_derivative(right, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_derivative(left, first)?;
+        self.lower_second_derivative(right, second, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_second_derivative(left, second, third)?;
+        self.lower_derivative(right, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_derivative(left, second)?;
+        self.lower_second_derivative(right, first, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_derivative(left, third)?;
+        self.lower_second_derivative(right, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower(left)?;
+        self.lower_third_derivative(right, first, second, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
     }
 
     fn expr_derivative_is_zero(
@@ -3693,6 +3881,52 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return self.push(NativeOp::Const(0.0));
         }
         Err(self.unsupported(format!("second derivative of identifier {name}")))
+    }
+
+    fn lower_identifier_third_derivative(
+        &mut self,
+        name: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if self
+            .mir
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name.as_str() == name)
+        {
+            return self.push(NativeOp::Const(0.0));
+        }
+        if self
+            .limits
+            .variable_names
+            .iter()
+            .any(|variable| variable.as_str() == name)
+        {
+            let shadow_name = format!(
+                "{name}@{}@{}@{}",
+                first.shadow_suffix(),
+                second.shadow_suffix(),
+                third.shadow_suffix()
+            );
+            if let Some(shadow_index) = self
+                .limits
+                .variable_names
+                .iter()
+                .position(|variable| variable.as_str() == shadow_name)
+            {
+                validate_index(
+                    self.model.clone(),
+                    "canonical variable third-derivative shadow",
+                    shadow_index,
+                    self.limits.variable_count,
+                )?;
+                return self.push(NativeOp::LoadVariable(shadow_index));
+            }
+            return self.push(NativeOp::Const(0.0));
+        }
+        Err(self.unsupported(format!("third derivative of identifier {name}")))
     }
 
     fn lower_branch_access_derivative(
@@ -4534,7 +4768,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
-            "ddx" => Err(self.unsupported("third derivative of ddx")),
+            "ddx" => {
+                let [expr, probe] = args else {
+                    return Err(self.unsupported(format!(
+                        "analog operator ddx expects two operands, found {}",
+                        args.len()
+                    )));
+                };
+                self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
+            }
             "ddt" | "idt" | "idtmod" => Err(self.unsupported(format!(
                 "second derivative of stateful intrinsic at expression {expr_id}"
             ))),
@@ -5559,7 +5801,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_second_derivative(*expr, first, second)
             }
             HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
-            HirAnalogOperator::Ddx { .. } => Err(self.unsupported("third derivative of ddx")),
+            HirAnalogOperator::Ddx { expr, probe } => {
+                self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
+            }
             HirAnalogOperator::Ddt { .. }
             | HirAnalogOperator::Idt { .. }
             | HirAnalogOperator::IdtMod { .. } => Err(self.unsupported(format!(
@@ -7037,6 +7281,35 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_array_access_third_derivative(
+        &mut self,
+        array: &str,
+        index: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let Some((base, len, lower)) =
+            self.resolve_array_third_derivative_variable_range(array, first, second, third)?
+        else {
+            return self.push(NativeOp::Const(0.0));
+        };
+        validate_range(
+            self.model.clone(),
+            "canonical array third-derivative variable range",
+            base,
+            len,
+            self.limits.variable_count,
+        )?;
+        self.lower(index)?;
+        if lower_constant_dynamic_variable_read(&mut self.ops, base, len, lower) {
+            return Ok(());
+        }
+        self.ops
+            .push(NativeOp::LoadVariableDyn { base, len, lower });
+        Ok(())
+    }
+
     fn resolve_array_derivative_variable_range(
         &self,
         array: &str,
@@ -7055,6 +7328,23 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<Option<(usize, usize, i64)>> {
         let prefix = format!("{array}[");
         let suffix = format!("]@{}@{}", first.shadow_suffix(), second.shadow_suffix());
+        self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
+    }
+
+    fn resolve_array_third_derivative_variable_range(
+        &self,
+        array: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<Option<(usize, usize, i64)>> {
+        let prefix = format!("{array}[");
+        let suffix = format!(
+            "]@{}@{}@{}",
+            first.shadow_suffix(),
+            second.shadow_suffix(),
+            third.shadow_suffix()
+        );
         self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
     }
 

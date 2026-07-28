@@ -3923,6 +3923,17 @@ fn lower_canonical_shadow_program(
             *second,
             limits,
         ),
+        [first, second, third] => NativeProgram::from_mir_expression_third_derivative(
+            model.name.clone(),
+            EntryKind::Assignment,
+            mir,
+            EquationId::new(0),
+            expr_id,
+            *first,
+            *second,
+            *third,
+            limits,
+        ),
         _ => Err(JitError::InvalidCanonicalIr {
             model: model.name.clone(),
             detail: format!(
@@ -4614,7 +4625,8 @@ mod tests {
     };
     use crate::device::VerilogADevice;
     use crate::native::expr::{
-        EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+        CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
+        PriorCurrentProbe,
     };
     use crate::native::model::{
         CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeStampKernelIo,
@@ -5507,6 +5519,48 @@ endmodule
             -expected,
             1.0e-5,
             "canonical_math_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn canonical_ddx_second_derivative_lowers_third_order_product_rule() {
+        let source = r#"
+module native_canonical_ddx_third_product(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(
+      V(p, n) * V(p, n) * V(p, n) * V(p, n),
+      V(p, n));
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let expression = artifact.mir.equations[0].expression.id;
+        let axis = CanonicalDerivativeAxis::Node(NodeId::from(0));
+        let program = NativeProgram::from_mir_expression_second_derivative(
+            "native_canonical_ddx_third_product",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            expression,
+            axis,
+            axis,
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower second derivative of ddx through a third-order product rule");
+        let bytes =
+            super::codegen::compile_value_function(&program).expect("compile derivative leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate derivative leaf");
+        let entry = memory.ptr_at(0).expect("derivative entry");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[2.0, 0.0]);
+
+        assert_close(
+            "canonical ddx third-order product derivative",
+            48.0,
+            function(&ctx, std::ptr::null()),
         );
     }
 
