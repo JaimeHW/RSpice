@@ -2242,6 +2242,35 @@ impl VerilogADevice {
     }
 
     #[cfg(feature = "native")]
+    fn validate_native_current_pair_storage(
+        context: &VmContext,
+        compiled_terminal_count: usize,
+        current_pairs: &[usize],
+    ) -> Result<(), VmError> {
+        if current_pairs.is_empty() {
+            return Ok(());
+        }
+
+        let terminal_count = context.terminal_count();
+        if terminal_count != compiled_terminal_count {
+            return Err(Self::mismatched_native_terminal_context(
+                compiled_terminal_count,
+                terminal_count,
+            ));
+        }
+        let available = context.terminal_pair_currents_len();
+        for pair_index in current_pairs {
+            if terminal_pair_current_endpoints(*pair_index, compiled_terminal_count).is_none()
+                || *pair_index >= available
+            {
+                return Err(Self::missing_native_terminal_pair_current_slot(*pair_index));
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
     fn validate_native_storage(context: &VmContext, native: &NativeModel) -> Result<(), VmError> {
         Self::validate_native_voltage_storage(
             context,
@@ -2449,7 +2478,10 @@ impl VerilogADevice {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
         Self::validate_native_storage(vm.context, native)?;
-        Self::validate_native_current_pairs(
+        // Assignment loads can be guarded by runtime control flow. Validate
+        // their memory contract here without rejecting a currently-unpublished
+        // value that the generated code may never read.
+        Self::validate_native_current_pair_storage(
             vm.context,
             native.num_terminals,
             native.assignment_current_pairs(),
@@ -2836,7 +2868,7 @@ impl VerilogADevice {
                 context.variables.resize(model.num_variables, 0.0);
             }
             Self::validate_native_storage(context, native)?;
-            Self::validate_native_current_pairs(
+            Self::validate_native_current_pair_storage(
                 context,
                 native.num_terminals,
                 native.assignment_current_pairs(),

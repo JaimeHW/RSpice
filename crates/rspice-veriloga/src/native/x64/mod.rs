@@ -83,13 +83,18 @@ fn compile_model_inner(
         Some(mir) => Some(build_canonical_noise_plan(model, mir)?),
         None => None,
     };
+    let assignment_current_pairs = if canonical_mir.is_some() {
+        all_terminal_current_pairs(model.num_terminals)?
+    } else {
+        Vec::new()
+    };
 
     let mut image = Vec::new();
     let mut entry_starts = Vec::new();
     let (assignment, assignment_dependencies) = append_assignment_entry(
         model,
         canonical_artifact,
-        base_limits,
+        base_limits.with_available_current_pairs(&assignment_current_pairs),
         &mut image,
         &mut entry_starts,
     )?;
@@ -423,6 +428,36 @@ fn compile_model_inner(
         current_dependencies,
         NativeRequiredStorage::for_model(model),
     )
+}
+
+fn all_terminal_current_pairs(terminal_count: usize) -> JitResult<Vec<usize>> {
+    let mut pairs = Vec::with_capacity(
+        terminal_count
+            .checked_add(1)
+            .and_then(|width| width.checked_mul(width))
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: "native-x64".into(),
+                detail: "terminal-pair current table dimensions overflow".into(),
+            })?,
+    );
+    for pos_axis in 0..=terminal_count {
+        for neg_axis in 0..=terminal_count {
+            let pos = if pos_axis == terminal_count {
+                CURRENT_PAIR_GROUND
+            } else {
+                pos_axis
+            };
+            let neg = if neg_axis == terminal_count {
+                CURRENT_PAIR_GROUND
+            } else {
+                neg_axis
+            };
+            if let Some(pair) = terminal_pair_current_index(pos, neg, terminal_count) {
+                pairs.push(pair);
+            }
+        }
+    }
+    Ok(pairs)
 }
 
 fn lower_parameter_default_program(
@@ -5529,6 +5564,35 @@ endmodule
 
         compile_model_with_canonical_ir(&model, &artifact)
             .expect("canonical Jacobian maps bytecode state slots before MIR lowering");
+    }
+
+    #[test]
+    fn canonical_guarded_assignment_current_probe_compiles_with_structural_dependency() {
+        let source = r#"
+`include "disciplines.vams"
+module native_canonical_guarded_assignment_current(p, n);
+  inout p, n;
+  electrical p, n;
+  real operating_current;
+  analog begin
+    if (analysis("static"))
+      operating_current = I(<p>);
+    I(p, n) <+ V(p, n);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical guarded assignment current compiles");
+        assert_eq!(
+            native.assignment_current_pairs().len(),
+            1,
+            "native metadata records the guarded terminal-current dependency"
+        );
     }
 
     #[test]
