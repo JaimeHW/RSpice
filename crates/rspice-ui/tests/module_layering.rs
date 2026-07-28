@@ -59,6 +59,10 @@ const LAYERS: &[(&str, u32)] = &[
     ("product", 0),
     ("quantity", 0),
     ("time_compat", 0),
+    // Output-specification parsing and the sensitivity math over a resolved
+    // spec. It names only `rspice_core` types, so it sits at the bottom
+    // beside the other contracts.
+    ("output_spec", 0),
     // Presentation-independent result contracts, and the design system.
     ("results", 1),
     ("ui", 1),
@@ -188,14 +192,28 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 
 /// The top-level module a source file belongs to.
 ///
-/// Files sitting directly in `src/` (`lib.rs`, `main.rs`, and crate-wide
-/// helpers) belong to no module and are skipped: the crate root is allowed
-/// to see everything.
+/// `lib.rs` and `main.rs` are the crate roots and are allowed to see
+/// everything, so they belong to no module. Every *other* file sitting
+/// directly in `src/` is a module in its own right and is layered like a
+/// directory: both the `foo.rs` half of the `foo.rs`-beside-`foo/`
+/// convention, and standalone modules such as `output_spec` that have no
+/// directory at all.
+///
+/// This used to return `None` for every root-level file, which meant the
+/// `mod.rs`-replacement files — `state.rs`, `simulation.rs`, `workbench.rs`
+/// and the rest — had their outbound edges counted nowhere, and a module
+/// with no directory escaped the order entirely in both directions.
 fn owning_module(root: &Path, file: &Path) -> Option<String> {
     let relative = file.strip_prefix(root).ok()?;
     let mut components = relative.components();
     let first = components.next()?.as_os_str().to_str()?.to_owned();
-    components.next()?;
+    if components.next().is_none() {
+        let stem = Path::new(&first).file_stem()?.to_str()?;
+        if stem == "lib" || stem == "main" {
+            return None;
+        }
+        return Some(stem.to_owned());
+    }
     Some(first)
 }
 
@@ -282,15 +300,27 @@ fn every_top_level_module_declares_a_layer() {
     let mut undeclared = Vec::new();
     for entry in entries {
         let path = entry.expect("directory entry").path();
-        if !path.is_dir() {
+        // A top-level module is either a directory or a `.rs` file sitting
+        // directly in `src/`. Checking only directories let `output_spec`
+        // sit in the tree with no declared position at all.
+        let name = if path.is_dir() {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .expect("module directory name")
+                .to_owned()
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .expect("module file name");
+            if stem == "lib" || stem == "main" {
+                continue;
+            }
+            stem.to_owned()
+        } else {
             continue;
-        }
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("module directory name")
-            .to_owned();
-        if !LAYERS.iter().any(|(declared, _)| *declared == name) {
+        };
+        if !LAYERS.iter().any(|(declared, _)| *declared == name) && !undeclared.contains(&name) {
             undeclared.push(name);
         }
     }
