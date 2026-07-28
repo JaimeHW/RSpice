@@ -2736,6 +2736,7 @@ impl Engine {
             let mut last_stamped_iterate: Vec<Value> = Vec::new();
             let mut last_stamped_merit = Value::INFINITY;
             let mut last_stamped_rollback: Option<TransientMeritRollback> = None;
+            let xyce_core_stabilized_jacobian = circuit.has_xyce_core_shared_level2();
 
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
@@ -2782,6 +2783,7 @@ impl Engine {
                 let transient_system_context = residual::TransientSystemContext {
                     coeff: &coeff,
                     xyce_one_step_order2,
+                    xyce_core_stabilized_jacobian,
                     xyce_static_history: xyce_static_history.as_deref(),
                     bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                     bjt_history: &bjt_history,
@@ -3283,6 +3285,7 @@ impl Engine {
                                     &residual::TransientSystemContext {
                                         coeff: &coeff,
                                         xyce_one_step_order2,
+                                        xyce_core_stabilized_jacobian,
                                         xyce_static_history: xyce_static_history.as_deref(),
                                         bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                                         bjt_history: &bjt_history,
@@ -3430,6 +3433,7 @@ impl Engine {
                         &residual::TransientSystemContext {
                             coeff: &coeff,
                             xyce_one_step_order2,
+                            xyce_core_stabilized_jacobian: false,
                             xyce_static_history: xyce_static_history.as_deref(),
                             bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             bjt_history: &bjt_history,
