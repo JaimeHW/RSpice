@@ -14,7 +14,9 @@ use rspice_veriloga::rust_backend::discover_veriloga_sources;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use rspice_veriloga::canonical_ir::cfg::CfgFunction;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
+use rspice_veriloga::canonical_ir::mir::MirParameterSlot;
 use rspice_veriloga::canonical_ir::{
+    CanonicalValueType,
     AdSeed, CanonicalIrArtifact, CfgEvalInputs, CfgScalar, ComplexStep, ValueId, differentiate,
     evaluate_cfg,
 };
@@ -625,13 +627,77 @@ fn next_unit(state: &mut u64) -> f64 {
     (z >> 11) as f64 / (1u64 << 53) as f64
 }
 
+/// A parameter drawn around its default and kept inside its declared range.
+///
+/// Deliberately a perturbation rather than a uniform draw across the range. A
+/// compact model's parameters are not independent — an oxide thickness drawn
+/// from one end of its range against a doping from the other describes no
+/// device, and a model that then refuses to evaluate is not evidence about the
+/// derivative rule. Scaling the default by a half-to-double factor moves every
+/// parameter off the value the fixtures pin without leaving the neighbourhood
+/// the model was written for.
+///
+/// Bounds are respected including their exclusivity, excluded points are stepped
+/// off, and an integer parameter stays integral.
+#[allow(dead_code)]
+fn draw_parameter(slot: &MirParameterSlot, state: &mut u64) -> f64 {
+    let default = slot.default.unwrap_or(0.0);
+    let mut value = default * (0.5 + 1.5 * next_unit(state));
+    if !value.is_finite() {
+        return default;
+    }
+
+    if let Some(range) = &slot.range {
+        if let Some(min) = range.min {
+            // An exclusive bound is stepped off by a share of the span rather
+            // than by an epsilon: a parameter sitting one ulp inside `> 0` is
+            // inside the range and useless as a bias.
+            let span = range.max.map_or(min.abs().max(1.0), |max| (max - min).abs());
+            let floor = if range.min_exclusive {
+                min + 1.0e-3 * span.max(f64::MIN_POSITIVE)
+            } else {
+                min
+            };
+            value = value.max(floor);
+        }
+        if let Some(max) = range.max {
+            let span = range.min.map_or(max.abs().max(1.0), |min| (max - min).abs());
+            let ceiling = if range.max_exclusive {
+                max - 1.0e-3 * span.max(f64::MIN_POSITIVE)
+            } else {
+                max
+            };
+            value = value.min(ceiling);
+        }
+        if range.exclude.iter().any(|excluded| *excluded == value) {
+            return default;
+        }
+    }
+
+    if slot.value_type == CanonicalValueType::Integer {
+        value = value.round();
+    }
+    if value.is_finite() { value } else { default }
+}
+
 /// A bias drawn from `seed`, spanning both sides of junction turn-on.
 ///
-/// Parameters stay at their declared defaults. Randomizing those as well is what
-/// the plan asks for, and it is a larger job than it sounds: a parameter drawn
-/// anywhere inside its declared range can be physically inconsistent with the
-/// others, and a model that then fails to evaluate is not evidence about the
-/// derivative rule. The bias is where a chain-rule error actually hides.
+/// **Parameters stay at their declared defaults, and [`draw_parameter`] is
+/// deliberately not called from here.** The plan asks for draws inside the
+/// declared ranges and that is not sufficient, which was worth finding out:
+/// wiring it up crashed the corpus run with `STATUS_HEAP_CORRUPTION`.
+///
+/// A declared range constrains one parameter. A compact model's real constraints
+/// are between them — and they live in the model's own `validate_parameters`,
+/// which nothing on this path calls, because this path evaluates a CFG rather
+/// than instantiating a device. Feeding a model a combination it would have
+/// rejected is not a test of the derivative rule; it is a test of what the model
+/// does when lied to.
+///
+/// Turning this on wants the validation gate first. `draw_parameter` is kept
+/// because the range handling in it — exclusive bounds, excluded points, integer
+/// parameters — is the part that was fiddly to get right, and it is what that
+/// work will build on.
 fn random_bias_point(artifact: &CanonicalIrArtifact, state: &mut u64) -> BiasPoint {
     BiasPoint {
         parameters: artifact
