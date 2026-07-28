@@ -76,17 +76,6 @@ impl SensConfig {
         self
     }
 
-    pub fn to_spice(&self) -> String {
-        match self.sens_type {
-            SensType::Dc => format!(".sens {}", self.output_expr),
-            SensType::Ac => format!(
-                ".sens {} ac {}",
-                self.output_expr,
-                format_freq(self.ac_freq)
-            ),
-        }
-    }
-
     pub fn validate(&self) -> Result<(), String> {
         if self.output_expr.is_empty() {
             return Err("Output expression required".into());
@@ -98,10 +87,6 @@ impl SensConfig {
             return Err("Threshold cannot be negative".into());
         }
         Ok(())
-    }
-
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }
 

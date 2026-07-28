@@ -97,35 +97,6 @@ impl Default for PzConfig {
 }
 
 impl PzConfig {
-    pub fn new(input: &str, output: &str) -> Self {
-        Self {
-            input_pos: input.to_uppercase(),
-            output_pos: output.to_uppercase(),
-            ..Default::default()
-        }
-    }
-
-    pub fn with_type(mut self, t: PzAnalysisType) -> Self {
-        self.analysis_type = t;
-        self
-    }
-    pub fn with_transfer(mut self, t: PzTransferType) -> Self {
-        self.transfer_type = t;
-        self
-    }
-
-    pub fn to_spice(&self) -> String {
-        format!(
-            ".pz {} {} {} {} {} {}",
-            self.input_pos,
-            self.input_neg,
-            self.output_pos,
-            self.output_neg,
-            self.transfer_type.spice_keyword(),
-            self.analysis_type.spice_keyword()
-        )
-    }
-
     pub fn validate(&self) -> Result<(), String> {
         if self.input_pos.is_empty() {
             return Err("Input positive node required".into());

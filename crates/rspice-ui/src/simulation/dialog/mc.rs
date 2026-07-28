@@ -96,39 +96,6 @@ impl Default for McConfig {
 }
 
 impl McConfig {
-    pub fn new(runs: u32) -> Self {
-        Self {
-            num_runs: runs,
-            ..Default::default()
-        }
-    }
-    pub fn with_distribution(mut self, d: McDistribution) -> Self {
-        self.distribution = d;
-        self
-    }
-    pub fn with_base(mut self, b: McBaseAnalysis) -> Self {
-        self.base_analysis = b;
-        self
-    }
-    pub fn with_seed(mut self, s: u32) -> Self {
-        self.seed = s;
-        self
-    }
-
-    pub fn to_spice(&self) -> String {
-        let dist = match self.distribution {
-            McDistribution::Gaussian => "GAUSS",
-            McDistribution::Uniform => "UNIFORM",
-            McDistribution::WorstCase => "WORSTCASE",
-        };
-        let spread = (self.variation_pct / 100.0).abs();
-        let mut cmd = format!(".mc {} DIST {} SPREAD {:.12e}", self.num_runs, dist, spread);
-        if self.seed > 0 {
-            cmd.push_str(&format!(" SEED {}", self.seed));
-        }
-        cmd
-    }
-
     pub fn validate(&self) -> Result<(), String> {
         if self.num_runs == 0 {
             return Err("Number of runs must be at least 1".into());
@@ -140,10 +107,6 @@ impl McConfig {
             return Err("Variation percentage cannot exceed 100%".into());
         }
         Ok(())
-    }
-
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }
 

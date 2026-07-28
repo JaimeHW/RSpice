@@ -58,39 +58,10 @@ impl Default for TempConfig {
 }
 
 impl TempConfig {
-    pub fn new(start: f64, stop: f64, step: f64) -> Self {
-        Self {
-            temp_start: start,
-            temp_stop: stop,
-            temp_step: step,
-            ..Default::default()
-        }
-    }
-
-    pub fn with_base(mut self, b: TempBaseAnalysis) -> Self {
-        self.base_analysis = b;
-        self
-    }
     pub fn with_corner_temps(mut self) -> Self {
         self.corner_temps = true;
         self.specific_temps = vec![-40.0, 25.0, 85.0, 125.0];
         self
-    }
-
-    pub fn to_spice(&self) -> String {
-        if !self.specific_temps.is_empty() {
-            let temps: Vec<String> = self
-                .specific_temps
-                .iter()
-                .map(|t| format!("{}", t))
-                .collect();
-            format!(".temp {}", temps.join(" "))
-        } else {
-            format!(
-                ".temp {} {} {}",
-                self.temp_start, self.temp_stop, self.temp_step
-            )
-        }
     }
 
     pub fn validate(&self) -> Result<(), String> {
