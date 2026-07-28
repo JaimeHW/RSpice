@@ -2,7 +2,7 @@
 //!
 //! The floating tabbed property dialog (schema-driven editing via the
 //! `PropertyRegistry`). Inline inspection lives in the workbench inspector
-//! (`crate::workbench::panels::schematic`).
+//! (`crate::workbench::docks::inspector`).
 
 use crate::properties::{TabbedDialogResult, render_tabbed_property_dialog};
 use crate::workbench::app_state::AppState;

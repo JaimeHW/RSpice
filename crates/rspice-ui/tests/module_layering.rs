@@ -483,7 +483,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // Command dispatch.
     "commands",
     // Chrome, docks, surfaces, and the rest of the presentation layer.
-    "panels",
     "chrome",
     "docks",
     "menu_bar",
@@ -530,7 +529,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "menu_bar", 12),
     ("app", "workflows/file_workflow", 8),
     ("app", "browser/navigation", 7),
-    ("app", "panels", 7),
     ("app", "workflows/file_actions", 6),
     ("app", "frame", 5),
     ("app", "browser/accessibility", 2),
@@ -553,7 +551,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above. `-> app` is `DialogState`,
     // which still lives in the dialogs tree.
-    ("app_state", "panels", 6),
     ("app_state", "app", 5),
     ("app_state", "commands", 5),
     ("app_state", "simulation_analysis_tabs", 3),

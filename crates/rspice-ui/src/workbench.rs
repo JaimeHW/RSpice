@@ -50,7 +50,6 @@ mod layout;
 pub(crate) mod lifecycle;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
-pub(crate) mod panels;
 pub(crate) mod platform;
 mod preferences;
 mod preflight;

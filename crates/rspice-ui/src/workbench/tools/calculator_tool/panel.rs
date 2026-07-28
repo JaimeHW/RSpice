@@ -1,53 +1,29 @@
-//! Waveform calculator — the egui implementation of
-//! the product dialog pattern.
+//! Waveform calculator — the egui half of the floating tool.
 //!
 //! Keyboard-first: there is no keypad — the two things a calculator over
 //! simulation data actually needs are the active run's signals and the
 //! function reference, both click-to-insert at the caret. The result (or
-//! error) renders inline under the expression; the dialog footer's
+//! error) renders inline under the expression; the tool footer's
 //! "Plot result" hands the expression to the waves strips as an
 //! expression trace.
+//!
+//! The state this draws lives at
+//! `workbench::app_state::session::calculator`, because `AppState` owns it
+//! across frames. This module is a second inherent impl on that type:
+//! rendering stays with the renderer, session data stays with the session.
 
 use egui::Ui;
 
-use crate::analysis::calculator::{CalcValue, SimulationContext, evaluator, parser};
 use crate::state::SimulationState;
-use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
     pane_section_label, two_pane,
 };
+use crate::workbench::app_state::session::calculator::{CalculatorPanel, FunctionCategory};
 
-/// Height of the signal/function panes (the spec's `min-height: 286px`).
 const PANE_HEIGHT: f32 = 286.0;
-
-#[derive(Default, Clone)]
-pub struct CalculatorPanel {
-    /// Current expression text.
-    pub expression: String,
-    /// Successful expressions, most recent first.
-    history: Vec<String>,
-    /// Position while cycling history with ↑/↓ (None = live text).
-    history_at: Option<usize>,
-    /// Live text stashed while cycling history.
-    stash: String,
-    /// Last evaluation outcome.
-    outcome: Option<Result<String, String>>,
-    /// Selected function category.
-    category: FunctionCategory,
-    /// Signal list filter.
-    signal_filter: String,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
-enum FunctionCategory {
-    #[default]
-    Math,
-    Signal,
-    Measure,
-}
 
 /// One function-reference row: label, one-line hint, what to insert, and
 /// how many characters the caret steps back into the inserted text.
@@ -170,11 +146,8 @@ struct SignalRow {
     color: egui::Color32,
 }
 
-impl CalculatorPanel {
-    pub fn new() -> Self {
-        Self::default()
-    }
 
+impl CalculatorPanel {
     /// Stable id for the expression editor (caret state lives in egui memory).
     fn editor_id(ui: &Ui) -> egui::Id {
         ui.id().with("rspice.calc.editor")
@@ -237,51 +210,6 @@ impl CalculatorPanel {
             ui.ctx().memory_mut(|m| m.request_focus(editor_id));
         }
     }
-
-    /// Footer hint for the dialog: what the expression evaluates against.
-    pub fn context_hint(&self, simulation: &SimulationState) -> String {
-        match simulation.active_run() {
-            Some(run) => format!("evaluates against run #{}", run.id),
-            None => "no run yet — signals resolve after a simulation".to_owned(),
-        }
-    }
-
-    /// Evaluate the current expression against the live waveform set.
-    pub fn evaluate(&mut self, simulation: &SimulationState) {
-        let text = self.expression.trim();
-        if text.is_empty() {
-            self.outcome = None;
-            return;
-        }
-        let expr = parser::parse(text);
-        let ctx = SimulationContext::new(simulation);
-        self.outcome = Some(match evaluator::evaluate(&expr, &ctx) {
-            Ok(CalcValue::Scalar(value)) => Ok(format!("= {}", fmt_si(value, "", 4))),
-            Ok(CalcValue::Waveform(x, y)) => {
-                let last = y.last().copied().unwrap_or(0.0);
-                Ok(format!(
-                    "= waveform · {} pts · last {}",
-                    x.len(),
-                    fmt_si(last, "", 3)
-                ))
-            }
-            Err(error) => Err(error.to_string()),
-        });
-        if matches!(self.outcome, Some(Ok(_))) {
-            let owned = text.to_owned();
-            self.history.retain(|h| h != &owned);
-            self.history.insert(0, owned);
-            self.history.truncate(16);
-        }
-    }
-
-    /// Clear the editor and outcome.
-    pub fn clear(&mut self) {
-        self.expression.clear();
-        self.outcome = None;
-        self.history_at = None;
-    }
-
     // -----------------------------------------------------------------
     // panes
     // -----------------------------------------------------------------

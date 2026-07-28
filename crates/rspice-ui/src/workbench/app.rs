@@ -598,7 +598,7 @@ impl RSpiceApp {
     fn render_frame_dialogs(&mut self, ctx: &Context) {
         self.synchronize_design_management_route();
         self.render_confirmation_dialog(ctx);
-        crate::workbench::panels::render_property_dialog(ctx, &mut self.state);
+        dialogs::property_dialog::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);
         self.render_simulation_options_dialog(ctx);
         self.render_preferences_dialog(ctx);

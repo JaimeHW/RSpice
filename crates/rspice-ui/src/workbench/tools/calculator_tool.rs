@@ -5,6 +5,8 @@
 //! expression. A modal dialog forbids exactly that, so the calculator is a
 //! floating tool that never blocks the workspace beneath it.
 
+mod panel;
+
 use egui::{Context, Ui};
 
 use crate::ui::theme::{self, FontWeight};

@@ -13,7 +13,9 @@ use std::path::PathBuf;
 
 use egui::{Context, Rect, Sense, Stroke, Ui, vec2};
 
-use super::model::{PdkSettingsDialogResult, PdkSettingsDialogState};
+use crate::workbench::app_state::session::pdk_settings::{
+    PdkSettingsDialogResult, PdkSettingsDialogState,
+};
 use crate::state::pdk_config::{DiscoveredFile, LibraryPathEntry};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};

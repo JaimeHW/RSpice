@@ -9,7 +9,7 @@ use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::panels::ConsoleHistoryItem;
+use crate::workbench::app_state::session::script_console::ConsoleHistoryItem;
 
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::{Command, command_catalog};

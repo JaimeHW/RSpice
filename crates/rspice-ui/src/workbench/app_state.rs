@@ -130,7 +130,7 @@ pub struct AppState {
     /// Structured log history buffer (ring-buffer, filterable).
     pub(crate) log_buffer: crate::diagnostics::LogBuffer,
     /// Scripting/Automation console state
-    pub(crate) script_console: crate::workbench::panels::ScriptConsoleState,
+    pub(crate) script_console: session::script_console::ScriptConsoleState,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Project/workspace model for active design context and open LCV views.
@@ -149,9 +149,9 @@ pub struct AppState {
     /// Property registry (component property schemas)
     pub(crate) property_registry: crate::state::PropertyRegistry,
     /// Calculator panel state
-    pub(crate) calculator_panel: crate::workbench::panels::calculator::CalculatorPanel,
+    pub(crate) calculator_panel: session::calculator::CalculatorPanel,
     /// PDK Settings dialog state
-    pub(crate) pdk_settings_dialog: crate::workbench::panels::PdkSettingsDialogState,
+    pub(crate) pdk_settings_dialog: session::pdk_settings::PdkSettingsDialogState,
     /// PDK configuration (library paths, environment variables)
     pub(crate) pdk_config: crate::state::pdk_config::PdkConfig,
     /// Model library manager (PDK models, device libraries)

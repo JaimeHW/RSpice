@@ -7,6 +7,7 @@ use egui::Context;
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogResult;
 
 #[cfg(target_arch = "wasm32")]
 type BrowserModelImport = Result<Option<(String, Vec<u8>)>, String>;
@@ -90,12 +91,12 @@ impl RSpiceApp {
     pub(in crate::workbench) fn process_pdk_settings_dialog(&mut self, ctx: &Context) {
         #[cfg(target_arch = "wasm32")]
         poll_browser_model_imports(ctx, &mut self.state);
-        let result = crate::workbench::panels::render_pdk_settings_dialog(
+        let result = super::pdk_settings::render_pdk_settings_dialog(
             ctx,
             &mut self.state.pdk_settings_dialog,
         );
         match result {
-            crate::workbench::panels::PdkSettingsDialogResult::Applied(config) => {
+            PdkSettingsDialogResult::Applied(config) => {
                 let load_result = self
                     .state
                     .model_library_manager
@@ -105,7 +106,7 @@ impl RSpiceApp {
                 }
                 emit_pdk_apply_messages(&mut self.state, load_result);
             }
-            crate::workbench::panels::PdkSettingsDialogResult::LoadFile(path) => {
+            PdkSettingsDialogResult::LoadFile(path) => {
                 match self
                     .state
                     .model_library_manager
@@ -129,7 +130,7 @@ impl RSpiceApp {
                     }
                 }
             }
-            crate::workbench::panels::PdkSettingsDialogResult::ImportBrowserFile => {
+            PdkSettingsDialogResult::ImportBrowserFile => {
                 #[cfg(target_arch = "wasm32")]
                 start_browser_model_import(ctx);
                 #[cfg(not(target_arch = "wasm32"))]
@@ -137,8 +138,8 @@ impl RSpiceApp {
                     "Browser model import is unavailable on this platform".to_owned(),
                 ));
             }
-            crate::workbench::panels::PdkSettingsDialogResult::Cancelled => {}
-            crate::workbench::panels::PdkSettingsDialogResult::None => {}
+            PdkSettingsDialogResult::Cancelled => {}
+            PdkSettingsDialogResult::None => {}
         }
     }
 }
