@@ -34,19 +34,26 @@ use crate::Value;
 use std::f64::consts::PI;
 
 mod complex;
-mod config;
 mod matching;
 mod matrix;
+mod network;
+mod noise_params;
+mod ports;
 mod stability;
 mod touchstone;
 
 pub use complex::Complex;
-pub use config::{FrequencySweep, SParameterAnalyzer, SParameterConfig};
 pub use matching::{
     SourceImpedance, available_power, delivered_power, l_section_match, mismatch_loss_db,
     optimal_load_impedance, optimal_source_impedance, reactance_to_component,
     reflection_coefficient, renormalize_2port, renormalize_s11, transducer_gain_db,
 };
 pub use matrix::{Port, SMatrix, SParameterResult};
+pub use network::{
+    NetworkError, invert_complex_matrix, invert_complex_matrix_with_abort, s_from_y,
+    s_from_y_with_abort,
+};
+pub use noise_params::{TwoPortNoise, derive_two_port_noise};
+pub use ports::{PortError, SParameterPort, collect_ports, set_excitations};
 pub use stability::{GainAnalysis, StabilityAnalysis};
 pub use touchstone::{TouchstoneExporter, TouchstoneFormat, TouchstoneFreqUnit};

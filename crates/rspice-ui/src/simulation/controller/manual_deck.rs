@@ -5,6 +5,7 @@
 //! workspace configured.
 
 use super::*;
+use rspice_core::analysis::advanced::s_param;
 use rspice_core::netlist::{
     AnalysisCommand, ElementKind, FreqVariation, Netlist, PoleZeroAnalysisType,
     PoleZeroTransferType, StepCommand, StepTarget,
@@ -478,55 +479,21 @@ fn ac_sweep(variation: FreqVariation) -> AcSweepType {
     }
 }
 
+/// Resolve the deck's `.SP` ports into the UI's port shape.
+///
+/// Discovery and validation live in `rspice_core`; this only projects the
+/// shared port type onto the runner's own, so the GUI, the CLI, and the Python
+/// bindings cannot disagree about which ports a deck declares.
 fn collect_sparameter_ports(netlist: &Netlist) -> Result<Vec<SpPort>, String> {
-    let mut ports = Vec::new();
-    for element in &netlist.elements {
-        let ElementKind::VoltageSource(spec) = &element.kind else {
-            continue;
-        };
-        let Some(port) = spec.rf_port() else {
-            continue;
-        };
-        if element.nodes.len() < 2 {
-            return Err(format!(
-                ".sp port source '{}' must have positive and negative nodes",
-                element.name
-            ));
-        }
-        if !port.z0.is_finite() || port.z0 <= 0.0 {
-            return Err(format!(
-                ".sp port source '{}' has invalid z0 {}; expected positive impedance",
-                element.name, port.z0
-            ));
-        }
-        ports.push((
-            port.portnum,
-            element.name.clone(),
-            SpPort {
-                node_pos: element.nodes[0].clone(),
-                node_neg: element.nodes[1].clone(),
-                z0: Some(port.z0),
-            },
-        ));
-    }
-
-    if ports.is_empty() {
-        return Err(
-            ".sp requires voltage sources annotated with portnum=<n> [z0=<ohms>]".to_string(),
-        );
-    }
-
-    ports.sort_by_key(|(number, _, _)| *number);
-    for (idx, (number, source_name, _)) in ports.iter().enumerate() {
-        let expected = idx + 1;
-        if *number != expected {
-            return Err(format!(
-                ".sp port numbers must be dense and unique starting at 1; expected portnum {expected}, found {number} on '{source_name}'"
-            ));
-        }
-    }
-
-    Ok(ports.into_iter().map(|(_, _, port)| port).collect())
+    let ports = s_param::collect_ports(netlist).map_err(|error| error.to_string())?;
+    Ok(ports
+        .into_iter()
+        .map(|port| SpPort {
+            node_pos: port.node_pos,
+            node_neg: port.node_neg,
+            z0: Some(port.z0),
+        })
+        .collect())
 }
 
 fn pz_transfer_name(transfer_type: PoleZeroTransferType) -> String {

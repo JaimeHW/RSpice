@@ -14,6 +14,7 @@ use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::AcResult;
+use rspice_core::analysis::advanced::s_param;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind, SourceSpec};
 use std::path::Path;
@@ -223,7 +224,8 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
                 y_matrix[row][col] = y[row][col][freq_idx];
             }
         }
-        let s_matrix = compute_s_from_y_matrix(&y_matrix, &z0_by_port, abort)?;
+        let s_matrix = s_param::s_from_y_with_abort(&y_matrix, &z0_by_port, abort)
+            .map_err(network_error)?;
         for row in 0..num_ports {
             for col in 0..num_ports {
                 s[row][col][freq_idx] = s_matrix[row][col];
@@ -306,163 +308,28 @@ fn unique_aux_element_name(
     unreachable!("unbounded iterator should always find a unique name");
 }
 
+/// Map a shared S-parameter conversion failure onto the service error type.
+///
+/// A singular normalization matrix becomes a reported failure, not the
+/// zero-filled matrix this module used to return. Presenting fabricated zeros
+/// as a measured S-matrix is worse than reporting nothing, because a plot of
+/// zeros looks like a real, very good result.
+fn network_error(error: s_param::NetworkError) -> ServiceRunError {
+    match error {
+        s_param::NetworkError::Aborted => ServiceRunError::Aborted,
+        other => ServiceRunError::Failure(other.to_string()),
+    }
+}
+
 fn branch_current_from_ac(point: &AcResult, branch_ordinal: usize) -> Option<Complex64> {
     let branch_index = branch_ordinal.checked_sub(1)?;
     point.currents.get(branch_index).copied()
 }
 
-fn compute_s_from_y_matrix(
-    y: &[Vec<Complex64>],
-    z0_by_port: &[Value],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Vec<Complex64>>> {
-    ensure_not_aborted(abort)?;
-    let n = y.len();
-    if n == 0 || y.iter().any(|row| row.len() != n) {
-        return Ok(Vec::new());
-    }
-    if z0_by_port.len() != n {
-        return Ok(vec![vec![Complex64::new(0.0, 0.0); n]; n]);
-    }
-
-    let mut a = identity_complex_matrix(n, abort)?;
-    let mut b = identity_complex_matrix(n, abort)?;
-    for row in 0..n {
-        poll_periodically(abort, row)?;
-        let z0 = Complex64::new(z0_by_port[row], 0.0);
-        for col in 0..n {
-            let zy = z0 * y[row][col];
-            a[row][col] += zy;
-            b[row][col] -= zy;
-        }
-    }
-
-    let Some(inv_a) = invert_complex_matrix(&a, abort)? else {
-        return Ok(vec![vec![Complex64::new(0.0, 0.0); n]; n]);
-    };
-    let mut s = multiply_complex_matrix(&b, &inv_a, abort)?;
-    // General multi-port normalization for non-uniform real reference impedances:
-    // S = D^(-1) * (I - ZY) * (I + ZY)^(-1) * D, where D = diag(sqrt(Z0_i)).
-    for row in 0..n {
-        poll_periodically(abort, row)?;
-        for col in 0..n {
-            let scale = (z0_by_port[col] / z0_by_port[row]).sqrt();
-            s[row][col] *= Complex64::new(scale, 0.0);
-        }
-    }
-    ensure_not_aborted(abort)?;
-    Ok(s)
-}
-
-fn identity_complex_matrix(
-    size: usize,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Vec<Complex64>>> {
-    let mut matrix = vec![vec![Complex64::new(0.0, 0.0); size]; size];
-    for (idx, row) in matrix.iter_mut().enumerate() {
-        poll_periodically(abort, idx)?;
-        row[idx] = Complex64::new(1.0, 0.0);
-    }
-    Ok(matrix)
-}
-
-fn multiply_complex_matrix(
-    lhs: &[Vec<Complex64>],
-    rhs: &[Vec<Complex64>],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Vec<Complex64>>> {
-    let rows = lhs.len();
-    let cols = rhs.first().map_or(0, |row| row.len());
-    let inner = rhs.len();
-    let mut out = vec![vec![Complex64::new(0.0, 0.0); cols]; rows];
-    for row in 0..rows {
-        poll_periodically(abort, row)?;
-        for k in 0..inner {
-            let lhs_value = lhs[row][k];
-            if lhs_value.norm() <= 1e-30 {
-                continue;
-            }
-            for col in 0..cols {
-                out[row][col] += lhs_value * rhs[k][col];
-            }
-        }
-    }
-    ensure_not_aborted(abort)?;
-    Ok(out)
-}
-
-fn invert_complex_matrix(
-    matrix: &[Vec<Complex64>],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Option<Vec<Vec<Complex64>>>> {
-    ensure_not_aborted(abort)?;
-    let n = matrix.len();
-    if n == 0 || matrix.iter().any(|row| row.len() != n) {
-        return Ok(None);
-    }
-
-    let mut augmented = vec![vec![Complex64::new(0.0, 0.0); 2 * n]; n];
-    for row in 0..n {
-        poll_periodically(abort, row)?;
-        for col in 0..n {
-            augmented[row][col] = matrix[row][col];
-        }
-        augmented[row][n + row] = Complex64::new(1.0, 0.0);
-    }
-
-    for col in 0..n {
-        poll_periodically(abort, col)?;
-        let mut pivot_row = col;
-        let mut pivot_norm = augmented[col][col].norm();
-        for (row, row_data) in augmented.iter().enumerate().skip(col + 1) {
-            let candidate_norm = row_data[col].norm();
-            if candidate_norm > pivot_norm {
-                pivot_norm = candidate_norm;
-                pivot_row = row;
-            }
-        }
-        if pivot_norm <= 1e-30 {
-            return Ok(None);
-        }
-        if pivot_row != col {
-            augmented.swap(pivot_row, col);
-        }
-
-        let pivot = augmented[col][col];
-        for idx in col..(2 * n) {
-            augmented[col][idx] /= pivot;
-        }
-
-        let pivot_snapshot = augmented[col].clone();
-        for (row, row_data) in augmented.iter_mut().enumerate() {
-            if row == col {
-                continue;
-            }
-            let factor = row_data[col];
-            if factor.norm() <= 1e-30 {
-                continue;
-            }
-            for idx in col..(2 * n) {
-                row_data[idx] -= factor * pivot_snapshot[idx];
-            }
-        }
-    }
-
-    let mut inverse = vec![vec![Complex64::new(0.0, 0.0); n]; n];
-    for row in 0..n {
-        poll_periodically(abort, row)?;
-        for col in 0..n {
-            inverse[row][col] = augmented[row][n + col];
-        }
-    }
-    ensure_not_aborted(abort)?;
-    Ok(Some(inverse))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
+    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 
     fn invalid_config() -> SParameterRunConfig {
         SParameterRunConfig {
@@ -483,18 +350,39 @@ mod tests {
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
 
+    /// The conversion itself, and its in-loop cancellation, are covered by
+    /// `rspice_core::analysis::advanced::s_param::network`. What this module
+    /// still owns is the mapping from that failure onto the service error
+    /// type, so that is what is tested here.
     #[test]
-    fn sparameter_matrix_conversion_honors_in_loop_abort() {
-        const PORTS: usize = 128;
-        let mut y = vec![vec![Complex64::new(0.0, 0.0); PORTS]; PORTS];
-        for (index, row) in y.iter_mut().enumerate() {
-            row[index] = Complex64::new(1e-3, 0.0);
-        }
-        let abort = CountingAbort::new(5);
+    fn conversion_abort_stays_an_abort_not_a_failure() {
+        assert!(matches!(
+            network_error(s_param::NetworkError::Aborted),
+            ServiceRunError::Aborted
+        ));
+    }
 
-        let result = compute_s_from_y_matrix(&y, &vec![50.0; PORTS], &abort);
+    #[test]
+    fn singular_normalization_is_reported_instead_of_returning_zeros() {
+        let error = network_error(s_param::NetworkError::SingularNormalization);
 
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
-        assert!(abort.count() > 5);
+        let ServiceRunError::Failure(message) = error else {
+            panic!("a singular matrix must surface as a failure");
+        };
+        assert!(message.contains("singular"), "{message}");
+    }
+
+    #[test]
+    fn conversion_reaches_core_and_reports_a_singular_network() {
+        // Y = -I/Z0 drives (I + ZY) to exactly zero.
+        let z0 = 50.0;
+        let y = vec![
+            vec![Complex64::new(-1.0 / z0, 0.0), Complex64::new(0.0, 0.0)],
+            vec![Complex64::new(0.0, 0.0), Complex64::new(-1.0 / z0, 0.0)],
+        ];
+
+        let result = s_param::s_from_y_with_abort(&y, &[z0, z0], &NoAbort).map_err(network_error);
+
+        assert!(matches!(result, Err(ServiceRunError::Failure(_))));
     }
 }

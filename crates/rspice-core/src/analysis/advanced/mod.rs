@@ -69,7 +69,8 @@ pub use pole_zero::{Matrix as PzMatrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZe
 pub use pstb::{FloquetMultiplier, PstbAnalyzer, PstbConfig, PstbResult, StabilityType};
 pub use pxf::{PxfAnalyzer, PxfConfig, PxfError, PxfResult, PxfSweepType, TransferPoint};
 pub use s_param::{
-    FrequencySweep, Port, SMatrix, SParameterAnalyzer, SParameterConfig, SParameterResult,
+    NetworkError, Port, PortError, SMatrix, SParameterPort, SParameterResult, TwoPortNoise,
+    collect_ports, derive_two_port_noise, invert_complex_matrix, s_from_y, set_excitations,
 };
 pub use sensitivity::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,

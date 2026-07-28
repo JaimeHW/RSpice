@@ -35,6 +35,8 @@ use rspice_core::{
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
+use rspice_core::analysis::advanced::s_param;
+
 use crate::abort::{ActiveRuns, run_interruptible};
 use crate::config::{PyIntegrationMethod, PySimulationConfig};
 use crate::measure;
@@ -183,324 +185,6 @@ fn ac_data_frequencies(netlist: &rspice_core::Netlist, table_name: &str) -> PyRe
         frequencies.push(frequency);
     }
     Ok(frequencies)
-}
-
-#[derive(Debug, Clone)]
-struct SParameterPortSpec {
-    number: usize,
-    source_name: String,
-    reference_impedance: f64,
-}
-
-fn collect_sparameter_ports(netlist: &rspice_core::Netlist) -> PyResult<Vec<SParameterPortSpec>> {
-    let mut ports = Vec::new();
-    for element in &netlist.elements {
-        let rspice_core::netlist::ElementKind::VoltageSource(spec) = &element.kind else {
-            continue;
-        };
-        let Some(port) = spec.rf_port() else {
-            continue;
-        };
-        if element.nodes.len() < 2 {
-            return Err(crate::errors::value_error(format!(
-                "S-parameter port source '{}' must have positive and negative nodes",
-                element.name
-            )));
-        }
-        if !port.z0.is_finite() || port.z0 <= 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "S-parameter port source '{}' has invalid z0 {}; expected a positive impedance",
-                element.name, port.z0
-            )));
-        }
-        ports.push(SParameterPortSpec {
-            number: port.portnum,
-            source_name: element.name.clone(),
-            reference_impedance: port.z0,
-        });
-    }
-    if ports.is_empty() {
-        return Err(crate::errors::value_error(
-            "S-parameter analysis requires voltage sources annotated with portnum=<n> [z0=<ohms>]",
-        ));
-    }
-    ports.sort_by_key(|port| port.number);
-    for (index, port) in ports.iter().enumerate() {
-        let expected = index + 1;
-        if port.number != expected {
-            return Err(crate::errors::value_error(format!(
-                "S-parameter port numbers must be dense and unique starting at 1; expected {expected}, found {} on '{}'",
-                port.number, port.source_name
-            )));
-        }
-    }
-    Ok(ports)
-}
-
-fn replace_source_ac(spec: &mut rspice_core::netlist::SourceSpec, magnitude: f64) {
-    let current = std::mem::replace(spec, rspice_core::netlist::SourceSpec::Dc(0.0));
-    *spec = current.with_ac(magnitude, 0.0);
-}
-
-fn set_sparameter_excitations(
-    netlist: &mut rspice_core::Netlist,
-    ports: &[SParameterPortSpec],
-    excited_port: usize,
-) -> Result<(), rspice_core::engine::SimulationError> {
-    for element in &mut netlist.elements {
-        match &mut element.kind {
-            rspice_core::netlist::ElementKind::VoltageSource(spec)
-            | rspice_core::netlist::ElementKind::CurrentSource(spec) => {
-                replace_source_ac(spec, 0.0);
-            }
-            _ => {}
-        }
-    }
-    for (index, port) in ports.iter().enumerate() {
-        let element = netlist
-            .elements
-            .iter_mut()
-            .find(|element| element.name.eq_ignore_ascii_case(&port.source_name))
-            .ok_or_else(|| {
-                rspice_core::engine::SimulationError::Circuit(format!(
-                    "S-parameter port source '{}' disappeared from the netlist",
-                    port.source_name
-                ))
-            })?;
-        let rspice_core::netlist::ElementKind::VoltageSource(spec) = &mut element.kind else {
-            return Err(rspice_core::engine::SimulationError::Circuit(format!(
-                "S-parameter port '{}' is not a voltage source",
-                port.source_name
-            )));
-        };
-        replace_source_ac(spec, if index == excited_port { 1.0 } else { 0.0 });
-    }
-    Ok(())
-}
-
-fn invert_complex_matrix(
-    matrix: &[Vec<rspice_core::Complex64>],
-) -> Option<Vec<Vec<rspice_core::Complex64>>> {
-    let size = matrix.len();
-    if size == 0 || matrix.iter().any(|row| row.len() != size) {
-        return None;
-    }
-    let zero = rspice_core::Complex64::new(0.0, 0.0);
-    let one = rspice_core::Complex64::new(1.0, 0.0);
-    let mut augmented = vec![vec![zero; 2 * size]; size];
-    for row in 0..size {
-        augmented[row][..size].copy_from_slice(&matrix[row]);
-        augmented[row][size + row] = one;
-    }
-    for column in 0..size {
-        let pivot = (column..size).max_by(|&lhs, &rhs| {
-            augmented[lhs][column]
-                .norm()
-                .total_cmp(&augmented[rhs][column].norm())
-        })?;
-        if augmented[pivot][column].norm() <= 1e-24 {
-            return None;
-        }
-        augmented.swap(pivot, column);
-        let pivot_value = augmented[column][column];
-        for value in &mut augmented[column] {
-            *value /= pivot_value;
-        }
-        let pivot_row = augmented[column].clone();
-        for (row, values) in augmented.iter_mut().enumerate() {
-            if row == column {
-                continue;
-            }
-            let factor = values[column];
-            for index in 0..2 * size {
-                values[index] -= factor * pivot_row[index];
-            }
-        }
-    }
-    Some(
-        augmented
-            .into_iter()
-            .map(|row| row[size..].to_vec())
-            .collect(),
-    )
-}
-
-fn s_from_y(
-    admittance: &[Vec<rspice_core::Complex64>],
-    impedances: &[f64],
-) -> Result<Vec<Vec<rspice_core::Complex64>>, rspice_core::engine::SimulationError> {
-    let size = admittance.len();
-    if size == 0 || impedances.len() != size || admittance.iter().any(|row| row.len() != size) {
-        return Err(rspice_core::engine::SimulationError::Circuit(
-            "malformed S-parameter admittance matrix".to_string(),
-        ));
-    }
-    let zero = rspice_core::Complex64::new(0.0, 0.0);
-    let one = rspice_core::Complex64::new(1.0, 0.0);
-    let mut plus = vec![vec![zero; size]; size];
-    let mut minus = vec![vec![zero; size]; size];
-    for row in 0..size {
-        for column in 0..size {
-            let identity = if row == column { one } else { zero };
-            let normalized = impedances[row] * admittance[row][column];
-            plus[row][column] = identity + normalized;
-            minus[row][column] = identity - normalized;
-        }
-    }
-    let inverse = invert_complex_matrix(&plus).ok_or_else(|| {
-        rspice_core::engine::SimulationError::Circuit(
-            "S-parameter normalization matrix is singular".to_string(),
-        )
-    })?;
-    let mut scattering = vec![vec![zero; size]; size];
-    for row in 0..size {
-        for column in 0..size {
-            for inner in 0..size {
-                scattering[row][column] += minus[row][inner] * inverse[inner][column];
-            }
-            scattering[row][column] *= (impedances[column] / impedances[row]).sqrt();
-        }
-    }
-    Ok(scattering)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TwoPortNoisePoint {
-    noise_resistance: f64,
-    noise_factor: f64,
-    minimum_noise_factor: f64,
-    optimum_source_reflection: rspice_core::Complex64,
-    valid: bool,
-}
-
-impl TwoPortNoisePoint {
-    fn undefined() -> Self {
-        Self {
-            noise_resistance: f64::NAN,
-            noise_factor: f64::NAN,
-            minimum_noise_factor: f64::NAN,
-            optimum_source_reflection: rspice_core::Complex64::new(f64::NAN, f64::NAN),
-            valid: false,
-        }
-    }
-}
-
-/// Derive the standard two-port noise parameters from Y and its Norton
-/// current-noise covariance. These are the Maas/ngspice `.SP donoise`
-/// equations, normalized by `4*k*T` at the actual circuit temperature.
-fn derive_two_port_noise_point(
-    admittance: &[Vec<rspice_core::Complex64>],
-    cy: &[Vec<rspice_core::Complex64>],
-    input_reference_impedance: f64,
-    temperature: f64,
-) -> TwoPortNoisePoint {
-    if admittance.len() != 2
-        || cy.len() != 2
-        || admittance.iter().any(|row| row.len() != 2)
-        || cy.iter().any(|row| row.len() != 2)
-        || !input_reference_impedance.is_finite()
-        || input_reference_impedance <= 0.0
-        || !temperature.is_finite()
-        || temperature <= 0.0
-    {
-        return TwoPortNoisePoint::undefined();
-    }
-
-    let finite_complex =
-        |value: rspice_core::Complex64| value.re.is_finite() && value.im.is_finite();
-    if admittance
-        .iter()
-        .flatten()
-        .any(|value| !finite_complex(*value))
-        || cy.iter().flatten().any(|value| !finite_complex(*value))
-    {
-        return TwoPortNoisePoint::undefined();
-    }
-
-    let y21_power = admittance[1][0].norm_sqr();
-    let y_scale = admittance
-        .iter()
-        .flatten()
-        .map(|value| value.norm())
-        .fold(0.0_f64, f64::max);
-    let transmission_floor = (y_scale * f64::EPSILON * 64.0).powi(2);
-    if !y21_power.is_finite() || y21_power <= transmission_floor.max(f64::MIN_POSITIVE) {
-        return TwoPortNoisePoint::undefined();
-    }
-
-    let knorm = 4.0 * rspice_core::analysis::noise::K_BOLTZMANN * temperature;
-    let c11 = cy[0][0] / knorm;
-    let c12 = cy[0][1] / knorm;
-    let c22 = cy[1][1] / knorm;
-    let covariance_scale = c11.norm().max(c12.norm()).max(c22.norm());
-
-    // A noiseless two-port has F=Fmin=1 and Rn=0. Sopt is non-unique;
-    // zero is the deterministic matched-source convention used here.
-    if covariance_scale <= f64::MIN_POSITIVE {
-        return TwoPortNoisePoint {
-            noise_resistance: 0.0,
-            noise_factor: 1.0,
-            minimum_noise_factor: 1.0,
-            optimum_source_reflection: rspice_core::Complex64::new(0.0, 0.0),
-            valid: true,
-        };
-    }
-
-    let covariance_tolerance = covariance_scale * f64::EPSILON * 256.0;
-    if c11.re < -covariance_tolerance
-        || c22.re <= covariance_tolerance
-        || c11.im.abs() > covariance_tolerance
-        || c22.im.abs() > covariance_tolerance
-    {
-        return TwoPortNoisePoint::undefined();
-    }
-
-    let noise_resistance = c22.re.max(0.0) / y21_power;
-    if !noise_resistance.is_finite() || noise_resistance <= 0.0 {
-        return TwoPortNoisePoint::undefined();
-    }
-    let ycor = admittance[0][0] - (c12 / c22.re) * admittance[1][0];
-    let gu = c11.re - noise_resistance * (admittance[0][0] - ycor).norm_sqr();
-    let raw_radicand = ycor.re * ycor.re + gu / noise_resistance;
-    let radicand_scale = ycor.norm_sqr().max((gu / noise_resistance).abs());
-    let radicand_tolerance = radicand_scale * f64::EPSILON * 1024.0;
-    if !raw_radicand.is_finite() || raw_radicand < -radicand_tolerance {
-        return TwoPortNoisePoint::undefined();
-    }
-    let ysopt = rspice_core::Complex64::new(raw_radicand.max(0.0).sqrt(), -ycor.im);
-    let y0 = rspice_core::Complex64::new(1.0 / input_reference_impedance, 0.0);
-    let reflection_denominator = y0 + ysopt;
-    if reflection_denominator.norm_sqr() <= f64::MIN_POSITIVE {
-        return TwoPortNoisePoint::undefined();
-    }
-    let optimum_source_reflection = (y0 - ysopt) / reflection_denominator;
-    let mut minimum_noise_factor = 1.0 + 2.0 * noise_resistance * (ycor.re + ysopt.re);
-    let mut noise_factor =
-        minimum_noise_factor + (noise_resistance / y0.re) * (y0 - ysopt).norm_sqr();
-
-    let factor_tolerance = 4096.0 * f64::EPSILON;
-    if minimum_noise_factor >= 1.0 - factor_tolerance && minimum_noise_factor < 1.0 {
-        minimum_noise_factor = 1.0;
-    }
-    if noise_factor >= 1.0 - factor_tolerance && noise_factor < 1.0 {
-        noise_factor = 1.0;
-    }
-    if !minimum_noise_factor.is_finite()
-        || !noise_factor.is_finite()
-        || minimum_noise_factor < 1.0
-        || noise_factor < minimum_noise_factor - factor_tolerance
-        || !finite_complex(optimum_source_reflection)
-    {
-        return TwoPortNoisePoint::undefined();
-    }
-
-    TwoPortNoisePoint {
-        noise_resistance,
-        noise_factor,
-        minimum_noise_factor,
-        optimum_source_reflection,
-        valid: true,
-    }
 }
 
 fn resolve_hb_harmonic_orders(
@@ -1552,14 +1236,15 @@ impl PyEngine {
                 "S-parameter frequencies must be strictly positive",
             ));
         }
-        let ports = collect_sparameter_ports(&netlist.inner)?;
+        let ports = s_param::collect_ports(&netlist.inner)
+            .map_err(|error| crate::errors::value_error(error.to_string()))?;
         let port_names = ports
             .iter()
             .map(|port| port.source_name.clone())
             .collect::<Vec<_>>();
         let impedances = ports
             .iter()
-            .map(|port| port.reference_impedance)
+            .map(|port| port.z0)
             .collect::<Vec<_>>();
         let engine = self.engine_for_netlist(&netlist.inner);
         let temperature = engine.config().temperature;
@@ -1573,7 +1258,9 @@ impl PyEngine {
                     return Err(rspice_core::engine::SimulationError::Aborted);
                 }
                 let mut excited = netlist.inner.clone();
-                set_sparameter_excitations(&mut excited, &ports, excited_port)?;
+                s_param::set_excitations(&mut excited, &ports, excited_port).map_err(|error| {
+                    rspice_core::engine::SimulationError::Circuit(error.to_string())
+                })?;
                 let points = engine.run_ac_with_abort(&excited, &frequencies, abort)?;
                 if points.len() != num_points {
                     return Err(rspice_core::engine::SimulationError::Circuit(format!(
@@ -1613,7 +1300,9 @@ impl PyEngine {
                             .collect::<Vec<_>>()
                     })
                     .collect::<Vec<_>>();
-                let matrix = s_from_y(&y, &impedances)?;
+                let matrix = s_param::s_from_y(&y, &impedances).map_err(|error| {
+                    rspice_core::engine::SimulationError::Circuit(error.to_string())
+                })?;
                 for row in 0..num_ports {
                     for column in 0..num_ports {
                         scattering[row][column][frequency_index] = matrix[row][column];
@@ -1669,7 +1358,7 @@ impl PyEngine {
                                     .collect::<Vec<_>>()
                             })
                             .collect::<Vec<_>>();
-                        two_port_points.push(derive_two_port_noise_point(
+                        two_port_points.push(s_param::derive_two_port_noise(
                             &y,
                             &point.current_correlation,
                             impedances[0],

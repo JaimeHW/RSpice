@@ -11,6 +11,8 @@
 //! Corner sweeps re-elaborate the deck per corner on `--jobs` workers,
 //! tagging each corner's output so workers never collide.
 
+use rspice_core::analysis::advanced::s_param;
+
 use super::RunContext;
 use super::basic::{run_dc_op, run_temp};
 use super::shared::{generate_frequency_sweep, generate_step_values};
@@ -1227,18 +1229,23 @@ fn corner_output_path(
     Some(path.with_file_name(file_name))
 }
 
-#[derive(Debug, Clone)]
-struct NetlistSParameterPort {
-    number: usize,
-    source_name: String,
-    z0: f64,
-}
-
 #[derive(Debug)]
 struct SParameterSweepData {
     frequencies: Vec<f64>,
-    ports: Vec<NetlistSParameterPort>,
+    ports: Vec<s_param::SParameterPort>,
     s: Vec<Vec<Vec<rspice_core::Complex64>>>,
+}
+
+/// Map a shared S-parameter failure onto the CLI's error type.
+///
+/// Both port validation and the Y-to-S conversion now report through
+/// `rspice_core`, including the singular-normalization case this command used
+/// to swallow by emitting a zero-filled matrix.
+fn sparameter_error(error: impl std::fmt::Display) -> CliError {
+    CliError::SimulationError {
+        message: error.to_string(),
+        analysis: Some("S-Parameters".to_string()),
+    }
 }
 
 pub(super) fn run_sparam_from_command(
@@ -1262,7 +1269,7 @@ pub(super) fn run_sparam_from_command(
         println!("SP note: optional ngspice SP-noise flag parsed; CLI exports S-parameters only");
     }
 
-    let ports = collect_netlist_sparameter_ports(ctx.netlist)?;
+    let ports = s_param::collect_ports(ctx.netlist).map_err(sparameter_error)?;
     if !ctx.quiet {
         println!(
             "Running {}-port S-parameter analysis: {} frequency points",
@@ -1338,70 +1345,9 @@ pub(super) fn run_sparam_from_command(
     Ok(())
 }
 
-fn collect_netlist_sparameter_ports(
-    netlist: &rspice_core::Netlist,
-) -> Result<Vec<NetlistSParameterPort>, CliError> {
-    let mut ports = Vec::new();
-    for element in &netlist.elements {
-        let rspice_core::netlist::ElementKind::VoltageSource(spec) = &element.kind else {
-            continue;
-        };
-        let Some(port) = spec.rf_port() else {
-            continue;
-        };
-        if element.nodes.len() < 2 {
-            return Err(CliError::SimulationError {
-                message: format!(
-                    ".SP port source '{}' must have positive and negative nodes",
-                    element.name
-                ),
-                analysis: Some("S-Parameters".to_string()),
-            });
-        }
-        if !port.z0.is_finite() || port.z0 <= 0.0 {
-            return Err(CliError::SimulationError {
-                message: format!(
-                    ".SP port source '{}' has invalid z0 {}; expected positive impedance",
-                    element.name, port.z0
-                ),
-                analysis: Some("S-Parameters".to_string()),
-            });
-        }
-        ports.push(NetlistSParameterPort {
-            number: port.portnum,
-            source_name: element.name.clone(),
-            z0: port.z0,
-        });
-    }
-
-    if ports.is_empty() {
-        return Err(CliError::SimulationError {
-            message: ".SP requires voltage sources annotated with portnum=<n> [z0=<ohms>]"
-                .to_string(),
-            analysis: Some("S-Parameters".to_string()),
-        });
-    }
-
-    ports.sort_by_key(|port| port.number);
-    for (idx, port) in ports.iter().enumerate() {
-        let expected = idx + 1;
-        if port.number != expected {
-            return Err(CliError::SimulationError {
-                message: format!(
-                    ".SP port numbers must be dense and unique starting at 1; expected portnum {}, found {} on '{}'",
-                    expected, port.number, port.source_name
-                ),
-                analysis: Some("S-Parameters".to_string()),
-            });
-        }
-    }
-
-    Ok(ports)
-}
-
 fn solve_netlist_sparameters(
     ctx: &RunContext<'_>,
-    ports: Vec<NetlistSParameterPort>,
+    ports: Vec<s_param::SParameterPort>,
     frequencies: Vec<f64>,
 ) -> Result<SParameterSweepData, CliError> {
     let num_ports = ports.len();
@@ -1412,7 +1358,8 @@ fn solve_netlist_sparameters(
 
     for (excite_port, _) in ports.iter().enumerate() {
         let mut excited = ctx.netlist.clone();
-        set_sparameter_port_excitations(&mut excited, &ports, excite_port)?;
+        s_param::set_excitations(&mut excited, &ports, excite_port)
+            .map_err(sparameter_error)?;
         let ac_points = ctx
             .engine
             .run_ac(&excited, &frequencies)
@@ -1454,7 +1401,7 @@ fn solve_netlist_sparameters(
                 y_matrix[row][col] = y[row][col][freq_idx];
             }
         }
-        let s_matrix = compute_s_from_y_matrix(&y_matrix, &z0_by_port);
+        let s_matrix = s_param::s_from_y(&y_matrix, &z0_by_port).map_err(sparameter_error)?;
         for row in 0..num_ports {
             for col in 0..num_ports {
                 s[row][col][freq_idx] = s_matrix[row][col];
@@ -1469,49 +1416,6 @@ fn solve_netlist_sparameters(
     })
 }
 
-fn set_sparameter_port_excitations(
-    netlist: &mut rspice_core::Netlist,
-    ports: &[NetlistSParameterPort],
-    excite_port: usize,
-) -> Result<(), CliError> {
-    for element in &mut netlist.elements {
-        match &mut element.kind {
-            rspice_core::netlist::ElementKind::VoltageSource(spec)
-            | rspice_core::netlist::ElementKind::CurrentSource(spec) => {
-                replace_source_ac(spec, 0.0);
-            }
-            _ => {}
-        }
-    }
-
-    for (idx, port) in ports.iter().enumerate() {
-        let Some(element) = netlist
-            .elements
-            .iter_mut()
-            .find(|element| element.name.eq_ignore_ascii_case(&port.source_name))
-        else {
-            return Err(CliError::SimulationError {
-                message: format!(".SP port source '{}' not found", port.source_name),
-                analysis: Some("S-Parameters".to_string()),
-            });
-        };
-        let rspice_core::netlist::ElementKind::VoltageSource(spec) = &mut element.kind else {
-            return Err(CliError::SimulationError {
-                message: format!(".SP port '{}' is not a voltage source", port.source_name),
-                analysis: Some("S-Parameters".to_string()),
-            });
-        };
-        replace_source_ac(spec, if idx == excite_port { 1.0 } else { 0.0 });
-    }
-
-    Ok(())
-}
-
-fn replace_source_ac(spec: &mut rspice_core::netlist::SourceSpec, magnitude: f64) {
-    let current = std::mem::replace(spec, rspice_core::netlist::SourceSpec::Dc(0.0));
-    *spec = current.with_ac(magnitude, 0.0);
-}
-
 fn branch_current_by_name(
     point: &rspice_core::analysis::AcResult,
     branch_name: &str,
@@ -1523,131 +1427,6 @@ fn branch_current_by_name(
         .and_then(|index| point.currents.get(index).copied())
 }
 
-fn compute_s_from_y_matrix(
-    y: &[Vec<rspice_core::Complex64>],
-    z0_by_port: &[f64],
-) -> Vec<Vec<rspice_core::Complex64>> {
-    let n = y.len();
-    if n == 0 || y.iter().any(|row| row.len() != n) || z0_by_port.len() != n {
-        return vec![vec![rspice_core::Complex64::new(0.0, 0.0); n]; n];
-    }
-
-    let mut a = identity_complex_matrix(n);
-    let mut b = identity_complex_matrix(n);
-    for row in 0..n {
-        let z0 = rspice_core::Complex64::new(z0_by_port[row], 0.0);
-        for col in 0..n {
-            let zy = z0 * y[row][col];
-            a[row][col] += zy;
-            b[row][col] -= zy;
-        }
-    }
-
-    let Some(inv_a) = invert_complex_matrix(&a) else {
-        return vec![vec![rspice_core::Complex64::new(0.0, 0.0); n]; n];
-    };
-    let mut s = multiply_complex_matrix(&b, &inv_a);
-    for row in 0..n {
-        for col in 0..n {
-            let scale = (z0_by_port[col] / z0_by_port[row]).sqrt();
-            s[row][col] *= rspice_core::Complex64::new(scale, 0.0);
-        }
-    }
-    s
-}
-
-fn identity_complex_matrix(size: usize) -> Vec<Vec<rspice_core::Complex64>> {
-    let mut matrix = vec![vec![rspice_core::Complex64::new(0.0, 0.0); size]; size];
-    for (idx, row) in matrix.iter_mut().enumerate() {
-        row[idx] = rspice_core::Complex64::new(1.0, 0.0);
-    }
-    matrix
-}
-
-fn multiply_complex_matrix(
-    lhs: &[Vec<rspice_core::Complex64>],
-    rhs: &[Vec<rspice_core::Complex64>],
-) -> Vec<Vec<rspice_core::Complex64>> {
-    let rows = lhs.len();
-    let cols = rhs.first().map_or(0, |row| row.len());
-    let inner = rhs.len();
-    let mut out = vec![vec![rspice_core::Complex64::new(0.0, 0.0); cols]; rows];
-    for row in 0..rows {
-        for k in 0..inner {
-            let lhs_value = lhs[row][k];
-            if lhs_value.norm() <= 1e-30 {
-                continue;
-            }
-            for col in 0..cols {
-                out[row][col] += lhs_value * rhs[k][col];
-            }
-        }
-    }
-    out
-}
-
-fn invert_complex_matrix(
-    matrix: &[Vec<rspice_core::Complex64>],
-) -> Option<Vec<Vec<rspice_core::Complex64>>> {
-    let n = matrix.len();
-    if n == 0 || matrix.iter().any(|row| row.len() != n) {
-        return None;
-    }
-
-    let mut augmented = vec![vec![rspice_core::Complex64::new(0.0, 0.0); 2 * n]; n];
-    for row in 0..n {
-        for col in 0..n {
-            augmented[row][col] = matrix[row][col];
-        }
-        augmented[row][n + row] = rspice_core::Complex64::new(1.0, 0.0);
-    }
-
-    for col in 0..n {
-        let mut pivot = col;
-        let mut pivot_norm = augmented[pivot][col].norm();
-        for (row, row_values) in augmented.iter().enumerate().take(n).skip(col + 1) {
-            let norm = row_values[col].norm();
-            if norm > pivot_norm {
-                pivot = row;
-                pivot_norm = norm;
-            }
-        }
-        if pivot_norm <= 1e-24 {
-            return None;
-        }
-        if pivot != col {
-            augmented.swap(pivot, col);
-        }
-
-        let pivot_value = augmented[col][col];
-        for value in &mut augmented[col] {
-            *value /= pivot_value;
-        }
-        let pivot_row = augmented[col].clone();
-
-        for (row, row_values) in augmented.iter_mut().enumerate().take(n) {
-            if row == col {
-                continue;
-            }
-            let factor = row_values[col];
-            if factor.norm() <= 1e-30 {
-                continue;
-            }
-            for idx in 0..(2 * n) {
-                row_values[idx] -= factor * pivot_row[idx];
-            }
-        }
-    }
-
-    let mut inverse = vec![vec![rspice_core::Complex64::new(0.0, 0.0); n]; n];
-    for (row, row_values) in inverse.iter_mut().enumerate() {
-        for (col, value) in row_values.iter_mut().enumerate() {
-            *value = augmented[row][n + col];
-        }
-    }
-    Some(inverse)
-}
-
 fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> bool {
     path.extension().is_some_and(|ext| {
         ext.eq_ignore_ascii_case("snp") || ext.eq_ignore_ascii_case(format!("s{}p", num_ports))
@@ -1656,7 +1435,7 @@ fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> boo
 
 fn write_touchstone_nport(
     path: &std::path::Path,
-    ports: &[NetlistSParameterPort],
+    ports: &[s_param::SParameterPort],
     frequencies: &[f64],
     s: &[Vec<Vec<rspice_core::Complex64>>],
 ) -> Result<(), CliError> {
