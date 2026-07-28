@@ -31,7 +31,8 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::section_header;
 
-use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} ELECTRICAL INTENT \u{00b7} CROSS-SHEET RESOLUTION";
 const TITLE: &str = "Connectivity, buses and signal bundles";
@@ -994,7 +995,7 @@ fn cell_view_reference_from_key(key: &str) -> Option<CellViewRef> {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.connectivity_manager.open {
             return;
         }

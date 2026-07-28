@@ -23,7 +23,8 @@ use crate::state::{
     Cell, CellViewRef, Library, LibraryManager, OpenCellView, ProjectWorkspace, SchematicState,
     View, ViewType,
 };
-use crate::workbench::app::{AppState, RSpiceApp, RecentKind};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::{AppState, RecentKind};
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 use crate::workbench::state::{LocalSafeModeOptions, Workspace};
@@ -516,9 +517,9 @@ fn matches_documented_pristine_plan(
 
 fn pristine_execution_context(
     project_id: crate::product::ProjectId,
-    identity_source: &crate::workbench::app::SimSetupState,
+    identity_source: &crate::workbench::app_state::SimSetupState,
 ) -> Result<ProjectExecutionContext, String> {
-    let mut pristine = crate::workbench::app::SimSetupState::new();
+    let mut pristine = crate::workbench::app_state::SimSetupState::new();
     let source_plan = identity_source.stable_analysis_plan().ok();
     let documented_plan = pristine.stable_analysis_plan().ok();
     if source_plan
@@ -533,7 +534,7 @@ fn pristine_execution_context(
     ProjectExecutionContext::from_state(
         project_id,
         &pristine,
-        &crate::workbench::app::default_model_library_manager(),
+        &crate::workbench::app_state::default_model_library_manager(),
     )
     .map_err(|error| format!("pristine simulation/model state is invalid: {error}"))
 }
@@ -676,8 +677,8 @@ pub(crate) fn open_comparison(
     app.state.workspace = comparison.workspace;
     app.state.schematic = comparison.active;
     app.state.bump_active_schematic_epoch();
-    app.state.sim_setup = crate::workbench::app::SimSetupState::new();
-    app.state.model_library_manager = crate::workbench::app::default_model_library_manager();
+    app.state.sim_setup = crate::workbench::app_state::SimSetupState::new();
+    app.state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
     app.state.workbench.activate(Workspace::Design);
     app.state.push_user_message(ConsoleMessage::warning(format!(
         "Opened recovery comparison for '{}'; the saved source and checkpoint remain unchanged",

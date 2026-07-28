@@ -14,9 +14,8 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
 
-use crate::workbench::app::{
-    AppState, HierarchyDescendEditMode, HierarchyParentContext, RSpiceApp, SchematicEditAuthority,
-};
+use crate::workbench::app::{HierarchyDescendEditMode, HierarchyParentContext, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} EDIT CONTEXT";
 const TITLE: &str = "Descend into hierarchy";
@@ -51,7 +50,7 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_descend_hierarchy_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_descend_hierarchy_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.descend_hierarchy.open {
             return;
         }

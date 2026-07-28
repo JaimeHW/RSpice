@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::diagnostics::ConsoleMessage;
 use crate::io::SchematicIoError;
 use crate::state::{SchematicState, ViewType};
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SchematicLoadOrigin<'a> {
@@ -181,7 +181,7 @@ pub(crate) fn apply_loaded_schematic(
     replace_active_schematic_document(state, schematic);
     state.clear_design_execution_context();
     if let Some(path) = origin.recent_path() {
-        state.remember_recent_file(crate::workbench::app::RecentKind::Schematic, path);
+        state.remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
     }
     state.push_user_message(ConsoleMessage::info(format!(
         "{}: {}",
@@ -370,7 +370,7 @@ pub(crate) fn save_schematic_to_path_with_io(
             }
             state.sync_active_schematic_to_workspace();
             if saved_path_is_reopenable {
-                state.remember_recent_file(crate::workbench::app::RecentKind::Schematic, path);
+                state.remember_recent_file(crate::workbench::app_state::RecentKind::Schematic, path);
                 state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
             } else {
                 state.browser_schematic_save_name = file_name_string(path);

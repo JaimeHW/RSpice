@@ -141,7 +141,7 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
 /// the legacy schematic-only behavior; hierarchy examples also populate the
 /// project library, open views, and schematic buffers that their cell
 /// instances resolve through.
-pub(crate) fn load_example_into_app(name: &str, app: &mut crate::workbench::app::AppState) -> bool {
+pub(crate) fn load_example_into_app(name: &str, app: &mut crate::workbench::app_state::AppState) -> bool {
     if name == HIERARCHICAL_RC_FILTER {
         build_hierarchical_rc_project(app);
         reset_example_runtime_context(app);
@@ -160,7 +160,7 @@ pub(crate) fn load_example_into_app(name: &str, app: &mut crate::workbench::app:
     true
 }
 
-fn reset_example_runtime_context(app: &mut crate::workbench::app::AppState) {
+fn reset_example_runtime_context(app: &mut crate::workbench::app_state::AppState) {
     app.schematic.current_file = None;
     app.schematic.read_only = false;
     app.clear_design_execution_context();
@@ -717,7 +717,7 @@ fn build_opamp_inverter(state: &mut SchematicState) {
     add_label(state, Point::new(380, 160), "vout");
 }
 
-fn build_hierarchical_rc_project(app: &mut crate::workbench::app::AppState) {
+fn build_hierarchical_rc_project(app: &mut crate::workbench::app_state::AppState) {
     let mut core_schematic = build_hierarchical_rc_core();
     let core_symbol = hierarchical_rc_symbol();
     let mut top = SchematicState::default();
@@ -989,7 +989,7 @@ mod tests {
     use super::*;
     use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
     use crate::state::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument};
-    use crate::workbench::app::AppState;
+    use crate::workbench::app_state::AppState;
     use std::collections::HashSet;
 
     /// Every wire endpoint must coincide with a component terminal or lie on

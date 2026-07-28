@@ -1,6 +1,6 @@
 use crate::diagnostics::ConsoleMessage;
 use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x655d_ae12_6cdd_5971_b7d8_aafe_02b6_b367);
@@ -103,7 +103,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             #[serde(default)]
             workbench: crate::workbench::WorkbenchState,
             #[serde(default)]
-            recent_files: Vec<crate::workbench::app::RecentFile>,
+            recent_files: Vec<crate::workbench::app_state::RecentFile>,
             #[serde(default)]
             license_key: Option<String>,
             #[serde(default)]

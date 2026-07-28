@@ -24,9 +24,8 @@ use crate::workbench::app::dialogs::review_primitives::{
     resolved_context,
 };
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
-use crate::workbench::app::{
-    AppState, ArraySelectionDialogState, RSpiceApp, SchematicEditAuthority,
-};
+use crate::workbench::app::{ArraySelectionDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} REPEATED STRUCTURE";
 const TITLE: &str = "Create object array";
@@ -166,7 +165,7 @@ pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_array_selection_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_array_selection_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.array_selection.open {
             return;
         }

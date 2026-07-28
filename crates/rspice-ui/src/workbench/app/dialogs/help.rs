@@ -7,7 +7,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::app::{HelpCenterPage, RSpiceApp, session::shortcuts::ShortcutCategory};
+use crate::workbench::app::{HelpCenterPage, RSpiceApp};
+use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
 use crate::workbench::commands::{Command, CommandPlatform};
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
@@ -52,7 +53,7 @@ fn shortcut_row_matches(
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_help_center_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_help_center_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.help_center.open {
             return;
         }
@@ -132,7 +133,7 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench::app) fn render_about_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_about_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.about {
             return;
         }
@@ -202,7 +203,7 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench::app) fn render_shortcuts_help_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_shortcuts_help_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.shortcuts_help {
             return;
         }
@@ -210,7 +211,7 @@ impl RSpiceApp {
         // Count against the filter as entered last frame — immediate mode
         // corrects the hint one frame after each keystroke.
         let shortcuts = self.state.ui.preferences.shortcuts().clone();
-        let platform = crate::workbench::app::runtime_command_platform(ctx);
+        let platform = crate::workbench::app_state::runtime_command_platform(ctx);
         let operating_system = ctx.os();
         let filter = self.state.dialogs.shortcuts_filter.trim().to_lowercase();
         let total: usize = ShortcutCategory::ALL

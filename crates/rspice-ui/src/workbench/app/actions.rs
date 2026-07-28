@@ -1,7 +1,7 @@
-pub(in crate::workbench::app) mod export_image;
-pub(in crate::workbench::app) mod file;
-pub(in crate::workbench::app) mod property_edit;
-pub(in crate::workbench::app) mod workspace;
+pub(in crate::workbench) mod export_image;
+pub(in crate::workbench) mod file;
+pub(in crate::workbench) mod property_edit;
+pub(in crate::workbench) mod workspace;
 
 use egui::{Context, Popup};
 
@@ -14,12 +14,11 @@ use crate::workbench::{
     mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
 };
 
-use crate::workbench::app::{
-    AppState, RSpiceApp,
-    session::shortcuts::{
-        ShortcutEnvironment, ShortcutInputSnapshot, engineering_canvas_has_focus,
-        runtime_command_platform,
-    },
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::session::shortcuts::{
+    ShortcutEnvironment, ShortcutInputSnapshot, engineering_canvas_has_focus,
+    runtime_command_platform,
 };
 
 fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
@@ -69,7 +68,7 @@ fn unique_symbol_pin_name(document: &SymbolDocument, base: &str) -> String {
 
 impl RSpiceApp {
     /// Handle keyboard shortcuts
-    pub(in crate::workbench::app) fn handle_shortcuts(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn handle_shortcuts(&mut self, ctx: &Context) {
         if shortcut_dispatch_blocked(&self.state, ctx) {
             self.state.shortcut_resolver.reset();
             return;
@@ -120,7 +119,7 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench::app) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
+    pub(in crate::workbench) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
         use crate::state::{ComponentType, Tool};
 
         if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol
@@ -1045,12 +1044,12 @@ impl RSpiceApp {
             .push_user_message(ConsoleMessage::info("Nothing to redo"));
     }
 
-    pub(in crate::workbench::app) fn action_edit_copy(&mut self) {
+    pub(in crate::workbench) fn action_edit_copy(&mut self) {
         crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         self.state.copy_active_schematic_selection();
     }
 
-    pub(in crate::workbench::app) fn action_edit_paste(&mut self) {
+    pub(in crate::workbench) fn action_edit_paste(&mut self) {
         let anchor = self.state.schematic_paste_anchor();
         if !self.state.schematic.paste_at(anchor) {
             self.state.push_user_message(ConsoleMessage::warning(
@@ -1059,15 +1058,15 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench::app) fn action_edit_cut(&mut self) {
+    pub(in crate::workbench) fn action_edit_cut(&mut self) {
         crate::workbench::app::open_cut_selection_dialog(&mut self.state);
     }
 
-    pub(in crate::workbench::app) fn action_edit_delete(&mut self) {
+    pub(in crate::workbench) fn action_edit_delete(&mut self) {
         crate::workbench::app::open_delete_selection_dialog(&mut self.state);
     }
 
-    pub(in crate::workbench::app) fn action_edit_select_all(&mut self) {
+    pub(in crate::workbench) fn action_edit_select_all(&mut self) {
         crate::workbench::app::open_select_all_dialog(&mut self.state);
     }
 }

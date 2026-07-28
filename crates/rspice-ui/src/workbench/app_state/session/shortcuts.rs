@@ -9,12 +9,12 @@ mod input_snapshot;
 mod platform;
 mod resolver;
 
-pub(in crate::workbench::app) use canvas_focus::engineering_canvas_has_focus;
+pub(in crate::workbench) use canvas_focus::engineering_canvas_has_focus;
 pub(crate) use canvas_focus::report_engineering_canvas_focus;
-pub(in crate::workbench::app) use category::ShortcutCategory;
-pub(in crate::workbench::app) use input_snapshot::ShortcutInputSnapshot;
+pub(in crate::workbench) use category::ShortcutCategory;
+pub(in crate::workbench) use input_snapshot::ShortcutInputSnapshot;
 pub(crate) use platform::runtime_command_platform;
-pub(in crate::workbench::app) use resolver::ShortcutEnvironment;
+pub(in crate::workbench) use resolver::ShortcutEnvironment;
 pub(crate) use resolver::ShortcutResolverState;
 
 /// Accessibility projection of the same effective bindings consumed by the

@@ -18,7 +18,8 @@ use crate::workbench::design_system::{
 use crate::workbench::app::dialogs::review_primitives::{
     input_field, purpose_line, read_only_field,
 };
-use crate::workbench::app::{AppState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 const MANAGER_TITLE: &str = "Testbench configuration sets";
 const MANAGER_EYEBROW: &str = "DESIGN · HIERARCHY · VIEW BINDING";
@@ -206,7 +207,7 @@ enum BodyAction {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_configuration_sets_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_configuration_sets_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.configuration_sets.open {
             return;
         }

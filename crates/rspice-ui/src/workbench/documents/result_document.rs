@@ -43,7 +43,7 @@ use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, docbar_at_height};
-use crate::workbench::app::ActiveViewer;
+use crate::workbench::app_state::ActiveViewer;
 use super::visualization_family::SourceSampleSelection;
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -1135,7 +1135,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     if !app.state.simulation.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
             crate::workbench::commands::Command::RunSimulation,
-            crate::workbench::app::runtime_command_platform(ui.ctx()),
+            crate::workbench::app_state::runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );
         let hint = if shortcut.is_empty() {
@@ -1300,7 +1300,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Waves => {
             let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
                 crate::workbench::commands::Command::ToggleLinkedCursors,
-                crate::workbench::app::runtime_command_platform(ui.ctx()),
+                crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
             let results = &mut state.ui.results;

@@ -15,9 +15,8 @@ use crate::ui::widgets::{
 };
 
 use crate::workbench::app::dialogs::schematic_command::{field_label, read_only_value, snap_label};
-use crate::workbench::app::{
-    AppState, NetLabelPlacementDialogState, RSpiceApp, SchematicEditAuthority,
-};
+use crate::workbench::app::{NetLabelPlacementDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY";
 const TITLE: &str = "Place net label";
@@ -80,7 +79,7 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_net_label_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_net_label_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.net_label_placement.open {
             return;
         }

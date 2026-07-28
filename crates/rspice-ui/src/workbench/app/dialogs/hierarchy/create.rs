@@ -25,13 +25,14 @@ use crate::ui::widgets::{
     select_mono_with_response,
 };
 
-use crate::workbench::app::design_history::{
+use crate::workbench::app_state::design_history::{
     HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
 };
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::dialogs::state::{CreateHierarchyDialogState, CreateHierarchyPortDraft};
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
-use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CELL / VIEW CONTRACT";
 const TITLE: &str = "Create hierarchical cell";
@@ -90,7 +91,7 @@ pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_create_hierarchy_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_create_hierarchy_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.create_hierarchy.open {
             return;
         }
@@ -539,7 +540,7 @@ fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
 /// connectivity authority used by transactional hierarchy extraction.  Sheet
 /// management consumes this result to preserve internal conductors and create
 /// exact typed contracts for every source/destination boundary terminal.
-pub(in crate::workbench::app) fn selected_component_sheet_move_plan(
+pub(in crate::workbench) fn selected_component_sheet_move_plan(
     state: &AppState,
 ) -> Result<SheetMoveConnectivityPlan, String> {
     if !create_hierarchy_available(state) {

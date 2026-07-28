@@ -1077,7 +1077,7 @@ fn command_item_as_impl(
     let enabled = availability.is_available();
     let shortcut = shortcut_for_occurrence(
         app.state.ui.preferences.shortcuts(),
-        crate::workbench::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
         command,
         shortcut_override,
@@ -1363,7 +1363,7 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::PageSetup);
     command_item(ui, app, Command::PrintHardcopy);
     command_item(ui, app, Command::ExportActiveView);
-    let platform = crate::workbench::app::runtime_command_platform(ui.ctx());
+    let platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
     if file_menu_shows_exit(platform) {
         menu_separator(ui);
         command_item(ui, app, Command::Exit);
@@ -1835,7 +1835,7 @@ fn search_button(ui: &mut Ui, app: &RSpiceApp, viewport_width: f32, large_target
     let t = Tokens::get(ui.ctx());
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
         Command::CommandPalette,
-        crate::workbench::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let keycap = shortcut.replace('+', " ");

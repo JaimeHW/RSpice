@@ -19,31 +19,32 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 use self::preferences_shell::PreferenceCategory;
 use self::shortcut_portability_dialogs::{ShortcutExportEnvironment, ShortcutPortabilityAction};
-use crate::workbench::app::session::shortcut_library::{
+use crate::workbench::app_state::session::shortcut_library::{
     ShortcutLibraryPublication, ShortcutLibraryPublicationContinuation,
 };
-use crate::workbench::app::{AppState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
-pub(in crate::workbench::app) const ENGINEERING_PROFILE_HELP: &str = "Sets the discipline context reported by capability discovery and the availability matrix. Deep links and project documents remain available.";
-pub(in crate::workbench::app) const CAPABILITY_MATRIX_HELP: &str = "See installed, licensed, preview and profile-hidden capabilities without duplicating their settings.";
+pub(in crate::workbench) const ENGINEERING_PROFILE_HELP: &str = "Sets the discipline context reported by capability discovery and the availability matrix. Deep links and project documents remain available.";
+pub(in crate::workbench) const CAPABILITY_MATRIX_HELP: &str = "See installed, licensed, preview and profile-hidden capabilities without duplicating their settings.";
 
 #[derive(Debug, Default)]
-pub(in crate::workbench::app) struct PreferencePageActions {
-    pub(in crate::workbench::app) open_capability_matrix: bool,
-    pub(in crate::workbench::app) open_resolved_preference_policy: bool,
-    pub(in crate::workbench::app) open_workspace_layout_manager: bool,
-    pub(in crate::workbench::app) open_shortcut_editor: bool,
-    pub(in crate::workbench::app) open_shortcut_import: bool,
-    pub(in crate::workbench::app) open_shortcut_export: bool,
-    pub(in crate::workbench::app) open_resolved_shortcut_policy: bool,
-    pub(in crate::workbench::app) shortcut_policy_candidate:
+pub(in crate::workbench) struct PreferencePageActions {
+    pub(in crate::workbench) open_capability_matrix: bool,
+    pub(in crate::workbench) open_resolved_preference_policy: bool,
+    pub(in crate::workbench) open_workspace_layout_manager: bool,
+    pub(in crate::workbench) open_shortcut_editor: bool,
+    pub(in crate::workbench) open_shortcut_import: bool,
+    pub(in crate::workbench) open_shortcut_export: bool,
+    pub(in crate::workbench) open_resolved_shortcut_policy: bool,
+    pub(in crate::workbench) shortcut_policy_candidate:
         Option<crate::workbench::ShortcutPreferences>,
-    pub(in crate::workbench::app) updated_profile_label: Option<&'static str>,
+    pub(in crate::workbench) updated_profile_label: Option<&'static str>,
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_preferences_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_preferences_dialog(&mut self, ctx: &Context) {
         self.poll_shortcut_portability_source();
         self.finish_shortcut_library_publication();
         let category_id = Id::new(CATEGORY_STATE_ID);
@@ -209,7 +210,7 @@ impl RSpiceApp {
             .filter(|context| context.matches(self))
             .collect::<Vec<_>>();
         let environment = ShortcutExportEnvironment {
-            runtime_platform: crate::workbench::app::runtime_command_platform(ctx),
+            runtime_platform: crate::workbench::app_state::runtime_command_platform(ctx),
             operating_system: ctx.os(),
             current_contexts: &current_contexts,
         };
@@ -579,7 +580,7 @@ fn close_preferences(state: &mut AppState) {
     }
 }
 
-pub(in crate::workbench::app) fn normalize_autosave_minutes(minutes: u8) -> u8 {
+pub(in crate::workbench) fn normalize_autosave_minutes(minutes: u8) -> u8 {
     match minutes {
         2 | 5 | 10 => minutes,
         0..=3 => 2,
@@ -588,7 +589,7 @@ pub(in crate::workbench::app) fn normalize_autosave_minutes(minutes: u8) -> u8 {
     }
 }
 
-pub(in crate::workbench::app) fn engineering_profile_detail(
+pub(in crate::workbench) fn engineering_profile_detail(
     profile: crate::workbench::EngineeringProfile,
 ) -> &'static str {
     if profile == crate::workbench::EngineeringProfile::All {
@@ -983,7 +984,7 @@ mod tests {
             .policies_mut()
             .set_chord_timeout(crate::workbench::ChordTimeoutPolicy::ThreeSeconds);
         app.state.shortcut_library_persistence =
-            crate::workbench::app::session::shortcut_library::ShortcutLibraryPersistenceRuntime::Unavailable(
+            crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::Unavailable(
                 "simulated canonical storage failure".to_owned(),
             );
 

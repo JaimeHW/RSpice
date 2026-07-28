@@ -77,7 +77,7 @@ impl DraftValidation {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_bus_tap_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_bus_tap_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.bus_tap.open {
             return;
         }

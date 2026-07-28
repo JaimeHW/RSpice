@@ -27,7 +27,8 @@ use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_
 use crate::workbench::app::schematic::instance_catalog::{
     InstanceCatalogEntry, instance_catalog, resolve_instance_catalog_entry,
 };
-use crate::workbench::app::{AppState, RSpiceApp, ReplaceInstanceOpen, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, ReplaceInstanceOpen, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} MODEL/SYMBOL COMPATIBILITY";
 const TITLE: &str = "Replace selected instance";
@@ -154,7 +155,7 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_replace_instance_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_replace_instance_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.replace_instance.open {
             return;
         }

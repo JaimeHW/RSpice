@@ -19,7 +19,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus};
 use crate::workbench::ResultViewer;
-use crate::workbench::app::{AppState, ContextTarget};
+use crate::workbench::app_state::{AppState, ContextTarget};
 use crate::workbench::commands::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
@@ -503,7 +503,7 @@ fn render_context_contents(
                         .map_or_else(String::new, |product_command| {
                             state.ui.preferences.shortcuts().resolved_label(
                                 product_command,
-                                crate::workbench::app::runtime_command_platform(ui.ctx()),
+                                crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                                 ui.ctx().os(),
                             )
                         });

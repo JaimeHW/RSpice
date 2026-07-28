@@ -11,7 +11,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 use super::commands::Command;
 use super::design_system::property_row;

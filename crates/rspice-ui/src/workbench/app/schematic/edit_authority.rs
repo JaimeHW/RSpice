@@ -6,7 +6,7 @@
 
 use crate::state::{SchematicDocumentPolicy, SchematicSnapshot, Selection};
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SchematicEditAuthority {

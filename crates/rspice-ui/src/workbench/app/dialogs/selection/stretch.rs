@@ -18,9 +18,8 @@ use crate::ui::widgets::{
 use crate::workbench::app::dialogs::schematic_command::{
     DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE, field_label, read_only_value, snap_label,
 };
-use crate::workbench::app::{
-    AppState, RSpiceApp, SchematicEditAuthority, StretchSelectionDialogState,
-};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority, StretchSelectionDialogState};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} GEOMETRY EDIT";
 const TITLE: &str = "Stretch selection";
@@ -74,7 +73,7 @@ pub(crate) fn open_stretch_selection_dialog(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_stretch_selection_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_stretch_selection_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.stretch_selection.open {
             return;
         }

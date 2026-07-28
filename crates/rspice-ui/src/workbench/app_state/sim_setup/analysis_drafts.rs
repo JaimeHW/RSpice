@@ -15,7 +15,7 @@ use crate::simulation::plan::{
     SimulationPlan,
 };
 
-use crate::workbench::app::{NoiseSetup, SimSetupState};
+use crate::workbench::app_state::{NoiseSetup, SimSetupState};
 
 const LEGACY_ANALYSIS_PLAN_NAMESPACE: Uuid =
     Uuid::from_u128(0x4fca_8534_7bd6_52fb_a3f9_5ca4_d8e3_b127);

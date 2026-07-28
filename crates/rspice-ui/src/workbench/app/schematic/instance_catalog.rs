@@ -13,7 +13,7 @@ use crate::state::{
     library_cell_placement_candidates,
 };
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 #[derive(Debug, Clone)]
 pub(crate) struct InstanceCatalogEntry {

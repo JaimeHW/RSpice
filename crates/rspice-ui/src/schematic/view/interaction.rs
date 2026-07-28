@@ -6,7 +6,7 @@ use crate::state::{
     ComponentType, NetGraph, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, Tool, ViewType,
 };
-use crate::workbench::app::{AppState, DragType};
+use crate::workbench::app_state::{AppState, DragType};
 
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;

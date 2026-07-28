@@ -12,7 +12,8 @@ use crate::ui::widgets::{
     select_with_response,
 };
 
-use crate::workbench::app::{AppState, DocumentationShapeDialogState, RSpiceApp};
+use crate::workbench::app::{DocumentationShapeDialogState, RSpiceApp};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} GRAPHICS";
 const TITLE: &str = "Draw documentation shape";
@@ -49,7 +50,7 @@ impl DraftValidation {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_documentation_shape_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_documentation_shape_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.documentation_shape.open {
             return;
         }

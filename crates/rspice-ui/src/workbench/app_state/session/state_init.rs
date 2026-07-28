@@ -1,4 +1,5 @@
-use crate::workbench::app::{AnalysisWorkspaceState, AppState, DialogState};
+use crate::workbench::app::DialogState;
+use crate::workbench::app_state::{AnalysisWorkspaceState, AppState};
 
 pub(crate) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
@@ -8,7 +9,7 @@ pub(crate) fn default_model_library_manager() -> crate::state::model_library::Mo
     manager
 }
 
-pub(in crate::workbench::app) fn default_analysis_viewers() -> AnalysisWorkspaceState {
+pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState {
     AnalysisWorkspaceState {
         pole_zero_state: crate::analysis::pole_zero::PoleZeroState::default(),
         bode_plot_state: crate::analysis::bode::BodePlotState::default(),
@@ -20,7 +21,7 @@ pub(in crate::workbench::app) fn default_analysis_viewers() -> AnalysisWorkspace
     }
 }
 
-pub(in crate::workbench::app) fn default_app_state() -> AppState {
+pub(in crate::workbench) fn default_app_state() -> AppState {
     let analysis = default_analysis_viewers();
     let mut library_manager = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut library_manager);
@@ -29,7 +30,7 @@ pub(in crate::workbench::app) fn default_app_state() -> AppState {
         .cloned()
         .unwrap_or_else(crate::state::SchematicState::default);
     workspace.save_active_schematic(&schematic);
-    let sim_setup = crate::workbench::app::SimSetupState::new();
+    let sim_setup = crate::workbench::app_state::SimSetupState::new();
     if let Ok(plan) = sim_setup.stable_analysis_plan() {
         workspace.migrate_active_plan_data(plan.id());
     }
@@ -99,9 +100,9 @@ pub(in crate::workbench::app) fn default_app_state() -> AppState {
         analysis,
         ui,
         workbench: crate::workbench::WorkbenchState::default(),
-        shortcut_resolver: crate::workbench::app::session::shortcuts::ShortcutResolverState::default(),
+        shortcut_resolver: crate::workbench::app_state::session::shortcuts::ShortcutResolverState::default(),
         shortcut_library_persistence:
-            crate::workbench::app::session::shortcut_library::ShortcutLibraryPersistenceRuntime::default(),
+            crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::default(),
         shortcut_library_publication_continuation: None,
     }
 }

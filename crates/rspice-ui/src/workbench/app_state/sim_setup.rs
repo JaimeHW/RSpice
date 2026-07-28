@@ -7,9 +7,9 @@
 //! builds the run plan, so what you see is what runs. `enabled` is the run
 //! set and `analysis_order` is its stable execution order.
 
-pub(in crate::workbench::app) mod analysis_drafts;
-pub(in crate::workbench::app) mod dialogs;
-pub(in crate::workbench::app) mod plan_catalog;
+pub(in crate::workbench) mod analysis_drafts;
+pub(in crate::workbench) mod dialogs;
+pub(in crate::workbench) mod plan_catalog;
 
 use std::collections::HashSet;
 
@@ -164,13 +164,13 @@ pub struct SimSetupState {
     pub reference_pvt: ReferencePvtPoint,
     /// Validated project-unique name of the active simulation plan.
     #[serde(default)]
-    pub active_plan_name: crate::workbench::app::SimulationPlanName,
+    pub active_plan_name: crate::workbench::app_state::SimulationPlanName,
     /// Immutable source identity and revision when the active plan is a clone.
     #[serde(default)]
-    pub active_plan_lineage: crate::workbench::app::SimulationPlanLineage,
+    pub active_plan_lineage: crate::workbench::app_state::SimulationPlanLineage,
     /// Complete inactive plans retained in deterministic catalog order.
     #[serde(default)]
-    pub inactive_plans: Vec<crate::workbench::app::StoredSimulationPlan>,
+    pub inactive_plans: Vec<crate::workbench::app_state::StoredSimulationPlan>,
     /// Stable, revisioned analysis-instance plan. `None` is accepted only
     /// while reading schema-3 projects/sessions and must be deterministically
     /// migrated before validation, editing, or execution.

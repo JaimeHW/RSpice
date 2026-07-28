@@ -13,10 +13,8 @@ use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
 };
 
-use crate::workbench::app::{
-    AppState, EngineeringTableDialogPage, EngineeringTableExportFormat,
-    EngineeringTableExportScope, RSpiceApp,
-};
+use crate::workbench::app::{EngineeringTableDialogPage, EngineeringTableExportFormat, EngineeringTableExportScope, RSpiceApp};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "VIEW \u{00b7} UNIVERSAL DATA-GRID CONTRACT";
 
@@ -84,7 +82,7 @@ pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_engineering_table_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_engineering_table_dialog(&mut self, ctx: &Context) {
         #[cfg(target_arch = "wasm32")]
         self.consume_engineering_view_import();
         if !self.state.dialogs.engineering_table.open {

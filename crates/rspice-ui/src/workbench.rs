@@ -34,6 +34,7 @@ pub(crate) mod lifecycle;
 pub(crate) mod documents;
 pub(crate) mod account_organization;
 pub(crate) mod app;
+pub(crate) mod app_state;
 pub(crate) mod browser;
 pub(crate) mod chrome;
 pub(crate) mod commands;
@@ -110,7 +111,8 @@ pub use lifecycle::window_session::{
     WindowSessionRegistry,
 };
 
-pub use app::{AppState, RSpiceApp};
+pub use app::RSpiceApp;
+pub use app_state::AppState;
 pub(crate) use frame::{
     enter_full_screen_presentation, exit_full_screen_presentation, show, show_embedded_secondary,
     show_route_overlays, show_secondary,

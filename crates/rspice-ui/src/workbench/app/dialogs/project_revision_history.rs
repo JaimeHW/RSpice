@@ -20,7 +20,8 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::section_header;
 
-use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "PROJECT \u{00b7} SEMANTIC HISTORY \u{00b7} TRACEABILITY";
 const TITLE: &str = "Project revision and audit history";
@@ -237,7 +238,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_project_revision_history_dialog(
+    pub(in crate::workbench) fn render_project_revision_history_dialog(
         &mut self,
         ctx: &Context,
     ) {
@@ -783,7 +784,7 @@ fn simulation_plan_row(
     id: String,
     revision: String,
     analysis_count: usize,
-    lineage: crate::workbench::app::SimulationPlanLineage,
+    lineage: crate::workbench::app_state::SimulationPlanLineage,
     active: bool,
 ) -> ProjectAuditRow {
     let lineage_evidence = match (lineage.source_plan_id(), lineage.source_revision()) {

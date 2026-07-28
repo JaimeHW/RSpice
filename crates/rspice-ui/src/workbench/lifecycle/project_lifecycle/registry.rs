@@ -419,7 +419,7 @@ mod tests {
         DesignVariableSweepEligibility, DocumentationShape, DocumentationShapeGeometry, Point,
         SimulationPlanPayloadRecord,
     };
-    use crate::workbench::app::AppState;
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn canonical_digest_is_independent_of_map_insertion_order() {

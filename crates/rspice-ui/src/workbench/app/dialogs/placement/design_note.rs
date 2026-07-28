@@ -12,7 +12,8 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
 
-use crate::workbench::app::{AppState, DesignNoteDialogState, RSpiceApp};
+use crate::workbench::app::{DesignNoteDialogState, RSpiceApp};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC · DOCUMENTATION";
 const TITLE: &str = "Place text or design note";
@@ -48,7 +49,7 @@ impl DraftValidation {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_design_note_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_design_note_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.design_note.open {
             return;
         }

@@ -15,7 +15,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 
-use crate::workbench::app::{AppState, RSpiceApp, RenameSelectionTarget};
+use crate::workbench::app::{RSpiceApp, RenameSelectionTarget};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "EDIT \u{00b7} STABLE IDENTITY";
 const TITLE: &str = "Rename selected object";
@@ -130,7 +131,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_rename_selection_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_rename_selection_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.rename_selection.open {
             return;
         }

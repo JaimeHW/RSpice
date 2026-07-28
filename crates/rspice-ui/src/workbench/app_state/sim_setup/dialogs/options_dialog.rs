@@ -21,7 +21,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, check_row, chip, choice_row, dialog_tabs, input_row,
 };
-use crate::workbench::app::SimSetupState;
+use crate::workbench::app_state::SimSetupState;
 
 const TABS: &[&str] = &[
     "Accuracy",
@@ -272,7 +272,7 @@ fn options_preview(ui: &mut Ui, setup: &SimSetupState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_simulation_options_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_simulation_options_dialog(&mut self, ctx: &Context) {
         if !self.state.sim_setup.options_open {
             return;
         }

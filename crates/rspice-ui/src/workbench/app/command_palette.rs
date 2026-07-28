@@ -818,7 +818,7 @@ impl RSpiceApp {
         ranked.into_iter().map(|(_, row)| row).collect()
     }
 
-    pub(in crate::workbench::app) fn render_command_palette(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_command_palette(&mut self, ctx: &Context) {
         if !self.state.dialogs.command_palette.open {
             return;
         }
@@ -954,7 +954,7 @@ impl RSpiceApp {
             let rows = self.palette_rows(
                 &self.state.dialogs.command_palette.query,
                 scope,
-                crate::workbench::app::runtime_command_platform(ctx),
+                crate::workbench::app_state::runtime_command_platform(ctx),
                 ctx.os(),
             );
             let selected = &mut self.state.dialogs.command_palette.selected;
@@ -1963,7 +1963,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn test_app() -> RSpiceApp {
         RSpiceApp {
-            state: crate::workbench::app::AppState::default(),
+            state: crate::workbench::app_state::AppState::default(),
             first_frame: false,
             autosave_last: None,
             applied_theme: None,

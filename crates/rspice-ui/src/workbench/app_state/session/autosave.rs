@@ -21,7 +21,7 @@ impl RSpiceApp {
     /// Write a checkpoint when the interval has elapsed on a dirty,
     /// path-bearing schematic. Called once per frame; cheap when idle.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(in crate::workbench::app) fn autosave_tick(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn autosave_tick(&mut self, ctx: &Context) {
         let minutes = self.state.ui.autosave_minutes;
         if minutes == 0 || !self.state.schematic.is_dirty || self.state.schematic.read_only {
             self.autosave_last = None;
@@ -50,8 +50,10 @@ impl RSpiceApp {
             return;
         }
 
-        match crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(&path, &self.state.schematic)
-        {
+        match crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(
+            &path,
+            &self.state.schematic,
+        ) {
             Ok(checkpoint) => {
                 self.state.log_buffer.log(
                     crate::diagnostics::LogSeverity::Debug,
@@ -72,7 +74,7 @@ impl RSpiceApp {
     /// as unsaved changes over the file's identity; Discard deletes it and
     /// opens the file; Esc opens the file and keeps the checkpoint.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(in crate::workbench::app) fn process_autosave_restore_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn process_autosave_restore_dialog(&mut self, ctx: &Context) {
         let Some(candidate) = self.state.dialogs.pending_autosave_restore.clone() else {
             return;
         };
@@ -113,17 +115,18 @@ impl RSpiceApp {
         match choice {
             DialogChoice::None => {}
             DialogChoice::Primary => {
-                let restored = crate::workbench::lifecycle::recovery_checkpoint::read_bound_checkpoint(
-                    &path,
-                    &checkpoint,
-                    &candidate.binding,
-                )
-                .and_then(|bytes| {
-                    let text = std::str::from_utf8(&bytes)
-                        .map_err(|error| format!("checkpoint is not UTF-8 JSON: {error}"))?;
-                    crate::io::schematic_io::load_schematic_text(text, Some(&path))
-                        .map_err(|error| error.to_string())
-                });
+                let restored =
+                    crate::workbench::lifecycle::recovery_checkpoint::read_bound_checkpoint(
+                        &path,
+                        &checkpoint,
+                        &candidate.binding,
+                    )
+                    .and_then(|bytes| {
+                        let text = std::str::from_utf8(&bytes)
+                            .map_err(|error| format!("checkpoint is not UTF-8 JSON: {error}"))?;
+                        crate::io::schematic_io::load_schematic_text(text, Some(&path))
+                            .map_err(|error| error.to_string())
+                    });
                 match restored {
                     Ok(mut schematic) => {
                         schematic.current_file = Some(path.clone());

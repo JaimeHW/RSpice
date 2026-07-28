@@ -3,7 +3,7 @@ use crate::diagnostics::ConsoleMessage;
 use super::{RSpiceApp, VERILOGA_LIBRARY_NAME};
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn process_pending_library_deletions(&mut self) {
+    pub(in crate::workbench) fn process_pending_library_deletions(&mut self) {
         if let Some((lib_name, cell_name)) = self.state.pending_delete_cell.take() {
             if block_configuration_root_deletion(&mut self.state, &lib_name, &cell_name, None) {
                 return;
@@ -98,7 +98,7 @@ struct PendingDesignManagementRemoval {
 }
 
 fn prepare_design_management_removal(
-    state: &crate::workbench::app::AppState,
+    state: &crate::workbench::app_state::AppState,
     library: &str,
     cell: &str,
     view: Option<&str>,
@@ -132,7 +132,7 @@ fn prepare_design_management_removal(
 }
 
 fn apply_design_management_removal(
-    state: &mut crate::workbench::app::AppState,
+    state: &mut crate::workbench::app_state::AppState,
     removal: Option<PendingDesignManagementRemoval>,
 ) -> bool {
     let Some(removal) = removal else {
@@ -152,7 +152,7 @@ fn apply_design_management_removal(
 }
 
 fn block_configuration_root_deletion(
-    state: &mut crate::workbench::app::AppState,
+    state: &mut crate::workbench::app_state::AppState,
     library: &str,
     cell: &str,
     view: Option<&str>,
@@ -184,7 +184,7 @@ fn block_configuration_root_deletion(
 }
 
 fn remove_project_sources_for_deleted_scope(
-    state: &mut crate::workbench::app::AppState,
+    state: &mut crate::workbench::app_state::AppState,
     library: &str,
     cell: &str,
     view: Option<&str>,
@@ -224,7 +224,7 @@ mod tests {
         SchematicState, View, ViewType,
     };
 
-    fn app_with_state(state: crate::workbench::app::AppState) -> RSpiceApp {
+    fn app_with_state(state: crate::workbench::app_state::AppState) -> RSpiceApp {
         RSpiceApp {
             state,
             first_frame: false,
@@ -239,8 +239,8 @@ mod tests {
         }
     }
 
-    fn state_with_open_amp_cell() -> crate::workbench::app::AppState {
-        let mut state = crate::workbench::app::AppState::default();
+    fn state_with_open_amp_cell() -> crate::workbench::app_state::AppState {
+        let mut state = crate::workbench::app_state::AppState::default();
         let mut library = Library::new("work");
         let mut amp = Cell::new("amp");
         amp.add_view(View::new("schematic", ViewType::Schematic));
@@ -275,7 +275,7 @@ mod tests {
     }
 
     fn insert_cell_source(
-        state: &mut crate::workbench::app::AppState,
+        state: &mut crate::workbench::app_state::AppState,
         cell: &str,
         view: &str,
     ) -> crate::state::ProjectSourceId {
@@ -304,7 +304,7 @@ mod tests {
     }
 
     fn add_configuration_root(
-        state: &mut crate::workbench::app::AppState,
+        state: &mut crate::workbench::app_state::AppState,
         name: &str,
         root: CellViewRef,
     ) -> crate::state::ConfigurationSetId {
@@ -327,8 +327,8 @@ mod tests {
             .expect("valid configuration root")
     }
 
-    fn state_with_active_leaf_under_amp() -> crate::workbench::app::AppState {
-        let mut state = crate::workbench::app::AppState::default();
+    fn state_with_active_leaf_under_amp() -> crate::workbench::app_state::AppState {
+        let mut state = crate::workbench::app_state::AppState::default();
         let mut library = Library::new("work");
         for name in ["top", "amp", "leaf"] {
             let mut cell = Cell::new(name);
@@ -364,8 +364,8 @@ mod tests {
         state
     }
 
-    fn default_project_with_active_keep_cell() -> crate::workbench::app::AppState {
-        let mut state = crate::workbench::app::AppState::default();
+    fn default_project_with_active_keep_cell() -> crate::workbench::app_state::AppState {
+        let mut state = crate::workbench::app_state::AppState::default();
         let keep_ref = CellViewRef::new("user", "keep", "schematic");
         if let Some(library) = state.library_manager.get_library_mut("user") {
             let mut keep = Cell::new("keep");
@@ -390,8 +390,8 @@ mod tests {
         state
     }
 
-    fn default_project_with_active_top_instancing_amp() -> crate::workbench::app::AppState {
-        let mut state = crate::workbench::app::AppState::default();
+    fn default_project_with_active_top_instancing_amp() -> crate::workbench::app_state::AppState {
+        let mut state = crate::workbench::app_state::AppState::default();
         let amp_ref = CellViewRef::new("user", "amp", "schematic");
         let top_ref = CellViewRef::new("user", "top", "schematic");
 
@@ -600,7 +600,7 @@ mod tests {
 
     #[test]
     fn deleting_default_top_cell_does_not_recreate_deleted_design() {
-        let mut app = app_with_state(crate::workbench::app::AppState::default());
+        let mut app = app_with_state(crate::workbench::app_state::AppState::default());
         app.state.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
 
         app.process_pending_library_deletions();
@@ -622,7 +622,7 @@ mod tests {
 
     #[test]
     fn deleting_default_top_schematic_view_does_not_recreate_deleted_view() {
-        let mut app = app_with_state(crate::workbench::app::AppState::default());
+        let mut app = app_with_state(crate::workbench::app_state::AppState::default());
         app.state.pending_delete_view = Some((
             "user".to_string(),
             "top".to_string(),

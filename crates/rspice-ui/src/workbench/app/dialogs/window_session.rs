@@ -76,7 +76,7 @@ pub(crate) fn open_window_workflow(app: &mut RSpiceApp, workflow: WindowWorkflow
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_window_session_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_window_session_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.window_session.open {
             return;
         }

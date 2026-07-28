@@ -1260,7 +1260,7 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     }
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
         crate::workbench::commands::Command::PlaceInstance,
-        crate::workbench::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     shelf_section_header(

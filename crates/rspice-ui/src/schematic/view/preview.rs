@@ -1,6 +1,6 @@
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
     ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool,

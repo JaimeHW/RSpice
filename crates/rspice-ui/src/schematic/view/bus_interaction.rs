@@ -1,4 +1,4 @@
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::state::{Bus, BusDeclaration, BusTapOrientation, BusTargetKind, Point, SchematicState};
 
 use super::drawing::nearest_bus_hit;

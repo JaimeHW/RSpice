@@ -82,7 +82,7 @@ pub struct ConfirmationDialogState {
     /// Exact recent-file kind captured with [`ConfirmationAction::OpenRecent`].
     /// Project and schematic entries have different save scopes and must not
     /// be inferred later from a mutable recent-files list or extension.
-    pub(crate) pending_recent_kind: Option<crate::workbench::app::RecentKind>,
+    pub(crate) pending_recent_kind: Option<crate::workbench::app_state::RecentKind>,
     /// Example name for [`ConfirmationAction::OpenExample`].
     pub pending_example: Option<String>,
     /// Destructive action suspended until the exact browser save transaction
@@ -96,7 +96,7 @@ pub(crate) struct PendingConfirmationContinuation {
     pub(crate) transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
     pub(crate) action: ConfirmationAction,
     pub(crate) path: Option<std::path::PathBuf>,
-    pub(crate) recent_kind: Option<crate::workbench::app::RecentKind>,
+    pub(crate) recent_kind: Option<crate::workbench::app_state::RecentKind>,
     pub(crate) example: Option<String>,
 }
 
@@ -123,7 +123,7 @@ impl ConfirmationDialogState {
     pub(crate) fn show_recent(
         &mut self,
         path: std::path::PathBuf,
-        kind: crate::workbench::app::RecentKind,
+        kind: crate::workbench::app_state::RecentKind,
     ) {
         self.visible = true;
         self.pending_action = Some(ConfirmationAction::OpenRecent);
@@ -155,7 +155,7 @@ impl ConfirmationDialogState {
         transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
-        recent_kind: Option<crate::workbench::app::RecentKind>,
+        recent_kind: Option<crate::workbench::app_state::RecentKind>,
         example: Option<String>,
     ) {
         self.awaiting_canonical_save = Some(PendingConfirmationContinuation {
@@ -249,7 +249,7 @@ impl ProjectReviewDialogState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app::RecentKind;
+    use crate::workbench::app_state::RecentKind;
 
     #[test]
     fn async_canonical_save_continuation_is_transaction_bound_for_all_destructive_actions() {

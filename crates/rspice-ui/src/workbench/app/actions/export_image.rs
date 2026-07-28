@@ -15,7 +15,7 @@ use crate::workbench::app::RSpiceApp;
 
 impl RSpiceApp {
     /// Pump the export request and any screenshot that arrived this frame.
-    pub(in crate::workbench::app) fn handle_image_export(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn handle_image_export(&mut self, ctx: &Context) {
         if std::mem::take(&mut self.state.ui.export_png_requested) {
             #[cfg(not(target_arch = "wasm32"))]
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));

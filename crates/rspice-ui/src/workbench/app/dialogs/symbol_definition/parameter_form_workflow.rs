@@ -17,7 +17,7 @@ use crate::workbench::RSpiceApp;
 
 use super::import_workflow::{setting_row, table_header};
 use super::state::ParameterFormPhase;
-use crate::workbench::app::publish_symbol_definition_candidate;
+use crate::workbench::app_state::publish_symbol_definition_candidate;
 
 const FORM_EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} TYPED PARAMETER FORM";
 const FORM_REVIEW_TITLE: &str = "Open component form designer";

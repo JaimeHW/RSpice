@@ -14,7 +14,7 @@ use crate::workbench::app::{
 };
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_confirmation_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_confirmation_dialog(&mut self, ctx: &Context) {
         if self.state.dialogs.confirmation_dialog.visible {
             self.render_save_confirmation_dialog(ctx);
         }

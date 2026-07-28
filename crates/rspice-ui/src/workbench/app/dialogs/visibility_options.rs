@@ -20,7 +20,8 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
 
-use crate::workbench::app::{AppState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "VIEW \u{00b7} DISPLAY ONLY";
 const TITLE: &str = "Hierarchy and annotation visibility";
@@ -39,7 +40,7 @@ pub(crate) fn open_schematic_visibility_options(state: &mut AppState) -> bool {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_schematic_visibility_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_schematic_visibility_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.schematic_visibility.open {
             return;
         }

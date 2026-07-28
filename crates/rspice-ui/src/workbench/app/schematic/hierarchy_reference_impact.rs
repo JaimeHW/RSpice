@@ -18,9 +18,9 @@ use crate::state::{
     RegressionTargetSelector, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
 };
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
-pub(in crate::workbench::app) fn validate_hierarchy_reference_impact(
+pub(in crate::workbench) fn validate_hierarchy_reference_impact(
     state: &AppState,
     extraction: &HierarchyExtractionPlan,
 ) -> Result<(), String> {

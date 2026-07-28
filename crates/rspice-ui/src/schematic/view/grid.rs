@@ -15,7 +15,7 @@ use std::cell::RefCell;
 
 use egui::{Color32, Mesh, Painter, Rect, Shape, pos2, vec2};
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::state::GridStyle;
 
 /// Minimum on-screen pitch before stepping up to a coarser grid.

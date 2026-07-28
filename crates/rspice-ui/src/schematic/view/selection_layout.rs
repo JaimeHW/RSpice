@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::state::{Point, Selection};
 
 use super::SchematicSymbolContext;

@@ -9,7 +9,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, check_row, input_row};
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn process_new_cell_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn process_new_cell_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.new_cell_dialog {
             return;
         }

@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::state::{BusTap, Junction, SchematicState, Selection, Wire};
 
 use super::{SchematicSymbolContext, SelectionWindow};

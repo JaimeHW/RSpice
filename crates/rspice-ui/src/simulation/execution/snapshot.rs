@@ -481,7 +481,7 @@ impl CrossProbeSnapshot {
         }
     }
 
-    pub(in crate::simulation) fn apply(self, state: &mut crate::workbench::app::AppState) {
+    pub(in crate::simulation) fn apply(self, state: &mut crate::workbench::app_state::AppState) {
         let source_is_active = state
             .workspace
             .active_view

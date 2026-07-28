@@ -45,7 +45,7 @@ impl AppState {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn process_copy_cell_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn process_copy_cell_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.copy_cell_dialog {
             return;
         }
@@ -175,7 +175,7 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench::app) fn process_rename_cell_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn process_rename_cell_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.rename_cell_dialog {
             return;
         }

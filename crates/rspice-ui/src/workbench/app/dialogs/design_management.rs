@@ -30,7 +30,9 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::{property_row, property_row_toned, section_header};
 
 use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
-use crate::workbench::app::{AppState, DesignManagementHistoryEntry, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::DesignManagementHistoryEntry;
+use crate::workbench::app_state::AppState;
 
 const MANAGER_EYEBROW: &str = "SCHEMATIC \u{00b7} DESIGN IDENTITY \u{00b7} TRANSACTIONAL AUTHORING";
 const MANAGER_TITLE: &str = "Sheets, variants, annotation and hierarchy";

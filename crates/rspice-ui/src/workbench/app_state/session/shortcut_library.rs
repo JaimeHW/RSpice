@@ -10,7 +10,7 @@ use crate::workbench::shortcuts::library_persistence::{
     PersistedShortcutProfileLibrary, RetainedShortcutLibraryBytes,
 };
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) enum ShortcutLibraryPersistenceRuntime {
@@ -25,7 +25,9 @@ pub(crate) enum ShortcutLibraryPersistenceRuntime {
         volatile_test: bool,
     },
     #[cfg(target_arch = "wasm32")]
-    Initializing(crate::workbench::shortcuts::library_persistence::BrowserShortcutLibraryWriteToken),
+    Initializing(
+        crate::workbench::shortcuts::library_persistence::BrowserShortcutLibraryWriteToken,
+    ),
     #[cfg(target_arch = "wasm32")]
     Publishing {
         predecessor: Box<PersistedShortcutProfileLibrary>,

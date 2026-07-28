@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::workbench::app::SimSetupState;
+use crate::workbench::app_state::SimSetupState;
 use crate::product::{ContentDigest, ProjectId};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::model_library::is_foreign_platform_absolute_path;
@@ -468,7 +468,7 @@ fn validate_simulation_plan(plan: &SimSetupState) -> Result<(), String> {
     let inactive_ids = plan
         .inactive_plans()
         .iter()
-        .map(crate::workbench::app::StoredSimulationPlan::id)
+        .map(crate::workbench::app_state::StoredSimulationPlan::id)
         .collect::<Vec<_>>();
     for id in inactive_ids {
         let mut projection = plan.clone();
@@ -1606,7 +1606,7 @@ mod tests {
         persisted_plan.insert("listed".to_owned(), serde_json::json!([1]));
         persisted_plan.insert(
             "tran".to_owned(),
-            serde_json::to_value(crate::workbench::app::TranSetup::default())
+            serde_json::to_value(crate::workbench::app_state::TranSetup::default())
                 .expect("legacy draft serializes"),
         );
 
@@ -1658,7 +1658,7 @@ mod tests {
         assert_eq!(restored.simulation_plan.plan_count(), 1);
         assert_eq!(
             restored.simulation_plan.active_plan_lineage(),
-            crate::workbench::app::SimulationPlanLineage::root()
+            crate::workbench::app_state::SimulationPlanLineage::root()
         );
         restored.validate().expect("promoted context validates");
     }

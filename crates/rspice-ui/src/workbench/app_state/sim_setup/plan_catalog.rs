@@ -15,7 +15,7 @@ use crate::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::{AnalysisPlanError, SimulationPlan};
 
-use crate::workbench::app::{ReferencePvtPoint, SimSetupState};
+use crate::workbench::app_state::{ReferencePvtPoint, SimSetupState};
 
 const DEFAULT_PLAN_NAME: &str = "Lab characterization";
 const MAX_PLAN_NAME_CHARACTERS: usize = 96;

@@ -1255,7 +1255,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
         let hint = if state.simulation.active_run().is_none() {
             let shortcut = state.ui.preferences.shortcuts().resolved_label(
                 crate::workbench::commands::Command::RunSimulation,
-                crate::workbench::app::runtime_command_platform(ui.ctx()),
+                crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
             if shortcut.is_empty() {

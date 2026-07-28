@@ -4,7 +4,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::io::ProjectFile;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::ProjectIoError;
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 use crate::workbench::lifecycle::project_lifecycle::{PersistenceBinding, ProjectLifecycleError, SaveScope};
@@ -72,8 +72,8 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.bump_active_schematic_epoch();
     state.clear_design_execution_context();
     state.sim_setup =
-        crate::workbench::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
-    state.model_library_manager = crate::workbench::app::default_model_library_manager();
+        crate::workbench::app_state::SimSetupState::new_with_user_preferences(&state.ui.preferences);
+    state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);
     state.push_user_message(ConsoleMessage::info("Created new project"));
@@ -181,7 +181,7 @@ fn save_native_scope(
             let canonical = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
                 .unwrap_or_else(|| path.to_path_buf());
             state.browser_project_save_name = None;
-            state.remember_recent_file(crate::workbench::app::RecentKind::Project, &canonical);
+            state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, &canonical);
             state.push_user_message(ConsoleMessage::info(format!(
                 "Saved project: {}",
                 canonical.display()
@@ -783,8 +783,8 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.schematic = schematic;
     state.bump_active_schematic_epoch();
     state.sim_setup =
-        crate::workbench::app::SimSetupState::new_with_user_preferences(&state.ui.preferences);
-    state.model_library_manager = crate::workbench::app::default_model_library_manager();
+        crate::workbench::app_state::SimSetupState::new_with_user_preferences(&state.ui.preferences);
+    state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
     match state.workbench.take_project_close_destination() {
@@ -884,10 +884,10 @@ fn apply_loaded_project_authorized(
                 }
             },
             None => (
-                crate::workbench::app::SimSetupState::new_with_user_preferences(
+                crate::workbench::app_state::SimSetupState::new_with_user_preferences(
                     &state.ui.preferences,
                 ),
-                crate::workbench::app::default_model_library_manager(),
+                crate::workbench::app_state::default_model_library_manager(),
                 vec![
                     "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
                         .to_owned(),
@@ -927,7 +927,7 @@ fn apply_loaded_project_authorized(
         ));
     }
     if let Some(path) = origin.recent_path() {
-        state.remember_recent_file(crate::workbench::app::RecentKind::Project, path);
+        state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, path);
     }
     state.push_user_message(ConsoleMessage::info(format!(
         "{}: {}",
@@ -1290,7 +1290,7 @@ mod tests {
     use crate::analysis::nyquist::NyquistData;
     use crate::analysis::pole_zero::PoleZeroData;
     use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
-    use crate::workbench::app::ActiveViewer;
+    use crate::workbench::app_state::ActiveViewer;
 
     fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
         run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
@@ -1783,7 +1783,7 @@ mod tests {
         let mut project = project_named("invalid-context.rspiceproj");
         let context = ProjectExecutionContext::from_state(
             project.workspace.project.id(),
-            &crate::workbench::app::SimSetupState::new(),
+            &crate::workbench::app_state::SimSetupState::new(),
             &crate::state::model_library::ModelLibraryManager::new(),
         )
         .expect("baseline context validates");

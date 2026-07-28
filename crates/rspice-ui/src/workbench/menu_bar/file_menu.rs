@@ -1,7 +1,8 @@
 //! File action layer: dirty-state confirmations, project/file IO dispatch,
 //! exports and application exit. Rendering lives in the workbench title bar.
 
-use crate::workbench::app::{AppState, ConfirmationAction};
+use crate::workbench::app::ConfirmationAction;
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 

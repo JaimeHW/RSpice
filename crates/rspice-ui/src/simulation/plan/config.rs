@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::workbench::app::{AcSetup, DcSetup, TranSetup};
+use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
 use crate::simulation::config::{
     AcSweepType, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };

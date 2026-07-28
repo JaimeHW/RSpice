@@ -34,7 +34,7 @@ impl RSpiceApp {
         };
     }
 
-    pub(in crate::workbench::app) fn render_license_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_license_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.license_dialog.open {
             return;
         }

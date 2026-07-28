@@ -1,4 +1,4 @@
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 
 pub(in crate::workbench) fn action_file_new(state: &mut AppState) {

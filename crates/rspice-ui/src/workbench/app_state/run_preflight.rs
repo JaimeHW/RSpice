@@ -14,7 +14,7 @@
 use crate::services::drc::DrcResult;
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{ProjectWorkspace, SchematicState};
-use crate::workbench::app::SimSetupState;
+use crate::workbench::app_state::SimSetupState;
 
 /// The user-facing reason a new run cannot start, excluding the transient
 /// "already running" state so a queued re-run can share the same rule.

@@ -7,7 +7,8 @@ use crate::state::{
     SchematicState, SymbolDocument, SymbolEditorMetadata, View, ViewType,
 };
 use crate::workbench::SymbolDocumentSnapshot;
-use crate::workbench::app::{AppState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 use std::collections::HashMap;
 
 const MAX_FINDING_ROWS: usize = 50;
@@ -1670,7 +1671,7 @@ mod tests {
         ViewType, Wire,
     };
     use crate::workbench::ChoicePreference;
-    use crate::workbench::app::AppState;
+    use crate::workbench::app_state::AppState;
     use crate::workbench::state::Workspace;
 
     #[test]

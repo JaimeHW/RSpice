@@ -1790,7 +1790,7 @@ fn saved_output_dialog(ctx: &egui::Context, app: &mut RSpiceApp, mut draft: Save
 }
 
 fn validate_clone_plan_draft(app: &RSpiceApp, draft: &ClonePlanDraft) -> Result<(), String> {
-    let name = crate::workbench::app::SimulationPlanName::new(draft.name.clone())
+    let name = crate::workbench::app_state::SimulationPlanName::new(draft.name.clone())
         .map_err(|error| error.to_string())?;
     let key = name.as_str().to_lowercase();
     if app
@@ -1827,7 +1827,7 @@ fn commit_clone_plan(app: &mut RSpiceApp, draft: &ClonePlanDraft) -> Result<Stri
     let mut workspace = app.state.workspace.clone();
     let source_plan_id = setup.stable_analysis_plan()?.id();
     workspace.migrate_active_plan_data(source_plan_id);
-    let options = crate::workbench::app::SimulationPlanCloneOptions {
+    let options = crate::workbench::app_state::SimulationPlanCloneOptions {
         copy_analyses: draft.copy_analyses_options,
         copy_advanced_options: draft.copy_analyses_options,
         copy_variables_outputs_and_specifications: draft.copy_variables_outputs_specs,

@@ -79,7 +79,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                 let command = Command::OpenWorkspace(workspace);
                 let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
                     command,
-                    crate::workbench::app::runtime_command_platform(ui.ctx()),
+                    crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                     ui.ctx().os(),
                 );
                 let response = ui

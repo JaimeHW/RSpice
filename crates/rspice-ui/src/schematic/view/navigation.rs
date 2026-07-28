@@ -1,6 +1,6 @@
 use egui::{Pos2, Rect, Response, Ui, Vec2};
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 const SCHEMATIC_ZOOM_MIN: f64 = 0.25;
 const SCHEMATIC_ZOOM_MAX: f64 = 8.0;

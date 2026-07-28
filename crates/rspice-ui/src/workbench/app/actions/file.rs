@@ -3,12 +3,12 @@ use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp}
 
 impl RSpiceApp {
     /// Internal: Actually create a new schematic (after confirmation)
-    pub(in crate::workbench::app) fn do_file_new(&mut self) {
+    pub(in crate::workbench) fn do_file_new(&mut self) {
         crate::workbench::workflows::file_actions::action_file_new(&mut self.state);
     }
 
     /// Internal: Actually open a schematic (after confirmation)
-    pub(in crate::workbench::app) fn do_file_open(&mut self) {
+    pub(in crate::workbench) fn do_file_open(&mut self) {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
         crate::workbench::workflows::file_actions::action_file_open_with_io(state, io);
     }
@@ -20,7 +20,7 @@ impl RSpiceApp {
     /// - Yes: Save first, then execute pending action
     /// - No: Discard changes and execute pending action
     /// - Cancel: Close dialog, do nothing
-    pub(in crate::workbench::app) fn handle_confirmation_response(
+    pub(in crate::workbench) fn handle_confirmation_response(
         &mut self,
         response: ConfirmationResponse,
     ) {
@@ -71,7 +71,7 @@ impl RSpiceApp {
                     (pending, pending_recent_kind),
                     (
                         Some(ConfirmationAction::OpenRecent),
-                        Some(crate::workbench::app::RecentKind::Project)
+                        Some(crate::workbench::app_state::RecentKind::Project)
                     )
                 );
                 let outcome = if project_action {
@@ -139,7 +139,7 @@ impl RSpiceApp {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(in crate::workbench::app) fn handle_save_continuation_event(
+    pub(in crate::workbench) fn handle_save_continuation_event(
         &mut self,
         event: crate::workbench::workflows::project_workflow::SaveContinuationEvent,
     ) {
@@ -185,7 +185,7 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench::app) fn begin_close_project_after_save(&mut self) {
+    pub(in crate::workbench) fn begin_close_project_after_save(&mut self) {
         match crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state) {
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                 self.state.dialogs.project_review_dialog.close();
@@ -217,11 +217,11 @@ impl RSpiceApp {
     }
 
     /// Execute a pending action after confirmation dialog
-    pub(in crate::workbench::app) fn execute_pending_action(
+    pub(in crate::workbench) fn execute_pending_action(
         &mut self,
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
-        recent_kind: Option<crate::workbench::app::RecentKind>,
+        recent_kind: Option<crate::workbench::app_state::RecentKind>,
         example: Option<String>,
     ) {
         self.execute_pending_action_with_project_open(
@@ -237,9 +237,9 @@ impl RSpiceApp {
         &mut self,
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
-        recent_kind: Option<crate::workbench::app::RecentKind>,
+        recent_kind: Option<crate::workbench::app_state::RecentKind>,
         example: Option<String>,
-        open_project: impl FnOnce(&mut crate::workbench::app::AppState) -> bool,
+        open_project: impl FnOnce(&mut crate::workbench::app_state::AppState) -> bool,
     ) {
         match action {
             ConfirmationAction::ProjectNew => {
@@ -285,7 +285,7 @@ impl RSpiceApp {
 
     /// Open an entry from the recent-files list, prompting to save first when
     /// the current document has unsaved changes.
-    pub(crate) fn open_recent_file(&mut self, recent: crate::workbench::app::RecentFile) {
+    pub(crate) fn open_recent_file(&mut self, recent: crate::workbench::app_state::RecentFile) {
         if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state) {
             self.state
                 .dialogs
@@ -302,9 +302,9 @@ impl RSpiceApp {
     fn do_open_recent(
         &mut self,
         path: std::path::PathBuf,
-        kind: crate::workbench::app::RecentKind,
+        kind: crate::workbench::app_state::RecentKind,
     ) {
-        use crate::workbench::app::RecentKind;
+        use crate::workbench::app_state::RecentKind;
 
         if !path.exists() {
             self.state.recent_files.retain(|r| r.path != path);
@@ -350,7 +350,7 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench::app) fn action_file_save(&mut self) -> bool {
+    pub(in crate::workbench) fn action_file_save(&mut self) -> bool {
         if self.state.project_lifecycle.project_open {
             return crate::workbench::workflows::project_workflow::save_project(&mut self.state);
         }
@@ -434,7 +434,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn test_app_with_file_io(
-        state: crate::workbench::app::AppState,
+        state: crate::workbench::app_state::AppState,
         file_io: TestFileWorkflowIo,
     ) -> RSpiceApp {
         RSpiceApp {
@@ -451,7 +451,7 @@ mod tests {
     }
 
     fn insert_ac_analysis(
-        state: &mut crate::workbench::app::AppState,
+        state: &mut crate::workbench::app_state::AppState,
     ) -> crate::product::AnalysisInstanceId {
         state
             .sim_setup
@@ -463,7 +463,7 @@ mod tests {
             .0
     }
 
-    fn has_ac_analysis(setup: &crate::workbench::app::SimSetupState) -> bool {
+    fn has_ac_analysis(setup: &crate::workbench::app_state::SimSetupState) -> bool {
         setup
             .stable_analysis_plan()
             .expect("current project owns a stable plan")
@@ -511,7 +511,7 @@ mod tests {
             let project_path = unique_temp_path("rspice-project-save-routing", "rspiceproj");
             let schematic_path = unique_temp_path("rspice-legacy-save-routing", "rsch");
             let saved_paths = Rc::new(RefCell::new(Vec::new()));
-            let mut state = crate::workbench::app::AppState::default();
+            let mut state = crate::workbench::app_state::AppState::default();
             crate::workbench::lifecycle::project_lifecycle::save_native(
                 &mut state,
                 SaveScope::AllDocuments,
@@ -547,7 +547,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cancelled_project_open_after_discard_confirmation_keeps_live_schematic() {
-        let mut state = crate::workbench::app::AppState::default();
+        let mut state = crate::workbench::app_state::AppState::default();
         state.schematic.components.push(Component::new(
             42,
             ComponentType::Resistor,
@@ -590,7 +590,7 @@ mod tests {
     fn confirmation_yes_after_download_only_save_keeps_dirty_document_and_pending_action() {
         let schematic_path = PathBuf::from("browser-copy.rsch");
         let saved_paths = Rc::new(RefCell::new(Vec::new()));
-        let mut state = crate::workbench::app::AppState::default();
+        let mut state = crate::workbench::app_state::AppState::default();
         state.project_lifecycle.project_open = false;
         state.schematic.current_file = Some(schematic_path.clone());
         state.schematic.components.push(Component::new(
@@ -634,7 +634,7 @@ mod tests {
         let target_project = unique_temp_path("rspice-recent-target", "rspiceproj");
         let target_schematic = unique_temp_path("rspice-recent-target", "rsch");
 
-        let mut target_state = crate::workbench::app::AppState::default();
+        let mut target_state = crate::workbench::app_state::AppState::default();
         target_state
             .workspace
             .project
@@ -648,7 +648,7 @@ mod tests {
         )
         .expect("create recent target project");
 
-        let mut project_source = crate::workbench::app::AppState::default();
+        let mut project_source = crate::workbench::app_state::AppState::default();
         project_source
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
@@ -665,7 +665,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::new(7, 3));
         let project_ac_id = insert_ac_analysis(&mut project_source);
         project_source
-            .remember_recent_file(crate::workbench::app::RecentKind::Project, &target_project);
+            .remember_recent_file(crate::workbench::app_state::RecentKind::Project, &target_project);
         let project_recent = project_source
             .recent_files
             .iter()
@@ -687,7 +687,7 @@ mod tests {
                 .dialogs
                 .confirmation_dialog
                 .pending_recent_kind,
-            Some(crate::workbench::app::RecentKind::Project)
+            Some(crate::workbench::app_state::RecentKind::Project)
         );
         project_app.handle_confirmation_response(ConfirmationResponse::Yes);
 
@@ -722,7 +722,7 @@ mod tests {
 
         std::fs::write(&target_schematic, b"placeholder for test I/O")
             .expect("create schematic recent path");
-        let mut schematic_source = crate::workbench::app::AppState::default();
+        let mut schematic_source = crate::workbench::app_state::AppState::default();
         schematic_source
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
@@ -738,7 +738,7 @@ mod tests {
             .add_component(ComponentType::Capacitor, Point::new(8, 4));
         let schematic_ac_id = insert_ac_analysis(&mut schematic_source);
         schematic_source.remember_recent_file(
-            crate::workbench::app::RecentKind::Schematic,
+            crate::workbench::app_state::RecentKind::Schematic,
             &target_schematic,
         );
         let schematic_recent = schematic_source
@@ -762,7 +762,7 @@ mod tests {
                 .dialogs
                 .confirmation_dialog
                 .pending_recent_kind,
-            Some(crate::workbench::app::RecentKind::Schematic)
+            Some(crate::workbench::app_state::RecentKind::Schematic)
         );
         schematic_app.handle_confirmation_response(ConfirmationResponse::Yes);
 
@@ -809,7 +809,7 @@ mod tests {
         use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
 
         let path = unique_temp_path("rspice-close-review", "rspiceproj");
-        let mut state = crate::workbench::app::AppState::default();
+        let mut state = crate::workbench::app_state::AppState::default();
         crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut state,
             SaveScope::AllDocuments,
@@ -876,7 +876,7 @@ mod tests {
 
         let path = unique_temp_path("rspice-save-all-close", "rspiceproj");
         let saved_paths = Rc::new(RefCell::new(Vec::new()));
-        let mut state = crate::workbench::app::AppState::default();
+        let mut state = crate::workbench::app_state::AppState::default();
         crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut state,
             SaveScope::AllDocuments,
@@ -935,7 +935,7 @@ mod tests {
         use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
 
         let path = unique_temp_path("rspice-close-external-change", "rspiceproj");
-        let mut state = crate::workbench::app::AppState::default();
+        let mut state = crate::workbench::app_state::AppState::default();
         crate::workbench::lifecycle::project_lifecycle::save_native(
             &mut state,
             SaveScope::AllDocuments,

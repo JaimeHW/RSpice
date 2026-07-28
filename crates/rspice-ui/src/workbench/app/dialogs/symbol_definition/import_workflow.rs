@@ -11,7 +11,7 @@ use crate::ui::widgets::{
 use super::source_picker;
 use super::state::SymbolImportBindingChoice;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::publish_symbol_definition_candidate;
+use crate::workbench::app_state::publish_symbol_definition_candidate;
 
 const IMPORT_EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} VALIDATED INTERCHANGE";
 const IMPORT_TITLE: &str = "Import symbol definition";
@@ -371,7 +371,7 @@ fn check_table(ui: &mut Ui, preview: Option<&SymbolDefinitionImport>) {
         });
 }
 fn import_candidate(
-    state: &crate::workbench::app::AppState,
+    state: &crate::workbench::app_state::AppState,
 ) -> Result<SymbolDefinitionImport, String> {
     let draft = &state.dialogs.symbol_import;
     if draft.source_text.is_empty() {
@@ -448,7 +448,7 @@ fn source_looks_like_json(name: &str, source: &str) -> bool {
     }) || source.trim_start().starts_with('{')
 }
 
-fn bound_symbol_references(state: &crate::workbench::app::AppState) -> Vec<CellViewRef> {
+fn bound_symbol_references(state: &crate::workbench::app_state::AppState) -> Vec<CellViewRef> {
     let mut references = Vec::new();
     for library in state.library_manager.libraries_sorted() {
         for cell in library.cells_sorted() {
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn review_only_svg_import_keeps_real_geometry_without_an_executable_contract() {
-        let mut app = crate::workbench::app::AppState::default();
+        let mut app = crate::workbench::app_state::AppState::default();
         app.project_lifecycle.project_open = true;
         app.dialogs.symbol_import.source_name = "review.svg".to_owned();
         app.dialogs.symbol_import.source_text =
@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn import_candidate_never_overwrites_an_existing_cell() {
-        let mut app = crate::workbench::app::AppState::default();
+        let mut app = crate::workbench::app_state::AppState::default();
         app.project_lifecycle.project_open = true;
         let library_name = app.workspace.active_view.library.clone();
         app.dialogs.symbol_import.source_name = "review.svg".to_owned();

@@ -7,7 +7,7 @@
 //! halves before publication or installation.
 //!
 //! Native builds publish the document under the user configuration directory.
-//! Browser builds already persist the complete [`crate::workbench::app::AppState`] through
+//! Browser builds already persist the complete [`crate::workbench::app_state::AppState`] through
 //! eframe storage; their dedicated filesystem entry points therefore remain
 //! quiet no-ops and never call APIs that abort on `wasm32`.
 
@@ -24,7 +24,7 @@ use crate::state::{
 #[cfg(target_arch = "wasm32")]
 use crate::state::{LibraryManager, ProjectWorkspace};
 
-pub(in crate::workbench::app) const VERILOGA_LIBRARY_NAME: &str = "veriloga";
+pub(in crate::workbench) const VERILOGA_LIBRARY_NAME: &str = "veriloga";
 #[cfg(not(target_arch = "wasm32"))]
 const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
 #[cfg(not(target_arch = "wasm32"))]
@@ -70,7 +70,7 @@ struct LoadedVerilogALibrary {
     sources: Option<ProjectSourceRegistry>,
 }
 
-pub(in crate::workbench::app) fn restore_global_veriloga_library(
+pub(in crate::workbench) fn restore_global_veriloga_library(
     library_manager: &mut LibraryManager,
     workspace: &mut ProjectWorkspace,
 ) {
@@ -96,7 +96,7 @@ pub(in crate::workbench::app) fn restore_global_veriloga_library(
     }
 }
 
-pub(in crate::workbench::app) fn save_global_veriloga_library(
+pub(in crate::workbench) fn save_global_veriloga_library(
     library_manager: &LibraryManager,
     workspace: &ProjectWorkspace,
 ) -> Result<(), String> {

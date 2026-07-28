@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
 use crate::services::yield_manager::YieldAnalysisManager;

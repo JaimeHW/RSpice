@@ -31,7 +31,7 @@ const fn is_creatable_view_type(view_type: crate::state::ViewType) -> bool {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn process_new_view_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn process_new_view_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.new_view_dialog {
             return;
         }

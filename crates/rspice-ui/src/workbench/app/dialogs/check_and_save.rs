@@ -23,7 +23,8 @@ use crate::workbench::app::dialogs::review_primitives::{
     input_field, purpose_line, read_only_field,
 };
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
-use crate::workbench::app::{AppState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} TRANSACTIONAL VALIDATION";
 const TITLE: &str = "Check and save schematic";
@@ -97,7 +98,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_check_and_save_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_check_and_save_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.check_and_save.open {
             return;
         }
@@ -391,7 +392,7 @@ impl RSpiceApp {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(in crate::workbench::app) fn handle_check_and_save_continuation(
+    pub(in crate::workbench) fn handle_check_and_save_continuation(
         &mut self,
         event: &crate::workbench::workflows::project_workflow::SaveContinuationEvent,
     ) -> bool {

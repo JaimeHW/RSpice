@@ -11,7 +11,8 @@ use crate::state::{
     CellViewRef, ComponentType, Library, ModelBoundSymbolDefinition, Point, SymbolSourceContract,
     ViewType, model_library::DeviceModel, model_library::ModelType,
 };
-use crate::workbench::app::{AppState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 fn render_accessibility_frame(
     app: &mut RSpiceApp,

@@ -25,7 +25,8 @@ use crate::workbench::design_system::{
 };
 use crate::workbench::{SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind};
 
-use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} FILTERED SELECTION \u{00b7} EXACT DIFFERENCE";
 const TITLE: &str = "Selection and bulk property editing";
@@ -294,7 +295,7 @@ pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_selection_bulk_edit_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_selection_bulk_edit_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.selection_bulk_edit.open {
             return;
         }

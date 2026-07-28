@@ -425,6 +425,12 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "hardcopy_adapters/sources",
     "hardcopy_adapters/render",
     "hardcopy_adapters/print",
+    // The session aggregate: the design, the simulation, the document engines'
+    // session state, and the dialogs' visibility. It sits directly below the
+    // frame loop because it aggregates the whole session — a module that only
+    // needs one part of it should take that part as a parameter, which is what
+    // retires the `-> app_state` entries below.
+    "app_state",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",
@@ -466,122 +472,129 @@ const WORKBENCH_LAYERS: &[&str] = &[
 
 /// Order violations inside `workbench` today, with exact counts.
 ///
-/// Same rules as [`ALLOWED_VIOLATIONS`]: a ceiling, never a target. 51 edges
-/// carrying 326 references, against 173 edges and 1409 references total — so
-/// 77% of the shell's interior coupling already runs downhill.
+/// Same rules as [`ALLOWED_VIOLATIONS`]: a ceiling, never a target. Every
+/// count here is the measured value, not a rounded-up allowance — a ceiling
+/// with slack in it is an edge nobody is watching.
 ///
-/// The concentration is the finding. `app` owns ten of the top twelve entries
-/// because it is both the data every module reads and the root that drives
-/// every module, and those two roles have to be separated before most of this
-/// list can move. Splitting `AppState` from `RSpiceApp` retires the first four
-/// entries outright.
+/// The concentration is the finding: `app` and `app_state` carry a third of
+/// the list between them. That is what splitting them apart exposed. Before
+/// the split, `AppState` and `RSpiceApp` shared a module, so "this module
+/// needs the session data" and "this module calls the application root" were
+/// the same measurement. They are now separate problems with separate fixes —
+/// the first retires by passing a slice of the session instead of the whole
+/// aggregate, the second by the `&mut RSpiceApp` burndown.
 const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
-    // `app` is the application root and the application data at once. Retired
-    // by splitting `AppState` (data, low) from `RSpiceApp` (frame loop, top).
-    ("app", "commands", 48),
-    ("app", "workflows/project_workflow", 46),
-    ("app", "panels", 30),
-    ("documents/result_document", "app", 23),
-    ("lifecycle/project_lifecycle", "app", 15),
+    // `app` is the frame loop, and it drives everything. These are the calls
+    // out of `RSpiceApp` into the presentation and workflow layers it renders.
+    // They retire as the frame loop stops calling and starts setting state
+    // that the called module reads — the pattern `frame` already follows.
+    ("app", "workflows/project_workflow", 45),
+    ("app", "commands", 16),
     ("app", "workflows/export_workflow", 14),
     ("app", "chrome", 12),
     ("app", "menu_bar", 12),
-    ("app", "workflows/file_workflow", 9),
+    ("app", "workflows/file_workflow", 8),
     ("app", "browser/navigation", 7),
+    ("app", "panels", 7),
     ("app", "workflows/file_actions", 6),
-    ("documents/netlist_document", "app", 6),
-    ("lifecycle/recovery", "app", 6),
-    ("app", "simulation_analysis_tabs", 3),
+    ("app", "frame", 5),
     ("app", "browser/accessibility", 2),
     ("app", "workflows/netlist_workflow", 2),
-    ("documents/model_editor", "app", 2),
     ("app", "browser/download", 1),
-    ("app", "tools/calculator_tool", 1),
     ("app", "cross_probe", 1),
-    ("browser/file_import", "app", 1),
-    ("hardcopy_adapters/sources", "app", 1),
-    ("lifecycle/project_checkpoint", "app", 1),
-    // Not new coupling: these were written `use crate::workbench::{A, B};`,
-    // and the first version of this table could not read a brace group, so
-    // it scored the whole import as zero edges. Expanding groups is what
-    // surfaced them.
+    ("app", "tools/calculator_tool", 1),
+    // `AppState` is the session aggregate, so it inherits two problems from
+    // the root it was split out of.
+    //
+    // Downward: a module that needs one slice of the session takes the whole
+    // aggregate. Each of these retires by passing the slice — the schematic,
+    // the workspace, the netlist session — instead of `&AppState`.
+    ("documents/result_document", "app_state", 19),
+    ("lifecycle/recovery", "app_state", 6),
+    ("documents/netlist_document", "app_state", 4),
+    ("lifecycle/project_lifecycle", "app_state", 3),
+    ("hardcopy_adapters/sources", "app_state", 1),
+    ("lifecycle/project_checkpoint", "app_state", 1),
+    // Upward: fields whose types live in the feature that renders them, plus
+    // gating methods that query a module above. `-> app` is `DialogState`,
+    // which still lives in the dialogs tree.
+    ("app_state", "panels", 6),
+    ("app_state", "app", 5),
+    ("app_state", "commands", 5),
+    ("app_state", "simulation_analysis_tabs", 3),
+    ("app_state", "workflows/file_workflow", 1),
+    ("app_state", "workflows/project_workflow", 1),
+    // What still reaches the application root rather than the session data.
+    // These name `RSpiceApp` itself, so they retire with the `&mut RSpiceApp`
+    // burndown, not with a module move.
     ("documents/code_workspace", "app", 2),
+    ("documents/model_editor", "app", 1),
+    ("documents/result_document", "app", 1),
     ("feature_availability", "app", 1),
+    ("browser/file_import", "app", 1),
+    ("lifecycle/recovery", "app", 1),
     // `commands` is a dispatcher and a command vocabulary in one file.
     // Retired by dropping the vocabulary to `commands::registry` at rank 0.
     ("shortcuts/artifacts", "commands", 11),
-    ("preferences", "commands", 3),
     ("documents/result_document", "commands", 3),
-    ("shortcuts/profile_workflow", "commands", 2),
+    ("preferences", "commands", 3),
     ("shortcuts", "commands", 2),
+    ("shortcuts/profile_workflow", "commands", 2),
     ("shortcuts/library_persistence", "commands", 1),
-    // Dispatch and persistence reaching up into presentation.
+    // Dispatch reaching up into what it renders. A command should name a
+    // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
+    ("commands", "documents/visualization_studio", 6),
     ("commands", "menu_bar", 5),
+    ("commands", "surfaces", 4),
+    ("commands", "account_organization", 1),
+    ("commands", "frame", 1),
+    ("commands", "preflight", 1),
+    ("commands", "tools/jobs_manager", 1),
+    ("commands", "tools/specialist_tool_browser", 1),
     ("chrome", "preflight", 1),
     ("surfaces", "preflight", 1),
+    // The shell's own persisted state reaching up into routing, presentation,
+    // and the document engines. This is the same inversion the top-level
+    // `state -> *` entries describe, one layer down: `WorkbenchState` stores
+    // what a surface is showing instead of the surface deriving it.
+    ("state", "documents/visualization_studio", 7),
+    ("state", "routing/availability", 4),
+    ("state", "documents/model_correlation", 2),
+    ("state", "documents/model_editor", 2),
+    ("state", "lifecycle/recovery", 2),
+    ("state", "lifecycle/window_session", 2),
+    ("state", "preferences", 1),
+    ("state", "simulation_analysis_tabs", 1),
+    // The interaction session reaching into the engines that hang off it.
+    ("lifecycle/session", "documents/result_document", 2),
+    ("lifecycle/session", "cross_probe", 1),
+    ("lifecycle/session", "documents/code_workspace", 1),
+    ("lifecycle/session", "documents/netlist_document", 1),
     // Browser import/download sitting above what needs it.
     ("documents/code_workspace", "browser/file_import", 7),
     ("workflows/export_workflow", "browser/download", 3),
-    ("workflows/project_workflow", "browser/download", 1),
     ("shortcuts/artifacts", "browser/download", 1),
     ("surfaces", "browser/download", 1),
+    ("workflows/project_workflow", "browser/download", 1),
     // Recovery and checkpointing reaching sideways into the workflows.
     ("lifecycle/recovery", "workflows/file_workflow", 6),
-    ("lifecycle/recovery", "workflows/project_workflow", 2),
-    ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
+    ("lifecycle/recovery_checkpoint", "workflows/file_workflow", 6),
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
+    ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
+    ("lifecycle/recovery", "workflows/project_workflow", 2),
     ("browser/file_import", "shortcuts/profile_workflow", 1),
     ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
     ("documents/code_workspace", "workflows/export_workflow", 1),
     ("documents/netlist_document", "workflows/netlist_workflow", 1),
-    // Calling the painter instead of setting state the painter reads. These
-    // were invisible until the frame renderer moved out of `workbench.rs`:
-    // as free functions on the module root they belonged to no submodule, so
-    // nothing scored them. Retired by having the full-screen and secondary
-    // -window transitions write `WorkbenchState` and letting `frame` observe
-    // it, which is what every other chrome transition already does.
-    ("app", "frame", 5),
-    ("commands", "frame", 1),
-    // Edges that were written `super::x` instead of `crate::workbench::x`.
-    // The first version of this table only read the long form, so 310
-    // references — about 15% of the shell's interior — were scored as zero.
-    // These are not new coupling; they are the coupling that short-form
-    // imports were hiding.
-    //
-    // `state` accounts for ten of them, and they are the interesting ones:
-    // the shell's own persisted state reaches up into routing, presentation,
-    // and the document engines. That is the same inversion the top-level
-    // `state -> *` entries describe, one layer down.
-    ("state", "routing/availability", 6),
-    ("state", "preferences", 1),
-    ("state", "documents/model_editor", 2),
-    ("state", "documents/model_correlation", 2),
-    ("state", "lifecycle/window_session", 2),
-    ("state", "lifecycle/recovery", 2),
-    ("state", "documents/visualization_studio", 7),
-    // Dispatch reaching the surfaces and tools it should be routing to.
-    ("commands", "documents/visualization_studio", 6),
-    ("commands", "surfaces", 4),
-    ("commands", "account_organization", 1),
-    ("commands", "tools/jobs_manager", 1),
-    ("commands", "preflight", 1),
-    ("commands", "tools/specialist_tool_browser", 1),
-    // Session state naming the document engines whose state it aggregates.
-    ("lifecycle/session", "documents/result_document", 2),
-    ("lifecycle/session", "documents/code_workspace", 1),
-    ("lifecycle/session", "documents/netlist_document", 1),
-    ("lifecycle/session", "cross_probe", 1),
-    // Remaining short-form edges.
-    ("feature_availability", "design_system", 1),
-    ("lifecycle/recovery_checkpoint", "workflows/file_workflow", 6),
-    ("hardcopy_adapters/sources", "documents/visualization_studio", 1),
-    ("routing/surface_route", "routing/surface_catalog", 2),
-    ("routing/surface_route", "workflows/capability_workflow", 1),
-    ("surfaces", "documents/visualization_studio", 1),
+    // Presentation reaching sideways into a peer surface.
     ("docks", "documents/visualization_studio", 1),
-    // Contracts naming things above them.
-    ("state", "simulation_analysis_tabs", 1),
+    ("hardcopy_adapters/sources", "documents/visualization_studio", 1),
+    ("surfaces", "documents/visualization_studio", 1),
+    ("feature_availability", "design_system", 1),
+    // A route describing its own catalog and availability.
+    ("routing/surface_route", "routing/surface_catalog", 1),
+    ("routing/surface_route", "workflows/capability_workflow", 1),
 ];
 
 fn workbench_dir() -> PathBuf {
@@ -700,7 +713,6 @@ fn path_segments(item: &str) -> String {
 fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
     const PREFIX: &str = "crate::workbench::";
     let reexports = workbench_reexports();
-    let declared: Vec<&str> = WORKBENCH_LAYERS.to_vec();
     let mut edges: BTreeMap<(String, String), usize> = BTreeMap::new();
 
     for file in rust_sources(&workbench_dir()) {

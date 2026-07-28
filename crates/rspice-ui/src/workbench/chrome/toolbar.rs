@@ -1079,7 +1079,7 @@ fn toolbar_command(
     };
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
         command,
-        crate::workbench::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let label = if shortcut.is_empty() {
@@ -1197,7 +1197,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             };
             let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
                 command,
-                crate::workbench::app::runtime_command_platform(ui.ctx()),
+                crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
             let accessibility_label = if shortcut.is_empty() {
@@ -1349,7 +1349,7 @@ fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
     let enabled = command.is_enabled(app);
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
         command,
-        crate::workbench::app::runtime_command_platform(ui.ctx()),
+        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let label = if shortcut.is_empty() {

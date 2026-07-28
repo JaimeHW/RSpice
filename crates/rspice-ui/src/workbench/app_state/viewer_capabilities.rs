@@ -1,4 +1,5 @@
-use crate::workbench::app::{ActiveViewer, AppState};
+use crate::workbench::app_state::ActiveViewer;
+use crate::workbench::app_state::AppState;
 
 /// Availability metadata for a specialized viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

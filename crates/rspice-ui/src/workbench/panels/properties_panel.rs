@@ -5,7 +5,7 @@
 //! (`crate::workbench::panels::schematic`).
 
 use crate::properties::{TabbedDialogResult, render_tabbed_property_dialog};
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 /// Render the floating tabbed property dialog window
 /// Call this from the main app update loop

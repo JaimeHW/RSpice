@@ -215,7 +215,7 @@ impl Default for HardcopyDialogState {
     }
 }
 
-/// Project transactions clone [`crate::workbench::app::AppState`]. A modal
+/// Project transactions clone [`crate::workbench::app_state::AppState`]. A modal
 /// hardcopy session is runtime authority, not project data, so it must never
 /// cross that transaction boundary or duplicate retained source/preview
 /// payloads.

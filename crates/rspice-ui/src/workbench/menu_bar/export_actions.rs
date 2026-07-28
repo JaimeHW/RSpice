@@ -1,4 +1,4 @@
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 pub(super) fn action_export_svg_with_io(

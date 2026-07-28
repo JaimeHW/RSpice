@@ -2075,7 +2075,7 @@ pub struct DialogState {
     pub(crate) project_checkpoint_recovery: ProjectCheckpointRecoveryState,
 
     /// Runtime interaction state for drag, hover, etc.
-    pub interaction: crate::workbench::app::InteractionState,
+    pub interaction: crate::workbench::app_state::InteractionState,
 
     /// State for save confirmation modal (unsaved changes warning)
     pub confirmation_dialog: ConfirmationDialogState,

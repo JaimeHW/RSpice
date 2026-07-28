@@ -13,7 +13,7 @@ impl RSpiceApp {
     /// incremental checking is enabled. The same production checker backs the
     /// explicit command, so enabling this preference cannot create a weaker
     /// or differently classified result.
-    pub(in crate::workbench::app) fn refresh_incremental_connectivity_checks(&mut self) {
+    pub(in crate::workbench) fn refresh_incremental_connectivity_checks(&mut self) {
         if !self
             .state
             .ui

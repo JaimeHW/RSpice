@@ -3,7 +3,8 @@ use std::path::Path;
 use egui::Context;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::{AppState, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 #[cfg(target_arch = "wasm32")]
 type BrowserModelImport = Result<Option<(String, Vec<u8>)>, String>;
@@ -84,7 +85,7 @@ fn emit_pdk_file_load_error_message(state: &mut AppState, path: &Path, error: im
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn process_pdk_settings_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn process_pdk_settings_dialog(&mut self, ctx: &Context) {
         #[cfg(target_arch = "wasm32")]
         poll_browser_model_imports(ctx, &mut self.state);
         let result = crate::workbench::panels::render_pdk_settings_dialog(

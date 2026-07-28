@@ -15,7 +15,8 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::section_header;
 
-use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "COLLABORATION \u{00b7} ANCHORED REVIEW \u{00b7} RESOLUTION";
 const TITLE: &str = "Design review comments";
@@ -172,7 +173,7 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_design_review_comments_dialog(
+    pub(in crate::workbench) fn render_design_review_comments_dialog(
         &mut self,
         ctx: &Context,
     ) {

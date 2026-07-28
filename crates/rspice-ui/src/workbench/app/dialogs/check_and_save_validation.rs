@@ -20,7 +20,7 @@ use crate::workbench::lifecycle::project_lifecycle::{
     SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

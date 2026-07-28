@@ -1,5 +1,5 @@
 use crate::workbench::EngineeringExportFormat;
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 const NO_RESULTS_MESSAGE: &str = "No simulation results to export. Run a simulation first.";

@@ -290,7 +290,7 @@ impl ProjectFile {
                             .inactive_plans()
                             .iter()
                             .find(|plan| plan.id() == plan_id)
-                            .map(crate::workbench::app::StoredSimulationPlan::analysis_plan)
+                            .map(crate::workbench::app_state::StoredSimulationPlan::analysis_plan)
                     })
             })
         };
@@ -431,7 +431,7 @@ impl ProjectFile {
 
     pub(crate) fn validate_result_plan_references_for(
         simulation_results: &ProjectSimulationResults,
-        simulation_plan: Option<&crate::workbench::app::SimSetupState>,
+        simulation_plan: Option<&crate::workbench::app_state::SimSetupState>,
         project_revision: ObjectRevision,
     ) -> Result<(), String> {
         let has_plan_receipt = simulation_results.runs.iter().any(|run| {
@@ -4233,7 +4233,7 @@ mod tests {
         let mut design_libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut design_libraries);
 
-        let mut setup = crate::workbench::app::SimSetupState::new();
+        let mut setup = crate::workbench::app_state::SimSetupState::new();
         setup.enabled.extend([TAB_AC, TAB_NOISE]);
         setup.analysis_order = vec![TAB_NOISE, TAB_TRANSIENT, TAB_AC];
         setup.listed.extend([TAB_AC, TAB_NOISE]);

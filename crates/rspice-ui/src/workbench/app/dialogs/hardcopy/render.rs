@@ -140,7 +140,7 @@ struct RenderingInputs {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_hardcopy_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_hardcopy_dialog(&mut self, ctx: &Context) {
         publish::register_repaint_context(ctx);
         if !self.state.dialogs.hardcopy.open {
             publish::cancel_source_resolution();

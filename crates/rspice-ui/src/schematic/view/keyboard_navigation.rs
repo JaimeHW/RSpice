@@ -5,7 +5,7 @@
 
 use egui::{Event, InputState, Key, Popup, Response};
 
-use crate::workbench::app::{AppState, SchematicKeyboardFocus};
+use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 use crate::state::Point;
 use crate::workbench::TogglePreference;
 

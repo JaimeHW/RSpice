@@ -15,7 +15,7 @@ use crate::state::{
     Component, ComponentType, NetGraph, NetLabel, NetNamingPolicy, Point, SchematicState,
 };
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 /// Exact naming authority captured for one logical named net.
 #[derive(Debug, Clone, PartialEq)]

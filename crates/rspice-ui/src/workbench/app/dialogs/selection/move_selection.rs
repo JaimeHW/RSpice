@@ -16,9 +16,8 @@ use crate::ui::widgets::{
     SchematicCommandPreview, schematic_command_workflow, select_with_response,
 };
 
-use crate::workbench::app::{
-    AppState, MoveSelectionDialogState, RSpiceApp, SchematicEditAuthority,
-};
+use crate::workbench::app::{MoveSelectionDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY PRESERVING";
 const TITLE: &str = "Move selection";
@@ -77,7 +76,7 @@ pub(crate) fn open_move_selection_dialog(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_move_selection_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_move_selection_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.move_selection.open {
             return;
         }

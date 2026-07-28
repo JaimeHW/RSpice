@@ -13,7 +13,8 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
 
-use crate::workbench::app::{AppState, PinPortDialogState, RSpiceApp};
+use crate::workbench::app::{PinPortDialogState, RSpiceApp};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} INTERFACE CONTRACT";
 const TITLE: &str = "Place pin or port";
@@ -52,7 +53,7 @@ impl DraftValidation {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_pin_port_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_pin_port_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.pin_port.open {
             return;
         }

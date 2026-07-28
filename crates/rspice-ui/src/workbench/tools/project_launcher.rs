@@ -18,7 +18,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, IconButton, select};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::{RecentFile, RecentKind};
+use crate::workbench::app_state::{RecentFile, RecentKind};
 
 use crate::workbench::commands::Command;
 use crate::workbench::design_system::WorkbenchIcon;

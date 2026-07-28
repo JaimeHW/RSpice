@@ -14,9 +14,8 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, SelectionImpact, SelectionPreview,
     select_mono_with_response, selection_command_workflow, workflow_preview_status,
 };
-use crate::workbench::app::{
-    AppState, FullScreenPanels, FullScreenScope, RSpiceApp, ViewOperation,
-};
+use crate::workbench::app::{FullScreenPanels, FullScreenScope, RSpiceApp, ViewOperation};
+use crate::workbench::app_state::AppState;
 
 pub(crate) fn open_full_screen_workflow(state: &mut AppState) {
     state
@@ -33,7 +32,7 @@ pub(crate) fn open_reset_active_view_workflow(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_view_operation_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_view_operation_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.view_operation.open {
             return;
         }

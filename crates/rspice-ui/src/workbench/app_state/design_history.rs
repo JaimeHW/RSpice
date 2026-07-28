@@ -17,7 +17,7 @@ use crate::state::{
     OpenCellView, SchematicSnapshot, SchematicState,
 };
 
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 const MAX_PROJECT_DESIGN_STEPS: usize = 32;
 

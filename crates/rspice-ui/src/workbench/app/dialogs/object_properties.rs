@@ -189,7 +189,7 @@ enum DraftResolutionSource {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_object_properties_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_object_properties_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.object_properties.open {
             return;
         }
@@ -336,7 +336,7 @@ impl RSpiceApp {
 
 fn resolve_draft_for_repaint(
     ctx: &Context,
-    state: &crate::workbench::app::AppState,
+    state: &crate::workbench::app_state::AppState,
     draft: &ObjectPropertiesDraft,
 ) -> (DraftValidation, Vec<(u64, String)>) {
     let key = draft_resolution_key(state, draft);
@@ -372,7 +372,7 @@ fn resolve_draft_for_repaint(
 }
 
 fn draft_resolution_key(
-    state: &crate::workbench::app::AppState,
+    state: &crate::workbench::app_state::AppState,
     draft: &ObjectPropertiesDraft,
 ) -> DraftResolutionKey {
     let (target_matches_baseline, draft_source) = match draft {
@@ -468,7 +468,7 @@ fn draft_resolution_key(
     }
 }
 
-fn object_property_session_error(state: &crate::workbench::app::AppState) -> Option<String> {
+fn object_property_session_error(state: &crate::workbench::app_state::AppState) -> Option<String> {
     let dialog = &state.dialogs.object_properties;
     if state.schematic.read_only || state.active_view_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
@@ -1835,7 +1835,7 @@ mod tests {
 
     #[test]
     fn repaint_resolution_cache_key_tracks_draft_topology_and_baseline_authority() {
-        let mut state = crate::workbench::app::AppState::default();
+        let mut state = crate::workbench::app_state::AppState::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
         state.schematic.buses.push(bus.clone());
         let mut draft = ObjectPropertiesDraft::Bus(BusObjectPropertiesDraft {

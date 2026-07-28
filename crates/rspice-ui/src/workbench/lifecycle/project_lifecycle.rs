@@ -30,7 +30,7 @@ use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app::AppState;
+use crate::workbench::app_state::AppState;
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -2232,7 +2232,7 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn has_ac_analysis(setup: &crate::workbench::app::SimSetupState) -> bool {
+    fn has_ac_analysis(setup: &crate::workbench::app_state::SimSetupState) -> bool {
         setup
             .stable_analysis_plan()
             .expect("current project owns a stable plan")

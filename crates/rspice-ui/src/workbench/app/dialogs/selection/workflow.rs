@@ -23,7 +23,8 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
 
-use crate::workbench::app::{AppState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app_state::AppState;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum SelectionWorkflowKind {
@@ -422,7 +423,7 @@ fn open_selection_workflow(
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_selection_workflow_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn render_selection_workflow_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.selection_workflow.open {
             return;
         }
