@@ -7518,13 +7518,7 @@ impl Engine {
             }
             let first_turns = first_turns.expect("multi-winding Core has at least two windings");
             let first_index = first_index.expect("multi-winding Core has at least two windings");
-            let mut params = resolve_xyce_core_model_params(model_def, first_turns)?;
-            // Xyce dispatches every multi-winding K-card to MutIndNonLin2.
-            // MutIndNonLin2's LEVEL metadata is intentionally ignored by the
-            // canonical device, so its accepted magnetic state follows the
-            // explicit LEVEL=2-style update even when the CORE model omits
-            // LEVEL (or spells LEVEL=1).
-            params.xyce_core_level2 = true;
+            let params = resolve_xyce_core_model_params(model_def, first_turns)?;
             let first_node_pos = circuit.inductors.node_pos[first_index];
             let first_node_neg = circuit.inductors.node_neg[first_index];
             let core = crate::device::passive::JilesAthertonInductor::new(
