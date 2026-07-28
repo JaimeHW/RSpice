@@ -88,11 +88,6 @@ impl Direction {
     /// All directions, in presentation order.
     pub const ALL: [Direction; 1] = [Direction::Instrument];
 
-    /// Human-readable name.
-    pub fn label(self) -> &'static str {
-        "Instrument"
-    }
-
     /// Control corner radius.
     pub fn radius(self) -> f32 {
         3.0

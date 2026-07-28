@@ -220,11 +220,6 @@ impl Toasts {
         );
     }
 
-    /// Queue an error toast.
-    pub fn error(&mut self, ctx: &Context, message: impl Into<String>) {
-        self.notify(ctx, NotificationCategory::System, ToastKind::Error, message);
-    }
-
     /// Queue a titled error toast.
     pub fn error_with_title(
         &mut self,

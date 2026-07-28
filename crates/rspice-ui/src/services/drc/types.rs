@@ -28,15 +28,6 @@ impl DrcSeverity {
         }
     }
 
-    /// Get icon for UI display
-    pub fn icon(&self) -> &'static str {
-        match self {
-            Self::Info => "ℹ️",
-            Self::Warning => "⚠️",
-            Self::Error => "❌",
-            Self::Critical => "🛑",
-        }
-    }
 }
 
 /// Type of DRC violation.
@@ -340,14 +331,6 @@ impl DrcResult {
         &self.violations
     }
 
-    /// Get violations filtered by severity
-    pub fn violations_by_severity(&self, severity: DrcSeverity) -> Vec<&DrcViolation> {
-        self.violations
-            .iter()
-            .filter(|v| v.severity == severity)
-            .collect()
-    }
-
     /// Get only errors (Error and Critical)
     pub fn errors(&self) -> Vec<&DrcViolation> {
         self.violations
@@ -369,13 +352,6 @@ impl DrcResult {
         self.violations
             .iter()
             .any(|v| v.severity >= DrcSeverity::Error)
-    }
-
-    /// Check if there are any warnings
-    pub fn has_warnings(&self) -> bool {
-        self.violations
-            .iter()
-            .any(|v| v.severity == DrcSeverity::Warning)
     }
 
     /// Check if the design passed (no errors or critical)
@@ -420,20 +396,3 @@ pub struct DrcSummary {
     pub passed: bool,
 }
 
-impl DrcSummary {
-    /// Get display string
-    pub fn display(&self) -> String {
-        if self.passed {
-            if self.warnings > 0 {
-                format!("Passed with {} warning(s)", self.warnings)
-            } else {
-                "Passed - no issues found".to_string()
-            }
-        } else {
-            format!(
-                "Failed: {} critical, {} error(s), {} warning(s)",
-                self.critical, self.errors, self.warnings
-            )
-        }
-    }
-}

@@ -299,12 +299,6 @@ impl Marker {
         }
     }
 
-    /// Draw a dashed drop line from the dot down to the X axis.
-    #[must_use]
-    pub fn drop_line(mut self) -> Self {
-        self.drop_line = true;
-        self
-    }
 }
 
 /// A horizontal dashed reference line (0 dB, thresholds).

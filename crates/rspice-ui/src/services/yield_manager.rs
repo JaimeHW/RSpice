@@ -231,12 +231,6 @@ impl YieldAnalysisManager {
         self.specs.insert(spec.target.clone(), spec);
     }
 
-    /// Clear all specs
-    pub fn clear_specs(&mut self) {
-        self.specs.clear();
-        self.results.clear();
-    }
-
     /// Run yield analysis over retained simulation results. A Monte Carlo
     /// result contributes every exact target sample; other result kinds
     /// contribute at most one scalar measurement each.

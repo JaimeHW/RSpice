@@ -17,28 +17,6 @@ impl WaveformWriter {
         Self { format }
     }
 
-    /// Write dataset to file
-    pub fn write(&self, dataset: &WaveformDataset, path: &Path) -> Result<(), String> {
-        let contents = self.write_text(dataset)?;
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // Direct writer callers have no earlier picker authorization, but
-            // still receive a complete-byte, crash-consistent CAS instead of
-            // a partial or unconditional filesystem write.
-            let expected = crate::io::durable_file::observe_expected_content(path)
-                .map_err(|error| error.to_string())?;
-            crate::io::durable_file::compare_exchange_bytes(path, expected, contents.as_bytes())
-                .map_err(|error| error.to_string())
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (contents, path);
-            Err("direct filesystem waveform writes are unavailable in the browser; use the download export workflow".to_string())
-        }
-    }
-
     /// Serialize dataset to a text-based waveform format.
     pub fn write_text(&self, dataset: &WaveformDataset) -> Result<String, String> {
         match self.format {

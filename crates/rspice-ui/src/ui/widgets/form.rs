@@ -46,39 +46,6 @@ pub fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
     .inner
 }
 
-/// A read-only inspector row (value rendered dimmed, still selectable).
-pub fn input_row_readonly(ui: &mut Ui, label: &str, value: &str) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let row_h = t.metrics.row_h;
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), row_h),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            let (label_rect, _) =
-                ui.allocate_exact_size(vec2(LABEL_COL, row_h), egui::Sense::hover());
-            ui.painter().text(
-                egui::pos2(label_rect.left(), label_rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                label,
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                c.text_dim,
-            );
-            let mut text = value.to_owned();
-            ui.add_sized(
-                vec2(ui.available_width(), t.metrics.ctl_h),
-                TextEdit::singleline(&mut text)
-                    .font(egui::TextStyle::Monospace)
-                    .text_color(c.text_dim)
-                    .interactive(false)
-                    .margin(egui::Margin::symmetric(8, 4)),
-            )
-        },
-    )
-    .inner
-}
-
 /// A key-value row: dimmed key left, mono value right.
 pub fn kv_row(ui: &mut Ui, key: &str, value: &str) {
     let t = Tokens::get(ui.ctx());

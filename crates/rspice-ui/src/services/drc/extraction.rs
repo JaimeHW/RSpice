@@ -433,24 +433,6 @@ pub fn run_drc_check(schematic: &crate::state::SchematicState) -> DrcResult {
     result
 }
 
-/// Run a complete DRC check with project-cell symbol resolution enabled.
-pub fn run_drc_check_with_hierarchy(
-    schematic: &crate::state::SchematicState,
-    hierarchy: &HierarchySource<'_>,
-) -> DrcResult {
-    let start = crate::time_compat::Instant::now();
-    let (components, wires, net_labels, junctions) =
-        extract_drc_data_with_hierarchy_and_junctions(schematic, hierarchy);
-    let mut checker = DrcChecker::new();
-    checker.set_net_naming_policy(schematic.document_policy.net_naming);
-    let mut result =
-        checker.check_connectivity_with_junctions(&components, &wires, &net_labels, &junctions);
-    append_bus_violations(schematic, &mut result, &Default::default());
-    result.completed = true;
-    result.duration_ms = start.elapsed().as_millis() as u64;
-    result
-}
-
 /// Run a complete DRC check with custom configuration.
 pub fn run_drc_check_with_config(
     schematic: &crate::state::SchematicState,

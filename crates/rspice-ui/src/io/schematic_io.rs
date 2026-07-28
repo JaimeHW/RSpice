@@ -71,12 +71,6 @@ impl SchematicVersion {
         self.major == Self::current().major
     }
 
-    /// Check if migration is needed (older minor/patch version)
-    pub fn needs_migration(&self) -> bool {
-        self.major < Self::current().major
-            || self.minor < Self::current().minor
-            || self.patch < Self::current().patch
-    }
 }
 
 impl std::fmt::Display for SchematicVersion {
@@ -126,22 +120,6 @@ impl SchematicFile {
             version: SchematicVersion::current(),
             schematic,
             metadata: SchematicMetadata::default(),
-        }
-    }
-
-    /// Create with metadata
-    pub fn with_metadata(schematic: SchematicState, title: impl Into<String>) -> Self {
-        let now = crate::time_compat::unix_epoch().as_secs();
-
-        Self {
-            version: SchematicVersion::current(),
-            schematic,
-            metadata: SchematicMetadata {
-                title: Some(title.into()),
-                created_at: Some(now),
-                modified_at: Some(now),
-                ..Default::default()
-            },
         }
     }
 
@@ -228,12 +206,6 @@ impl From<std::io::Error> for SchematicIoError {
 
 /// Standard file filter for RSpice schematic files
 pub const SCHEMATIC_FILTER: (&str, &[&str]) = ("RSpice Schematic", &["rsch", "json"]);
-
-/// All supported file filters for open dialog
-pub const OPEN_FILTERS: &[(&str, &[&str])] = &[
-    ("RSpice Schematic", &["rsch", "json"]),
-    ("All Files", &["*"]),
-];
 
 // =============================================================================
 // Native File Dialog Functions

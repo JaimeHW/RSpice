@@ -30,16 +30,6 @@ impl QuantityPresentationPolicy {
         }
     }
 
-    /// Affine axis-label transform for temperatures stored in Celsius.
-    #[must_use]
-    pub const fn celsius_axis_transform(self) -> (f64, f64, &'static str) {
-        match self.temperature_display {
-            TemperatureDisplay::Celsius => (1.0, 0.0, "°C"),
-            TemperatureDisplay::Kelvin => (1.0, 273.15, "K"),
-            TemperatureDisplay::Fahrenheit => (1.8, 32.0, "°F"),
-        }
-    }
-
     /// Format hertz without changing the stored value.
     #[must_use]
     pub fn format_frequency(self, hertz: f64, fractional_digits: usize) -> String {
@@ -72,12 +62,6 @@ impl QuantityPresentationPolicy {
             AngleDisplay::Radians => (radians, "rad"),
         };
         fixed_value(value, unit, fractional_digits)
-    }
-
-    /// Format an arbitrary SI value with an engineering prefix.
-    #[must_use]
-    pub fn format_si_value(self, value_si: f64, si_unit: &str, fractional_digits: usize) -> String {
-        engineering_value(value_si, si_unit, fractional_digits, false)
     }
 
     /// Format an exact PDK-layout coordinate. `database_units` remains the

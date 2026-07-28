@@ -259,14 +259,6 @@ impl SoAManager {
         self.evaluations.values()
     }
 
-    /// Group violations by device ID
-    pub fn violations_by_device(&self) -> HashMap<String, Vec<&SoAViolation>> {
-        let mut map: HashMap<String, Vec<&SoAViolation>> = HashMap::new();
-        for v in &self.violations {
-            map.entry(v.device_id.clone()).or_default().push(v);
-        }
-        map
-    }
 }
 
 fn rule_verdict(actual: f64, maximum: f64) -> SoARuleVerdict {

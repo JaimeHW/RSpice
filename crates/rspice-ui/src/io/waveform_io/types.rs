@@ -26,39 +26,6 @@ pub enum WaveformFormat {
 }
 
 impl WaveformFormat {
-    /// Detect format from file extension
-    pub fn from_extension(ext: &str) -> Option<Self> {
-        let ext = ext.to_lowercase();
-        match ext.as_str() {
-            "psf" => Some(WaveformFormat::Psf),
-            "raw" | "tr0" | "ac0" => Some(WaveformFormat::Nutmeg),
-            "csv" => Some(WaveformFormat::Csv),
-            "tsv" => Some(WaveformFormat::Tsv),
-            "s1p" | "s2p" | "snp" => Some(WaveformFormat::Touchstone),
-            _ if ext.len() >= 3
-                && ext.starts_with('s')
-                && ext.ends_with('p')
-                && ext[1..ext.len() - 1].chars().all(|ch| ch.is_ascii_digit()) =>
-            {
-                Some(WaveformFormat::Touchstone)
-            }
-            _ => None,
-        }
-    }
-
-    /// Default file extension
-    pub fn extension(&self) -> &'static str {
-        match self {
-            WaveformFormat::Psf => "psf",
-            WaveformFormat::Nutmeg => "raw",
-            WaveformFormat::AsciiRaw => "raw",
-            WaveformFormat::BinaryRaw => "raw",
-            WaveformFormat::Csv => "csv",
-            WaveformFormat::Tsv => "tsv",
-            WaveformFormat::Touchstone => "s2p",
-        }
-    }
-
     /// Whether this format currently supports writing.
     pub fn can_write(&self) -> bool {
         matches!(
@@ -124,29 +91,9 @@ impl WaveformSignal {
         }
     }
 
-    /// Add data point
-    pub fn push(&mut self, value: f64) {
-        self.data.push(value);
-    }
-
     /// Get number of points
     pub fn len(&self) -> usize {
         self.data.len()
-    }
-
-    /// Is empty
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    /// Get min value
-    pub fn min(&self) -> Option<f64> {
-        self.data.iter().copied().reduce(f64::min)
-    }
-
-    /// Get max value
-    pub fn max(&self) -> Option<f64> {
-        self.data.iter().copied().reduce(f64::max)
     }
 
     /// Get value at index

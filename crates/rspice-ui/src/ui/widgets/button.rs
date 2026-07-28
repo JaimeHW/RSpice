@@ -16,12 +16,11 @@ fn trailing_shortcut(text: &str) -> Option<&str> {
 /// A labeled button: bordered by default, filled when [`Button::accent`].
 ///
 /// Matches the design's `.button` / `.button.primary`: control height, 10 px
-/// horizontal padding, 1 px border, 11 px label, with an
-/// optional 13 px leading icon and a dimmed trailing hint (e.g. a shortcut).
+/// horizontal padding, 1 px border, 11 px label, with an optional 13 px
+/// leading icon.
 pub struct Button<'a> {
     label: &'a str,
     icon: Option<Icon>,
-    hint: Option<&'a str>,
     accent: bool,
     ghost: bool,
     destructive: bool,
@@ -38,7 +37,6 @@ impl<'a> Button<'a> {
         Self {
             label,
             icon: None,
-            hint: None,
             accent: false,
             ghost: false,
             destructive: false,
@@ -53,12 +51,6 @@ impl<'a> Button<'a> {
     /// Add a leading 13 px icon.
     pub fn icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
-        self
-    }
-
-    /// Add a dimmed trailing hint (keyboard shortcut).
-    pub fn hint(mut self, hint: &'a str) -> Self {
-        self.hint = Some(hint);
         self
     }
 
@@ -153,15 +145,8 @@ impl<'a> Button<'a> {
             );
             ui.fonts_mut(|f| f.layout_job(job))
         };
-        let hint_galley = self.hint.map(|h| {
-            ui.fonts_mut(|f| {
-                f.layout_no_wrap(h.to_owned(), font_id.clone(), fg.gamma_multiply(0.65))
-            })
-        });
-
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
-        let hint_w = hint_galley.as_ref().map_or(0.0, |g| g.size().x + 5.0);
-        let content_width = galley.size().x + icon_w + hint_w;
+        let content_width = galley.size().x + icon_w;
         let unconstrained_width = (content_width + 20.0).max(self.min_width);
         let width = self
             .max_width
@@ -190,12 +175,6 @@ impl<'a> Button<'a> {
                 self.accessible_label.unwrap_or(self.label),
             )
         });
-        if let Some(shortcut) = self.hint {
-            ui.ctx().accesskit_node_builder(response.id, |node| {
-                node.set_keyboard_shortcut(shortcut);
-            });
-        }
-
         if !ui.is_rect_visible(rect) {
             return response;
         }
@@ -256,15 +235,6 @@ impl<'a> Button<'a> {
             galley.clone(),
             fg.gamma_multiply(opacity),
         );
-        x += galley.size().x;
-        if let Some(hint) = hint_galley {
-            painter.galley(
-                egui::pos2(x + 5.0, rect.center().y - hint.size().y * 0.5),
-                hint,
-                fg.gamma_multiply(0.65 * opacity),
-            );
-        }
-
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         }

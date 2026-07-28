@@ -97,16 +97,6 @@ impl DecimationCache {
         self.evict_to_fit(0);
     }
 
-    #[must_use]
-    pub fn memory_budget_mib(&self) -> usize {
-        self.byte_capacity / (1024 * 1024)
-    }
-
-    #[must_use]
-    pub const fn resident_bytes(&self) -> usize {
-        self.resident_bytes
-    }
-
     fn evict_to_fit(&mut self, incoming_bytes: usize) {
         while (!self.map.is_empty())
             && (self.map.len() >= CACHE_CAP
