@@ -13,7 +13,16 @@ use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
 use std::path::Path;
 
-/// Result of a simulation run
+/// Result of a whole-deck simulation run in the legacy shape, where an
+/// ordinary parse or solver failure is carried in `success`/`error` rather
+/// than returned as an error.
+///
+/// Superseded: whole-deck execution ships through
+/// [`crate::simulation::runner`], which dispatches per analysis and returns
+/// each analysis' own typed data. Retained under `cfg(test)` only to pin the
+/// contract that cancellation stays a typed error in this shape; delete the
+/// legacy family once that contract is asserted against the shipping path.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
     /// Whether the simulation succeeded
@@ -84,7 +93,8 @@ impl TransientData {
     }
 }
 
-/// Simulation statistics
+/// Timing and point-count statistics for a legacy [`SimulationResult`].
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 pub struct SimulationStats {
     /// Parse time in milliseconds
@@ -97,14 +107,9 @@ pub struct SimulationStats {
     pub num_points: usize,
 }
 
-/// Run a simulation from netlist text
-///
-/// This function parses the netlist, runs requested analyses, and extracts results.
-pub fn run_simulation(netlist_text: &str) -> SimulationResult {
-    compatibility_simulation_result(run_simulation_with_abort(netlist_text, &NoAbort))
-}
-
-/// Run a simulation from netlist text with cooperative cancellation.
+/// Run a whole deck in the legacy [`SimulationResult`] shape with cooperative
+/// cancellation. Test-only; see [`SimulationResult`].
+#[cfg(test)]
 pub fn run_simulation_with_abort(
     netlist_text: &str,
     abort: &dyn AbortSignal,
@@ -112,72 +117,14 @@ pub fn run_simulation_with_abort(
     run_simulation_with_options_and_source_path_and_abort(netlist_text, None, None, abort)
 }
 
-/// Run a simulation from netlist text with a source path used to resolve
-/// relative includes and model file references.
-pub fn run_simulation_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> SimulationResult {
-    compatibility_simulation_result(run_simulation_with_source_path_and_abort(
-        netlist_text,
-        source_path,
-        &NoAbort,
-    ))
-}
-
-/// Run a simulation with source-path resolution and cooperative cancellation.
-pub fn run_simulation_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<SimulationResult> {
-    run_simulation_with_options_and_source_path_and_abort(netlist_text, None, source_path, abort)
-}
-
-/// Run a simulation with custom simulation options
-///
-/// Allows passing UI-configured SimulationOptions to control the solver behavior.
-pub fn run_simulation_with_options(
-    netlist_text: &str,
-    options: Option<&crate::simulation::dialog::SimulationOptions>,
-) -> SimulationResult {
-    compatibility_simulation_result(run_simulation_with_options_and_abort(
-        netlist_text,
-        options,
-        &NoAbort,
-    ))
-}
-
-/// Run a simulation with custom options and cooperative cancellation.
-pub fn run_simulation_with_options_and_abort(
-    netlist_text: &str,
-    options: Option<&crate::simulation::dialog::SimulationOptions>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<SimulationResult> {
-    run_simulation_with_options_and_source_path_and_abort(netlist_text, options, None, abort)
-}
-
-/// Run a simulation with custom simulation options and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_simulation_with_options_and_source_path(
-    netlist_text: &str,
-    options: Option<&crate::simulation::dialog::SimulationOptions>,
-    source_path: Option<&Path>,
-) -> SimulationResult {
-    compatibility_simulation_result(run_simulation_with_options_and_source_path_and_abort(
-        netlist_text,
-        options,
-        source_path,
-        &NoAbort,
-    ))
-}
-
-/// Canonical cancellable simulation entry point with explicit options and
+/// Canonical legacy whole-deck entry point, with explicit options and
 /// source-path resolution.
 ///
 /// This legacy result shape carries ordinary parse/solver failures in its
 /// `success`/`error` fields. Cooperative cancellation is the sole typed error
-/// so callers cannot mistake it for a failed simulation.
+/// so callers cannot mistake it for a failed simulation. Test-only; see
+/// [`SimulationResult`].
+#[cfg(test)]
 pub fn run_simulation_with_options_and_source_path_and_abort(
     netlist_text: &str,
     options: Option<&crate::simulation::dialog::SimulationOptions>,
@@ -295,12 +242,7 @@ pub fn run_simulation_with_options_and_source_path_and_abort(
     })
 }
 
-fn compatibility_simulation_result(result: ServiceRunResult<SimulationResult>) -> SimulationResult {
-    result.unwrap_or_else(|error| {
-        failed_simulation_result(error.to_string(), SimulationStats::default())
-    })
-}
-
+#[cfg(test)]
 fn failed_simulation_result(error: String, stats: SimulationStats) -> SimulationResult {
     SimulationResult {
         success: false,
@@ -311,21 +253,12 @@ fn failed_simulation_result(error: String, stats: SimulationStats) -> Simulation
     }
 }
 
-/// Run transient analysis with explicit parameters.
-///
-/// Unlike `run_simulation`, this path does not depend on `.tran` directives
-/// embedded in the netlist text.
-pub fn run_transient_analysis(
-    netlist_text: &str,
-    stop_time: Value,
-    step_time: Value,
-) -> Result<TransientData, String> {
-    run_transient_analysis_with_abort(netlist_text, stop_time, step_time, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
 /// Run transient analysis with explicit parameters and cooperative
 /// cancellation.
+///
+/// Test-only. The shipping path is
+/// [`run_transient_analysis_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_transient_analysis_with_abort(
     netlist_text: &str,
     stop_time: Value,
@@ -339,24 +272,6 @@ pub fn run_transient_analysis_with_abort(
         None,
         abort,
     )
-}
-
-/// Run transient analysis with explicit parameters and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_transient_analysis_with_source_path(
-    netlist_text: &str,
-    stop_time: Value,
-    step_time: Value,
-    source_path: Option<&Path>,
-) -> Result<TransientData, String> {
-    run_transient_analysis_with_source_path_and_abort(
-        netlist_text,
-        stop_time,
-        step_time,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run transient analysis with explicit parameters, source-path resolution,

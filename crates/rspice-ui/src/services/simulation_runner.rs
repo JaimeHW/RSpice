@@ -168,15 +168,7 @@ pub use tf::{
     run_tf_analysis_with_config_and_source_path_and_abort, run_tf_analysis_with_source_path,
     run_tf_analysis_with_source_path_and_abort,
 };
-pub use transient::{
-    SimulationResult, SimulationStats, TransientData, run_simulation, run_simulation_with_abort,
-    run_simulation_with_options, run_simulation_with_options_and_abort,
-    run_simulation_with_options_and_source_path,
-    run_simulation_with_options_and_source_path_and_abort, run_simulation_with_source_path,
-    run_simulation_with_source_path_and_abort, run_transient_analysis,
-    run_transient_analysis_with_abort, run_transient_analysis_with_source_path,
-    run_transient_analysis_with_source_path_and_abort,
-};
+pub use transient::{TransientData, run_transient_analysis_with_source_path_and_abort};
 
 // =============================================================================
 // Platform-agnostic timing utilities
