@@ -14,25 +14,6 @@ pub enum PzAnalysisType {
     ZerosOnly,
 }
 
-impl PzAnalysisType {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::PolesAndZeros => "Poles & Zeros",
-            Self::PolesOnly => "Poles Only",
-            Self::ZerosOnly => "Zeros Only",
-        }
-    }
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::PolesAndZeros => "pz",
-            Self::PolesOnly => "pol",
-            Self::ZerosOnly => "zer",
-        }
-    }
-    pub fn all() -> &'static [PzAnalysisType] {
-        &[Self::PolesAndZeros, Self::PolesOnly, Self::ZerosOnly]
-    }
-}
 
 /// Transfer function type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -40,24 +21,6 @@ pub enum PzTransferType {
     #[default]
     Voltage,
     Current,
-}
-
-impl PzTransferType {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Voltage => "Voltage (V/V)",
-            Self::Current => "Current (I/I)",
-        }
-    }
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Voltage => "vol",
-            Self::Current => "cur",
-        }
-    }
-    pub fn all() -> &'static [PzTransferType] {
-        &[Self::Voltage, Self::Current]
-    }
 }
 
 /// Pole-Zero analysis configuration

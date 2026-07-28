@@ -13,20 +13,6 @@ pub enum TempBaseAnalysis {
     Dc,
 }
 
-impl TempBaseAnalysis {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Op => "DC OP",
-            Self::Transient => "Transient",
-            Self::Ac => "AC",
-            Self::Dc => "DC Sweep",
-        }
-    }
-    pub fn all() -> &'static [TempBaseAnalysis] {
-        &[Self::Op, Self::Transient, Self::Ac, Self::Dc]
-    }
-}
-
 /// Temperature sweep configuration
 #[derive(Debug, Clone)]
 pub struct TempConfig {

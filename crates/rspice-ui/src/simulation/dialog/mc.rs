@@ -12,25 +12,6 @@ pub enum McDistribution {
     WorstCase,
 }
 
-impl McDistribution {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Gaussian => "Gaussian",
-            Self::Uniform => "Uniform",
-            Self::WorstCase => "Worst Case",
-        }
-    }
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Gaussian => "gauss",
-            Self::Uniform => "uniform",
-            Self::WorstCase => "worstcase",
-        }
-    }
-    pub fn all() -> &'static [McDistribution] {
-        &[Self::Gaussian, Self::Uniform, Self::WorstCase]
-    }
-}
 
 /// Base analysis to run for MC
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -42,19 +23,6 @@ pub enum McBaseAnalysis {
     Op,
 }
 
-impl McBaseAnalysis {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Transient => "Transient",
-            Self::Ac => "AC",
-            Self::Dc => "DC Sweep",
-            Self::Op => "DC OP",
-        }
-    }
-    pub fn all() -> &'static [McBaseAnalysis] {
-        &[Self::Transient, Self::Ac, Self::Dc, Self::Op]
-    }
-}
 
 /// Monte Carlo analysis configuration
 #[derive(Debug, Clone)]

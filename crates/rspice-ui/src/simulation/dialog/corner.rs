@@ -41,15 +41,9 @@ pub enum ProcessCorner {
 }
 
 impl ProcessCorner {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::TT => "TT (Typical)",
-            Self::SS => "SS (Slow-Slow)",
-            Self::FF => "FF (Fast-Fast)",
-            Self::SF => "SF (Slow-Fast)",
-            Self::FS => "FS (Fast-Slow)",
-        }
+    /// Standard 5-corner set
+    pub fn standard_five() -> Vec<ProcessCorner> {
+        vec![Self::TT, Self::SS, Self::FF, Self::SF, Self::FS]
     }
 
     /// Short name
@@ -63,15 +57,6 @@ impl ProcessCorner {
         }
     }
 
-    /// All corners
-    pub fn all() -> &'static [ProcessCorner] {
-        &[Self::TT, Self::SS, Self::FF, Self::SF, Self::FS]
-    }
-
-    /// Standard 5-corner set
-    pub fn standard_five() -> Vec<ProcessCorner> {
-        vec![Self::TT, Self::SS, Self::FF, Self::SF, Self::FS]
-    }
 
     /// Speed corners only (SS, TT, FF)
     pub fn speed_corners() -> Vec<ProcessCorner> {
@@ -95,23 +80,6 @@ pub enum CornerBaseAnalysis {
     Dc,
     /// Operating point
     Op,
-}
-
-impl CornerBaseAnalysis {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Transient => "Transient",
-            Self::Ac => "AC",
-            Self::Dc => "DC",
-            Self::Op => "Operating Point",
-        }
-    }
-
-    /// All types
-    pub fn all() -> &'static [CornerBaseAnalysis] {
-        &[Self::Transient, Self::Ac, Self::Dc, Self::Op]
-    }
 }
 
 // =============================================================================

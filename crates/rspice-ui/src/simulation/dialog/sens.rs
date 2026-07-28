@@ -11,23 +11,6 @@ pub enum SensType {
     Ac,
 }
 
-impl SensType {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Dc => "DC",
-            Self::Ac => "AC",
-        }
-    }
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Dc => "dc",
-            Self::Ac => "ac",
-        }
-    }
-    pub fn all() -> &'static [SensType] {
-        &[Self::Dc, Self::Ac]
-    }
-}
 
 /// Sensitivity analysis configuration
 #[derive(Debug, Clone)]
