@@ -18,7 +18,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
-use rspice_core::analysis::{HbConfig, advanced::pss::PssConfig};
+use rspice_core::analysis::{HbConfig, pss::PssConfig};
 use rspice_core::engine::Engine;
 use std::path::Path;
 

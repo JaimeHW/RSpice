@@ -62,13 +62,6 @@ impl EngineBridge {
         }
     }
 
-    /// Create a new engine bridge with custom configuration
-    pub fn with_config(config: rspice_core::SimulationConfig) -> Self {
-        Self {
-            engine: rspice_core::Engine::new(config),
-        }
-    }
-
     /// Create a new engine bridge only when the complete configuration is valid.
     ///
     /// Prefer this constructor at service and job-queue boundaries so invalid
@@ -96,27 +89,6 @@ impl EngineBridge {
                 config,
                 netlist_str,
                 source_path: None,
-            },
-            &NoAbort,
-        )
-    }
-
-    /// Run simulation without cooperative cancellation, using a source path
-    /// to resolve relative includes and model file references.
-    ///
-    /// Production queued execution must use
-    /// [`Self::run_with_abort_and_source_path`].
-    pub fn run_with_source_path(
-        &self,
-        config: &AnalysisConfig,
-        netlist_str: &str,
-        source_path: Option<&Path>,
-    ) -> Result<SimulationResult, SimulationError> {
-        self.run_request(
-            SimulationInput {
-                config,
-                netlist_str,
-                source_path,
             },
             &NoAbort,
         )

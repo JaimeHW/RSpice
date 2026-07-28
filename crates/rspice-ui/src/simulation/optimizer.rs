@@ -22,7 +22,7 @@ mod types;
 
 pub use design_var::DesignVar;
 pub use goal::OptimizationGoal;
-pub use types::{OptimizationResult, OptimizerAlgo, OptimizerConfig, OptimizerState};
+pub use types::{OptimizerAlgo, OptimizerConfig, OptimizerState};
 /// Core engine for executing optimization runs
 ///
 /// Implements Spectre-compatible optimization algorithms:

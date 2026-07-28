@@ -128,11 +128,6 @@ impl SimulationRunner {
             .progress()
     }
 
-    /// Get full progress information
-    pub fn progress(&self) -> SimulationProgress {
-        lock_progress(&self.progress, "SimulationRunner::progress").clone()
-    }
-
     /// Abort current simulation
     pub fn abort(&self) {
         self.abort_flag.store(true, Ordering::SeqCst);
@@ -301,52 +296,6 @@ impl SimulationRunner {
         )
     }
 
-    /// Start a simulation from strongly-typed analysis spec.
-    #[cfg(test)]
-    fn start_spec(&mut self, spec: AnalysisSpec, netlist: String) -> Result<(), SimulationError> {
-        self.start_spec_with_options_with_source_path(
-            spec,
-            netlist,
-            SpecExecutionOptions::default(),
-            None,
-        )
-    }
-
-    /// Start a simulation from strongly-typed analysis spec with explicit execution options.
-    #[cfg(test)]
-    fn start_spec_with_options(
-        &mut self,
-        spec: AnalysisSpec,
-        netlist: String,
-        options: SpecExecutionOptions,
-    ) -> Result<(), SimulationError> {
-        self.start_spec_with_options_with_source_path(spec, netlist, options, None)
-    }
-
-    /// Start a simulation from strongly-typed analysis spec with explicit
-    /// execution options and a source path for relative include resolution.
-    #[cfg(test)]
-    fn start_spec_with_options_with_source_path(
-        &mut self,
-        spec: AnalysisSpec,
-        netlist: String,
-        options: SpecExecutionOptions,
-        source_path: Option<PathBuf>,
-    ) -> Result<(), SimulationError> {
-        self.start_request(
-            SimulationRequest::Spec {
-                spec: Box::new(spec),
-                options: Box::new(options),
-            },
-            NetlistInput {
-                netlist,
-                source_path,
-                project_veriloga_runtimes: Default::default(),
-                dependencies: Default::default(),
-            },
-        )
-    }
-
     fn start_request(
         &mut self,
         request: SimulationRequest,
@@ -390,22 +339,6 @@ impl SimulationRunner {
         Ok(())
     }
 
-    /// Run DC operating point analysis
-    #[cfg(test)]
-    fn run_dc_op(&mut self, netlist: String) -> Result<(), SimulationError> {
-        self.start(AnalysisConfig::dc_op(), netlist)
-    }
-
-    /// Run DC operating point analysis with a source path for relative include
-    /// resolution.
-    #[cfg(test)]
-    fn run_dc_op_with_source_path(
-        &mut self,
-        netlist: String,
-        source_path: Option<PathBuf>,
-    ) -> Result<(), SimulationError> {
-        self.start_with_source_path(AnalysisConfig::dc_op(), netlist, source_path)
-    }
 }
 
 fn lock_progress<'a>(
@@ -1091,11 +1024,6 @@ mod tests {
         for signature in [
             "\n    fn start(&mut self",
             "\n    fn start_with_source_path(",
-            "\n    fn start_spec(&mut self",
-            "\n    fn start_spec_with_options(",
-            "\n    fn start_spec_with_options_with_source_path(",
-            "\n    fn run_dc_op(&mut self",
-            "\n    fn run_dc_op_with_source_path(",
         ] {
             let index = source
                 .find(signature)
@@ -1115,15 +1043,7 @@ mod tests {
             1,
             "the controller must have one opaque task dispatch point"
         );
-        for forbidden in [
-            "self.runner.start(",
-            "self.runner.start_with_source_path(",
-            "self.runner.start_spec(",
-            "self.runner.start_spec_with_options(",
-            "self.runner.start_spec_with_options_with_source_path(",
-            "self.runner.run_dc_op(",
-            "self.runner.run_dc_op_with_source_path(",
-        ] {
+        for forbidden in ["self.runner.start(", "self.runner.start_with_source_path("] {
             assert!(
                 !controller_source.contains(forbidden),
                 "controller bypasses the authorized dispatch boundary: {forbidden}"

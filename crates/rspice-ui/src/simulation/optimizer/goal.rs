@@ -71,36 +71,4 @@ impl OptimizationGoal {
         }
     }
 
-    /// Calculate cost (error) for a given value
-    /// 0.0 means perfect match, higher means worse
-    pub fn calculate_cost(&self, current_val: f64) -> f64 {
-        match self.strategy {
-            GoalStrategy::Maximize => {
-                // Return 1/val or 1-val depending on normalization
-                if current_val > 0.0 {
-                    1.0 / current_val
-                } else {
-                    f64::MAX
-                }
-            }
-            GoalStrategy::Minimize => current_val.abs(),
-            GoalStrategy::Target => {
-                let target = self.target_val.unwrap_or(0.0);
-                (current_val - target).powi(2)
-            }
-            GoalStrategy::Range => {
-                if let Some((min, max)) = self.range {
-                    if current_val < min {
-                        (min - current_val).powi(2)
-                    } else if current_val > max {
-                        (current_val - max).powi(2)
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                }
-            }
-        }
-    }
 }

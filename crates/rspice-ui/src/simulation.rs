@@ -12,7 +12,6 @@ pub(crate) mod engine_bridge;
 pub(crate) mod execution;
 pub(crate) mod multi_run;
 pub(crate) mod netlist_gen;
-pub(crate) mod netlist_viewer;
 pub(crate) mod optimizer;
 pub(crate) mod output_contract;
 pub use output_contract::{

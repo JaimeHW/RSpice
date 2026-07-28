@@ -35,11 +35,6 @@ impl OptimizerEngine {
         }
     }
 
-    pub fn with_algorithm(mut self, algo: OptimizerAlgo) -> Self {
-        self.config.algorithm = algo;
-        self
-    }
-
     pub fn add_goal(&mut self, goal: OptimizationGoal) {
         self.goals.push(goal);
     }
@@ -55,19 +50,6 @@ impl OptimizerEngine {
             .iter()
             .map(|v| (v.name.clone(), v.value))
             .collect()
-    }
-
-    /// Calculate total cost across all goals
-    pub fn calculate_total_cost(&self, measurements: &HashMap<String, f64>) -> f64 {
-        let mut total = 0.0;
-        for goal in &self.goals {
-            if let Some(&val) = measurements.get(&goal.target) {
-                total += goal.calculate_cost(val) * goal.weight as f64;
-            } else {
-                total += 1e9; // Penalty for missing measurement
-            }
-        }
-        total
     }
 
     /// Compute finite-difference gradient

@@ -4,7 +4,6 @@
 //! has to be consistent at each boundary for a resumed run to continue
 //! rather than restart.
 
-use crate::time_compat::Instant;
 use std::collections::HashMap;
 
 use super::*;
@@ -41,35 +40,6 @@ impl OptimizerEngine {
         false
     }
 
-    /// Run full optimization loop
-    pub fn optimize<F>(&mut self, mut cost_fn: F) -> OptimizationResult
-    where
-        F: FnMut(&HashMap<String, f64>) -> f64,
-    {
-        let start = Instant::now();
-
-        // Initialize best
-        let initial_cost = cost_fn(&self.current_vars());
-        self.best_cost = initial_cost;
-        self.best_vars = self.current_vars();
-
-        while self.iteration < self.config.max_iterations {
-            self.step(&mut cost_fn);
-
-            if self.is_converged() {
-                break;
-            }
-        }
-
-        OptimizationResult {
-            best_vars: self.best_vars.clone(),
-            final_cost: self.best_cost,
-            iterations: self.iteration,
-            total_time: start.elapsed().as_secs_f64(),
-            success: self.best_cost < 1e-3, // Reasonable success threshold
-        }
-    }
-
     /// Get the best result found so far
     pub fn best_result(&self) -> (&HashMap<String, f64>, f64) {
         (&self.best_vars, self.best_cost)
@@ -78,15 +48,5 @@ impl OptimizerEngine {
     /// Get current iteration
     pub fn current_iteration(&self) -> usize {
         self.iteration
-    }
-
-    /// Get gradient vector
-    pub fn gradient(&self) -> &[f64] {
-        &self.gradient
-    }
-
-    /// Get cost history
-    pub fn cost_history(&self) -> &[f64] {
-        &self.cost_history
     }
 }

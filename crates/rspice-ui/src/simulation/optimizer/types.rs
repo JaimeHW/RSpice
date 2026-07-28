@@ -36,16 +36,6 @@ pub struct OptimizerState {
     pub var_values: HashMap<String, f64>,
 }
 
-/// Final result of optimization
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OptimizationResult {
-    pub best_vars: HashMap<String, f64>,
-    pub final_cost: f64,
-    pub iterations: usize,
-    pub total_time: f64,
-    pub success: bool,
-}
-
 // =============================================================================
 // Optimizer Engine
 // =============================================================================

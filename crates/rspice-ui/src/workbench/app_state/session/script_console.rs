@@ -5,14 +5,13 @@
 //! dock being closed and reopened. The dock that renders it lives at
 //! `workbench::docks::console`, which reaches down here for the model.
 
-use crate::simulation::automation::{CommandOutput, ScriptExecutor};
+use crate::simulation::automation::CommandOutput;
 
 /// State for the scripting console
 #[derive(Clone, Default)]
 pub struct ScriptConsoleState {
     pub input_buffer: String,
     pub history: Vec<ConsoleHistoryItem>,
-    pub executor: ScriptExecutor,
 }
 
 #[derive(Clone, Default)]
