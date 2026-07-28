@@ -5,7 +5,7 @@
 //! branch allocation, and whole-circuit orchestration.
 
 use super::{NodeId, TwoTerminalStamp, project_two_terminal_voltage};
-use crate::analysis::{CompanionCoefficients, IntegrationMethod};
+use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::device::{
     Bjt, Diode, Ekv3Device, EkvMosfet, MatrixStamper, Mosfet, NonlinearConvergenceCriteria,
     SolutionDependentCapacitor, SolutionDependentCapacitorLinearization, Vdmos,

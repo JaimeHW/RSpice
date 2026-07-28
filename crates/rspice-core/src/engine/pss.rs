@@ -23,10 +23,12 @@
 use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
-    BreakpointManager, CompanionCoefficients, LteEstimator, TimestepController, TrapGearController,
+    BreakpointManager, LteEstimator, TimestepController, TrapGearController,
 };
+use crate::numerics::integration::CompanionCoefficients;
+use crate::numerics::integration::IntegrationMethod;
 use crate::analysis::{
-    IntegrationMethod, PeriodDetector, PeriodicWaveform, PssConfig, PssResult,
+    PeriodDetector, PeriodicWaveform, PssConfig, PssResult,
     ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::Circuit;
@@ -1537,7 +1539,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let dt_freeze = period * 1e-9;
         let coeff =
-            CompanionCoefficients::for_method(crate::analysis::IntegrationMethod::BackwardEuler);
+            CompanionCoefficients::for_method(crate::numerics::integration::IntegrationMethod::BackwardEuler);
         let start = vec![0.0; circuit.matrix_size()];
 
         match self.pss_newton_solve(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start, abort)? {

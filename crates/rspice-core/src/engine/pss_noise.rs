@@ -28,8 +28,9 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::transient::CompanionCoefficients;
-use crate::analysis::{IntegrationMethod, NoiseSource, NoiseSourceType, PssConfig};
+use crate::numerics::integration::CompanionCoefficients;
+use crate::analysis::{NoiseSource, NoiseSourceType, PssConfig};
+use crate::numerics::integration::IntegrationMethod;
 use crate::{Netlist, Value};
 use std::collections::HashMap;
 

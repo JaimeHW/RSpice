@@ -7,7 +7,7 @@
 
 #![allow(clippy::too_many_arguments)]
 use crate::Value;
-use crate::analysis::CompanionCoefficients;
+use crate::numerics::integration::CompanionCoefficients;
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};

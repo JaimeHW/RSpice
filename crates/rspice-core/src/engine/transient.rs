@@ -10,9 +10,9 @@
 use super::{Engine, SimulationError, SpiceDialect, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
-    BreakpointManager, BreakpointStepPolicy, CompanionCoefficients, IntegrationMethod,
-    LteEstimator, TimestepController, TrapGearController,
+    BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
 };
+use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,

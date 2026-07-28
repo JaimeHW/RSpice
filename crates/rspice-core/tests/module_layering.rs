@@ -82,35 +82,40 @@ const LAYERS: &[(&str, u32)] = &[
     // coefficients and LTE machinery that `analysis::core::transient` owns
     // today.
     ("simd", 1),
-    ("solver", 2),
+    // Numerics shared by every analysis. `integration` holds the integration
+    // method and the companion-model coefficients that the circuit store, the
+    // device models and XSPICE all stamp with. `crate::solver` joins it as
+    // `numerics::la` in the rest of Phase 5.
+    ("numerics", 2),
+    ("solver", 3),
     // Expression evaluation. Two deliberate subsystems: the bytecode VM here
     // and the complex-valued `.PARAM` evaluator inside `netlist`, mirroring
     // ngspice's inpptree/numparam split.
-    ("expr", 3),
+    ("expr", 4),
     // Deck text to AST. Phase 7 moves its circuit transforms (flattener,
     // add_resistors, remove_unused, topology) up into `elab`, leaving parsing.
-    ("netlist", 4),
+    ("netlist", 5),
     // `.lib` model-library and Verilog-A pack discovery. Above `netlist`
     // because resolving a library produces deck content.
-    ("library", 5),
+    ("library", 6),
     // Device model evaluation, plus the Verilog-A and FFI extension points.
-    ("device", 6),
+    ("device", 7),
     // The XSPICE code-model subsystem: a device extension with its own event
     // queue, so it sits just above `device`.
-    ("xspice", 7),
+    ("xspice", 8),
     // Struct-of-arrays circuit storage and stamping. Phase 8 consolidates the
     // four stamping surfaces into `circuit::assembly`.
-    ("circuit", 8),
+    ("circuit", 9),
     // Analysis algorithms and result types. Phase 6 merges the `engine::X` /
     // `analysis::X` twins into one module per analysis.
-    ("analysis", 9),
+    ("analysis", 10),
     // Foreign-format IO: the LTspice RAW reader. `analysis::output` joins it
     // here, which is what retires the last `analysis -> compat` edge.
-    ("compat", 10),
+    ("compat", 11),
     // The facade: configuration resolution, dispatch, health, abort plumbing.
     // Phase 3 moves `SimulationConfig` and friends out to their own low rank;
     // Phase 7 moves `engine::builder` out to `elab`.
-    ("engine", 11),
+    ("engine", 12),
 ];
 
 /// Layer-order violations present in the tree today, with exact counts.
@@ -152,15 +157,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // context. The dialect enums are configuration, and travel to `config`
     // with `SpiceDialect`.
     ("expr", "netlist", 1),
-    // ---------------------------------------------------------------------
-    // Phase 5 — numerics.
-    //
-    // `CompanionCoefficients` is an integration-method primitive that lives in
-    // `analysis::core::transient`, so every module that stamps a companion
-    // model reaches up for it.
-    ("circuit", "analysis", 10),
-    ("device", "analysis", 5),
-    ("xspice", "analysis", 2),
     // ---------------------------------------------------------------------
     // Phase 6 — one module per analysis.
     //

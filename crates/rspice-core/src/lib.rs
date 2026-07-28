@@ -111,6 +111,7 @@ pub mod library;
 /// A leaf — everything else depends on it, so it depends on nothing.
 pub(crate) mod naming;
 pub mod netlist;
+pub mod numerics;
 pub mod solver;
 pub mod time_compat;
 pub mod xspice;

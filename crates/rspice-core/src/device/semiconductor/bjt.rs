@@ -1037,9 +1037,9 @@ impl Bjt {
             nf: 1.0,            // Forward emission coefficient
             nr: 1.0,            // Reverse emission coefficient
             vt: 0.025851999786, // Thermal voltage at 300K
-            tnom: crate::analysis::temperature::T_NOMINAL,
-            ambient_temperature: crate::analysis::temperature::T_NOMINAL,
-            temperature: crate::analysis::temperature::T_NOMINAL,
+            tnom: crate::constants::TEMP_REFERENCE,
+            ambient_temperature: crate::constants::TEMP_REFERENCE,
+            temperature: crate::constants::TEMP_REFERENCE,
             xyce_compatibility: false,
             xti: 3.0,
             eg: 1.11,
