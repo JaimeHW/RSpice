@@ -693,6 +693,15 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
     }
 }
 
+fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
+    // SAFETY: every slot is an f64, and all-zero bytes are 0.0.
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 30],
     pub branches: [usize; 36],
@@ -703,6 +712,7 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+    pub(crate) canonical_reactive: Box<[f64; 216]>,
 }
 
 impl Clone for Instance {
@@ -718,6 +728,7 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
+            canonical_reactive: self.canonical_reactive.clone(),
         }
     }
 }
@@ -730,10 +741,10 @@ impl Instance {
 
     pub const BRANCH_COUNT: usize = 36;
     pub const PARAMETER_COUNT: usize = 356;
-    pub const VARIABLE_COUNT: usize = 2701;
+    pub const VARIABLE_COUNT: usize = 3990;
     pub const DDT_STATE_COUNT: usize = 146;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "048497185e77abbd195b0a20db9d0dbd7ede128fa0ed79bfcff67c935c469c28";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "d91dcddf96aefe439960390a635a97983d85ed7f65b9c3a799ad1f76de24b71b";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -751,6 +762,7 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+            canonical_reactive: canonical_boxed_zero_f64(),
         }
     }
 

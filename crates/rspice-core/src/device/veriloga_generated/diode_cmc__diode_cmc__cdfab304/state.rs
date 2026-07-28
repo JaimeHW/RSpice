@@ -453,6 +453,15 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
     }
 }
 
+fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
+    // SAFETY: every slot is an f64, and all-zero bytes are 0.0.
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
+    }
+}
+
 pub struct Instance {
     pub nodes: [usize; 6],
     pub branches: [usize; 4],
@@ -463,6 +472,12 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+    pub(crate) canonical_reactive: Box<[f64; 22]>,
+    pub(crate) canonical_staged: Box<[f64; 837]>,
+    pub(crate) canonical_instance_valid: bool,
+    pub(crate) canonical_temperature_valid: bool,
+    pub(crate) canonical_temperature: f64,
+    pub(crate) canonical_thermal_voltage: f64,
 }
 
 impl Clone for Instance {
@@ -478,6 +493,12 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
+            canonical_reactive: self.canonical_reactive.clone(),
+            canonical_staged: self.canonical_staged.clone(),
+            canonical_instance_valid: self.canonical_instance_valid,
+            canonical_temperature_valid: self.canonical_temperature_valid,
+            canonical_temperature: self.canonical_temperature,
+            canonical_thermal_voltage: self.canonical_thermal_voltage,
         }
     }
 }
@@ -493,7 +514,7 @@ impl Instance {
     pub const VARIABLE_COUNT: usize = 962;
     pub const DDT_STATE_COUNT: usize = 5;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "d00b8dd3fa2b203d87832f7bbeea91f3c3280673e0c542c5c914593a163b0a00";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3fe4025010e5efa9bff5fc8a01be31c5fa756f95dbb70c5c07831cc792a3c8d0";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -511,6 +532,12 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+            canonical_reactive: canonical_boxed_zero_f64(),
+            canonical_staged: canonical_boxed_zero_f64(),
+            canonical_instance_valid: false,
+            canonical_temperature_valid: false,
+            canonical_temperature: 0.0,
+            canonical_thermal_voltage: 0.0,
         }
     }
 
@@ -644,7 +671,10 @@ impl Instance {
     #[inline]
     fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
-        let _ = invalidates_caches;
+        if invalidates_caches {
+            self.canonical_instance_valid = false;
+            self.canonical_temperature_valid = false;
+        }
     }
 
     #[inline]

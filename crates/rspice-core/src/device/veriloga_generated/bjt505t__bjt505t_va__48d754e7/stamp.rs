@@ -1,21 +1,121 @@
-#![allow(dead_code, non_snake_case, unused_imports, unused_parens, unused_variables)]
+#![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
 use crate::device::veriloga_generated::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
 
+#[inline(always)]
+fn rspice_limexp(x: f64) -> f64 {
+    if x < 80.0 { x.exp() } else { (80.0f64).exp() * (x - 80.0 + 1.0) }
+}
+
+#[inline(always)]
+fn rspice_limited_exp(x: f64) -> f64 {
+    if x > 80.0 {
+        5.54062238439351e34 * (x - 80.0 + 1.0)
+    } else if x < -80.0 {
+        1.804851387e-35
+    } else {
+        x.exp()
+    }
+}
+
+#[inline(always)]
+fn rspice_limited_exp_derivative(x: f64) -> f64 {
+    if x > 80.0 {
+        5.54062238439351e34
+    } else if x < -80.0 {
+        0.0
+    } else {
+        x.exp()
+    }
+}
+
+/// A packed derivative: one partial per unknown the value can reach.
+///
+/// A newtype rather than a bare `[f64; N]` so the elementwise rules emit as
+/// `a + b` and `a * s` instead of named calls. That is not cosmetic — these
+/// operations are most of a large model's generated source, and an operator is
+/// a dozen characters shorter than a call at every one of them.
+#[derive(Clone, Copy)]
+struct Lanes<const N: usize>([f64; N]);
+
+impl<const N: usize> core::ops::Add for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] + rhs.0[i];
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Sub for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] - rhs.0[i];
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Mul<f64> for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, rhs: f64) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] * rhs;
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Div<f64> for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn div(self, rhs: f64) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] / rhs;
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
+    type Output = f64;
+    #[inline(always)]
+    fn index(&self, index: usize) -> &f64 {
+        &self.0[index]
+    }
+}
+
 #[inline]
-fn eval_ddt<const STATE_COUNT: usize>(
+fn rspice_eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
     previous: &mut [f64; STATE_COUNT],
     older: &mut [f64; STATE_COUNT],
     initialized: &mut [bool; STATE_COUNT],
     derivative_current: &mut [f64; STATE_COUNT],
     derivative_previous: &mut [f64; STATE_COUNT],
-    ddt_active: bool,
-    ddt_scale: f64,
-    ddt_previous_value_scale: f64,
-    ddt_older_value_scale: f64,
-    ddt_previous_derivative_scale: f64,
+    active: bool,
+    scale: f64,
+    previous_value_scale: f64,
+    older_value_scale: f64,
+    previous_derivative_scale: f64,
     slot: usize,
     value: f64,
 ) -> f64 {
@@ -23,15 +123,14 @@ fn eval_ddt<const STATE_COUNT: usize>(
     let previous_value = if initialized[slot] { previous[slot] } else { value };
     let older_value = if initialized[slot] { older[slot] } else { value };
     current[slot] = value;
-    if ddt_active {
-        let result = value * ddt_scale
-            - previous_value * ddt_previous_value_scale
-            - older_value * ddt_older_value_scale
-            - derivative_previous[slot] * ddt_previous_derivative_scale;
+    if active {
+        let result = value * scale
+            - previous_value * previous_value_scale
+            - older_value * older_value_scale
+            - derivative_previous[slot] * previous_derivative_scale;
         derivative_current[slot] = result;
         result
     } else {
-        current[slot] = value;
         previous[slot] = value;
         older[slot] = value;
         derivative_current[slot] = 0.0;
@@ -41,292 +140,4106 @@ fn eval_ddt<const STATE_COUNT: usize>(
     }
 }
 
-struct CommonStampValues {
-    b: f64, d: f64, M: f64, N: f64, a2: f64, aX: f64,
-    be: f64, bf: f64, bh: f64, bj: f64, bl: f64, bm: f64,
-    bn: f64, bo: f64, bp: f64, bq: f64, bw: f64, bx: f64,
-    by: f64, bD: bool, bF: f64, bG: f64, bK: f64, bL: f64,
-    bM: f64, bN: f64, bT: f64, bU: f64, bV: f64, c0: bool,
-    c2: f64, c3: f64, c7: f64, c8: f64, cz: f64, cX: f64,
-    dE: f64, dL: f64, dO: f64, dP: f64, dQ: f64, dR: f64,
-    dV: bool, dX: f64, dY: f64, dZ: f64, er: f64, es: f64,
-    eu: f64, ev: f64, ew: f64, ff: f64, gC: f64, gF: f64,
-    gG: f64, gH: f64, gJ: f64, gK: f64, gN: bool, gQ: f64,
-    gS: f64, h5: f64, hi: f64, j4: f64, j5: f64, j6: f64,
-    j7: f64, j9: f64, ja: f64, jb: f64, jd: f64, jg: f64,
-    jr: f64, js: f64, jt: f64, jv: f64, jw: f64, jx: f64,
-    jz: f64, jC: f64, k3: f64, k4: f64, kh: f64, lP: f64,
-    lS: f64, lT: f64, lV: f64, lY: f64, m0: f64, m3: f64,
-    m6: f64, mb: f64, mj: f64, mm: f64, mp: f64, mt: f64,
-    mu: f64, mv: f64, mw: f64, mJ: f64, n6: f64, n7: f64,
-    n9: f64, nc: bool, nd: f64, nt: f64, nv: f64, ny: bool,
-    nz: f64, nP: f64, nR: f64, nU: bool, nV: f64, p6: f64,
-    pl: f64, r4: f64, s2: f64, sr: f64, su: f64, sx: f64,
-    sY: f64, ug: f64, uQ: f64, uR: f64, uW: f64, uX: f64,
-    vg: f64, vi: f64, vl: bool, vm: f64, vv: f64, w1: f64,
-    w2: f64, w3: f64, w5: f64, wa: bool, wb: f64, wi: f64,
-    wj: f64, wl: f64, wq: bool, ws: f64, xi: f64, xj: f64,
-    xk: f64, xm: f64, xr: bool, xs: f64, xT: f64, y6: f64,
-    yj: f64, yw: f64, yD: f64, yE: f64, yG: f64, yH: f64,
-    yJ: f64, yO: bool, yP: f64, yV: f64, yZ: f64, z2: f64,
-    za: f64, zb: f64, zc: f64, ze: f64, zg: f64, zi: f64,
-    zj: f64, zk: f64, zl: f64, zn: f64, zq: f64, zs: f64,
-    zt: bool, zy: bool, zz: f64, Ab: f64, Ad: f64, Af: f64,
-    Ag: f64, Ai: f64, Aj: f64, Al: f64, Aq: bool, Ar: f64,
-    Aw: f64, Az: f64, AB: f64, AJ: f64, AK: f64, AL: f64,
-    AN: f64, AQ: f64, AR: f64, AS: f64, AT: f64, AV: f64,
-    AX: f64, AZ: f64, B0: bool, B5: bool, B6: f64, BM: f64,
-    BQ: f64, Dd: f64, DB: f64, DT: f64, Eg: f64, Fs: f64,
-    FE: f64, FR: bool, FS: bool, FT: f64, FW: bool, FX: f64,
-    G1: f64, G2: f64, G4: f64, G5: f64, G7: f64, G8: f64,
-    Ga: f64, Gf: bool, Gg: f64, Gv: bool, Ie: bool, If: f64,
-    Ih: f64, Ij: f64, Il: f64, In: f64, Io: bool, Iq: bool,
-    Iy: f64, IB: bool, IC: f64, ID: f64, IJ: bool, IL: f64,
-    IM: f64, IQ: f64, IS: f64, IU: f64, IV: f64, IX: f64,
-    J2: bool, J3: f64, K0: f64, Qa: f64, QL: f64, S1: f64,
-    S4: f64, S7: f64, Sa: f64, Sd: f64, Sh: f64, Sl: f64,
-    St: f64, Sz: f64, SI: f64, SK: f64, SR: f64, SS: f64,
-    ST: f64, SV: f64, SW: f64, SX: f64, TH: f64, TK: f64,
-    U5: f64, Us: f64, Va: f64, VX: f64, VZ: f64, W4: f64,
-    WI: f64, Xp: f64, Xr: f64, XT: f64, Zr: f64, a0E: f64,
-    a0R: f64, a0U: f64, a13: f64, a1Y: f64, a1Z: f64, a29: f64,
-    a2a: f64, a2b: f64, a2x: f64, a2N: f64, a2O: f64, a2P: f64,
-    a2Q: f64, a2R: f64, a6u: f64, a6v: f64, a6w: f64, a6x: f64,
-    a6E: f64, acY: f64, acZ: f64, ad0: f64, ad1: f64, agn: f64,
-    ago: f64, agp: f64, agq: f64, ahh: f64, ahi: f64, ahj: f64,
-    ahk: f64, aht: f64, ahu: f64, ahv: f64, ahw: f64, ahF: f64,
-    ahG: f64, ahH: f64, ahI: f64, aiF: f64, aiG: f64, aiH: f64,
-    anm: f64, ann: f64, ano: f64, anp: f64, apB: f64, apC: f64,
-    apD: f64, apE: f64, apF: f64, apI: f64, apL: f64, apO: f64,
-    apR: f64, apU: f64, apY: f64, apZ: f64, aq0: f64, aq1: f64,
-    aq4: f64, aq6: f64, aqe: f64, aqg: f64, aqQ: f64, aqR: f64,
-    arS: f64, arT: f64, arU: f64, av4: f64, av5: f64, av6: f64,
-    av7: f64, awq: f64, awr: f64, aws: f64, awt: f64, awN: f64,
-    awO: f64, awP: f64, awQ: f64, axi: f64, axj: f64, axk: f64,
-    axl: f64, axm: f64, axn: f64, axL: f64, axM: f64, axN: f64,
-    axO: f64, axP: f64, axQ: f64, aH5: f64, aHi: f64, aI5: f64,
-    aMP: f64, aMQ: f64, aMR: f64, aMS: f64, aMT: f64, aOK: f64,
-    aOL: f64, aOM: f64, aON: f64, aOO: f64, aOP: f64, aOQ: f64,
-    aPm: f64, aPn: f64, aPo: f64, aPp: f64, aPq: f64, aPr: f64,
-    aPs: f64, aPt: f64, aPu: f64, aS0: f64, aS1: f64, aS2: f64,
-    aS3: f64, aS4: f64, aS5: f64, aS6: f64, aS7: f64, aS8: f64,
-    aS9: f64, aYm: f64, aYn: f64, aYo: f64, aYp: f64, aYq: f64,
-    bFQ: f64, bMh: f64, bMi: f64, bMj: f64, bMk: f64, bMl: f64,
-    bMm: f64, bMn: f64, bMu: f64, bMv: f64, bMw: f64, bML: f64,
-    bMM: f64, bMN: f64, bMO: f64, bMP: f64, bMQ: f64, bMR: f64,
-    bMY: f64, bMZ: f64, bN0: f64, bNf: f64, bNg: f64, bNh: f64,
-    bNi: f64, bNj: f64, bNk: f64, bNl: f64, bNq: f64, bNr: f64,
-    bNw: f64, bNx: f64, bOq: f64, bOr: f64, bOs: f64, bOt: f64,
-    bOu: f64, bOv: f64, bOw: f64, bOx: f64, bOy: f64, bOz: f64,
-    bP9: f64, bPa: f64, bPb: f64, bPc: f64, bPd: f64, bPw: f64,
-    bPx: f64, bPy: f64, bPz: f64, bPA: f64, bPB: f64, bPC: f64,
-    bPD: f64,
-}
-
 impl Instance {
-    #[inline(always)]
-    fn eval_common_stamp_values<const REACTIVE: bool>(&mut self, ctx: &GeneratedEvalContext<'_>) -> CommonStampValues {
-        let n=self.nodes;
-        let nodes=n;
-        self.ensure_instance_static();
-        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
-        let stamp_state = self.stamp_state.as_mut();
-        let ddt_state_current = &mut stamp_state.ddt_current;
-        let ddt_state_previous = &mut stamp_state.ddt_previous;
-        let ddt_state_older = &mut stamp_state.ddt_older;
-        let ddt_state_initialized = &mut stamp_state.ddt_initialized;
-        let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;
-        let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;
-        let ddt_active = self.ddt_coefficients.active;
-        let ddt_scale = self.ddt_coefficients.derivative_scale;
-        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
-        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
-        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let sf=&self.scalar_static.f64_values;
-        let sb=&self.scalar_static.bool_values;
-        let b=1.0;let d=0.0;let M=0.001;let N=2.0;let a0=0.05;let a2=0.1;let aX=ctx.node_voltage(n[4]);let aZ=(if (aX<d){b}else{d});let b0=(b-aX);let b3=(if ((aZ)!=0.0){(-(b0).ln())}else{aX});let b6=(if (b3<sf[85]){b}else{d});let b8=(!((b6)!=0.0));let ba=(b+(b3-sf[85]));let be=(sf[427]+(if b8{(sf[85]+(ba).ln())}else{(if ((b6)!=0.0){b3}else{d})}));let bf=(be/sf[9]);let bg=8.617086918058125e-5;let bh=(be*bg);let bj=(b/bh);let bl=(bj-sf[87]);let bm=(be-sf[9]);let bn=(bf).ln();let bo=(sf[25]*be);let bp=(be*bo);let bq=(sf[28]+be);let bs=(sf[47]-(bp/bq));let bu=((bs-a0)/a2);let bw=(if (bs<a0){b}else{d});let bx=(bu).exp();let by=(b+bx);let bD=(!((bw)!=0.0));let bF=((-bu)).exp();let bG=(b+bF);let bK=(if bD{(bs+(a2*(bG).ln()))}else{(if ((bw)!=0.0){(a0+(a2*(by).ln()))}else{d})});let bL=(sf[57]*be);let bM=(be*bL);let bN=(sf[60]+be);let bP=(sf[79]-(bM/bN));let bR=((bP-a0)/a2);let bT=(if (bP<a0){b}else{d});let bU=(bR).exp();let bV=(b+bU);let c0=(!((bT)!=0.0));let c2=((-bR)).exp();let c3=(b+c2);let c7=(if c0{(bP+(a2*(c3).ln()))}else{(if ((bT)!=0.0){(a0+(a2*(bV).ln()))}else{d})});let c8=3.0;let c9=-3.0;let ca=(bh*c9);let cb=(bn*ca);let ce=(b-bf);let ch=((cb+(sf[49]*bf))+(ce*sf[88]));let ci=(a0-ch);let cj=(ci/bh);let cl=(if (a0<ch){b}else{d});let cm=(cj).exp();let cn=(b+cm);let co=(cn).ln();let cs=(!((cl)!=0.0));let cu=((-cj)).exp();let cv=(b+cu);let cw=(cv).ln();let cz=(if cs{(a0+(bh*cw))}else{(if ((cl)!=0.0){(ch+(bh*co))}else{d})});let cE=(ce*sf[90]);let cF=((cb+(bf*sf[89]))+cE);let cG=(a0-cF);let cH=(cG/bh);let cJ=(if (a0<cF){b}else{d});let cK=(cH).exp();let cL=(b+cK);let cM=(cL).ln();let cQ=(!((cJ)!=0.0));let cS=((-cH)).exp();let cT=(b+cS);let cU=(cT).ln();let cX=(if cQ{(a0+(bh*cU))}else{(if ((cJ)!=0.0){(cF+(bh*cM))}else{d})});let d1=(cE+(cb+(bf*sf[91])));let d2=(a0-d1);let d3=(d2/bh);let d5=(if (a0<d1){b}else{d});let d6=(d3).exp();let d7=(b+d6);let d8=(d7).ln();let dc=(!((d5)!=0.0));let de=((-d3)).exp();let df=(b+de);let dg=(df).ln();let dj=(if dc{(a0+(bh*dg))}else{(if ((d5)!=0.0){(d1+(bh*d8))}else{d})});let dm=(cE+(cb+(sf[51]*bf)));let dn=(a0-dm);let do_=(dn/bh);let dq=(if (a0<dm){b}else{d});let dr=(do_).exp();let ds=(b+dr);let dt=(ds).ln();let dx=(!((dq)!=0.0));let dz=((-do_)).exp();let dA=(b+dz);let dB=(dA).ln();let dE=(if dx{(a0+(bh*dB))}else{(if ((dq)!=0.0){(dm+(bh*dt))}else{d})});let dK=((cb+(bf*sf[92]))+(ce*sf[93]));let dL=(a0-dK);let dM=(dL/bh);let dO=(if (a0<dK){b}else{d});let dP=(dM).exp();let dQ=(b+dP);let dR=(dQ).ln();let dV=(!((dO)!=0.0));let dX=((-dM)).exp();let dY=(b+dX);let dZ=(dY).ln();let e2=(if dV{(a0+(bh*dZ))}else{(if ((dO)!=0.0){(dK+(bh*dR))}else{d})});let e8=((cb+(bf*sf[94]))+(ce*sf[95]));let e9=(a0-e8);let ea=(e9/bh);let ec=(if (a0<e8){b}else{d});let ed=(ea).exp();let ee=(b+ed);let ef=(ee).ln();let ej=(!((ec)!=0.0));let el=((-ea)).exp();let em=(b+el);let en=(em).ln();let eq=(if ej{(a0+(bh*en))}else{(if ((ec)!=0.0){(e8+(bh*ef))}else{d})});let er=(b/cz);let es=(b/dE);let et=(sf[49]*er);let eu=f64::powf(et,sf[20]);let ev=(sf[51]*es);let ew=f64::powf(ev,sf[52]);let ey=(eu*sf[96]);let eA=(sf[94]/eq);let eD=(sf[97]*f64::powf(eA,sf[98]));let eG=(sf[51]/dE);let eJ=(sf[99]+(sf[100]*f64::powf(eG,sf[52])));let eK=(b/eJ);let eM=(eJ*sf[101]);let eN=(sf[99]*eK);let fe=((bn*sf[111])).exp();let ff=(sf[110]*fe);let fq=((bn*sf[116])).exp();let fr=(sf[115]*fq);let fz=(if ((sf[118])!=0.0){(sf[119]*(b+(bm*sf[117])))}else{d});let fC=(if ((sf[118])!=0.0){((fz-b)/M)}else{ea});let fE=(if (fz<b){b}else{d});let fF=(((sf[118])!=0.0)&&((fE)!=0.0));let fG=(fC).exp();let fH=(b+fG);let fL=(if fF{(b+(M*(fH).ln()))}else{fz});let fN=(((sf[118])!=0.0)&&(!((fE)!=0.0)));let fP=((-fC)).exp();let fQ=(b+fP);let fV=0.0006931471805599453;let fZ=(if sb[11]{sf[119]}else{(if ((sf[118])!=0.0){((if fN{(fL+(M*(fQ).ln()))}else{fL})-fV)}else{d})});let g7=(if ((sf[121])!=0.0){(sf[122]*(b+(bm*sf[120])))}else{d});let ga=(if ((sf[121])!=0.0){((g7-b)/M)}else{fC});let gc=(if (g7<b){b}else{d});let gd=(((sf[121])!=0.0)&&((gc)!=0.0));let ge=(ga).exp();let gf=(b+ge);let gj=(if gd{(b+(M*(gf).ln()))}else{g7});let gl=(((sf[121])!=0.0)&&(!((gc)!=0.0)));
-        let gn=((-ga)).exp();let go=(b+gn);let gw=(if sb[13]{sf[122]}else{(if ((sf[121])!=0.0){((if gl{(gj+(M*(go).ln()))}else{gj})-fV)}else{d})});let gB=(sf[123]*(b+(bm*sf[124])));let gC=1e-6;let gD=(gB*gB);let gF=(if (gB<d){b}else{d});let gG=0.5;let gH=5e-7;let gJ=((gC+gD)).sqrt();let gK=(gJ-gB);let gN=(!((gF)!=0.0));let gQ=(if gN{(gG*(gB+gJ))}else{(if ((gF)!=0.0){(gH/gK)}else{d})});let gS=4.0;let gX=(bn*sf[129]);let gZ=((gX/fZ)).exp();let h0=(sf[125]*gZ);let h2=(bl*sf[130]);let h4=((h2/fZ)).exp();let h5=(h0*h4);let h9=((bn*sf[132])).exp();let ha=(sf[131]*h9);let hf=((bn*sf[135])).exp();let hg=(sf[133]*hf);let hi=6.0;let ix=((bn*sf[168])).exp();let iy=(sf[166]*ix);let iC=((bl*sf[170])).exp();let iD=(iy*iC);let j4=(sf[48]*bK);let j5=-0.5;let j6=f64::powf(j4,j5);let j7=(b/eu);let j9=(bK*sf[180]);let ja=(bK*j9);let jb=(j6*ja);let jd=(sf[49]*(j7*jb));let jg=(sf[48]*(sf[48]*(er*jd)));let jr=(sf[80]*c7);let js=f64::powf(jr,j5);let jt=(b/ew);let jv=(c7*sf[182]);let jw=(c7*jv);let jx=(js*jw);let jz=(sf[51]*(jt*jx));let jC=(sf[80]*(sf[80]*(es*jz)));let jO=((bn*sf[106])).exp();let jQ=(jO*sf[184]);let jR=(eK*jQ);let jT=(jO*sf[185]);let jU=(j7*jT);let jZ=((bn*sf[188])).exp();let k0=(sf[186]*jZ);let k3=((bl*sf[189])).exp();let k4=(k0*k3);let kg=((bn*sf[194])).exp();let kh=(sf[193]*kg);let kq=((bn*sf[198])).exp();let kr=(sf[197]*kq);let kv=((bl*sf[200])).exp();let kw=(kr*kv);let kB=((bn*sf[203])).exp();let kC=(sf[201]*kB);let kG=((bn*sf[205])).exp();let kH=(sf[204]*kG);let kJ=(kC+kH);let kM=((sf[206]*kJ)/sf[207]);let kR=((bn*sf[210])).exp();let kS=(sf[208]*kR);let lc=(jO*sf[212]);let lM=ctx.node_voltage(n[7]);let lN=ctx.node_voltage(n[8]);let lP=(sf[0]*(lM-lN));let lQ=ctx.node_voltage(n[9]);let lS=(sf[0]*(lM-lQ));let lT=ctx.node_voltage(n[5]);let lV=(sf[0]*(lM-lT));let lW=ctx.node_voltage(n[6]);let lY=(sf[0]*(lW-lT));let m0=(sf[0]*(lW-lM));let m3=(sf[0]*(ctx.node_voltage(n[3])-lN));let m5=(sf[0]*(lN-lQ));let m6=ctx.node_voltage(n[2]);let m9=ctx.node_voltage(n[1]);let mb=(sf[0]*(m9-lW));let mg=(sf[0]*(m9-ctx.node_voltage(n[0])));let mh=ctx.node_voltage(n[11]);let mj=(sf[0]*(mh-lN));let mm=(sf[0]*(ctx.node_voltage(n[10])-mh));let mp=(((lS+m0)-m5)-mj);let mt=((mp+(mb+(-mg)))-mm);let mu=(mg+mt);let mv=(m3-mj);let mw=(mv-mm);let mx=(bj*lS);let mA=(if (mx<sf[218]){b}else{d});let mB=(mx).exp();let mD=(!((mA)!=0.0));let mF=(if mD{sf[219]}else{d});let mJ=(if mD{(mF*(b+(mx-sf[218])))}else{(if ((mA)!=0.0){mB}else{d})});let mK=(bj*lV);let mL=(mK/fZ);let mN=(if (mL<sf[218]){b}else{d});let mO=(mL).exp();let mQ=(!((mN)!=0.0));let mR=(if mQ{sf[219]}else{mF});let mV=(if mQ{(mR*(b+(mL-sf[218])))}else{(if ((mN)!=0.0){mO}else{d})});let mW=(bj*mp);let mY=(if (mW<sf[218]){b}else{d});let mZ=(mW).exp();let n1=(!((mY)!=0.0));let n2=(if n1{sf[219]}else{mR});let n6=(if n1{(n2*(b+(mW-sf[218])))}else{(if ((mY)!=0.0){mZ}else{d})});let n7=(bj*m0);let n9=(if (n7<sf[218]){b}else{d});let nc=(!((n9)!=0.0));let nd=(if nc{sf[219]}else{n2});let ni=(bj*mu);let nk=(if (ni<sf[218]){b}else{d});let nl=(ni).exp();let nn=(!((nk)!=0.0));let no=(if nn{sf[219]}else{nd});let ns=(if nn{(no*(b+(ni-sf[218])))}else{(if ((nk)!=0.0){nl}else{d})});let nt=(bj*m3);let nv=(if (nt<sf[218]){b}else{d});let ny=(!((nv)!=0.0));let nz=(if ny{sf[219]}else{no});let nE=(bj*mw);let nG=(if (nE<sf[218]){b}else{d});let nH=(nE).exp();let nJ=(!((nG)!=0.0));let nK=(if nJ{sf[219]}else{nz});let nO=(if nJ{(nK*(b+(nE-sf[218])))}else{(if ((nG)!=0.0){nH}else{d})});let nP=(bj*mv);let nR=(if (nP<sf[218]){b}else{d});let nU=(!((nR)!=0.0));let nV=(if nU{sf[219]}else{nK});let o0=(mu-cX);let o1=(bj*o0);let o3=(if (o1<sf[218]){b}else{d});let o4=(o1).exp();let o6=(!((o3)!=0.0));let o7=(if o6{sf[219]}else{nV});let oc=(mp-cX);let od=(bj*oc);let of=(if (od<sf[218]){b}else{d});let og=(od).exp();let oi=(!((of)!=0.0));let oj=(if oi{sf[219]}else{o7});let oo=(lS-cX);let op=(bj*oo);let or=(if (op<sf[218]){b}else{d});let os=(op).exp();let ou=(!((or)!=0.0));let ov=(if ou{sf[219]}else{oj});let oz=(if ou{(ov*(b+(op-sf[218])))}else{(if ((or)!=0.0){os}else{d})});let oA=(lP-cX);let oB=(bj*oA);let oD=(if (oB<sf[218]){b}else{d});
-        let oE=(oB).exp();let oG=(!((oD)!=0.0));let oH=(if oG{sf[219]}else{ov});let oL=(if oG{(oH*(b+(oB-sf[218])))}else{(if ((oD)!=0.0){oE}else{d})});let oO=((b+(gS*oz))).sqrt();let oR=((b+(gS*oL))).sqrt();let oS=(N*oL);let oT=(b+oR);let oU=(oS/oT);let oX=(if (oU<sf[220]){b}else{d});let oY=(if ((oX)!=0.0){sf[220]}else{oU});let p0=(b+oO);let p1=(p0/oT);let p3=((oO-oR)-(p1).ln());let p4=(bh*p3);let p5=(m5+p4);let p6=(p5/fr);let p8=(if (p6>d){b}else{d});let p9=100.0;let pb=(if (lP<p9){b}else{d});let pc=(((p8)!=0.0)&&((pb)!=0.0));let pf=(((p8)!=0.0)&&(!((pb)!=0.0)));let ph=(b+(lP-p9));let pl=(N*bh);let pm=(gG*p6);let pn=(fr*pm);let pp=(b+(bj*pn));let pq=(pp).ln();let pu=(if ((p8)!=0.0){((cX+(pl*pq))-(if pf{(p9+(ph).ln())}else{(if pc{lP}else{d})}))}else{d});let pv=0.2;let px=(if ((p8)!=0.0){(cX*pv)}else{d});let pz=(if ((p8)!=0.0){(px*px)}else{gC});let pD=(if (pu<d){b}else{d});let pE=(((p8)!=0.0)&&((pD)!=0.0));let pF=(gG*pz);let pH=((pz+(if ((p8)!=0.0){(pu*pu)}else{gD}))).sqrt();let pI=(pH-pu);let pM=(((p8)!=0.0)&&(!((pD)!=0.0)));let pP=(if pM{(gG*(pu+pH))}else{(if pE{(pF/pI)}else{d})});let pT=(pP+sf[223]);let pU=(pP*pT);let pX=(sf[222]*(pP+(fr*sf[221])));let pZ=(if ((p8)!=0.0){(pU/pX)}else{d});let q1=(if ((p8)!=0.0){(p6/pZ)}else{d});let q5=(if ((p8)!=0.0){((q1-b)/sf[224])}else{ga});let q7=(if (q1<b){b}else{d});let q8=(((p8)!=0.0)&&((q7)!=0.0));let q9=(q5).exp();let qa=(b+q9);let qg=(((p8)!=0.0)&&(!((q7)!=0.0)));let qi=((-q5)).exp();let qj=(b+qi);let qw=(if ((p8)!=0.0){((if qg{(q1+(sf[224]*(qj).ln()))}else{(if q8{(b+(sf[224]*(qa).ln()))}else{d})})/sf[230])}else{d});let qy=(if ((p8)!=0.0){(pP/sf[223])}else{d});let qz=(gS*qw);let qA=(qy*qz);let qB=(b+qy);let qE=((b+(qA*qB))).sqrt();let qF=(b+qE);let qG=(N*qw);let qH=(qB*qG);let qJ=(if ((p8)!=0.0){(qF/qH)}else{d});let qL=(oY*qJ);let qM=((b-qJ)+qL);let qN=(b+qL);let qP=(if ((p8)!=0.0){(qM/qN)}else{d});let qQ=(pn*qP);let qS=(if ((p8)!=0.0){(bj*qQ)}else{d});let qV=(b+(oY+qS));let qY=(if ((p8)!=0.0){((N*qS)+(oY*qV))}else{d});let r1=(if ((p8)!=0.0){(gG*(qS-b))}else{d});let r4=(if ((p8)!=0.0){(qY+(r1*r1))}else{d});let r6=(if (qS>=b){b}else{d});let r7=(((p8)!=0.0)&&((r6)!=0.0));let r8=(r4).sqrt();let rc=(((p8)!=0.0)&&(!((r6)!=0.0)));let rd=(r8-r1);let rf=(if rc{(qY/rd)}else{(if r7{(r1+r8)}else{d})});let rj=(((p8)!=0.0)&&(((if (rf<sf[231]){b}else{d}))!=0.0));let rk=(if rj{sf[231]}else{rf});let rl=(b+rk);let rm=(rk*rl);let ro=((bj*cX)).exp();let ru=(if ((p8)!=0.0){(sf[232]*(p6-sf[221]))}else{d});let rw=(sf[221]*(fr*sf[222]));let rB=(((if ((p8)!=0.0){(p6*rw)}else{d})+(ru*ru))).sqrt();let rH=(((p8)!=0.0)&&((sf[234])!=0.0));let rI=(a2*dE);let rL=(((p8)!=0.0)&&sb[22]);let rM=(N*p6);let rN=(p6+pZ);let rP=(a2+(rM/rN));let rS=(p6*sf[221]);let rT=(p6+sf[221]);let rY=(!((p8)!=0.0));let rZ=(N*oz);let s2=(if rY{mJ}else{(if ((p8)!=0.0){(rm*ro)}else{d})});let se=(if (((m5).abs()<(bh*1e-5))||((p4).abs()<((bh*1e-40)*(oO+oR)))){b}else{d});let sf_=(rY&&((se)!=0.0));let sg=(oY+(if rY{(rZ/p0)}else{rk}));let si=(if sf_{(gG*sg)}else{d});let sj=(b+si);let sn=(rY&&(!((se)!=0.0)));let sp=((lS+p4)-lP);let sr=(if sn{(p4/sp)}else{(if sf_{(si/sj)}else{qP})});let st=(if rY{rI}else{(if rL{(dE*rP)}else{(if rH{rI}else{d})})});let su=(if rY{p6}else{(if ((p8)!=0.0){(rS/rT)}else{d})});let sx=(if rY{(b-(su/sf[221]))}else{(if ((p8)!=0.0){(sf[221]/rT)}else{d})});let sB=(cz*sf[237]);let sC=(a2*cz);let sD=(lV-sB);let sE=(sD/sC);let sG=(if (lV<sB){b}else{d});let sH=(sE).exp();let sI=(b+sH);let sJ=(sI).ln();let sN=(!((sG)!=0.0));let sP=((-sE)).exp();let sQ=(b+sP);let sR=(sQ).ln();let sU=(if sN{(sB-(sC*sR))}else{(if ((sG)!=0.0){(lV-(sC*sJ))}else{d})});let sW=(b-(er*sU));let sY=f64::powf(sW,sf[238]);let sZ=(cz/sf[238]);let t0=(b-sY);let t4=((sZ*t0)+(c8*(lV-sU)));let th=(if sb[28]{lS}else{(if sb[26]{(lP+(if rY{m5}else{(if ((p8)!=0.0){(ru+rB)}else{d})}))}else{(if ((sf[240])!=0.0){lP}else{d})})});let ti=(N-eN);let tj=(b-eN);let tk=(ti/tj);let tn=(b-f64::powf(tk,sf[242]));let to=(dE*tn);let tp=(th-to);let tq=(tp/st);let ts=(if (th<to){b}else{d});let tt=(tq).exp();let tu=(b+tt);let tv=(tu).ln();let tz=(!((ts)!=0.0));
-        let tB=((-tq)).exp();let tC=(b+tB);let tD=(tC).ln();let tG=(if tz{(to-(st*tD))}else{(if ((ts)!=0.0){(th-(st*tv))}else{d})});let tI=f64::powf(sx,sf[243]);let tK=(dE/sf[244]);let tM=(b-(tG/dE));let tN=f64::powf(tM,sf[244]);let tP=(b-(tI*tN));let tR=(tk*tI);let tS=(th-tG);let tU=((tK*tP)+(tR*tS));let tX=((tj*tU)+(eN*lP));let tY=(gS*h5);let tZ=(tY/ha);let u0=(mV*tZ);let u2=((b+u0)).sqrt();let u3=(b+u2);let u4=(u0/u3);let u5=(b/gw);let u6=f64::powf(s2,u5);let u7=(tZ*u6);let u9=((b+u7)).sqrt();let ua=(b+u9);let ub=(u7/ua);let uf=(b+(t4/jU));let ug=(tX/jR);let uh=(uf+ug);let uk=(lc*uf);let un=(-tX);let uo=(un/jR);let up=(lc*uo);let us=((if sb[30]{(bj*uk)}else{d})).exp();let ut=((if sb[30]{(bj*up)}else{d})).exp();let uu=(us-ut);let uw=((bj*lc)).exp();let ux=(uw-b);let uz=(if sb[30]{(uu/ux)}else{(if ((sf[245])!=0.0){uh}else{d})});let uA=0.010000000000000002;let uB=(uz*uz);let uD=(if (uz<d){b}else{d});let uE=0.005000000000000001;let uG=((uA+uB)).sqrt();let uH=(uG-uz);let uK=(!((uD)!=0.0));let uN=(if uK{(gG*(uz+uG))}else{(if ((uD)!=0.0){(uE/uH)}else{d})});let uQ=(b+(gG*(u4+ub)));let uR=(uN*uQ);let uT=(h5*sf[246]);let uU=(u6*uT);let uV=(h5*mV);let uW=(uV-uU);let uX=(uW/uR);let uY=0.0001;let uZ=(lV/uY);let v0=(lV<d);let v1=(if v0{b}else{d});let v2=(uZ).exp();let v3=(b+v2);let v7=(!((v1)!=0.0));let v9=((-uZ)).exp();let va=(b+v9);let ve=(if v7{(lV+(uY*(va).ln()))}else{(if ((v1)!=0.0){(uY*(v3).ln())}else{d})});let vg=(ve/sf[247]);let vi=(if (vg<sf[218]){b}else{d});let vl=(!((vi)!=0.0));let vm=(if vl{sf[219]}else{oH});let vv=((lV-sf[248])/M);let vR=(mK/sf[150]);let vT=(if (vR<sf[218]){b}else{d});let vU=(vR).exp();let vW=(!((vT)!=0.0));let vX=(if vW{sf[219]}else{vm});let w1=(if vW{(vX*(b+(vR-sf[218])))}else{(if ((vT)!=0.0){vU}else{ve})});let w2=(lV-e2);let w3=(bj*w2);let w5=(if (w3<sf[218]){b}else{d});let wa=(((sf[156])!=0.0)&&(!((w5)!=0.0)));let wb=(if wa{sf[219]}else{vX});let wi=((uX/h5)-1000.0);let wj=40.0;let wl=(if (wi<wj){b}else{d});let wq=(((sf[156])!=0.0)&&(!((wl)!=0.0)));let ws=(if wq{2.3538526683702e17}else{wb});let x7=(bj*lY);let x8=(x7/sf[154]);let xa=(if (x8<sf[218]){b}else{d});let xb=(x8).exp();let xd=(!((xa)!=0.0));let xe=(if xd{sf[219]}else{ws});let xi=(if xd{(xe*(b+(x8-sf[218])))}else{(if ((xa)!=0.0){xb}else{w1})});let xj=(lY-e2);let xk=(bj*xj);let xm=(if (xk<sf[218]){b}else{d});let xr=(((sf[156])!=0.0)&&(!((xm)!=0.0)));let xs=(if xr{sf[219]}else{xe});let xJ=(mK/sf[137]);let xL=(if (xJ<sf[218]){b}else{d});let xM=(xJ).exp();let xO=(!((xL)!=0.0));let xP=(if xO{sf[219]}else{xs});let xT=(if xO{(xP*(b+(xJ-sf[218])))}else{(if ((xL)!=0.0){xM}else{xi})});let xW=(x7/sf[172]);let xY=(if (xW<sf[218]){b}else{d});let xZ=(xW).exp();let y1=(!((xY)!=0.0));let y2=(if y1{sf[219]}else{xP});let y6=(if y1{(y2*(b+(xW-sf[218])))}else{(if ((xY)!=0.0){xZ}else{xT})});let y9=(mW/sf[143]);let yb=(if (y9<sf[218]){b}else{d});let yc=(y9).exp();let ye=(!((yb)!=0.0));let yf=(if ye{sf[219]}else{y2});let yj=(if ye{(yf*(b+(y9-sf[218])))}else{(if ((yb)!=0.0){yc}else{y6})});let ym=(x7/sf[176]);let yo=(if (ym<sf[218]){b}else{d});let yp=(ym).exp();let yr=(!((yo)!=0.0));let ys=(if yr{sf[219]}else{yf});let yw=(if yr{(ys*(b+(ym-sf[218])))}else{(if ((yo)!=0.0){yp}else{yj})});let yD=(if (v0&&sb[38]){b}else{d});let yE=(N*sY);let yG=(b-(sf[22]/yE));let yH=(jg*yG);let yJ=(if (yH<sf[218]){b}else{d});let yO=(((yD)!=0.0)&&(!((yJ)!=0.0)));let yP=(if yO{sf[219]}else{ys});let yV=(if ((yD)!=0.0){(er*lV)}else{jO});let yX=1e-30;let yZ=(((yV*yV)+yX)).sqrt();let z2=f64::powf(yZ,sf[253]);let za=(hi*yV);let zb=(yV*za);let zc=(yV+sf[256]);let ze=((sf[20]*(sf[255]-((c8*yV)*sf[256])))-(zb*zc));let zg=0.16666666666666666;let zi=(if ((yD)!=0.0){((z2*ze)*zg)}else{d});let zj=(sf[22]*lV);let zk=(jg*zj);let zl=(bK*zi);let zn=(if ((yD)!=0.0){(zk/zl)}else{yV});let zo=-0.001;let zq=(if (zn<zo){b}else{d});let zs=(if (zn<sf[218]){b}else{d});let zt=(((yD)!=0.0)&&((zq)!=0.0));let zy=(zt&&(!((zs)!=0.0)));let zz=(if zy{sf[219]}else{yP});let Ab=(if (sb[41]&&(lP<d)){b}else{d});let Ac=(es*lP);let Ad=(b-Ac);let Af=(if ((Ab)!=0.0){f64::powf(Ad,sf[244])}else{d});let Ag=(N*Af);
-        let Ai=(b-(sf[54]/Ag));let Aj=(jC*Ai);let Al=(if (Aj<sf[218]){b}else{d});let Aq=(((Ab)!=0.0)&&(!((Al)!=0.0)));let Ar=(if Aq{sf[219]}else{zz});let Aw=(if ((Ab)!=0.0){Ac}else{js});let Az=((yX+(Aw*Aw))).sqrt();let AB=f64::powf(Az,sf[257]);let AJ=(hi*Aw);let AK=(Aw*AJ);let AL=(Aw+sf[260]);let AN=((sf[52]*(sf[259]-((c8*Aw)*sf[260])))-(AK*AL));let AQ=(if ((Ab)!=0.0){(zg*(AB*AN))}else{d});let AR=(sf[54]*lP);let AS=(jC*AR);let AT=(c7*AQ);let AV=(if ((Ab)!=0.0){(AS/AT)}else{Aw});let AX=(if (AV<zo){b}else{d});let AZ=(if (AV<sf[218]){b}else{d});let B0=(((Ab)!=0.0)&&((AX)!=0.0));let B5=(B0&&(!((AZ)!=0.0)));let B6=(if B5{sf[219]}else{Ar});let BB=(n6*tZ);let BC=(gS*(if oi{(oj*(b+(od-sf[218])))}else{(if ((of)!=0.0){og}else{d})}));let BD=(BB-tZ);let BF=((b+BB)).sqrt();let BG=(b+BF);let BH=(BD/BG);let BJ=((b+BC)).sqrt();let BK=(b+BJ);let BL=(BC/BK);let BM=(N*iD);let BP=(gS*iD);let BQ=(BP/hg);let D5=(iD*sf[271]);let D6=(ns-b);let D7=(D5*D6);let Da=((b+(ns*BQ))).sqrt();let Db=(b+Da);let Dd=(if ((sf[270])!=0.0){(D7/Db)}else{d});let Dh=(k4*sf[273]);let Di=(ns-nO);let Dj=(Dh*Di);let Dk=(gS*k4);let Dl=(Dk/kh);let Dn=(ns+(nO*sf[265]));let Dq=((b+(Dl*Dn))).sqrt();let Dr=(b+Dq);let Dv=(D6*Dh);let Dy=((b+(ns*Dl))).sqrt();let Dz=(b+Dy);let DB=(if sb[48]{(Dv/Dz)}else{(if sb[47]{(Dj/Dr)}else{d})});let DG=(sf[6]*(iD+k4));let DI=(if sb[50]{(ff*DG)}else{d});let DJ=(bj*DI);let DL=(N-(DJ).ln());let DP=(if sb[50]{(mu-(if sb[50]{(bh*DL)}else{d}))}else{d});let DT=(if sb[50]{(DP*DP)}else{uB});let DV=(if (DP<d){b}else{d});let DW=(sb[50]&&((DV)!=0.0));let DZ=((sf[275]+DT)).sqrt();let E0=(DZ-DP);let E4=(sb[50]&&(!((DV)!=0.0)));let E7=(if E4{(gG*(DP+DZ))}else{(if DW{(sf[276]/E0)}else{d})});let E8=(Dd+DB);let Eb=(E7+(DI+(ff*E8)));let Eg=(if sb[52]{b}else{(if sb[50]{(E7/Eb)}else{b})});let Fj=(if (uh<d){b}else{d});let Fl=((uA+(uh*uh))).sqrt();let Fm=(Fl-uh);let Fp=(!((Fj)!=0.0));let Fs=(if Fp{(gG*(uh+Fl))}else{(if ((Fj)!=0.0){(uE/Fm)}else{d})});let FE=(if (uX>d){b}else{d});let FK=(if (lP<sf[298]){b}else{d});let FN=((-uX)/sf[299]);let FP=(if (FN<sf[218]){b}else{d});let FR=(((FK)!=0.0)&&(((FE)!=0.0)&&((sf[297])!=0.0)));let FS=(((FP)!=0.0)&&FR);let FT=(FN).exp();let FW=(FR&&(!((FP)!=0.0)));let FX=(if FW{sf[219]}else{B6});let G1=(if FW{(FX*(b+(FN-sf[218])))}else{(if FS{FT}else{d})});let G2=(sf[298]-lP);let G4=(if FR{(G1*G2)}else{d});let G5=(-gQ);let G7=f64::powf(G4,sf[300]);let G8=(G5*G7);let Ga=(if (G8<sf[218]){b}else{d});let Gf=(FR&&(!((Ga)!=0.0)));let Gg=(if Gf{sf[219]}else{FX});let Gv=(((FE)!=0.0)&&sb[57]);let Ie=(((FK)!=0.0)&&(((sf[315])!=0.0)&&(Gv&&sb[61])));let If=f64::powf(G2,sf[300]);let Ih=(uX+sf[316]);let Ij=(b-(uX/Ih));let Il=f64::powf(Ij,sf[317]);let In=(if Ie{(If*Il)}else{d});let Io=(((sf[309])!=0.0)&&Ie);let Iq=(sb[59]&&Ie);let Iu=(if Iq{((uX-sf[318])/sf[316])}else{d});let Iy=(if Iq{((Iu-b)/sf[319])}else{vv});let IA=(if (Iu<b){b}else{d});let IB=(Iq&&((IA)!=0.0));let IC=(Iy).exp();let ID=(b+IC);let IJ=(Iq&&(!((IA)!=0.0)));let IL=((-Iy)).exp();let IM=(b+IL);let IQ=(if IJ{(Iu+(sf[319]*(IM).ln()))}else{(if IB{(b+(sf[319]*(ID).ln()))}else{d})});let IS=f64::powf(IQ,sf[320]);let IU=(if Iq{(In*IS)}else{(if Io{In}else{d})});let IV=(G5*IU);let IX=(if (IV<sf[218]){b}else{d});let J2=(Ie&&(!((IX)!=0.0)));let J3=(if J2{sf[219]}else{Gg});let K0=(s2).ln();let L3=(ey*sf[324]);let L5=(lY-sB);let L6=(L5/sC);let L8=(if (lY<sB){b}else{d});let L9=(L6).exp();let La=(b+L9);let Lb=(La).ln();let Lf=(!((L8)!=0.0));let Lh=((-L6)).exp();let Li=(b+Lh);let Lj=(Li).ln();let Lm=(if Lf{(sB-(sC*Lj))}else{(if ((L8)!=0.0){(lY-(sC*Lb))}else{d})});let Ln=(ey*sf[323]);let Lp=(b-(er*Lm));let Lr=(b-f64::powf(Lp,sf[238]));let Lv=((sZ*Lr)+(c8*(lY-Lm)));let Ly=(eM*sf[325]);let LA=(ha*kC);let LB=(gG*LA);let LC=(u4*LB);let LD=(Fs*LC);let LE=(ub*LB);let LF=(Fs*LE);let LG=(mp-to);let LH=(LG/rI);let LJ=(if (mp<to){b}else{d});let LK=(LH).exp();let LL=(b+LK);let LM=(LL).ln();let LQ=(!((LJ)!=0.0));let LS=((-LH)).exp();let LT=(b+LS);let LU=(LT).ln();let LX=(if LQ{(to-(rI*LU))}else{(if ((LJ)!=0.0){(mp-(rI*LM))}else{d})});let LZ=(b-(LX/dE));let M1=(b-f64::powf(LZ,sf[244]));let M3=(mp-LX);
-        let M5=((tK*M1)+(tk*M3));let M8=((tj*M5)+(eN*mp));let Md=(mu-to);let Me=(Md/rI);let Mg=(if (mu<to){b}else{d});let Mh=(Me).exp();let Mi=(b+Mh);let Mj=(Mi).ln();let Mn=(!((Mg)!=0.0));let Mp=((-Me)).exp();let Mq=(b+Mp);let Mr=(Mq).ln();let Mu=(if Mn{(to-(rI*Mr))}else{(if ((Mg)!=0.0){(mu-(rI*Mj))}else{d})});let Mw=(b-(Mu/dE));let My=(b-f64::powf(Mw,sf[244]));let MA=(mu-Mu);let MC=((tK*My)+(tk*MA));let MF=((tj*MC)+(eN*mu));let MJ=(a2*eq);let MN=(eq*sf[329]);let MO=(m3-MN);let MP=(MO/MJ);let MR=(if (m3<MN){b}else{d});let MS=(MP).exp();let MT=(b+MS);let MU=(MT).ln();let MY=(!((MR)!=0.0));let N0=((-MP)).exp();let N1=(b+N0);let N2=(N1).ln();let N5=(if MY{(MN-(MJ*N2))}else{(if ((MR)!=0.0){(m3-(MJ*MU))}else{d})});let N7=(eq/sf[330]);let N9=(b-(N5/eq));let Nb=(b-f64::powf(N9,sf[330]));let Nf=((N7*Nb)+(N*(m3-N5)));let Nh=(ha*kw);let Ni=(h5/ha);let Nl=f64::powf(Ni,sf[332]);let Nm=(Nh*Nl);let Nn=(bh*sf[331]);let No=(lV/Nn);let Nq=(if (No<sf[218]){b}else{d});let Nr=(No).exp();let Nt=(!((Nq)!=0.0));let Nu=(if Nt{sf[219]}else{J3});let Ny=(if Nt{(Nu*(b+(No-sf[218])))}else{(if ((Nq)!=0.0){Nr}else{yw})});let Nz=(Nm*Ny);let NA=(gS*kH);let NB=(bh*NA);let NC=(NB/fr);let ND=(gG*NC);let NE=(sr*ND);let NF=(N+sg);let NK=(gG*kM);let NN=((BH*LA)+(BL*NC));let NO=(NK*NN);let NT=((mp-dj)/sf[335]);let NU=(bj*NT);let NW=(if (NU<sf[218]){b}else{d});let NY=(((NW)!=0.0)&&sb[66]);let NZ=(NU).exp();let O2=(sb[66]&&(!((NW)!=0.0)));let O3=(if O2{sf[219]}else{Nu});let O8=(kS*BM);let O9=(n6*O8);let Oc=((b+(gS*(if O2{(O3*(b+(NU-sf[218])))}else{(if NY{NZ}else{d})})))).sqrt();let Od=(b+Oc);let Of=(if sb[66]{(O9/Od)}else{(if ((sf[334])!=0.0){(NO/kJ)}else{d})});let Oo=(if sb[70]{(ns*tZ)}else{d});let Op=(Oo-tZ);let Or=((b+Oo)).sqrt();let Os=(b+Or);let Ou=(if sb[70]{(Op/Os)}else{d});let Ow=(if sb[70]{(gS*(if o6{(o7*(b+(o1-sf[218])))}else{(if ((o3)!=0.0){o4}else{d})}))}else{d});let Oy=((b+Ow)).sqrt();let Oz=(b+Oy);let OB=(if sb[70]{(Ow/Oz)}else{d});let OD=(kM*sf[337]);let OG=((LA*Ou)+(NC*OB));let OH=(OD*OG);let OK=(mu-dj);let OL=(bj*OK);let ON=(if (OL<sf[218]){b}else{d});let OP=(((ON)!=0.0)&&sb[71]);let OQ=(OL).exp();let OT=(sb[71]&&(!((ON)!=0.0)));let OU=(if OT{sf[219]}else{O3});let OZ=(kS*D5);let P0=(ns*OZ);let P3=((b+(gS*(if OT{(OU*(b+(OL-sf[218])))}else{(if OP{OQ}else{d})})))).sqrt();let P4=(b+P3);let P6=(if sb[71]{(P0/P4)}else{(if sb[70]{(OH/kJ)}else{d})});let Pf=(if ((sf[339])!=0.0){(f64::powf(sW,sf[340])-c8)}else{d});let Pg=(if ((sf[339])!=0.0){sE}else{d});let Pi=(if (Pg<d){b}else{d});let Pj=(((sf[339])!=0.0)&&((Pi)!=0.0));let Pk=(Pg).exp();let Pl=(b+Pk);let Pp=(((sf[339])!=0.0)&&(!((Pi)!=0.0)));let Pr=((-Pg)).exp();let Ps=(b+Pr);let Pu=(if Pp{(Pr/Ps)}else{(if Pj{(b/Pl)}else{d})});let Px=(if ((sf[339])!=0.0){(c8+(Pf*Pu))}else{d});let PA=(bj*u0);let PB=(PA/fZ);let PC=(gG/u2);let PE=(if ((sf[339])!=0.0){(PB*PC)}else{d});let PF=(Fs*LB);let PK=(m0*pv);let PM=((if ((sf[339])!=0.0){(Nz/Nn)}else{d})+((if ((sf[339])!=0.0){(L3*Px)}else{d})+(if ((sf[339])!=0.0){(PE*PF)}else{d})));let PV=(if ((sf[339])!=0.0){(LD+(Nz*sf[341]))}else{d});let Q4=(if sb[73]{LD}else{(if ((sf[339])!=0.0){(PV*sf[344])}else{d})});let Q5=(if sb[73]{LF}else{(if ((sf[339])!=0.0){(LF+(PV*sf[343]))}else{d})});let Q9=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, (aX*sf[345])) };let Qa=(sf[15]*Q9);let QK=(uU+uV);let QL=(QK/uR);let QV=(if (QL>d){b}else{d});let QW=(Q4+Q5);let QZ=(!((QV)!=0.0));let R0=(kC*Fs);let R2=(if QZ{(uR*R0)}else{(if ((QV)!=0.0){(QW/QL)}else{d})});let Rh=(if sb[91]{d}else{(if sb[89]{(R2*sf[357])}else{(if ((sf[355])!=0.0){(sf[343]*R2)}else{d})})});
-        let S0=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, (sf[0]*((if sb[73]{Nz}else{(if ((sf[339])!=0.0){(Nz*sf[342])}else{d})})+((t4*L3)+Q4)))) };let S1=(sf[15]*S0);let S3=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, (sf[0]*(Ln*Lv))) };let S4=(sf[15]*S3);let S6=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, (sf[0]*((NE*NF)+((tX*Ly)+Q5)))) };let S7=(sf[15]*S6);let S9=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, (sf[0]*(eD*Nf))) };let Sa=(sf[15]*S9);let Sc=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 5, (sf[0]*(if ((sf[339])!=0.0){(PK*PM)}else{d}))) };let Sd=(sf[15]*Sc);let Sg=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 6, ((sf[0]*(m9-m6))*sf[360])) };let Sh=(sf[15]*Sg);let Sk=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 7, (mg*sf[361])) };let Sl=(sf[15]*Sk);let Ss=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 8, (sf[0]*((sf[6]*(sf[326]*(eM*MF)))+(if ((sf[336])!=0.0){(Eg*P6)}else{d})))) };let St=(sf[15]*Ss);let Sy=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 9, (sf[0]*((sf[7]*((eM*M8)*sf[326]))+(if ((sf[336])!=0.0){(sf[7]*Of)}else{Of})))) };let Sz=(sf[15]*Sy);let SI=ctx.node_voltage(n[12]);let SJ=if REACTIVE { 0.0 } else { eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 10, SI) };let SK=(Rh*SJ);let SO=(if ((aZ)!=0.0){(-(-1.0/b0))}else{b});let SR=(if b8{(SO/ba)}else{(if ((b6)!=0.0){SO}else{d})});let SS=(SR/sf[9]);let ST=(bg*SR);let SV=(bh*bh);let SW=((-ST)/SV);let SX=(SS/bf);let TH=((ca*SX)+(bn*(c9*ST)));let TK=(-SS);let TM=((TH+(sf[49]*SS))+(sf[88]*TK));let TR=(((bh*(-TM))-(ci*ST))/SV);let U5=(if cs{((cw*ST)+(bh*((cu*(-TR))/cv)))}else{(if ((cl)!=0.0){(TM+((co*ST)+(bh*((cm*TR)/cn))))}else{d})});let U8=(sf[90]*TK);let U9=((TH+(sf[89]*SS))+U8);let Ue=(((bh*(-U9))-(cG*ST))/SV);let Us=(if cQ{((cU*ST)+(bh*((cS*(-Ue))/cT)))}else{(if ((cJ)!=0.0){(U9+((cM*ST)+(bh*((cK*Ue)/cL))))}else{d})});let Uv=(U8+(TH+(sf[91]*SS)));let UA=(((bh*(-Uv))-(d2*ST))/SV);
-        let UR=(U8+(TH+(sf[51]*SS)));let UW=(((bh*(-UR))-(dn*ST))/SV);let Va=(if dx{((dB*ST)+(bh*((dz*(-UW))/dA)))}else{(if ((dq)!=0.0){(UR+((dt*ST)+(bh*((dr*UW)/ds))))}else{d})});let VB=((TH+(sf[94]*SS))+(sf[95]*TK));let VG=(((bh*(-VB))-(e9*ST))/SV);let VU=(if ej{((en*ST)+(bh*((el*(-VG))/em)))}else{(if ((ec)!=0.0){(VB+((ef*ST)+(bh*((ed*VG)/ee))))}else{d})});let VX=((-U5)/(cz*cz));let VZ=(dE*dE);let W4=((sf[49]*VX)*(sf[20]*f64::powf(et,sf[256])));let W9=(sf[96]*W4);let Wc=(eq*eq);let Wp=(sf[100]*(((-(sf[51]*Va))/VZ)*(sf[52]*f64::powf(eG,sf[260]))));let Ws=((-Wp)/(eJ*eJ));let Wt=(sf[101]*Wp);let Wu=(sf[99]*Ws);let WI=(sf[110]*(fe*(sf[111]*SX)));let WP=(sf[115]*(fq*(sf[116]*SX)));let WS=(if ((sf[118])!=0.0){(sf[119]*(sf[117]*SR))}else{d});let WU=(if ((sf[118])!=0.0){(WS/M)}else{VG});let WY=(if fF{(M*((fG*WU)/fH))}else{WS});let X6=(if sb[11]{d}else{(if ((sf[118])!=0.0){(if fN{(WY+(M*((fP*(-WU))/fQ)))}else{WY})}else{d})});let X9=(if ((sf[121])!=0.0){(sf[122]*(sf[120]*SR))}else{d});let Xb=(if ((sf[121])!=0.0){(X9/M)}else{WU});let Xf=(if gd{(M*((ge*Xb)/gf))}else{X9});let Xp=(sf[123]*(sf[124]*SR));let Xq=(gB*Xp);let Xr=(Xq+Xq);let XH=(fZ*fZ);let XT=((h4*(sf[125]*(gZ*(((fZ*(sf[129]*SX))-(gX*X6))/XH))))+(h0*(h4*(((fZ*(sf[130]*SW))-(h2*X6))/XH))));let XW=(sf[131]*(h9*(sf[132]*SX)));let YV=((iC*(sf[166]*(ix*(sf[168]*SX))))+(iy*(iC*(sf[170]*SW))));let Zr=((-W4)/(eu*eu));let a0E=(jO*(sf[106]*SX));let a0I=((jQ*Ws)+(eK*(sf[184]*a0E)));let a0R=(k3*(sf[189]*SW));let a0U=((k3*(sf[186]*(jZ*(sf[188]*SX))))+(k0*a0R));let a13=(sf[193]*(kg*(sf[194]*SX)));let a1h=(sf[201]*(kB*(sf[203]*SX)));let a1k=(sf[204]*(kG*(sf[205]*SX)));let a1l=(a1h+a1k);let a1n=((sf[206]*a1l)/sf[207]);let a1q=(sf[208]*(kR*(sf[210]*SX)));let a1A=(sf[212]*a0E);let a1X=(lS*SW);let a1Y=(sf[0]*bj);let a1Z=(bj*sf[363]);let a29=(if mD{(mF*a1X)}else{(if ((mA)!=0.0){(mB*a1X)}else{d})});let a2a=(if mD{(mF*a1Y)}else{(if ((mA)!=0.0){(mB*a1Y)}else{d})});let a2b=(if mD{(mF*a1Z)}else{(if ((mA)!=0.0){(mB*a1Z)}else{d})});let a2c=(lV*SW);let a2g=(((fZ*a2c)-(mK*X6))/XH);let a2h=(a1Z/fZ);let a2i=(a1Y/fZ);let a2s=(if mQ{(mR*a2g)}else{(if ((mN)!=0.0){(mO*a2g)}else{d})});let a2t=(if mQ{(mR*a2h)}else{(if ((mN)!=0.0){(mO*a2h)}else{d})});let a2u=(if mQ{(mR*a2i)}else{(if ((mN)!=0.0){(mO*a2i)}else{d})});let a2v=(mp*SW);let a2w=(bj*sf[364]);let a2x=(bj*sf[365]);let a2N=(if n1{(n2*a2v)}else{(if ((mY)!=0.0){(mZ*a2v)}else{d})});let a2O=(if n1{(n2*a1Y)}else{(if ((mY)!=0.0){(mZ*a1Y)}else{d})});let a2P=(if n1{(n2*a2w)}else{(if ((mY)!=0.0){(mZ*a2w)}else{d})});let a2Q=(if n1{(n2*a2x)}else{(if ((mY)!=0.0){(mZ*a2x)}else{d})});let a2R=(if n1{(n2*a1Z)}else{(if ((mY)!=0.0){(mZ*a1Z)}else{d})});let a35=(bj*sf[366]);let a36=(mu*SW);let a3m=(if nn{(no*a2w)}else{(if ((nk)!=0.0){(nl*a2w)}else{d})});let a3n=(if nn{(no*a35)}else{(if ((nk)!=0.0){(nl*a35)}else{d})});let a3o=(if nn{(no*a36)}else{(if ((nk)!=0.0){(nl*a36)}else{d})});let a3p=(if nn{(no*a2x)}else{(if ((nk)!=0.0){(nl*a2x)}else{d})});let a3q=(if nn{(no*a1Z)}else{(if ((nk)!=0.0){(nl*a1Z)}else{d})});let a3E=(mw*SW);let a3R=(if nJ{(nK*a1Y)}else{(if ((nG)!=0.0){(nH*a1Y)}else{d})});let a3S=(if nJ{(nK*a3E)}else{(if ((nG)!=0.0){(nH*a3E)}else{d})});let a3T=(if nJ{(nK*a2x)}else{(if ((nG)!=0.0){(nH*a2x)}else{d})});let a3U=(if nJ{(nK*a1Z)}else{(if ((nG)!=0.0){(nH*a1Z)}else{d})});let a4e=(bj*(-Us));let a4f=((o0*SW)+a4e);let a4B=(a4e+(oc*SW));let a4X=(a4e+(oo*SW));let a57=(if ou{(ov*a4X)}else{(if ((or)!=0.0){(os*a4X)}else{d})});let a58=(if ou{(ov*a1Y)}else{(if ((or)!=0.0){(os*a1Y)}else{d})});let a59=(if ou{(ov*a1Z)}else{(if ((or)!=0.0){(os*a1Z)}else{d})});let a5b=(a4e+(oA*SW));let a5l=(if oG{(oH*a5b)}else{(if ((oD)!=0.0){(oE*a5b)}else{d})});let a5m=(if oG{(oH*a1Y)}else{(if ((oD)!=0.0){(oE*a1Y)}else{d})});let a5n=(if oG{(oH*a1Z)}else{(if ((oD)!=0.0){(oE*a1Z)}else{d})});let a5r=(N*oO);let a5s=((gS*a57)/a5r);let a5t=((gS*a58)/a5r);let a5u=((gS*a59)/a5r);let a5y=(N*oR);let a5z=((gS*a5l)/a5y);let a5A=((gS*a5m)/a5y);let a5B=((gS*a5n)/a5y);let a5I=(oT*oT);let a5S=(if ((oX)!=0.0){d}else{(((oT*(N*a5l))-(oS*a5z))/a5I)});let a5T=(if ((oX)!=0.0){d}else{(((oT*(N*a5m))-(oS*a5A))/a5I)});
-        let a5U=(if ((oX)!=0.0){d}else{(((oT*(N*a5n))-(oS*a5B))/a5I)});let a6k=((p3*ST)+(bh*((a5s-a5z)-((((oT*a5s)-(p0*a5z))/a5I)/p1))));let a6l=(bh*((a5t-a5A)-((((oT*a5t)-(p0*a5A))/a5I)/p1)));let a6m=(bh*((-a5B)-(((-(p0*a5B))/a5I)/p1)));let a6n=(bh*(a5u-((a5u/oT)/p1)));let a6p=(sf[363]+a6n);let a6t=(fr*fr);let a6u=(((fr*a6k)-(p5*WP))/a6t);let a6v=(a6l/fr);let a6w=((sf[0]+a6m)/fr);let a6x=(a6p/fr);let a6E=(N*ST);let a6L=((pm*WP)+(fr*(gG*a6u)));let a6M=(fr*(gG*a6v));let a6N=(fr*(gG*a6w));let a6O=(fr*(gG*a6x));let a78=(if ((p8)!=0.0){(Us+((pq*a6E)+(pl*(((pn*SW)+(bj*a6L))/pp))))}else{d});let a79=(if ((p8)!=0.0){((pl*((bj*a6M)/pp))-(if pf{(sf[0]/ph)}else{(if pc{sf[0]}else{d})}))}else{d});let a7a=(if ((p8)!=0.0){((pl*((bj*a6N)/pp))-(if pf{(sf[363]/ph)}else{(if pc{sf[363]}else{d})}))}else{d});let a7b=(if ((p8)!=0.0){(pl*((bj*a6O)/pp))}else{d});let a7e=(px*(if ((p8)!=0.0){(pv*Us)}else{d}));let a7g=(if ((p8)!=0.0){(a7e+a7e)}else{d});let a7h=(pu*a78);let a7j=(pu*a79);let a7l=(pu*a7a);let a7n=(pu*a7b);let a7v=(N*pH);let a7w=((a7g+(if ((p8)!=0.0){(a7h+a7h)}else{Xr}))/a7v);let a7x=((if ((p8)!=0.0){(a7j+a7j)}else{d})/a7v);let a7y=((if ((p8)!=0.0){(a7l+a7l)}else{d})/a7v);let a7z=((if ((p8)!=0.0){(a7n+a7n)}else{d})/a7v);let a7H=(pI*pI);let a84=(if pM{(gG*(a78+a7w))}else{(if pE{(((pI*(gG*a7g))-(pF*(a7w-a78)))/a7H)}else{d})});let a85=(if pM{(gG*(a79+a7x))}else{(if pE{((-(pF*(a7x-a79)))/a7H)}else{d})});let a86=(if pM{(gG*(a7a+a7y))}else{(if pE{((-(pF*(a7y-a7a)))/a7H)}else{d})});let a87=(if pM{(gG*(a7b+a7z))}else{(if pE{((-(pF*(a7z-a7b)))/a7H)}else{d})});let a8t=(pX*pX);let a8H=(if ((p8)!=0.0){(((pX*((pT*a84)+(pP*a84)))-(pU*(sf[222]*(a84+(sf[221]*WP)))))/a8t)}else{d});let a8I=(if ((p8)!=0.0){(((pX*((pT*a85)+(pP*a85)))-(pU*(sf[222]*a85)))/a8t)}else{d});let a8J=(if ((p8)!=0.0){(((pX*((pT*a86)+(pP*a86)))-(pU*(sf[222]*a86)))/a8t)}else{d});let a8K=(if ((p8)!=0.0){(((pX*((pT*a87)+(pP*a87)))-(pU*(sf[222]*a87)))/a8t)}else{d});let a8O=(pZ*pZ);let a92=(if ((p8)!=0.0){(((pZ*a6u)-(p6*a8H))/a8O)}else{d});let a93=(if ((p8)!=0.0){(((pZ*a6v)-(p6*a8I))/a8O)}else{d});let a94=(if ((p8)!=0.0){(((pZ*a6w)-(p6*a8J))/a8O)}else{d});let a95=(if ((p8)!=0.0){(((pZ*a6x)-(p6*a8K))/a8O)}else{d});let a9a=(if ((p8)!=0.0){(a92/sf[224])}else{Xb});let a9b=(if ((p8)!=0.0){(a93/sf[224])}else{d});let a9c=(if ((p8)!=0.0){(a94/sf[224])}else{d});let a9d=(if ((p8)!=0.0){(a95/sf[224])}else{d});let a9W=(if ((p8)!=0.0){((if qg{(a92+(sf[224]*((qi*(-a9a))/qj)))}else{(if q8{(sf[224]*((q9*a9a)/qa))}else{d})})/sf[230])}else{d});let a9X=(if ((p8)!=0.0){((if qg{(a93+(sf[224]*((qi*(-a9b))/qj)))}else{(if q8{(sf[224]*((q9*a9b)/qa))}else{d})})/sf[230])}else{d});let a9Y=(if ((p8)!=0.0){((if qg{(a94+(sf[224]*((qi*(-a9c))/qj)))}else{(if q8{(sf[224]*((q9*a9c)/qa))}else{d})})/sf[230])}else{d});let a9Z=(if ((p8)!=0.0){((if qg{(a95+(sf[224]*((qi*(-a9d))/qj)))}else{(if q8{(sf[224]*((q9*a9d)/qa))}else{d})})/sf[230])}else{d});let aa4=(if ((p8)!=0.0){(a84/sf[223])}else{d});let aa5=(if ((p8)!=0.0){(a85/sf[223])}else{d});let aa6=(if ((p8)!=0.0){(a86/sf[223])}else{d});let aa7=(if ((p8)!=0.0){(a87/sf[223])}else{d});let aaA=(N*qE);let aaY=(qH*qH);let abc=(if ((p8)!=0.0){(((qH*(((qB*((qz*aa4)+(qy*(gS*a9W))))+(qA*aa4))/aaA))-(qF*((qG*aa4)+(qB*(N*a9W)))))/aaY)}else{d});let abd=(if ((p8)!=0.0){(((qH*(((qB*((qz*aa5)+(qy*(gS*a9X))))+(qA*aa5))/aaA))-(qF*((qG*aa5)+(qB*(N*a9X)))))/aaY)}else{d});let abe=(if ((p8)!=0.0){(((qH*(((qB*((qz*aa6)+(qy*(gS*a9Y))))+(qA*aa6))/aaA))-(qF*((qG*aa6)+(qB*(N*a9Y)))))/aaY)}else{d});let abf=(if ((p8)!=0.0){(((qH*(((qB*((qz*aa7)+(qy*(gS*a9Z))))+(qA*aa7))/aaA))-(qF*((qG*aa7)+(qB*(N*a9Z)))))/aaY)}else{d});let abm=((qJ*a5S)+(oY*abc));let abp=((qJ*a5T)+(oY*abd));let abs=((qJ*a5U)+(oY*abe));let abt=(oY*abf);let abB=(qN*qN);let abP=(if ((p8)!=0.0){(((qN*((-abc)+abm))-(qM*abm))/abB)}else{d});let abQ=(if ((p8)!=0.0){(((qN*((-abd)+abp))-(qM*abp))/abB)}else{d});let abR=(if ((p8)!=0.0){(((qN*((-abe)+abs))-(qM*abs))/abB)}else{d});let abS=(if ((p8)!=0.0){(((qN*((-abf)+abt))-(qM*abt))/abB)}else{d});let acb=(if ((p8)!=0.0){((qQ*SW)+(bj*((qP*a6L)+(pn*abP))))}else{d});
-        let acc=(if ((p8)!=0.0){(bj*((qP*a6M)+(pn*abQ)))}else{d});let acd=(if ((p8)!=0.0){(bj*((qP*a6N)+(pn*abR)))}else{d});let ace=(if ((p8)!=0.0){(bj*((qP*a6O)+(pn*abS)))}else{d});let acA=(if ((p8)!=0.0){((N*acb)+((qV*a5S)+(oY*(a5S+acb))))}else{d});let acB=(if ((p8)!=0.0){((N*acc)+((qV*a5T)+(oY*(a5T+acc))))}else{d});let acC=(if ((p8)!=0.0){((N*acd)+((qV*a5U)+(oY*(a5U+acd))))}else{d});let acD=(if ((p8)!=0.0){((N*ace)+(oY*ace))}else{d});let acI=(if ((p8)!=0.0){(gG*acb)}else{d});let acJ=(if ((p8)!=0.0){(gG*acc)}else{d});let acK=(if ((p8)!=0.0){(gG*acd)}else{d});let acL=(if ((p8)!=0.0){(gG*ace)}else{d});let acM=(r1*acI);let acO=(r1*acJ);let acQ=(r1*acK);let acS=(r1*acL);let acY=(if ((p8)!=0.0){(acA+(acM+acM))}else{d});let acZ=(if ((p8)!=0.0){(acB+(acO+acO))}else{d});let ad0=(if ((p8)!=0.0){(acC+(acQ+acQ))}else{d});let ad1=(if ((p8)!=0.0){(acD+(acS+acS))}else{d});let ad2=(N*r8);let ad3=(acY/ad2);let ad4=(acZ/ad2);let ad5=(ad0/ad2);let ad6=(ad1/ad2);let adm=(rd*rd);let adE=(if rj{d}else{(if rc{(((rd*acA)-(qY*(ad3-acI)))/adm)}else{(if r7{(acI+ad3)}else{d})})});let adF=(if rj{d}else{(if rc{(((rd*acB)-(qY*(ad4-acJ)))/adm)}else{(if r7{(acJ+ad4)}else{d})})});let adG=(if rj{d}else{(if rc{(((rd*acC)-(qY*(ad5-acK)))/adm)}else{(if r7{(acK+ad5)}else{d})})});let adH=(if rj{d}else{(if rc{(((rd*acD)-(qY*(ad6-acL)))/adm)}else{(if r7{(acL+ad6)}else{d})})});let aec=(if ((p8)!=0.0){(sf[232]*a6u)}else{d});let aed=(if ((p8)!=0.0){(sf[232]*a6v)}else{d});let aee=(if ((p8)!=0.0){(sf[232]*a6w)}else{d});let aef=(if ((p8)!=0.0){(sf[232]*a6x)}else{d});let aes=(ru*aec);let aeu=(ru*aed);let aew=(ru*aee);let aey=(ru*aef);let aeE=(N*rB);let aeR=(a2*Va);let af4=(rN*rN);let afs=(sf[221]*a6u);let aft=(sf[221]*a6v);let afu=(sf[221]*a6w);let afv=(sf[221]*a6x);let afz=(rT*rT);let ag9=(p0*p0);let agm=(if rY{(((p0*(N*a59))-(rZ*a5u))/ag9)}else{adH});let agn=(if rY{a29}else{(if ((p8)!=0.0){((ro*((rl*adE)+(rk*adE)))+(rm*(ro*((cX*SW)+(bj*Us)))))}else{d})});let ago=(if rY{a2a}else{(if ((p8)!=0.0){(ro*((rl*adF)+(rk*adF)))}else{d})});let agp=(if rY{d}else{(if ((p8)!=0.0){(ro*((rl*adG)+(rk*adG)))}else{d})});let agq=(if rY{a2b}else{(if ((p8)!=0.0){(ro*((rl*adH)+(rk*adH)))}else{d})});let agr=(a5S+(if rY{(((p0*(N*a57))-(rZ*a5s))/ag9)}else{adE}));let ags=(a5T+(if rY{(((p0*(N*a58))-(rZ*a5t))/ag9)}else{adF}));let agt=(a5U+(if rY{d}else{adG}));let agy=(if sf_{(gG*agr)}else{d});let agz=(if sf_{(gG*ags)}else{d});let agA=(if sf_{(gG*agt)}else{d});let agB=(if sf_{(gG*agm)}else{d});let agF=(sj*sj);let ah3=(sp*sp);let ahh=(if sn{(((sp*a6k)-(p4*a6k))/ah3)}else{(if sf_{(((sj*agy)-(si*agy))/agF)}else{abP})});let ahi=(if sn{(((sp*a6l)-(p4*((sf[0]+a6l)-sf[0])))/ah3)}else{(if sf_{(((sj*agz)-(si*agz))/agF)}else{abQ})});let ahj=(if sn{(((sp*a6m)-(p4*(a6m-sf[363])))/ah3)}else{(if sf_{(((sj*agA)-(si*agA))/agF)}else{abR})});let ahk=(if sn{(((sp*a6n)-(p4*a6p))/ah3)}else{(if sf_{(((sj*agB)-(si*agB))/agF)}else{abS})});let ahp=(if rY{aeR}else{(if rL{((rP*Va)+(dE*(((rN*(N*a6u))-(rM*(a6u+a8H)))/af4)))}else{(if rH{aeR}else{d})})});let ahq=(if rY{d}else{(if rL{(dE*(((rN*(N*a6v))-(rM*(a6v+a8I)))/af4))}else{d})});let ahr=(if rY{d}else{(if rL{(dE*(((rN*(N*a6w))-(rM*(a6w+a8J)))/af4))}else{d})});let ahs=(if rY{d}else{(if rL{(dE*(((rN*(N*a6x))-(rM*(a6x+a8K)))/af4))}else{d})});let aht=(if rY{a6u}else{(if ((p8)!=0.0){(((rT*afs)-(rS*a6u))/afz)}else{d})});let ahu=(if rY{a6v}else{(if ((p8)!=0.0){(((rT*aft)-(rS*a6v))/afz)}else{d})});let ahv=(if rY{a6w}else{(if ((p8)!=0.0){(((rT*afu)-(rS*a6w))/afz)}else{d})});let ahw=(if rY{a6x}else{(if ((p8)!=0.0){(((rT*afv)-(rS*a6x))/afz)}else{d})});let ahF=(if rY{(-(aht/sf[221]))}else{(if ((p8)!=0.0){((-afs)/afz)}else{d})});let ahG=(if rY{(-(ahu/sf[221]))}else{(if ((p8)!=0.0){((-aft)/afz)}else{d})});let ahH=(if rY{(-(ahv/sf[221]))}else{(if ((p8)!=0.0){((-afu)/afz)}else{d})});let ahI=(if rY{(-(ahw/sf[221]))}else{(if ((p8)!=0.0){((-afv)/afz)}else{d})});let ahJ=(sf[237]*U5);let ahK=(a2*U5);let ahM=(sC*(-ahJ));let ahP=(sC*sC);let ahQ=((ahM-(sD*ahK))/ahP);let ahR=(sf[363]/sC);let ahS=(sf[0]/sC);let aib=(-ahR);let aic=(-ahS);
-        let air=(if sN{(ahJ-((sR*ahK)+(sC*((sP*(-ahQ))/sQ))))}else{(if ((sG)!=0.0){(-((sJ*ahK)+(sC*((sH*ahQ)/sI))))}else{d})});let ais=(if sN{(-(sC*((sP*aib)/sQ)))}else{(if ((sG)!=0.0){(sf[363]-(sC*((sH*ahR)/sI)))}else{d})});let ait=(if sN{(-(sC*((sP*aic)/sQ)))}else{(if ((sG)!=0.0){(sf[0]-(sC*((sH*ahS)/sI)))}else{d})});let aiz=(-((sU*VX)+(er*air)));let aiA=(-(er*ais));let aiB=(-(er*ait));let aiE=(sf[238]*f64::powf(sW,sf[367]));let aiF=(aiz*aiE);let aiG=(aiA*aiE);let aiH=(aiB*aiE);let aiI=(U5/sf[238]);let aiX=(((t0*aiI)+(sZ*(-aiF)))+(c8*(-air)));let aiY=((sZ*(-aiG))+(c8*(sf[363]-ais)));let aiZ=((sZ*(-aiH))+(c8*(sf[0]-ait)));let aj8=(if sb[28]{d}else{(if sb[26]{(if rY{d}else{(if ((p8)!=0.0){(aec+(((if ((p8)!=0.0){((rw*a6u)+(p6*(sf[221]*(sf[222]*WP))))}else{d})+(aes+aes))/aeE))}else{d})})}else{d})});let aj9=(if sb[28]{sf[0]}else{(if sb[26]{(sf[0]+(if rY{d}else{(if ((p8)!=0.0){(aed+(((if ((p8)!=0.0){(rw*a6v)}else{d})+(aeu+aeu))/aeE))}else{d})}))}else{sf[368]})});let aja=(if sb[28]{d}else{(if sb[26]{(sf[363]+(if rY{sf[0]}else{(if ((p8)!=0.0){(aee+(((if ((p8)!=0.0){(rw*a6w)}else{d})+(aew+aew))/aeE))}else{d})}))}else{sf[369]})});let ajb=(if sb[28]{sf[363]}else{(if sb[26]{(if rY{sf[363]}else{(if ((p8)!=0.0){(aef+(((if ((p8)!=0.0){(rw*a6x)}else{d})+(aey+aey))/aeE))}else{d})})}else{d})});let ajc=(-Wu);let ajh=(((tj*ajc)-(ti*ajc))/(tj*tj));let ajp=((tn*Va)+(dE*(-(ajh*(sf[242]*f64::powf(tk,sf[370]))))));let aju=(st*st);let ajv=(((st*(aj8-ajp))-(tp*ahp))/aju);let ajz=(((st*aj9)-(tp*ahq))/aju);let ajD=(((st*aja)-(tp*ahr))/aju);let ajH=(((st*ajb)-(tp*ahs))/aju);let akC=(if tz{(ajp-((tD*ahp)+(st*((tB*(-ajv))/tC))))}else{(if ((ts)!=0.0){(aj8-((tv*ahp)+(st*((tt*ajv)/tu))))}else{d})});let akD=(if tz{(-((tD*ahq)+(st*((tB*(-ajz))/tC))))}else{(if ((ts)!=0.0){(aj9-((tv*ahq)+(st*((tt*ajz)/tu))))}else{d})});let akE=(if tz{(-((tD*ahr)+(st*((tB*(-ajD))/tC))))}else{(if ((ts)!=0.0){(aja-((tv*ahr)+(st*((tt*ajD)/tu))))}else{d})});let akF=(if tz{(-((tD*ahs)+(st*((tB*(-ajH))/tC))))}else{(if ((ts)!=0.0){(ajb-((tv*ahs)+(st*((tt*ajH)/tu))))}else{d})});let akI=(sf[243]*f64::powf(sx,sf[371]));let akJ=(ahF*akI);let akK=(ahG*akI);let akL=(ahH*akI);let akM=(ahI*akI);let akN=(Va/sf[244]);let al1=(sf[244]*f64::powf(tM,sf[372]));let alX=(tj*((tK*(-((tN*akM)+(tI*((-(akF/dE))*al1)))))+((tS*(tk*akM))+(tR*(ajb-akF)))));let alZ=(sf[0]*eN);let am0=(eN*sf[363]);let am1=(((tU*ajc)+(tj*(((tP*akN)+(tK*(-((tN*akJ)+(tI*((-(((dE*akC)-(tG*Va))/VZ))*al1))))))+((tS*((tI*ajh)+(tk*akJ)))+(tR*(aj8-akC))))))+(lP*Wu));let am2=((tj*((tK*(-((tN*akK)+(tI*((-(akD/dE))*al1)))))+((tS*(tk*akK))+(tR*(aj9-akD)))))+alZ);let am3=((tj*((tK*(-((tN*akL)+(tI*((-(akE/dE))*al1)))))+((tS*(tk*akL))+(tR*(aja-akE)))))+am0);let am8=(ha*ha);let am9=(((ha*(gS*XT))-(tY*XW))/am8);let amc=((tZ*a2s)+(mV*am9));let amd=(tZ*a2t);let ame=(tZ*a2u);let amf=(N*u2);let amg=(amc/amf);let amh=(amd/amf);let ami=(ame/amf);let amm=(u3*u3);let amn=(((u3*amc)-(u0*amg))/amm);let amr=(((u3*amd)-(u0*amh))/amm);let amv=(((u3*ame)-(u0*ami))/amm);let amB=(u5*f64::powf(s2,(u5-b)));let amF=((agn*amB)+(((-(if sb[13]{d}else{(if ((sf[121])!=0.0){(if gl{(Xf+(M*((gn*(-Xb))/go)))}else{Xf})}else{d})}))/(gw*gw))*(u6*K0)));let amG=(ago*amB);let amH=(agp*amB);let amI=(agq*amB);let amL=((u6*am9)+(tZ*amF));let amM=(tZ*amG);let amN=(tZ*amH);let amO=(tZ*amI);let amP=(N*u9);let amX=(ua*ua);let amY=(((ua*amL)-(u7*(amL/amP)))/amX);let an2=(((ua*amM)-(u7*(amM/amP)))/amX);let an6=(((ua*amN)-(u7*(amN/amP)))/amX);let ana=(((ua*amO)-(u7*(amO/amP)))/amX);let anf=(((jU*aiX)-(t4*((jT*Zr)+(j7*(sf[185]*a0E)))))/(jU*jU));let ang=(aiY/jU);let anh=(aiZ/jU);let anl=(jR*jR);let anm=(((jR*am1)-(tX*a0I))/anl);let ann=(am2/jR);let ano=(am3/jR);let anp=(alX/jR);let anq=(anf+anm);let anr=(anh+ann);let aoz=(if sb[30]{(((ux*((us*(if sb[30]{((uk*SW)+(bj*((uf*a1A)+(lc*anf))))}else{d}))-(ut*(if sb[30]{((up*SW)+(bj*((uo*a1A)+(lc*(((jR*(-am1))-(un*a0I))/anl)))))}else{d}))))-(uu*(uw*((lc*SW)+(bj*a1A)))))/(ux*ux))}else{(if ((sf[245])!=0.0){anq}else{d})});let aoA=(if sb[30]{((us*(if sb[30]{(bj*(lc*ang))}else{d}))/ux)}else{(if ((sf[245])!=0.0){ang}else{d})});
-        let aoB=(if sb[30]{(((us*(if sb[30]{(bj*(lc*anh))}else{d}))-(ut*(if sb[30]{(bj*(lc*((-am2)/jR)))}else{d})))/ux)}else{(if ((sf[245])!=0.0){anr}else{d})});let aoC=(if sb[30]{((-(ut*(if sb[30]{(bj*(lc*((-am3)/jR)))}else{d})))/ux)}else{(if ((sf[245])!=0.0){ano}else{d})});let aoD=(if sb[30]{((-(ut*(if sb[30]{(bj*(lc*((-alX)/jR)))}else{d})))/ux)}else{(if ((sf[245])!=0.0){anp}else{d})});let aoE=(uz*aoz);let aoF=(aoE+aoE);let aoG=(uz*aoA);let aoH=(aoG+aoG);let aoI=(uz*aoB);let aoJ=(aoI+aoI);let aoK=(uz*aoC);let aoL=(aoK+aoK);let aoM=(uz*aoD);let aoN=(aoM+aoM);let aoO=(N*uG);let aoP=(aoF/aoO);let aoQ=(aoH/aoO);let aoR=(aoJ/aoO);let aoS=(aoL/aoO);let aoT=(aoN/aoO);let ap1=(uH*uH);let apB=(gG*(amn+amY));let apC=(gG*amr);let apD=(gG*(amv+an2));let apE=(gG*an6);let apF=(gG*ana);let apI=((uQ*(if uK{(gG*(aoz+aoP))}else{(if ((uD)!=0.0){((-(uE*(aoP-aoz)))/ap1)}else{d})}))+(uN*apB));let apL=((uQ*(if uK{(gG*(aoA+aoQ))}else{(if ((uD)!=0.0){((-(uE*(aoQ-aoA)))/ap1)}else{d})}))+(uN*apC));let apO=((uQ*(if uK{(gG*(aoB+aoR))}else{(if ((uD)!=0.0){((-(uE*(aoR-aoB)))/ap1)}else{d})}))+(uN*apD));let apR=((uQ*(if uK{(gG*(aoC+aoS))}else{(if ((uD)!=0.0){((-(uE*(aoS-aoC)))/ap1)}else{d})}))+(uN*apE));let apU=((uQ*(if uK{(gG*(aoD+aoT))}else{(if ((uD)!=0.0){((-(uE*(aoT-aoD)))/ap1)}else{d})}))+(uN*apF));let apY=((uT*amF)+(u6*(sf[246]*XT)));let apZ=(uT*amG);let aq0=(uT*amH);let aq1=(uT*amI);let aq4=((mV*XT)+(h5*a2s));let aq6=(h5*a2u);let aqe=(uR*uR);let aqg=(uR*(h5*a2t));let aqQ=(if v7{(sf[363]+(uY*((v9*sf[375])/va)))}else{(if ((v1)!=0.0){(uY*((v2*sf[373])/v3))}else{d})});let aqR=(if v7{(sf[0]+(uY*((v9*sf[376])/va)))}else{(if ((v1)!=0.0){(uY*((v2*sf[374])/v3))}else{d})});let arG=(a2c/sf[150]);let arH=(a1Z/sf[150]);let arI=(a1Y/sf[150]);let arS=(if vW{(vX*arG)}else{(if ((vT)!=0.0){(vU*arG)}else{d})});let arT=(if vW{(vX*arH)}else{(if ((vT)!=0.0){(vU*arH)}else{aqQ})});let arU=(if vW{(vX*arI)}else{(if ((vT)!=0.0){(vU*arI)}else{aqR})});let auQ=(lY*SW);let auR=(auQ/sf[154]);let auS=(a1Z/sf[154]);let auT=(a1Y/sf[154]);let av4=(if xd{(xe*auR)}else{(if ((xa)!=0.0){(xb*auR)}else{arS})});let av5=(if xd{(xe*auS)}else{(if ((xa)!=0.0){(xb*auS)}else{arT})});let av6=(if xd{(xe*auT)}else{(if ((xa)!=0.0){(xb*auT)}else{d})});let av7=(if xd{d}else{(if ((xa)!=0.0){d}else{arU})});let awd=(a2c/sf[137]);let awe=(a1Z/sf[137]);let awf=(a1Y/sf[137]);let awq=(if xO{(xP*awd)}else{(if ((xL)!=0.0){(xM*awd)}else{av4})});let awr=(if xO{(xP*awe)}else{(if ((xL)!=0.0){(xM*awe)}else{av5})});let aws=(if xO{d}else{(if ((xL)!=0.0){d}else{av6})});let awt=(if xO{(xP*awf)}else{(if ((xL)!=0.0){(xM*awf)}else{av7})});let awA=(auQ/sf[172]);let awB=(a1Z/sf[172]);let awC=(a1Y/sf[172]);let awN=(if y1{(y2*awA)}else{(if ((xY)!=0.0){(xZ*awA)}else{awq})});let awO=(if y1{(y2*awB)}else{(if ((xY)!=0.0){(xZ*awB)}else{awr})});let awP=(if y1{(y2*awC)}else{(if ((xY)!=0.0){(xZ*awC)}else{aws})});let awQ=(if y1{d}else{(if ((xY)!=0.0){d}else{awt})});let awX=(a2v/sf[143]);let awY=(a1Y/sf[143]);let awZ=(a2w/sf[143]);let ax0=(a2x/sf[143]);let ax1=(a1Z/sf[143]);let axi=(if ye{(yf*awX)}else{(if ((yb)!=0.0){(yc*awX)}else{awN})});let axj=(if ye{d}else{(if ((yb)!=0.0){d}else{awO})});let axk=(if ye{(yf*awY)}else{(if ((yb)!=0.0){(yc*awY)}else{awP})});let axl=(if ye{(yf*awZ)}else{(if ((yb)!=0.0){(yc*awZ)}else{awQ})});let axm=(if ye{(yf*ax0)}else{(if ((yb)!=0.0){(yc*ax0)}else{d})});let axn=(if ye{(yf*ax1)}else{(if ((yb)!=0.0){(yc*ax1)}else{d})});let axw=(auQ/sf[176]);let axx=(a1Z/sf[176]);let axy=(a1Y/sf[176]);let axL=(if yr{(ys*axw)}else{(if ((yo)!=0.0){(yp*axw)}else{axi})});let axM=(if yr{(ys*axx)}else{(if ((yo)!=0.0){(yp*axx)}else{axj})});let axN=(if yr{(ys*axy)}else{(if ((yo)!=0.0){(yp*axy)}else{axk})});let axO=(if yr{d}else{(if ((yo)!=0.0){d}else{axl})});let axP=(if yr{d}else{(if ((yo)!=0.0){d}else{axm})});let axQ=(if yr{d}else{(if ((yo)!=0.0){d}else{axn})});let aG2=((tZ*a2N)+(n6*am9));let aG3=(tZ*a2O);let aG4=(tZ*a2P);let aG5=(tZ*a2Q);let aG6=(tZ*a2R);let aG7=(gS*(if oi{(oj*a4B)}else{(if ((of)!=0.0){(og*a4B)}else{d})}));let aG8=(gS*(if oi{(oj*a1Y)}else{(if ((of)!=0.0){(og*a1Y)}else{d})}));
-        let aG9=(gS*(if oi{(oj*a2w)}else{(if ((of)!=0.0){(og*a2w)}else{d})}));let aGa=(gS*(if oi{(oj*a2x)}else{(if ((of)!=0.0){(og*a2x)}else{d})}));let aGb=(gS*(if oi{(oj*a1Z)}else{(if ((of)!=0.0){(og*a1Z)}else{d})}));let aGd=(N*BF);let aGm=(BG*BG);let aGE=(N*BJ);let aGN=(BK*BK);let aH5=(N*YV);let aHi=(((hg*(gS*YV))-(BP*(sf[133]*(hf*(sf[135]*SX)))))/(hg*hg));let aI5=(kh*kh);let aM9=(sf[271]*YV);let aMo=(N*Da);let aMx=(Db*Db);let aMP=(if ((sf[270])!=0.0){(((Db*(D5*a3m))-(D7*((BQ*a3m)/aMo)))/aMx)}else{d});let aMQ=(if ((sf[270])!=0.0){(((Db*(D5*a3n))-(D7*((BQ*a3n)/aMo)))/aMx)}else{d});let aMR=(if ((sf[270])!=0.0){(((Db*((D6*aM9)+(D5*a3o)))-(D7*(((BQ*a3o)+(ns*aHi))/aMo)))/aMx)}else{d});let aMS=(if ((sf[270])!=0.0){(((Db*(D5*a3p))-(D7*((BQ*a3p)/aMo)))/aMx)}else{d});let aMT=(if ((sf[270])!=0.0){(((Db*(D5*a3q))-(D7*((BQ*a3q)/aMo)))/aMx)}else{d});let aMU=(sf[273]*a0U);let aMZ=(Dh*a3m);let aN0=(Dh*a3n);let aN6=(Dh*a3p);let aNc=(((kh*(gS*a0U))-(Dk*a13))/aI5);let aNk=(Dl*a3m);let aNl=(Dl*a3n);let aNr=(Dl*a3p);let aNt=(N*Dq);let aNE=(Dr*Dr);let aOj=(N*Dy);let aOs=(Dz*Dz);let aOF=(((Dz*aN6)-(Dv*(aNr/aOj)))/aOs);let aOK=(if sb[48]{(((Dz*aMZ)-(Dv*(aNk/aOj)))/aOs)}else{(if sb[47]{(((Dr*aMZ)-(Dj*(aNk/aNt)))/aNE)}else{d})});let aOL=(if sb[48]{(((Dz*aN0)-(Dv*(aNl/aOj)))/aOs)}else{(if sb[47]{(((Dr*aN0)-(Dj*(aNl/aNt)))/aNE)}else{d})});let aOM=(if sb[48]{d}else{(if sb[47]{(((Dr*(Dh*(-a3R)))-(Dj*((Dl*(sf[265]*a3R))/aNt)))/aNE)}else{d})});let aON=(if sb[48]{(((Dz*((Dh*a3o)+(D6*aMU)))-(Dv*(((Dl*a3o)+(ns*aNc))/aOj)))/aOs)}else{(if sb[47]{(((Dr*((Di*aMU)+(Dh*(a3o-a3S))))-(Dj*(((Dn*aNc)+(Dl*(a3o+(sf[265]*a3S))))/aNt)))/aNE)}else{d})});let aOO=(if sb[48]{aOF}else{(if sb[47]{(((Dr*(Dh*(a3p-a3T)))-(Dj*((Dl*(a3p+(sf[265]*a3T)))/aNt)))/aNE)}else{d})});let aOP=(if sb[48]{aOF}else{(if sb[47]{(((Dr*aN6)-(Dj*(aNr/aNt)))/aNE)}else{d})});let aOQ=(if sb[48]{(((Dz*(Dh*a3q))-(Dv*((Dl*a3q)/aOj)))/aOs)}else{(if sb[47]{(((Dr*(Dh*(a3q-a3U)))-(Dj*((Dl*(a3q+(sf[265]*a3U)))/aNt)))/aNE)}else{d})});let aOW=(if sb[50]{((DG*WI)+(ff*(sf[6]*(YV+a0U))))}else{d});let aP9=(if sb[50]{(-(if sb[50]{((DL*ST)+(bh*(-(((DI*SW)+(bj*aOW))/DJ))))}else{d}))}else{d});let aPc=(DP*sf[389]);let aPd=(aPc+aPc);let aPe=(DP*sf[390]);let aPg=(DP*aP9);let aPi=(DP*sf[391]);let aPj=(aPi+aPi);let aPk=(DP*sf[392]);let aPm=(if sb[50]{aPd}else{d});let aPn=(if sb[50]{(aPe+aPe)}else{d});let aPo=(if sb[50]{(aPg+aPg)}else{aoF});let aPp=(if sb[50]{d}else{aoH});let aPq=(if sb[50]{aPd}else{aoJ});let aPr=(if sb[50]{aPj}else{aoL});let aPs=(if sb[50]{aPj}else{aoN});let aPt=(if sb[50]{(aPk+aPk)}else{d});let aPu=(if sb[50]{aPj}else{d});let aPv=(N*DZ);let aPw=(aPm/aPv);let aPx=(aPn/aPv);let aPy=(aPo/aPv);let aPz=(aPp/aPv);let aPA=(aPq/aPv);let aPB=(aPr/aPv);let aPC=(aPs/aPv);let aPD=(aPt/aPv);let aPE=(aPu/aPv);let aPP=(E0*E0);let aQF=(if E4{(gG*(sf[389]+aPw))}else{(if DW{((-(sf[276]*(aPw-sf[389])))/aPP)}else{d})});let aQG=(if E4{(gG*(sf[390]+aPx))}else{(if DW{((-(sf[276]*(aPx-sf[390])))/aPP)}else{d})});let aQH=(if E4{(gG*(aP9+aPy))}else{(if DW{((-(sf[276]*(aPy-aP9)))/aPP)}else{d})});let aQI=(if E4{(gG*aPz)}else{(if DW{((-(sf[276]*aPz))/aPP)}else{d})});let aQJ=(if E4{(gG*(sf[389]+aPA))}else{(if DW{((-(sf[276]*(aPA-sf[389])))/aPP)}else{d})});let aQK=(if E4{(gG*(sf[391]+aPB))}else{(if DW{((-(sf[276]*(aPB-sf[391])))/aPP)}else{d})});let aQL=(if E4{(gG*(sf[391]+aPC))}else{(if DW{((-(sf[276]*(aPC-sf[391])))/aPP)}else{d})});let aQM=(if E4{(gG*(sf[392]+aPD))}else{(if DW{((-(sf[276]*(aPD-sf[392])))/aPP)}else{d})});let aQN=(if E4{(gG*(sf[391]+aPE))}else{(if DW{((-(sf[276]*(aPE-sf[391])))/aPP)}else{d})});let aQU=(ff*(aMP+aOK));let aR0=(ff*(aMS+aOO));let aRf=(Eb*Eb);let aS0=(if sb[52]{d}else{(if sb[50]{(((Eb*aQF)-(E7*(aQF+aQU)))/aRf)}else{d})});let aS1=(if sb[52]{d}else{(if sb[50]{(((Eb*aQG)-(E7*(aQG+(ff*(aMQ+aOL)))))/aRf)}else{d})});let aS2=(if sb[52]{d}else{(if sb[50]{((-(E7*(ff*aOM)))/aRf)}else{d})});let aS3=(if sb[52]{d}else{(if sb[50]{(((Eb*aQH)-(E7*(aQH+(aOW+((E8*WI)+(ff*(aMR+aON)))))))/aRf)}else{d})});let aS4=(if sb[52]{d}else{(if sb[50]{(((Eb*aQI)-(E7*aQI))/aRf)}else{d})});
-        let aS5=(if sb[52]{d}else{(if sb[50]{(((Eb*aQJ)-(E7*(aQJ+aQU)))/aRf)}else{d})});let aS6=(if sb[52]{d}else{(if sb[50]{(((Eb*aQK)-(E7*(aQK+aR0)))/aRf)}else{d})});let aS7=(if sb[52]{d}else{(if sb[50]{(((Eb*aQL)-(E7*(aQL+(ff*(aMS+aOP)))))/aRf)}else{d})});let aS8=(if sb[52]{d}else{(if sb[50]{(((Eb*aQM)-(E7*(aQM+(ff*(aMT+aOQ)))))/aRf)}else{d})});let aS9=(if sb[52]{d}else{(if sb[50]{(((Eb*aQN)-(E7*(aQN+aR0)))/aRf)}else{d})});let aXw=(uh*anq);let aXy=(uh*ang);let aXA=(uh*anr);let aXC=(uh*ano);let aXE=(uh*anp);let aXG=(N*Fl);let aXH=((aXw+aXw)/aXG);let aXI=((aXy+aXy)/aXG);let aXJ=((aXA+aXA)/aXG);let aXK=((aXC+aXC)/aXG);let aXL=((aXE+aXE)/aXG);let aXT=(Fm*Fm);let aYm=(if Fp{(gG*(anq+aXH))}else{(if ((Fj)!=0.0){((-(uE*(aXH-anq)))/aXT)}else{d})});let aYn=(if Fp{(gG*(ang+aXI))}else{(if ((Fj)!=0.0){((-(uE*(aXI-ang)))/aXT)}else{d})});let aYo=(if Fp{(gG*(anr+aXJ))}else{(if ((Fj)!=0.0){((-(uE*(aXJ-anr)))/aXT)}else{d})});let aYp=(if Fp{(gG*(ano+aXK))}else{(if ((Fj)!=0.0){((-(uE*(aXK-ano)))/aXT)}else{d})});let aYq=(if Fp{(gG*(anp+aXL))}else{(if ((Fj)!=0.0){((-(uE*(aXL-anp)))/aXT)}else{d})});let bmH=(sf[324]*W9);let bmP=((ahM-(L5*ahK))/ahP);let bnm=(if Lf{(ahJ-((Lj*ahK)+(sC*((Lh*(-bmP))/Li))))}else{(if ((L8)!=0.0){(-((Lb*ahK)+(sC*((L9*bmP)/La))))}else{d})});let bnn=(if Lf{(-(sC*((Lh*aib)/Li)))}else{(if ((L8)!=0.0){(sf[363]-(sC*((L9*ahR)/La)))}else{d})});let bno=(if Lf{(-(sC*((Lh*aic)/Li)))}else{(if ((L8)!=0.0){(sf[0]-(sC*((L9*ahS)/La)))}else{d})});let bnz=(sf[238]*f64::powf(Lp,sf[367]));let bo8=((kC*XW)+(ha*a1h));let bo9=(gG*bo8);let boh=((LC*aYm)+(Fs*((LB*amn)+(u4*bo9))));let bok=((LC*aYn)+(Fs*(LB*amr)));let bon=((LC*aYo)+(Fs*(LB*amv)));let boo=(LC*aYp);let bop=(LC*aYq);let boy=((LE*aYm)+(Fs*((LB*amY)+(ub*bo9))));let boz=(LE*aYn);let boC=((LE*aYo)+(Fs*(LB*an2)));let boF=((LE*aYp)+(Fs*(LB*an6)));let boI=((LE*aYq)+(Fs*(LB*ana)));let boK=(rI*(-ajp));let boN=(rI*rI);let boO=((boK-(LG*aeR))/boN);let boP=(sf[0]/rI);let boQ=(sf[364]/rI);let boR=(sf[365]/rI);let boS=(sf[363]/rI);let bpm=(-boQ);let bpn=(-boR);let bpo=(-boS);let bpL=(if LQ{(ajp-((LU*aeR)+(rI*((LS*(-boO))/LT))))}else{(if ((LJ)!=0.0){(-((LM*aeR)+(rI*((LK*boO)/LL))))}else{d})});let bpM=(if LQ{(-(rI*((LS*(-boP))/LT)))}else{(if ((LJ)!=0.0){(sf[0]-(rI*((LK*boP)/LL)))}else{d})});let bpN=(if LQ{(-(rI*((LS*bpm)/LT)))}else{(if ((LJ)!=0.0){(sf[364]-(rI*((LK*boQ)/LL)))}else{d})});let bpO=(if LQ{(-(rI*((LS*bpn)/LT)))}else{(if ((LJ)!=0.0){(sf[365]-(rI*((LK*boR)/LL)))}else{d})});let bpP=(if LQ{(-(rI*((LS*bpo)/LT)))}else{(if ((LJ)!=0.0){(sf[363]-(rI*((LK*boS)/LL)))}else{d})});let bq4=(sf[244]*f64::powf(LZ,sf[372]));let bqL=(eN*sf[364]);let bqM=(eN*sf[365]);let br9=(sf[366]/rI);let brc=((boK-(Md*aeR))/boN);let bs2=(if Mn{(-(rI*((Mp*bpm)/Mq)))}else{(if ((Mg)!=0.0){(sf[364]-(rI*((Mh*boQ)/Mi)))}else{d})});let bs3=(if Mn{(-(rI*((Mp*(-br9))/Mq)))}else{(if ((Mg)!=0.0){(sf[366]-(rI*((Mh*br9)/Mi)))}else{d})});let bs4=(if Mn{(ajp-((Mr*aeR)+(rI*((Mp*(-brc))/Mq))))}else{(if ((Mg)!=0.0){(-((Mj*aeR)+(rI*((Mh*brc)/Mi))))}else{d})});let bs5=(if Mn{(-(rI*((Mp*bpn)/Mq)))}else{(if ((Mg)!=0.0){(sf[365]-(rI*((Mh*boR)/Mi)))}else{d})});let bs6=(if Mn{(-(rI*((Mp*bpo)/Mq)))}else{(if ((Mg)!=0.0){(sf[363]-(rI*((Mh*boS)/Mi)))}else{d})});let bsl=(sf[244]*f64::powf(Mw,sf[372]));let btk=(sf[6]*(sf[326]*(eM*(bqL+(tj*((tK*(-((-(bs2/dE))*bsl)))+(tk*(sf[364]-bs2))))))));let btn=(sf[6]*(sf[326]*(eM*(bqM+(tj*((tK*(-((-(bs5/dE))*bsl)))+(tk*(sf[365]-bs5))))))));let btp=(a2*VU);let btq=(sf[329]*VU);let bts=(sf[0]/MJ);let btx=(((MJ*(-btq))-(MO*btp))/(MJ*MJ));let bty=(sf[363]/MJ);let bu7=(if MY{(-(MJ*((N0*(-bts))/N1)))}else{(if ((MR)!=0.0){(sf[0]-(MJ*((MS*bts)/MT)))}else{d})});let bu8=(if MY{(btq-((N2*btp)+(MJ*((N0*(-btx))/N1))))}else{(if ((MR)!=0.0){(-((MU*btp)+(MJ*((MS*btx)/MT))))}else{d})});let bu9=(if MY{(-(MJ*((N0*(-bty))/N1)))}else{(if ((MR)!=0.0){(sf[363]-(MJ*((MS*bty)/MT)))}else{d})});let bum=(sf[330]*f64::powf(N9,sf[408]));let bv0=(sf[331]*ST);let bv3=(Nn*Nn);let bv4=((-(lV*bv0))/bv3);let bv5=(sf[363]/Nn);let bv6=(sf[0]/Nn);
-        let bvr=((Ny*((Nl*((kw*XW)+(ha*((kv*(sf[197]*(kq*(sf[198]*SX))))+(kr*(kv*(sf[200]*SW)))))))+(Nh*((((ha*XT)-(h5*XW))/am8)*(sf[332]*f64::powf(Ni,sf[409]))))))+(Nm*(if Nt{(Nu*bv4)}else{(if ((Nq)!=0.0){(Nr*bv4)}else{axL})})));let bvs=(Nm*(if Nt{(Nu*bv5)}else{(if ((Nq)!=0.0){(Nr*bv5)}else{axM})}));let bvt=(Nm*(if Nt{d}else{(if ((Nq)!=0.0){d}else{axN})}));let bvu=(Nm*(if Nt{(Nu*bv6)}else{(if ((Nq)!=0.0){(Nr*bv6)}else{axO})}));let bvv=(Nm*(if Nt{d}else{(if ((Nq)!=0.0){d}else{axP})}));let bvw=(Nm*(if Nt{d}else{(if ((Nq)!=0.0){d}else{axQ})}));let bvE=(((fr*((NA*ST)+(bh*(gS*a1k))))-(NB*WP))/a6t);let bws=(kJ*kJ);let bwD=(-(if dc{((dg*ST)+(bh*((de*(-UA))/df)))}else{(if ((d5)!=0.0){(Uv+((d8*ST)+(bh*((d6*UA)/d7))))}else{d})}));let bwL=((NT*SW)+(bj*(bwD/sf[335])));let bwM=(bj*sf[410]);let bwN=(bj*sf[411]);let bwO=(bj*sf[412]);let bwP=(bj*sf[413]);let bxp=(N*Oc);let bxy=(Od*Od);let bxQ=(if sb[66]{(((Od*((O8*a2N)+(n6*((BM*a1q)+(kS*aH5)))))-(O9*((gS*(if O2{(O3*bwL)}else{(if NY{(NZ*bwL)}else{d})}))/bxp)))/bxy)}else{(if ((sf[334])!=0.0){(((kJ*((NN*(gG*a1n))+(NK*(((LA*(((BG*(aG2-am9))-(BD*(aG2/aGd)))/aGm))+(BH*bo8))+((NC*(((BK*aG7)-(BC*(aG7/aGE)))/aGN))+(BL*bvE))))))-(NO*a1l))/bws)}else{d})});let bxR=(if sb[66]{(((Od*(O8*a2O))-(O9*((gS*(if O2{(O3*bwM)}else{(if NY{(NZ*bwM)}else{d})}))/bxp)))/bxy)}else{(if ((sf[334])!=0.0){((NK*((LA*(((BG*aG3)-(BD*(aG3/aGd)))/aGm))+(NC*(((BK*aG8)-(BC*(aG8/aGE)))/aGN))))/kJ)}else{d})});let bxS=(if sb[66]{(((Od*(O8*a2P))-(O9*((gS*(if O2{(O3*bwN)}else{(if NY{(NZ*bwN)}else{d})}))/bxp)))/bxy)}else{(if ((sf[334])!=0.0){((NK*((LA*(((BG*aG4)-(BD*(aG4/aGd)))/aGm))+(NC*(((BK*aG9)-(BC*(aG9/aGE)))/aGN))))/kJ)}else{d})});let bxT=(if sb[66]{(((Od*(O8*a2Q))-(O9*((gS*(if O2{(O3*bwO)}else{(if NY{(NZ*bwO)}else{d})}))/bxp)))/bxy)}else{(if ((sf[334])!=0.0){((NK*((LA*(((BG*aG5)-(BD*(aG5/aGd)))/aGm))+(NC*(((BK*aGa)-(BC*(aGa/aGE)))/aGN))))/kJ)}else{d})});let bxU=(if sb[66]{(((Od*(O8*a2R))-(O9*((gS*(if O2{(O3*bwP)}else{(if NY{(NZ*bwP)}else{d})}))/bxp)))/bxy)}else{(if ((sf[334])!=0.0){((NK*((LA*(((BG*aG6)-(BD*(aG6/aGd)))/aGm))+(NC*(((BK*aGb)-(BC*(aGb/aGE)))/aGN))))/kJ)}else{d})});let byc=(if sb[70]{(tZ*a3m)}else{d});let byd=(if sb[70]{(tZ*a3n)}else{d});let bye=(if sb[70]{((tZ*a3o)+(ns*am9))}else{d});let byf=(if sb[70]{(tZ*a3p)}else{d});let byg=(if sb[70]{(tZ*a3q)}else{d});let byi=(N*Or);let byr=(Os*Os);let byT=(if sb[70]{(gS*(if o6{(o7*a2w)}else{(if ((o3)!=0.0){(o4*a2w)}else{d})}))}else{d});let byU=(if sb[70]{(gS*(if o6{(o7*a35)}else{(if ((o3)!=0.0){(o4*a35)}else{d})}))}else{d});let byV=(if sb[70]{(gS*(if o6{(o7*a4f)}else{(if ((o3)!=0.0){(o4*a4f)}else{d})}))}else{d});let byW=(if sb[70]{(gS*(if o6{(o7*a2x)}else{(if ((o3)!=0.0){(o4*a2x)}else{d})}))}else{d});let byX=(if sb[70]{(gS*(if o6{(o7*a1Z)}else{(if ((o3)!=0.0){(o4*a1Z)}else{d})}))}else{d});let byY=(N*Oy);let bz7=(Oz*Oz);let bAa=((OK*SW)+(bj*bwD));let bAK=(N*P3);let bAT=(P4*P4);let bBh=(Eg*(if sb[71]{(((P4*(OZ*a3m))-(P0*((gS*(if OT{(OU*a2w)}else{(if OP{(OQ*a2w)}else{d})}))/bAK)))/bAT)}else{(if sb[70]{((OD*((LA*(if sb[70]{(((Os*byc)-(Op*(byc/byi)))/byr)}else{d}))+(NC*(if sb[70]{(((Oz*byT)-(Ow*(byT/byY)))/bz7)}else{d}))))/kJ)}else{d})}));let bBu=(Eg*(if sb[71]{(((P4*(OZ*a3p))-(P0*((gS*(if OT{(OU*a2x)}else{(if OP{(OQ*a2x)}else{d})}))/bAK)))/bAT)}else{(if sb[70]{((OD*((LA*(if sb[70]{(((Os*byf)-(Op*(byf/byi)))/byr)}else{d}))+(NC*(if sb[70]{(((Oz*byW)-(Ow*(byW/byY)))/bz7)}else{d}))))/kJ)}else{d})}));let bBP=(sf[340]*f64::powf(sW,sf[414]));let bBW=(if ((sf[339])!=0.0){ahQ}else{d});let bBX=(if ((sf[339])!=0.0){ahR}else{d});let bBY=(if ((sf[339])!=0.0){ahS}else{d});let bC3=(Pl*Pl);let bCf=(Pr*(-bBW));let bCg=(Pr*(-bBX));let bCh=(Pr*(-bBY));let bCl=(Ps*Ps);let bD5=(u2*u2);let bDZ=(if ((sf[339])!=0.0){(bvv/Nn)}else{d});let bEJ=(sf[341]*bvv);let bEQ=(if ((sf[339])!=0.0){(boh+(sf[341]*bvr))}else{d});let bER=(if ((sf[339])!=0.0){(bok+(sf[341]*bvs))}else{d});let bES=(if ((sf[339])!=0.0){(sf[341]*bvt)}else{d});let bET=(if ((sf[339])!=0.0){(bon+(sf[341]*bvu))}else{d});let bEU=(if ((sf[339])!=0.0){(boo+bEJ)}else{d});let bEV=(if ((sf[339])!=0.0){(bop+bEJ)}else{d});
-        let bEW=(if ((sf[339])!=0.0){(sf[341]*bvw)}else{d});let bFu=(if sb[73]{boh}else{(if ((sf[339])!=0.0){(sf[344]*bEQ)}else{d})});let bFv=(if sb[73]{bok}else{(if ((sf[339])!=0.0){(sf[344]*bER)}else{d})});let bFw=(if sb[73]{d}else{(if ((sf[339])!=0.0){(sf[344]*bES)}else{d})});let bFx=(if sb[73]{bon}else{(if ((sf[339])!=0.0){(sf[344]*bET)}else{d})});let bFy=(if sb[73]{boo}else{(if ((sf[339])!=0.0){(sf[344]*bEU)}else{d})});let bFz=(if sb[73]{bop}else{(if ((sf[339])!=0.0){(sf[344]*bEV)}else{d})});let bFA=(if sb[73]{d}else{(if ((sf[339])!=0.0){(sf[344]*bEW)}else{d})});let bFB=(if sb[73]{boy}else{(if ((sf[339])!=0.0){(boy+(sf[343]*bEQ))}else{d})});let bFC=(if sb[73]{boz}else{(if ((sf[339])!=0.0){(boz+(sf[343]*bER))}else{d})});let bFD=(if sb[73]{d}else{(if ((sf[339])!=0.0){(sf[343]*bES)}else{d})});let bFE=(if sb[73]{boC}else{(if ((sf[339])!=0.0){(boC+(sf[343]*bET))}else{d})});let bFF=(if sb[73]{boF}else{(if ((sf[339])!=0.0){(boF+(sf[343]*bEU))}else{d})});let bFG=(if sb[73]{boI}else{(if ((sf[339])!=0.0){(boI+(sf[343]*bEV))}else{d})});let bFH=(if sb[73]{d}else{(if ((sf[339])!=0.0){(sf[343]*bEW)}else{d})});let bFM=(if sb[73]{bvv}else{(if ((sf[339])!=0.0){(sf[342]*bvv)}else{d})});let bFO=(if REACTIVE { 1.0 } else { ddt_scale });let bFQ=(sf[15]*(sf[345]*bFO));let bGr=(QL*QL);let bHo=(if QZ{((R0*apI)+(uR*((Fs*a1h)+(kC*aYm))))}else{(if ((QV)!=0.0){(((QL*(bFu+bFB))-(QW*(((uR*(apY+aq4))-(QK*apI))/aqe)))/bGr)}else{d})});let bHp=(if QZ{((R0*apL)+(uR*(kC*aYn)))}else{(if ((QV)!=0.0){(((QL*(bFv+bFC))-(QW*((aqg-(QK*apL))/aqe)))/bGr)}else{d})});let bHq=(if QZ{d}else{(if ((QV)!=0.0){((bFw+bFD)/QL)}else{d})});let bHr=(if QZ{((R0*apO)+(uR*(kC*aYo)))}else{(if ((QV)!=0.0){(((QL*(bFx+bFE))-(QW*(((uR*(apZ+aq6))-(QK*apO))/aqe)))/bGr)}else{d})});let bHs=(if QZ{((R0*apR)+(uR*(kC*aYp)))}else{(if ((QV)!=0.0){(((QL*(bFy+bFF))-(QW*(((uR*aq0)-(QK*apR))/aqe)))/bGr)}else{d})});let bHt=(if QZ{((R0*apU)+(uR*(kC*aYq)))}else{(if ((QV)!=0.0){(((QL*(bFz+bFG))-(QW*(((uR*aq1)-(QK*apU))/aqe)))/bGr)}else{d})});let bHu=(if QZ{d}else{(if ((QV)!=0.0){((bFA+bFH)/QL)}else{d})});let bID=((sf[6]*(sf[326]*((MF*Wt)+(eM*(((MC*ajc)+(tj*(((My*akN)+(tK*(-((-(((dE*bs4)-(Mu*Va))/VZ))*bsl))))+((MA*ajh)+(tk*(-bs4))))))+(mu*Wu))))))+(if ((sf[336])!=0.0){((P6*aS3)+(Eg*(if sb[71]{(((P4*((OZ*a3o)+(ns*((D5*a1q)+(kS*aM9)))))-(P0*((gS*(if OT{(OU*bAa)}else{(if OP{(OQ*bAa)}else{d})}))/bAK)))/bAT)}else{(if sb[70]{(((kJ*((OG*(sf[337]*a1n))+(OD*(((Ou*bo8)+(LA*(if sb[70]{(((Os*(bye-am9))-(Op*(bye/byi)))/byr)}else{d})))+((OB*bvE)+(NC*(if sb[70]{(((Oz*byV)-(Ow*(byV/byY)))/bz7)}else{d})))))))-(OH*a1l))/bws)}else{d})})))}else{d}));let bMh=(sf[15]*(bFO*(sf[0]*((if sb[73]{bvr}else{(if ((sf[339])!=0.0){(sf[342]*bvr)}else{d})})+(((L3*aiX)+(t4*bmH))+bFu)))));let bMi=(sf[15]*(bFO*(sf[0]*((if sb[73]{bvs}else{(if ((sf[339])!=0.0){(sf[342]*bvs)}else{d})})+((L3*aiY)+bFv)))));let bMj=(sf[15]*(bFO*(sf[0]*(bFw+(if sb[73]{bvt}else{(if ((sf[339])!=0.0){(sf[342]*bvt)}else{d})})))));let bMk=(sf[15]*(bFO*(sf[0]*((if sb[73]{bvu}else{(if ((sf[339])!=0.0){(sf[342]*bvu)}else{d})})+((L3*aiZ)+bFx)))));let bMl=(sf[15]*(bFO*(sf[0]*(bFy+bFM))));let bMm=(sf[15]*(bFO*(sf[0]*(bFz+bFM))));let bMn=(sf[15]*(bFO*(sf[0]*(bFA+(if sb[73]{bvw}else{(if ((sf[339])!=0.0){(sf[342]*bvw)}else{d})})))));let bMu=(sf[15]*(bFO*(sf[0]*((Lv*(sf[323]*W9))+(Ln*(((Lr*aiI)+(sZ*(-((-((Lm*VX)+(er*bnm)))*bnz))))+(c8*(-bnm))))))));let bMv=(sf[15]*(bFO*(sf[0]*(Ln*((sZ*(-((-(er*bnn))*bnz)))+(c8*(sf[363]-bnn)))))));let bMw=(sf[15]*(bFO*(sf[0]*(Ln*((sZ*(-((-(er*bno))*bnz)))+(c8*(sf[0]-bno)))))));let bML=(sf[15]*(bFO*(sf[0]*(((NF*((ND*ahh)+(sr*(gG*bvE))))+(NE*agr))+(((Ly*am1)+(tX*(sf[325]*Wt)))+bFB)))));let bMM=(sf[15]*(bFO*(sf[0]*bFC)));let bMN=(sf[15]*(bFO*(sf[0]*bFD)));let bMO=(sf[15]*(bFO*(sf[0]*(((NF*(ND*ahi))+(NE*ags))+((Ly*am2)+bFE)))));let bMP=(sf[15]*(bFO*(sf[0]*(((NF*(ND*ahj))+(NE*agt))+((Ly*am3)+bFF)))));let bMQ=(sf[15]*(bFO*(sf[0]*(((NF*(ND*ahk))+(NE*agm))+((Ly*alX)+bFG)))));let bMR=(sf[15]*(bFO*(sf[0]*bFH)));let bMY=(sf[15]*(bFO*(sf[0]*(eD*((N7*(-((-(bu7/eq))*bum)))+(N*(sf[0]-bu7)))))));
-        let bMZ=(sf[15]*(bFO*(sf[0]*((Nf*(sf[97]*(((-(sf[94]*VU))/Wc)*(sf[98]*f64::powf(eA,sf[362])))))+(eD*(((Nb*(VU/sf[330]))+(N7*(-((-(((eq*bu8)-(N5*VU))/Wc))*bum))))+(N*(-bu8))))))));let bN0=(sf[15]*(bFO*(sf[0]*(eD*((N7*(-((-(bu9/eq))*bum)))+(N*(sf[363]-bu9)))))));let bNf=(sf[15]*(bFO*(sf[0]*(if ((sf[339])!=0.0){(PK*((if ((sf[339])!=0.0){(((Nn*bvr)-(Nz*bv0))/bv3)}else{d})+((if ((sf[339])!=0.0){((Px*bmH)+(L3*(if ((sf[339])!=0.0){((Pu*(if ((sf[339])!=0.0){(aiz*bBP)}else{d}))+(Pf*(if Pp{(((Ps*bCf)-(Pr*bCf))/bCl)}else{(if Pj{((-(Pk*bBW))/bC3)}else{d})})))}else{d})))}else{d})+(if ((sf[339])!=0.0){((PF*(if ((sf[339])!=0.0){((PC*(((fZ*((u0*SW)+(bj*amc)))-(PA*X6))/XH))+(PB*((-(gG*amg))/bD5)))}else{d}))+(PE*((LB*aYm)+(Fs*bo9))))}else{d}))))}else{d}))));let bNg=(sf[15]*(bFO*(sf[0]*(if ((sf[339])!=0.0){(PK*((if ((sf[339])!=0.0){(bvs/Nn)}else{d})+((if ((sf[339])!=0.0){(L3*(if ((sf[339])!=0.0){((Pu*(if ((sf[339])!=0.0){(aiA*bBP)}else{d}))+(Pf*(if Pp{(((Ps*bCg)-(Pr*bCg))/bCl)}else{(if Pj{((-(Pk*bBX))/bC3)}else{d})})))}else{d}))}else{d})+(if ((sf[339])!=0.0){((PF*(if ((sf[339])!=0.0){((PC*((bj*amd)/fZ))+(PB*((-(gG*amh))/bD5)))}else{d}))+(PE*(LB*aYn)))}else{d}))))}else{d}))));let bNh=(sf[15]*(bFO*(sf[0]*(if ((sf[339])!=0.0){((PM*sf[415])+(PK*(if ((sf[339])!=0.0){(bvt/Nn)}else{d})))}else{d}))));let bNi=(sf[15]*(bFO*(sf[0]*(if ((sf[339])!=0.0){((PM*sf[416])+(PK*((if ((sf[339])!=0.0){(bvu/Nn)}else{d})+((if ((sf[339])!=0.0){(L3*(if ((sf[339])!=0.0){((Pu*(if ((sf[339])!=0.0){(aiB*bBP)}else{d}))+(Pf*(if Pp{(((Ps*bCh)-(Pr*bCh))/bCl)}else{(if Pj{((-(Pk*bBY))/bC3)}else{d})})))}else{d}))}else{d})+(if ((sf[339])!=0.0){((PF*(if ((sf[339])!=0.0){((PC*((bj*ame)/fZ))+(PB*((-(gG*ami))/bD5)))}else{d}))+(PE*(LB*aYo)))}else{d})))))}else{d}))));let bNj=(sf[15]*(bFO*(sf[0]*(if ((sf[339])!=0.0){(PK*((if ((sf[339])!=0.0){(PE*(LB*aYp))}else{d})+bDZ))}else{d}))));let bNk=(sf[15]*(bFO*(sf[0]*(if ((sf[339])!=0.0){(PK*((if ((sf[339])!=0.0){(PE*(LB*aYq))}else{d})+bDZ))}else{d}))));let bNl=(sf[15]*(bFO*(sf[0]*(if ((sf[339])!=0.0){(PK*(if ((sf[339])!=0.0){(bvw/Nn)}else{d}))}else{d}))));let bNq=(sf[15]*(bFO*sf[421]));let bNr=(sf[15]*(bFO*sf[422]));let bNw=(sf[15]*(bFO*sf[423]));let bNx=(sf[15]*(bFO*sf[424]));let bOq=(sf[15]*(bFO*(sf[0]*(btk+(if ((sf[336])!=0.0){((P6*aS0)+bBh)}else{d})))));let bOr=(sf[15]*(bFO*(sf[0]*((sf[6]*(sf[326]*(eM*((tj*((tK*(-((-(bs3/dE))*bsl)))+(tk*(sf[366]-bs3))))+(eN*sf[366])))))+(if ((sf[336])!=0.0){((P6*aS1)+(Eg*(if sb[71]{(((P4*(OZ*a3n))-(P0*((gS*(if OT{(OU*a35)}else{(if OP{(OQ*a35)}else{d})}))/bAK)))/bAT)}else{(if sb[70]{((OD*((LA*(if sb[70]{(((Os*byd)-(Op*(byd/byi)))/byr)}else{d}))+(NC*(if sb[70]{(((Oz*byU)-(Ow*(byU/byY)))/bz7)}else{d}))))/kJ)}else{d})})))}else{d})))));let bOs=(sf[15]*(bFO*(sf[0]*(if ((sf[336])!=0.0){(P6*aS2)}else{d}))));let bOt=(sf[15]*(bFO*(sf[0]*bID)));let bOu=(sf[15]*(bFO*(sf[0]*(if ((sf[336])!=0.0){(P6*aS4)}else{d}))));let bOv=(sf[15]*(bFO*(sf[0]*(btk+(if ((sf[336])!=0.0){(bBh+(P6*aS5))}else{d})))));let bOw=(sf[15]*(bFO*(sf[0]*(btn+(if ((sf[336])!=0.0){((P6*aS6)+bBu)}else{d})))));let bOx=(sf[15]*(bFO*(sf[0]*(btn+(if ((sf[336])!=0.0){(bBu+(P6*aS7))}else{d})))));let bOy=(sf[15]*(bFO*(sf[0]*((sf[6]*(sf[326]*(eM*(am0+(tj*((tK*(-((-(bs6/dE))*bsl)))+(tk*(sf[363]-bs6))))))))+(if ((sf[336])!=0.0){((P6*aS8)+(Eg*(if sb[71]{(((P4*(OZ*a3q))-(P0*((gS*(if OT{(OU*a1Z)}else{(if OP{(OQ*a1Z)}else{d})}))/bAK)))/bAT)}else{(if sb[70]{((OD*((LA*(if sb[70]{(((Os*byg)-(Op*(byg/byi)))/byr)}else{d}))+(NC*(if sb[70]{(((Oz*byX)-(Ow*(byX/byY)))/bz7)}else{d}))))/kJ)}else{d})})))}else{d})))));let bOz=(sf[15]*(bFO*(sf[0]*(btn+(if ((sf[336])!=0.0){(bBu+(P6*aS9))}else{d})))));let bP9=(sf[15]*(bFO*(sf[0]*((sf[7]*(sf[326]*((M8*Wt)+(eM*(((M5*ajc)+(tj*(((M1*akN)+(tK*(-((-(((dE*bpL)-(LX*Va))/VZ))*bq4))))+((M3*ajh)+(tk*(-bpL))))))+(mp*Wu))))))+(if ((sf[336])!=0.0){(sf[7]*bxQ)}else{bxQ})))));let bPa=(sf[15]*(bFO*(sf[0]*((sf[7]*(sf[326]*(eM*(alZ+(tj*((tK*(-((-(bpM/dE))*bq4)))+(tk*(sf[0]-bpM))))))))+(if ((sf[336])!=0.0){(sf[7]*bxR)}else{bxR})))));
-        let bPb=(sf[15]*(bFO*(sf[0]*((sf[7]*(sf[326]*(eM*((tj*((tK*(-((-(bpN/dE))*bq4)))+(tk*(sf[364]-bpN))))+bqL))))+(if ((sf[336])!=0.0){(sf[7]*bxS)}else{bxS})))));let bPc=(sf[15]*(bFO*(sf[0]*((sf[7]*(sf[326]*(eM*((tj*((tK*(-((-(bpO/dE))*bq4)))+(tk*(sf[365]-bpO))))+bqM))))+(if ((sf[336])!=0.0){(sf[7]*bxT)}else{bxT})))));let bPd=(sf[15]*(bFO*(sf[0]*((sf[7]*(sf[326]*(eM*(am0+(tj*((tK*(-((-(bpP/dE))*bq4)))+(tk*(sf[363]-bpP))))))))+(if ((sf[336])!=0.0){(sf[7]*bxU)}else{bxU})))));let bPw=(SJ*(if sb[91]{d}else{(if sb[89]{(sf[357]*bHo)}else{(if ((sf[355])!=0.0){(sf[343]*bHo)}else{d})})}));let bPx=(SJ*(if sb[91]{d}else{(if sb[89]{(sf[357]*bHp)}else{(if ((sf[355])!=0.0){(sf[343]*bHp)}else{d})})}));let bPy=(SJ*(if sb[91]{d}else{(if sb[89]{(sf[357]*bHq)}else{(if ((sf[355])!=0.0){(sf[343]*bHq)}else{d})})}));let bPz=(SJ*(if sb[91]{d}else{(if sb[89]{(sf[357]*bHr)}else{(if ((sf[355])!=0.0){(sf[343]*bHr)}else{d})})}));let bPA=(SJ*(if sb[91]{d}else{(if sb[89]{(sf[357]*bHs)}else{(if ((sf[355])!=0.0){(sf[343]*bHs)}else{d})})}));let bPB=(SJ*(if sb[91]{d}else{(if sb[89]{(sf[357]*bHt)}else{(if ((sf[355])!=0.0){(sf[343]*bHt)}else{d})})}));let bPC=(SJ*(if sb[91]{d}else{(if sb[89]{(sf[357]*bHu)}else{(if ((sf[355])!=0.0){(sf[343]*bHu)}else{d})})}));let bPD=(Rh*bFO);
-
-        CommonStampValues {
-            b, d, M, N, a2, aX, be, bf,
-            bh, bj, bl, bm, bn, bo, bp, bq,
-            bw, bx, by, bD, bF, bG, bK, bL,
-            bM, bN, bT, bU, bV, c0, c2, c3,
-            c7, c8, cz, cX, dE, dL, dO, dP,
-            dQ, dR, dV, dX, dY, dZ, er, es,
-            eu, ev, ew, ff, gC, gF, gG, gH,
-            gJ, gK, gN, gQ, gS, h5, hi, j4,
-            j5, j6, j7, j9, ja, jb, jd, jg,
-            jr, js, jt, jv, jw, jx, jz, jC,
-            k3, k4, kh, lP, lS, lT, lV, lY,
-            m0, m3, m6, mb, mj, mm, mp, mt,
-            mu, mv, mw, mJ, n6, n7, n9, nc,
-            nd, nt, nv, ny, nz, nP, nR, nU,
-            nV, p6, pl, r4, s2, sr, su, sx,
-            sY, ug, uQ, uR, uW, uX, vg, vi,
-            vl, vm, vv, w1, w2, w3, w5, wa,
-            wb, wi, wj, wl, wq, ws, xi, xj,
-            xk, xm, xr, xs, xT, y6, yj, yw,
-            yD, yE, yG, yH, yJ, yO, yP, yV,
-            yZ, z2, za, zb, zc, ze, zg, zi,
-            zj, zk, zl, zn, zq, zs, zt, zy,
-            zz, Ab, Ad, Af, Ag, Ai, Aj, Al,
-            Aq, Ar, Aw, Az, AB, AJ, AK, AL,
-            AN, AQ, AR, AS, AT, AV, AX, AZ,
-            B0, B5, B6, BM, BQ, Dd, DB, DT,
-            Eg, Fs, FE, FR, FS, FT, FW, FX,
-            G1, G2, G4, G5, G7, G8, Ga, Gf,
-            Gg, Gv, Ie, If, Ih, Ij, Il, In,
-            Io, Iq, Iy, IB, IC, ID, IJ, IL,
-            IM, IQ, IS, IU, IV, IX, J2, J3,
-            K0, Qa, QL, S1, S4, S7, Sa, Sd,
-            Sh, Sl, St, Sz, SI, SK, SR, SS,
-            ST, SV, SW, SX, TH, TK, U5, Us,
-            Va, VX, VZ, W4, WI, Xp, Xr, XT,
-            Zr, a0E, a0R, a0U, a13, a1Y, a1Z, a29,
-            a2a, a2b, a2x, a2N, a2O, a2P, a2Q, a2R,
-            a6u, a6v, a6w, a6x, a6E, acY, acZ, ad0,
-            ad1, agn, ago, agp, agq, ahh, ahi, ahj,
-            ahk, aht, ahu, ahv, ahw, ahF, ahG, ahH,
-            ahI, aiF, aiG, aiH, anm, ann, ano, anp,
-            apB, apC, apD, apE, apF, apI, apL, apO,
-            apR, apU, apY, apZ, aq0, aq1, aq4, aq6,
-            aqe, aqg, aqQ, aqR, arS, arT, arU, av4,
-            av5, av6, av7, awq, awr, aws, awt, awN,
-            awO, awP, awQ, axi, axj, axk, axl, axm,
-            axn, axL, axM, axN, axO, axP, axQ, aH5,
-            aHi, aI5, aMP, aMQ, aMR, aMS, aMT, aOK,
-            aOL, aOM, aON, aOO, aOP, aOQ, aPm, aPn,
-            aPo, aPp, aPq, aPr, aPs, aPt, aPu, aS0,
-            aS1, aS2, aS3, aS4, aS5, aS6, aS7, aS8,
-            aS9, aYm, aYn, aYo, aYp, aYq, bFQ, bMh,
-            bMi, bMj, bMk, bMl, bMm, bMn, bMu, bMv,
-            bMw, bML, bMM, bMN, bMO, bMP, bMQ, bMR,
-            bMY, bMZ, bN0, bNf, bNg, bNh, bNi, bNj,
-            bNk, bNl, bNq, bNr, bNw, bNx, bOq, bOr,
-            bOs, bOt, bOu, bOv, bOw, bOx, bOy, bOz,
-            bP9, bPa, bPb, bPc, bPd, bPw, bPx, bPy,
-            bPz, bPA, bPB, bPC, bPD,
-        }
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let n=self.nodes;
-        let nodes=n;
-        self.ensure_instance_static();
-        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
-        let CommonStampValues {
-            b, d, M, N, a2, aX, be, bf,
-            bh, bj, bl, bm, bn, bo, bp, bq,
-            bw, bx, by, bD, bF, bG, bK, bL,
-            bM, bN, bT, bU, bV, c0, c2, c3,
-            c7, c8, cz, cX, dE, dL, dO, dP,
-            dQ, dR, dV, dX, dY, dZ, er, es,
-            eu, ev, ew, ff, gC, gF, gG, gH,
-            gJ, gK, gN, gQ, gS, h5, hi, j4,
-            j5, j6, j7, j9, ja, jb, jd, jg,
-            jr, js, jt, jv, jw, jx, jz, jC,
-            k3, k4, kh, lP, lS, lT, lV, lY,
-            m0, m3, m6, mb, mj, mm, mp, mt,
-            mu, mv, mw, mJ, n6, n7, n9, nc,
-            nd, nt, nv, ny, nz, nP, nR, nU,
-            nV, p6, pl, r4, s2, sr, su, sx,
-            sY, ug, uQ, uR, uW, uX, vg, vi,
-            vl, vm, vv, w1, w2, w3, w5, wa,
-            wb, wi, wj, wl, wq, ws, xi, xj,
-            xk, xm, xr, xs, xT, y6, yj, yw,
-            yD, yE, yG, yH, yJ, yO, yP, yV,
-            yZ, z2, za, zb, zc, ze, zg, zi,
-            zj, zk, zl, zn, zq, zs, zt, zy,
-            zz, Ab, Ad, Af, Ag, Ai, Aj, Al,
-            Aq, Ar, Aw, Az, AB, AJ, AK, AL,
-            AN, AQ, AR, AS, AT, AV, AX, AZ,
-            B0, B5, B6, BM, BQ, Dd, DB, DT,
-            Eg, Fs, FE, FR, FS, FT, FW, FX,
-            G1, G2, G4, G5, G7, G8, Ga, Gf,
-            Gg, Gv, Ie, If, Ih, Ij, Il, In,
-            Io, Iq, Iy, IB, IC, ID, IJ, IL,
-            IM, IQ, IS, IU, IV, IX, J2, J3,
-            K0, Qa, QL, S1, S4, S7, Sa, Sd,
-            Sh, Sl, St, Sz, SI, SK, SR, SS,
-            ST, SV, SW, SX, TH, TK, U5, Us,
-            Va, VX, VZ, W4, WI, Xp, Xr, XT,
-            Zr, a0E, a0R, a0U, a13, a1Y, a1Z, a29,
-            a2a, a2b, a2x, a2N, a2O, a2P, a2Q, a2R,
-            a6u, a6v, a6w, a6x, a6E, acY, acZ, ad0,
-            ad1, agn, ago, agp, agq, ahh, ahi, ahj,
-            ahk, aht, ahu, ahv, ahw, ahF, ahG, ahH,
-            ahI, aiF, aiG, aiH, anm, ann, ano, anp,
-            apB, apC, apD, apE, apF, apI, apL, apO,
-            apR, apU, apY, apZ, aq0, aq1, aq4, aq6,
-            aqe, aqg, aqQ, aqR, arS, arT, arU, av4,
-            av5, av6, av7, awq, awr, aws, awt, awN,
-            awO, awP, awQ, axi, axj, axk, axl, axm,
-            axn, axL, axM, axN, axO, axP, axQ, aH5,
-            aHi, aI5, aMP, aMQ, aMR, aMS, aMT, aOK,
-            aOL, aOM, aON, aOO, aOP, aOQ, aPm, aPn,
-            aPo, aPp, aPq, aPr, aPs, aPt, aPu, aS0,
-            aS1, aS2, aS3, aS4, aS5, aS6, aS7, aS8,
-            aS9, aYm, aYn, aYo, aYp, aYq, bFQ, bMh,
-            bMi, bMj, bMk, bMl, bMm, bMn, bMu, bMv,
-            bMw, bML, bMM, bMN, bMO, bMP, bMQ, bMR,
-            bMY, bMZ, bN0, bNf, bNg, bNh, bNi, bNj,
-            bNk, bNl, bNq, bNr, bNw, bNx, bOq, bOr,
-            bOs, bOt, bOu, bOv, bOw, bOx, bOy, bOz,
-            bP9, bPa, bPb, bPc, bPd, bPw, bPx, bPy,
-            bPz, bPA, bPB, bPC, bPD,
-        }=self.eval_common_stamp_values::<false>(ctx);
-        let m=self.multiplicity;
-        let multiplicity=m;
-        let timestep = self.timestep;
-        let stamp_state = self.stamp_state.as_mut();
-        let ddt_state_current = &mut stamp_state.ddt_current;
-        let ddt_state_previous = &mut stamp_state.ddt_previous;
-        let ddt_state_older = &mut stamp_state.ddt_older;
-        let ddt_state_initialized = &mut stamp_state.ddt_initialized;
-        let ddt_derivative_current = &mut stamp_state.ddt_derivative_current;
-        let ddt_derivative_previous = &mut stamp_state.ddt_derivative_previous;
+        let parameters = &self.params.values;
+        let multiplicity = self.multiplicity;
+        let temperature = ctx.temperature();
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12])];
+        let ddt_scale_value = self.ddt_coefficients.derivative_scale;
+        let ddt_scale = move || ddt_scale_value;
+        let ddt_state = self.stamp_state.as_mut();
         let ddt_active = self.ddt_coefficients.active;
-        let ddt_scale = self.ddt_coefficients.derivative_scale;
-        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
-        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
-        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let sf=&self.scalar_static.f64_values;
-        let sb=&self.scalar_static.bool_values;
-        let w=ctx.simparam_or("gmin", d);let L=(if sb[5]{d}else{w});let eR=((bn*sf[103])).exp();let eS=(sf[102]*eR);let eU=(if (eS<sf[16]){b}else{d});let eV=(if ((eU)!=0.0){sf[16]}else{eS});let f1=((bn*sf[107])).exp();let f2=(sf[104]*f1);let f6=((bn*sf[109])).exp();let f7=(sf[108]*f6);let f9=(if (f7<sf[16]){b}else{d});let fa=(if ((f9)!=0.0){sf[16]}else{f7});let fj=((bn*sf[113])).exp();let fk=(sf[112]*fj);let fm=(fj*sf[114]);let hn=((bn*sf[139])).exp();let ho=(sf[136]*hn);let hr=(bl*sf[141]);let ht=((hr/sf[137])).exp();let hu=(ho*ht);let hA=((bn*sf[145])).exp();let hB=(sf[142]*hA);let hF=(((bl*sf[146])/sf[143])).exp();let hG=(hB*hF);let hK=(bn*sf[149]);let hN=((hK/sf[150])).exp();let hO=(sf[147]*hN);let hR=(bl*sf[152]);let hT=((hR/sf[150])).exp();let hU=(hO*hT);let hY=((hK/sf[154])).exp();let hZ=(sf[153]*hY);let i1=((hR/sf[154])).exp();let i2=(hZ*i1);let ib=(((bl*sf[159])/sf[150])).exp();let ii=((bl*sf[162])).exp();let ik=(if ((sf[156])!=0.0){(sf[160]*ii)}else{d});let iq=(((bl*sf[165])/sf[154])).exp();let iJ=((bn*sf[174])).exp();let iK=(sf[171]*iJ);let iM=((hr/sf[172])).exp();let iN=(iK*iM);let iS=((bn*sf[177])).exp();let iT=(sf[175]*iS);let iV=((hr/sf[176])).exp();let iW=(iT*iV);let iY=(bf).sqrt();let iZ=(sf[178]*iY);let j2=((bm*sf[179])).exp();let j3=(iZ*j2);let ji=(j6*sf[181]);let jj=(cz*ji);let jm=(sf[50]*(sf[50]*(cz*jj)));let jn=(eu*jm);let jp=((sf[180]-jg)).exp();let jE=(js*sf[183]);let jF=(dE*jE);let jI=(sf[81]*(sf[81]*(dE*jF)));let jJ=(ew*jI);let jL=((sf[182]-jC)).exp();let ka=((bn*sf[192])).exp();let kb=(sf[18]*ka);let kc=(k3*kb);let kl=((bn*sf[196])).exp();let km=(sf[195]*kl);let kU=(be-300.0);let kX=(if (be<525.0){b}else{d});let kY=0.00072;let l1=1.6e-6;let l2=(kU*l1);let l7=(!((kX)!=0.0));let la=(if l7{sf[211]}else{(if ((kX)!=0.0){(sf[5]*((b+(kU*kY))-(kU*l2)))}else{d})});let ll=(if ((sf[215])!=0.0){(b/ff)}else{d});let lo=(((sf[215])!=0.0)&&(((if (ll>sf[17]){b}else{d}))!=0.0));let lr=(if sb[16]{d}else{(if lo{sf[17]}else{ll})});let lv=(if ((sf[216])!=0.0){(b/fk)}else{d});let ly=(((sf[216])!=0.0)&&(((if (lv>sf[17]){b}else{d}))!=0.0));let lB=(if sb[18]{d}else{(if ly{sf[17]}else{lv})});let lF=(if ((sf[217])!=0.0){(b/fm)}else{d});let lI=(((sf[217])!=0.0)&&(((if (lF>sf[17]){b}else{d}))!=0.0));let lL=(if sb[20]{d}else{(if lI{sf[17]}else{lF})});let m8=(sf[0]*(m6-lT));let na=(n7).exp();let nw=(nt).exp();let nD=(if ny{(nz*(b+(nt-sf[218])))}else{(if ((nv)!=0.0){nw}else{d})});let nS=(nP).exp();let nZ=(if nU{(nV*(b+(nP-sf[218])))}else{(if ((nR)!=0.0){nS}else{d})});let vj=(vg).exp();let vq=(if vl{(vm*(b+(vg-sf[218])))}else{(if ((vi)!=0.0){vj}else{d})});let vr=(vq-b);let vx=(if (lV<sf[248]){b}else{d});let vy=(vv).exp();let vz=(b+vy);let vE=(!((vx)!=0.0));let vG=((-vv)).exp();let vH=(b+vG);let vL=(if vE{(sf[248]-(M*(vH).ln()))}else{(if ((vx)!=0.0){(lV-(M*(vz).ln()))}else{d})});let vN=(vL*sf[249]);let vO=(sf[248]-vL);let vP={let pb=vO;pb*pb};let w6=(((sf[156])!=0.0)&&((w5)!=0.0));let w7=(w3).exp();let wf=(if wa{(wb*(b+(w3-sf[218])))}else{(if w6{w7}else{vg})});let wm=(((sf[156])!=0.0)&&((wl)!=0.0));let wn=(wi).exp();let ww=(if wq{(ws*(b+(wi-wj)))}else{(if wm{wn}else{vq})});let wx=(w1-b);let wy=(hU*wx);let wz=(N*(if ((sf[156])!=0.0){(sf[157]*ib)}else{d}));let wA=(wx*wz);let wD=((b+(gS*wf))).sqrt();let wE=(b+wD);let wF=(wA/wE);let wG=(b+ug);let wJ=(s2-b);let wK=(ik*wJ);let wL=(ww*wK);let wM=(b+ww);let x2=(sf[250]*((s2+w1)-N));let x4=((wx*sf[252])+(wG*x2));let xn=(((sf[156])!=0.0)&&((xm)!=0.0));let xo=(xk).exp();let xx=(xi-b);let xy=(i2*xx);let xz=(N*(if ((sf[156])!=0.0){(sf[163]*iq)}else{d}));let xA=(xx*xz);let xD=((b+(gS*(if xr{(xs*(b+(xk-sf[218])))}else{(if xn{xo}else{wf})})))).sqrt();let xE=(b+xD);let xU=(xT-b);let y7=(y6-b);let yk=(yj-b);let yl=(hG*yk);let yx=(yw-b);let yK=(((yD)!=0.0)&&((yJ)!=0.0));let yL=(yH).exp();let yT=(if yO{(yP*(b+(yH-sf[218])))}else{(if yK{yL}else{d})});let zu=(((zs)!=0.0)&&zt);let zv=(zn).exp();let zE=(-lV);let zF=(b-(if zy{(zz*(b+(zn-sf[218])))}else{(if zu{zv}else{d})}));let zH=(b+(zF/zn));let zL=(((yD)!=0.0)&&(!((zq)!=0.0)));let zM=(gG*lV);let zN=(zn*zM);let zO=0.3333333333333333;let zP=(zn*zO);
-        let zQ=0.25;let zS=(b+(zn*zQ));let zU=(b+(zP*zS));let zW=(if zL{(zN*zU)}else{(if zt{(zE*zH)}else{d})});let zX=(N*(jn*jp));let zY=(zW*zX);let zZ=(sY*zY);let A0=(yT*zZ);let A4=(!((yD)!=0.0));let Am=(((Ab)!=0.0)&&((Al)!=0.0));let An=(Aj).exp();let Av=(if Aq{(Ar*(b+(Aj-sf[218])))}else{(if Am{An}else{d})});let B1=(((AZ)!=0.0)&&B0);let B2=(AV).exp();let Bb=(-lP);let Bc=(b-(if B5{(B6*(b+(AV-sf[218])))}else{(if B1{B2}else{d})}));let Be=(b+(Bc/AV));let Bi=(((Ab)!=0.0)&&(!((AX)!=0.0)));let Bj=(gG*lP);let Bk=(AV*Bj);let Bl=(zO*AV);let Bn=(b+(zQ*AV));let Bp=(b+(Bl*Bn));let Br=(if Bi{(Bk*Bp)}else{(if B0{(Bb*Be)}else{d})});let Bs=(N*(jJ*jL));let Bt=(Br*Bs);let Bu=(Af*Bt);let Bv=(Av*Bu);let Bz=(!((Ab)!=0.0));let BA=(if Bz{d}else{(if ((Ab)!=0.0){(sf[55]*(es*Bv))}else{d})});let BN=(n6-b);let BO=(BM*BN);let BT=((b+(n6*BQ))).sqrt();let BU=(b+BT);let BV=(BO/BU);let C1=(k4*sf[264]);let C2=(mJ-nD);let C3=(C1*C2);let C5=(gS*(k4/kh));let C8=(mJ+(nD*sf[265]));let Cb=((b+(C5*C8))).sqrt();let Cc=(b+Cb);let Ch=(k4*sf[267]);let Ci=(n6-nZ);let Cj=(Ch*Ci);let Cl=(n6+(nZ*sf[265]));let Co=((b+(C5*Cl))).sqrt();let Cp=(b+Co);let Ct=(mJ-b);let Cu=(C1*Ct);let Cx=((b+(mJ*C5))).sqrt();let Cy=(b+Cx);let CA=(if sb[43]{(Cu/Cy)}else{(if ((sf[262])!=0.0){(C3/Cc)}else{d})});let CB=(BN*Ch);let CE=((b+(n6*C5))).sqrt();let CF=(b+CE);let CH=(if sb[43]{(CB/CF)}else{(if ((sf[262])!=0.0){(Cj/Cp)}else{d})});let CI=(N*kc);let CJ=(nD-b);let CK=(CI*CJ);let CN=(sf[268]*(kc/km));let CQ=((b+(nD*CN))).sqrt();let CR=(b+CQ);let CU=((CK/CR)+(L*m3));let D1=(if ((sf[270])!=0.0){(sf[7]*BV)}else{BV});let D3=(if ((sf[270])!=0.0){(sf[7]*CH)}else{CH});let Ei=(if ((sf[270])!=0.0){(Dd*Eg)}else{d});let Ek=(if ((sf[270])!=0.0){(DB*Eg)}else{d});let Ep=(if ((sf[278])!=0.0){(lP+m0)}else{d});let Er=(-Ep);let Ev=(if (Er<d){b}else{d});let Ew=(((sf[278])!=0.0)&&((Ev)!=0.0));let Ez=((sf[279]+(if ((sf[278])!=0.0){(Ep*Ep)}else{DT}))).sqrt();let EA=(Ez-Er);let EE=(((sf[278])!=0.0)&&(!((Ev)!=0.0)));let EH=(if EE{(gG*(Er+Ez))}else{(if Ew{(sf[280]/EA)}else{d})});let EY=(if (EH<sf[288]){b}else{d});let EZ=(((sf[278])!=0.0)&&((EY)!=0.0));let F0=(EH/sf[286]);let F2=(b-f64::powf(F0,sf[281]));let F6=(((sf[278])!=0.0)&&(!((EY)!=0.0)));let Fc=(if sb[54]{b}else{(if F6{(sf[285]+(sf[295]*(EH-sf[288])))}else{(if EZ{(b/F2)}else{d})})});let Fd=(BA*Fc);let Fe=(D1*Fc);let Ff=(yl*Fc);let Fg=(Ei*Fc);let Ft=(uQ*Fs);let Fu=(f2/Ft);let Fw=(if (Fu<sf[16]){b}else{d});let Fy=(c8*(if ((Fw)!=0.0){sf[16]}else{Fu}));let Fz=((if nc{(nd*(b+(n7-sf[218])))}else{(if ((n9)!=0.0){na}else{d})})-b);let FB=(m0+(pl*Fz));let FC=(FB/Fy);let Gb=(FR&&((Ga)!=0.0));let Gc=(G8).exp();let Gk=(if Gf{(Gg*(b+(G8-sf[218])))}else{(if Gb{Gc}else{d})});let Gm=(sf[301]/gQ);let Gn=(G4*Gm);let Gx=((((if (lP<cX){b}else{d}))!=0.0)&&(((sf[302])!=0.0)&&Gv));let GD=(if Gx{sf[307]}else{d});let GE=(cX-lP);let GG=(if Gx{(GE/sx)}else{r4});let GJ=(((N*GG)/GD)).sqrt();let GK=(if Gx{GJ}else{d});let GO=(Gx&&((sf[309])!=0.0));let GR=(Gx&&sb[59]);let GU=(if GR{(b-(gG*sr))}else{d});let GV=(sf[305]*GU);let GX=(if GR{(GU*GV)}else{(if GO{sf[305]}else{d})});let GY=(GK*GX);let H2=(((GK*GK)+(GX*GX))).sqrt();let H4=(if Gx{(GY/H2)}else{d});let H6=(if Gx{(GE/H4)}else{d});let H7=(gG*H4);let H8=(GD*H7);let Hb=(if Gx{(H6+(sx*H8))}else{d});let Ho=(sf[221]*(if GR{(b+(sf[311]*(b+(N*sr))))}else{d}));let Hq=((if GR{sf[314]}else{d})-(uX/Ho));let Ht=(if GR{(H6-(H8*Hq))}else{d});let Hu=(Ht-Hb);let Hw=(a2*H6);let Hx=(H6*Hw);let HD=((if GR{((Hu*Hu)+((su*Hx)/sf[221]))}else{GG})).sqrt();let HG=(if GR{(gG*((Hb+Ht)+HD))}else{(if GO{Hb}else{d})});let HH=(HG-H6);let HJ=(if Gx{(HH/HG)}else{d});let HN=(if ((HJ).abs()>1e-7){b}else{d});let HO=(Gx&&((HN)!=0.0));let HQ=(if HO{(H7/HJ)}else{d});let HR=(sf[4]/la);let HS=(HG*HR);let HT=(HQ*HS);let HU=(-la);let HV=(HU/HG);let HW=(HV).exp();let HY=(b+(GX/HQ));let I0=((HV*HY)).exp();let I1=(HW-I0);let I5=(Gx&&(!((HN)!=0.0)));let I6=(sf[4]*GX);let IY=(Ie&&((IX)!=0.0));let IZ=(IV).exp();let J7=(if J2{(J3*(b+(IV-sf[218])))}else{(if IY{IZ}else{Gk})});let J8=(G2*Gm);let Ja=(if Ie{(J7*J8)}else{(if I5{(HW*I6)}else{(if HO{(HT*I1)}else{(if FR{(Gk*Gn)}else{d})})})});
-        let Jg=(((FE)!=0.0)&&(((if (Ja>d){b}else{d}))!=0.0));let Jh=(((sf[322])!=0.0)&&Jg);let Ji=(fa+Fy);let Jj=(uX*Ji);let Jl=(uR/h5);let Jq=(if Jh{(((bh/Jj)+(hU*Jl))+(eV/Ji))}else{d});let Jr=(((sf[315])!=0.0)&&Jh);let Ju=(if Jr{((Ja-Jq)/gC)}else{Iy});let Jw=(if (Ja<Jq){b}else{d});let Jx=(Jr&&((Jw)!=0.0));let Jy=(Ju).exp();let Jz=(b+Jy);let JF=(Jr&&(!((Jw)!=0.0)));let JH=((-Ju)).exp();let JI=(b+JH);let JM=(if JF{(Jq-(gC*(JI).ln()))}else{(if Jx{(Ja-(gC*(Jz).ln()))}else{Ja})});let JN=(uX*JM);let JQ=(Jh&&sb[63]);let JR=(Jq*JN);let JS=(Jq+JM);let JW=(Jg&&sb[64]);let JX=(if JW{JN}else{(if JQ{(JR/JS)}else{(if Jr{JN}else{d})})});let JZ=(if (s2>d){b}else{d});let K3=(!((JZ)!=0.0));let K4=(if K3{lS}else{(if ((JZ)!=0.0){(bh*K0)}else{d})});let K6=(if sb[32]{lS}else{(if ((sf[156])!=0.0){lP}else{d})});let K7=(lV-K4);let K9=(K4-lP);let Ke=(m8*m8);let Kh=(mt*mt);let Kk=(mm*mm);let Kn=(mj*mj);let Kq=(mb*mb);let KA=((j3*vr)+((vN*vP)+((((if sb[35]{(hU*x4)}else{(if sb[33]{wy}else{(if ((sf[156])!=0.0){((wy+(wF*wG))+(wL/wM))}else{d})})})+(hu*xU))+(w*lV))-(if A4{d}else{(if ((yD)!=0.0){(sf[23]*(er*A0))}else{d})}))));let KG=((iW*yx)+((if sb[32]{xy}else{(if ((sf[156])!=0.0){(xy+(xA/xE))}else{d})})+(iN*y7)));let KK=(w*mp);let KL=((Fe+Ff)+KK);let KQ=(mp-mv);let KT=(lP-m3);let KW=(mu-mw);let Qu=(b+(aX/sf[427]));let QT=(if sb[85]{d}else{(if ((sf[353])!=0.0){((JX/QL)).abs()}else{d})});let Rw=(sf[0]*KG);let Ry=(sf[0]*KA);let RC=(sf[15]*(sf[0]*(-Fd)));let RF=(sf[0]*D3);let RH=(sf[0]*CA);let RL=(sf[0]*CU);let RN=(sf[0]*FC);let RR=(sf[0]*m8);let RU=(sf[0]*mb);let So=(sf[0]*mt);let SA=(sf[0]*mm);let SE=(sf[0]*mj);let T7=(-(((bq*((bo*SR)+(be*(sf[25]*SR))))-(bp*SR))/(bq*bq)));let T8=(T7/a2);let Ti=(if bD{(T7+(a2*((bF*(-T8))/bG)))}else{(if ((bw)!=0.0){(a2*((bx*T8)/by))}else{d})});let Ts=(-(((bN*((bL*SR)+(be*(sf[57]*SR))))-(bM*SR))/(bN*bN)));let Tt=(Ts/a2);let TD=(if c0{(Ts+(a2*((c2*(-Tt))/c3)))}else{(if ((bT)!=0.0){(a2*((bU*Tt)/bV))}else{d})});let Ve=((TH+(sf[92]*SS))+(sf[93]*TK));let Vj=(((bh*(-Ve))-(dL*ST))/SV);let W0=((-Va)/VZ);let W8=((sf[51]*W0)*(sf[52]*f64::powf(ev,sf[260])));let Wy=(if ((eU)!=0.0){d}else{(sf[102]*(eR*(sf[103]*SX)))});let WF=(if ((f9)!=0.0){d}else{(sf[108]*(f6*(sf[109]*SX)))});let WK=(fj*(sf[113]*SX));let Xt=(Xr/(N*gJ));let XC=(if gN{(gG*(Xp+Xt))}else{(if ((gF)!=0.0){((-(gH*(Xt-Xp)))/(gK*gK))}else{d})});let Y3=(sf[141]*SW);let Yi=(sf[149]*SX);let Ym=(sf[152]*SW);let Yr=((hT*(sf[147]*(hN*(Yi/sf[150]))))+(hO*(hT*(Ym/sf[150]))));let Zl=-1.5;let Zo=((sf[48]*Ti)*(j5*f64::powf(j4,Zl)));let ZH=(sf[48]*(sf[48]*((jd*VX)+(er*(sf[49]*((jb*Zr)+(j7*((ja*Zo)+(j6*((j9*Ti)+(bK*(sf[180]*Ti))))))))))));let a02=((sf[80]*TD)*(j5*f64::powf(jr,Zl)));let a0l=(sf[80]*(sf[80]*((jz*W0)+(es*(sf[51]*((jx*((-W8)/(ew*ew)))+(jt*((jw*a02)+(js*((jv*TD)+(c7*(sf[182]*TD))))))))))));let a10=((kb*a0R)+(k3*(sf[18]*(ka*(sf[192]*SX)))));let a1z=(if l7{d}else{(if ((kX)!=0.0){(sf[5]*((kY*SR)-((l2*SR)+(kU*(l1*SR)))))}else{d})});let a1G=(if sb[16]{d}else{(if lo{d}else{(if ((sf[215])!=0.0){((-WI)/(ff*ff))}else{d})})});let a1M=(if sb[18]{d}else{(if ly{d}else{(if ((sf[216])!=0.0){((-(sf[112]*WK))/(fk*fk))}else{d})})});let a1S=(if sb[20]{d}else{(if lI{d}else{(if ((sf[217])!=0.0){((-(sf[114]*WK))/(fm*fm))}else{d})})});let a2S=(m0*SW);let a3r=(m3*SW);let a3B=(if ny{(nz*a1Y)}else{(if ((nv)!=0.0){(nw*a1Y)}else{d})});let a3C=(if ny{(nz*a3r)}else{(if ((nv)!=0.0){(nw*a3r)}else{d})});let a3D=(if ny{(nz*a1Z)}else{(if ((nv)!=0.0){(nw*a1Z)}else{d})});let a3V=(mv*SW);let a48=(if nU{(nV*a1Y)}else{(if ((nR)!=0.0){(nS*a1Y)}else{d})});let a49=(if nU{(nV*a3V)}else{(if ((nR)!=0.0){(nS*a3V)}else{d})});let a4a=(if nU{(nV*a2x)}else{(if ((nR)!=0.0){(nS*a2x)}else{d})});let a4b=(if nU{(nV*a1Z)}else{(if ((nR)!=0.0){(nS*a1Z)}else{d})});let aqf=(((uR*(aq4-apY))-(uW*apI))/aqe);let aqj=((aqg-(uW*apL))/aqe);let aqn=(((uR*(aq6-apZ))-(uW*apO))/aqe);let aqr=(((uR*(-aq0))-(uW*apR))/aqe);let aqv=(((uR*(-aq1))-(uW*apU))/aqe);let aqS=(aqQ/sf[247]);let aqT=(aqR/sf[247]);let ar0=(if vl{(vm*aqS)}else{(if ((vi)!=0.0){(vj*aqS)}else{d})});let ar1=(if vl{(vm*aqT)}else{(if ((vi)!=0.0){(vj*aqT)}else{d})});
-        let arr=(if vE{(-(M*((vG*sf[379])/vH)))}else{(if ((vx)!=0.0){(sf[363]-(M*((vy*sf[377])/vz)))}else{d})});let ars=(if vE{(-(M*((vG*sf[380])/vH)))}else{(if ((vx)!=0.0){(sf[0]-(M*((vy*sf[378])/vz)))}else{d})});let arx=(N*vO);let arX=(bj*(-(if dV{((dZ*ST)+(bh*((dX*(-Vj))/dY)))}else{(if ((dO)!=0.0){(Ve+((dR*ST)+(bh*((dP*Vj)/dQ))))}else{d})})));let arY=((w2*SW)+arX);let as8=(if wa{(wb*arY)}else{(if w6{(w7*arY)}else{d})});let as9=(if wa{(wb*a1Z)}else{(if w6{(w7*a1Z)}else{aqS})});let asa=(if wa{(wb*a1Y)}else{(if w6{(w7*a1Y)}else{aqT})});let ase=(h5*h5);let asf=(((h5*aqf)-(uX*XT))/ase);let asg=(aqj/h5);let ash=(aqn/h5);let asi=(aqr/h5);let asj=(aqv/h5);let asz=(if wq{(ws*asf)}else{(if wm{(wn*asf)}else{d})});let asA=(if wq{(ws*asg)}else{(if wm{(wn*asg)}else{ar0})});let asB=(if wq{(ws*ash)}else{(if wm{(wn*ash)}else{ar1})});let asC=(if wq{(ws*asi)}else{(if wm{(wn*asi)}else{d})});let asD=(if wq{(ws*asj)}else{(if wm{(wn*asj)}else{d})});let asG=((wx*Yr)+(hU*arS));let asH=(hU*arT);let asI=(hU*arU);let asS=(N*wD);let asZ=(wE*wE);let atH=(wM*wM);let auO=(if sb[35]{(hU*((x2*ano)+(wG*(sf[250]*agp))))}else{(if sb[33]{d}else{(if ((sf[156])!=0.0){((wF*ano)+(((wM*((wK*asC)+(ww*(ik*agp))))-(wL*asC))/atH))}else{d})})});let auP=(if sb[35]{(hU*((x2*anp)+(wG*(sf[250]*agq))))}else{(if sb[33]{d}else{(if ((sf[156])!=0.0){((wF*anp)+(((wM*((wK*asD)+(ww*(ik*agq))))-(wL*asD))/atH))}else{d})})});let av9=(arX+(xj*SW));let avq=((xx*((i1*(sf[153]*(hY*(Yi/sf[154]))))+(hZ*(i1*(Ym/sf[154])))))+(i2*av4));let avr=(i2*av5);let avs=(i2*av6);let avt=(i2*av7);let avF=(N*xD);let avN=(xE*xE);let awy=(hu*aws);let axX=(iW*axP);let axY=(iW*axQ);let ay4=(yE*yE);let ayh=((yG*ZH)+(jg*(-((-(sf[22]*(N*aiF)))/ay4))));let ayi=(jg*(-((-(sf[22]*(N*aiG)))/ay4)));let ayj=(jg*(-((-(sf[22]*(N*aiH)))/ay4)));let ayz=(if ((yD)!=0.0){(lV*VX)}else{a0E});let ayA=(if ((yD)!=0.0){(er*sf[363])}else{d});let ayB=(if ((yD)!=0.0){(sf[0]*er)}else{d});let ayC=(yV*ayz);let ayE=(yV*ayA);let ayG=(yV*ayB);let ayI=(N*yZ);let ayO=(sf[253]*f64::powf(yZ,sf[381]));let azU=(zl*zl);let aA4=(if ((yD)!=0.0){(((zl*(zj*ZH))-(zk*((zi*Ti)+(bK*(if ((yD)!=0.0){(zg*((ze*(((ayC+ayC)/ayI)*ayO))+(z2*((sf[20]*(-(sf[256]*(c8*ayz))))-((zc*((za*ayz)+(yV*(hi*ayz))))+(zb*ayz))))))}else{d})))))/azU)}else{ayz});let aA5=(if ((yD)!=0.0){(((zl*(jg*sf[382]))-(zk*(bK*(if ((yD)!=0.0){(zg*((ze*(((ayE+ayE)/ayI)*ayO))+(z2*((sf[20]*(-(sf[256]*(c8*ayA))))-((zc*((za*ayA)+(yV*(hi*ayA))))+(zb*ayA))))))}else{d}))))/azU)}else{ayA});let aA6=(if ((yD)!=0.0){(((zl*(jg*sf[383]))-(zk*(bK*(if ((yD)!=0.0){(zg*((ze*(((ayG+ayG)/ayI)*ayO))+(z2*((sf[20]*(-(sf[256]*(c8*ayB))))-((zc*((za*ayB)+(yV*(hi*ayB))))+(zb*ayB))))))}else{d}))))/azU)}else{ayB});let aAp=(zn*zn);let aBV=(lP*W0);let aBW=(sf[0]*es);let aBX=(es*sf[363]);let aC2=(sf[244]*f64::powf(Ad,sf[372]));let aC6=(if ((Ab)!=0.0){((-aBV)*aC2)}else{d});let aC7=(if ((Ab)!=0.0){((-aBW)*aC2)}else{d});let aC8=(if ((Ab)!=0.0){((-aBX)*aC2)}else{d});let aCe=(Ag*Ag);let aCr=((Ai*a0l)+(jC*(-((-(sf[54]*(N*aC6)))/aCe))));let aCs=(jC*(-((-(sf[54]*(N*aC7)))/aCe)));let aCt=(jC*(-((-(sf[54]*(N*aC8)))/aCe)));let aCG=(if ((Ab)!=0.0){aBV}else{a02});let aCH=(if ((Ab)!=0.0){aBW}else{d});let aCI=(if ((Ab)!=0.0){aBX}else{d});let aCJ=(Aw*aCG);let aCL=(Aw*aCH);let aCN=(Aw*aCI);let aCP=(N*Az);let aCV=(sf[257]*f64::powf(Az,sf[386]));let aE1=(AT*AT);let aEb=(if ((Ab)!=0.0){(((AT*(AR*a0l))-(AS*((AQ*TD)+(c7*(if ((Ab)!=0.0){(zg*((AN*(((aCJ+aCJ)/aCP)*aCV))+(AB*((sf[52]*(-(sf[260]*(c8*aCG))))-((AL*((AJ*aCG)+(Aw*(hi*aCG))))+(AK*aCG))))))}else{d})))))/aE1)}else{aCG});let aEc=(if ((Ab)!=0.0){(((AT*(jC*sf[387]))-(AS*(c7*(if ((Ab)!=0.0){(zg*((AN*(((aCL+aCL)/aCP)*aCV))+(AB*((sf[52]*(-(sf[260]*(c8*aCH))))-((AL*((AJ*aCH)+(Aw*(hi*aCH))))+(AK*aCH))))))}else{d}))))/aE1)}else{aCH});let aEd=(if ((Ab)!=0.0){(((AT*(jC*sf[388]))-(AS*(c7*(if ((Ab)!=0.0){(zg*((AN*(((aCN+aCN)/aCP)*aCV))+(AB*((sf[52]*(-(sf[260]*(c8*aCI))))-((AL*((AJ*aCI)+(Aw*(hi*aCI))))+(AK*aCI))))))}else{d}))))/aE1)}else{aCI});let aEw=(AV*AV);let aHq=(N*BT);let aHz=(BU*BU);let aHA=(((BU*((BN*aH5)+(BM*a2N)))-(BO*(((BQ*a2N)+(n6*aHi))/aHq)))/aHz);
-        let aHE=(((BU*(BM*a2O))-(BO*((BQ*a2O)/aHq)))/aHz);let aHI=(((BU*(BM*a2P))-(BO*((BQ*a2P)/aHq)))/aHz);let aHM=(((BU*(BM*a2Q))-(BO*((BQ*a2Q)/aHq)))/aHz);let aHQ=(((BU*(BM*a2R))-(BO*((BQ*a2R)/aHq)))/aHz);let aHR=(sf[264]*a0U);let aHZ=(C1*a2a);let aI1=(C1*a2b);let aI7=(gS*(((kh*a0U)-(k4*a13))/aI5));let aIg=(C5*a2a);let aIi=(C5*a2b);let aIj=(N*Cb);let aIs=(Cc*Cc);let aIP=(sf[267]*a0U);let aIY=(Ch*a2O);let aIZ=(Ch*a2P);let aJ1=(Ch*a2Q);let aJe=(C5*a2O);let aJf=(C5*a2P);let aJh=(C5*a2Q);let aJj=(N*Co);let aJu=(Cp*Cp);let aK7=(N*Cx);let aKe=(Cy*Cy);let aKo=(if sb[43]{d}else{(if ((sf[262])!=0.0){(((Cc*(C1*(-a3B)))-(C3*((C5*(sf[265]*a3B))/aIj)))/aIs)}else{d})});let aKp=(if sb[43]{(((Cy*((Ct*aHR)+(C1*a29)))-(Cu*(((C5*a29)+(mJ*aI7))/aK7)))/aKe)}else{(if ((sf[262])!=0.0){(((Cc*((C2*aHR)+(C1*(a29-a3C))))-(C3*(((C8*aI7)+(C5*(a29+(sf[265]*a3C))))/aIj)))/aIs)}else{d})});let aKq=(if sb[43]{(((Cy*aHZ)-(Cu*(aIg/aK7)))/aKe)}else{(if ((sf[262])!=0.0){(((Cc*aHZ)-(C3*(aIg/aIj)))/aIs)}else{d})});let aKr=(if sb[43]{d}else{(if ((sf[262])!=0.0){(((Cc*(C1*(-a3D)))-(C3*((C5*(sf[265]*a3D))/aIj)))/aIs)}else{d})});let aKs=(if sb[43]{(((Cy*aI1)-(Cu*(aIi/aK7)))/aKe)}else{(if ((sf[262])!=0.0){(((Cc*aI1)-(C3*(aIi/aIj)))/aIs)}else{d})});let aKB=(N*CE);let aKK=(CF*CF);let aKX=(((CF*aJ1)-(CB*(aJh/aKB)))/aKK);let aL2=(if sb[43]{d}else{(if ((sf[262])!=0.0){(((Cp*(Ch*(-a48)))-(Cj*((C5*(sf[265]*a48))/aJj)))/aJu)}else{d})});let aL3=(if sb[43]{(((CF*((Ch*a2N)+(BN*aIP)))-(CB*(((C5*a2N)+(n6*aI7))/aKB)))/aKK)}else{(if ((sf[262])!=0.0){(((Cp*((Ci*aIP)+(Ch*(a2N-a49))))-(Cj*(((Cl*aI7)+(C5*(a2N+(sf[265]*a49))))/aJj)))/aJu)}else{d})});let aL4=(if sb[43]{(((CF*aIY)-(CB*(aJe/aKB)))/aKK)}else{(if ((sf[262])!=0.0){(((Cp*aIY)-(Cj*(aJe/aJj)))/aJu)}else{d})});let aL5=(if sb[43]{(((CF*aIZ)-(CB*(aJf/aKB)))/aKK)}else{(if ((sf[262])!=0.0){(((Cp*aIZ)-(Cj*(aJf/aJj)))/aJu)}else{d})});let aL6=(if sb[43]{aKX}else{(if ((sf[262])!=0.0){(((Cp*(Ch*(a2Q-a4a)))-(Cj*((C5*(a2Q+(sf[265]*a4a)))/aJj)))/aJu)}else{d})});let aL7=(if sb[43]{aKX}else{(if ((sf[262])!=0.0){(((Cp*aJ1)-(Cj*(aJh/aJj)))/aJu)}else{d})});let aL8=(if sb[43]{(((CF*(Ch*a2R))-(CB*((C5*a2R)/aKB)))/aKK)}else{(if ((sf[262])!=0.0){(((Cp*(Ch*(a2R-a4b)))-(Cj*((C5*(a2R+(sf[265]*a4b)))/aJj)))/aJu)}else{d})});let aLq=(N*CQ);let aLx=(CR*CR);let aLC=(((CR*((CJ*(N*a10))+(CI*a3C)))-(CK*(((CN*a3C)+(nD*(sf[268]*(((km*a10)-(kc*(sf[195]*(kl*(sf[196]*SX)))))/(km*km)))))/aLq)))/aLx);let aLJ=((((CR*(CI*a3B))-(CK*((CN*a3B)/aLq)))/aLx)+(sf[0]*L));let aLK=((((CR*(CI*a3D))-(CK*((CN*a3D)/aLq)))/aLx)+(L*sf[363]));let aM2=(if ((sf[270])!=0.0){(sf[7]*aL2)}else{aL2});let aM3=(if ((sf[270])!=0.0){(sf[7]*aL3)}else{aL3});let aM4=(if ((sf[270])!=0.0){(sf[7]*aL4)}else{aL4});let aM5=(if ((sf[270])!=0.0){(sf[7]*aL5)}else{aL5});let aM6=(if ((sf[270])!=0.0){(sf[7]*aL6)}else{aL6});let aM7=(if ((sf[270])!=0.0){(sf[7]*aL7)}else{aL7});let aM8=(if ((sf[270])!=0.0){(sf[7]*aL8)}else{aL8});let aSa=(Eg*aMP);let aSn=(Eg*aMS);let aSH=(Eg*aOK);let aSW=(Eg*aOO);let aT7=(if ((sf[270])!=0.0){(aSH+(DB*aS0))}else{d});let aT8=(if ((sf[270])!=0.0){((Eg*aOL)+(DB*aS1))}else{d});let aT9=(if ((sf[270])!=0.0){((Eg*aOM)+(DB*aS2))}else{d});let aTa=(if ((sf[270])!=0.0){((Eg*aON)+(DB*aS3))}else{d});let aTb=(if ((sf[270])!=0.0){(DB*aS4)}else{d});let aTc=(if ((sf[270])!=0.0){(aSH+(DB*aS5))}else{d});let aTd=(if ((sf[270])!=0.0){(aSW+(DB*aS6))}else{d});let aTe=(if ((sf[270])!=0.0){((Eg*aOP)+(DB*aS7))}else{d});let aTf=(if ((sf[270])!=0.0){((Eg*aOQ)+(DB*aS8))}else{d});let aTg=(if ((sf[270])!=0.0){(aSW+(DB*aS9))}else{d});let aTn=(Ep*sf[393]);let aTp=(Ep*sf[394]);let aTr=(Ep*sf[395]);let aTD=(N*Ez);let aTE=((if ((sf[278])!=0.0){d}else{aPm})/aTD);let aTF=((if ((sf[278])!=0.0){d}else{aPn})/aTD);let aTG=((if ((sf[278])!=0.0){d}else{aPo})/aTD);let aTH=((if ((sf[278])!=0.0){d}else{aPp})/aTD);let aTI=((if ((sf[278])!=0.0){(aTn+aTn)}else{aPm})/aTD);let aTJ=((if ((sf[278])!=0.0){(aTp+aTp)}else{aPq})/aTD);let aTK=((if ((sf[278])!=0.0){(aTr+aTr)}else{aPr})/aTD);let aTL=((if ((sf[278])!=0.0){d}else{aPs})/aTD);let aTM=((if ((sf[278])!=0.0){d}else{aPt})/aTD);let aTN=((if ((sf[278])!=0.0){d}else{aPu})/aTD);
-        let aTT=(EA*EA);let aUJ=(if EE{(gG*aTE)}else{(if Ew{((-(sf[280]*aTE))/aTT)}else{d})});let aUK=(if EE{(gG*aTF)}else{(if Ew{((-(sf[280]*aTF))/aTT)}else{d})});let aUL=(if EE{(gG*aTG)}else{(if Ew{((-(sf[280]*aTG))/aTT)}else{d})});let aUM=(if EE{(gG*aTH)}else{(if Ew{((-(sf[280]*aTH))/aTT)}else{d})});let aUN=(if EE{(gG*(sf[396]+aTI))}else{(if Ew{((-(sf[280]*(aTI-sf[396])))/aTT)}else{d})});let aUO=(if EE{(gG*(sf[397]+aTJ))}else{(if Ew{((-(sf[280]*(aTJ-sf[397])))/aTT)}else{d})});let aUP=(if EE{(gG*(sf[398]+aTK))}else{(if Ew{((-(sf[280]*(aTK-sf[398])))/aTT)}else{d})});let aUQ=(if EE{(gG*aTL)}else{(if Ew{((-(sf[280]*aTL))/aTT)}else{d})});let aUR=(if EE{(gG*aTM)}else{(if Ew{((-(sf[280]*aTM))/aTT)}else{d})});let aUS=(if EE{(gG*aTN)}else{(if Ew{((-(sf[280]*aTN))/aTT)}else{d})});let aV4=(sf[281]*f64::powf(F0,sf[290]));let aVf=(F2*F2);let aVU=(if sb[54]{d}else{(if F6{(sf[295]*aUJ)}else{(if EZ{(((aUJ/sf[286])*aV4)/aVf)}else{d})})});let aVV=(if sb[54]{d}else{(if F6{(sf[295]*aUK)}else{(if EZ{(((aUK/sf[286])*aV4)/aVf)}else{d})})});let aVW=(if sb[54]{d}else{(if F6{(sf[295]*aUL)}else{(if EZ{(((aUL/sf[286])*aV4)/aVf)}else{d})})});let aVX=(if sb[54]{d}else{(if F6{(sf[295]*aUM)}else{(if EZ{(((aUM/sf[286])*aV4)/aVf)}else{d})})});let aVY=(if sb[54]{d}else{(if F6{(sf[295]*aUN)}else{(if EZ{(((aUN/sf[286])*aV4)/aVf)}else{d})})});let aVZ=(if sb[54]{d}else{(if F6{(sf[295]*aUO)}else{(if EZ{(((aUO/sf[286])*aV4)/aVf)}else{d})})});let aW0=(if sb[54]{d}else{(if F6{(sf[295]*aUP)}else{(if EZ{(((aUP/sf[286])*aV4)/aVf)}else{d})})});let aW1=(if sb[54]{d}else{(if F6{(sf[295]*aUQ)}else{(if EZ{(((aUQ/sf[286])*aV4)/aVf)}else{d})})});let aW2=(if sb[54]{d}else{(if F6{(sf[295]*aUR)}else{(if EZ{(((aUR/sf[286])*aV4)/aVf)}else{d})})});let aW3=(if sb[54]{d}else{(if F6{(sf[295]*aUS)}else{(if EZ{(((aUS/sf[286])*aV4)/aVf)}else{d})})});let aW4=(BA*aVU);let aW5=(BA*aVV);let aW8=((Fc*(if Bz{d}else{(if ((Ab)!=0.0){(sf[55]*((Bv*W0)+(es*((Bu*(if Aq{(Ar*aCr)}else{(if Am{(An*aCr)}else{d})}))+(Av*((Bt*aC6)+(Af*((Bs*(if Bi{((Bp*(Bj*aEb))+(Bk*((Bn*(zO*aEb))+(Bl*(zQ*aEb)))))}else{(if B0{(Bb*(((AV*(-(if B5{(B6*aEb)}else{(if B1{(B2*aEb)}else{d})})))-(Bc*aEb))/aEw))}else{d})}))+(Br*(N*((jL*((jI*W8)+(ew*(sf[81]*(sf[81]*((jF*Va)+(dE*((jE*Va)+(dE*(sf[183]*a02))))))))))+(jJ*(jL*(-a0l))))))))))))))}else{d})}))+(BA*aVW));let aW9=(BA*aVX);let aWa=(BA*aVY);let aWd=((Fc*(if Bz{d}else{(if ((Ab)!=0.0){(sf[55]*(es*((Bu*(if Aq{(Ar*aCs)}else{(if Am{(An*aCs)}else{d})}))+(Av*((Bt*aC7)+(Af*(Bs*(if Bi{((Bp*((Bj*aEc)+(AV*sf[385])))+(Bk*((Bn*(zO*aEc))+(Bl*(zQ*aEc)))))}else{(if B0{((Be*sf[363])+(Bb*(((AV*(-(if B5{(B6*aEc)}else{(if B1{(B2*aEc)}else{d})})))-(Bc*aEc))/aEw)))}else{d})}))))))))}else{d})}))+(BA*aVZ));let aWg=((Fc*(if Bz{d}else{(if ((Ab)!=0.0){(sf[55]*(es*((Bu*(if Aq{(Ar*aCt)}else{(if Am{(An*aCt)}else{d})}))+(Av*((Bt*aC8)+(Af*(Bs*(if Bi{((Bp*((Bj*aEd)+(AV*sf[384])))+(Bk*((Bn*(zO*aEd))+(Bl*(zQ*aEd)))))}else{(if B0{((sf[0]*Be)+(Bb*(((AV*(-(if B5{(B6*aEd)}else{(if B1{(B2*aEd)}else{d})})))-(Bc*aEd))/aEw)))}else{d})}))))))))}else{d})}))+(BA*aW0));let aWh=(BA*aW1);let aWi=(BA*aW2);let aWj=(BA*aW3);let aWs=((Fc*(if ((sf[270])!=0.0){(sf[7]*aHE)}else{aHE}))+(D1*aVY));let aWv=((Fc*(if ((sf[270])!=0.0){(sf[7]*aHI)}else{aHI}))+(D1*aVZ));let aWw=(Fc*(if ((sf[270])!=0.0){(sf[7]*aHM)}else{aHM}));let aWy=(aWw+(D1*aW0));let aWA=(aWw+(D1*aW1));let aWE=((Fc*(if ((sf[270])!=0.0){(sf[7]*aHQ)}else{aHQ}))+(D1*aW3));let aWP=((Fc*(hG*axk))+(yl*aVY));let aWS=((Fc*(hG*axl))+(yl*aVZ));let aWT=(Fc*(hG*axm));let aWV=(aWT+(yl*aW0));let aWX=(aWT+(yl*aW1));let aX1=((Fc*(hG*axn))+(yl*aW3));let aX2=(Fc*(if ((sf[270])!=0.0){(aSa+(Dd*aS0))}else{d}));let aX4=(aX2+(Ei*aVU));let aX7=((Fc*(if ((sf[270])!=0.0){((Eg*aMQ)+(Dd*aS1))}else{d}))+(Ei*aVV));let aX8=(Fc*(if ((sf[270])!=0.0){(Dd*aS2)}else{d}));let aXb=((Fc*(if ((sf[270])!=0.0){((Eg*aMR)+(Dd*aS3))}else{d}))+(Ei*aVW));let aXe=((Fc*(if ((sf[270])!=0.0){(Dd*aS4)}else{d}))+(Ei*aVX));let aXg=(aX2+(Ei*aVY));let aXj=((Fc*(if ((sf[270])!=0.0){(aSa+(Dd*aS5))}else{d}))+(Ei*aVZ));let aXm=((Fc*(if ((sf[270])!=0.0){(aSn+(Dd*aS6))}else{d}))+(Ei*aW0));
-        let aXp=((Fc*(if ((sf[270])!=0.0){(aSn+(Dd*aS7))}else{d}))+(Ei*aW1));let aXs=((Fc*(if ((sf[270])!=0.0){((Eg*aMT)+(Dd*aS8))}else{d}))+(Ei*aW2));let aXv=((Fc*(if ((sf[270])!=0.0){(aSn+(Dd*aS9))}else{d}))+(Ei*aW3));let aYJ=(Ft*Ft);let aZ2=(c8*(if ((Fw)!=0.0){d}else{(((Ft*(sf[104]*(f1*(sf[107]*SX))))-(f2*((Fs*apB)+(uQ*aYm))))/aYJ)}));let aZ3=(c8*(if ((Fw)!=0.0){d}else{((-(f2*((Fs*apC)+(uQ*aYn))))/aYJ)}));let aZ4=(c8*(if ((Fw)!=0.0){d}else{((-(f2*((Fs*apD)+(uQ*aYo))))/aYJ)}));let aZ5=(c8*(if ((Fw)!=0.0){d}else{((-(f2*((Fs*apE)+(uQ*aYp))))/aYJ)}));let aZ6=(c8*(if ((Fw)!=0.0){d}else{((-(f2*((Fs*apF)+(uQ*aYq))))/aYJ)}));let aZh=(Fy*Fy);let aZi=(((Fy*((Fz*a6E)+(pl*(if nc{(nd*a2S)}else{(if ((n9)!=0.0){(na*a2S)}else{d})}))))-(FB*aZ2))/aZh);let aZl=((-(FB*aZ3))/aZh);let aZm=((sf[0]+(pl*(if nc{(nd*a1Y)}else{(if ((n9)!=0.0){(na*a1Y)}else{d})})))/Fy);let aZq=(((Fy*(sf[363]+(pl*(if nc{(nd*a1Z)}else{(if ((n9)!=0.0){(na*a1Z)}else{d})}))))-(FB*aZ4))/aZh);let aZt=((-(FB*aZ5))/aZh);let aZw=((-(FB*aZ6))/aZh);let aZC=((-aqf)/sf[299]);let aZD=((-aqj)/sf[299]);let aZE=((-aqn)/sf[299]);let aZF=((-aqr)/sf[299]);let aZG=((-aqv)/sf[299]);let b0a=(if FR{(G2*(if FW{(FX*aZC)}else{(if FS{(FT*aZC)}else{d})}))}else{d});let b0b=(if FR{(G2*(if FW{(FX*aZD)}else{(if FS{(FT*aZD)}else{d})}))}else{d});let b0c=(if FR{((G2*(if FW{(FX*aZE)}else{(if FS{(FT*aZE)}else{d})}))+(G1*sf[363]))}else{d});let b0d=(if FR{((G2*(if FW{(FX*aZF)}else{(if FS{(FT*aZF)}else{d})}))+(sf[0]*G1))}else{d});let b0e=(if FR{(G2*(if FW{(FX*aZG)}else{(if FS{(FT*aZG)}else{d})}))}else{d});let b0f=(-XC);let b0i=(sf[300]*f64::powf(G4,sf[399]));let b0q=((G7*b0f)+(G5*(b0a*b0i)));let b0r=(G5*(b0b*b0i));let b0s=(G5*(b0c*b0i));let b0t=(G5*(b0d*b0i));let b0u=(G5*(b0e*b0i));let b0K=(if Gf{(Gg*b0q)}else{(if Gb{(Gc*b0q)}else{d})});let b0L=(if Gf{(Gg*b0r)}else{(if Gb{(Gc*b0r)}else{d})});let b0M=(if Gf{(Gg*b0s)}else{(if Gb{(Gc*b0s)}else{d})});let b0N=(if Gf{(Gg*b0t)}else{(if Gb{(Gc*b0t)}else{d})});let b0O=(if Gf{(Gg*b0u)}else{(if Gb{(Gc*b0u)}else{d})});let b0S=((-(sf[301]*XC))/(gQ*gQ));let b1n=(sx*sx);let b1A=(if Gx{(((sx*Us)-(GE*ahF))/b1n)}else{acY});let b1B=(if Gx{(((sx*sf[363])-(GE*ahG))/b1n)}else{acZ});let b1C=(if Gx{(((sf[0]*sx)-(GE*ahH))/b1n)}else{ad0});let b1D=(if Gx{((-(GE*ahI))/b1n)}else{ad1});let b1M=(N*GJ);let b1R=(if Gx{(((N*b1A)/GD)/b1M)}else{d});let b1S=(if Gx{(((N*b1B)/GD)/b1M)}else{d});let b1T=(if Gx{(((N*b1C)/GD)/b1M)}else{d});let b1U=(if Gx{(((N*b1D)/GD)/b1M)}else{d});let b23=(if GR{(-(gG*ahh))}else{d});let b24=(if GR{(-(gG*ahi))}else{d});let b25=(if GR{(-(gG*ahj))}else{d});let b26=(if GR{(-(gG*ahk))}else{d});let b2n=(if GR{((GV*b23)+(GU*(sf[305]*b23)))}else{d});let b2o=(if GR{((GV*b24)+(GU*(sf[305]*b24)))}else{d});let b2p=(if GR{((GV*b25)+(GU*(sf[305]*b25)))}else{d});let b2q=(if GR{((GV*b26)+(GU*(sf[305]*b26)))}else{d});let b2D=(GK*b1R);let b2F=(GK*b1S);let b2H=(GK*b1T);let b2J=(GK*b1U);let b2L=(GX*b2n);let b2N=(GX*b2o);let b2P=(GX*b2p);let b2R=(GX*b2q);let b2X=(N*H2);let b35=(H2*H2);let b3j=(if Gx{(((H2*((GX*b1R)+(GK*b2n)))-(GY*(((b2D+b2D)+(b2L+b2L))/b2X)))/b35)}else{d});let b3k=(if Gx{(((H2*((GX*b1S)+(GK*b2o)))-(GY*(((b2F+b2F)+(b2N+b2N))/b2X)))/b35)}else{d});let b3l=(if Gx{(((H2*((GX*b1T)+(GK*b2p)))-(GY*(((b2H+b2H)+(b2P+b2P))/b2X)))/b35)}else{d});let b3m=(if Gx{(((H2*((GX*b1U)+(GK*b2q)))-(GY*(((b2J+b2J)+(b2R+b2R))/b2X)))/b35)}else{d});let b3q=(H4*H4);let b3D=(if Gx{(((H4*Us)-(GE*b3j))/b3q)}else{d});let b3E=(if Gx{(((H4*sf[363])-(GE*b3k))/b3q)}else{d});let b3F=(if Gx{(((sf[0]*H4)-(GE*b3l))/b3q)}else{d});let b3G=(if Gx{((-(GE*b3m))/b3q)}else{d});let b3H=(gG*b3j);let b3I=(gG*b3k);let b3J=(gG*b3l);let b3K=(gG*b3m);let b3L=(GD*b3H);let b3M=(GD*b3I);let b3N=(GD*b3J);let b3O=(GD*b3K);let b45=(if Gx{(b3D+((H8*ahF)+(sx*b3L)))}else{d});let b46=(if Gx{(b3E+((H8*ahG)+(sx*b3M)))}else{d});let b47=(if Gx{(b3F+((H8*ahH)+(sx*b3N)))}else{d});let b48=(if Gx{(b3G+((H8*ahI)+(sx*b3O)))}else{d});let b4w=(Ho*Ho);let b58=(if GR{(b3D-((Hq*b3L)+(H8*(-(((Ho*aqf)-(uX*(sf[221]*(if GR{(sf[311]*(N*ahh))}else{d}))))/b4w)))))}else{d});let b59=(if GR{(-(H8*(-(aqj/Ho))))}else{d});
-        let b5a=(if GR{(b3E-((Hq*b3M)+(H8*(-(((Ho*aqn)-(uX*(sf[221]*(if GR{(sf[311]*(N*ahi))}else{d}))))/b4w)))))}else{d});let b5b=(if GR{(b3F-((Hq*b3N)+(H8*(-(((Ho*aqr)-(uX*(sf[221]*(if GR{(sf[311]*(N*ahj))}else{d}))))/b4w)))))}else{d});let b5c=(if GR{(b3G-((Hq*b3O)+(H8*(-(((Ho*aqv)-(uX*(sf[221]*(if GR{(sf[311]*(N*ahk))}else{d}))))/b4w)))))}else{d});let b5h=(Hu*(b58-b45));let b5j=(Hu*b59);let b5l=(Hu*(b5a-b46));let b5n=(Hu*(b5b-b47));let b5p=(Hu*(b5c-b48));let b6a=(N*HD);let b6q=(if GR{(gG*((b45+b58)+((if GR{((b5h+b5h)+(((Hx*aht)+(su*((Hw*b3D)+(H6*(a2*b3D)))))/sf[221]))}else{b1A})/b6a)))}else{(if GO{b45}else{d})});let b6r=(if GR{(gG*(b59+((if GR{(b5j+b5j)}else{d})/b6a)))}else{d});let b6s=(if GR{(gG*((b46+b5a)+((if GR{((b5l+b5l)+(((Hx*ahu)+(su*((Hw*b3E)+(H6*(a2*b3E)))))/sf[221]))}else{b1B})/b6a)))}else{(if GO{b46}else{d})});let b6t=(if GR{(gG*((b47+b5b)+((if GR{((b5n+b5n)+(((Hx*ahv)+(su*((Hw*b3F)+(H6*(a2*b3F)))))/sf[221]))}else{b1C})/b6a)))}else{(if GO{b47}else{d})});let b6u=(if GR{(gG*((b48+b5c)+((if GR{((b5p+b5p)+(((Hx*ahw)+(su*((Hw*b3G)+(H6*(a2*b3G)))))/sf[221]))}else{b1D})/b6a)))}else{(if GO{b48}else{d})});let b6C=(HG*HG);let b72=(HJ*HJ);let b7j=(if HO{(((HJ*b3H)-(H7*(if Gx{(((HG*(b6q-b3D))-(HH*b6q))/b6C)}else{d})))/b72)}else{d});let b7k=(if HO{((-(H7*(if Gx{(((HG*b6r)-(HH*b6r))/b6C)}else{d})))/b72)}else{d});let b7l=(if HO{(((HJ*b3I)-(H7*(if Gx{(((HG*(b6s-b3E))-(HH*b6s))/b6C)}else{d})))/b72)}else{d});let b7m=(if HO{(((HJ*b3J)-(H7*(if Gx{(((HG*(b6t-b3F))-(HH*b6t))/b6C)}else{d})))/b72)}else{d});let b7n=(if HO{(((HJ*b3K)-(H7*(if Gx{(((HG*(b6u-b3G))-(HH*b6u))/b6C)}else{d})))/b72)}else{d});let b7S=(((HG*(-a1z))-(HU*b6q))/b6C);let b7V=((-(HU*b6r))/b6C);let b7Y=((-(HU*b6s))/b6C);let b81=((-(HU*b6t))/b6C);let b84=((-(HU*b6u))/b6C);let b85=(HW*b7S);let b86=(HW*b7V);let b87=(HW*b7Y);let b88=(HW*b81);let b89=(HW*b84);let b8d=(HQ*HQ);let b9A=(sf[300]*f64::powf(G2,sf[399]));let b9G=(Ih*Ih);let ba5=(sf[317]*f64::powf(Ij,sf[400]));let bak=(if Ie{(If*((-(((Ih*aqf)-(uX*aqf))/b9G))*ba5))}else{d});let bal=(if Ie{(If*((-(((Ih*aqj)-(uX*aqj))/b9G))*ba5))}else{d});let bam=(if Ie{((Il*(sf[363]*b9A))+(If*((-(((Ih*aqn)-(uX*aqn))/b9G))*ba5)))}else{d});let ban=(if Ie{((Il*(sf[0]*b9A))+(If*((-(((Ih*aqr)-(uX*aqr))/b9G))*ba5)))}else{d});let bao=(if Ie{(If*((-(((Ih*aqv)-(uX*aqv))/b9G))*ba5))}else{d});let baz=(if Iq{(aqf/sf[316])}else{d});let baA=(if Iq{(aqj/sf[316])}else{d});let baB=(if Iq{(aqn/sf[316])}else{d});let baC=(if Iq{(aqr/sf[316])}else{d});let baD=(if Iq{(aqv/sf[316])}else{d});let baJ=(if Iq{(baz/sf[319])}else{d});let baK=(if Iq{(baA/sf[319])}else{sf[377]});let baL=(if Iq{(baB/sf[319])}else{sf[378]});let baM=(if Iq{(baC/sf[319])}else{d});let baN=(if Iq{(baD/sf[319])}else{d});let bbE=(sf[320]*f64::powf(IQ,sf[401]));let bc6=((IU*b0f)+(G5*(if Iq{((IS*bak)+(In*((if IJ{(baz+(sf[319]*((IL*(-baJ))/IM)))}else{(if IB{(sf[319]*((IC*baJ)/ID))}else{d})})*bbE)))}else{(if Io{bak}else{d})})));let bc7=(G5*(if Iq{((IS*bal)+(In*((if IJ{(baA+(sf[319]*((IL*(-baK))/IM)))}else{(if IB{(sf[319]*((IC*baK)/ID))}else{d})})*bbE)))}else{(if Io{bal}else{d})}));let bc8=(G5*(if Iq{((IS*bam)+(In*((if IJ{(baB+(sf[319]*((IL*(-baL))/IM)))}else{(if IB{(sf[319]*((IC*baL)/ID))}else{d})})*bbE)))}else{(if Io{bam}else{d})}));let bc9=(G5*(if Iq{((IS*ban)+(In*((if IJ{(baC+(sf[319]*((IL*(-baM))/IM)))}else{(if IB{(sf[319]*((IC*baM)/ID))}else{d})})*bbE)))}else{(if Io{ban}else{d})}));let bca=(G5*(if Iq{((IS*bao)+(In*((if IJ{(baD+(sf[319]*((IL*(-baN))/IM)))}else{(if IB{(sf[319]*((IC*baN)/ID))}else{d})})*bbE)))}else{(if Io{bao}else{d})}));let bcJ=(if Ie{((J8*(if J2{(J3*bc6)}else{(if IY{(IZ*bc6)}else{b0K})}))+(J7*(G2*b0S)))}else{(if I5{((I6*b85)+(HW*(sf[4]*b2n)))}else{(if HO{((I1*((HS*b7j)+(HQ*((HR*b6q)+(HG*((-(sf[4]*a1z))/(la*la)))))))+(HT*(b85-(I0*((HY*b7S)+(HV*(((HQ*b2n)-(GX*b7j))/b8d)))))))}else{(if FR{((Gn*b0K)+(Gk*((Gm*b0a)+(G4*b0S))))}else{d})})})});
-        let bcK=(if Ie{(J8*(if J2{(J3*bc7)}else{(if IY{(IZ*bc7)}else{b0L})}))}else{(if I5{(I6*b86)}else{(if HO{((I1*((HS*b7k)+(HQ*(HR*b6r))))+(HT*(b86-(I0*((HY*b7V)+(HV*((-(GX*b7k))/b8d)))))))}else{(if FR{((Gn*b0L)+(Gk*(Gm*b0b)))}else{d})})})});let bcL=(if Ie{((J8*(if J2{(J3*bc8)}else{(if IY{(IZ*bc8)}else{b0M})}))+(J7*(Gm*sf[363])))}else{(if I5{((I6*b87)+(HW*(sf[4]*b2o)))}else{(if HO{((I1*((HS*b7l)+(HQ*(HR*b6s))))+(HT*(b87-(I0*((HY*b7Y)+(HV*(((HQ*b2o)-(GX*b7l))/b8d)))))))}else{(if FR{((Gn*b0M)+(Gk*(Gm*b0c)))}else{d})})})});let bcM=(if Ie{((J8*(if J2{(J3*bc9)}else{(if IY{(IZ*bc9)}else{b0N})}))+(J7*(sf[0]*Gm)))}else{(if I5{((I6*b88)+(HW*(sf[4]*b2p)))}else{(if HO{((I1*((HS*b7m)+(HQ*(HR*b6t))))+(HT*(b88-(I0*((HY*b81)+(HV*(((HQ*b2p)-(GX*b7m))/b8d)))))))}else{(if FR{((Gn*b0N)+(Gk*(Gm*b0d)))}else{d})})})});let bcN=(if Ie{(J8*(if J2{(J3*bca)}else{(if IY{(IZ*bca)}else{b0O})}))}else{(if I5{((I6*b89)+(HW*(sf[4]*b2q)))}else{(if HO{((I1*((HS*b7n)+(HQ*(HR*b6u))))+(HT*(b89-(I0*((HY*b84)+(HV*(((HQ*b2q)-(GX*b7n))/b8d)))))))}else{(if FR{((Gn*b0O)+(Gk*(Gm*b0e)))}else{d})})})});let bcO=(WF+aZ2);let bd7=(Jj*Jj);let bdI=(Ji*Ji);let be1=(if Jh{(((((Jj*ST)-(bh*((Ji*aqf)+(uX*bcO))))/bd7)+((Jl*Yr)+(hU*(((h5*apI)-(uR*XT))/ase))))+(((Ji*Wy)-(eV*bcO))/bdI))}else{d});let be2=(if Jh{((((-(bh*((Ji*aqj)+(uX*aZ3))))/bd7)+(hU*(apL/h5)))+((-(eV*aZ3))/bdI))}else{d});let be3=(if Jh{((((-(bh*((Ji*aqn)+(uX*aZ4))))/bd7)+(hU*(apO/h5)))+((-(eV*aZ4))/bdI))}else{d});let be4=(if Jh{((((-(bh*((Ji*aqr)+(uX*aZ5))))/bd7)+(hU*(apR/h5)))+((-(eV*aZ5))/bdI))}else{d});let be5=(if Jh{((((-(bh*((Ji*aqv)+(uX*aZ6))))/bd7)+(hU*(apU/h5)))+((-(eV*aZ6))/bdI))}else{d});let beg=(if Jr{((bcJ-be1)/gC)}else{baJ});let beh=(if Jr{((bcK-be2)/gC)}else{baK});let bei=(if Jr{((bcL-be3)/gC)}else{baL});let bej=(if Jr{((bcM-be4)/gC)}else{baM});let bek=(if Jr{((bcN-be5)/gC)}else{baN});let bf9=(if JF{(be1-(gC*((JH*(-beg))/JI)))}else{(if Jx{(bcJ-(gC*((Jy*beg)/Jz)))}else{bcJ})});let bfa=(if JF{(be2-(gC*((JH*(-beh))/JI)))}else{(if Jx{(bcK-(gC*((Jy*beh)/Jz)))}else{bcK})});let bfb=(if JF{(be3-(gC*((JH*(-bei))/JI)))}else{(if Jx{(bcL-(gC*((Jy*bei)/Jz)))}else{bcL})});let bfc=(if JF{(be4-(gC*((JH*(-bej))/JI)))}else{(if Jx{(bcM-(gC*((Jy*bej)/Jz)))}else{bcM})});let bfd=(if JF{(be5-(gC*((JH*(-bek))/JI)))}else{(if Jx{(bcN-(gC*((Jy*bek)/Jz)))}else{bcN})});let bfg=((JM*aqf)+(uX*bf9));let bfj=((JM*aqj)+(uX*bfa));let bfm=((JM*aqn)+(uX*bfb));let bfp=((JM*aqr)+(uX*bfc));let bfs=((JM*aqv)+(uX*bfd));let bfV=(JS*JS);let bgi=(if JW{bfg}else{(if JQ{(((JS*((JN*be1)+(Jq*bfg)))-(JR*(be1+bf9)))/bfV)}else{(if Jr{bfg}else{d})})});let bgj=(if JW{bfj}else{(if JQ{(((JS*((JN*be2)+(Jq*bfj)))-(JR*(be2+bfa)))/bfV)}else{(if Jr{bfj}else{d})})});let bgk=(if JW{bfm}else{(if JQ{(((JS*((JN*be3)+(Jq*bfm)))-(JR*(be3+bfb)))/bfV)}else{(if Jr{bfm}else{d})})});let bgl=(if JW{bfp}else{(if JQ{(((JS*((JN*be4)+(Jq*bfp)))-(JR*(be4+bfc)))/bfV)}else{(if Jr{bfp}else{d})})});let bgm=(if JW{bfs}else{(if JQ{(((JS*((JN*be5)+(Jq*bfs)))-(JR*(be5+bfd)))/bfV)}else{(if Jr{bfs}else{d})})});let bgB=(if K3{d}else{(if ((JZ)!=0.0){((K0*ST)+(bh*(agn/s2)))}else{d})});let bgC=(if K3{sf[0]}else{(if ((JZ)!=0.0){(bh*(ago/s2))}else{d})});let bgD=(if K3{d}else{(if ((JZ)!=0.0){(bh*(agp/s2))}else{d})});let bgE=(if K3{sf[363]}else{(if ((JZ)!=0.0){(bh*(agq/s2))}else{d})});let bhE=(m8*sf[363]);let bhJ=(eV*eV);let bhP=(mt*sf[364]);let bhR=(mt*sf[365]);let bhT=(mt*sf[363]);let bhW=(lr*(bhP+bhP));let bhY=(lr*(bhR+bhR));let bi5=(mm*sf[363]);let bid=(mj*sf[363]);let bin=(mb*sf[363]);let bis=(fa*fa);let biQ=(w*sf[363]);let biR=(sf[0]*w);
-        let biU=(((if sb[35]{((x4*Yr)+(hU*((sf[252]*arS)+((x2*anm)+(wG*(sf[250]*(agn+arS)))))))}else{(if sb[33]{asG}else{(if ((sf[156])!=0.0){((asG+((wG*(((wE*((wz*arS)+(wx*(N*(if ((sf[156])!=0.0){(sf[157]*(ib*((sf[159]*SW)/sf[150])))}else{d})))))-(wA*((gS*as8)/asS)))/asZ))+(wF*anm)))+(((wM*((wK*asz)+(ww*((wJ*(if ((sf[156])!=0.0){(sf[160]*(ii*(sf[162]*SW)))}else{d}))+(ik*agn)))))-(wL*asz))/atH))}else{d})})})+((xU*((ht*(sf[136]*(hn*(sf[139]*SX))))+(ho*(ht*(Y3/sf[137])))))+(hu*awq)))-(if A4{d}else{(if ((yD)!=0.0){(sf[23]*((A0*VX)+(er*((zZ*(if yO{(yP*ayh)}else{(if yK{(yL*ayh)}else{d})}))+(yT*((zY*aiF)+(sY*((zX*(if zL{((zU*(zM*aA4))+(zN*((zS*(zO*aA4))+(zP*(zQ*aA4)))))}else{(if zt{(zE*(((zn*(-(if zy{(zz*aA4)}else{(if zu{(zv*aA4)}else{d})})))-(zF*aA4))/aAp))}else{d})}))+(zW*(N*((jp*((jm*W4)+(eu*(sf[50]*(sf[50]*((jj*U5)+(cz*((ji*U5)+(cz*(sf[181]*Zo))))))))))+(jn*(jp*(-ZH))))))))))))))}else{d})}));let biV=((((if sb[35]{(hU*((sf[252]*arT)+(wG*(sf[250]*arT))))}else{(if sb[33]{asH}else{(if ((sf[156])!=0.0){((asH+(wG*(((wE*(wz*arT))-(wA*((gS*as9)/asS)))/asZ)))+(((wM*(wK*asA))-(wL*asA))/atH))}else{d})})})+(hu*awr))+biQ)-(if A4{d}else{(if ((yD)!=0.0){(sf[23]*(er*((zZ*(if yO{(yP*ayi)}else{(if yK{(yL*ayi)}else{d})}))+(yT*((zY*aiG)+(sY*(zX*(if zL{((zU*((zM*aA5)+(zn*sf[384])))+(zN*((zS*(zO*aA5))+(zP*(zQ*aA5)))))}else{(if zt{((sf[0]*zH)+(zE*(((zn*(-(if zy{(zz*aA5)}else{(if zu{(zv*aA5)}else{d})})))-(zF*aA5))/aAp)))}else{d})}))))))))}else{d})}));let biW=((((if sb[35]{(hU*((sf[252]*arU)+((x2*ann)+(wG*(sf[250]*(ago+arU))))))}else{(if sb[33]{asI}else{(if ((sf[156])!=0.0){((asI+((wG*(((wE*(wz*arU))-(wA*((gS*asa)/asS)))/asZ))+(wF*ann)))+(((wM*((wK*asB)+(ww*(ik*ago))))-(wL*asB))/atH))}else{d})})})+(hu*awt))+biR)-(if A4{d}else{(if ((yD)!=0.0){(sf[23]*(er*((zZ*(if yO{(yP*ayj)}else{(if yK{(yL*ayj)}else{d})}))+(yT*((zY*aiH)+(sY*(zX*(if zL{((zU*((zM*aA6)+(zn*sf[385])))+(zN*((zS*(zO*aA6))+(zP*(zQ*aA6)))))}else{(if zt{((zH*sf[363])+(zE*(((zn*(-(if zy{(zz*aA6)}else{(if zu{(zv*aA6)}else{d})})))-(zF*aA6))/aAp)))}else{d})}))))))))}else{d})}));let biZ=((vr*((j2*(sf[178]*(SS/(N*iY))))+(iZ*(j2*(sf[179]*SR)))))+biU);let bj0=((j3*ar0)+(((vP*(sf[249]*arr))+(vN*((-arr)*arx)))+biV));let bj1=((j3*ar1)+(((vP*(sf[249]*ars))+(vN*((-ars)*arx)))+biW));let bjL=(((yx*((iV*(sf[175]*(iS*(sf[177]*SX))))+(iT*(iV*(Y3/sf[176])))))+(iW*axL))+((if sb[32]{avq}else{(if ((sf[156])!=0.0){(avq+(((xE*((xz*av4)+(xx*(N*(if ((sf[156])!=0.0){(sf[163]*(iq*((sf[165]*SW)/sf[154])))}else{d})))))-(xA*((gS*(if xr{(xs*av9)}else{(if xn{(xo*av9)}else{as8})}))/avF)))/avN))}else{d})})+((y7*((iM*(sf[171]*(iJ*(sf[174]*SX))))+(iK*(iM*(Y3/sf[172])))))+(iN*awN))));let bjM=((iW*axM)+((if sb[32]{avr}else{(if ((sf[156])!=0.0){(avr+(((xE*(xz*av5))-(xA*((gS*(if xr{(xs*a1Z)}else{(if xn{(xo*a1Z)}else{as9})}))/avF)))/avN))}else{d})})+(iN*awO)));let bjN=((iW*axN)+((if sb[32]{avs}else{(if ((sf[156])!=0.0){(avs+(((xE*(xz*av6))-(xA*((gS*(if xr{(xs*a1Y)}else{(if xn{(xo*a1Y)}else{d})}))/avF)))/avN))}else{d})})+(iN*awP)));let bjO=((iW*axO)+((if sb[32]{avt}else{(if ((sf[156])!=0.0){(avt+(((xE*(xz*av7))-(xA*((gS*(if xr{d}else{(if xn{d}else{asa})}))/avF)))/avN))}else{d})})+(iN*awQ)));let bjW=(lY*axX);let bk5=((D1*aVU)+(yl*aVU));let bk6=((D1*aVV)+(yl*aVV));let bk7=(((Fc*(if ((sf[270])!=0.0){(sf[7]*aHA)}else{aHA}))+(D1*aVW))+((Fc*((yk*((hF*(sf[142]*(hA*(sf[145]*SX))))+(hB*(hF*((sf[146]*SW)/sf[143])))))+(hG*axi)))+(yl*aVW)));let bk8=((D1*aVX)+((Fc*(hG*axj))+(yl*aVX)));let bkd=((D1*aW2)+(yl*aW2));let bkf=(w*sf[364]);let bkg=(w*sf[365]);let bkw=(KL*sf[365]);let bkP=(Fg*sf[364]);let bl2=(Fg*sf[365]);let blA=(D3*sf[365]);let bm1=(Ek*sf[364]);let bm2=((KW*aT7)+bm1);let bme=(Ek*sf[407]);let bmh=(Ek*sf[365]);let bJb=(sf[15]*(sf[0]*axX));let bJJ=(sf[15]*(sf[0]*(-aW4)));let bJK=(sf[15]*(sf[0]*(-aW5)));let bJL=(sf[15]*(sf[0]*(-aW8)));let bJM=(sf[15]*(sf[0]*(-aW9)));let bJN=(sf[15]*(sf[0]*(-aWa)));let bJO=(sf[15]*(sf[0]*(-aWd)));let bJP=(sf[15]*(sf[0]*(-aWg)));let bJQ=(sf[15]*(sf[0]*(-aWh)));let bJR=(sf[15]*(sf[0]*(-aWi)));let bJS=(sf[15]*(sf[0]*(-aWj)));let bKL=(sf[15]*(sf[0]*aT7));let bO2=(sf[15]*(lr*sf[425]));
-        let bO4=(sf[15]*(lr*sf[426]));
-
+        let ddt_coefficients = self.ddt_coefficients;
+        let mut ddt = |operator: usize, value: f64| -> f64 {
+            let _ = operator;
+            let slot = match operator { 13541 => 0usize, 13609 => 1usize, 13615 => 2usize, 13625 => 3usize, 13631 => 4usize, 13637 => 5usize, 13645 => 6usize, 13653 => 7usize, 13673 => 8usize, 13692 => 9usize, 13963 => 10usize, _ => usize::MAX };
+            rspice_eval_ddt(
+                &mut ddt_state.ddt_current,
+                &mut ddt_state.ddt_previous,
+                &mut ddt_state.ddt_older,
+                &mut ddt_state.ddt_initialized,
+                &mut ddt_state.ddt_derivative_current,
+                &mut ddt_state.ddt_derivative_previous,
+                ddt_active,
+                ddt_coefficients.derivative_scale,
+                ddt_coefficients.previous_value_scale,
+                ddt_coefficients.older_value_scale,
+                ddt_coefficients.previous_derivative_scale,
+                slot,
+                value,
+            )
+        };
+            let v0 = 0e0f64;
+            let v1 = parameters[3];
+            let v2 = 1e0f64;
+            let v4 = 7.03e7f64;
+            let v5 = 1.23e8f64;
+            let v6 = 1.58e8f64;
+            let v7 = 2.04e8f64;
+            let v8 = parameters[33];
+            let v10 = parameters[4];
+            let v11 = 2.7315e2f64;
+            let v13 = temperature;
+            let v14 = parameters[0];
+            let v17 = parameters[154];
+            let v19 = 1e-12f64;
+            let v21 = parameters[1];
+            let v24 = parameters[134];
+            let v26 = 1e-3f64;
+            let v27 = 2e0f64;
+            let v28 = parameters[67];
+            let v32 = parameters[114];
+            let v33 = parameters[115];
+            let v36 = parameters[116];
+            let v40 = 5e-2f64;
+            let v42 = 1e-1f64;
+            let v57 = parameters[66];
+            let v59 = parameters[71];
+            let v60 = parameters[72];
+            let v64 = parameters[117];
+            let v65 = parameters[118];
+            let v68 = parameters[119];
+            let v88 = parameters[83];
+            let v91 = node_potentials[4];
+            let v97 = parameters[125];
+            let v106 = 8.617086918058125e-5f64;
+            let v154 = 3e0f64;
+            let v155 = -3e0f64;
+            let v161 = parameters[105];
+            let v178 = -3e0f64;
+            let v181 = parameters[64];
+            let v184 = parameters[110];
+            let v201 = -3e0f64;
+            let v204 = parameters[80];
+            let v222 = -3e0f64;
+            let v242 = -3e0f64;
+            let v261 = -3e0f64;
+            let v264 = parameters[27];
+            let v267 = parameters[109];
+            let v284 = -3e0f64;
+            let v287 = parameters[138];
+            let v290 = parameters[140];
+            let v315 = parameters[65];
+            let v317 = parameters[137];
+            let v320 = parameters[139];
+            let v323 = parameters[75];
+            let v331 = parameters[70];
+            let v334 = parameters[54];
+            let v335 = parameters[97];
+            let v340 = parameters[56];
+            let v341 = parameters[98];
+            let v342 = parameters[96];
+            let v347 = parameters[55];
+            let v348 = parameters[101];
+            let v353 = parameters[57];
+            let v354 = parameters[102];
+            let v358 = parameters[58];
+            let v359 = parameters[104];
+            let v363 = parameters[59];
+            let v365 = parameters[60];
+            let v366 = parameters[99];
+            let v370 = parameters[122];
+            let v372 = parameters[10];
+            let v391 = 6.931471805599453e-4f64;
+            let v393 = parameters[123];
+            let v395 = parameters[11];
+            let v414 = 6.931471805599453e-4f64;
+            let v416 = parameters[43];
+            let v417 = parameters[124];
+            let v421 = 1e-6f64;
+            let v424 = 5e-1f64;
+            let v425 = 5e-7f64;
+            let v434 = parameters[9];
+            let v435 = 4e0f64;
+            let v438 = parameters[121];
+            let v450 = parameters[12];
+            let v455 = parameters[30];
+            let v456 = parameters[103];
+            let v461 = parameters[20];
+            let v462 = 6e0f64;
+            let v463 = parameters[21];
+            let v469 = parameters[113];
+            let v475 = parameters[31];
+            let v476 = parameters[32];
+            let v487 = parameters[16];
+            let v491 = parameters[17];
+            let v495 = parameters[111];
+            let v501 = parameters[18];
+            let v502 = parameters[19];
+            let v509 = parameters[24];
+            let v511 = parameters[25];
+            let v512 = parameters[107];
+            let v518 = parameters[28];
+            let v519 = parameters[106];
+            let v524 = parameters[26];
+            let v525 = parameters[108];
+            let v531 = parameters[29];
+            let v537 = parameters[112];
+            let v542 = parameters[22];
+            let v543 = parameters[23];
+            let v552 = parameters[149];
+            let v553 = parameters[150];
+            let v561 = parameters[155];
+            let v564 = parameters[157];
+            let v570 = -5e-1f64;
+            let v573 = parameters[35];
+            let v582 = parameters[34];
+            let v594 = -5e-1f64;
+            let v597 = parameters[37];
+            let v606 = parameters[36];
+            let v618 = parameters[14];
+            let v621 = parameters[13];
+            let v624 = parameters[133];
+            let v625 = parameters[141];
+            let v634 = 3.5e0f64;
+            let v635 = parameters[142];
+            let v642 = parameters[135];
+            let v647 = parameters[136];
+            let v652 = parameters[86];
+            let v657 = parameters[120];
+            let v662 = parameters[87];
+            let v668 = parameters[88];
+            let v673 = parameters[89];
+            let v678 = parameters[90];
+            let v679 = parameters[100];
+            let v684 = 3e2f64;
+            let v686 = 5.25e2f64;
+            let v689 = 7.2e-4f64;
+            let v692 = 1.6e-6f64;
+            let v697 = 1.081e0f64;
+            let v699 = parameters[92];
+            let v701 = parameters[146];
+            let v703 = parameters[148];
+            let v715 = node_potentials[7];
+            let v716 = node_potentials[8];
+            let v719 = node_potentials[9];
+            let v722 = node_potentials[5];
+            let v725 = node_potentials[6];
+            let v730 = node_potentials[3];
+            let v735 = node_potentials[2];
+            let v738 = node_potentials[1];
+            let v743 = node_potentials[0];
+            let v746 = node_potentials[11];
+            let v749 = node_potentials[10];
+            let v763 = parameters[151];
+            let v864 = parameters[153];
+            let v875 = 1e2f64;
+            let v891 = 2e-1f64;
+            let v906 = parameters[62];
+            let v907 = parameters[61];
+            let v917 = parameters[63];
+            let v932 = -1e0f64;
+            let v975 = parameters[152];
+            let v993 = parameters[73];
+            let v1009 = 1e-5f64;
+            let v1013 = 1e-40f64;
+            let v1029 = -1e0f64;
+            let v1060 = parameters[74];
+            let v1068 = -1e0f64;
+            let v1092 = parameters[76];
+            let v1147 = 1.0000000000000002e-2f64;
+            let v1151 = 5.000000000000001e-3f64;
+            let v1165 = parameters[15];
+            let v1171 = 1e-4f64;
+            let v1185 = parameters[156];
+            let v1196 = parameters[158];
+            let v1211 = parameters[159];
+            let v1234 = 1e3f64;
+            let v1236 = 4e1f64;
+            let v1239 = 2.3538526683702e17f64;
+            let v1267 = parameters[93];
+            let v1369 = 1e-30f64;
+            let v1372 = -2e0f64;
+            let v1388 = 1.6666666666666666e-1f64;
+            let v1394 = -1e-3f64;
+            let v1410 = 3.333333333333333e-1f64;
+            let v1412 = 2.5e-1f64;
+            let v1447 = -2e0f64;
+            let v1468 = -1e-3f64;
+            let v1521 = parameters[8];
+            let v1523 = parameters[143];
+            let v1531 = parameters[144];
+            let v1586 = parameters[5];
+            let v1640 = 1.21e-2f64;
+            let v1643 = 6.05e-3f64;
+            let v1662 = parameters[84];
+            let v1665 = 1e-6f64;
+            let v1666 = 1e-12f64;
+            let v1667 = -1e0f64;
+            let v1669 = -1e0f64;
+            let v1672 = -1e0f64;
+            let v1675 = 5e-13f64;
+            let v1678 = -1e0f64;
+            let v1684 = -1e0f64;
+            let v1688 = parameters[82];
+            let v1692 = parameters[81];
+            let v1722 = 1.0000000000000002e-2f64;
+            let v1725 = 5.000000000000001e-3f64;
+            let v1747 = parameters[39];
+            let v1749 = parameters[44];
+            let v1752 = parameters[42];
+            let v1765 = parameters[41];
+            let v1774 = parameters[40];
+            let v1781 = parameters[46];
+            let v1783 = parameters[45];
+            let v1791 = parameters[7];
+            let v1811 = parameters[47];
+            let v1841 = 1e-7f64;
+            let v1867 = parameters[48];
+            let v1871 = parameters[49];
+            let v1875 = parameters[52];
+            let v1879 = parameters[51];
+            let v1894 = parameters[50];
+            let v1918 = parameters[53];
+            let v2029 = parameters[68];
+            let v2058 = parameters[77];
+            let v2128 = -1e0f64;
+            let v2161 = parameters[85];
+            let v2184 = parameters[79];
+            let v2194 = parameters[91];
+            let v2257 = parameters[6];
+            let v2285 = parameters[95];
+            let v2290 = parameters[94];
+            let v2319 = -1e0f64;
+            let v2329 = parameters[147];
+            let v2335 = parameters[145];
+            let v2359 = -1e0f64;
+            let v2385 = parameters[69];
+            let v2390 = parameters[78];
+            let v2417 = 0e0f64;
+            let v2421 = 0e0f64;
+            let v2424 = parameters[130];
+            let v2434 = parameters[131];
+            let v2439 = parameters[132];
+            let v2450 = 0e0f64;
+            let v2451 = node_potentials[12];
+            let v2457 = 0e0f64;
+            let v2458 = 0e0f64;
+            let v2459 = 0e0f64;
+            let v2460 = 0e0f64;
+            let v2461 = 0e0f64;
+            let v2462 = 0e0f64;
+            let v2463 = 0e0f64;
+            let v2464 = 0e0f64;
+            let v2465 = 0e0f64;
+            let v2466 = 0e0f64;
+            let v2467 = 0e0f64;
+            let v2468 = 0e0f64;
+            let v2469 = 0e0f64;
+            let v2470 = 0e0f64;
+            let v2471 = 0e0f64;
+            let v2472 = 0e0f64;
+            let v2473 = 0e0f64;
+            let v2474 = 0e0f64;
+            let v2475 = 0e0f64;
+            let v2476 = 0e0f64;
+            let v2477 = 0e0f64;
+            let v2478 = 0e0f64;
+            let v2479 = 0e0f64;
+            let v2480 = 0e0f64;
+            let v2481 = 0e0f64;
+            let v2482 = 0e0f64;
+            let v2483 = 0e0f64;
+            let v2515 = 1e0f64;
+            let v2516 = Lanes([1e0f64; 1]);
+            let v2517 = Lanes([1e0f64; 1]);
+            let v2518 = Lanes([1e0f64; 1]);
+            let v2519 = Lanes([1e0f64; 1]);
+            let v2520 = Lanes([1e0f64; 1]);
+            let v2521 = Lanes([1e0f64; 1]);
+            let v2522 = Lanes([1e0f64; 1]);
+            let v2523 = Lanes([1e0f64; 1]);
+            let v2524 = Lanes([1e0f64; 1]);
+            let v2525 = Lanes([1e0f64; 1]);
+            let v2526 = Lanes([1e0f64; 1]);
+            let v2527 = Lanes([1e0f64; 1]);
+            let v2528 = Lanes([1e0f64; 1]);
+            let v2676 = -1e0f64;
+            let v2947 = Lanes([0e0f64; 1]);
+            let v2994 = 2e0f64;
+            let v3108 = -1.5e0f64;
+            let v3149 = -1.5e0f64;
+            let v3443 = Lanes([0e0f64; 3]);
+            let v3468 = 0e0f64;
+            let v3489 = Lanes([0e0f64; 4]);
+            let v4087 = Lanes([0e0f64; 3]);
+            let v4422 = Lanes([0e0f64; 10]);
+            let v4535 = Lanes([0e0f64; 3]);
+            let v4617 = Lanes([0e0f64; 5]);
+            let v5439 = Lanes([0e0f64; 6]);
+            let v5514 = Lanes([0e0f64; 4]);
+            let v5546 = ddt_scale();
+            let v5615 = Lanes([0e0f64; 3]);
+            let v5623 = Lanes([0e0f64; 3]);
+            let v3 = if v1 == v2 { 1.0 } else { 0.0 };
+            let v688: f64;
+            let v1844: f64;
+            if v3 != 0.0 {
+                v688 = v5;
+                v1844 = v4;
+            } else {
+                v688 = v7;
+                v1844 = v6;
+            }
+            let v9 = v2 - v8;
+            let v12 = v10 + v11;
+            let v15 = v13 + v14;
+            let v16 = ctx.simparam_or("gmin", v0);
+            let v18 = if v17 == v0 { 1.0 } else { 0.0 };
+            let v20: f64;
+            if v18 != 0.0 {
+                v20 = v19;
+            } else {
+                v20 = v17;
+            }
+            let v22 = v20 * v21;
+            let v23 = v2 / v22;
+            let v25 = if v24 > v0 { 1.0 } else { 0.0 };
+            let v1583: f64;
+            if v25 != 0.0 {
+                v1583 = v16;
+            } else {
+                v1583 = v0;
+            }
+            let v30 = v27.powf((v27 - v28));
+            let v31 = v2 / v30;
+            let v39 = v32 + (((v33 * v12) * v12) / (v12 + v36));
+            let v43 = (v39 - v40) / v42;
+            let v44 = if v39 < v40 { 1.0 } else { 0.0 };
+            let v114: f64;
+            if v44 != 0.0 {
+                let v49 = v40 + (v42 * ((v2 + (v43.exp())).ln()));
+                v114 = v49;
+            } else {
+                let v55 = v39 + (v42 * ((v2 + ((-v43).exp())).ln()));
+                v114 = v55;
+            }
+            let v56 = v2 / v32;
+            let v58 = v2 / v57;
+            let v62 = v27.powf((v27 - v60));
+            let v63 = v2 / v62;
+            let v71 = v64 + (((v65 * v12) * v12) / (v12 + v68));
+            let v73 = (v71 - v40) / v42;
+            let v74 = if v71 < v40 { 1.0 } else { 0.0 };
+            let v134: f64;
+            if v74 != 0.0 {
+                let v79 = v40 + (v42 * ((v2 + (v73.exp())).ln()));
+                v134 = v79;
+            } else {
+                let v85 = v71 + (v42 * ((v2 + ((-v73).exp())).ln()));
+                v134 = v85;
+            }
+            let v86 = v2 / v64;
+            let v87 = v2 / v59;
+            let v90 = v2 - (v2 / v88);
+            let v92 = if v91 < v0 { 1.0 } else { 0.0 };
+            let v96: f64;
+            let v2529: Lanes<1>;
+            if v92 != 0.0 {
+                let v93 = v2 - v91;
+                let v95 = -(v93.ln());
+                let v2680 = ((v2516 * v2676) * (v2515 / v93)) * v2676;
+                v96 = v95;
+                v2529 = v2680;
+            } else {
+                v96 = v91;
+                v2529 = v2516;
+            }
+            let v98 = if v96 < v97 { 1.0 } else { 0.0 };
+            let v103: f64;
+            let v2530: Lanes<1>;
+            if v98 != 0.0 {
+                v103 = v96;
+                v2530 = v2529;
+            } else {
+                let v100 = v2 + (v96 - v97);
+                let v2682 = v2529 * (v2515 / v100);
+                let v102 = v97 + (v100.ln());
+                v103 = v102;
+                v2530 = v2682;
+            }
+            let v104 = v15 + v103;
+            let v105 = v104 / v12;
+            let v2683 = v2530 / v12;
+            let v107 = v106 * v104;
+            let v2684 = v2530 * v106;
+            let v109 = v2 / v107;
+            let v2687 = ((v2684 * v109) * v2676) / v107;
+            let v111 = v109 - (v2 / (v106 * v12));
+            let v112 = v104 - v12;
+            let v113 = v105.ln();
+            let v2689 = v2683 * (v2515 / v105);
+            let v115 = v33 * v104;
+            let v117 = v104 + v36;
+            let v118 = (v115 * v104) / v117;
+            let v119 = v114 - v118;
+            let v2697 = (((((v2530 * v33) * v104) + (v2530 * v115)) - (v2530 * v118)) / v117) * v2676;
+            let v121 = (v119 - v40) / v42;
+            let v2698 = v2697 / v42;
+            let v122 = if v119 < v40 { 1.0 } else { 0.0 };
+            let v568: f64;
+            let v2531: Lanes<1>;
+            if v122 != 0.0 {
+                let v123 = v121.exp();
+                let v124 = v2 + v123;
+                let v2708 = ((v2698 * v123) * (v2515 / v124)) * v42;
+                let v127 = v40 + (v42 * (v124.ln()));
+                v568 = v127;
+                v2531 = v2708;
+            } else {
+                let v129 = (-v121).exp();
+                let v130 = v2 + v129;
+                let v133 = v119 + (v42 * (v130.ln()));
+                let v2704 = v2697 + ((((v2698 * v2676) * v129) * (v2515 / v130)) * v42);
+                v568 = v133;
+                v2531 = v2704;
+            }
+            let v135 = v65 * v104;
+            let v137 = v104 + v68;
+            let v138 = (v135 * v104) / v137;
+            let v139 = v134 - v138;
+            let v2716 = (((((v2530 * v65) * v104) + (v2530 * v135)) - (v2530 * v138)) / v137) * v2676;
+            let v141 = (v139 - v40) / v42;
+            let v2717 = v2716 / v42;
+            let v142 = if v139 < v40 { 1.0 } else { 0.0 };
+            let v592: f64;
+            let v2532: Lanes<1>;
+            if v142 != 0.0 {
+                let v143 = v141.exp();
+                let v144 = v2 + v143;
+                let v2727 = ((v2717 * v143) * (v2515 / v144)) * v42;
+                let v147 = v40 + (v42 * (v144.ln()));
+                v592 = v147;
+                v2532 = v2727;
+            } else {
+                let v149 = (-v141).exp();
+                let v150 = v2 + v149;
+                let v153 = v139 + (v42 * (v150.ln()));
+                let v2723 = v2716 + ((((v2717 * v2676) * v149) * (v2515 / v150)) * v42);
+                v592 = v153;
+                v2532 = v2723;
+            }
+            let v156 = v155 * v107;
+            let v160 = v2 - v105;
+            let v2734 = v2683 * v2676;
+            let v163 = ((v156 * v113) + (v57 * v105)) + (v160 * v161);
+            let v2736 = ((((v2684 * v155) * v113) + (v2689 * v156)) + (v2683 * v57)) + (v2734 * v161);
+            let v165 = (v40 - v163) / v107;
+            let v2740 = ((v2736 * v2676) - (v2684 * v165)) / v107;
+            let v166 = if v40 < v163 { 1.0 } else { 0.0 };
+            let v307: f64;
+            let v2533: Lanes<1>;
+            if v166 != 0.0 {
+                let v167 = v165.exp();
+                let v168 = v2 + v167;
+                let v169 = v168.ln();
+                let v171 = v163 + (v107 * v169);
+                let v2754 = v2736 + ((v2684 * v169) + (((v2740 * v167) * (v2515 / v168)) * v107));
+                v307 = v171;
+                v2533 = v2754;
+            } else {
+                let v173 = (-v165).exp();
+                let v174 = v2 + v173;
+                let v175 = v174.ln();
+                let v2747 = (v2684 * v175) + ((((v2740 * v2676) * v173) * (v2515 / v174)) * v107);
+                let v177 = v40 + (v107 * v175);
+                v307 = v177;
+                v2533 = v2747;
+            }
+            let v179 = v178 * v107;
+            let v185 = v160 * v184;
+            let v2761 = v2734 * v184;
+            let v186 = ((v179 * v113) + (v181 * v105)) + v185;
+            let v2762 = ((((v2684 * v178) * v113) + (v2689 * v179)) + (v2683 * v181)) + v2761;
+            let v188 = (v40 - v186) / v107;
+            let v2766 = ((v2762 * v2676) - (v2684 * v188)) / v107;
+            let v189 = if v40 < v186 { 1.0 } else { 0.0 };
+            let v820: f64;
+            let v2534: Lanes<1>;
+            if v189 != 0.0 {
+                let v190 = v188.exp();
+                let v191 = v2 + v190;
+                let v192 = v191.ln();
+                let v194 = v186 + (v107 * v192);
+                let v2780 = v2762 + ((v2684 * v192) + (((v2766 * v190) * (v2515 / v191)) * v107));
+                v820 = v194;
+                v2534 = v2780;
+            } else {
+                let v196 = (-v188).exp();
+                let v197 = v2 + v196;
+                let v198 = v197.ln();
+                let v2773 = (v2684 * v198) + ((((v2766 * v2676) * v196) * (v2515 / v197)) * v107);
+                let v200 = v40 + (v107 * v198);
+                v820 = v200;
+                v2534 = v2773;
+            }
+            let v202 = v201 * v107;
+            let v207 = ((v202 * v113) + (v204 * v105)) + v185;
+            let v2787 = ((((v2684 * v201) * v113) + (v2689 * v202)) + (v2683 * v204)) + v2761;
+            let v209 = (v40 - v207) / v107;
+            let v2791 = ((v2787 * v2676) - (v2684 * v209)) / v107;
+            let v210 = if v40 < v207 { 1.0 } else { 0.0 };
+            let v2192: f64;
+            let v2535: Lanes<1>;
+            if v210 != 0.0 {
+                let v211 = v209.exp();
+                let v212 = v2 + v211;
+                let v213 = v212.ln();
+                let v215 = v207 + (v107 * v213);
+                let v2805 = v2787 + ((v2684 * v213) + (((v2791 * v211) * (v2515 / v212)) * v107));
+                v2192 = v215;
+                v2535 = v2805;
+            } else {
+                let v217 = (-v209).exp();
+                let v218 = v2 + v217;
+                let v219 = v218.ln();
+                let v2798 = (v2684 * v219) + ((((v2791 * v2676) * v217) * (v2515 / v218)) * v107);
+                let v221 = v40 + (v107 * v219);
+                v2192 = v221;
+                v2535 = v2798;
+            }
+            let v223 = v222 * v107;
+            let v225 = v59 * v105;
+            let v2810 = v2683 * v59;
+            let v227 = ((v223 * v113) + v225) + v185;
+            let v2812 = ((((v2684 * v222) * v113) + (v2689 * v223)) + v2810) + v2761;
+            let v229 = (v40 - v227) / v107;
+            let v2816 = ((v2812 * v2676) - (v2684 * v229)) / v107;
+            let v230 = if v40 < v227 { 1.0 } else { 0.0 };
+            let v325: f64;
+            let v2536: Lanes<1>;
+            if v230 != 0.0 {
+                let v231 = v229.exp();
+                let v232 = v2 + v231;
+                let v233 = v232.ln();
+                let v235 = v227 + (v107 * v233);
+                let v2830 = v2812 + ((v2684 * v233) + (((v2816 * v231) * (v2515 / v232)) * v107));
+                v325 = v235;
+                v2536 = v2830;
+            } else {
+                let v237 = (-v229).exp();
+                let v238 = v2 + v237;
+                let v239 = v238.ln();
+                let v2823 = (v2684 * v239) + ((((v2816 * v2676) * v237) * (v2515 / v238)) * v107);
+                let v241 = v40 + (v107 * v239);
+                v325 = v241;
+                v2536 = v2823;
+            }
+            let v243 = v242 * v107;
+            let v246 = ((v243 * v113) + v225) + v185;
+            let v2836 = ((((v2684 * v242) * v113) + (v2689 * v243)) + v2810) + v2761;
+            let v248 = (v40 - v246) / v107;
+            let v2840 = ((v2836 * v2676) - (v2684 * v248)) / v107;
+            let v249 = if v40 < v246 { 1.0 } else { 0.0 };
+            let v309: f64;
+            let v2537: Lanes<1>;
+            if v249 != 0.0 {
+                let v250 = v248.exp();
+                let v251 = v2 + v250;
+                let v252 = v251.ln();
+                let v254 = v246 + (v107 * v252);
+                let v2854 = v2836 + ((v2684 * v252) + (((v2840 * v250) * (v2515 / v251)) * v107));
+                v309 = v254;
+                v2537 = v2854;
+            } else {
+                let v256 = (-v248).exp();
+                let v257 = v2 + v256;
+                let v258 = v257.ln();
+                let v2847 = (v2684 * v258) + ((((v2840 * v2676) * v256) * (v2515 / v257)) * v107);
+                let v260 = v40 + (v107 * v258);
+                v309 = v260;
+                v2537 = v2847;
+            }
+            let v262 = v261 * v107;
+            let v269 = ((v262 * v113) + (v264 * v105)) + (v160 * v267);
+            let v2862 = ((((v2684 * v261) * v113) + (v2689 * v262)) + (v2683 * v264)) + (v2734 * v267);
+            let v271 = (v40 - v269) / v107;
+            let v2866 = ((v2862 * v2676) - (v2684 * v271)) / v107;
+            let v272 = if v40 < v269 { 1.0 } else { 0.0 };
+            let v1224: f64;
+            let v2538: Lanes<1>;
+            if v272 != 0.0 {
+                let v273 = v271.exp();
+                let v274 = v2 + v273;
+                let v275 = v274.ln();
+                let v277 = v269 + (v107 * v275);
+                let v2880 = v2862 + ((v2684 * v275) + (((v2866 * v273) * (v2515 / v274)) * v107));
+                v1224 = v277;
+                v2538 = v2880;
+            } else {
+                let v279 = (-v271).exp();
+                let v280 = v2 + v279;
+                let v281 = v280.ln();
+                let v2873 = (v2684 * v281) + ((((v2866 * v2676) * v279) * (v2515 / v280)) * v107);
+                let v283 = v40 + (v107 * v281);
+                v1224 = v283;
+                v2538 = v2873;
+            }
+            let v285 = v284 * v107;
+            let v292 = ((v285 * v113) + (v287 * v105)) + (v160 * v290);
+            let v2888 = ((((v2684 * v284) * v113) + (v2689 * v285)) + (v2683 * v287)) + (v2734 * v290);
+            let v294 = (v40 - v292) / v107;
+            let v2892 = ((v2888 * v2676) - (v2684 * v294)) / v107;
+            let v295 = if v40 < v292 { 1.0 } else { 0.0 };
+            let v318: f64;
+            let v2539: Lanes<1>;
+            if v295 != 0.0 {
+                let v296 = v294.exp();
+                let v297 = v2 + v296;
+                let v298 = v297.ln();
+                let v300 = v292 + (v107 * v298);
+                let v2906 = v2888 + ((v2684 * v298) + (((v2892 * v296) * (v2515 / v297)) * v107));
+                v318 = v300;
+                v2539 = v2906;
+            } else {
+                let v302 = (-v294).exp();
+                let v303 = v2 + v302;
+                let v304 = v303.ln();
+                let v2899 = (v2684 * v304) + ((((v2892 * v2676) * v302) * (v2515 / v303)) * v107);
+                let v306 = v40 + (v107 * v304);
+                v318 = v306;
+                v2539 = v2899;
+            }
+            let v308 = v2 / v307;
+            let v2909 = ((v2533 * v308) * v2676) / v307;
+            let v310 = v2 / v309;
+            let v2912 = ((v2537 * v310) * v2676) / v309;
+            let v311 = v57 * v308;
+            let v312 = v311.powf(v28);
+            let v2917 = (v2909 * v57) * (v28 * (v311.powf((v28 - v2515))));
+            let v313 = v59 * v310;
+            let v314 = v313.powf(v60);
+            let v2919 = v60 - v2515;
+            let v2922 = (v2912 * v59) * (v60 * (v313.powf(v2919)));
+            let v316 = v315 * v312;
+            let v2923 = v2917 * v315;
+            let v319 = v287 / v318;
+            let v322 = v317 * (v319.powf(v320));
+            let v2931 = ((((v2539 * v319) * v2676) / v318) * (v320 * (v319.powf((v320 - v2515))))) * v317;
+            let v324 = v2 - v323;
+            let v326 = v59 / v325;
+            let v2938 = ((((v2536 * v326) * v2676) / v325) * (v60 * (v326.powf(v2919)))) * v324;
+            let v329 = (v324 * (v326.powf(v60))) + v323;
+            let v330 = v2 / v329;
+            let v2941 = ((v2938 * v330) * v2676) / v329;
+            let v332 = v331 * v329;
+            let v2942 = v2938 * v331;
+            let v333 = v323 * v330;
+            let v2943 = v2941 * v323;
+            let v337 = (v113 * v335).exp();
+            let v338 = v334 * v337;
+            let v2946 = ((v2689 * v335) * v337) * v334;
+            let v339 = if v338 < v22 { 1.0 } else { 0.0 };
+            let v1927: f64;
+            let v2540: Lanes<1>;
+            if v339 != 0.0 {
+                v1927 = v22;
+                v2540 = v2947;
+            } else {
+                v1927 = v338;
+                v2540 = v2946;
+            }
+            let v343 = v341 - v342;
+            let v345 = (v113 * v343).exp();
+            let v346 = v340 * v345;
+            let v2950 = ((v2689 * v343) * v345) * v340;
+            let v350 = (v113 * v348).exp();
+            let v351 = v347 * v350;
+            let v2953 = ((v2689 * v348) * v350) * v347;
+            let v352 = if v351 < v22 { 1.0 } else { 0.0 };
+            let v1920: f64;
+            let v2541: Lanes<1>;
+            if v352 != 0.0 {
+                v1920 = v22;
+                v2541 = v2947;
+            } else {
+                v1920 = v351;
+                v2541 = v2953;
+            }
+            let v356 = (v113 * v354).exp();
+            let v357 = v353 * v356;
+            let v2956 = ((v2689 * v354) * v356) * v353;
+            let v361 = (v113 * v359).exp();
+            let v2958 = (v2689 * v359) * v361;
+            let v362 = v358 * v361;
+            let v2959 = v2958 * v358;
+            let v364 = v363 * v361;
+            let v2960 = v2958 * v363;
+            let v368 = (v113 * v366).exp();
+            let v369 = v365 * v368;
+            let v2963 = ((v2689 * v366) * v368) * v365;
+            let v371 = if v370 != v0 { 1.0 } else { 0.0 };
+            let v441: f64;
+            let v2542: Lanes<1>;
+            if v371 != 0.0 {
+                let v375 = v372 * (v2 + (v112 * v370));
+                let v2965 = (v2530 * v370) * v372;
+                let v377 = (v375 - v2) / v26;
+                let v2966 = v2965 / v26;
+                let v378 = if v375 < v2 { 1.0 } else { 0.0 };
+                let v390: f64;
+                let v2543: Lanes<1>;
+                if v378 != 0.0 {
+                    let v379 = v377.exp();
+                    let v380 = v2 + v379;
+                    let v2976 = ((v2966 * v379) * (v2515 / v380)) * v26;
+                    let v383 = v2 + (v26 * (v380.ln()));
+                    v390 = v383;
+                    v2543 = v2976;
+                } else {
+                    let v385 = (-v377).exp();
+                    let v386 = v2 + v385;
+                    let v389 = v375 + (v26 * (v386.ln()));
+                    let v2972 = v2965 + ((((v2966 * v2676) * v385) * (v2515 / v386)) * v26);
+                    v390 = v389;
+                    v2543 = v2972;
+                }
+                let v392 = v390 - v391;
+                v441 = v392;
+                v2542 = v2543;
+            } else {
+                v441 = v372;
+                v2542 = v2947;
+            }
+            let v394 = if v393 != v0 { 1.0 } else { 0.0 };
+            let v1119: f64;
+            let v2544: Lanes<1>;
+            if v394 != 0.0 {
+                let v398 = v395 * (v2 + (v112 * v393));
+                let v2978 = (v2530 * v393) * v395;
+                let v400 = (v398 - v2) / v26;
+                let v2979 = v2978 / v26;
+                let v401 = if v398 < v2 { 1.0 } else { 0.0 };
+                let v413: f64;
+                let v2545: Lanes<1>;
+                if v401 != 0.0 {
+                    let v402 = v400.exp();
+                    let v403 = v2 + v402;
+                    let v2989 = ((v2979 * v402) * (v2515 / v403)) * v26;
+                    let v406 = v2 + (v26 * (v403.ln()));
+                    v413 = v406;
+                    v2545 = v2989;
+                } else {
+                    let v408 = (-v400).exp();
+                    let v409 = v2 + v408;
+                    let v412 = v398 + (v26 * (v409.ln()));
+                    let v2985 = v2978 + ((((v2979 * v2676) * v408) * (v2515 / v409)) * v26);
+                    v413 = v412;
+                    v2545 = v2985;
+                }
+                let v415 = v413 - v414;
+                v1119 = v415;
+                v2544 = v2545;
+            } else {
+                v1119 = v395;
+                v2544 = v2947;
+            }
+            let v420 = v416 * (v2 + (v417 * v112));
+            let v2991 = (v2530 * v417) * v416;
+            let v422 = v420 * v420;
+            let v2992 = v2991 * v420;
+            let v2993 = v2992 + v2992;
+            let v423 = if v420 < v0 { 1.0 } else { 0.0 };
+            let v1763: f64;
+            let v2546: Lanes<1>;
+            if v423 != 0.0 {
+                let v427 = (v422 + v421).sqrt();
+                let v428 = v427 - v420;
+                let v429 = v425 / v428;
+                let v3006 = ((((v2993 * (v2515 / (v2994 * v427))) - v2991) * v429) * v2676) / v428;
+                v1763 = v429;
+                v2546 = v3006;
+            } else {
+                let v431 = (v422 + v421).sqrt();
+                let v433 = v424 * (v431 + v420);
+                let v2999 = ((v2993 * (v2515 / (v2994 * v431))) + v2991) * v424;
+                v1763 = v433;
+                v2546 = v2999;
+            }
+            let v439 = ((v435 - v341) - v342) + v438;
+            let v442 = (v113 * v439) / v441;
+            let v443 = v442.exp();
+            let v444 = v434 * v443;
+            let v445 = -v161;
+            let v447 = (v445 * v111) / v441;
+            let v448 = v447.exp();
+            let v449 = v444 * v448;
+            let v3020 = ((((((v2689 * v439) - (v2542 * v442)) / v441) * v443) * v434) * v448) + (((((v2687 * v445) - (v2542 * v447)) / v441) * v448) * v444);
+            let v451 = v2 - v341;
+            let v453 = (v113 * v451).exp();
+            let v454 = v450 * v453;
+            let v3023 = ((v2689 * v451) * v453) * v450;
+            let v457 = v2 - v456;
+            let v459 = (v113 * v457).exp();
+            let v460 = v455 * v459;
+            let v3026 = ((v2689 * v457) * v459) * v455;
+            let v465 = v462 - (v27 * v463);
+            let v467 = (v113 * v465).exp();
+            let v468 = v461 * v467;
+            let v470 = -v469;
+            let v471 = v470 * v111;
+            let v3030 = v2687 * v470;
+            let v473 = (v471 / v463).exp();
+            let v474 = v468 * v473;
+            let v3035 = ((((v2689 * v465) * v467) * v461) * v473) + (((v3030 / v463) * v473) * v468);
+            let v478 = v462 - (v27 * v476);
+            let v480 = (v113 * v478).exp();
+            let v481 = v475 * v480;
+            let v482 = -v184;
+            let v485 = ((v482 * v111) / v476).exp();
+            let v486 = v481 * v485;
+            let v3044 = ((((v2689 * v478) * v480) * v475) * v485) + ((((v2687 * v482) / v476) * v485) * v481);
+            let v489 = (v435 - v335) + v438;
+            let v490 = v113 * v489;
+            let v3045 = v2689 * v489;
+            let v493 = (v490 / v491).exp();
+            let v494 = v487 * v493;
+            let v496 = -v495;
+            let v497 = v496 * v111;
+            let v3049 = v2687 * v496;
+            let v499 = (v497 / v491).exp();
+            let v500 = v494 * v499;
+            let v3054 = ((((v3045 / v491) * v493) * v487) * v499) + (((v3049 / v491) * v499) * v494);
+            let v504 = (v490 / v502).exp();
+            let v505 = v501 * v504;
+            let v507 = (v497 / v502).exp();
+            let v508 = v505 * v507;
+            let v3062 = ((((v3045 / v502) * v504) * v501) * v507) + (((v3049 / v502) * v507) * v505);
+            let v510 = if v509 == v2 { 1.0 } else { 0.0 };
+            let v1246: f64;
+            let v1259: f64;
+            let v1301: f64;
+            let v2547: Lanes<1>;
+            let v2548: Lanes<1>;
+            let v2549: Lanes<1>;
+            if v510 != 0.0 {
+                let v513 = -v512;
+                let v516 = ((v513 * v111) / v491).exp();
+                let v517 = v511 * v516;
+                let v3066 = (((v2687 * v513) / v491) * v516) * v511;
+                let v520 = -v519;
+                let v522 = (v520 * v111).exp();
+                let v523 = v518 * v522;
+                let v3069 = ((v2687 * v520) * v522) * v518;
+                let v526 = -v525;
+                let v529 = ((v526 * v111) / v502).exp();
+                let v530 = v524 * v529;
+                let v3073 = (((v2687 * v526) / v502) * v529) * v524;
+                v1246 = v517;
+                v1259 = v523;
+                v1301 = v530;
+                v2547 = v3066;
+                v2548 = v3069;
+                v2549 = v3073;
+            } else {
+                v1246 = v0;
+                v1259 = v0;
+                v1301 = v0;
+                v2547 = v2947;
+                v2548 = v2947;
+                v2549 = v2947;
+            }
+            let v533 = (v435 - v456) + v438;
+            let v535 = (v113 * v533).exp();
+            let v536 = v531 * v535;
+            let v538 = -v537;
+            let v540 = (v538 * v111).exp();
+            let v541 = v536 * v540;
+            let v3081 = ((((v2689 * v533) * v535) * v531) * v540) + (((v2687 * v538) * v540) * v536);
+            let v545 = v462 - (v27 * v543);
+            let v547 = (v113 * v545).exp();
+            let v548 = v542 * v547;
+            let v550 = (v471 / v543).exp();
+            let v551 = v548 * v550;
+            let v3089 = ((((v2689 * v545) * v547) * v542) * v550) + (((v3030 / v543) * v550) * v548);
+            let v554 = v435 / v553;
+            let v556 = (v113 * v554).exp();
+            let v557 = v552 * v556;
+            let v559 = (v471 / v553).exp();
+            let v560 = v557 * v559;
+            let v3097 = ((((v2689 * v554) * v556) * v552) * v559) + (((v3030 / v553) * v559) * v557);
+            let v562 = v105.sqrt();
+            let v563 = v561 * v562;
+            let v566 = (v564 * v112).exp();
+            let v567 = v563 * v566;
+            let v3106 = (((v2683 * (v2515 / (v2994 * v562))) * v561) * v566) + (((v2530 * v564) * v566) * v563);
+            let v569 = v568 * v56;
+            let v571 = v569.powf(v570);
+            let v3111 = (v2531 * v56) * (v570 * (v569.powf(v3108)));
+            let v572 = v2 / v312;
+            let v3114 = ((v2917 * v572) * v2676) / v312;
+            let v574 = v573 * v568;
+            let v575 = v574 * v568;
+            let v576 = v575 * v571;
+            let v578 = (v576 * v572) * v57;
+            let v581 = ((v578 * v308) * v56) * v56;
+            let v3130 = (((((((((((v2531 * v573) * v568) + (v2531 * v574)) * v571) + (v3111 * v575)) * v572) + (v3114 * v576)) * v57) * v308) + (v2909 * v578)) * v56) * v56;
+            let v583 = v582 * v571;
+            let v584 = v583 * v307;
+            let v587 = ((v584 * v307) * v58) * v58;
+            let v588 = v587 * v312;
+            let v590 = (v573 - v581).exp();
+            let v591 = v588 * v590;
+            let v3147 = ((((((((((v3111 * v582) * v307) + (v2533 * v583)) * v307) + (v2533 * v584)) * v58) * v58) * v312) + (v2917 * v587)) * v590) + (((v3130 * v2676) * v590) * v588);
+            let v593 = v592 * v86;
+            let v595 = v593.powf(v594);
+            let v3152 = (v2532 * v86) * (v594 * (v593.powf(v3149)));
+            let v596 = v2 / v314;
+            let v598 = v597 * v592;
+            let v599 = v598 * v592;
+            let v600 = v599 * v595;
+            let v602 = (v600 * v596) * v59;
+            let v605 = ((v602 * v310) * v86) * v86;
+            let v3171 = (((((((((((v2532 * v597) * v592) + (v2532 * v598)) * v595) + (v3152 * v599)) * v596) + ((((v2922 * v596) * v2676) / v314) * v600)) * v59) * v310) + (v2912 * v602)) * v86) * v86;
+            let v607 = v606 * v595;
+            let v608 = v607 * v309;
+            let v611 = ((v608 * v309) * v87) * v87;
+            let v612 = v611 * v314;
+            let v614 = (v597 - v605).exp();
+            let v615 = v612 * v614;
+            let v3188 = ((((((((((v3152 * v606) * v309) + (v2537 * v607)) * v309) + (v2537 * v608)) * v87) * v87) * v314) + (v2922 * v611)) * v614) + (((v3171 * v2676) * v614) * v612);
+            let v617 = (v113 * v342).exp();
+            let v3190 = (v2689 * v342) * v617;
+            let v619 = v618 * v617;
+            let v620 = v619 * v330;
+            let v3194 = ((v3190 * v618) * v330) + (v2941 * v619);
+            let v622 = v621 * v617;
+            let v623 = v622 * v572;
+            let v3198 = ((v3190 * v621) * v572) + (v3114 * v622);
+            let v626 = v435 - v625;
+            let v628 = (v113 * v626).exp();
+            let v629 = v624 * v628;
+            let v630 = -v290;
+            let v632 = (v630 * v111).exp();
+            let v3203 = (v2687 * v630) * v632;
+            let v633 = v629 * v632;
+            let v3206 = ((((v2689 * v626) * v628) * v624) * v632) + (v3203 * v629);
+            let v637 = v634 - (v424 * v635);
+            let v639 = (v113 * v637).exp();
+            let v640 = v24 * v639;
+            let v641 = v640 * v632;
+            let v3212 = ((((v2689 * v637) * v639) * v24) * v632) + (v3203 * v640);
+            let v643 = v2 - v625;
+            let v645 = (v113 * v643).exp();
+            let v646 = v642 * v645;
+            let v3215 = ((v2689 * v643) * v645) * v642;
+            let v648 = v2 - v635;
+            let v650 = (v113 * v648).exp();
+            let v651 = v647 * v650;
+            let v3218 = ((v2689 * v648) * v650) * v647;
+            let v653 = v341 - v27;
+            let v655 = (v113 * v653).exp();
+            let v656 = v652 * v655;
+            let v658 = -v657;
+            let v660 = (v658 * v111).exp();
+            let v661 = v656 * v660;
+            let v3226 = ((((v2689 * v653) * v655) * v652) * v660) + (((v2687 * v658) * v660) * v656);
+            let v664 = (v342 + v341) - v2;
+            let v666 = (v113 * v664).exp();
+            let v667 = v662 * v666;
+            let v3229 = ((v2689 * v664) * v666) * v662;
+            let v669 = v366 - v2;
+            let v671 = (v113 * v669).exp();
+            let v672 = v668 * v671;
+            let v3232 = ((v2689 * v669) * v671) * v668;
+            let v674 = v667 + v672;
+            let v3233 = v3229 + v3232;
+            let v676 = v662 + v668;
+            let v677 = (v673 * v674) / v676;
+            let v3235 = (v3233 * v673) / v676;
+            let v680 = v679 - v2;
+            let v682 = (v113 * v680).exp();
+            let v683 = v678 * v682;
+            let v3238 = ((v2689 * v680) * v682) * v678;
+            let v685 = v104 - v684;
+            let v687 = if v104 < v686 { 1.0 } else { 0.0 };
+            let v1845: f64;
+            let v2550: Lanes<1>;
+            if v687 != 0.0 {
+                let v693 = v692 * v685;
+                let v696 = v688 * ((v2 + (v689 * v685)) - (v693 * v685));
+                let v3245 = ((v2530 * v689) - (((v2530 * v692) * v685) + (v2530 * v693))) * v688;
+                v1845 = v696;
+                v2550 = v3245;
+            } else {
+                let v698 = v688 * v697;
+                v1845 = v698;
+                v2550 = v2947;
+            }
+            let v700 = v699 * v617;
+            let v3246 = v3190 * v699;
+            let v705 = v701 * ((v15 / v12).powf(v703));
+            let v706 = if v353 > v0 { 1.0 } else { 0.0 };
+            let v1970: f64;
+            let v2551: Lanes<1>;
+            if v706 != 0.0 {
+                let v707 = v2 / v357;
+                let v3249 = ((v2956 * v707) * v2676) / v357;
+                let v708 = if v707 > v23 { 1.0 } else { 0.0 };
+                let v1971: f64;
+                let v2552: Lanes<1>;
+                if v708 != 0.0 {
+                    v1971 = v23;
+                    v2552 = v2947;
+                } else {
+                    v1971 = v707;
+                    v2552 = v3249;
+                }
+                v1970 = v1971;
+                v2551 = v2552;
+            } else {
+                v1970 = v0;
+                v2551 = v2947;
+            }
+            let v709 = if v358 > v0 { 1.0 } else { 0.0 };
+            let v1975: f64;
+            let v2553: Lanes<1>;
+            if v709 != 0.0 {
+                let v710 = v2 / v362;
+                let v3252 = ((v2959 * v710) * v2676) / v362;
+                let v711 = if v710 > v23 { 1.0 } else { 0.0 };
+                let v1976: f64;
+                let v2554: Lanes<1>;
+                if v711 != 0.0 {
+                    v1976 = v23;
+                    v2554 = v2947;
+                } else {
+                    v1976 = v710;
+                    v2554 = v3252;
+                }
+                v1975 = v1976;
+                v2553 = v2554;
+            } else {
+                v1975 = v0;
+                v2553 = v2947;
+            }
+            let v712 = if v363 > v0 { 1.0 } else { 0.0 };
+            let v1980: f64;
+            let v2555: Lanes<1>;
+            if v712 != 0.0 {
+                let v713 = v2 / v364;
+                let v3255 = ((v2960 * v713) * v2676) / v364;
+                let v714 = if v713 > v23 { 1.0 } else { 0.0 };
+                let v1981: f64;
+                let v2556: Lanes<1>;
+                if v714 != 0.0 {
+                    v1981 = v23;
+                    v2556 = v2947;
+                } else {
+                    v1981 = v713;
+                    v2556 = v3255;
+                }
+                v1980 = v1981;
+                v2555 = v2556;
+            } else {
+                v1980 = v0;
+                v2555 = v2947;
+            }
+            let v718 = v1 * (v715 - v716);
+            let v3259 = ((Lanes([v2517[0], 0.0])) - (Lanes([0.0, v2518[0]]))) * v1;
+            let v721 = v1 * (v715 - v719);
+            let v3263 = ((Lanes([v2517[0], 0.0])) - (Lanes([0.0, v2519[0]]))) * v1;
+            let v724 = v1 * (v715 - v722);
+            let v3267 = ((Lanes([0.0, v2517[0]])) - (Lanes([v2520[0], 0.0]))) * v1;
+            let v727 = v1 * (v725 - v722);
+            let v3271 = ((Lanes([0.0, v2521[0]])) - (Lanes([v2520[0], 0.0]))) * v1;
+            let v729 = v1 * (v725 - v715);
+            let v3275 = ((Lanes([v2521[0], 0.0])) - (Lanes([0.0, v2517[0]]))) * v1;
+            let v732 = v1 * (v730 - v716);
+            let v3279 = ((Lanes([v2522[0], 0.0])) - (Lanes([0.0, v2518[0]]))) * v1;
+            let v734 = v1 * (v716 - v719);
+            let v3283 = ((Lanes([v2518[0], 0.0])) - (Lanes([0.0, v2519[0]]))) * v1;
+            let v737 = v1 * (v735 - v722);
+            let v3287 = ((Lanes([v2523[0], 0.0])) - (Lanes([0.0, v2520[0]]))) * v1;
+            let v740 = v1 * (v738 - v725);
+            let v3291 = ((Lanes([v2524[0], 0.0])) - (Lanes([0.0, v2521[0]]))) * v1;
+            let v742 = v1 * (v738 - v735);
+            let v3295 = ((Lanes([v2524[0], 0.0])) - (Lanes([0.0, v2523[0]]))) * v1;
+            let v745 = v1 * (v738 - v743);
+            let v3299 = ((Lanes([0.0, v2524[0]])) - (Lanes([v2525[0], 0.0]))) * v1;
+            let v748 = v1 * (v746 - v716);
+            let v3303 = ((Lanes([0.0, v2526[0]])) - (Lanes([v2518[0], 0.0]))) * v1;
+            let v751 = v1 * (v749 - v746);
+            let v3307 = ((Lanes([v2527[0], 0.0])) - (Lanes([0.0, v2526[0]]))) * v1;
+            let v3310 = (Lanes([v3275[0], v3275[1], 0.0])) + (Lanes([0.0, v3263[0], v3263[1]]));
+            let v3313 = (Lanes([v3310[0], v3310[1], 0.0, v3310[2]])) - (Lanes([0.0, 0.0, v3283[0], v3283[1]]));
+            let v754 = ((v729 + v721) - v734) - v748;
+            let v3316 = (Lanes([v3313[0], v3313[1], v3313[2], v3313[3], 0.0])) - (Lanes([0.0, 0.0, v3303[0], 0.0, v3303[1]]));
+            let v3317 = v3299 * v2676;
+            let v3320 = (Lanes([v3317[0], v3317[1], 0.0])) + (Lanes([0.0, v3291[0], v3291[1]]));
+            let v3323 = (Lanes([v3320[0], v3320[1], v3320[2], 0.0, 0.0, 0.0, 0.0])) + (Lanes([0.0, 0.0, v3316[0], v3316[1], v3316[2], v3316[3], v3316[4]]));
+            let v758 = (((-v745) + v740) + v754) - v751;
+            let v3326 = (Lanes([v3323[0], v3323[1], v3323[2], v3323[3], v3323[4], v3323[5], 0.0, v3323[6]])) - (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, v3307[0], v3307[1]]));
+            let v759 = v745 + v758;
+            let v3328 = (Lanes([v3299[0], v3299[1], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + v3326;
+            let v760 = v732 - v748;
+            let v3331 = (Lanes([v3279[0], v3279[1], 0.0])) - (Lanes([0.0, v3303[0], v3303[1]]));
+            let v761 = v760 - v751;
+            let v3334 = (Lanes([v3331[0], v3331[1], 0.0, v3331[2]])) - (Lanes([0.0, 0.0, v3307[0], v3307[1]]));
+            let v762 = v721 * v109;
+            let v3335 = v3263 * v109;
+            let v3336 = v2687 * v721;
+            let v3339 = (Lanes([0.0, v3335[0], v3335[1]])) + (Lanes([v3336[0], 0.0, 0.0]));
+            let v764 = if v762 < v763 { 1.0 } else { 0.0 };
+            let v1007: f64;
+            let v2557: Lanes<3>;
+            if v764 != 0.0 {
+                let v765 = v762.exp();
+                let v3341 = v3339 * v765;
+                v1007 = v765;
+                v2557 = v3341;
+            } else {
+                let v766 = v763.exp();
+                let v769 = v766 * (v2 + (v762 - v763));
+                let v3340 = v3339 * v766;
+                v1007 = v769;
+                v2557 = v3340;
+            }
+            let v770 = v724 * v109;
+            let v3342 = v3267 * v109;
+            let v3343 = v2687 * v724;
+            let v3346 = (Lanes([0.0, v3342[0], v3342[1]])) + (Lanes([v3343[0], 0.0, 0.0]));
+            let v771 = v770 / v441;
+            let v3347 = v2542 * v771;
+            let v3350 = (v3346 - (Lanes([v3347[0], 0.0, 0.0]))) / v441;
+            let v772 = if v771 < v763 { 1.0 } else { 0.0 };
+            let v1112: f64;
+            let v2558: Lanes<3>;
+            if v772 != 0.0 {
+                let v773 = v771.exp();
+                let v3352 = v3350 * v773;
+                v1112 = v773;
+                v2558 = v3352;
+            } else {
+                let v774 = v763.exp();
+                let v777 = v774 * (v2 + (v771 - v763));
+                let v3351 = v3350 * v774;
+                v1112 = v777;
+                v2558 = v3351;
+            }
+            let v778 = v754 * v109;
+            let v3353 = v3316 * v109;
+            let v3354 = v2687 * v754;
+            let v3357 = (Lanes([0.0, v3353[0], v3353[1], v3353[2], v3353[3], v3353[4]])) + (Lanes([v3354[0], 0.0, 0.0, 0.0, 0.0, 0.0]));
+            let v779 = if v778 < v763 { 1.0 } else { 0.0 };
+            let v1498: f64;
+            let v2559: Lanes<6>;
+            if v779 != 0.0 {
+                let v780 = v778.exp();
+                let v3359 = v3357 * v780;
+                v1498 = v780;
+                v2559 = v3359;
+            } else {
+                let v781 = v763.exp();
+                let v784 = v781 * (v2 + (v778 - v763));
+                let v3358 = v3357 * v781;
+                v1498 = v784;
+                v2559 = v3358;
+            }
+            let v785 = v729 * v109;
+            let v3360 = v3275 * v109;
+            let v3361 = v2687 * v729;
+            let v3364 = (Lanes([0.0, v3360[0], v3360[1]])) + (Lanes([v3361[0], 0.0, 0.0]));
+            let v786 = if v785 < v763 { 1.0 } else { 0.0 };
+            let v1741: f64;
+            let v2560: Lanes<3>;
+            if v786 != 0.0 {
+                let v787 = v785.exp();
+                let v3366 = v3364 * v787;
+                v1741 = v787;
+                v2560 = v3366;
+            } else {
+                let v788 = v763.exp();
+                let v791 = v788 * (v2 + (v785 - v763));
+                let v3365 = v3364 * v788;
+                v1741 = v791;
+                v2560 = v3365;
+            }
+            let v792 = v759 * v109;
+            let v3367 = v3328 * v109;
+            let v3368 = v2687 * v759;
+            let v3371 = (Lanes([v3367[0], v3367[1], 0.0, v3367[2], v3367[3], v3367[4], v3367[5], v3367[6], v3367[7]])) + (Lanes([0.0, 0.0, v3368[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+            let v793 = if v792 < v763 { 1.0 } else { 0.0 };
+            let v1595: f64;
+            let v2561: Lanes<9>;
+            if v793 != 0.0 {
+                let v794 = v792.exp();
+                let v3373 = v3371 * v794;
+                v1595 = v794;
+                v2561 = v3373;
+            } else {
+                let v795 = v763.exp();
+                let v798 = v795 * (v2 + (v792 - v763));
+                let v3372 = v3371 * v795;
+                v1595 = v798;
+                v2561 = v3372;
+            }
+            let v799 = v732 * v109;
+            let v3374 = v3279 * v109;
+            let v3375 = v2687 * v732;
+            let v3378 = (Lanes([v3374[0], 0.0, v3374[1]])) + (Lanes([0.0, v3375[0], 0.0]));
+            let v800 = if v799 < v763 { 1.0 } else { 0.0 };
+            let v1526: f64;
+            let v2562: Lanes<3>;
+            if v800 != 0.0 {
+                let v801 = v799.exp();
+                let v3380 = v3378 * v801;
+                v1526 = v801;
+                v2562 = v3380;
+            } else {
+                let v802 = v763.exp();
+                let v805 = v802 * (v2 + (v799 - v763));
+                let v3379 = v3378 * v802;
+                v1526 = v805;
+                v2562 = v3379;
+            }
+            let v806 = v761 * v109;
+            let v3381 = v3334 * v109;
+            let v3382 = v2687 * v761;
+            let v3385 = (Lanes([v3381[0], 0.0, v3381[1], v3381[2], v3381[3]])) + (Lanes([0.0, v3382[0], 0.0, 0.0, 0.0]));
+            let v807 = if v806 < v763 { 1.0 } else { 0.0 };
+            let v1607: f64;
+            let v2563: Lanes<5>;
+            if v807 != 0.0 {
+                let v808 = v806.exp();
+                let v3387 = v3385 * v808;
+                v1607 = v808;
+                v2563 = v3387;
+            } else {
+                let v809 = v763.exp();
+                let v812 = v809 * (v2 + (v806 - v763));
+                let v3386 = v3385 * v809;
+                v1607 = v812;
+                v2563 = v3386;
+            }
+            let v813 = v760 * v109;
+            let v3388 = v3331 * v109;
+            let v3389 = v2687 * v760;
+            let v3392 = (Lanes([v3388[0], 0.0, v3388[1], v3388[2]])) + (Lanes([0.0, v3389[0], 0.0, 0.0]));
+            let v814 = if v813 < v763 { 1.0 } else { 0.0 };
+            let v1542: f64;
+            let v2564: Lanes<4>;
+            if v814 != 0.0 {
+                let v815 = v813.exp();
+                let v3394 = v3392 * v815;
+                v1542 = v815;
+                v2564 = v3394;
+            } else {
+                let v816 = v763.exp();
+                let v819 = v816 * (v2 + (v813 - v763));
+                let v3393 = v3392 * v816;
+                v1542 = v819;
+                v2564 = v3393;
+            }
+            let v821 = v759 - v820;
+            let v3395 = Lanes([v3328[0], v3328[1], 0.0, v3328[2], v3328[3], v3328[4], v3328[5], v3328[6], v3328[7]]);
+            let v822 = v821 * v109;
+            let v3399 = v2687 * v821;
+            let v3401 = ((v3395 - (Lanes([0.0, 0.0, v2534[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))) * v109) + (Lanes([0.0, 0.0, v3399[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+            let v823 = if v822 < v763 { 1.0 } else { 0.0 };
+            let v2223: f64;
+            let v2565: Lanes<9>;
+            if v823 != 0.0 {
+                let v824 = v822.exp();
+                let v3403 = v3401 * v824;
+                v2223 = v824;
+                v2565 = v3403;
+            } else {
+                let v825 = v763.exp();
+                let v828 = v825 * (v2 + (v822 - v763));
+                let v3402 = v3401 * v825;
+                v2223 = v828;
+                v2565 = v3402;
+            }
+            let v829 = v754 - v820;
+            let v3404 = Lanes([0.0, v3316[0], v3316[1], v3316[2], v3316[3], v3316[4]]);
+            let v830 = v829 * v109;
+            let v3408 = v2687 * v829;
+            let v3410 = ((v3404 - (Lanes([v2534[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) * v109) + (Lanes([v3408[0], 0.0, 0.0, 0.0, 0.0, 0.0]));
+            let v831 = if v830 < v763 { 1.0 } else { 0.0 };
+            let v1500: f64;
+            let v2566: Lanes<6>;
+            if v831 != 0.0 {
+                let v832 = v830.exp();
+                let v3412 = v3410 * v832;
+                v1500 = v832;
+                v2566 = v3412;
+            } else {
+                let v833 = v763.exp();
+                let v836 = v833 * (v2 + (v830 - v763));
+                let v3411 = v3410 * v833;
+                v1500 = v836;
+                v2566 = v3411;
+            }
+            let v837 = v721 - v820;
+            let v838 = v837 * v109;
+            let v3417 = v2687 * v837;
+            let v3419 = (((Lanes([0.0, v3263[0], v3263[1]])) - (Lanes([v2534[0], 0.0, 0.0]))) * v109) + (Lanes([v3417[0], 0.0, 0.0]));
+            let v839 = if v838 < v763 { 1.0 } else { 0.0 };
+            let v853: f64;
+            let v2567: Lanes<3>;
+            if v839 != 0.0 {
+                let v840 = v838.exp();
+                let v3421 = v3419 * v840;
+                v853 = v840;
+                v2567 = v3421;
+            } else {
+                let v841 = v763.exp();
+                let v844 = v841 * (v2 + (v838 - v763));
+                let v3420 = v3419 * v841;
+                v853 = v844;
+                v2567 = v3420;
+            }
+            let v845 = v718 - v820;
+            let v3422 = Lanes([0.0, v3259[0], v3259[1]]);
+            let v3423 = Lanes([v2534[0], 0.0, 0.0]);
+            let v846 = v845 * v109;
+            let v3426 = v2687 * v845;
+            let v3428 = ((v3422 - v3423) * v109) + (Lanes([v3426[0], 0.0, 0.0]));
+            let v847 = if v846 < v763 { 1.0 } else { 0.0 };
+            let v857: f64;
+            let v2568: Lanes<3>;
+            if v847 != 0.0 {
+                let v848 = v846.exp();
+                let v3430 = v3428 * v848;
+                v857 = v848;
+                v2568 = v3430;
+            } else {
+                let v849 = v763.exp();
+                let v852 = v849 * (v2 + (v846 - v763));
+                let v3429 = v3428 * v849;
+                v857 = v852;
+                v2568 = v3429;
+            }
+            let v856 = (v2 + (v435 * v853)).sqrt();
+            let v3434 = (v2567 * v435) * (v2515 / (v2994 * v856));
+            let v860 = (v2 + (v435 * v857)).sqrt();
+            let v3438 = (v2568 * v435) * (v2515 / (v2994 * v860));
+            let v862 = v2 + v860;
+            let v863 = (v27 * v857) / v862;
+            let v3442 = ((v2568 * v27) - (v3438 * v863)) / v862;
+            let v865 = if v863 < v864 { 1.0 } else { 0.0 };
+            let v952: f64;
+            let v2569: Lanes<3>;
+            if v865 != 0.0 {
+                v952 = v864;
+                v2569 = v3443;
+            } else {
+                v952 = v863;
+                v2569 = v3442;
+            }
+            let v3444 = Lanes([v3434[0], v3434[1], 0.0, v3434[2]]);
+            let v867 = v856 + v2;
+            let v868 = v867 / v862;
+            let v3447 = v3438 * v868;
+            let v870 = (v856 - v860) - (v868.ln());
+            let v871 = v107 * v870;
+            let v3454 = v2684 * v870;
+            let v3457 = (Lanes([v3454[0], 0.0, 0.0, 0.0])) + (((v3444 - (Lanes([v3438[0], v3438[1], v3438[2], 0.0]))) - (((v3444 - (Lanes([v3447[0], v3447[1], v3447[2], 0.0]))) / v862) * (v2515 / v868))) * v107);
+            let v3458 = Lanes([0.0, 0.0, v3283[0], v3283[1]]);
+            let v873 = (v871 + v734) / v369;
+            let v3460 = v2963 * v873;
+            let v3463 = ((v3457 + v3458) - (Lanes([v3460[0], 0.0, 0.0, 0.0]))) / v369;
+            let v874 = if v873 > v0 { 1.0 } else { 0.0 };
+            let v1063: f64;
+            let v1076: f64;
+            let v1091: f64;
+            let v1118: f64;
+            let v1793: f64;
+            let v1829: f64;
+            let v2180: f64;
+            let v2570: Lanes<4>;
+            let v2571: Lanes<4>;
+            let v2572: Lanes<4>;
+            let v2573: Lanes<4>;
+            let v2574: Lanes<4>;
+            let v2575: Lanes<4>;
+            let v2576: Lanes<4>;
+            if v874 != 0.0 {
+                let v876 = if v718 < v875 { 1.0 } else { 0.0 };
+                let v889: f64;
+                let v2577: Lanes<2>;
+                if v876 != 0.0 {
+                    v889 = v718;
+                    v2577 = v3259;
+                } else {
+                    let v878 = v2 + (v718 - v875);
+                    let v3491 = v3259 * (v2515 / v878);
+                    let v880 = v875 + (v878.ln());
+                    v889 = v880;
+                    v2577 = v3491;
+                }
+                let v881 = v27 * v107;
+                let v882 = v424 * v873;
+                let v883 = v882 * v369;
+                let v3495 = v2963 * v882;
+                let v3497 = ((v3463 * v424) * v369) + (Lanes([v3495[0], 0.0, 0.0, 0.0]));
+                let v3499 = v2687 * v883;
+                let v885 = (v883 * v109) + v2;
+                let v886 = v885.ln();
+                let v3504 = (v2684 * v27) * v886;
+                let v890 = (v820 + (v881 * v886)) - v889;
+                let v3511 = ((Lanes([v2534[0], 0.0, 0.0, 0.0])) + ((Lanes([v3504[0], 0.0, 0.0, 0.0])) + ((((v3497 * v109) + (Lanes([v3499[0], 0.0, 0.0, 0.0]))) * (v2515 / v885)) * v881))) - (Lanes([0.0, v2577[0], v2577[1], 0.0]));
+                let v892 = v891 * v820;
+                let v893 = v892 * v892;
+                let v3513 = (v2534 * v891) * v892;
+                let v3514 = v3513 + v3513;
+                let v894 = v890 * v890;
+                let v3515 = v3511 * v890;
+                let v3516 = v3515 + v3515;
+                let v895 = if v890 < v0 { 1.0 } else { 0.0 };
+                let v905: f64;
+                let v2578: Lanes<4>;
+                if v895 != 0.0 {
+                    let v3524 = v3514 * v424;
+                    let v898 = (v894 + v893).sqrt();
+                    let v899 = v898 - v890;
+                    let v900 = (v424 * v893) / v899;
+                    let v3534 = ((Lanes([v3524[0], 0.0, 0.0, 0.0])) - ((((v3516 + (Lanes([v3514[0], 0.0, 0.0, 0.0]))) * (v2515 / (v2994 * v898))) - v3511) * v900)) / v899;
+                    v905 = v900;
+                    v2578 = v3534;
+                } else {
+                    let v902 = (v894 + v893).sqrt();
+                    let v904 = v424 * (v902 + v890);
+                    let v3523 = (((v3516 + (Lanes([v3514[0], 0.0, 0.0, 0.0]))) * (v2515 / (v2994 * v902))) + v3511) * v424;
+                    v905 = v904;
+                    v2578 = v3523;
+                }
+                let v908 = v906 * v907;
+                let v909 = v905 + v908;
+                let v3538 = v2963 * v906;
+                let v913 = v907 * (v905 + (v906 * v369));
+                let v914 = (v905 * v909) / v913;
+                let v3544 = (((v2578 * v909) + (v2578 * v905)) - (((v2578 + (Lanes([v3538[0], 0.0, 0.0, 0.0]))) * v907) * v914)) / v913;
+                let v915 = v873 / v914;
+                let v3547 = (v3463 - (v3544 * v915)) / v914;
+                let v918 = (v915 - v2) / v917;
+                let v3548 = v3547 / v917;
+                let v919 = if v915 < v2 { 1.0 } else { 0.0 };
+                let v931: f64;
+                let v2579: Lanes<4>;
+                if v919 != 0.0 {
+                    let v920 = v918.exp();
+                    let v921 = v2 + v920;
+                    let v3558 = ((v3548 * v920) * (v2515 / v921)) * v917;
+                    let v924 = v2 + (v917 * (v921.ln()));
+                    v931 = v924;
+                    v2579 = v3558;
+                } else {
+                    let v926 = (-v918).exp();
+                    let v927 = v2 + v926;
+                    let v930 = v915 + (v917 * (v927.ln()));
+                    let v3554 = v3547 + ((((v3548 * v2676) * v926) * (v2515 / v927)) * v917);
+                    v931 = v930;
+                    v2579 = v3554;
+                }
+                let v938 = v2 + (v917 * ((v2 + ((v932 / v917).exp())).ln()));
+                let v939 = v931 / v938;
+                let v3559 = v2579 / v938;
+                let v940 = v905 / v908;
+                let v3560 = v2578 / v908;
+                let v941 = v435 * v939;
+                let v942 = v941 * v940;
+                let v943 = v2 + v940;
+                let v946 = (v2 + (v942 * v943)).sqrt();
+                let v948 = v27 * v939;
+                let v949 = v948 * v943;
+                let v950 = (v2 + v946) / v949;
+                let v3577 = (((((((v3559 * v435) * v940) + (v3560 * v941)) * v943) + (v3560 * v942)) * (v2515 / (v2994 * v946))) - ((((v3559 * v27) * v943) + (v3560 * v948)) * v950)) / v949;
+                let v953 = v952 * v950;
+                let v3579 = v2569 * v950;
+                let v3582 = (Lanes([v3579[0], v3579[1], v3579[2], 0.0])) + (v3577 * v952);
+                let v955 = v2 + v953;
+                let v956 = ((v2 - v950) + v953) / v955;
+                let v3586 = (((v3577 * v2676) + v3582) - (v3582 * v956)) / v955;
+                let v957 = v883 * v956;
+                let v958 = v957 * v109;
+                let v3591 = v2687 * v957;
+                let v3593 = (((v3497 * v956) + (v3586 * v883)) * v109) + (Lanes([v3591[0], 0.0, 0.0, 0.0]));
+                let v961 = (v952 + v958) + v2;
+                let v3597 = v2569 * v961;
+                let v963 = (v27 * v958) + (v952 * v961);
+                let v3601 = (v3593 * v27) + ((Lanes([v3597[0], v3597[1], v3597[2], 0.0])) + (((Lanes([v2569[0], v2569[1], v2569[2], 0.0])) + v3593) * v952));
+                let v965 = v424 * (v958 - v2);
+                let v3602 = v3593 * v424;
+                let v3603 = v3602 * v965;
+                let v967 = (v965 * v965) + v963;
+                let v3605 = (v3603 + v3603) + v3601;
+                let v968 = if v958 >= v2 { 1.0 } else { 0.0 };
+                let v974: f64;
+                let v2580: Lanes<4>;
+                if v968 != 0.0 {
+                    let v969 = v967.sqrt();
+                    let v970 = v965 + v969;
+                    let v3616 = v3602 + (v3605 * (v2515 / (v2994 * v969)));
+                    v974 = v970;
+                    v2580 = v3616;
+                } else {
+                    let v971 = v967.sqrt();
+                    let v972 = v971 - v965;
+                    let v973 = v963 / v972;
+                    let v3612 = (v3601 - (((v3605 * (v2515 / (v2994 * v971))) - v3602) * v973)) / v972;
+                    v974 = v973;
+                    v2580 = v3612;
+                }
+                let v976 = if v974 < v975 { 1.0 } else { 0.0 };
+                let v977: f64;
+                let v2581: Lanes<4>;
+                if v976 != 0.0 {
+                    v977 = v975;
+                    v2581 = v3489;
+                } else {
+                    v977 = v974;
+                    v2581 = v2580;
+                }
+                let v978 = v977 + v2;
+                let v979 = v977 * v978;
+                let v981 = (v820 * v109).exp();
+                let v982 = v979 * v981;
+                let v3625 = (((v2534 * v109) + (v2687 * v820)) * v981) * v979;
+                let v3627 = (((v2581 * v978) + (v2581 * v977)) * v981) + (Lanes([v3625[0], 0.0, 0.0, 0.0]));
+                let v983 = v424 * v907;
+                let v985 = v983 * (v873 - v906);
+                let v3628 = v3463 * v983;
+                let v987 = (v907 * v369) * v906;
+                let v3631 = ((v2963 * v907) * v906) * v873;
+                let v3635 = v3628 * v985;
+                let v991 = ((v985 * v985) + (v987 * v873)).sqrt();
+                let v992 = v985 + v991;
+                let v3641 = v3628 + (((v3635 + v3635) + ((Lanes([v3631[0], 0.0, 0.0, 0.0])) + (v3463 * v987))) * (v2515 / (v2994 * v991)));
+                let v994 = if v993 == v0 { 1.0 } else { 0.0 };
+                let v1077: f64;
+                let v2582: Lanes<4>;
+                if v994 != 0.0 {
+                    let v995 = v325 * v42;
+                    let v3651 = v2536 * v42;
+                    let v3652 = Lanes([v3651[0], 0.0, 0.0, 0.0]);
+                    v1077 = v995;
+                    v2582 = v3652;
+                } else {
+                    let v997 = v873 + v914;
+                    let v998 = (v27 * v873) / v997;
+                    let v999 = v42 + v998;
+                    let v1000 = v325 * v999;
+                    let v3647 = v2536 * v999;
+                    let v3650 = (Lanes([v3647[0], 0.0, 0.0, 0.0])) + ((((v3463 * v27) - ((v3463 + v3544) * v998)) / v997) * v325);
+                    v1077 = v1000;
+                    v2582 = v3650;
+                }
+                let v1002 = v906 + v873;
+                let v1003 = (v906 * v873) / v1002;
+                let v3656 = ((v3463 * v906) - (v3463 * v1003)) / v1002;
+                let v1004 = v906 / v1002;
+                let v3659 = ((v3463 * v1004) * v2676) / v1002;
+                v1063 = v992;
+                v1076 = v1077;
+                v1091 = v1004;
+                v1118 = v982;
+                v1793 = v956;
+                v1829 = v1003;
+                v2180 = v977;
+                v2570 = v3641;
+                v2571 = v2582;
+                v2572 = v3659;
+                v2573 = v3627;
+                v2574 = v3586;
+                v2575 = v3656;
+                v2576 = v2581;
+            } else {
+                let v1006 = (v27 * v853) / v867;
+                let v3467 = ((v2567 * v27) - (v3434 * v1006)) / v867;
+                let v1018 = if (if (v734.abs()) < (v1009 * v107) { 1.0 } else { 0.0 }) != 0.0 || (if (v871.abs()) < ((v1013 * v107) * (v856 + v860)) { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                let v1794: f64;
+                let v2583: Lanes<4>;
+                if v1018 != 0.0 {
+                    let v1020 = v424 * (v1006 + v952);
+                    let v3479 = ((Lanes([v3467[0], v3467[1], 0.0, v3467[2]])) + (Lanes([v2569[0], v2569[1], v2569[2], 0.0]))) * v424;
+                    let v1021 = v1020 + v2;
+                    let v1022 = v1020 / v1021;
+                    let v3482 = (v3479 - (v3479 * v1022)) / v1021;
+                    v1794 = v1022;
+                    v2583 = v3482;
+                } else {
+                    let v1024 = (v871 + v721) - v718;
+                    let v1025 = v871 / v1024;
+                    let v3475 = (v3457 - (((v3457 + (Lanes([0.0, v3263[0], 0.0, v3263[1]]))) - (Lanes([0.0, v3259[0], v3259[1], 0.0]))) * v1025)) / v1024;
+                    v1794 = v1025;
+                    v2583 = v3475;
+                }
+                let v1026 = v42 * v325;
+                let v3483 = v2536 * v42;
+                let v1028 = v2 - (v873 / v906);
+                let v3485 = (v3463 / v906) * v2676;
+                let v3486 = Lanes([v3483[0], 0.0, 0.0, 0.0]);
+                let v3487 = Lanes([v2557[0], v2557[1], 0.0, v2557[2]]);
+                let v3488 = Lanes([v3467[0], v3467[1], 0.0, v3467[2]]);
+                v1063 = v734;
+                v1076 = v1026;
+                v1091 = v1028;
+                v1118 = v1007;
+                v1793 = v1794;
+                v1829 = v873;
+                v2180 = v1006;
+                v2570 = v3458;
+                v2571 = v3486;
+                v2572 = v3485;
+                v2573 = v3487;
+                v2574 = v2583;
+                v2575 = v3463;
+                v2576 = v3488;
+            }
+            let v1032 = v2 - (v154.powf((v1029 / v28)));
+            let v1033 = v307 * v1032;
+            let v3660 = v2533 * v1032;
+            let v1034 = v42 * v307;
+            let v3661 = v2533 * v42;
+            let v3662 = Lanes([0.0, v3267[0], v3267[1]]);
+            let v3663 = Lanes([v3660[0], 0.0, 0.0]);
+            let v1036 = (v724 - v1033) / v1034;
+            let v3665 = v3661 * v1036;
+            let v3668 = ((v3662 - v3663) - (Lanes([v3665[0], 0.0, 0.0]))) / v1034;
+            let v1037 = if v724 < v1033 { 1.0 } else { 0.0 };
+            let v1049: f64;
+            let v2584: Lanes<3>;
+            if v1037 != 0.0 {
+                let v1038 = v1036.exp();
+                let v1039 = v2 + v1038;
+                let v1040 = v1039.ln();
+                let v3681 = v3661 * v1040;
+                let v1042 = v724 - (v1034 * v1040);
+                let v3685 = v3662 - ((Lanes([v3681[0], 0.0, 0.0])) + (((v3668 * v1038) * (v2515 / v1039)) * v1034));
+                v1049 = v1042;
+                v2584 = v3685;
+            } else {
+                let v1044 = (-v1036).exp();
+                let v1045 = v2 + v1044;
+                let v1046 = v1045.ln();
+                let v3673 = v3661 * v1046;
+                let v1048 = v1033 - (v1034 * v1046);
+                let v3677 = v3663 - ((Lanes([v3673[0], 0.0, 0.0])) + ((((v3668 * v2676) * v1044) * (v2515 / v1045)) * v1034));
+                v1049 = v1048;
+                v2584 = v3677;
+            }
+            let v3687 = v2909 * v1049;
+            let v1051 = v2 - (v1049 * v308);
+            let v3690 = ((v2584 * v308) + (Lanes([v3687[0], 0.0, 0.0]))) * v2676;
+            let v1052 = v2 - v28;
+            let v1053 = v1051.powf(v1052);
+            let v3691 = v1052 - v2515;
+            let v3694 = v3690 * (v1052 * (v1051.powf(v3691)));
+            let v1054 = v307 / v1052;
+            let v3695 = v2533 / v1052;
+            let v1055 = v2 - v1053;
+            let v3697 = v3695 * v1055;
+            let v1059 = (v1054 * v1055) + (v154 * (v724 - v1049));
+            let v3703 = ((Lanes([v3697[0], 0.0, 0.0])) + ((v3694 * v2676) * v1054)) + ((v3662 - v2584) * v154);
+            let v1061 = if v1060 == v2 { 1.0 } else { 0.0 };
+            let v1073: f64;
+            let v2585: Lanes<4>;
+            if v1061 != 0.0 {
+                let v3707 = Lanes([0.0, v3259[0], v3259[1], 0.0]);
+                v1073 = v718;
+                v2585 = v3707;
+            } else {
+                let v1062 = if v1060 == v27 { 1.0 } else { 0.0 };
+                let v1074: f64;
+                let v2586: Lanes<4>;
+                if v1062 != 0.0 {
+                    let v1064 = v718 + v1063;
+                    let v3706 = (Lanes([0.0, v3259[0], v3259[1], 0.0])) + v2570;
+                    v1074 = v1064;
+                    v2586 = v3706;
+                } else {
+                    let v3704 = Lanes([0.0, v3263[0], 0.0, v3263[1]]);
+                    v1074 = v721;
+                    v2586 = v3704;
+                }
+                v1073 = v1074;
+                v2585 = v2586;
+            }
+            let v3708 = v2943 * v2676;
+            let v1066 = v2 - v333;
+            let v1067 = (v27 - v333) / v1066;
+            let v3711 = (v3708 - (v3708 * v1067)) / v1066;
+            let v1069 = v1068 / v60;
+            let v1071 = v2 - (v1067.powf(v1069));
+            let v1072 = v325 * v1071;
+            let v3719 = (v2536 * v1071) + (((v3711 * (v1069 * (v1067.powf((v1069 - v2515))))) * v2676) * v325);
+            let v3720 = Lanes([v3719[0], 0.0, 0.0, 0.0]);
+            let v1078 = (v1073 - v1072) / v1076;
+            let v3724 = ((v2585 - v3720) - (v2571 * v1078)) / v1076;
+            let v1079 = if v1073 < v1072 { 1.0 } else { 0.0 };
+            let v1096: f64;
+            let v2587: Lanes<4>;
+            if v1079 != 0.0 {
+                let v1080 = v1078.exp();
+                let v1081 = v2 + v1080;
+                let v1082 = v1081.ln();
+                let v1084 = v1073 - (v1076 * v1082);
+                let v3739 = v2585 - ((v2571 * v1082) + (((v3724 * v1080) * (v2515 / v1081)) * v1076));
+                v1096 = v1084;
+                v2587 = v3739;
+            } else {
+                let v1086 = (-v1078).exp();
+                let v1087 = v2 + v1086;
+                let v1088 = v1087.ln();
+                let v1090 = v1072 - (v1076 * v1088);
+                let v3732 = v3720 - ((v2571 * v1088) + ((((v3724 * v2676) * v1086) * (v2515 / v1087)) * v1076));
+                v1096 = v1090;
+                v2587 = v3732;
+            }
+            let v1093 = v1091.powf(v1092);
+            let v3743 = v2572 * (v1092 * (v1091.powf((v1092 - v2515))));
+            let v1094 = v2 - v60;
+            let v1095 = v325 / v1094;
+            let v3744 = v2536 / v1094;
+            let v1097 = v1096 / v325;
+            let v3745 = v2536 * v1097;
+            let v1098 = v2 - v1097;
+            let v1099 = v1098.powf(v1094);
+            let v3750 = v1094 - v2515;
+            let v1101 = v2 - (v1093 * v1099);
+            let v3758 = v3744 * v1101;
+            let v1103 = v1093 * v1067;
+            let v3763 = v3711 * v1093;
+            let v1104 = v1073 - v1096;
+            let v1106 = (v1095 * v1101) + (v1103 * v1104);
+            let v3771 = v3708 * v1106;
+            let v3775 = v2943 * v718;
+            let v3776 = v3259 * v333;
+            let v3779 = (Lanes([v3775[0], 0.0, 0.0])) + (Lanes([0.0, v3776[0], v3776[1]]));
+            let v1109 = (v1066 * v1106) + (v333 * v718);
+            let v3781 = ((Lanes([v3771[0], 0.0, 0.0, 0.0])) + ((((Lanes([v3758[0], 0.0, 0.0, 0.0])) + ((((v3743 * v1099) + (((((v2587 - (Lanes([v3745[0], 0.0, 0.0, 0.0]))) / v325) * v2676) * (v1094 * (v1098.powf(v3750)))) * v1093)) * v2676) * v1095)) + ((((v3743 * v1067) + (Lanes([v3763[0], 0.0, 0.0, 0.0]))) * v1104) + ((v2585 - v2587) * v1103))) * v1066)) + (Lanes([v3779[0], v3779[1], v3779[2], 0.0]));
+            let v1111 = (v435 * v449) / v454;
+            let v3785 = ((v3020 * v435) - (v3023 * v1111)) / v454;
+            let v1113 = v1111 * v1112;
+            let v3786 = v3785 * v1112;
+            let v3789 = (Lanes([v3786[0], 0.0, 0.0])) + (v2558 * v1111);
+            let v1115 = (v2 + v1113).sqrt();
+            let v3792 = v3789 * (v2515 / (v2994 * v1115));
+            let v1116 = v2 + v1115;
+            let v1117 = v1113 / v1116;
+            let v3795 = (v3789 - (v3792 * v1117)) / v1116;
+            let v1120 = v2 / v1119;
+            let v1121 = v1118.powf(v1120);
+            let v3803 = v1118.ln();
+            let v3805 = (((v2544 * v1120) * v2676) / v1119) * (v1121 * v3803);
+            let v3807 = (v2573 * (v1120 * (v1118.powf((v1120 - v2515))))) + (Lanes([v3805[0], 0.0, 0.0, 0.0]));
+            let v1122 = v1111 * v1121;
+            let v3808 = v3785 * v1121;
+            let v3811 = (Lanes([v3808[0], 0.0, 0.0, 0.0])) + (v3807 * v1111);
+            let v1124 = (v2 + v1122).sqrt();
+            let v1125 = v2 + v1124;
+            let v1126 = v1122 / v1125;
+            let v3817 = (v3811 - ((v3811 * (v2515 / (v2994 * v1124))) * v1126)) / v1125;
+            let v1127 = if v699 == v0 { 1.0 } else { 0.0 };
+            let v1148: f64;
+            let v2588: Lanes<5>;
+            if v1127 != 0.0 {
+                let v1128 = v1059 / v623;
+                let v3856 = v3198 * v1128;
+                let v3859 = (v3703 - (Lanes([v3856[0], 0.0, 0.0]))) / v623;
+                let v1130 = v1109 / v620;
+                let v3860 = v3194 * v1130;
+                let v3863 = (v3781 - (Lanes([v3860[0], 0.0, 0.0, 0.0]))) / v620;
+                let v1131 = (v2 + v1128) + v1130;
+                let v3866 = (Lanes([v3859[0], v3859[1], v3859[2], 0.0, 0.0])) + (Lanes([v3863[0], 0.0, v3863[1], v3863[2], v3863[3]]));
+                v1148 = v1131;
+                v2588 = v3866;
+            } else {
+                let v1132 = v1059 / v623;
+                let v3818 = v3198 * v1132;
+                let v1133 = v1132 + v2;
+                let v1134 = v1133 * v700;
+                let v3823 = v3246 * v1133;
+                let v3827 = v2687 * v1134;
+                let v1137 = (-v1109) / v620;
+                let v3831 = v3194 * v1137;
+                let v1138 = v1137 * v700;
+                let v3836 = v3246 * v1137;
+                let v3840 = v2687 * v1138;
+                let v1140 = (v1134 * v109).exp();
+                let v3843 = ((((((v3703 - (Lanes([v3818[0], 0.0, 0.0]))) / v623) * v700) + (Lanes([v3823[0], 0.0, 0.0]))) * v109) + (Lanes([v3827[0], 0.0, 0.0]))) * v1140;
+                let v1141 = (v1138 * v109).exp();
+                let v3844 = (((((((v3781 * v2676) - (Lanes([v3831[0], 0.0, 0.0, 0.0]))) / v620) * v700) + (Lanes([v3836[0], 0.0, 0.0, 0.0]))) * v109) + (Lanes([v3840[0], 0.0, 0.0, 0.0]))) * v1141;
+                let v1144 = (v700 * v109).exp();
+                let v1145 = v1144 - v2;
+                let v1146 = (v1140 - v1141) / v1145;
+                let v3852 = (((v3246 * v109) + (v2687 * v700)) * v1144) * v1146;
+                let v3855 = (((Lanes([v3843[0], v3843[1], v3843[2], 0.0, 0.0])) - (Lanes([v3844[0], 0.0, v3844[1], v3844[2], v3844[3]]))) - (Lanes([v3852[0], 0.0, 0.0, 0.0, 0.0]))) / v1145;
+                v1148 = v1146;
+                v2588 = v3855;
+            }
+            let v1149 = v1148 * v1148;
+            let v3867 = v2588 * v1148;
+            let v3868 = v3867 + v3867;
+            let v1150 = if v1148 < v0 { 1.0 } else { 0.0 };
+            let v1160: f64;
+            let v2589: Lanes<5>;
+            if v1150 != 0.0 {
+                let v1153 = (v1149 + v1147).sqrt();
+                let v1154 = v1153 - v1148;
+                let v1155 = v1151 / v1154;
+                let v3880 = ((((v3868 * (v2515 / (v2994 * v1153))) - v2588) * v1155) * v2676) / v1154;
+                v1160 = v1155;
+                v2589 = v3880;
+            } else {
+                let v1157 = (v1149 + v1147).sqrt();
+                let v1159 = v424 * (v1157 + v1148);
+                let v3873 = ((v3868 * (v2515 / (v2994 * v1157))) + v2588) * v424;
+                v1160 = v1159;
+                v2589 = v3873;
+            }
+            let v3884 = ((Lanes([v3795[0], v3795[1], v3795[2], 0.0, 0.0])) + (Lanes([v3817[0], 0.0, v3817[1], v3817[2], v3817[3]]))) * v424;
+            let v1163 = v2 + (v424 * (v1117 + v1126));
+            let v1164 = v1160 * v1163;
+            let v3887 = (v2589 * v1163) + (v3884 * v1160);
+            let v1166 = v1165 * v449;
+            let v1167 = v1166 * v1121;
+            let v3889 = (v3020 * v1165) * v1121;
+            let v3892 = (Lanes([v3889[0], 0.0, 0.0, 0.0])) + (v3807 * v1166);
+            let v1168 = v449 * v1112;
+            let v3893 = v3020 * v1112;
+            let v3896 = (Lanes([v3893[0], 0.0, 0.0])) + (v2558 * v449);
+            let v3897 = Lanes([v3896[0], v3896[1], v3896[2], 0.0, 0.0]);
+            let v3898 = Lanes([v3892[0], 0.0, v3892[1], v3892[2], v3892[3]]);
+            let v1170 = (v1168 - v1167) / v1164;
+            let v3902 = ((v3897 - v3898) - (v3887 * v1170)) / v1164;
+            let v1172 = v724 / v1171;
+            let v3903 = v3267 / v1171;
+            let v1173 = if v724 < v0 { 1.0 } else { 0.0 };
+            let v1184: f64;
+            let v2590: Lanes<2>;
+            if v1173 != 0.0 {
+                let v1174 = v1172.exp();
+                let v1175 = v2 + v1174;
+                let v1177 = v1171 * (v1175.ln());
+                let v3913 = ((v3903 * v1174) * (v2515 / v1175)) * v1171;
+                v1184 = v1177;
+                v2590 = v3913;
+            } else {
+                let v1179 = (-v1172).exp();
+                let v1180 = v2 + v1179;
+                let v1183 = v724 + (v1171 * (v1180.ln()));
+                let v3909 = v3267 + ((((v3903 * v2676) * v1179) * (v2515 / v1180)) * v1171);
+                v1184 = v1183;
+                v2590 = v3909;
+            }
+            let v1186 = v1184 / v1185;
+            let v3914 = v2590 / v1185;
+            let v1187 = if v1186 < v763 { 1.0 } else { 0.0 };
+            let v1193: f64;
+            let v2591: Lanes<2>;
+            if v1187 != 0.0 {
+                let v1188 = v1186.exp();
+                let v3916 = v3914 * v1188;
+                v1193 = v1188;
+                v2591 = v3916;
+            } else {
+                let v1189 = v763.exp();
+                let v1192 = v1189 * (v2 + (v1186 - v763));
+                let v3915 = v3914 * v1189;
+                v1193 = v1192;
+                v2591 = v3915;
+            }
+            let v1194 = v1193 - v2;
+            let v1195 = v567 * v1194;
+            let v3917 = v3106 * v1194;
+            let v3918 = v2591 * v567;
+            let v3921 = (Lanes([v3917[0], 0.0, 0.0])) + (Lanes([0.0, v3918[0], v3918[1]]));
+            let v1198 = (v724 - v1196) / v26;
+            let v3922 = v3267 / v26;
+            let v1199 = if v724 < v1196 { 1.0 } else { 0.0 };
+            let v1212: f64;
+            let v2592: Lanes<2>;
+            if v1199 != 0.0 {
+                let v1200 = v1198.exp();
+                let v1201 = v2 + v1200;
+                let v1204 = v724 - (v26 * (v1201.ln()));
+                let v3933 = v3267 - (((v3922 * v1200) * (v2515 / v1201)) * v26);
+                v1212 = v1204;
+                v2592 = v3933;
+            } else {
+                let v1206 = (-v1198).exp();
+                let v1207 = v2 + v1206;
+                let v1210 = v1196 - (v26 * (v1207.ln()));
+                let v3928 = ((((v3922 * v2676) * v1206) * (v2515 / v1207)) * v26) * v2676;
+                v1212 = v1210;
+                v2592 = v3928;
+            }
+            let v1213 = v1211 * v1212;
+            let v1214 = v1196 - v1212;
+            let v1215 = v1214 * v1214;
+            let v1216 = v1213 * v1215;
+            let v3940 = ((v2592 * v1211) * v1215) + (((v2592 * v2676) * (v27 * v1214)) * v1213);
+            let v1217 = v770 / v491;
+            let v3941 = v3346 / v491;
+            let v1218 = if v1217 < v763 { 1.0 } else { 0.0 };
+            let v1243: f64;
+            let v2593: Lanes<3>;
+            if v1218 != 0.0 {
+                let v1219 = v1217.exp();
+                let v3943 = v3941 * v1219;
+                v1243 = v1219;
+                v2593 = v3943;
+            } else {
+                let v1220 = v763.exp();
+                let v1223 = v1220 * (v2 + (v1217 - v763));
+                let v3942 = v3941 * v1220;
+                v1243 = v1223;
+                v2593 = v3942;
+            }
+            let v1989: f64;
+            let v2594: Lanes<5>;
+            if v510 != 0.0 {
+                let v1225 = v724 - v1224;
+                let v1226 = v1225 * v109;
+                let v3971 = v2687 * v1225;
+                let v3973 = ((v3662 - (Lanes([v2538[0], 0.0, 0.0]))) * v109) + (Lanes([v3971[0], 0.0, 0.0]));
+                let v1227 = if v1226 < v763 { 1.0 } else { 0.0 };
+                let v1249: f64;
+                let v2595: Lanes<3>;
+                if v1227 != 0.0 {
+                    let v1228 = v1226.exp();
+                    let v3975 = v3973 * v1228;
+                    v1249 = v1228;
+                    v2595 = v3975;
+                } else {
+                    let v1229 = v763.exp();
+                    let v1232 = v1229 * (v2 + (v1226 - v763));
+                    let v3974 = v3973 * v1229;
+                    v1249 = v1232;
+                    v2595 = v3974;
+                }
+                let v1233 = v1170 / v449;
+                let v3976 = v3020 * v1233;
+                let v3979 = (v3902 - (Lanes([v3976[0], 0.0, 0.0, 0.0, 0.0]))) / v449;
+                let v1235 = v1233 - v1234;
+                let v1237 = if v1235 < v1236 { 1.0 } else { 0.0 };
+                let v1262: f64;
+                let v2596: Lanes<5>;
+                if v1237 != 0.0 {
+                    let v1238 = v1235.exp();
+                    let v3981 = v3979 * v1238;
+                    v1262 = v1238;
+                    v2596 = v3981;
+                } else {
+                    let v1242 = v1239 * (v2 + (v1235 - v1236));
+                    let v3980 = v3979 * v1239;
+                    v1262 = v1242;
+                    v2596 = v3980;
+                }
+                let v1244 = v1243 - v2;
+                let v3982 = v3054 * v1244;
+                let v3985 = (Lanes([v3982[0], 0.0, 0.0])) + (v2593 * v500);
+                let v1247 = v1246 * v27;
+                let v3987 = (v2547 * v27) * v1244;
+                let v1252 = (v2 + (v435 * v1249)).sqrt();
+                let v1253 = v2 + v1252;
+                let v1254 = (v1247 * v1244) / v1253;
+                let v1255 = v1109 / v620;
+                let v3998 = v3194 * v1255;
+                let v1256 = v2 + v1255;
+                let v4002 = ((((Lanes([v3987[0], 0.0, 0.0])) + (v2593 * v1247)) - (((v2595 * v435) * (v2515 / (v2994 * v1252))) * v1254)) / v1253) * v1256;
+                let v4003 = ((v3781 - (Lanes([v3998[0], 0.0, 0.0, 0.0]))) / v620) * v1254;
+                let v1260 = v1118 - v2;
+                let v1261 = v1259 * v1260;
+                let v4009 = v2548 * v1260;
+                let v4013 = ((Lanes([v4009[0], 0.0, 0.0, 0.0])) + (v2573 * v1259)) * v1262;
+                let v1264 = v2 + v1262;
+                let v1265 = (v1261 * v1262) / v1264;
+                let v1266 = ((v500 * v1244) + (v1254 * v1256)) + v1265;
+                let v4020 = ((Lanes([v3985[0], v3985[1], v3985[2], 0.0, 0.0])) + ((Lanes([v4002[0], v4002[1], v4002[2], 0.0, 0.0])) + (Lanes([v4003[0], 0.0, v4003[1], v4003[2], v4003[3]])))) + ((((Lanes([v4013[0], 0.0, v4013[1], v4013[2], v4013[3]])) + (v2596 * v1261)) - (v2596 * v1265)) / v1264);
+                v1989 = v1266;
+                v2594 = v4020;
+            } else {
+                let v1268 = if v1267 == v0 { 1.0 } else { 0.0 };
+                let v1990: f64;
+                let v2597: Lanes<5>;
+                if v1268 != 0.0 {
+                    let v1269 = v1243 - v2;
+                    let v1270 = v500 * v1269;
+                    let v3963 = v3054 * v1269;
+                    let v3966 = (Lanes([v3963[0], 0.0, 0.0])) + (v2593 * v500);
+                    let v3967 = Lanes([v3966[0], v3966[1], v3966[2], 0.0, 0.0]);
+                    v1990 = v1270;
+                    v2597 = v3967;
+                } else {
+                    let v1271 = v2 - v1267;
+                    let v3944 = v2593 * v1271;
+                    let v1276 = v1267 * ((v1243 + v1118) - v27);
+                    let v1277 = v1109 / v620;
+                    let v3949 = v3194 * v1277;
+                    let v1278 = v2 + v1277;
+                    let v3954 = ((v3781 - (Lanes([v3949[0], 0.0, 0.0, 0.0]))) / v620) * v1276;
+                    let v1280 = (v1271 * (v1243 - v2)) + (v1276 * v1278);
+                    let v1281 = v500 * v1280;
+                    let v3959 = v3054 * v1280;
+                    let v3962 = (Lanes([v3959[0], 0.0, 0.0, 0.0, 0.0])) + (((Lanes([v3944[0], v3944[1], v3944[2], 0.0, 0.0])) + (((((Lanes([v2593[0], v2593[1], v2593[2], 0.0, 0.0])) + (Lanes([v2573[0], 0.0, v2573[1], v2573[2], v2573[3]]))) * v1267) * v1278) + (Lanes([v3954[0], 0.0, v3954[1], v3954[2], v3954[3]])))) * v500);
+                    v1990 = v1281;
+                    v2597 = v3962;
+                }
+                v1989 = v1990;
+                v2594 = v2597;
+            }
+            let v1282 = v727 * v109;
+            let v4021 = v3271 * v109;
+            let v4022 = v2687 * v727;
+            let v4025 = (Lanes([0.0, v4021[0], v4021[1]])) + (Lanes([v4022[0], 0.0, 0.0]));
+            let v1283 = v1282 / v502;
+            let v4026 = v4025 / v502;
+            let v1284 = if v1283 < v763 { 1.0 } else { 0.0 };
+            let v1298: f64;
+            let v2598: Lanes<3>;
+            if v1284 != 0.0 {
+                let v1285 = v1283.exp();
+                let v4028 = v4026 * v1285;
+                v1298 = v1285;
+                v2598 = v4028;
+            } else {
+                let v1286 = v763.exp();
+                let v1289 = v1286 * (v2 + (v1283 - v763));
+                let v4027 = v4026 * v1286;
+                v1298 = v1289;
+                v2598 = v4027;
+            }
+            let v2003: f64;
+            let v2599: Lanes<3>;
+            if v510 != 0.0 {
+                let v1290 = v727 - v1224;
+                let v1291 = v1290 * v109;
+                let v4037 = v2687 * v1290;
+                let v4039 = (((Lanes([0.0, v3271[0], v3271[1]])) - (Lanes([v2538[0], 0.0, 0.0]))) * v109) + (Lanes([v4037[0], 0.0, 0.0]));
+                let v1292 = if v1291 < v763 { 1.0 } else { 0.0 };
+                let v1304: f64;
+                let v2600: Lanes<3>;
+                if v1292 != 0.0 {
+                    let v1293 = v1291.exp();
+                    let v4041 = v4039 * v1293;
+                    v1304 = v1293;
+                    v2600 = v4041;
+                } else {
+                    let v1294 = v763.exp();
+                    let v1297 = v1294 * (v2 + (v1291 - v763));
+                    let v4040 = v4039 * v1294;
+                    v1304 = v1297;
+                    v2600 = v4040;
+                }
+                let v1299 = v1298 - v2;
+                let v4042 = v3062 * v1299;
+                let v1302 = v1301 * v27;
+                let v4047 = (v2549 * v27) * v1299;
+                let v1307 = (v2 + (v435 * v1304)).sqrt();
+                let v1308 = v2 + v1307;
+                let v1309 = (v1302 * v1299) / v1308;
+                let v1310 = (v508 * v1299) + v1309;
+                let v4058 = ((Lanes([v4042[0], 0.0, 0.0])) + (v2598 * v508)) + ((((Lanes([v4047[0], 0.0, 0.0])) + (v2598 * v1302)) - (((v2600 * v435) * (v2515 / (v2994 * v1307))) * v1309)) / v1308);
+                v2003 = v1310;
+                v2599 = v4058;
+            } else {
+                let v1311 = v1298 - v2;
+                let v1312 = v508 * v1311;
+                let v4029 = v3062 * v1311;
+                let v4032 = (Lanes([v4029[0], 0.0, 0.0])) + (v2598 * v508);
+                v2003 = v1312;
+                v2599 = v4032;
+            }
+            let v1313 = v770 / v463;
+            let v4059 = v3346 / v463;
+            let v1314 = if v1313 < v763 { 1.0 } else { 0.0 };
+            let v1320: f64;
+            let v2601: Lanes<3>;
+            if v1314 != 0.0 {
+                let v1315 = v1313.exp();
+                let v4061 = v4059 * v1315;
+                v1320 = v1315;
+                v2601 = v4061;
+            } else {
+                let v1316 = v763.exp();
+                let v1319 = v1316 * (v2 + (v1313 - v763));
+                let v4060 = v4059 * v1316;
+                v1320 = v1319;
+                v2601 = v4060;
+            }
+            let v1321 = v1320 - v2;
+            let v1322 = v474 * v1321;
+            let v4062 = v3035 * v1321;
+            let v4065 = (Lanes([v4062[0], 0.0, 0.0])) + (v2601 * v474);
+            let v1323 = v1282 / v543;
+            let v4066 = v4025 / v543;
+            let v1324 = if v1323 < v763 { 1.0 } else { 0.0 };
+            let v1330: f64;
+            let v2602: Lanes<3>;
+            if v1324 != 0.0 {
+                let v1325 = v1323.exp();
+                let v4068 = v4066 * v1325;
+                v1330 = v1325;
+                v2602 = v4068;
+            } else {
+                let v1326 = v763.exp();
+                let v1329 = v1326 * (v2 + (v1323 - v763));
+                let v4067 = v4066 * v1326;
+                v1330 = v1329;
+                v2602 = v4067;
+            }
+            let v1331 = v1330 - v2;
+            let v1332 = v551 * v1331;
+            let v4069 = v3089 * v1331;
+            let v4072 = (Lanes([v4069[0], 0.0, 0.0])) + (v2602 * v551);
+            let v1333 = v778 / v476;
+            let v4073 = v3357 / v476;
+            let v1334 = if v1333 < v763 { 1.0 } else { 0.0 };
+            let v1340: f64;
+            let v2603: Lanes<6>;
+            if v1334 != 0.0 {
+                let v1335 = v1333.exp();
+                let v4075 = v4073 * v1335;
+                v1340 = v1335;
+                v2603 = v4075;
+            } else {
+                let v1336 = v763.exp();
+                let v1339 = v1336 * (v2 + (v1333 - v763));
+                let v4074 = v4073 * v1336;
+                v1340 = v1339;
+                v2603 = v4074;
+            }
+            let v1341 = v1340 - v2;
+            let v1342 = v486 * v1341;
+            let v4076 = v3044 * v1341;
+            let v4079 = (Lanes([v4076[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2603 * v486);
+            let v1343 = v1282 / v553;
+            let v4080 = v4025 / v553;
+            let v1344 = if v1343 < v763 { 1.0 } else { 0.0 };
+            let v1350: f64;
+            let v2604: Lanes<3>;
+            if v1344 != 0.0 {
+                let v1345 = v1343.exp();
+                let v4082 = v4080 * v1345;
+                v1350 = v1345;
+                v2604 = v4082;
+            } else {
+                let v1346 = v763.exp();
+                let v1349 = v1346 * (v2 + (v1343 - v763));
+                let v4081 = v4080 * v1346;
+                v1350 = v1349;
+                v2604 = v4081;
+            }
+            let v1351 = v1350 - v2;
+            let v1352 = v560 * v1351;
+            let v4083 = v3097 * v1351;
+            let v4086 = (Lanes([v4083[0], 0.0, 0.0])) + (v2604 * v560);
+            let v1356 = if (if (if v582 > v0 { 1.0 } else { 0.0 }) != 0.0 && (if v573 > v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 && v1173 != 0.0 { 1.0 } else { 0.0 };
+            let v1994: f64;
+            let v2605: Lanes<3>;
+            if v1356 != 0.0 {
+                let v1357 = v27 * v1053;
+                let v1358 = v30 / v1357;
+                let v1359 = v2 - v1358;
+                let v1360 = v581 * v1359;
+                let v4093 = v3130 * v1359;
+                let v4096 = (Lanes([v4093[0], 0.0, 0.0])) + ((((((v3694 * v27) * v1358) * v2676) / v1357) * v2676) * v581);
+                let v1361 = if v1360 < v763 { 1.0 } else { 0.0 };
+                let v1422: f64;
+                let v2606: Lanes<3>;
+                if v1361 != 0.0 {
+                    let v1362 = v1360.exp();
+                    let v4098 = v4096 * v1362;
+                    v1422 = v1362;
+                    v2606 = v4098;
+                } else {
+                    let v1363 = v763.exp();
+                    let v1366 = v1363 * (v2 + (v1360 - v763));
+                    let v4097 = v4096 * v1363;
+                    v1422 = v1366;
+                    v2606 = v4097;
+                }
+                let v1367 = v724 * v308;
+                let v4099 = v3267 * v308;
+                let v4100 = v2909 * v724;
+                let v4103 = (Lanes([0.0, v4099[0], v4099[1]])) + (Lanes([v4100[0], 0.0, 0.0]));
+                let v4104 = v4103 * v1367;
+                let v1371 = ((v1367 * v1367) + v1369).sqrt();
+                let v1373 = v1372 - v28;
+                let v1374 = v1371.powf(v1373);
+                let v1378 = v28 - v2;
+                let v1382 = v462 * v1367;
+                let v1383 = v1382 * v1367;
+                let v1384 = v1378 + v1367;
+                let v1386 = (v28 * ((v2 - (v28 * v28)) - ((v154 * v1367) * v1378))) - (v1383 * v1384);
+                let v1389 = (v1374 * v1386) * v1388;
+                let v1390 = v724 * v30;
+                let v4130 = (v3267 * v30) * v581;
+                let v4131 = v3130 * v1390;
+                let v1392 = v568 * v1389;
+                let v4135 = v2531 * v1389;
+                let v1393 = (v1390 * v581) / v1392;
+                let v4141 = (((Lanes([0.0, v4130[0], v4130[1]])) + (Lanes([v4131[0], 0.0, 0.0]))) - (((Lanes([v4135[0], 0.0, 0.0])) + (((((((v4104 + v4104) * (v2515 / (v2994 * v1371))) * (v1373 * (v1371.powf((v1373 - v2515))))) * v1386) + ((((((v4103 * v154) * v1378) * v2676) * v28) - (((((v4103 * v462) * v1367) + (v4103 * v1382)) * v1384) + (v4103 * v1383))) * v1374)) * v1388) * v568)) * v1393)) / v1392;
+                let v1395 = if v1393 < v1394 { 1.0 } else { 0.0 };
+                let v1419: f64;
+                let v2607: Lanes<3>;
+                if v1395 != 0.0 {
+                    let v1396 = if v1393 < v763 { 1.0 } else { 0.0 };
+                    let v1403: f64;
+                    let v2608: Lanes<3>;
+                    if v1396 != 0.0 {
+                        let v1397 = v1393.exp();
+                        let v4156 = v4141 * v1397;
+                        v1403 = v1397;
+                        v2608 = v4156;
+                    } else {
+                        let v1398 = v763.exp();
+                        let v1401 = v1398 * (v2 + (v1393 - v763));
+                        let v4155 = v4141 * v1398;
+                        v1403 = v1401;
+                        v2608 = v4155;
+                    }
+                    let v1402 = -v724;
+                    let v1405 = (v2 - v1403) / v1393;
+                    let v1406 = v2 + v1405;
+                    let v1407 = v1402 * v1406;
+                    let v4162 = (v3267 * v2676) * v1406;
+                    let v4165 = (Lanes([0.0, v4162[0], v4162[1]])) + ((((v2608 * v2676) - (v4141 * v1405)) / v1393) * v1402);
+                    v1419 = v1407;
+                    v2607 = v4165;
+                } else {
+                    let v1408 = v724 * v424;
+                    let v1409 = v1408 * v1393;
+                    let v4143 = (v3267 * v424) * v1393;
+                    let v1411 = v1393 * v1410;
+                    let v1414 = v2 + (v1412 * v1393);
+                    let v1416 = v2 + (v1411 * v1414);
+                    let v1417 = v1409 * v1416;
+                    let v4154 = (((Lanes([0.0, v4143[0], v4143[1]])) + (v4141 * v1408)) * v1416) + ((((v4141 * v1410) * v1414) + ((v4141 * v1412) * v1411)) * v1409);
+                    v1419 = v1417;
+                    v2607 = v4154;
+                }
+                let v1418 = v27 * v591;
+                let v1420 = v1418 * v1419;
+                let v4167 = (v3147 * v27) * v1419;
+                let v1421 = v1420 * v1053;
+                let v1423 = v1421 * v1422;
+                let v4178 = v2909 * v1423;
+                let v1425 = (v1423 * v308) * v31;
+                let v4181 = ((((((((Lanes([v4167[0], 0.0, 0.0])) + (v2607 * v1418)) * v1053) + (v3694 * v1420)) * v1422) + (v2606 * v1421)) * v308) + (Lanes([v4178[0], 0.0, 0.0]))) * v31;
+                v1994 = v1425;
+                v2605 = v4181;
+            } else {
+                v1994 = v0;
+                v2605 = v4087;
+            }
+            let v1430 = if (if (if v606 > v0 { 1.0 } else { 0.0 }) != 0.0 && (if v597 > v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 && (if v718 < v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+            let v1709: f64;
+            let v2609: Lanes<3>;
+            if v1430 != 0.0 {
+                let v1431 = v718 * v310;
+                let v4182 = v3259 * v310;
+                let v4183 = v2912 * v718;
+                let v4186 = (Lanes([0.0, v4182[0], v4182[1]])) + (Lanes([v4183[0], 0.0, 0.0]));
+                let v1432 = v2 - v1431;
+                let v1433 = v1432.powf(v1094);
+                let v4190 = (v4186 * v2676) * (v1094 * (v1432.powf(v3750)));
+                let v1434 = v27 * v1433;
+                let v1435 = v62 / v1434;
+                let v1436 = v2 - v1435;
+                let v1437 = v605 * v1436;
+                let v4196 = v3171 * v1436;
+                let v4199 = (Lanes([v4196[0], 0.0, 0.0])) + ((((((v4190 * v27) * v1435) * v2676) / v1434) * v2676) * v605);
+                let v1438 = if v1437 < v763 { 1.0 } else { 0.0 };
+                let v1494: f64;
+                let v2610: Lanes<3>;
+                if v1438 != 0.0 {
+                    let v1439 = v1437.exp();
+                    let v4201 = v4199 * v1439;
+                    v1494 = v1439;
+                    v2610 = v4201;
+                } else {
+                    let v1440 = v763.exp();
+                    let v1443 = v1440 * (v2 + (v1437 - v763));
+                    let v4200 = v4199 * v1440;
+                    v1494 = v1443;
+                    v2610 = v4200;
+                }
+                let v4202 = v4186 * v1431;
+                let v1446 = ((v1431 * v1431) + v1369).sqrt();
+                let v1448 = v1447 - v60;
+                let v1449 = v1446.powf(v1448);
+                let v1453 = v60 - v2;
+                let v1457 = v462 * v1431;
+                let v1458 = v1457 * v1431;
+                let v1459 = v1453 + v1431;
+                let v1461 = (v60 * ((v2 - (v60 * v60)) - ((v154 * v1431) * v1453))) - (v1458 * v1459);
+                let v1463 = (v1449 * v1461) * v1388;
+                let v1464 = v718 * v62;
+                let v4228 = (v3259 * v62) * v605;
+                let v4229 = v3171 * v1464;
+                let v1466 = v592 * v1463;
+                let v4233 = v2532 * v1463;
+                let v1467 = (v1464 * v605) / v1466;
+                let v4239 = (((Lanes([0.0, v4228[0], v4228[1]])) + (Lanes([v4229[0], 0.0, 0.0]))) - (((Lanes([v4233[0], 0.0, 0.0])) + (((((((v4202 + v4202) * (v2515 / (v2994 * v1446))) * (v1448 * (v1446.powf((v1448 - v2515))))) * v1461) + ((((((v4186 * v154) * v1453) * v2676) * v60) - (((((v4186 * v462) * v1431) + (v4186 * v1457)) * v1459) + (v4186 * v1458))) * v1449)) * v1388) * v592)) * v1467)) / v1466;
+                let v1469 = if v1467 < v1468 { 1.0 } else { 0.0 };
+                let v1491: f64;
+                let v2611: Lanes<3>;
+                if v1469 != 0.0 {
+                    let v1470 = if v1467 < v763 { 1.0 } else { 0.0 };
+                    let v1477: f64;
+                    let v2612: Lanes<3>;
+                    if v1470 != 0.0 {
+                        let v1471 = v1467.exp();
+                        let v4254 = v4239 * v1471;
+                        v1477 = v1471;
+                        v2612 = v4254;
+                    } else {
+                        let v1472 = v763.exp();
+                        let v1475 = v1472 * (v2 + (v1467 - v763));
+                        let v4253 = v4239 * v1472;
+                        v1477 = v1475;
+                        v2612 = v4253;
+                    }
+                    let v1476 = -v718;
+                    let v1479 = (v2 - v1477) / v1467;
+                    let v1480 = v2 + v1479;
+                    let v1481 = v1476 * v1480;
+                    let v4260 = (v3259 * v2676) * v1480;
+                    let v4263 = (Lanes([0.0, v4260[0], v4260[1]])) + ((((v2612 * v2676) - (v4239 * v1479)) / v1467) * v1476);
+                    v1491 = v1481;
+                    v2611 = v4263;
+                } else {
+                    let v1482 = v718 * v424;
+                    let v1483 = v1482 * v1467;
+                    let v4241 = (v3259 * v424) * v1467;
+                    let v1484 = v1467 * v1410;
+                    let v1486 = v2 + (v1412 * v1467);
+                    let v1488 = v2 + (v1484 * v1486);
+                    let v1489 = v1483 * v1488;
+                    let v4252 = (((Lanes([0.0, v4241[0], v4241[1]])) + (v4239 * v1482)) * v1488) + ((((v4239 * v1410) * v1486) + ((v4239 * v1412) * v1484)) * v1483);
+                    v1491 = v1489;
+                    v2611 = v4252;
+                }
+                let v1490 = v27 * v615;
+                let v1492 = v1490 * v1491;
+                let v4265 = (v3188 * v27) * v1491;
+                let v1493 = v1492 * v1433;
+                let v1495 = v1493 * v1494;
+                let v4276 = v2912 * v1495;
+                let v1497 = (v1495 * v310) * v63;
+                let v4279 = ((((((((Lanes([v4265[0], 0.0, 0.0])) + (v2611 * v1490)) * v1433) + (v4190 * v1492)) * v1494) + (v2610 * v1493)) * v310) + (Lanes([v4276[0], 0.0, 0.0]))) * v63;
+                v1709 = v1497;
+                v2609 = v4279;
+            } else {
+                v1709 = v0;
+                v2609 = v3443;
+            }
+            let v1499 = v1111 * v1498;
+            let v4280 = v3785 * v1498;
+            let v4283 = (Lanes([v4280[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2559 * v1111);
+            let v1501 = v435 * v1500;
+            let v4284 = v2566 * v435;
+            let v1504 = (v2 + v1499).sqrt();
+            let v1505 = v2 + v1504;
+            let v1506 = (v1499 - v1111) / v1505;
+            let v4292 = ((v4283 - (Lanes([v3785[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) - ((v4283 * (v2515 / (v2994 * v1504))) * v1506)) / v1505;
+            let v1508 = (v2 + v1501).sqrt();
+            let v1509 = v2 + v1508;
+            let v1510 = v1501 / v1509;
+            let v4298 = (v4284 - ((v4284 * (v2515 / (v2994 * v1508))) * v1510)) / v1509;
+            let v1511 = v27 * v541;
+            let v4299 = v3081 * v27;
+            let v1512 = v1498 - v2;
+            let v4300 = v4299 * v1512;
+            let v1515 = (v435 * v541) / v460;
+            let v4307 = ((v3081 * v435) - (v3026 * v1515)) / v460;
+            let v4308 = v4307 * v1498;
+            let v1518 = (v2 + (v1515 * v1498)).sqrt();
+            let v1519 = v2 + v1518;
+            let v1520 = (v1511 * v1512) / v1519;
+            let v4317 = (((Lanes([v4300[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2559 * v1511)) - ((((Lanes([v4308[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2559 * v1515)) * (v2515 / (v2994 * v1518))) * v1520)) / v1519;
+            let v1522 = if v1521 == v2 { 1.0 } else { 0.0 };
+            let v1591: f64;
+            let v2019: f64;
+            let v2613: Lanes<7>;
+            let v2614: Lanes<5>;
+            if v1522 != 0.0 {
+                let v1524 = v1523 * v27;
+                let v1525 = v1524 * v633;
+                let v1527 = v1007 - v1526;
+                let v4355 = Lanes([0.0, v2557[0], v2557[1], 0.0, v2557[2]]);
+                let v4358 = (v3206 * v1524) * v1527;
+                let v1529 = v633 / v646;
+                let v1530 = v435 * v1529;
+                let v4365 = ((v3206 - (v3215 * v1529)) / v646) * v435;
+                let v4366 = v2562 * v1531;
+                let v1533 = v1007 + (v1531 * v1526);
+                let v4369 = v4365 * v1533;
+                let v1536 = (v2 + (v1530 * v1533)).sqrt();
+                let v1537 = v2 + v1536;
+                let v1538 = (v1525 * v1527) / v1537;
+                let v4378 = (((Lanes([0.0, v4358[0], 0.0, 0.0, 0.0])) + ((v4355 - (Lanes([v2562[0], v2562[1], 0.0, v2562[2], 0.0]))) * v1525)) - ((((Lanes([0.0, v4369[0], 0.0, 0.0, 0.0])) + ((v4355 + (Lanes([v4366[0], v4366[1], 0.0, v4366[2], 0.0]))) * v1530)) * (v2515 / (v2994 * v1536))) * v1538)) / v1537;
+                let v1540 = (v2 - v1523) * v27;
+                let v1541 = v1540 * v633;
+                let v1543 = v1498 - v1542;
+                let v4380 = Lanes([0.0, v2559[0], v2559[1], v2559[2], v2559[3], v2559[4], v2559[5]]);
+                let v4383 = (v3206 * v1540) * v1543;
+                let v4387 = v2564 * v1531;
+                let v1546 = v1498 + (v1531 * v1542);
+                let v4390 = v4365 * v1546;
+                let v1549 = (v2 + (v1530 * v1546)).sqrt();
+                let v1550 = v2 + v1549;
+                let v1551 = (v1541 * v1543) / v1550;
+                let v4399 = (((Lanes([0.0, v4383[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((v4380 - (Lanes([v2564[0], v2564[1], 0.0, 0.0, v2564[2], 0.0, v2564[3]]))) * v1541)) - ((((Lanes([0.0, v4390[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((v4380 + (Lanes([v4387[0], v4387[1], 0.0, 0.0, v4387[2], 0.0, v4387[3]]))) * v1530)) * (v2515 / (v2994 * v1549))) * v1551)) / v1550;
+                v1591 = v1551;
+                v2019 = v1538;
+                v2613 = v4399;
+                v2614 = v4378;
+            } else {
+                let v1552 = v1523 * v27;
+                let v1553 = v1552 * v633;
+                let v1554 = v1007 - v2;
+                let v4319 = (v3206 * v1552) * v1554;
+                let v1556 = v633 / v646;
+                let v1557 = v435 * v1556;
+                let v4326 = ((v3206 - (v3215 * v1556)) / v646) * v435;
+                let v4327 = v4326 * v1007;
+                let v1560 = (v2 + (v1557 * v1007)).sqrt();
+                let v1561 = v2 + v1560;
+                let v1562 = (v1553 * v1554) / v1561;
+                let v4336 = (((Lanes([v4319[0], 0.0, 0.0])) + (v2557 * v1553)) - ((((Lanes([v4327[0], 0.0, 0.0])) + (v2557 * v1557)) * (v2515 / (v2994 * v1560))) * v1562)) / v1561;
+                let v1564 = (v2 - v1523) * v27;
+                let v1565 = v1564 * v633;
+                let v4338 = (v3206 * v1564) * v1512;
+                let v4342 = v4326 * v1498;
+                let v1569 = (v2 + (v1557 * v1498)).sqrt();
+                let v1570 = v2 + v1569;
+                let v1571 = (v1565 * v1512) / v1570;
+                let v4351 = (((Lanes([v4338[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2559 * v1565)) - ((((Lanes([v4342[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2559 * v1557)) * (v2515 / (v2994 * v1569))) * v1571)) / v1570;
+                let v4352 = Lanes([0.0, v4351[0], v4351[1], v4351[2], v4351[3], v4351[4], v4351[5]]);
+                let v4353 = Lanes([0.0, v4336[0], v4336[1], 0.0, v4336[2]]);
+                v1591 = v1571;
+                v2019 = v1562;
+                v2613 = v4352;
+                v2614 = v4353;
+            }
+            let v1572 = v27 * v641;
+            let v1573 = v1526 - v2;
+            let v4401 = (v3212 * v27) * v1573;
+            let v1575 = v1531 * v435;
+            let v1576 = v641 / v651;
+            let v1577 = v1575 * v1576;
+            let v4409 = (((v3212 - (v3218 * v1576)) / v651) * v1575) * v1526;
+            let v1580 = (v2 + (v1577 * v1526)).sqrt();
+            let v1581 = v2 + v1580;
+            let v1582 = (v1572 * v1573) / v1581;
+            let v4419 = v3279 * v1583;
+            let v1585 = v1582 + (v732 * v1583);
+            let v4421 = ((((Lanes([0.0, v4401[0], 0.0])) + (v2562 * v1572)) - ((((Lanes([0.0, v4409[0], 0.0])) + (v2562 * v1577)) * (v2515 / (v2994 * v1580))) * v1582)) / v1581) + (Lanes([v4419[0], 0.0, v4419[1]]));
+            let v1588 = if v8 > v0 { 1.0 } else { 0.0 };
+            let v1589 = if (if v1586 > v0 { 1.0 } else { 0.0 }) != 0.0 && v1588 != 0.0 { 1.0 } else { 0.0 };
+            let v1713: f64;
+            let v1716: f64;
+            let v2015: f64;
+            let v2023: f64;
+            let v2254: f64;
+            let v2615: Lanes<6>;
+            let v2616: Lanes<10>;
+            let v2617: Lanes<7>;
+            let v2618: Lanes<10>;
+            let v2619: Lanes<10>;
+            if v1589 != 0.0 {
+                let v1590 = v1520 * v9;
+                let v4423 = v4317 * v9;
+                let v1592 = v1591 * v9;
+                let v4424 = v2613 * v9;
+                let v1593 = v8 * v27;
+                let v1594 = v1593 * v541;
+                let v1596 = v1595 - v2;
+                let v4426 = (v3081 * v1593) * v1596;
+                let v4430 = v4307 * v1595;
+                let v1600 = (v2 + (v1515 * v1595)).sqrt();
+                let v1601 = v2 + v1600;
+                let v1602 = (v1594 * v1596) / v1601;
+                let v4439 = (((Lanes([0.0, 0.0, v4426[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2561 * v1594)) - ((((Lanes([0.0, 0.0, v4430[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2561 * v1515)) * (v2515 / (v2994 * v1600))) * v1602)) / v1601;
+                let v1653: f64;
+                let v2620: Lanes<10>;
+                if v1522 != 0.0 {
+                    let v1605 = ((v2 - v1523) * v8) * v27;
+                    let v1606 = v1605 * v633;
+                    let v1608 = v1595 - v1607;
+                    let v4461 = Lanes([v2561[0], v2561[1], 0.0, v2561[2], v2561[3], v2561[4], v2561[5], v2561[6], v2561[7], v2561[8]]);
+                    let v4464 = (v3206 * v1605) * v1608;
+                    let v1611 = (v435 * v633) / v646;
+                    let v4472 = v2563 * v1531;
+                    let v1613 = v1595 + (v1531 * v1607);
+                    let v4475 = (((v3206 * v435) - (v3215 * v1611)) / v646) * v1613;
+                    let v1616 = (v2 + (v1611 * v1613)).sqrt();
+                    let v1617 = v2 + v1616;
+                    let v1618 = (v1606 * v1608) / v1617;
+                    let v4484 = (((Lanes([0.0, 0.0, 0.0, v4464[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((v4461 - (Lanes([0.0, 0.0, v2563[0], v2563[1], 0.0, 0.0, v2563[2], 0.0, v2563[3], v2563[4]]))) * v1606)) - ((((Lanes([0.0, 0.0, 0.0, v4475[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((v4461 + (Lanes([0.0, 0.0, v4472[0], v4472[1], 0.0, 0.0, v4472[2], 0.0, v4472[3], v4472[4]]))) * v1611)) * (v2515 / (v2994 * v1616))) * v1618)) / v1617;
+                    v1653 = v1618;
+                    v2620 = v4484;
+                } else {
+                    let v1621 = ((v2 - v1523) * v8) * v27;
+                    let v1622 = v1621 * v633;
+                    let v4441 = (v3206 * v1621) * v1596;
+                    let v1625 = (v435 * v633) / v646;
+                    let v4449 = (((v3206 * v435) - (v3215 * v1625)) / v646) * v1595;
+                    let v1628 = (v2 + (v1625 * v1595)).sqrt();
+                    let v1629 = v2 + v1628;
+                    let v1630 = (v1622 * v1596) / v1629;
+                    let v4458 = (((Lanes([0.0, 0.0, v4441[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2561 * v1622)) - ((((Lanes([0.0, 0.0, v4449[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2561 * v1625)) * (v2515 / (v2994 * v1628))) * v1630)) / v1629;
+                    let v4459 = Lanes([v4458[0], v4458[1], 0.0, v4458[2], v4458[3], v4458[4], v4458[5], v4458[6], v4458[7], v4458[8]]);
+                    v1653 = v1630;
+                    v2620 = v4459;
+                }
+                let v1631 = if v1586 == v2 { 1.0 } else { 0.0 };
+                let v1659: f64;
+                let v2621: Lanes<10>;
+                if v1631 != 0.0 {
+                    let v1633 = v8 * (v541 + v633);
+                    let v1634 = v1633 * v357;
+                    let v4489 = (((v3081 + v3206) * v8) * v357) + (v2956 * v1633);
+                    let v1635 = v1634 * v109;
+                    let v1637 = v27 - (v1635.ln());
+                    let v4498 = (v2684 * v1637) + (((((v4489 * v109) + (v2687 * v1634)) * (v2515 / v1635)) * v2676) * v107);
+                    let v1639 = v759 - (v107 * v1637);
+                    let v4500 = v3395 - (Lanes([0.0, 0.0, v4498[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+                    let v1641 = v1639 * v1639;
+                    let v4501 = v4500 * v1639;
+                    let v4502 = v4501 + v4501;
+                    let v1642 = if v1639 < v0 { 1.0 } else { 0.0 };
+                    let v1652: f64;
+                    let v2622: Lanes<9>;
+                    if v1642 != 0.0 {
+                        let v1645 = (v1641 + v1640).sqrt();
+                        let v1646 = v1645 - v1639;
+                        let v1647 = v1643 / v1646;
+                        let v4514 = ((((v4502 * (v2515 / (v2994 * v1645))) - v4500) * v1647) * v2676) / v1646;
+                        v1652 = v1647;
+                        v2622 = v4514;
+                    } else {
+                        let v1649 = (v1641 + v1640).sqrt();
+                        let v1651 = v424 * (v1649 + v1639);
+                        let v4507 = ((v4502 * (v2515 / (v2994 * v1649))) + v4500) * v424;
+                        v1652 = v1651;
+                        v2622 = v4507;
+                    }
+                    let v1654 = v1602 + v1653;
+                    let v4518 = v2956 * v1654;
+                    let v1657 = (v1634 + (v1654 * v357)) + v1652;
+                    let v4523 = Lanes([v2622[0], v2622[1], 0.0, v2622[2], v2622[3], v2622[4], v2622[5], v2622[6], v2622[7], v2622[8]]);
+                    let v1658 = v1652 / v1657;
+                    let v4527 = (v4523 - ((((Lanes([0.0, 0.0, 0.0, v4489[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((Lanes([v4439[0], v4439[1], 0.0, v4439[2], v4439[3], v4439[4], v4439[5], v4439[6], v4439[7], v4439[8]])) + v2620) * v357) + (Lanes([0.0, 0.0, 0.0, v4518[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])))) + v4523) * v1658)) / v1657;
+                    v1659 = v1658;
+                    v2621 = v4527;
+                } else {
+                    v1659 = v2;
+                    v2621 = v4422;
+                }
+                let v1660 = v1659 * v1602;
+                let v4529 = v4439 * v1659;
+                let v4531 = (v2621 * v1602) + (Lanes([v4529[0], v4529[1], 0.0, v4529[2], v4529[3], v4529[4], v4529[5], v4529[6], v4529[7], v4529[8]]));
+                let v1661 = v1659 * v1653;
+                let v4534 = (v2621 * v1653) + (v2620 * v1659);
+                v1713 = v1590;
+                v1716 = v1660;
+                v2015 = v1592;
+                v2023 = v1661;
+                v2254 = v1659;
+                v2615 = v4423;
+                v2616 = v4531;
+                v2617 = v4424;
+                v2618 = v4534;
+                v2619 = v2621;
+            } else {
+                v1713 = v1520;
+                v1716 = v0;
+                v2015 = v1591;
+                v2023 = v0;
+                v2254 = v2;
+                v2615 = v4317;
+                v2616 = v4422;
+                v2617 = v2613;
+                v2618 = v4422;
+                v2619 = v4422;
+            }
+            let v1663 = if v1662 == v2 { 1.0 } else { 0.0 };
+            let v1710: f64;
+            let v2623: Lanes<3>;
+            if v1663 != 0.0 {
+                let v1664 = v729 + v718;
+                let v4538 = (Lanes([v3275[0], v3275[1], 0.0])) + (Lanes([0.0, v3259[0], v3259[1]]));
+                let v1670 = (v1667 * v1664) * v1669;
+                let v1671 = v1670 * v1664;
+                let v4543 = (((v4538 * v1667) * v1669) * v1664) + (v4538 * v1670);
+                let v1674 = if (v1672 * v1664) < v0 { 1.0 } else { 0.0 };
+                let v1700: f64;
+                let v2624: Lanes<3>;
+                if v1674 != 0.0 {
+                    let v1677 = (v1671 + v1666).sqrt();
+                    let v1680 = v1677 - (v1678 * v1664);
+                    let v1681 = v1675 / v1680;
+                    let v4557 = ((((v4543 * (v2515 / (v2994 * v1677))) - (v4538 * v1678)) * v1681) * v2676) / v1680;
+                    v1700 = v1681;
+                    v2624 = v4557;
+                } else {
+                    let v1683 = (v1671 + v1666).sqrt();
+                    let v1687 = v424 * (v1683 + (v1684 * v1664));
+                    let v4549 = ((v4543 * (v2515 / (v2994 * v1683))) + (v4538 * v1684)) * v424;
+                    v1700 = v1687;
+                    v2624 = v4549;
+                }
+                let v1691 = v2 / (v2 - (v90.powf(v1688)));
+                let v1693 = v90 * v1692;
+                let v1699 = (((v1691 * v1691) * (v90.powf((v1688 - v2)))) * v1688) / v1692;
+                let v1701 = if v1700 < v1693 { 1.0 } else { 0.0 };
+                let v1711: f64;
+                let v2625: Lanes<3>;
+                if v1701 != 0.0 {
+                    let v1702 = v1700 / v1692;
+                    let v1704 = v2 - (v1702.powf(v1688));
+                    let v1705 = v2 / v1704;
+                    let v4567 = (((((v2624 / v1692) * (v1688 * (v1702.powf((v1688 - v2515))))) * v2676) * v1705) * v2676) / v1704;
+                    v1711 = v1705;
+                    v2625 = v4567;
+                } else {
+                    let v4558 = v2624 * v1699;
+                    let v1708 = v1691 + ((v1700 - v1693) * v1699);
+                    v1711 = v1708;
+                    v2625 = v4558;
+                }
+                v1710 = v1711;
+                v2623 = v2625;
+            } else {
+                v1710 = v2;
+                v2623 = v4535;
+            }
+            let v1712 = v1709 * v1710;
+            let v4568 = v2609 * v1710;
+            let v4569 = v2623 * v1709;
+            let v4572 = (Lanes([v4568[0], 0.0, v4568[1], v4568[2]])) + (Lanes([0.0, v4569[0], v4569[1], v4569[2]]));
+            let v1714 = v1713 * v1710;
+            let v4574 = v2623 * v1713;
+            let v4576 = (v2615 * v1710) + (Lanes([0.0, v4574[0], v4574[1], v4574[2], 0.0, 0.0]));
+            let v1715 = v1342 * v1710;
+            let v4578 = v2623 * v1342;
+            let v4580 = (v4079 * v1710) + (Lanes([0.0, v4578[0], v4578[1], v4578[2], 0.0, 0.0]));
+            let v1717 = v1716 * v1710;
+            let v4582 = v2623 * v1716;
+            let v4584 = (v2616 * v1710) + (Lanes([0.0, 0.0, 0.0, 0.0, v4582[0], v4582[1], v4582[2], 0.0, 0.0, 0.0]));
+            let v1718 = v1059 / v623;
+            let v4585 = v3198 * v1718;
+            let v4588 = (v3703 - (Lanes([v4585[0], 0.0, 0.0]))) / v623;
+            let v1720 = v1109 / v620;
+            let v4589 = v3194 * v1720;
+            let v4592 = (v3781 - (Lanes([v4589[0], 0.0, 0.0, 0.0]))) / v620;
+            let v1721 = (v2 + v1718) + v1720;
+            let v4595 = (Lanes([v4588[0], v4588[1], v4588[2], 0.0, 0.0])) + (Lanes([v4592[0], 0.0, v4592[1], v4592[2], v4592[3]]));
+            let v1723 = v1721 * v1721;
+            let v4596 = v4595 * v1721;
+            let v4597 = v4596 + v4596;
+            let v1724 = if v1721 < v0 { 1.0 } else { 0.0 };
+            let v1734: f64;
+            let v2626: Lanes<5>;
+            if v1724 != 0.0 {
+                let v1727 = (v1723 + v1722).sqrt();
+                let v1728 = v1727 - v1721;
+                let v1729 = v1725 / v1728;
+                let v4609 = ((((v4597 * (v2515 / (v2994 * v1727))) - v4595) * v1729) * v2676) / v1728;
+                v1734 = v1729;
+                v2626 = v4609;
+            } else {
+                let v1731 = (v1723 + v1722).sqrt();
+                let v1733 = v424 * (v1731 + v1721);
+                let v4602 = ((v4597 * (v2515 / (v2994 * v1731))) + v4595) * v424;
+                v1734 = v1733;
+                v2626 = v4602;
+            }
+            let v1735 = v1734 * v1163;
+            let v1736 = v346 / v1735;
+            let v4616 = ((Lanes([v2950[0], 0.0, 0.0, 0.0, 0.0])) - (((v2626 * v1163) + (v3884 * v1734)) * v1736)) / v1735;
+            let v1737 = if v1736 < v22 { 1.0 } else { 0.0 };
+            let v1738: f64;
+            let v2627: Lanes<5>;
+            if v1737 != 0.0 {
+                v1738 = v22;
+                v2627 = v4617;
+            } else {
+                v1738 = v1736;
+                v2627 = v4616;
+            }
+            let v1739 = v154 * v1738;
+            let v4618 = v2627 * v154;
+            let v1740 = v27 * v107;
+            let v1742 = v1741 - v2;
+            let v4620 = (v2684 * v27) * v1742;
+            let v4625 = ((Lanes([v4620[0], 0.0, 0.0])) + (v2560 * v1740)) + (Lanes([0.0, v3275[0], v3275[1]]));
+            let v1745 = ((v1740 * v1742) + v729) / v1739;
+            let v4626 = v4618 * v1745;
+            let v4630 = ((Lanes([v4625[0], 0.0, v4625[1], v4625[2], 0.0, 0.0])) - (Lanes([v4626[0], v4626[1], 0.0, v4626[2], v4626[3], v4626[4]]))) / v1739;
+            let v1746 = if v1170 > v0 { 1.0 } else { 0.0 };
+            let v1960: f64;
+            let v2628: Lanes<5>;
+            if v1746 != 0.0 {
+                let v1748 = if v1747 == v2 { 1.0 } else { 0.0 };
+                let v1910: f64;
+                let v2629: Lanes<5>;
+                if v1748 != 0.0 {
+                    let v1750 = if v718 < v1749 { 1.0 } else { 0.0 };
+                    let v1911: f64;
+                    let v2630: Lanes<5>;
+                    if v1750 != 0.0 {
+                        let v1753 = (-v1170) / v1752;
+                        let v4809 = (v3902 * v2676) / v1752;
+                        let v1754 = if v1753 < v763 { 1.0 } else { 0.0 };
+                        let v1761: f64;
+                        let v2631: Lanes<5>;
+                        if v1754 != 0.0 {
+                            let v1755 = v1753.exp();
+                            let v4811 = v4809 * v1755;
+                            v1761 = v1755;
+                            v2631 = v4811;
+                        } else {
+                            let v1756 = v763.exp();
+                            let v1759 = v1756 * (v2 + (v1753 - v763));
+                            let v4810 = v4809 * v1756;
+                            v1761 = v1759;
+                            v2631 = v4810;
+                        }
+                        let v1760 = v1749 - v718;
+                        let v1762 = v1760 * v1761;
+                        let v4813 = (v3259 * v2676) * v1761;
+                        let v4816 = (Lanes([0.0, 0.0, v4813[0], v4813[1], 0.0])) + (v2631 * v1760);
+                        let v1764 = -v1763;
+                        let v1766 = v1762.powf(v1765);
+                        let v1767 = v1764 * v1766;
+                        let v4822 = (v2546 * v2676) * v1766;
+                        let v4825 = (Lanes([v4822[0], 0.0, 0.0, 0.0, 0.0])) + ((v4816 * (v1765 * (v1762.powf((v1765 - v2515))))) * v1764);
+                        let v1768 = if v1767 < v763 { 1.0 } else { 0.0 };
+                        let v1777: f64;
+                        let v2632: Lanes<5>;
+                        if v1768 != 0.0 {
+                            let v1769 = v1767.exp();
+                            let v4827 = v4825 * v1769;
+                            v1777 = v1769;
+                            v2632 = v4827;
+                        } else {
+                            let v1770 = v763.exp();
+                            let v1773 = v1770 * (v2 + (v1767 - v763));
+                            let v4826 = v4825 * v1770;
+                            v1777 = v1773;
+                            v2632 = v4826;
+                        }
+                        let v1775 = v1774 / v1763;
+                        let v1776 = v1775 * v1762;
+                        let v4831 = (((v2546 * v1775) * v2676) / v1763) * v1762;
+                        let v1778 = v1776 * v1777;
+                        let v4837 = (((Lanes([v4831[0], 0.0, 0.0, 0.0, 0.0])) + (v4816 * v1775)) * v1777) + (v2632 * v1776);
+                        v1911 = v1778;
+                        v2630 = v4837;
+                    } else {
+                        v1911 = v0;
+                        v2630 = v4617;
+                    }
+                    v1910 = v1911;
+                    v2629 = v2630;
+                } else {
+                    let v1779 = if v1747 == v27 { 1.0 } else { 0.0 };
+                    let v1912: f64;
+                    let v2633: Lanes<5>;
+                    if v1779 != 0.0 {
+                        let v1780 = if v718 < v820 { 1.0 } else { 0.0 };
+                        let v1913: f64;
+                        let v2634: Lanes<5>;
+                        if v1780 != 0.0 {
+                            let v1785 = (v27 * v1781) / (v1783 * v1783);
+                            let v1786 = v820 - v718;
+                            let v4686 = v3423 - v3422;
+                            let v1787 = v1786 / v1091;
+                            let v4688 = Lanes([v4686[0], v4686[1], v4686[2], 0.0]);
+                            let v1790 = ((v27 * v1787) / v1785).sqrt();
+                            let v4695 = ((((v4688 - (v2572 * v1787)) / v1091) * v27) / v1785) * (v2515 / (v2994 * v1790));
+                            let v1792 = if v1791 == v0 { 1.0 } else { 0.0 };
+                            let v1799: f64;
+                            let v2635: Lanes<4>;
+                            if v1792 != 0.0 {
+                                v1799 = v1783;
+                                v2635 = v3489;
+                            } else {
+                                let v1796 = v2 - (v424 * v1793);
+                                let v4697 = (v2574 * v424) * v2676;
+                                let v1797 = v1783 * v1796;
+                                let v1798 = v1797 * v1796;
+                                let v4701 = ((v4697 * v1783) * v1796) + (v4697 * v1797);
+                                v1799 = v1798;
+                                v2635 = v4701;
+                            }
+                            let v4705 = v4695 * v1790;
+                            let v4707 = v2635 * v1799;
+                            let v1804 = ((v1790 * v1790) + (v1799 * v1799)).sqrt();
+                            let v1805 = (v1790 * v1799) / v1804;
+                            let v4715 = (((v4695 * v1799) + (v2635 * v1790)) - ((((v4705 + v4705) + (v4707 + v4707)) * (v2515 / (v2994 * v1804))) * v1805)) / v1804;
+                            let v1806 = v1786 / v1805;
+                            let v4718 = (v4688 - (v4715 * v1806)) / v1805;
+                            let v1807 = v424 * v1805;
+                            let v4719 = v4715 * v424;
+                            let v1808 = v1807 * v1785;
+                            let v4720 = v4719 * v1785;
+                            let v1810 = v1806 + (v1808 * v1091);
+                            let v4724 = v4718 + ((v4720 * v1091) + (v2572 * v1808));
+                            let v1837: f64;
+                            let v2636: Lanes<5>;
+                            if v1792 != 0.0 {
+                                let v4759 = Lanes([v4724[0], 0.0, v4724[1], v4724[2], v4724[3]]);
+                                v1837 = v1810;
+                                v2636 = v4759;
+                            } else {
+                                let v1812 = v27 * v1811;
+                                let v1820 = v906 * (v2 + (v1812 * (v2 + (v27 * v1793))));
+                                let v1821 = v1170 / v1820;
+                                let v4728 = (((v2574 * v27) * v1812) * v906) * v1821;
+                                let v1822 = ((v2 + v1811) / (v2 + v1812)) - v1821;
+                                let v4733 = v4720 * v1822;
+                                let v1824 = v1806 - (v1808 * v1822);
+                                let v4738 = (Lanes([v4718[0], 0.0, v4718[1], v4718[2], v4718[3]])) - ((Lanes([v4733[0], 0.0, v4733[1], v4733[2], v4733[3]])) + ((((v3902 - (Lanes([v4728[0], 0.0, v4728[1], v4728[2], v4728[3]]))) / v1820) * v2676) * v1808));
+                                let v1825 = v1824 - v1810;
+                                let v4739 = Lanes([v4724[0], 0.0, v4724[1], v4724[2], v4724[3]]);
+                                let v4741 = (v4738 - v4739) * v1825;
+                                let v1827 = v42 * v1806;
+                                let v1828 = v1827 * v1806;
+                                let v4750 = (((((v4718 * v42) * v1806) + (v4718 * v1827)) * v1829) + (v2575 * v1828)) / v906;
+                                let v1834 = ((v1825 * v1825) + ((v1828 * v1829) / v906)).sqrt();
+                                let v1836 = v424 * ((v1824 + v1810) + v1834);
+                                let v4758 = ((v4738 + v4739) + (((v4741 + v4741) + (Lanes([v4750[0], 0.0, v4750[1], v4750[2], v4750[3]]))) * (v2515 / (v2994 * v1834)))) * v424;
+                                v1837 = v1836;
+                                v2636 = v4758;
+                            }
+                            let v1839 = (v1837 - v1806) / v1837;
+                            let v4764 = ((v2636 - (Lanes([v4718[0], 0.0, v4718[1], v4718[2], v4718[3]]))) - (v2636 * v1839)) / v1837;
+                            let v1842 = if (v1839.abs()) > v1841 { 1.0 } else { 0.0 };
+                            let v1914: f64;
+                            let v2637: Lanes<5>;
+                            if v1842 != 0.0 {
+                                let v1843 = v1807 / v1839;
+                                let v4779 = ((Lanes([v4719[0], 0.0, v4719[1], v4719[2], v4719[3]])) - (v4764 * v1843)) / v1839;
+                                let v1846 = v1844 / v1845;
+                                let v1847 = v1846 * v1837;
+                                let v4783 = (((v2550 * v1846) * v2676) / v1845) * v1837;
+                                let v1848 = v1847 * v1843;
+                                let v4790 = v2550 * v2676;
+                                let v1850 = (-v1845) / v1837;
+                                let v4794 = ((Lanes([v4790[0], 0.0, 0.0, 0.0, 0.0])) - (v2636 * v1850)) / v1837;
+                                let v1851 = v1850.exp();
+                                let v1852 = v1799 / v1843;
+                                let v1853 = v2 + v1852;
+                                let v1855 = (v1850 * v1853).exp();
+                                let v1856 = v1851 - v1855;
+                                let v1857 = v1848 * v1856;
+                                let v4807 = (((((Lanes([v4783[0], 0.0, 0.0, 0.0, 0.0])) + (v2636 * v1846)) * v1843) + (v4779 * v1847)) * v1856) + (((v4794 * v1851) - (((v4794 * v1853) + ((((Lanes([v2635[0], 0.0, v2635[1], v2635[2], v2635[3]])) - (v4779 * v1852)) / v1843) * v1850)) * v1855)) * v1848);
+                                v1914 = v1857;
+                                v2637 = v4807;
+                            } else {
+                                let v1858 = v1844 * v1799;
+                                let v4766 = v2550 * v2676;
+                                let v1860 = (-v1845) / v1837;
+                                let v1861 = v1860.exp();
+                                let v1862 = v1858 * v1861;
+                                let v4772 = (v2635 * v1844) * v1861;
+                                let v4775 = (Lanes([v4772[0], 0.0, v4772[1], v4772[2], v4772[3]])) + (((((Lanes([v4766[0], 0.0, 0.0, 0.0, 0.0])) - (v2636 * v1860)) / v1837) * v1861) * v1858);
+                                v1914 = v1862;
+                                v2637 = v4775;
+                            }
+                            v1913 = v1914;
+                            v2634 = v2637;
+                        } else {
+                            v1913 = v0;
+                            v2634 = v4617;
+                        }
+                        v1912 = v1913;
+                        v2633 = v2634;
+                    } else {
+                        let v1863 = if v1747 == v154 { 1.0 } else { 0.0 };
+                        let v1915: f64;
+                        let v2638: Lanes<5>;
+                        if v1863 != 0.0 {
+                            let v1864 = if v718 < v1749 { 1.0 } else { 0.0 };
+                            let v1916: f64;
+                            let v2639: Lanes<5>;
+                            if v1864 != 0.0 {
+                                let v1865 = v1749 - v718;
+                                let v4631 = v3259 * v2676;
+                                let v1866 = v1865.powf(v1765);
+                                let v1868 = v1867 + v1170;
+                                let v1869 = v1170 / v1868;
+                                let v1870 = v2 - v1869;
+                                let v1872 = v1870.powf(v1871);
+                                let v1873 = v1866 * v1872;
+                                let v4644 = (v4631 * (v1765 * (v1865.powf((v1765 - v2515))))) * v1872;
+                                let v4647 = (Lanes([0.0, 0.0, v4644[0], v4644[1], 0.0])) + (((((v3902 - (v3902 * v1869)) / v1868) * v2676) * (v1871 * (v1870.powf((v1871 - v2515))))) * v1866);
+                                let v1874 = if v1791 == v0 { 1.0 } else { 0.0 };
+                                let v1898: f64;
+                                let v2640: Lanes<5>;
+                                if v1874 != 0.0 {
+                                    v1898 = v1873;
+                                    v2640 = v4647;
+                                } else {
+                                    let v1877 = (v1170 - v1875) / v1867;
+                                    let v4648 = v3902 / v1867;
+                                    let v1880 = (v1877 - v2) / v1879;
+                                    let v4649 = v4648 / v1879;
+                                    let v1881 = if v1877 < v2 { 1.0 } else { 0.0 };
+                                    let v1893: f64;
+                                    let v2641: Lanes<5>;
+                                    if v1881 != 0.0 {
+                                        let v1882 = v1880.exp();
+                                        let v1883 = v2 + v1882;
+                                        let v4659 = ((v4649 * v1882) * (v2515 / v1883)) * v1879;
+                                        let v1886 = v2 + (v1879 * (v1883.ln()));
+                                        v1893 = v1886;
+                                        v2641 = v4659;
+                                    } else {
+                                        let v1888 = (-v1880).exp();
+                                        let v1889 = v2 + v1888;
+                                        let v1892 = v1877 + (v1879 * (v1889.ln()));
+                                        let v4655 = v4648 + ((((v4649 * v2676) * v1888) * (v2515 / v1889)) * v1879);
+                                        v1893 = v1892;
+                                        v2641 = v4655;
+                                    }
+                                    let v1895 = v1893.powf(v1894);
+                                    let v1896 = v1873 * v1895;
+                                    let v4666 = (v4647 * v1895) + ((v2641 * (v1894 * (v1893.powf((v1894 - v2515))))) * v1873);
+                                    v1898 = v1896;
+                                    v2640 = v4666;
+                                }
+                                let v1897 = -v1763;
+                                let v1899 = v1897 * v1898;
+                                let v4668 = (v2546 * v2676) * v1898;
+                                let v4671 = (Lanes([v4668[0], 0.0, 0.0, 0.0, 0.0])) + (v2640 * v1897);
+                                let v1900 = if v1899 < v763 { 1.0 } else { 0.0 };
+                                let v1908: f64;
+                                let v2642: Lanes<5>;
+                                if v1900 != 0.0 {
+                                    let v1901 = v1899.exp();
+                                    let v4673 = v4671 * v1901;
+                                    v1908 = v1901;
+                                    v2642 = v4673;
+                                } else {
+                                    let v1902 = v763.exp();
+                                    let v1905 = v1902 * (v2 + (v1899 - v763));
+                                    let v4672 = v4671 * v1902;
+                                    v1908 = v1905;
+                                    v2642 = v4672;
+                                }
+                                let v1906 = v1774 / v1763;
+                                let v1907 = v1906 * v1865;
+                                let v4677 = (((v2546 * v1906) * v2676) / v1763) * v1865;
+                                let v4678 = v4631 * v1906;
+                                let v1909 = v1907 * v1908;
+                                let v4682 = ((Lanes([v4677[0], 0.0, 0.0])) + (Lanes([0.0, v4678[0], v4678[1]]))) * v1908;
+                                let v4685 = (Lanes([v4682[0], 0.0, v4682[1], v4682[2], 0.0])) + (v2642 * v1907);
+                                v1916 = v1909;
+                                v2639 = v4685;
+                            } else {
+                                v1916 = v0;
+                                v2639 = v4617;
+                            }
+                            v1915 = v1916;
+                            v2638 = v2639;
+                        } else {
+                            v1915 = v0;
+                            v2638 = v4617;
+                        }
+                        v1912 = v1915;
+                        v2633 = v2638;
+                    }
+                    v1910 = v1912;
+                    v2629 = v2633;
+                }
+                let v1917 = if v1910 > v0 { 1.0 } else { 0.0 };
+                let v1961: f64;
+                let v2643: Lanes<5>;
+                if v1917 != 0.0 {
+                    let v1919 = if v1918 == v2 { 1.0 } else { 0.0 };
+                    let v1962: f64;
+                    let v2644: Lanes<5>;
+                    if v1919 != 0.0 {
+                        let v1921 = v1920 + v1739;
+                        let v4842 = (Lanes([v2541[0], 0.0, 0.0, 0.0, 0.0])) + v4618;
+                        let v1922 = v1170 * v1921;
+                        let v1923 = v107 / v1922;
+                        let v1924 = v1164 / v449;
+                        let v4850 = v3020 * v1924;
+                        let v4855 = v3054 * v1924;
+                        let v1928 = v1927 / v1921;
+                        let v1929 = (v1923 + (v1924 * v500)) + v1928;
+                        let v4863 = ((((Lanes([v2684[0], 0.0, 0.0, 0.0, 0.0])) - (((v3902 * v1921) + (v4842 * v1170)) * v1923)) / v1922) + ((((v3887 - (Lanes([v4850[0], 0.0, 0.0, 0.0, 0.0]))) / v449) * v500) + (Lanes([v4855[0], 0.0, 0.0, 0.0, 0.0])))) + (((Lanes([v2540[0], 0.0, 0.0, 0.0, 0.0])) - (v4842 * v1928)) / v1921);
+                        let v1930 = if v1747 == v154 { 1.0 } else { 0.0 };
+                        let v1963: f64;
+                        let v2645: Lanes<5>;
+                        if v1930 != 0.0 {
+                            let v1932 = (v1910 - v1929) / v1665;
+                            let v4875 = (v2629 - v4863) / v1665;
+                            let v1933 = if v1910 < v1929 { 1.0 } else { 0.0 };
+                            let v1945: f64;
+                            let v2646: Lanes<5>;
+                            if v1933 != 0.0 {
+                                let v1934 = v1932.exp();
+                                let v1935 = v2 + v1934;
+                                let v1938 = v1910 - (v1665 * (v1935.ln()));
+                                let v4886 = v2629 - (((v4875 * v1934) * (v2515 / v1935)) * v1665);
+                                v1945 = v1938;
+                                v2646 = v4886;
+                            } else {
+                                let v1940 = (-v1932).exp();
+                                let v1941 = v2 + v1940;
+                                let v1944 = v1929 - (v1665 * (v1941.ln()));
+                                let v4881 = v4863 - ((((v4875 * v2676) * v1940) * (v2515 / v1941)) * v1665);
+                                v1945 = v1944;
+                                v2646 = v4881;
+                            }
+                            let v1946 = v1170 * v1945;
+                            let v4889 = (v3902 * v1945) + (v2646 * v1170);
+                            v1963 = v1946;
+                            v2645 = v4889;
+                        } else {
+                            let v1947 = v1170 * v1910;
+                            let v1949 = v1910 + v1929;
+                            let v1950 = (v1947 * v1929) / v1949;
+                            let v4873 = (((((v3902 * v1910) + (v2629 * v1170)) * v1929) + (v4863 * v1947)) - ((v2629 + v4863) * v1950)) / v1949;
+                            v1963 = v1950;
+                            v2645 = v4873;
+                        }
+                        v1962 = v1963;
+                        v2644 = v2645;
+                    } else {
+                        let v1951 = v1170 * v1910;
+                        let v4840 = (v3902 * v1910) + (v2629 * v1170);
+                        v1962 = v1951;
+                        v2644 = v4840;
+                    }
+                    v1961 = v1962;
+                    v2643 = v2644;
+                } else {
+                    v1961 = v0;
+                    v2643 = v4617;
+                }
+                v1960 = v1961;
+                v2628 = v2643;
+            } else {
+                v1960 = v0;
+                v2628 = v4617;
+            }
+            let v1952 = if v1118 > v0 { 1.0 } else { 0.0 };
+            let v1954: f64;
+            let v2647: Lanes<4>;
+            if v1952 != 0.0 {
+                let v1953 = v107 * v3803;
+                let v4893 = v2684 * v3803;
+                let v4896 = (Lanes([v4893[0], 0.0, 0.0, 0.0])) + ((v2573 * (v2515 / v1118)) * v107);
+                v1954 = v1953;
+                v2647 = v4896;
+            } else {
+                let v4890 = Lanes([0.0, v3263[0], 0.0, v3263[1]]);
+                v1954 = v721;
+                v2647 = v4890;
+            }
+            let v2000: f64;
+            let v2648: Lanes<3>;
+            if v510 != 0.0 {
+                let v4898 = Lanes([v3259[0], v3259[1], 0.0]);
+                v2000 = v718;
+                v2648 = v4898;
+            } else {
+                let v4897 = Lanes([v3263[0], 0.0, v3263[1]]);
+                v2000 = v721;
+                v2648 = v4897;
+            }
+            let v1955 = v724 - v1954;
+            let v1957 = v1954 - v718;
+            let v4909 = (v3463 * v1957) + ((v2647 - (Lanes([0.0, v3259[0], v3259[1], 0.0]))) * v873);
+            let v4913 = v2647 * v1960;
+            let v4916 = (((v3902 * v1955) + (((Lanes([0.0, v3267[0], v3267[1], 0.0, 0.0])) - (Lanes([v2647[0], 0.0, v2647[1], v2647[2], v2647[3]]))) * v1170)) + (Lanes([v4909[0], 0.0, v4909[1], v4909[2], v4909[3]]))) - ((v2628 * v1954) + (Lanes([v4913[0], 0.0, v4913[1], v4913[2], v4913[3]])));
+            let v4917 = v3287 * v737;
+            let v4918 = v4917 + v4917;
+            let v1967 = (v737 * v737) / v1927;
+            let v4919 = v2540 * v1967;
+            let v4923 = ((Lanes([v4918[0], 0.0, v4918[1]])) - (Lanes([0.0, v4919[0], 0.0]))) / v1927;
+            let v4926 = (Lanes([0.0, v4916[0], v4916[1], v4916[2], v4916[3], v4916[4]])) + (Lanes([v4923[0], v4923[1], v4923[2], 0.0, 0.0, 0.0]));
+            let v1969 = v758 * v758;
+            let v4927 = v3326 * v758;
+            let v4929 = (v4927 + v4927) * v1970;
+            let v4930 = v2551 * v1969;
+            let v4933 = (Lanes([v4929[0], v4929[1], 0.0, v4929[2], v4929[3], v4929[4], v4929[5], v4929[6], v4929[7]])) + (Lanes([0.0, 0.0, v4930[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+            let v1974 = v751 * v751;
+            let v4937 = v3307 * v751;
+            let v4939 = (v4937 + v4937) * v1975;
+            let v4940 = v2553 * v1974;
+            let v4943 = (Lanes([0.0, v4939[0], v4939[1]])) + (Lanes([v4940[0], 0.0, 0.0]));
+            let v1979 = v748 * v748;
+            let v4946 = v3303 * v748;
+            let v4948 = (v4946 + v4946) * v1980;
+            let v4949 = v2555 * v1979;
+            let v4952 = (Lanes([0.0, v4948[0], v4948[1]])) + (Lanes([v4949[0], 0.0, 0.0]));
+            let v4955 = v3291 * v740;
+            let v4956 = v4955 + v4955;
+            let v1985 = (v740 * v740) / v1920;
+            let v4957 = v2541 * v1985;
+            let v4961 = ((Lanes([v4956[0], 0.0, v4956[1]])) - (Lanes([0.0, v4957[0], 0.0]))) / v1920;
+            let v4965 = v3275 * v1745;
+            let v4967 = (v4630 * v729) + (Lanes([0.0, 0.0, v4965[0], v4965[1], 0.0, 0.0]));
+            let v4972 = v3267 * v16;
+            let v1997 = ((((v1989 + v1322) + (v16 * v724)) - v1994) + v1216) + v1195;
+            let v4980 = ((((v2594 + (Lanes([v4065[0], v4065[1], v4065[2], 0.0, 0.0]))) + (Lanes([0.0, v4972[0], v4972[1], 0.0, 0.0]))) - (Lanes([v2605[0], v2605[1], v2605[2], 0.0, 0.0]))) + (Lanes([0.0, v3940[0], v3940[1], 0.0, 0.0]))) + (Lanes([v3921[0], v3921[1], v3921[2], 0.0, 0.0]));
+            let v4982 = v3267 * v1997;
+            let v4984 = (v4980 * v724) + (Lanes([0.0, v4982[0], v4982[1], 0.0, 0.0]));
+            let v4987 = v4572 * v2000;
+            let v4988 = v2648 * v1712;
+            let v4991 = (Lanes([v4987[0], v4987[1], v4987[2], v4987[3], 0.0])) + (Lanes([0.0, 0.0, v4988[0], v4988[1], v4988[2]]));
+            let v2005 = (v2003 + v1332) + v1352;
+            let v4995 = (v2599 + v4072) + v4086;
+            let v4997 = v3271 * v2005;
+            let v4999 = (v4995 * v727) + (Lanes([0.0, v4997[0], v4997[1]]));
+            let v2009 = v16 * v754;
+            let v5003 = v3316 * v16;
+            let v2010 = (v1714 + v1715) + v2009;
+            let v5004 = Lanes([0.0, v5003[0], v5003[1], v5003[2], v5003[3], v5003[4]]);
+            let v5007 = v3316 * v2010;
+            let v5009 = (((v4576 + v4580) + v5004) * v754) + (Lanes([0.0, v5007[0], v5007[1], v5007[2], v5007[3], v5007[4]]));
+            let v5011 = (((((((((Lanes([0.0, 0.0, v4926[0], v4926[1], v4926[2], 0.0, v4926[3], v4926[4], v4926[5], 0.0, 0.0])) + (Lanes([v4933[0], v4933[1], 0.0, v4933[2], 0.0, v4933[3], v4933[4], v4933[5], v4933[6], v4933[7], v4933[8]]))) + (Lanes([0.0, 0.0, 0.0, v4943[0], 0.0, 0.0, 0.0, 0.0, 0.0, v4943[1], v4943[2]]))) + (Lanes([0.0, 0.0, 0.0, v4952[0], 0.0, 0.0, 0.0, v4952[1], 0.0, 0.0, v4952[2]]))) + (Lanes([0.0, v4961[0], 0.0, v4961[1], 0.0, v4961[2], 0.0, 0.0, 0.0, 0.0, 0.0]))) + (Lanes([0.0, 0.0, 0.0, v4967[0], v4967[1], v4967[2], v4967[3], v4967[4], v4967[5], 0.0, 0.0]))) + (Lanes([0.0, 0.0, 0.0, v4984[0], v4984[1], 0.0, v4984[2], v4984[3], v4984[4], 0.0, 0.0]))) - (Lanes([0.0, 0.0, 0.0, v4991[0], 0.0, v4991[1], v4991[2], v4991[3], v4991[4], 0.0, 0.0]))) + (Lanes([0.0, 0.0, 0.0, v4999[0], v4999[1], v4999[2], 0.0, 0.0, 0.0, 0.0, 0.0]))) + (Lanes([0.0, 0.0, 0.0, v5009[0], 0.0, v5009[1], v5009[2], v5009[3], v5009[4], 0.0, v5009[5]]));
+            let v5013 = v3328 * v1717;
+            let v5015 = (v4584 * v759) + (Lanes([v5013[0], v5013[1], 0.0, 0.0, v5013[2], v5013[3], v5013[4], v5013[5], v5013[6], v5013[7]]));
+            let v2016 = v754 - v760;
+            let v5023 = ((Lanes([0.0, v3316[0], v3316[1], v3316[2], v3316[3], v3316[4]])) - (Lanes([v3331[0], 0.0, 0.0, v3331[1], 0.0, v3331[2]]))) * v2015;
+            let v5025 = (v2617 * v2016) + (Lanes([v5023[0], 0.0, v5023[1], v5023[2], v5023[3], v5023[4], v5023[5]]));
+            let v2020 = v718 - v732;
+            let v5032 = ((Lanes([0.0, v3259[0], v3259[1]])) - (Lanes([v3279[0], 0.0, v3279[1]]))) * v2019;
+            let v5034 = (v2614 * v2020) + (Lanes([v5032[0], 0.0, v5032[1], v5032[2], 0.0]));
+            let v2024 = v759 - v761;
+            let v5041 = ((Lanes([v3328[0], v3328[1], 0.0, v3328[2], v3328[3], v3328[4], v3328[5], v3328[6], v3328[7]])) - (Lanes([0.0, 0.0, v3334[0], 0.0, 0.0, v3334[1], 0.0, v3334[2], v3334[3]]))) * v2023;
+            let v5043 = (v2618 * v2024) + (Lanes([v5041[0], v5041[1], v5041[2], 0.0, v5041[3], v5041[4], v5041[5], v5041[6], v5041[7], v5041[8]]));
+            let v5047 = v3279 * v1585;
+            let v5049 = (v4421 * v732) + (Lanes([v5047[0], 0.0, v5047[1]]));
+            let v2028 = (((((((((((((((((v1170 * v1955) + (v873 * v1957)) - (v1960 * v1954)) + v1967) + (v1969 * v1970)) + (v1974 * v1975)) + (v1979 * v1980)) + v1985) + (v1745 * v729)) + (v1997 * v724)) - (v1712 * v2000)) + (v2005 * v727)) + (v2010 * v754)) + (v1717 * v759)) + (v2015 * v2016)) + (v2019 * v2020)) + (v2023 * v2024)) + (v1585 * v732);
+            let v5051 = (((((Lanes([v5011[0], v5011[1], v5011[2], 0.0, v5011[3], v5011[4], v5011[5], v5011[6], v5011[7], v5011[8], v5011[9], v5011[10]])) + (Lanes([v5015[0], v5015[1], 0.0, v5015[2], v5015[3], 0.0, v5015[4], v5015[5], v5015[6], v5015[7], v5015[8], v5015[9]]))) + (Lanes([0.0, 0.0, 0.0, v5025[0], v5025[1], 0.0, v5025[2], v5025[3], v5025[4], v5025[5], 0.0, v5025[6]]))) + (Lanes([0.0, 0.0, 0.0, v5034[0], v5034[1], 0.0, 0.0, v5034[2], v5034[3], v5034[4], 0.0, 0.0]))) + (Lanes([v5043[0], v5043[1], 0.0, v5043[2], v5043[3], 0.0, v5043[4], v5043[5], v5043[6], v5043[7], v5043[8], v5043[9]]))) + (Lanes([0.0, 0.0, 0.0, v5049[0], v5049[1], 0.0, 0.0, 0.0, v5049[2], 0.0, 0.0, 0.0]));
+            let v2030 = v2 - v2029;
+            let v2031 = v2030 * v316;
+            let v5052 = v2923 * v2030;
+            let v2032 = v2031 * v1059;
+            let v5053 = v5052 * v1059;
+            let v5056 = (Lanes([v5053[0], 0.0, 0.0])) + (v3703 * v2031);
+            let v5057 = Lanes([0.0, v3271[0], v3271[1]]);
+            let v5058 = Lanes([v3660[0], 0.0, 0.0]);
+            let v2034 = (v727 - v1033) / v1034;
+            let v5060 = v3661 * v2034;
+            let v5063 = ((v5057 - v5058) - (Lanes([v5060[0], 0.0, 0.0]))) / v1034;
+            let v2035 = if v727 < v1033 { 1.0 } else { 0.0 };
+            let v2048: f64;
+            let v2649: Lanes<3>;
+            if v2035 != 0.0 {
+                let v2036 = v2034.exp();
+                let v2037 = v2 + v2036;
+                let v2038 = v2037.ln();
+                let v5076 = v3661 * v2038;
+                let v2040 = v727 - (v1034 * v2038);
+                let v5080 = v5057 - ((Lanes([v5076[0], 0.0, 0.0])) + (((v5063 * v2036) * (v2515 / v2037)) * v1034));
+                v2048 = v2040;
+                v2649 = v5080;
+            } else {
+                let v2042 = (-v2034).exp();
+                let v2043 = v2 + v2042;
+                let v2044 = v2043.ln();
+                let v5068 = v3661 * v2044;
+                let v2046 = v1033 - (v1034 * v2044);
+                let v5072 = v5058 - ((Lanes([v5068[0], 0.0, 0.0])) + ((((v5063 * v2676) * v2042) * (v2515 / v2043)) * v1034));
+                v2048 = v2046;
+                v2649 = v5072;
+            }
+            let v2047 = v2029 * v316;
+            let v5083 = v2909 * v2048;
+            let v2050 = v2 - (v2048 * v308);
+            let v2052 = v2 - (v2050.powf(v1052));
+            let v5091 = v3695 * v2052;
+            let v2056 = (v1054 * v2052) + (v154 * (v727 - v2048));
+            let v2057 = v2047 * v2056;
+            let v5098 = (v2923 * v2029) * v2056;
+            let v5101 = (Lanes([v5098[0], 0.0, 0.0])) + ((((Lanes([v5091[0], 0.0, 0.0])) + ((((((v2649 * v308) + (Lanes([v5083[0], 0.0, 0.0]))) * v2676) * (v1052 * (v2050.powf(v3691)))) * v2676) * v1054)) + ((v5057 - v2649) * v154)) * v2047);
+            let v2059 = v2058 * v332;
+            let v2060 = v2059 * v1109;
+            let v5103 = (v2942 * v2058) * v1109;
+            let v5106 = (Lanes([v5103[0], 0.0, 0.0, 0.0])) + (v3781 * v2059);
+            let v2061 = v667 * v454;
+            let v5109 = (v3229 * v454) + (v3023 * v667);
+            let v2062 = v424 * v2061;
+            let v5110 = v5109 * v424;
+            let v2063 = v2062 * v1117;
+            let v5111 = v5110 * v1117;
+            let v2064 = v2063 * v1734;
+            let v5115 = ((Lanes([v5111[0], 0.0, 0.0])) + (v3795 * v2062)) * v1734;
+            let v5118 = (Lanes([v5115[0], v5115[1], v5115[2], 0.0, 0.0])) + (v2626 * v2063);
+            let v2065 = v2062 * v1126;
+            let v5119 = v5110 * v1126;
+            let v2066 = v2065 * v1734;
+            let v5123 = ((Lanes([v5119[0], 0.0, 0.0, 0.0])) + (v3817 * v2062)) * v1734;
+            let v5126 = (Lanes([v5123[0], 0.0, v5123[1], v5123[2], v5123[3]])) + (v2626 * v2065);
+            let v2067 = v42 * v325;
+            let v5127 = v2536 * v42;
+            let v5128 = Lanes([v3719[0], 0.0, 0.0, 0.0, 0.0, 0.0]);
+            let v2069 = (v754 - v1072) / v2067;
+            let v5130 = v5127 * v2069;
+            let v5133 = ((v3404 - v5128) - (Lanes([v5130[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) / v2067;
+            let v2070 = if v754 < v1072 { 1.0 } else { 0.0 };
+            let v2082: f64;
+            let v2650: Lanes<6>;
+            if v2070 != 0.0 {
+                let v2071 = v2069.exp();
+                let v2072 = v2 + v2071;
+                let v2073 = v2072.ln();
+                let v5146 = v5127 * v2073;
+                let v2075 = v754 - (v2067 * v2073);
+                let v5150 = v3404 - ((Lanes([v5146[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (((v5133 * v2071) * (v2515 / v2072)) * v2067));
+                v2082 = v2075;
+                v2650 = v5150;
+            } else {
+                let v2077 = (-v2069).exp();
+                let v2078 = v2 + v2077;
+                let v2079 = v2078.ln();
+                let v5138 = v5127 * v2079;
+                let v2081 = v1072 - (v2067 * v2079);
+                let v5142 = v5128 - ((Lanes([v5138[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((v5133 * v2676) * v2077) * (v2515 / v2078)) * v2067));
+                v2082 = v2081;
+                v2650 = v5142;
+            }
+            let v2083 = v2082 / v325;
+            let v5151 = v2536 * v2083;
+            let v2084 = v2 - v2083;
+            let v2086 = v2 - (v2084.powf(v1094));
+            let v5160 = v3744 * v2086;
+            let v2088 = v754 - v2082;
+            let v5165 = v3711 * v2088;
+            let v2090 = (v1095 * v2086) + (v1067 * v2088);
+            let v5170 = v3708 * v2090;
+            let v5174 = v2943 * v754;
+            let v5175 = v3316 * v333;
+            let v2093 = (v1066 * v2090) + (v333 * v754);
+            let v5180 = v2942 * v2093;
+            let v2095 = v2 - v2058;
+            let v2097 = ((v332 * v2093) * v2095) * v9;
+            let v5185 = (((Lanes([v5180[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((Lanes([v5170[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((Lanes([v5160[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((((v2650 - (Lanes([v5151[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) / v325) * v2676) * (v1094 * (v2084.powf(v3750)))) * v2676) * v1095)) + ((Lanes([v5165[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((v3404 - v2650) * v1067))) * v1066)) + ((Lanes([v5174[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (Lanes([0.0, v5175[0], v5175[1], v5175[2], v5175[3], v5175[4]])))) * v332)) * v2095) * v9;
+            let v5186 = Lanes([0.0, 0.0, v3719[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+            let v2099 = (v759 - v1072) / v2067;
+            let v5188 = v5127 * v2099;
+            let v5191 = ((v3395 - v5186) - (Lanes([0.0, 0.0, v5188[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))) / v2067;
+            let v2100 = if v759 < v1072 { 1.0 } else { 0.0 };
+            let v2112: f64;
+            let v2651: Lanes<9>;
+            if v2100 != 0.0 {
+                let v2101 = v2099.exp();
+                let v2102 = v2 + v2101;
+                let v2103 = v2102.ln();
+                let v5204 = v5127 * v2103;
+                let v2105 = v759 - (v2067 * v2103);
+                let v5208 = v3395 - ((Lanes([0.0, 0.0, v5204[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (((v5191 * v2101) * (v2515 / v2102)) * v2067));
+                v2112 = v2105;
+                v2651 = v5208;
+            } else {
+                let v2107 = (-v2099).exp();
+                let v2108 = v2 + v2107;
+                let v2109 = v2108.ln();
+                let v5196 = v5127 * v2109;
+                let v2111 = v1072 - (v2067 * v2109);
+                let v5200 = v5186 - ((Lanes([0.0, 0.0, v5196[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((v5191 * v2676) * v2107) * (v2515 / v2108)) * v2067));
+                v2112 = v2111;
+                v2651 = v5200;
+            }
+            let v2113 = v2112 / v325;
+            let v5209 = v2536 * v2113;
+            let v2114 = v2 - v2113;
+            let v2116 = v2 - (v2114.powf(v1094));
+            let v5218 = v3744 * v2116;
+            let v2118 = v759 - v2112;
+            let v5223 = v3711 * v2118;
+            let v2120 = (v1095 * v2116) + (v1067 * v2118);
+            let v5228 = v3708 * v2120;
+            let v5232 = v2943 * v759;
+            let v5233 = v3328 * v333;
+            let v2123 = (v1066 * v2120) + (v333 * v759);
+            let v5238 = v2942 * v2123;
+            let v2126 = ((v332 * v2123) * v2095) * v8;
+            let v5243 = (((Lanes([0.0, 0.0, v5238[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((Lanes([0.0, 0.0, v5228[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((Lanes([0.0, 0.0, v5218[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((((v2651 - (Lanes([0.0, 0.0, v5209[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))) / v325) * v2676) * (v1094 * (v2114.powf(v3750)))) * v2676) * v1095)) + ((Lanes([0.0, 0.0, v5223[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((v3395 - v2651) * v1067))) * v1066)) + ((Lanes([0.0, 0.0, v5232[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (Lanes([v5233[0], v5233[1], 0.0, v5233[2], v5233[3], v5233[4], v5233[5], v5233[6], v5233[7]])))) * v332)) * v2095) * v8;
+            let v2127 = v42 * v318;
+            let v5244 = v2539 * v42;
+            let v2131 = v2 - (v27.powf((v2128 / v320)));
+            let v2132 = v318 * v2131;
+            let v5245 = v2539 * v2131;
+            let v5246 = Lanes([v3279[0], 0.0, v3279[1]]);
+            let v5247 = Lanes([0.0, v5245[0], 0.0]);
+            let v2134 = (v732 - v2132) / v2127;
+            let v5249 = v5244 * v2134;
+            let v5252 = ((v5246 - v5247) - (Lanes([0.0, v5249[0], 0.0]))) / v2127;
+            let v2135 = if v732 < v2132 { 1.0 } else { 0.0 };
+            let v2149: f64;
+            let v2652: Lanes<3>;
+            if v2135 != 0.0 {
+                let v2136 = v2134.exp();
+                let v2137 = v2 + v2136;
+                let v2138 = v2137.ln();
+                let v5265 = v5244 * v2138;
+                let v2140 = v732 - (v2127 * v2138);
+                let v5269 = v5246 - ((Lanes([0.0, v5265[0], 0.0])) + (((v5252 * v2136) * (v2515 / v2137)) * v2127));
+                v2149 = v2140;
+                v2652 = v5269;
+            } else {
+                let v2142 = (-v2134).exp();
+                let v2143 = v2 + v2142;
+                let v2144 = v2143.ln();
+                let v5257 = v5244 * v2144;
+                let v2146 = v2132 - (v2127 * v2144);
+                let v5261 = v5247 - ((Lanes([0.0, v5257[0], 0.0])) + ((((v5252 * v2676) * v2142) * (v2515 / v2143)) * v2127));
+                v2149 = v2146;
+                v2652 = v5261;
+            }
+            let v2147 = v2 - v320;
+            let v2148 = v318 / v2147;
+            let v2150 = v2149 / v318;
+            let v5271 = v2539 * v2150;
+            let v2151 = v2 - v2150;
+            let v2153 = v2 - (v2151.powf(v2147));
+            let v5281 = (v2539 / v2147) * v2153;
+            let v2157 = (v2148 * v2153) + (v27 * (v732 - v2149));
+            let v2158 = v322 * v2157;
+            let v5288 = v2931 * v2157;
+            let v5291 = (Lanes([0.0, v5288[0], 0.0])) + ((((Lanes([0.0, v5281[0], 0.0])) + ((((((v2652 - (Lanes([0.0, v5271[0], 0.0]))) / v318) * v2676) * (v2147 * (v2151.powf((v2147 - v2515))))) * v2676) * v2148)) + ((v5246 - v2652) * v27)) * v322);
+            let v2159 = v661 * v454;
+            let v2160 = v449 / v454;
+            let v2162 = v2 / v2161;
+            let v2163 = v2160.powf(v2162);
+            let v2164 = v2159 * v2163;
+            let v5304 = (((v3226 * v454) + (v3023 * v661)) * v2163) + ((((v3020 - (v3023 * v2160)) / v454) * (v2162 * (v2160.powf((v2162 - v2515))))) * v2159);
+            let v2165 = v2161 * v107;
+            let v5305 = v2684 * v2161;
+            let v2166 = v724 / v2165;
+            let v5306 = v5305 * v2166;
+            let v5309 = (v3662 - (Lanes([v5306[0], 0.0, 0.0]))) / v2165;
+            let v2167 = if v2166 < v763 { 1.0 } else { 0.0 };
+            let v2173: f64;
+            let v2653: Lanes<3>;
+            if v2167 != 0.0 {
+                let v2168 = v2166.exp();
+                let v5311 = v5309 * v2168;
+                v2173 = v2168;
+                v2653 = v5311;
+            } else {
+                let v2169 = v763.exp();
+                let v2172 = v2169 * (v2 + (v2166 - v763));
+                let v5310 = v5309 * v2169;
+                v2173 = v2172;
+                v2653 = v5310;
+            }
+            let v2174 = v2164 * v2173;
+            let v5312 = v5304 * v2173;
+            let v5315 = (Lanes([v5312[0], 0.0, 0.0])) + (v2653 * v2164);
+            let v2175 = v435 * v672;
+            let v2177 = (v2175 * v107) / v369;
+            let v5322 = ((((v3232 * v435) * v107) + (v2684 * v2175)) - (v2963 * v2177)) / v369;
+            let v2178 = v424 * v2177;
+            let v2179 = v2178 * v1793;
+            let v5324 = (v5322 * v424) * v1793;
+            let v2182 = (v2180 + v952) + v27;
+            let v2183 = v2179 * v2182;
+            let v5332 = (((Lanes([v5324[0], 0.0, 0.0, 0.0])) + (v2574 * v2178)) * v2182) + ((v2576 + (Lanes([v2569[0], v2569[1], v2569[2], 0.0]))) * v2179);
+            let v2185 = if v2184 == v0 { 1.0 } else { 0.0 };
+            let v2215: f64;
+            let v2654: Lanes<6>;
+            if v2185 != 0.0 {
+                let v2186 = v677 * v424;
+                let v5357 = v5109 * v1506;
+                let v5361 = v5322 * v1510;
+                let v2189 = (v2061 * v1506) + (v2177 * v1510);
+                let v5366 = (v3235 * v424) * v2189;
+                let v2191 = (v2186 * v2189) / v674;
+                let v5370 = v3233 * v2191;
+                let v5373 = (((Lanes([v5366[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((Lanes([v5357[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v4292 * v2061)) + ((Lanes([v5361[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v4298 * v2177))) * v2186)) - (Lanes([v5370[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) / v674;
+                v2215 = v2191;
+                v2654 = v5373;
+            } else {
+                let v2195 = (v754 - v2192) / v2194;
+                let v2196 = v2195 * v109;
+                let v5337 = v2687 * v2195;
+                let v5339 = (((v3404 - (Lanes([v2535[0], 0.0, 0.0, 0.0, 0.0, 0.0]))) / v2194) * v109) + (Lanes([v5337[0], 0.0, 0.0, 0.0, 0.0, 0.0]));
+                let v2197 = if v2196 < v763 { 1.0 } else { 0.0 };
+                let v2205: f64;
+                let v2655: Lanes<6>;
+                if v2197 != 0.0 {
+                    let v2198 = v2196.exp();
+                    let v5341 = v5339 * v2198;
+                    v2205 = v2198;
+                    v2655 = v5341;
+                } else {
+                    let v2199 = v763.exp();
+                    let v2202 = v2199 * (v2 + (v2196 - v763));
+                    let v5340 = v5339 * v2199;
+                    v2205 = v2202;
+                    v2655 = v5340;
+                }
+                let v2203 = v1511 * v683;
+                let v5345 = ((v4299 * v683) + (v3238 * v1511)) * v1498;
+                let v2208 = (v2 + (v435 * v2205)).sqrt();
+                let v2209 = v2 + v2208;
+                let v2210 = (v2203 * v1498) / v2209;
+                let v5355 = (((Lanes([v5345[0], 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2559 * v2203)) - (((v2655 * v435) * (v2515 / (v2994 * v2208))) * v2210)) / v2209;
+                v2215 = v2210;
+                v2654 = v5355;
+            }
+            let v2214 = if (if (if v1586 == v2 { 1.0 } else { 0.0 }) != 0.0 || (if v1586 == v154 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 && v1588 != 0.0 { 1.0 } else { 0.0 };
+            let v2400: f64;
+            let v2409: f64;
+            let v2656: Lanes<10>;
+            let v2657: Lanes<6>;
+            if v2214 != 0.0 {
+                let v2216 = v2215 * v9;
+                let v5374 = v2654 * v9;
+                let v2255: f64;
+                let v2658: Lanes<9>;
+                if v2185 != 0.0 {
+                    let v2217 = v1111 * v1595;
+                    let v5398 = v3785 * v1595;
+                    let v5401 = (Lanes([0.0, 0.0, v5398[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2561 * v1111);
+                    let v2220 = (v2 + v2217).sqrt();
+                    let v2221 = v2 + v2220;
+                    let v2222 = (v2217 - v1111) / v2221;
+                    let v2224 = v435 * v2223;
+                    let v5410 = v2565 * v435;
+                    let v2226 = (v2 + v2224).sqrt();
+                    let v2227 = v2 + v2226;
+                    let v2228 = v2224 / v2227;
+                    let v2229 = v424 * v8;
+                    let v2230 = v2229 * v677;
+                    let v5418 = v5109 * v2222;
+                    let v5422 = v5322 * v2228;
+                    let v2233 = (v2061 * v2222) + (v2177 * v2228);
+                    let v5427 = (v3235 * v2229) * v2233;
+                    let v2235 = (v2230 * v2233) / v674;
+                    let v5431 = v3233 * v2235;
+                    let v5434 = (((Lanes([0.0, 0.0, v5427[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((Lanes([0.0, 0.0, v5418[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + ((((v5401 - (Lanes([0.0, 0.0, v3785[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))) - ((v5401 * (v2515 / (v2994 * v2220))) * v2222)) / v2221) * v2061)) + ((Lanes([0.0, 0.0, v5422[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (((v5410 - ((v5410 * (v2515 / (v2994 * v2226))) * v2228)) / v2227) * v2177))) * v2230)) - (Lanes([0.0, 0.0, v5431[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))) / v674;
+                    v2255 = v2235;
+                    v2658 = v5434;
+                } else {
+                    let v2236 = v759 - v2192;
+                    let v2237 = v2236 * v109;
+                    let v5378 = v2687 * v2236;
+                    let v5380 = ((v3395 - (Lanes([0.0, 0.0, v2535[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))) * v109) + (Lanes([0.0, 0.0, v5378[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+                    let v2238 = if v2237 < v763 { 1.0 } else { 0.0 };
+                    let v2248: f64;
+                    let v2659: Lanes<9>;
+                    if v2238 != 0.0 {
+                        let v2239 = v2237.exp();
+                        let v5382 = v5380 * v2239;
+                        v2248 = v2239;
+                        v2659 = v5382;
+                    } else {
+                        let v2240 = v763.exp();
+                        let v2243 = v2240 * (v2 + (v2237 - v763));
+                        let v5381 = v5380 * v2240;
+                        v2248 = v2243;
+                        v2659 = v5381;
+                    }
+                    let v2244 = v27 * v8;
+                    let v2245 = v2244 * v541;
+                    let v2246 = v2245 * v683;
+                    let v5387 = (((v3081 * v2244) * v683) + (v3238 * v2245)) * v1595;
+                    let v2251 = (v2 + (v435 * v2248)).sqrt();
+                    let v2252 = v2 + v2251;
+                    let v2253 = (v2246 * v1595) / v2252;
+                    let v5397 = (((Lanes([0.0, 0.0, v5387[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])) + (v2561 * v2246)) - (((v2659 * v435) * (v2515 / (v2994 * v2251))) * v2253)) / v2252;
+                    v2255 = v2253;
+                    v2658 = v5397;
+                }
+                let v2256 = v2254 * v2255;
+                let v5436 = v2658 * v2254;
+                let v5438 = (v2619 * v2255) + (Lanes([v5436[0], v5436[1], 0.0, v5436[2], v5436[3], v5436[4], v5436[5], v5436[6], v5436[7], v5436[8]]));
+                v2400 = v2256;
+                v2409 = v2216;
+                v2656 = v5438;
+                v2657 = v5374;
+            } else {
+                v2400 = v0;
+                v2409 = v2215;
+                v2656 = v4422;
+                v2657 = v2654;
+            }
+            let v2258 = if v2257 == v2 { 1.0 } else { 0.0 };
+            let v2362: f64;
+            let v2364: f64;
+            let v2372: f64;
+            let v2381: f64;
+            let v2660: Lanes<5>;
+            let v2661: Lanes<3>;
+            let v2662: Lanes<5>;
+            let v2663: Lanes<6>;
+            if v2258 != 0.0 {
+                let v2259 = -v28;
+                let v5443 = v3690 * (v2259 * (v1051.powf((v2259 - v2515))));
+                let v2261 = (v1051.powf(v2259)) - v154;
+                let v2262 = if v1036 < v0 { 1.0 } else { 0.0 };
+                let v2270: f64;
+                let v2664: Lanes<3>;
+                if v2262 != 0.0 {
+                    let v2263 = v1036.exp();
+                    let v2264 = v2 + v2263;
+                    let v2265 = v2 / v2264;
+                    let v5452 = (((v3668 * v2263) * v2265) * v2676) / v2264;
+                    v2270 = v2265;
+                    v2664 = v5452;
+                } else {
+                    let v2267 = (-v1036).exp();
+                    let v5445 = (v3668 * v2676) * v2267;
+                    let v2268 = v2 + v2267;
+                    let v2269 = v2267 / v2268;
+                    let v5448 = (v5445 - (v5445 * v2269)) / v2268;
+                    v2270 = v2269;
+                    v2664 = v5448;
+                }
+                let v2272 = (v2261 * v2270) + v154;
+                let v5456 = v5052 * v2272;
+                let v5459 = (Lanes([v5456[0], 0.0, 0.0])) + (((v5443 * v2270) + (v2664 * v2261)) * v2031);
+                let v5461 = v2687 * v1113;
+                let v2275 = (v1113 * v109) / v441;
+                let v5464 = v2542 * v2275;
+                let v2276 = v424 / v1115;
+                let v2277 = v2275 * v2276;
+                let v2278 = v2062 * v1734;
+                let v5474 = v5110 * v1734;
+                let v5479 = ((((((v3789 * v109) + (Lanes([v5461[0], 0.0, 0.0]))) - (Lanes([v5464[0], 0.0, 0.0]))) / v441) * v2276) + ((((v3792 * v2276) * v2676) / v1115) * v2275)) * v2278;
+                let v2280 = v2174 / v2165;
+                let v5482 = v5305 * v2280;
+                let v5485 = (v5315 - (Lanes([v5482[0], 0.0, 0.0]))) / v2165;
+                let v2281 = v891 * v729;
+                let v2283 = ((v2031 * v2272) + (v2278 * v2277)) + v2280;
+                let v2284 = v2281 * v2283;
+                let v5491 = (v3275 * v891) * v2283;
+                let v5492 = (((Lanes([v5459[0], v5459[1], v5459[2], 0.0, 0.0])) + ((((Lanes([v5474[0], 0.0, 0.0, 0.0, 0.0])) + (v2626 * v2062)) * v2277) + (Lanes([v5479[0], v5479[1], v5479[2], 0.0, 0.0])))) + (Lanes([v5485[0], v5485[1], v5485[2], 0.0, 0.0]))) * v2281;
+                let v5495 = (Lanes([0.0, 0.0, v5491[0], v5491[1], 0.0, 0.0])) + (Lanes([v5492[0], v5492[1], 0.0, v5492[2], v5492[3], v5492[4]]));
+                let v2286 = v2 - v2285;
+                let v2287 = v2286 * v2174;
+                let v5496 = v5315 * v2286;
+                let v5497 = v5315 * v2285;
+                let v2289 = v2064 + (v2285 * v2174);
+                let v5499 = v5118 + (Lanes([v5497[0], v5497[1], v5497[2], 0.0, 0.0]));
+                let v2292 = (v2290 * v2289) + v2066;
+                let v5501 = (v5499 * v2290) + v5126;
+                let v2293 = v2 - v2290;
+                let v2294 = v2293 * v2289;
+                let v5502 = v5499 * v2293;
+                v2362 = v2294;
+                v2364 = v2287;
+                v2372 = v2292;
+                v2381 = v2284;
+                v2660 = v5502;
+                v2661 = v5496;
+                v2662 = v5501;
+                v2663 = v5495;
+            } else {
+                v2362 = v2064;
+                v2364 = v2174;
+                v2372 = v2066;
+                v2381 = v0;
+                v2660 = v5118;
+                v2661 = v5315;
+                v2662 = v5126;
+                v2663 = v5439;
+            }
+            let v2296 = (v1 * v873) * v21;
+            let v5504 = (v3463 * v1) * v21;
+            let v2298 = (v1 * v1170) * v21;
+            let v5506 = (v3902 * v1) * v21;
+            let v2300 = (v1 * v2005) * v21;
+            let v5508 = (v4995 * v1) * v21;
+            let v2302 = (v1 * v1997) * v21;
+            let v5510 = (v4980 * v1) * v21;
+            let v2499: f64;
+            let v2500: f64;
+            let v2665: Lanes<4>;
+            let v2666: Lanes<4>;
+            if v510 != 0.0 {
+                let v2305 = (v1 * (-v1712)) * v21;
+                let v5517 = ((v4572 * v2676) * v1) * v21;
+                v2499 = v2305;
+                v2500 = v0;
+                v2665 = v5517;
+                v2666 = v5514;
+            } else {
+                let v2308 = (v1 * (-v1712)) * v21;
+                let v5513 = ((v4572 * v2676) * v1) * v21;
+                v2499 = v0;
+                v2500 = v2308;
+                v2665 = v5514;
+                v2666 = v5513;
+            }
+            let v2310 = (v1 * v2015) * v21;
+            let v5519 = (v2617 * v1) * v21;
+            let v2312 = (v1 * v2019) * v21;
+            let v5521 = (v2614 * v1) * v21;
+            let v2314 = (v1 * v2023) * v21;
+            let v5523 = (v2618 * v1) * v21;
+            let v2316 = (v1 * v1585) * v21;
+            let v5525 = (v4421 * v1) * v21;
+            let v2318 = (v1 * v1745) * v21;
+            let v5527 = (v4630 * v1) * v21;
+            let v2322 = (v1 * (v2319 * v1960)) * v21;
+            let v5530 = ((v2628 * v2319) * v1) * v21;
+            let v5531 = v3287 * v1;
+            let v2324 = (v1 * v737) / v1927;
+            let v5532 = v2540 * v2324;
+            let v2325 = v2324 * v21;
+            let v5537 = (((Lanes([v5531[0], 0.0, v5531[1]])) - (Lanes([0.0, v5532[0], 0.0]))) / v1927) * v21;
+            let v5538 = v3291 * v1;
+            let v2327 = (v1 * v740) / v1920;
+            let v5539 = v2541 * v2327;
+            let v2328 = v2327 * v21;
+            let v5544 = (((Lanes([v5538[0], 0.0, v5538[1]])) - (Lanes([0.0, v5539[0], 0.0]))) / v1920) * v21;
+            let v2332 = (ddt(13541, (v2329 * v91))) * v21;
+            let v5548 = ((v2516 * v2329) * v5546) * v21;
+            let v2333 = v2 - v703;
+            let v2334 = if v701 > v22 { 1.0 } else { 0.0 };
+            let v2356: f64;
+            let v2667: Lanes<1>;
+            if v2334 != 0.0 {
+                let v2336 = if v2335 == v0 { 1.0 } else { 0.0 };
+                let v2357: f64;
+                let v2668: Lanes<1>;
+                if v2336 != 0.0 {
+                    let v2338 = (v91 / v705) * v21;
+                    let v5561 = (v2516 / v705) * v21;
+                    v2357 = v2338;
+                    v2668 = v5561;
+                } else {
+                    let v2340 = if (v2333.abs()) < v1665 { 1.0 } else { 0.0 };
+                    let v2358: f64;
+                    let v2669: Lanes<1>;
+                    if v2340 != 0.0 {
+                        let v2342 = (v15 / v705) * v21;
+                        let v2344 = v2 + (v91 / v15);
+                        let v2346 = v2342 * (v2344.ln());
+                        let v5559 = ((v2516 / v15) * (v2515 / v2344)) * v2342;
+                        v2358 = v2346;
+                        v2669 = v5559;
+                    } else {
+                        let v2349 = (v15 / (v2333 * v705)) * v21;
+                        let v2351 = v2 + (v91 / v15);
+                        let v2354 = v2349 * ((v2351.powf(v2333)) - v2);
+                        let v5555 = ((v2516 / v15) * (v2333 * (v2351.powf((v2333 - v2515))))) * v2349;
+                        v2358 = v2354;
+                        v2669 = v5555;
+                    }
+                    v2357 = v2358;
+                    v2668 = v2669;
+                }
+                v2356 = v2357;
+                v2667 = v2668;
+            } else {
+                let v2355 = v91 / v20;
+                let v5549 = v2516 / v20;
+                v2356 = v2355;
+                v2667 = v5549;
+            }
+            let v2361 = (v2359 * v2028) * v21;
+            let v5563 = (v5051 * v2359) * v21;
+            let v2368 = (ddt(13609, (v1 * ((v2032 + v2362) + v2364)))) * v21;
+            let v5570 = (((((Lanes([v5056[0], v5056[1], v5056[2], 0.0, 0.0])) + v2660) + (Lanes([v2661[0], v2661[1], v2661[2], 0.0, 0.0]))) * v1) * v5546) * v21;
+            let v2371 = (ddt(13615, (v1 * v2057))) * v21;
+            let v5573 = ((v5101 * v1) * v5546) * v21;
+            let v2377 = (ddt(13625, (v1 * ((v2060 + v2372) + v2183)))) * v21;
+            let v5580 = (((((Lanes([v5106[0], 0.0, v5106[1], v5106[2], v5106[3]])) + v2662) + (Lanes([v5332[0], 0.0, v5332[1], v5332[2], v5332[3]]))) * v1) * v5546) * v21;
+            let v2380 = (ddt(13631, (v1 * v2158))) * v21;
+            let v5583 = ((v5291 * v1) * v5546) * v21;
+            let v2384 = (ddt(13637, (v1 * v2381))) * v21;
+            let v5586 = ((v2663 * v1) * v5546) * v21;
+            let v2386 = v1 * v2385;
+            let v2389 = (ddt(13645, (v2386 * v742))) * v21;
+            let v5589 = ((v3295 * v2386) * v5546) * v21;
+            let v2391 = v1 * v2390;
+            let v2394 = (ddt(13653, (v2391 * v745))) * v21;
+            let v5592 = ((v3299 * v2391) * v5546) * v21;
+            let v2396 = (v1 * v1717) * v21;
+            let v5594 = (v4584 * v1) * v21;
+            let v2397 = v1 * v758;
+            let v5596 = (v3326 * v1) * v1970;
+            let v5597 = v2551 * v2397;
+            let v2399 = (v2397 * v1970) * v21;
+            let v5601 = ((Lanes([v5596[0], v5596[1], 0.0, v5596[2], v5596[3], v5596[4], v5596[5], v5596[6], v5596[7]])) + (Lanes([0.0, 0.0, v5597[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))) * v21;
+            let v2404 = (ddt(13673, (v1 * (v2126 + v2400)))) * v21;
+            let v5606 = ((((Lanes([v5243[0], v5243[1], 0.0, v5243[2], v5243[3], v5243[4], v5243[5], v5243[6], v5243[7], v5243[8]])) + v2656) * v1) * v5546) * v21;
+            let v2408 = (v1 * ((v1715 + v2009) + v1714)) * v21;
+            let v5610 = (((v4580 + v5004) + v4576) * v1) * v21;
+            let v2413 = (ddt(13692, (v1 * (v2097 + v2409)))) * v21;
+            let v5614 = (((v5185 + v2657) * v1) * v5546) * v21;
+            let v2501: f64;
+            let v2502: f64;
+            let v2670: Lanes<3>;
+            if v709 != 0.0 {
+                let v2414 = v1 * v751;
+                let v5617 = (v3307 * v1) * v1975;
+                let v5618 = v2553 * v2414;
+                let v2416 = (v2414 * v1975) * v21;
+                let v5622 = ((Lanes([0.0, v5617[0], v5617[1]])) + (Lanes([v5618[0], 0.0, 0.0]))) * v21;
+                v2501 = v2416;
+                v2502 = v0;
+                v2670 = v5622;
+            } else {
+                v2501 = v0;
+                v2502 = v2417;
+                v2670 = v5615;
+            }
+            let v2503: f64;
+            let v2504: f64;
+            let v2671: Lanes<3>;
+            if v712 != 0.0 {
+                let v2418 = v1 * v748;
+                let v5625 = (v3303 * v1) * v1980;
+                let v5626 = v2555 * v2418;
+                let v2420 = (v2418 * v1980) * v21;
+                let v5630 = ((Lanes([0.0, v5625[0], v5625[1]])) + (Lanes([v5626[0], 0.0, 0.0]))) * v21;
+                v2503 = v2420;
+                v2504 = v0;
+                v2671 = v5630;
+            } else {
+                v2503 = v0;
+                v2504 = v2421;
+                v2671 = v5623;
+            }
+            let v2423 = (v1168 + v1167) / v1164;
+            let v5634 = ((v3897 + v3898) - (v3887 * v2423)) / v1164;
+            let v2425 = if v2424 > v0 { 1.0 } else { 0.0 };
+            let v2428: f64;
+            let v2672: Lanes<5>;
+            if v2425 != 0.0 {
+                let v2426 = v1960 / v2423;
+                let v2427 = v2426.abs();
+                let v5641 = ((v2628 - (v5634 * v2426)) / v2423) * ((v2994 * (if v2426 >= v3468 { 1.0 } else { 0.0 })) - v2515);
+                v2428 = v2427;
+                v2672 = v5641;
+            } else {
+                v2428 = v0;
+                v2672 = v4617;
+            }
+            let v2429 = if v2423 > v0 { 1.0 } else { 0.0 };
+            let v2436: f64;
+            let v2673: Lanes<5>;
+            if v2429 != 0.0 {
+                let v2431 = (v2362 + v2372) / v2423;
+                let v5652 = ((v2660 + v2662) - (v5634 * v2431)) / v2423;
+                v2436 = v2431;
+                v2673 = v5652;
+            } else {
+                let v2432 = v667 * v1734;
+                let v5642 = v3229 * v1734;
+                let v2433 = v2432 * v1164;
+                let v5648 = (((Lanes([v5642[0], 0.0, 0.0, 0.0, 0.0])) + (v2626 * v667)) * v1164) + (v3887 * v2432);
+                v2436 = v2433;
+                v2673 = v5648;
+            }
+            let v2435 = if v2434 == v2 { 1.0 } else { 0.0 };
+            let v2452: f64;
+            let v2674: Lanes<5>;
+            if v2435 != 0.0 {
+                let v2437 = v2290 * v2436;
+                let v5654 = v2673 * v2290;
+                v2452 = v2437;
+                v2674 = v5654;
+            } else {
+                let v2438 = if v2434 == v27 { 1.0 } else { 0.0 };
+                let v2453: f64;
+                let v2675: Lanes<5>;
+                if v2438 != 0.0 {
+                    let v2440 = v2439 * v2436;
+                    let v5653 = v2673 * v2439;
+                    v2453 = v2440;
+                    v2675 = v5653;
+                } else {
+                    v2453 = v0;
+                    v2675 = v4617;
+                }
+                v2452 = v2453;
+                v2674 = v2675;
+            }
+            let v2442 = if (v1989 + v2003) < v0 { 1.0 } else { 0.0 };
+            if v2442 != 0.0 {
+            } else {
+            }
+            let v2445 = if ((v1322 + v1332) + v1352) < v0 { 1.0 } else { 0.0 };
+            if v2445 != 0.0 {
+            } else {
+            }
+            let v2446 = if v1715 < v0 { 1.0 } else { 0.0 };
+            if v2446 != 0.0 {
+            } else {
+            }
+            let v2447 = if v1714 < v0 { 1.0 } else { 0.0 };
+            if v2447 != 0.0 {
+            } else {
+            }
+            let v2448 = if v8 == v0 { 1.0 } else { 0.0 };
+            if v2448 != 0.0 {
+            } else {
+            }
+            let v2449 = if v1717 < v0 { 1.0 } else { 0.0 };
+            if v2449 != 0.0 {
+            } else {
+            }
+            let v2454 = ddt(13963, v2451);
+            let v2455 = v2452 * v2454;
+            let v5656 = v2674 * v2454;
+            let v5657 = (v2528 * v5546) * v2452;
+            let v5660 = (Lanes([v5656[0], v5656[1], v5656[2], v5656[3], v5656[4], 0.0])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v5657[0]]));
+            let v2456 = v2428 * v2451;
+            let v5661 = v2672 * v2451;
+            let v5662 = v2528 * v2428;
+            let v5665 = (Lanes([v5661[0], v5661[1], v5661[2], v5661[3], v5661[4], 0.0])) + (Lanes([0.0, 0.0, 0.0, 0.0, 0.0, v5662[0]]));
+            let v2505: f64;
+            let v2506: f64;
+            if v510 != 0.0 {
+                v2505 = v2471;
+                v2506 = v0;
+            } else {
+                v2505 = v0;
+                v2506 = v2472;
+            }
+            let v2484: f64;
+            let v2486: f64;
+            let v2488: f64;
+            let v2490: f64;
+            let v2507: f64;
+            let v2509: f64;
+            let v2511: f64;
+            let v2513: f64;
+            if v709 != 0.0 {
+                let v2485: f64;
+                let v2487: f64;
+                let v2508: f64;
+                let v2510: f64;
+                let v2512: f64;
+                if v712 != 0.0 {
+                    v2485 = v2476;
+                    v2487 = v0;
+                    v2508 = v2477;
+                    v2510 = v2478;
+                    v2512 = v0;
+                } else {
+                    v2485 = v0;
+                    v2487 = v2479;
+                    v2508 = v0;
+                    v2510 = v0;
+                    v2512 = v2480;
+                }
+                v2484 = v2485;
+                v2486 = v2487;
+                v2488 = v0;
+                v2490 = v0;
+                v2507 = v2508;
+                v2509 = v2510;
+                v2511 = v2512;
+                v2513 = v0;
+            } else {
+                let v2489: f64;
+                let v2491: f64;
+                let v2514: f64;
+                if v712 != 0.0 {
+                    v2489 = v2481;
+                    v2491 = v0;
+                    v2514 = v2482;
+                } else {
+                    v2489 = v0;
+                    v2491 = v2483;
+                    v2514 = v0;
+                }
+                v2484 = v0;
+                v2486 = v0;
+                v2488 = v2489;
+                v2490 = v2491;
+                v2507 = v0;
+                v2509 = v0;
+                v2511 = v0;
+                v2513 = v2514;
+            }
+            let v2497 = if (((((v2314 + v2328) + v2389) + v2394) + v2396) + v2404) == v0 { 1.0 } else { 0.0 };
+            if v2497 != 0.0 {
+            } else {
+            }
+            let v2498 = if v21 != v2 { 1.0 } else { 0.0 };
+            if v2498 != 0.0 {
+            } else {
+            }
+            let v5666 = v5504[0];
+            let v5667 = v5504[1];
+            let v5668 = v5504[2];
+            let v5669 = v5504[3];
+            let v5670 = v5506[0];
+            let v5671 = v5506[1];
+            let v5672 = v5506[2];
+            let v5673 = v5506[3];
+            let v5674 = v5506[4];
+            let v5675 = v5508[0];
+            let v5676 = v5508[1];
+            let v5677 = v5508[2];
+            let v5678 = v5510[0];
+            let v5679 = v5510[1];
+            let v5680 = v5510[2];
+            let v5681 = v5510[3];
+            let v5682 = v5510[4];
+            let v5683 = v2665[0];
+            let v5684 = v2665[1];
+            let v5685 = v2665[2];
+            let v5686 = v2665[3];
+            let v5687 = v2666[0];
+            let v5688 = v2666[1];
+            let v5689 = v2666[2];
+            let v5690 = v2666[3];
+            let v5691 = v5519[0];
+            let v5692 = v5519[1];
+            let v5693 = v5519[2];
+            let v5694 = v5519[3];
+            let v5695 = v5519[4];
+            let v5696 = v5519[5];
+            let v5697 = v5519[6];
+            let v5698 = v5521[0];
+            let v5699 = v5521[1];
+            let v5700 = v5521[2];
+            let v5701 = v5521[3];
+            let v5702 = v5521[4];
+            let v5703 = v5523[0];
+            let v5704 = v5523[1];
+            let v5705 = v5523[2];
+            let v5706 = v5523[3];
+            let v5707 = v5523[4];
+            let v5708 = v5523[5];
+            let v5709 = v5523[6];
+            let v5710 = v5523[7];
+            let v5711 = v5523[8];
+            let v5712 = v5523[9];
+            let v5713 = v5525[0];
+            let v5714 = v5525[1];
+            let v5715 = v5525[2];
+            let v5716 = v5527[0];
+            let v5717 = v5527[1];
+            let v5718 = v5527[2];
+            let v5719 = v5527[3];
+            let v5720 = v5527[4];
+            let v5721 = v5527[5];
+            let v5722 = v5530[0];
+            let v5723 = v5530[1];
+            let v5724 = v5530[2];
+            let v5725 = v5530[3];
+            let v5726 = v5530[4];
+            let v5727 = v5537[0];
+            let v5728 = v5537[1];
+            let v5729 = v5537[2];
+            let v5730 = v5544[0];
+            let v5731 = v5544[1];
+            let v5732 = v5544[2];
+            let v5733 = v2667[0];
+            let v5734 = v5548[0];
+            let v5735 = v5563[0];
+            let v5736 = v5563[1];
+            let v5737 = v5563[2];
+            let v5738 = v5563[3];
+            let v5739 = v5563[4];
+            let v5740 = v5563[5];
+            let v5741 = v5563[6];
+            let v5742 = v5563[7];
+            let v5743 = v5563[8];
+            let v5744 = v5563[9];
+            let v5745 = v5563[10];
+            let v5746 = v5563[11];
+            let v5747 = v5570[0];
+            let v5748 = v5570[1];
+            let v5749 = v5570[2];
+            let v5750 = v5570[3];
+            let v5751 = v5570[4];
+            let v5752 = v5573[0];
+            let v5753 = v5573[1];
+            let v5754 = v5573[2];
+            let v5755 = v5580[0];
+            let v5756 = v5580[1];
+            let v5757 = v5580[2];
+            let v5758 = v5580[3];
+            let v5759 = v5580[4];
+            let v5760 = v5583[0];
+            let v5761 = v5583[1];
+            let v5762 = v5583[2];
+            let v5763 = v5586[0];
+            let v5764 = v5586[1];
+            let v5765 = v5586[2];
+            let v5766 = v5586[3];
+            let v5767 = v5586[4];
+            let v5768 = v5586[5];
+            let v5769 = v5589[0];
+            let v5770 = v5589[1];
+            let v5771 = v5592[0];
+            let v5772 = v5592[1];
+            let v5773 = v5594[0];
+            let v5774 = v5594[1];
+            let v5775 = v5594[2];
+            let v5776 = v5594[3];
+            let v5777 = v5594[4];
+            let v5778 = v5594[5];
+            let v5779 = v5594[6];
+            let v5780 = v5594[7];
+            let v5781 = v5594[8];
+            let v5782 = v5594[9];
+            let v5783 = v5601[0];
+            let v5784 = v5601[1];
+            let v5785 = v5601[2];
+            let v5786 = v5601[3];
+            let v5787 = v5601[4];
+            let v5788 = v5601[5];
+            let v5789 = v5601[6];
+            let v5790 = v5601[7];
+            let v5791 = v5601[8];
+            let v5792 = v5606[0];
+            let v5793 = v5606[1];
+            let v5794 = v5606[2];
+            let v5795 = v5606[3];
+            let v5796 = v5606[4];
+            let v5797 = v5606[5];
+            let v5798 = v5606[6];
+            let v5799 = v5606[7];
+            let v5800 = v5606[8];
+            let v5801 = v5606[9];
+            let v5802 = v5610[0];
+            let v5803 = v5610[1];
+            let v5804 = v5610[2];
+            let v5805 = v5610[3];
+            let v5806 = v5610[4];
+            let v5807 = v5610[5];
+            let v5808 = v5614[0];
+            let v5809 = v5614[1];
+            let v5810 = v5614[2];
+            let v5811 = v5614[3];
+            let v5812 = v5614[4];
+            let v5813 = v5614[5];
+            let v5814 = v2670[0];
+            let v5815 = v2670[1];
+            let v5816 = v2670[2];
+            let v5817 = v2671[0];
+            let v5818 = v2671[1];
+            let v5819 = v2671[2];
+            let v5820 = v2528[0];
+            let v5821 = v5660[0];
+            let v5822 = v5660[1];
+            let v5823 = v5660[2];
+            let v5824 = v5660[3];
+            let v5825 = v5660[4];
+            let v5826 = v5660[5];
+            let v5827 = v5665[0];
+            let v5828 = v5665[1];
+            let v5829 = v5665[2];
+            let v5830 = v5665[3];
+            let v5831 = v5665[4];
+            let v5832 = v5665[5];
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(8),
             Some(9),
-            multiplicity * ((sf[15]*(sf[0]*p6))),
+            multiplicity * (v2296),
             [4, 7, 8, 9],
-            [(sf[15]*(sf[0]*a6u)), (sf[15]*(sf[0]*a6v)), (sf[15]*(sf[0]*a6w)), (sf[15]*(sf[0]*a6x))],
+            [v5666, v5667, v5668, v5669],
             [],
             [],
             multiplicity,
@@ -334,49 +4247,49 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(9),
             Some(5),
-            multiplicity * ((sf[15]*(sf[0]*uX))),
+            multiplicity * (v2298),
             [4, 5, 7, 8, 9],
-            [(sf[15]*(sf[0]*aqf)), (sf[15]*(sf[0]*aqj)), (sf[15]*(sf[0]*aqn)), (sf[15]*(sf[0]*aqr)), (sf[15]*(sf[0]*aqv))],
+            [v5670, v5671, v5672, v5673, v5674],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<7, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(6),
             Some(5),
-            multiplicity * ((sf[15]*Rw)),
-            [4, 5, 6, 7, 8, 9, 11],
-            [(sf[15]*(sf[0]*bjL)), (sf[15]*(sf[0]*bjM)), (sf[15]*(sf[0]*bjN)), (sf[15]*(sf[0]*bjO)), bJb, bJb, (sf[15]*(sf[0]*axY))],
+            multiplicity * (v2300),
+            [4, 5, 6],
+            [v5675, v5676, v5677],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<6, 0>(
+        stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(5),
-            multiplicity * ((sf[15]*Ry)),
-            [4, 5, 6, 7, 8, 9],
-            [(sf[15]*(sf[0]*biZ)), (sf[15]*(sf[0]*bj0)), (sf[15]*(sf[0]*awy)), (sf[15]*(sf[0]*bj1)), (sf[15]*(sf[0]*auO)), (sf[15]*(sf[0]*auP))],
+            multiplicity * (v2302),
+            [4, 5, 7, 8, 9],
+            [v5678, v5679, v5680, v5681, v5682],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<10, 0>(
+        stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             Some(8),
-            multiplicity * ((if ((sf[156])!=0.0){RC}else{d})),
-            [0, 1, 4, 5, 6, 7, 8, 9, 10, 11],
-            [(if ((sf[156])!=0.0){bJJ}else{d}), (if ((sf[156])!=0.0){bJK}else{d}), (if ((sf[156])!=0.0){bJL}else{d}), (if ((sf[156])!=0.0){bJM}else{d}), (if ((sf[156])!=0.0){bJN}else{d}), (if ((sf[156])!=0.0){bJO}else{d}), (if ((sf[156])!=0.0){bJP}else{d}), (if ((sf[156])!=0.0){bJQ}else{d}), (if ((sf[156])!=0.0){bJR}else{d}), (if ((sf[156])!=0.0){bJS}else{d})],
+            multiplicity * (v2499),
+            [4, 6, 7, 8],
+            [v5683, v5684, v5685, v5686],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<10, 0>(
+        stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             Some(9),
-            multiplicity * ((if sb[32]{RC}else{d})),
-            [0, 1, 4, 5, 6, 7, 8, 9, 10, 11],
-            [(if sb[32]{bJJ}else{d}), (if sb[32]{bJK}else{d}), (if sb[32]{bJL}else{d}), (if sb[32]{bJM}else{d}), (if sb[32]{bJN}else{d}), (if sb[32]{bJO}else{d}), (if sb[32]{bJP}else{d}), (if sb[32]{bJQ}else{d}), (if sb[32]{bJR}else{d}), (if sb[32]{bJS}else{d})],
+            multiplicity * (v2500),
+            [4, 6, 7, 8],
+            [v5687, v5688, v5689, v5690],
             [],
             [],
             multiplicity,
@@ -384,9 +4297,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(6),
             Some(3),
-            multiplicity * ((sf[15]*RF)),
+            multiplicity * (v2310),
             [3, 4, 6, 7, 8, 9, 11],
-            [(sf[15]*(sf[0]*aM2)), (sf[15]*(sf[0]*aM3)), (sf[15]*(sf[0]*aM4)), (sf[15]*(sf[0]*aM5)), (sf[15]*(sf[0]*aM6)), (sf[15]*(sf[0]*aM7)), (sf[15]*(sf[0]*aM8))],
+            [v5691, v5692, v5693, v5694, v5695, v5696, v5697],
             [],
             [],
             multiplicity,
@@ -394,40 +4307,39 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(3),
-            multiplicity * ((sf[15]*RH)),
+            multiplicity * (v2312),
             [3, 4, 7, 8, 9],
-            [(sf[15]*(sf[0]*aKo)), (sf[15]*(sf[0]*aKp)), (sf[15]*(sf[0]*aKq)), (sf[15]*(sf[0]*aKr)), (sf[15]*(sf[0]*aKs))],
+            [v5698, v5699, v5700, v5701, v5702],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<10, 0>(
             Some(1),
             Some(3),
-            multiplicity * ((sf[15]*(sf[0]*Ek))),
-            &[0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-            &[bKL, (sf[15]*(sf[0]*aT8)), (sf[15]*(sf[0]*aT9)), (sf[15]*(sf[0]*aTa)), (sf[15]*(sf[0]*aTb)), bKL, (sf[15]*(sf[0]*aTc)), (sf[15]*(sf[0]*aTd)), (sf[15]*(sf[0]*aTe)), (sf[15]*(sf[0]*aTf)), (sf[15]*(sf[0]*aTg))],
-            &[],
-            &[],
+            multiplicity * (v2314),
+            [0, 1, 3, 4, 6, 7, 8, 9, 10, 11],
+            [v5703, v5704, v5705, v5706, v5707, v5708, v5709, v5710, v5711, v5712],
+            [],
+            [],
             multiplicity,
         );
-        stamper.stamp_current_node3_local(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(3),
             Some(8),
-            multiplicity * ((sf[15]*RL)),
-            3,
-            multiplicity * ((sf[15]*(sf[0]*aLJ))),
-            4,
-            multiplicity * ((sf[15]*(sf[0]*aLC))),
-            8,
-            multiplicity * ((sf[15]*(sf[0]*aLK))),
+            multiplicity * (v2316),
+            [3, 4, 8],
+            [v5713, v5714, v5715],
+            [],
+            [],
+            multiplicity,
         );
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(6),
             Some(7),
-            multiplicity * ((sf[15]*RN)),
+            multiplicity * (v2318),
             [4, 5, 6, 7, 8, 9],
-            [(sf[15]*(sf[0]*aZi)), (sf[15]*(sf[0]*aZl)), (sf[15]*(sf[0]*aZm)), (sf[15]*(sf[0]*aZq)), (sf[15]*(sf[0]*aZt)), (sf[15]*(sf[0]*aZw))],
+            [v5716, v5717, v5718, v5719, v5720, v5721],
             [],
             [],
             multiplicity,
@@ -435,165 +4347,159 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(9),
-            multiplicity * ((sf[15]*(sf[0]*(-JX)))),
+            multiplicity * (v2322),
             [4, 5, 7, 8, 9],
-            [(sf[15]*(sf[0]*(-bgi))), (sf[15]*(sf[0]*(-bgj))), (sf[15]*(sf[0]*(-bgk))), (sf[15]*(sf[0]*(-bgl))), (sf[15]*(sf[0]*(-bgm)))],
+            [v5722, v5723, v5724, v5725, v5726],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_node3_local(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(2),
             Some(5),
-            multiplicity * ((sf[15]*(RR/eV))),
-            2,
-            multiplicity * ((sf[15]*(sf[419]/eV))),
-            4,
-            multiplicity * ((sf[15]*((-(RR*Wy))/bhJ))),
-            5,
-            multiplicity * ((sf[15]*(sf[420]/eV))),
+            multiplicity * (v2325),
+            [2, 4, 5],
+            [v5727, v5728, v5729],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_node3_local(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(6),
-            multiplicity * ((sf[15]*(RU/fa))),
-            1,
-            multiplicity * ((sf[15]*(sf[419]/fa))),
-            4,
-            multiplicity * ((sf[15]*((-(RU*WF))/bis))),
-            6,
-            multiplicity * ((sf[15]*(sf[420]/fa))),
-        );
-        stamper.stamp_current_node1_local(
-            Some(4),
-            None,
-            multiplicity * ((if sb[83]{(aX/sf[14])}else{(if sb[82]{(sf[435]*(f64::powf(Qu,sf[346])-b))}else{(if sb[80]{(sf[432]*(Qu).ln())}else{(if sb[76]{(sf[15]*(aX/sf[430]))}else{d})})})})),
-            4,
-            multiplicity * ((if sb[83]{sf[418]}else{(if sb[82]{(sf[435]*(sf[439]*(sf[346]*f64::powf(Qu,sf[417]))))}else{(if sb[80]{(sf[432]*(sf[439]/Qu))}else{sf[438]})})})),
-        );
-        stamper.stamp_current_node1_local(
-            Some(4),
-            None,
-            multiplicity * (Qa),
-            4,
-            multiplicity * (bFQ),
-        );
-        stamper.stamp_current_indexed_dense_local(
-            Some(4),
-            None,
-            multiplicity * ((sf[15]*(-((((((((((((((((((uX*K7)+(p6*K9))-(JX*K4))+(Ke/eV))+(lr*Kh))+(lB*Kk))+(lL*Kn))+(Kq/fa))+(m0*FC))+(lV*KA))-(Fd*K6))+(lY*KG))+(mp*KL))+(mu*Fg))+(D3*KQ))+(CA*KT))+(Ek*KW))+(m3*CU))))),
-            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-            &[(sf[15]*(-(((((lr*(So+So))-(K6*aW4))+(mp*bk5))+(bkP+(mu*aX4)))+bm2))), (sf[15]*(-(((((bhW+((RU+RU)/fa))-(K6*aW5))+(mp*bk6))+((Fg*sf[366])+(mu*aX7)))+((KW*aT8)+(Ek*sf[366]))))), (sf[15]*(-((RR+RR)/eV))), (sf[15]*(-(((((mu*aX8)+((KQ*aM2)+(D3*sf[363])))+((KT*aKo)+(CA*sf[363])))+((KW*aT9)+(Ek*sf[363])))+(RL+(m3*aLJ))))), (sf[15]*(-(((((((((((((((((((K7*aqf)+(uX*(-bgB)))+((K9*a6u)+(p6*bgB)))-((K4*bgi)+(JX*bgB)))+((-(Ke*Wy))/bhJ))+(Kh*a1G))+(Kk*a1M))+(Kn*a1S))+((-(Kq*WF))/bis))+(m0*aZi))+(lV*biZ))-(K6*aW8))+(lY*bjL))+(mp*bk7))+(mu*aXb))+(KQ*aM3))+(KT*aKp))+(KW*aTa))+(m3*aLC)))), (sf[15]*(-(((((((((((K7*aqj)+(uX*sf[363]))-(K4*bgj))+((bhE+bhE)/eV))+(m0*aZl))+((KA*sf[363])+(lV*bj0)))-(K6*aW9))+((KG*sf[363])+(lY*bjM)))+(mp*bk8))+(mu*aXe))+(KW*aTb)))), (sf[15]*(-(((((((((bhW+((bin+bin)/fa))+(RN+(m0*aZm)))+(lV*awy))-(K6*aWa))+(Rw+(lY*bjN)))+((sf[0]*KL)+(mp*(biR+(aWs+aWP)))))+(bkP+(mu*aXg)))+(RF+(KQ*aM4)))+bm2))), (sf[15]*(-((((((((((((((K7*aqn)+(uX*(sf[0]-bgC)))+((K9*a6v)+(p6*(bgC-sf[0]))))-((K4*bgk)+(JX*bgC)))+bhW)+((FC*sf[363])+(m0*aZq)))+(Ry+(lV*bj1)))-((K6*aWd)+(Fd*sf[404])))+(lY*bjO))+((KL*sf[364])+(mp*((aWv+aWS)+bkf))))+(bkP+(mu*aXj)))+((KQ*aM5)+(D3*sf[364])))+(RH+(KT*aKq)))+(bm1+(KW*aTc))))), (sf[15]*(-((((((((((((((((K7*aqr)+(uX*(-bgD)))+((K9*a6w)+(p6*(bgD-sf[363]))))-((K4*bgl)+(JX*bgD)))+bhY)+(lL*(bid+bid)))+(m0*aZt))+(lV*auO))-((K6*aWg)+(Fd*sf[405])))+bjW)+(bkw+(mp*((aWy+aWV)+bkg))))+(bl2+(mu*aXm)))+((KQ*aM6)+(D3*sf[407])))+((KT*aKr)+(CA*sf[365])))+((KW*aTd)+bme))+((CU*sf[363])+(m3*aLK))))), (sf[15]*(-((((((((((((((K7*aqv)+(uX*(-bgE)))+((K9*a6x)+(p6*bgE)))-((K4*bgm)+(JX*bgE)))+bhY)+(m0*aZw))+(lV*auP))-((K6*aWh)+(Fd*sf[406])))+bjW)+(bkw+(mp*((aWA+aWX)+bkg))))+(bl2+(mu*aXp)))+((KQ*aM7)+blA))+(KT*aKs))+((KW*aTe)+bmh)))), (sf[15]*(-((((((lr*(bhT+bhT))+(lB*(SA+SA)))-(K6*aWi))+(mp*bkd))+((Fg*sf[363])+(mu*aXs)))+(bmh+(KW*aTf))))), (sf[15]*(-((((((((bhY+(lB*(bi5+bi5)))+(lL*(SE+SE)))-(K6*aWj))+(lY*axY))+((KL*sf[363])+(mp*(biQ+(aWE+aX1)))))+(bl2+(mu*aXv)))+(blA+(KQ*aM8)))+(bme+(KW*aTg)))))],
-            &[],
-            &[],
+            multiplicity * (v2328),
+            [1, 4, 6],
+            [v5730, v5731, v5732],
+            [],
+            [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<7, 0>(
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(4),
+            None,
+            multiplicity * (v2356),
+            [4],
+            [v5733],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(4),
+            None,
+            multiplicity * (v2332),
+            [4],
+            [v5734],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<12, 0>(
+            Some(4),
+            None,
+            multiplicity * (v2361),
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            [v5735, v5736, v5737, v5738, v5739, v5740, v5741, v5742, v5743, v5744, v5745, v5746],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(5),
-            multiplicity * (S1),
-            [4, 5, 6, 7, 8, 9, 11],
-            [bMh, bMi, bMj, bMk, bMl, bMm, bMn],
+            multiplicity * (v2368),
+            [4, 5, 7, 8, 9],
+            [v5747, v5748, v5749, v5750, v5751],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_node3_local(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(6),
             Some(5),
-            multiplicity * (S4),
-            4,
-            multiplicity * (bMu),
-            5,
-            multiplicity * (bMv),
-            6,
-            multiplicity * (bMw),
+            multiplicity * (v2371),
+            [4, 5, 6],
+            [v5752, v5753, v5754],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_sparse_local::<7, 0>(
+        stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(9),
-            multiplicity * (S7),
-            [4, 5, 6, 7, 8, 9, 11],
-            [bML, bMM, bMN, bMO, bMP, bMQ, bMR],
+            multiplicity * (v2377),
+            [4, 5, 7, 8, 9],
+            [v5755, v5756, v5757, v5758, v5759],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_node3_local(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(3),
             Some(8),
-            multiplicity * (Sa),
-            3,
-            multiplicity * (bMY),
-            4,
-            multiplicity * (bMZ),
-            8,
-            multiplicity * (bN0),
-        );
-        stamper.stamp_current_sparse_local::<7, 0>(
-            Some(6),
-            Some(7),
-            multiplicity * (Sd),
-            [4, 5, 6, 7, 8, 9, 11],
-            [bNf, bNg, bNh, bNi, bNj, bNk, bNl],
+            multiplicity * (v2380),
+            [3, 4, 8],
+            [v5760, v5761, v5762],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_node2_local(
+        stamper.stamp_current_sparse_local::<6, 0>(
+            Some(6),
+            Some(7),
+            multiplicity * (v2384),
+            [4, 5, 6, 7, 8, 9],
+            [v5763, v5764, v5765, v5766, v5767, v5768],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<2, 0>(
             Some(1),
             Some(2),
-            multiplicity * (Sh),
-            1,
-            multiplicity * (bNq),
-            2,
-            multiplicity * (bNr),
+            multiplicity * (v2389),
+            [1, 2],
+            [v5769, v5770],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_node2_local(
+        stamper.stamp_current_sparse_local::<2, 0>(
             Some(1),
             Some(0),
-            multiplicity * (Sl),
-            0,
-            multiplicity * (bNw),
-            1,
-            multiplicity * (bNx),
+            multiplicity * (v2394),
+            [0, 1],
+            [v5771, v5772],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_indexed_dense_local(
+        stamper.stamp_current_sparse_local::<10, 0>(
             Some(1),
             Some(10),
-            multiplicity * ((sf[15]*(sf[0]*Fg))),
-            &[0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-            &[(sf[15]*(sf[0]*aX4)), (sf[15]*(sf[0]*aX7)), (sf[15]*(sf[0]*aX8)), (sf[15]*(sf[0]*aXb)), (sf[15]*(sf[0]*aXe)), (sf[15]*(sf[0]*aXg)), (sf[15]*(sf[0]*aXj)), (sf[15]*(sf[0]*aXm)), (sf[15]*(sf[0]*aXp)), (sf[15]*(sf[0]*aXs)), (sf[15]*(sf[0]*aXv))],
-            &[],
-            &[],
+            multiplicity * (v2396),
+            [0, 1, 3, 4, 6, 7, 8, 9, 10, 11],
+            [v5773, v5774, v5775, v5776, v5777, v5778, v5779, v5780, v5781, v5782],
+            [],
+            [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<9, 0>(
             Some(0),
             Some(10),
-            multiplicity * ((sf[15]*(lr*So))),
+            multiplicity * (v2399),
             [0, 1, 4, 6, 7, 8, 9, 10, 11],
-            [(sf[15]*(lr*sf[419])), bO2, (sf[15]*(So*a1G)), bO2, bO2, bO4, bO4, (sf[15]*(lr*sf[420])), bO4],
+            [v5783, v5784, v5785, v5786, v5787, v5788, v5789, v5790, v5791],
             [],
             [],
-            multiplicity,
-        );
-        stamper.stamp_current_indexed_dense_local(
-            Some(1),
-            Some(10),
-            multiplicity * (St),
-            &[0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-            &[bOq, bOr, bOs, bOt, bOu, bOq, bOv, bOw, bOx, bOy, bOz],
-            &[],
-            &[],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<10, 0>(
-            Some(6),
-            Some(11),
-            multiplicity * ((sf[15]*(sf[0]*(Fe+(Ff+KK))))),
-            [0, 1, 4, 5, 6, 7, 8, 9, 10, 11],
-            [(sf[15]*(sf[0]*bk5)), (sf[15]*(sf[0]*bk6)), (sf[15]*(sf[0]*bk7)), (sf[15]*(sf[0]*bk8)), (sf[15]*(sf[0]*(aWs+(aWP+biR)))), (sf[15]*(sf[0]*(aWv+(aWS+bkf)))), (sf[15]*(sf[0]*(aWy+(aWV+bkg)))), (sf[15]*(sf[0]*(aWA+(aWX+bkg)))), (sf[15]*(sf[0]*bkd)), (sf[15]*(sf[0]*(aWE+(aX1+biQ))))],
+            Some(1),
+            Some(10),
+            multiplicity * (v2404),
+            [0, 1, 3, 4, 6, 7, 8, 9, 10, 11],
+            [v5792, v5793, v5794, v5795, v5796, v5797, v5798, v5799, v5800, v5801],
             [],
             [],
             multiplicity,
@@ -601,396 +4507,384 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(6),
             Some(11),
-            multiplicity * (Sz),
+            multiplicity * (v2408),
             [4, 6, 7, 8, 9, 11],
-            [bP9, bPa, bPb, bPc, bPc, bPd],
+            [v5802, v5803, v5804, v5805, v5806, v5807],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_node3_local(
+        stamper.stamp_current_sparse_local::<6, 0>(
+            Some(6),
+            Some(11),
+            multiplicity * (v2413),
+            [4, 6, 7, 8, 9, 11],
+            [v5808, v5809, v5810, v5811, v5812, v5813],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(10),
             Some(11),
-            multiplicity * ((if ((sf[216])!=0.0){(sf[15]*(lB*SA))}else{d})),
-            4,
-            multiplicity * ((if ((sf[216])!=0.0){(sf[15]*(SA*a1M))}else{d})),
-            10,
-            multiplicity * ((if ((sf[216])!=0.0){(sf[15]*(lB*sf[419]))}else{d})),
-            11,
-            multiplicity * ((if ((sf[216])!=0.0){(sf[15]*(lB*sf[420]))}else{d})),
-        );
-        stamper.stamp_potential_branch_local(
-            Some(10),
-            Some(11),
-            0,
-            multiplicity,
-        );
-        stamper.stamp_potential_const_local(
-            0,
-            d,
-        );
-        stamper.stamp_current_node3_local(
-            Some(11),
-            Some(8),
-            multiplicity * ((if ((sf[217])!=0.0){(sf[15]*(lL*SE))}else{d})),
-            4,
-            multiplicity * ((if ((sf[217])!=0.0){(sf[15]*(SE*a1S))}else{d})),
-            8,
-            multiplicity * ((if ((sf[217])!=0.0){(sf[15]*(lL*sf[420]))}else{d})),
-            11,
-            multiplicity * ((if ((sf[217])!=0.0){(sf[15]*(lL*sf[419]))}else{d})),
-        );
-        stamper.stamp_potential_branch_local(
-            Some(11),
-            Some(8),
-            1,
-            multiplicity,
-        );
-        stamper.stamp_potential_const_local(
-            1,
-            d,
-        );
-        stamper.stamp_current_const_local(
-            Some(12),
-            None,
-            multiplicity * (d),
-        );
-        stamper.stamp_current_node1_local(
-            Some(12),
-            None,
-            multiplicity * (SI),
-            12,
-            multiplicity * (b),
-        );
-        stamper.stamp_current_sparse_local::<8, 0>(
-            Some(7),
-            Some(5),
-            multiplicity * (SK),
-            [4, 5, 6, 7, 8, 9, 11, 12],
-            [bPw, bPx, bPy, bPz, bPA, bPB, bPC, bPD],
+            multiplicity * (v2501),
+            [4, 10, 11],
+            [v5814, v5815, v5816],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_node1_local(
+        stamper.stamp_potential_branch_local(Some(10), Some(11), 0, multiplicity);
+        stamper.stamp_potential_sparse_local::<0, 0>(
+            0,
+            v2502,
+            [],
+            [],
+            [],
+            [],
+        );
+        stamper.stamp_current_sparse_local::<3, 0>(
+            Some(11),
+            Some(8),
+            multiplicity * (v2503),
+            [4, 8, 11],
+            [v5817, v5818, v5819],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_potential_branch_local(Some(11), Some(8), 1, multiplicity);
+        stamper.stamp_potential_sparse_local::<0, 0>(
+            1,
+            v2504,
+            [],
+            [],
+            [],
+            [],
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(12),
+            None,
+            multiplicity * (v2450),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(12),
+            None,
+            multiplicity * (v2451),
+            [12],
+            [v5820],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<6, 0>(
+            Some(7),
+            Some(5),
+            multiplicity * (v2455),
+            [4, 5, 7, 8, 9, 12],
+            [v5821, v5822, v5823, v5824, v5825, v5826],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<6, 0>(
             Some(9),
             Some(7),
-            multiplicity * ((QT*SI)),
-            12,
-            multiplicity * (QT),
+            multiplicity * (v2456),
+            [4, 5, 7, 8, 9, 12],
+            [v5827, v5828, v5829, v5830, v5831, v5832],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_node1_local(
+        stamper.stamp_current_sparse_local::<1, 0>(
             Some(9),
             Some(5),
-            multiplicity * (SI),
-            12,
-            multiplicity * (b),
+            multiplicity * (v2451),
+            [12],
+            [v5820],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(9),
             Some(7),
-            multiplicity * (d),
+            multiplicity * (v2457),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(5),
-            multiplicity * (d),
+            multiplicity * (v2458),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(2),
             Some(5),
-            multiplicity * (d),
+            multiplicity * (v2459),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(6),
-            multiplicity * (d),
+            multiplicity * (v2460),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(7),
-            multiplicity * (d),
+            multiplicity * (v2461),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(5),
-            multiplicity * (d),
+            multiplicity * (v2462),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(5),
-            multiplicity * (d),
+            multiplicity * (v2463),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(5),
-            multiplicity * (d),
+            multiplicity * (v2464),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(11),
-            multiplicity * (d),
+            multiplicity * (v2465),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(11),
-            multiplicity * (d),
+            multiplicity * (v2466),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(11),
-            multiplicity * (d),
+            multiplicity * (v2467),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(11),
-            multiplicity * (d),
+            multiplicity * (v2468),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(10),
-            multiplicity * (d),
+            multiplicity * (v2469),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(10),
-            multiplicity * (d),
+            multiplicity * (v2470),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(7),
-            multiplicity * (d),
+            multiplicity * (v2505),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(9),
             Some(7),
-            multiplicity * (d),
+            multiplicity * (v2506),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(3),
-            multiplicity * (d),
+            multiplicity * (v2473),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(3),
-            multiplicity * (d),
+            multiplicity * (v2474),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(3),
-            multiplicity * (d),
+            multiplicity * (v2475),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(10),
-            multiplicity * (d),
+            multiplicity * (v2484),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(10),
             Some(11),
-            multiplicity * (d),
+            multiplicity * (v2507),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(11),
             Some(8),
-            multiplicity * (d),
+            multiplicity * (v2509),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(10),
-            multiplicity * (d),
+            multiplicity * (v2486),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(10),
             Some(8),
-            multiplicity * (d),
+            multiplicity * (v2511),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(11),
-            multiplicity * (d),
+            multiplicity * (v2488),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(11),
             Some(8),
-            multiplicity * (d),
+            multiplicity * (v2513),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
-        stamper.stamp_current_const_local(
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(8),
-            multiplicity * (d),
+            multiplicity * (v2490),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
         );
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let n=self.nodes;
-        let nodes=n;
-        let br=self.branches;
-        let branches=br;
-        self.ensure_instance_static();
-        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
-        let CommonStampValues {
-            b, d, M, N, a2, aX, be, bf,
-            bh, bj, bl, bm, bn, bo, bp, bq,
-            bw, bx, by, bD, bF, bG, bK, bL,
-            bM, bN, bT, bU, bV, c0, c2, c3,
-            c7, c8, cz, cX, dE, dL, dO, dP,
-            dQ, dR, dV, dX, dY, dZ, er, es,
-            eu, ev, ew, ff, gC, gF, gG, gH,
-            gJ, gK, gN, gQ, gS, h5, hi, j4,
-            j5, j6, j7, j9, ja, jb, jd, jg,
-            jr, js, jt, jv, jw, jx, jz, jC,
-            k3, k4, kh, lP, lS, lT, lV, lY,
-            m0, m3, m6, mb, mj, mm, mp, mt,
-            mu, mv, mw, mJ, n6, n7, n9, nc,
-            nd, nt, nv, ny, nz, nP, nR, nU,
-            nV, p6, pl, r4, s2, sr, su, sx,
-            sY, ug, uQ, uR, uW, uX, vg, vi,
-            vl, vm, vv, w1, w2, w3, w5, wa,
-            wb, wi, wj, wl, wq, ws, xi, xj,
-            xk, xm, xr, xs, xT, y6, yj, yw,
-            yD, yE, yG, yH, yJ, yO, yP, yV,
-            yZ, z2, za, zb, zc, ze, zg, zi,
-            zj, zk, zl, zn, zq, zs, zt, zy,
-            zz, Ab, Ad, Af, Ag, Ai, Aj, Al,
-            Aq, Ar, Aw, Az, AB, AJ, AK, AL,
-            AN, AQ, AR, AS, AT, AV, AX, AZ,
-            B0, B5, B6, BM, BQ, Dd, DB, DT,
-            Eg, Fs, FE, FR, FS, FT, FW, FX,
-            G1, G2, G4, G5, G7, G8, Ga, Gf,
-            Gg, Gv, Ie, If, Ih, Ij, Il, In,
-            Io, Iq, Iy, IB, IC, ID, IJ, IL,
-            IM, IQ, IS, IU, IV, IX, J2, J3,
-            K0, Qa, QL, S1, S4, S7, Sa, Sd,
-            Sh, Sl, St, Sz, SI, SK, SR, SS,
-            ST, SV, SW, SX, TH, TK, U5, Us,
-            Va, VX, VZ, W4, WI, Xp, Xr, XT,
-            Zr, a0E, a0R, a0U, a13, a1Y, a1Z, a29,
-            a2a, a2b, a2x, a2N, a2O, a2P, a2Q, a2R,
-            a6u, a6v, a6w, a6x, a6E, acY, acZ, ad0,
-            ad1, agn, ago, agp, agq, ahh, ahi, ahj,
-            ahk, aht, ahu, ahv, ahw, ahF, ahG, ahH,
-            ahI, aiF, aiG, aiH, anm, ann, ano, anp,
-            apB, apC, apD, apE, apF, apI, apL, apO,
-            apR, apU, apY, apZ, aq0, aq1, aq4, aq6,
-            aqe, aqg, aqQ, aqR, arS, arT, arU, av4,
-            av5, av6, av7, awq, awr, aws, awt, awN,
-            awO, awP, awQ, axi, axj, axk, axl, axm,
-            axn, axL, axM, axN, axO, axP, axQ, aH5,
-            aHi, aI5, aMP, aMQ, aMR, aMS, aMT, aOK,
-            aOL, aOM, aON, aOO, aOP, aOQ, aPm, aPn,
-            aPo, aPp, aPq, aPr, aPs, aPt, aPu, aS0,
-            aS1, aS2, aS3, aS4, aS5, aS6, aS7, aS8,
-            aS9, aYm, aYn, aYo, aYp, aYq, bFQ, bMh,
-            bMi, bMj, bMk, bMl, bMm, bMn, bMu, bMv,
-            bMw, bML, bMM, bMN, bMO, bMP, bMQ, bMR,
-            bMY, bMZ, bN0, bNf, bNg, bNh, bNi, bNj,
-            bNk, bNl, bNq, bNr, bNw, bNx, bOq, bOr,
-            bOs, bOt, bOu, bOv, bOw, bOx, bOy, bOz,
-            bP9, bPa, bPb, bPc, bPd, bPw, bPx, bPy,
-            bPz, bPA, bPB, bPC, bPD,
-        }=self.eval_common_stamp_values::<true>(ctx);
-        let p=&(*self.params);
-        let m=self.multiplicity;
-        let multiplicity=m;
-        let sf=&self.scalar_static.f64_values;
-        let sb=&self.scalar_static.bool_values;
-        stamper.stamp_current_reactive_node1_local(
-            Some(4),
-            None,
-            4,
-            multiplicity * (bFQ),
-        );
-        stamper.stamp_current_reactive_indexed_dense_local(
-            Some(7),
-            Some(5),
-            &[4, 5, 6, 7, 8, 9, 11],
-            &[bMh, bMi, bMj, bMk, bMl, bMm, bMn],
-            &[],
-            &[],
-            multiplicity,
-        );
-        stamper.stamp_current_reactive_node3_local(
-            Some(6),
-            Some(5),
-            4,
-            multiplicity * (bMu),
-            5,
-            multiplicity * (bMv),
-            6,
-            multiplicity * (bMw),
-        );
-        stamper.stamp_current_reactive_indexed_dense_local(
-            Some(7),
-            Some(9),
-            &[4, 5, 6, 7, 8, 9, 11],
-            &[bML, bMM, bMN, bMO, bMP, bMQ, bMR],
-            &[],
-            &[],
-            multiplicity,
-        );
-        stamper.stamp_current_reactive_node3_local(
-            Some(3),
-            Some(8),
-            3,
-            multiplicity * (bMY),
-            4,
-            multiplicity * (bMZ),
-            8,
-            multiplicity * (bN0),
-        );
-        stamper.stamp_current_reactive_indexed_dense_local(
-            Some(6),
-            Some(7),
-            &[4, 5, 6, 7, 8, 9, 11],
-            &[bNf, bNg, bNh, bNi, bNj, bNk, bNl],
-            &[],
-            &[],
-            multiplicity,
-        );
-        stamper.stamp_current_reactive_node2_local(
-            Some(1),
-            Some(2),
-            1,
-            multiplicity * (bNq),
-            2,
-            multiplicity * (bNr),
-        );
-        stamper.stamp_current_reactive_node2_local(
-            Some(1),
-            Some(0),
-            0,
-            multiplicity * (bNw),
-            1,
-            multiplicity * (bNx),
-        );
-        stamper.stamp_current_reactive_indexed_dense_local(
-            Some(1),
-            Some(10),
-            &[0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-            &[bOq, bOr, bOs, bOt, bOu, bOq, bOv, bOw, bOx, bOy, bOz],
-            &[],
-            &[],
-            multiplicity,
-        );
-        stamper.stamp_current_reactive_indexed_dense_local(
-            Some(6),
-            Some(11),
-            &[4, 6, 7, 8, 9, 11],
-            &[bP9, bPa, bPb, bPc, bPc, bPd],
-            &[],
-            &[],
-            multiplicity,
-        );
-        stamper.stamp_current_reactive_indexed_dense_local(
-            Some(7),
-            Some(5),
-            &[4, 5, 6, 7, 8, 9, 11, 12],
-            &[bPw, bPx, bPy, bPz, bPA, bPB, bPC, bPD],
-            &[],
-            &[],
-            multiplicity,
-        );
     }
+
 }

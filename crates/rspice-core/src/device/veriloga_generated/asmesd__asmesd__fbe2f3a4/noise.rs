@@ -1,11 +1,8 @@
-#![allow(dead_code, non_snake_case, unused_assignments, unused_parens, unused_variables)]
+#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
 use super::state::Instance;
 use crate::device::veriloga_generated::GeneratedEvalContext;
 pub use crate::device::veriloga_generated::{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor};
-
-const LIMEXP_MAX: f64 = 5.54062238439351e34;
-const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
 
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 6] = [
     GeneratedNoiseDescriptor { mechanism: "WHITE_B_BI_RB", label: Some("Rb"), kind: GeneratedNoiseKind::White, equation: 24, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "b", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "bi", is_internal: true }, table_len: 0, table_log_interp: false },
@@ -21,1300 +18,654 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let params = &*self.params;
-        let mut w = [0.0; 128];
-        self.noise_activation_schedule_part_0(ctx, &mut w);
-        let noise_source_0_active = {
-            w[125] != 0.0
-        };
-        let noise_source_1_active = {
-            w[126] != 0.0
-        };
-        let noise_source_2_active = {
-            w[127] != 0.0
-        };
-        let noise_source_3_active = {
-            true
-        };
-        let noise_source_4_active = {
-            true
-        };
-        let noise_source_5_active = {
-            true
-        };
-        let noise_source_active = [noise_source_0_active, noise_source_1_active, noise_source_2_active, noise_source_3_active, noise_source_4_active, noise_source_5_active];
-        let noise_source_active_mask = [(noise_source_0_active as u128) | ((noise_source_1_active as u128) << 1) | ((noise_source_2_active as u128) << 2) | ((noise_source_3_active as u128) << 3) | ((noise_source_4_active as u128) << 4) | ((noise_source_5_active as u128) << 5)];
-        w.fill(0.0);
-        self.noise_metadata_schedule_part_0(ctx, &mut w, &noise_source_active_mask);
-        self.noise_metadata_schedule_part_1(ctx, &mut w, &noise_source_active_mask);
-        self.noise_metadata_schedule_part_2(ctx, &mut w, &noise_source_active_mask);
-        if !noise_source_active[0] {
+        let parameters = &self.params.values;
+        let temperature = ctx.temperature();
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9])];
+            let v0 = 0e0f64;
+            let v1 = temperature;
+            let v2 = node_potentials[3];
+            let v4 = parameters[45];
+            let v6 = 2.7315e2f64;
+            let v7 = 1.3e3f64;
+            let v8 = 1.7314999999999998e2f64;
+            let v10 = 1.7314999999999998e2f64;
+            let v13 = 1.3e3f64;
+            let v14 = 1.7314999999999998e2f64;
+            let v16 = 1.7314999999999998e2f64;
+            let v19 = 1e0f64;
+            let v20 = 0.0f64;
+            let v21 = parameters[26];
+            let v23 = parameters[43];
+            let v24 = parameters[42];
+            let v26 = parameters[29];
+            let v27 = node_potentials[5];
+            let v28 = node_potentials[4];
+            let v31 = parameters[79];
+            let v34 = parameters[80];
+            let v38 = parameters[25];
+            let v40 = 8.6170869e-5f64;
+            let v44 = parameters[77];
+            let v47 = parameters[52];
+            let v50 = parameters[53];
+            let v54 = parameters[62];
+            let v58 = parameters[54];
+            let v62 = parameters[63];
+            let v66 = parameters[22];
+            let v68 = parameters[21];
+            let v73 = parameters[23];
+            let v75 = parameters[0];
+            let v78 = parameters[2];
+            let v81 = parameters[58];
+            let v82 = parameters[59];
+            let v87 = parameters[64];
+            let v88 = parameters[65];
+            let v93 = parameters[47];
+            let v94 = parameters[7];
+            let v98 = parameters[5];
+            let v99 = parameters[6];
+            let v103 = parameters[9];
+            let v104 = parameters[10];
+            let v108 = parameters[56];
+            let v109 = parameters[55];
+            let v113 = 3.0015e2f64;
+            let v116 = 1.16e0f64;
+            let v117 = 7.02e-4f64;
+            let v120 = 1.108e3f64;
+            let v125 = 1.3806226e-23f64;
+            let v129 = 1.3454442398941469e20f64;
+            let v133 = 1.5e0f64;
+            let v136 = 1.6021918e-19f64;
+            let v140 = parameters[17];
+            let v145 = 1.3454442398941469e20f64;
+            let v150 = parameters[70];
+            let v155 = node_potentials[2];
+            let v158 = node_potentials[6];
+            let v161 = node_potentials[1];
+            let v169 = parameters[1];
+            let v174 = parameters[11];
+            let v179 = 8e1f64;
+            let v187 = 3.7e1f64;
+            let v189 = -3.7e1f64;
+            let v196 = -3.7e1f64;
+            let v210 = parameters[8];
+            let v218 = parameters[4];
+            let v220 = 1e-3f64;
+            let v222 = -1e0f64;
+            let v225 = parameters[3];
+            let v243 = parameters[57];
+            let v256 = -3.7e1f64;
+            let v263 = -3.7e1f64;
+            let v283 = parameters[61];
+            let v300 = -3.7e1f64;
+            let v307 = -3.7e1f64;
+            let v338 = -3.7e1f64;
+            let v341 = -3.7e1f64;
+            let v350 = parameters[81];
+            let v361 = 4e0f64;
+            let v365 = parameters[82];
+            let v368 = 2e0f64;
+            let v373 = parameters[48];
+            let v376 = parameters[49];
+            let v379 = parameters[50];
+            let v382 = parameters[51];
+            let v385 = parameters[12];
+            let v386 = parameters[37];
+            let v393 = parameters[66];
+            let v394 = parameters[78];
+            let v398 = parameters[14];
+            let v399 = parameters[38];
+            let v406 = parameters[19];
+            let v407 = parameters[32];
+            let v409 = node_potentials[8];
+            let v411 = parameters[20];
+            let v413 = parameters[44];
+            let v417 = parameters[31];
+            let v420 = parameters[13];
+            let v422 = parameters[67];
+            let v424 = parameters[15];
+            let v428 = parameters[24];
+            let v438 = parameters[68];
+            let v442 = parameters[30];
+            let v444 = parameters[33];
+            let v449 = parameters[35];
+            let v452 = -1e0f64;
+            let v454 = 5.5224904e-23f64;
+            let v466 = parameters[46];
+            let v494 = parameters[28];
+            let v496 = parameters[27];
+            let v505 = -1e0f64;
+            let v508 = 3.2043836e-19f64;
+            let v5 = (v1 + v2) + v4;
+            let v9 = if v5 > v8 { 1.0 } else { 0.0 };
+            let v11: f64;
+            if v9 != 0.0 {
+                v11 = v5;
+            } else {
+                v11 = v10;
+            }
+            let v12 = if v7 < v11 { 1.0 } else { 0.0 };
+            let v18: f64;
+            if v12 != 0.0 {
+                v18 = v13;
+            } else {
+                let v15 = if v5 > v14 { 1.0 } else { 0.0 };
+                let v17: f64;
+                if v15 != 0.0 {
+                    v17 = v5;
+                } else {
+                    v17 = v16;
+                }
+                v18 = v17;
+            }
+            if v20 != 0.0 {
+            } else {
+            }
+            let v22 = if v18 > v21 { 1.0 } else { 0.0 };
+            if v22 != 0.0 {
+            } else {
+            }
+            let v25 = v23 * v24;
+            let v30 = v26 * (v27 - v28);
+            let v39 = v38 + v6;
+            let v41 = v40 * v18;
+            let v42 = v18 / v39;
+            let v43 = v42.ln();
+            let v46 = (v44 * v43).exp();
+            let v49 = (v47 * v46) * (v19 + (v31 * ((-(if v30 <= v0 { v30 } else { v0 })).powf(v34))));
+            let v51 = if v50 > v0 { 1.0 } else { 0.0 };
+            let v53: f64;
+            if v51 != 0.0 {
+                let v52 = v19 / v50;
+                v53 = v52;
+            } else {
+                v53 = v0;
+            }
+            let v55 = if v54 > v0 { 1.0 } else { 0.0 };
+            let v57: f64;
+            if v55 != 0.0 {
+                let v56 = v19 / v54;
+                v57 = v56;
+            } else {
+                v57 = v0;
+            }
+            let v59 = if v58 > v0 { 1.0 } else { 0.0 };
+            let v61: f64;
+            if v59 != 0.0 {
+                let v60 = v19 / v58;
+                v61 = v60;
+            } else {
+                v61 = v0;
+            }
+            let v63 = if v62 > v0 { 1.0 } else { 0.0 };
+            let v65: f64;
+            if v63 != 0.0 {
+                let v64 = v19 / v62;
+                v65 = v64;
+            } else {
+                v65 = v0;
+            }
+            let v69 = v42 - v19;
+            let v72 = (v66 * v43) + ((v68 * v69) / v41);
+            let v77 = v75 * (v72.exp());
+            let v80 = v78 * ((v73 * v43).exp());
+            let v86 = (v81 * ((v72 / v82).exp())) / v46;
+            let v92 = (v87 * ((v72 / v88).exp())) / v46;
+            let v97 = v93 * (v19 + (v94 * v69));
+            let v102 = v98 * (v19 + (v99 * v69));
+            let v107 = v103 * (v19 + (v104 * v69));
+            let v112 = v108 * (v19 + (v109 * v69));
+            let v114 = v39 / v113;
+            let v115 = v18 / v113;
+            let v128 = (-(v116 - (((v117 * v18) * v18) / (v120 + v18)))) / (v125 * (v18 + v18));
+            let v132 = -(v41 + v41);
+            let v135 = v133 * (v115.ln());
+            let v139 = v132 * (v135 + (v136 * (v128 + v129)));
+            let v144 = (v115 * ((v140 - v139) / v114)) + v139;
+            let v149 = v132 * (v135 + (v136 * (v128 + v145)));
+            let v154 = (v115 * ((v150 - v149) / v114)) + v149;
+            let v157 = v26 * (v155 - v28);
+            let v160 = v26 * (v27 - v158);
+            let v163 = v26 * (v161 - v28);
+            let v165 = v26 * (v161 - v27);
+            let v167 = v26 * (v155 - v158);
+            let v168 = if v77 > v0 { 1.0 } else { 0.0 };
+            let v343: f64;
+            if v168 != 0.0 {
+                let v171 = v160 / (v169 * v41);
+                let v175 = v174 * v41;
+                let v176 = ((-v160) - v102) / v175;
+                let v178 = (-v102) / v175;
+                let v180 = if v171 > v179 { 1.0 } else { 0.0 };
+                let v183: f64;
+                let v184: f64;
+                if v180 != 0.0 {
+                    let v182 = v19 + (v171 - v179);
+                    v183 = v182;
+                    v184 = v179;
+                } else {
+                    v183 = v19;
+                    v184 = v171;
+                }
+                let v186 = v183 * (v184.exp());
+                let v188 = if v176 >= v187 { 1.0 } else { 0.0 };
+                let v202: f64;
+                if v188 != 0.0 {
+                    v202 = v176;
+                } else {
+                    let v190 = if v176 <= v189 { 1.0 } else { 0.0 };
+                    let v203: f64;
+                    if v190 != 0.0 {
+                        let v191 = v176.exp();
+                        v203 = v191;
+                    } else {
+                        let v194 = ((v176.exp()) + v19).ln();
+                        v203 = v194;
+                    }
+                    v202 = v203;
+                }
+                let v195 = if v178 >= v187 { 1.0 } else { 0.0 };
+                let v204: f64;
+                if v195 != 0.0 {
+                    v204 = v178;
+                } else {
+                    let v197 = if v178 <= v196 { 1.0 } else { 0.0 };
+                    let v205: f64;
+                    if v197 != 0.0 {
+                        let v198 = v178.exp();
+                        v205 = v198;
+                    } else {
+                        let v201 = ((v178.exp()) + v19).ln();
+                        v205 = v201;
+                    }
+                    v204 = v205;
+                }
+                let v216 = (v77 * (v186 - v19)) - ((v97 * (v202 - v204)) / (v19 + (v210 * ((v160.abs()).powf(v107)))));
+                v343 = v216;
+            } else {
+                v343 = v0;
+            }
+            let v217 = if v80 > v0 { 1.0 } else { 0.0 };
+            let v344: f64;
+            if v217 != 0.0 {
+                let v228 = ((v222 * v160) * v218) / ((v225 * v41) * (if (v218 - v160) >= v220 { (v218 - v160) } else { v220 }));
+                let v229 = if v228 > v179 { 1.0 } else { 0.0 };
+                let v232: f64;
+                let v233: f64;
+                if v229 != 0.0 {
+                    let v231 = v19 + (v228 - v179);
+                    v232 = v231;
+                    v233 = v179;
+                } else {
+                    v232 = v19;
+                    v233 = v228;
+                }
+                let v237 = v80 * ((v232 * (v233.exp())) - v19);
+                v344 = v237;
+            } else {
+                v344 = v0;
+            }
+            let v238 = if v86 > v0 { 1.0 } else { 0.0 };
+            let v347: f64;
+            if v238 != 0.0 {
+                let v240 = v160 / (v82 * v41);
+                let v244 = v243 * v41;
+                let v245 = ((-v160) - v102) / v244;
+                let v247 = (-v102) / v244;
+                let v248 = if v240 > v179 { 1.0 } else { 0.0 };
+                let v251: f64;
+                let v252: f64;
+                if v248 != 0.0 {
+                    let v250 = v19 + (v240 - v179);
+                    v251 = v250;
+                    v252 = v179;
+                } else {
+                    v251 = v19;
+                    v252 = v240;
+                }
+                let v254 = v251 * (v252.exp());
+                let v255 = if v245 >= v187 { 1.0 } else { 0.0 };
+                let v269: f64;
+                if v255 != 0.0 {
+                    v269 = v245;
+                } else {
+                    let v257 = if v245 <= v256 { 1.0 } else { 0.0 };
+                    let v270: f64;
+                    if v257 != 0.0 {
+                        let v258 = v245.exp();
+                        v270 = v258;
+                    } else {
+                        let v261 = ((v245.exp()) + v19).ln();
+                        v270 = v261;
+                    }
+                    v269 = v270;
+                }
+                let v262 = if v247 >= v187 { 1.0 } else { 0.0 };
+                let v271: f64;
+                if v262 != 0.0 {
+                    v271 = v247;
+                } else {
+                    let v264 = if v247 <= v263 { 1.0 } else { 0.0 };
+                    let v272: f64;
+                    if v264 != 0.0 {
+                        let v265 = v247.exp();
+                        v272 = v265;
+                    } else {
+                        let v268 = ((v247.exp()) + v19).ln();
+                        v272 = v268;
+                    }
+                    v271 = v272;
+                }
+                let v282 = (v86 * (v254 - v19)) - ((v0 * (v269 - v271)) / (v19 + (v210 * ((v160.abs()).powf(v107)))));
+                v347 = v282;
+            } else {
+                v347 = v0;
+            }
+            let v349: f64;
+            if v168 != 0.0 {
+                let v285 = v30 / (v283 * v41);
+                let v288 = v243 * v41;
+                let v289 = ((-v30) - v102) / v288;
+                let v291 = (-v102) / v288;
+                let v292 = if v285 > v179 { 1.0 } else { 0.0 };
+                let v295: f64;
+                let v296: f64;
+                if v292 != 0.0 {
+                    let v294 = v19 + (v285 - v179);
+                    v295 = v294;
+                    v296 = v179;
+                } else {
+                    v295 = v19;
+                    v296 = v285;
+                }
+                let v298 = v295 * (v296.exp());
+                let v299 = if v289 >= v187 { 1.0 } else { 0.0 };
+                let v313: f64;
+                if v299 != 0.0 {
+                    v313 = v289;
+                } else {
+                    let v301 = if v289 <= v300 { 1.0 } else { 0.0 };
+                    let v314: f64;
+                    if v301 != 0.0 {
+                        let v302 = v289.exp();
+                        v314 = v302;
+                    } else {
+                        let v305 = ((v289.exp()) + v19).ln();
+                        v314 = v305;
+                    }
+                    v313 = v314;
+                }
+                let v306 = if v291 >= v187 { 1.0 } else { 0.0 };
+                let v315: f64;
+                if v306 != 0.0 {
+                    v315 = v291;
+                } else {
+                    let v308 = if v291 <= v307 { 1.0 } else { 0.0 };
+                    let v316: f64;
+                    if v308 != 0.0 {
+                        let v309 = v291.exp();
+                        v316 = v309;
+                    } else {
+                        let v312 = ((v291.exp()) + v19).ln();
+                        v316 = v312;
+                    }
+                    v315 = v316;
+                }
+                let v326 = (v77 * (v298 - v19)) - ((v112 * (v313 - v315)) / (v19 + (v210 * ((v30.abs()).powf(v107)))));
+                v349 = v326;
+            } else {
+                v349 = v0;
+            }
+            let v327 = if v92 > v0 { 1.0 } else { 0.0 };
+            if v327 != 0.0 {
+                let v332 = v243 * v41;
+                let v333 = ((-v30) - v102) / v332;
+                let v335 = (-v102) / v332;
+                let v336 = if (v30 / (v88 * v41)) > v179 { 1.0 } else { 0.0 };
+                if v336 != 0.0 {
+                } else {
+                }
+                let v337 = if v333 >= v187 { 1.0 } else { 0.0 };
+                if v337 != 0.0 {
+                } else {
+                    let v339 = if v333 <= v338 { 1.0 } else { 0.0 };
+                    if v339 != 0.0 {
+                    } else {
+                    }
+                }
+                let v340 = if v335 >= v187 { 1.0 } else { 0.0 };
+                if v340 != 0.0 {
+                } else {
+                    let v342 = if v335 <= v341 { 1.0 } else { 0.0 };
+                    if v342 != 0.0 {
+                    } else {
+                    }
+                }
+            } else {
+            }
+            let v348 = ((v343 - v344) / v49) + v347;
+            let v370 = (v368 * ((v19 - (v160 * v57)) - (v30 * v53))) / (v19 + (((v19 + (v361 * ((v343 * (v61 * (v19 + (v30 * v350)))) + (v349 * v65)))).abs()).powf(v365)));
+            let v371 = v349 * v370;
+            let v372 = v343 * v370;
+            let v392 = (v385 * ((v43 * v386).exp())) * ((v19 + (((v165 / v373).abs()).powf(v376))).powf((v19 / v376)));
+            let v397 = v393 * ((v43 * v394).exp());
+            let v405 = (v398 * ((v43 * v399).exp())) * ((v19 + (((v167 / v379).abs()).powf(v382))).powf((v19 / v382)));
+            let v408 = if v407 == v19 { 1.0 } else { 0.0 };
+            let v419: f64;
+            if v408 != 0.0 {
+                let v416 = v392 / (v19 + (((v409.abs()) / v411).powf(v413)));
+                v419 = v416;
+            } else {
+                v419 = v392;
+            }
+            let v418 = if v417 == v19 { 1.0 } else { 0.0 };
+            let v469: f64;
+            let v478: f64;
+            let v487: f64;
+            if v418 != 0.0 {
+                let v421 = v419 + v420;
+                let v423 = v397 + v422;
+                let v425 = v405 + v424;
+                v469 = v421;
+                v478 = v425;
+                v487 = v423;
+            } else {
+                v469 = v419;
+                v478 = v405;
+                v487 = v397;
+            }
+            let v426 = if v157 <= v0 { 1.0 } else { 0.0 };
+            if v426 != 0.0 {
+            } else {
+            }
+            let v431 = if (v160 + ((-v144) * v428)) > v0 { 1.0 } else { 0.0 };
+            if v431 != 0.0 {
+            } else {
+            }
+            let v433 = (-v154) * v428;
+            let v435 = if (v163 + v433) > v0 { 1.0 } else { 0.0 };
+            if v435 != 0.0 {
+            } else {
+            }
+            let v437 = if (v30 + v433) > v0 { 1.0 } else { 0.0 };
+            if v437 != 0.0 {
+            } else {
+            }
+            let v441 = if (if v438 != v0 { 1.0 } else { 0.0 }) != 0.0 && (if v406 != v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+            if v441 != 0.0 {
+            } else {
+            }
+            let v445 = if v444 > v0 { 1.0 } else { 0.0 };
+            let v446 = if (if v442 == v19 { 1.0 } else { 0.0 }) != 0.0 && v445 != 0.0 { 1.0 } else { 0.0 };
+            if v446 != 0.0 {
+            } else {
+                let v451 = if (if (if v442 == v368 { 1.0 } else { 0.0 }) != 0.0 && v445 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && (if v449 > v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                if v451 != 0.0 {
+                } else {
+                    let v453 = if v442 == v452 { 1.0 } else { 0.0 };
+                    if v453 != 0.0 {
+                    } else {
+                    }
+                }
+            }
+            let v455 = v454 * v18;
+            let v458 = (v385 + (v417 * v420)) / v25;
+            let v461 = (v398 + (v417 * v424)) / v25;
+            let v464 = (v393 + (v417 * v422)) / v25;
+            let v468 = if (if v458 > v0 { 1.0 } else { 0.0 }) != 0.0 && (if v458 >= v466 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+            let v514: f64;
+            let v515: f64;
+            if v468 != 0.0 {
+                let v470 = v469 / v25;
+                let v471 = if v470 > v466 { 1.0 } else { 0.0 };
+                if v471 != 0.0 {
+                } else {
+                }
+                let v472 = if v470 >= v466 { 1.0 } else { 0.0 };
+                let v474: f64;
+                if v472 != 0.0 {
+                    let v473 = v455 / v470;
+                    v474 = v473;
+                } else {
+                    v474 = v0;
+                }
+                v514 = v19;
+                v515 = v474;
+            } else {
+                v514 = v0;
+                v515 = v0;
+            }
+            let v477 = if (if v461 > v0 { 1.0 } else { 0.0 }) != 0.0 && (if v461 >= v466 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+            let v516: f64;
+            let v517: f64;
+            if v477 != 0.0 {
+                let v479 = v478 / v25;
+                let v480 = if v479 > v466 { 1.0 } else { 0.0 };
+                if v480 != 0.0 {
+                } else {
+                }
+                let v481 = if v479 >= v466 { 1.0 } else { 0.0 };
+                let v483: f64;
+                if v481 != 0.0 {
+                    let v482 = v455 / v479;
+                    v483 = v482;
+                } else {
+                    v483 = v0;
+                }
+                v516 = v19;
+                v517 = v483;
+            } else {
+                v516 = v0;
+                v517 = v0;
+            }
+            let v486 = if (if v464 > v0 { 1.0 } else { 0.0 }) != 0.0 && (if v464 >= v466 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+            let v518: f64;
+            let v519: f64;
+            if v486 != 0.0 {
+                let v488 = v487 / v25;
+                let v489 = if v488 > v466 { 1.0 } else { 0.0 };
+                if v489 != 0.0 {
+                } else {
+                }
+                let v490 = if v488 >= v466 { 1.0 } else { 0.0 };
+                let v492: f64;
+                if v490 != 0.0 {
+                    let v491 = v455 / v488;
+                    v492 = v491;
+                } else {
+                    v492 = v0;
+                }
+                v518 = v19;
+                v519 = v492;
+            } else {
+                v518 = v0;
+                v519 = v0;
+            }
+            let v493 = v26 * v348;
+            let v499 = if (if (if v494 > v0 { 1.0 } else { 0.0 }) != 0.0 && (if v496 > v0 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) > v0 { 1.0 } else { 0.0 };
+            let v503: f64;
+            if v499 != 0.0 {
+                let v502 = v496 * ((v348.abs()).powf(v494));
+                v503 = v502;
+            } else {
+                v503 = v0;
+            }
+            let v504 = if v493 >= v0 { 1.0 } else { 0.0 };
+            let v506: f64;
+            if v504 != 0.0 {
+                v506 = v19;
+            } else {
+                v506 = v505;
+            }
+            let v507 = v506 * v503;
+            let v510 = v508 * (v348.abs());
+            let v513 = v508 * ((v372 - v371).abs());
+        if v514 == 0.0 {
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let noise_0_psd_e2354: f64 = 1.0;
-            let noise_0_psd_e2355: f64 = (noise_0_psd_e2354 * w[72]);
-            let psd = noise_0_psd_e2355;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
+            let psd = v515;
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 0, value: psd }); }
             let exponent: Option<f64> = None;
-            if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "scaled psd", value: psd }); }
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !noise_source_active[1] {
+        if v516 == 0.0 {
             if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let noise_1_psd_e2357: f64 = 1.0;
-            let noise_1_psd_e2358: f64 = (noise_1_psd_e2357 * w[73]);
-            let psd = noise_1_psd_e2358;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
+            let psd = v517;
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 1, value: psd }); }
             let exponent: Option<f64> = None;
-            if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "scaled psd", value: psd }); }
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !noise_source_active[2] {
+        if v518 == 0.0 {
             if !visitor.visit(2, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let noise_2_psd_e2360: f64 = 1.0;
-            let noise_2_psd_e2361: f64 = (noise_2_psd_e2360 * w[74]);
-            let psd = noise_2_psd_e2361;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: psd }); }
+            let psd = v519;
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 2, value: psd }); }
             let exponent: Option<f64> = None;
-            if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "scaled psd", value: psd }); }
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(2, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !noise_source_active[3] {
-            if !visitor.visit(3, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-        } else {
-            let noise_3_psd_e2363: f64 = 1.0;
-            let noise_3_psd_e429: f64 = (w[9] * w[37]);
-            let (noise_3_psd_e436,) = {
-    if (noise_3_psd_e429 >= 0.0) {
-        let noise_3_psd_e433: f64 = 1.0;
-        (noise_3_psd_e433,)
-    } else {
-        let noise_3_psd_e435: f64 = (-1.0);
-        (noise_3_psd_e435,)
-    }
-};
-            let noise_3_psd_e438: f64 = (noise_3_psd_e436 * w[71]);
-            let noise_3_psd_e2364: f64 = (noise_3_psd_e2363 * noise_3_psd_e438);
-            let psd = noise_3_psd_e2364;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: psd }); }
+        {
+            let psd = v507;
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 3, value: psd }); }
-            let exponent: Option<f64> = Some(1.0);
+            let exponent: Option<f64> = Some(v19);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "scaled psd", value: psd }); }
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(3, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !noise_source_active[4] {
-            if !visitor.visit(4, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-        } else {
-            let noise_4_psd_e2366: f64 = 1.0;
-            let noise_4_psd_e444: f64 = (w[37]).abs();
-            let noise_4_psd_e445: f64 = (w[70] * noise_4_psd_e444);
-            let noise_4_psd_e2367: f64 = (noise_4_psd_e2366 * noise_4_psd_e445);
-            let psd = noise_4_psd_e2367;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: psd }); }
+        {
+            let psd = v510;
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 4, value: psd }); }
             let exponent: Option<f64> = None;
-            if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "scaled psd", value: psd }); }
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(4, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !noise_source_active[5] {
-            if !visitor.visit(5, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-        } else {
-            let noise_5_psd_e2369: f64 = 1.0;
-            let noise_5_psd_e451: f64 = (w[44] - w[45]);
-            let noise_5_psd_e452: f64 = (noise_5_psd_e451).abs();
-            let noise_5_psd_e453: f64 = (w[70] * noise_5_psd_e452);
-            let noise_5_psd_e2370: f64 = (noise_5_psd_e2369 * noise_5_psd_e453);
-            let psd = noise_5_psd_e2370;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
+        {
+            let psd = v513;
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
             if psd < 0.0 { return Err(GeneratedNoiseEvaluationError::NegativePower { index: 5, value: psd }); }
             let exponent: Option<f64> = None;
-            if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
-            if !psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "scaled psd", value: psd }); }
+            if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(5, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
         Ok(())
-    }
-
-    #[inline(never)]
-    fn noise_activation_schedule_part_0(&self, ctx: &GeneratedEvalContext<'_>, w: &mut [f64; 128]) {
-        let params = &*self.params;
-        let noise_activation_schedule_4_0_e502: f64 = (params[43] * params[42]);
-        w[3] = noise_activation_schedule_4_0_e502;
-        let noise_activation_schedule_196_0_e2249: f64 = (params[31] * params[13]);
-        let noise_activation_schedule_196_0_e2250: f64 = (params[12] + noise_activation_schedule_196_0_e2249);
-        let noise_activation_schedule_196_0_e2252: f64 = (noise_activation_schedule_196_0_e2250 / w[3]);
-        w[50] = noise_activation_schedule_196_0_e2252;
-        let noise_activation_schedule_197_0_e2256: f64 = (params[31] * params[15]);
-        let noise_activation_schedule_197_0_e2257: f64 = (params[14] + noise_activation_schedule_197_0_e2256);
-        let noise_activation_schedule_197_0_e2259: f64 = (noise_activation_schedule_197_0_e2257 / w[3]);
-        w[48] = noise_activation_schedule_197_0_e2259;
-        let noise_activation_schedule_198_0_e2263: f64 = (params[31] * params[67]);
-        let noise_activation_schedule_198_0_e2264: f64 = (params[66] + noise_activation_schedule_198_0_e2263);
-        let noise_activation_schedule_198_0_e2266: f64 = (noise_activation_schedule_198_0_e2264 / w[3]);
-        w[49] = noise_activation_schedule_198_0_e2266;
-        let noise_activation_schedule_199_0_e2273: f64 = if ((w[50] > 0.0) && (w[50] >= params[46])) { 1.0 } else { 0.0 };
-        w[125] = noise_activation_schedule_199_0_e2273;
-        let noise_activation_schedule_201_0_e2295: f64 = if ((w[48] > 0.0) && (w[48] >= params[46])) { 1.0 } else { 0.0 };
-        w[126] = noise_activation_schedule_201_0_e2295;
-        let noise_activation_schedule_203_0_e2317: f64 = if ((w[49] > 0.0) && (w[49] >= params[46])) { 1.0 } else { 0.0 };
-        w[127] = noise_activation_schedule_203_0_e2317;
-    }
-
-    #[inline(never)]
-    fn noise_metadata_schedule_part_0(&self, ctx: &GeneratedEvalContext<'_>, w: &mut [f64; 128], active: &[u128; 1]) {
-        let params = &*self.params;
-        if (active[0] & 0x3f) != 0 {
-            let noise_metadata_schedule_0_0_e456: f64 = ctx.temperature();
-            let noise_metadata_schedule_0_0_e458: f64 = (noise_metadata_schedule_0_0_e456 + (ctx.node_voltage(self.nodes[3]) - 0.0));
-            let noise_metadata_schedule_0_0_e460: f64 = (noise_metadata_schedule_0_0_e458 + params[45]);
-            w[12] = noise_metadata_schedule_0_0_e460;
-        }
-        if (active[0] & 0x3f) != 0 {
-            let noise_metadata_schedule_1_0_e463: f64 = (1026.85 + 273.15);
-            let noise_metadata_schedule_1_0_e466: f64 = (-100.0);
-            let noise_metadata_schedule_1_0_e468: f64 = (noise_metadata_schedule_1_0_e466 + 273.15);
-            let (noise_metadata_schedule_1_0_e475,) = {
-    if (w[12] > noise_metadata_schedule_1_0_e468) {
-        (w[12],)
-    } else {
-        let noise_metadata_schedule_1_0_e472: f64 = (-100.0);
-        let noise_metadata_schedule_1_0_e474: f64 = (noise_metadata_schedule_1_0_e472 + 273.15);
-        (noise_metadata_schedule_1_0_e474,)
-    }
-};
-            let (noise_metadata_schedule_1_0_e492,) = {
-    if (noise_metadata_schedule_1_0_e463 < noise_metadata_schedule_1_0_e475) {
-        let noise_metadata_schedule_1_0_e479: f64 = (1026.85 + 273.15);
-        (noise_metadata_schedule_1_0_e479,)
-    } else {
-        let noise_metadata_schedule_1_0_e482: f64 = (-100.0);
-        let noise_metadata_schedule_1_0_e484: f64 = (noise_metadata_schedule_1_0_e482 + 273.15);
-        let (noise_metadata_schedule_1_0_e491,) = {
-            if (w[12] > noise_metadata_schedule_1_0_e484) {
-                (w[12],)
-            } else {
-                let noise_metadata_schedule_1_0_e488: f64 = (-100.0);
-                let noise_metadata_schedule_1_0_e490: f64 = (noise_metadata_schedule_1_0_e488 + 273.15);
-                (noise_metadata_schedule_1_0_e490,)
-            }
-        };
-        (noise_metadata_schedule_1_0_e491,)
-    }
-};
-            w[10] = noise_metadata_schedule_1_0_e492;
-        }
-        if (active[0] & 0x7) != 0 {
-            let noise_metadata_schedule_4_0_e502: f64 = (params[43] * params[42]);
-            w[3] = noise_metadata_schedule_4_0_e502;
-        }
-        if (active[0] & 0x18) != 0 {
-            let noise_metadata_schedule_5_0_e505: f64 = (params[29] * (ctx.node_voltage(self.nodes[5]) - ctx.node_voltage(self.nodes[4])));
-            w[95] = noise_metadata_schedule_5_0_e505;
-        }
-        if (active[0] & 0x18) != 0 {
-            let noise_metadata_schedule_6_0_e510: f64 = (w[95]).min(0.0);
-            let noise_metadata_schedule_6_0_e511: f64 = (-noise_metadata_schedule_6_0_e510);
-            let noise_metadata_schedule_6_0_e513: f64 = (noise_metadata_schedule_6_0_e511).powf(params[80]);
-            let noise_metadata_schedule_6_0_e514: f64 = (params[79] * noise_metadata_schedule_6_0_e513);
-            let noise_metadata_schedule_6_0_e515: f64 = (1.0 + noise_metadata_schedule_6_0_e514);
-            w[94] = noise_metadata_schedule_6_0_e515;
-        }
-        if (active[0] & 0x3f) != 0 {
-            let noise_metadata_schedule_7_0_e518: f64 = (params[25] + 273.15);
-            w[11] = noise_metadata_schedule_7_0_e518;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_8_0_e521: f64 = (8.6170869e-5 * w[10]);
-            w[15] = noise_metadata_schedule_8_0_e521;
-        }
-        if (active[0] & 0x3f) != 0 {
-            let noise_metadata_schedule_9_0_e524: f64 = (w[10] / w[11]);
-            w[13] = noise_metadata_schedule_9_0_e524;
-        }
-        if (active[0] & 0x3f) != 0 {
-            let noise_metadata_schedule_10_0_e526: f64 = (w[13]).ln();
-            w[14] = noise_metadata_schedule_10_0_e526;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_11_0_e529: f64 = (params[77] * w[14]);
-            let noise_metadata_schedule_11_0_e530: f64 = (noise_metadata_schedule_11_0_e529).exp();
-            w[18] = noise_metadata_schedule_11_0_e530;
-        }
-        if (active[0] & 0x18) != 0 {
-            let noise_metadata_schedule_12_0_e533: f64 = (params[52] * w[18]);
-            let noise_metadata_schedule_12_0_e535: f64 = (noise_metadata_schedule_12_0_e533 * w[94]);
-            w[16] = noise_metadata_schedule_12_0_e535;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_14_0_e546,) = {
-    if (params[53] > 0.0) {
-        let noise_metadata_schedule_14_0_e544: f64 = (1.0 / params[53]);
-        (noise_metadata_schedule_14_0_e544,)
-    } else {
-        (0.0,)
-    }
-};
-            w[64] = noise_metadata_schedule_14_0_e546;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_15_0_e554,) = {
-    if (params[62] > 0.0) {
-        let noise_metadata_schedule_15_0_e552: f64 = (1.0 / params[62]);
-        (noise_metadata_schedule_15_0_e552,)
-    } else {
-        (0.0,)
-    }
-};
-            w[65] = noise_metadata_schedule_15_0_e554;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_16_0_e562,) = {
-    if (params[54] > 0.0) {
-        let noise_metadata_schedule_16_0_e560: f64 = (1.0 / params[54]);
-        (noise_metadata_schedule_16_0_e560,)
-    } else {
-        (0.0,)
-    }
-};
-            w[66] = noise_metadata_schedule_16_0_e562;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_17_0_e570,) = {
-    if (params[63] > 0.0) {
-        let noise_metadata_schedule_17_0_e568: f64 = (1.0 / params[63]);
-        (noise_metadata_schedule_17_0_e568,)
-    } else {
-        (0.0,)
-    }
-};
-            w[67] = noise_metadata_schedule_17_0_e570;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_18_0_e573: f64 = (params[22] * w[14]);
-            let noise_metadata_schedule_18_0_e577: f64 = (w[13] - 1.0);
-            let noise_metadata_schedule_18_0_e578: f64 = (params[21] * noise_metadata_schedule_18_0_e577);
-            let noise_metadata_schedule_18_0_e580: f64 = (noise_metadata_schedule_18_0_e578 / w[15]);
-            let noise_metadata_schedule_18_0_e581: f64 = (noise_metadata_schedule_18_0_e573 + noise_metadata_schedule_18_0_e580);
-            w[68] = noise_metadata_schedule_18_0_e581;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_19_0_e584: f64 = (params[23] * w[14]);
-            w[92] = noise_metadata_schedule_19_0_e584;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_20_0_e587: f64 = (w[68]).exp();
-            let noise_metadata_schedule_20_0_e588: f64 = (params[0] * noise_metadata_schedule_20_0_e587);
-            w[19] = noise_metadata_schedule_20_0_e588;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_21_0_e591: f64 = (w[92]).exp();
-            let noise_metadata_schedule_21_0_e592: f64 = (params[2] * noise_metadata_schedule_21_0_e591);
-            w[93] = noise_metadata_schedule_21_0_e592;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_22_0_e596: f64 = (w[68] / params[59]);
-            let noise_metadata_schedule_22_0_e597: f64 = (noise_metadata_schedule_22_0_e596).exp();
-            let noise_metadata_schedule_22_0_e598: f64 = (params[58] * noise_metadata_schedule_22_0_e597);
-            let noise_metadata_schedule_22_0_e600: f64 = (noise_metadata_schedule_22_0_e598 / w[18]);
-            w[20] = noise_metadata_schedule_22_0_e600;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_24_0_e614: f64 = (w[13] - 1.0);
-            let noise_metadata_schedule_24_0_e615: f64 = (params[7] * noise_metadata_schedule_24_0_e614);
-            let noise_metadata_schedule_24_0_e616: f64 = (1.0 + noise_metadata_schedule_24_0_e615);
-            let noise_metadata_schedule_24_0_e617: f64 = (params[47] * noise_metadata_schedule_24_0_e616);
-            w[28] = noise_metadata_schedule_24_0_e617;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_25_0_e623: f64 = (w[13] - 1.0);
-            let noise_metadata_schedule_25_0_e624: f64 = (params[6] * noise_metadata_schedule_25_0_e623);
-            let noise_metadata_schedule_25_0_e625: f64 = (1.0 + noise_metadata_schedule_25_0_e624);
-            let noise_metadata_schedule_25_0_e626: f64 = (params[5] * noise_metadata_schedule_25_0_e625);
-            w[30] = noise_metadata_schedule_25_0_e626;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_26_0_e632: f64 = (w[13] - 1.0);
-            let noise_metadata_schedule_26_0_e633: f64 = (params[10] * noise_metadata_schedule_26_0_e632);
-            let noise_metadata_schedule_26_0_e634: f64 = (1.0 + noise_metadata_schedule_26_0_e633);
-            let noise_metadata_schedule_26_0_e635: f64 = (params[9] * noise_metadata_schedule_26_0_e634);
-            w[31] = noise_metadata_schedule_26_0_e635;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_27_0_e641: f64 = (w[13] - 1.0);
-            let noise_metadata_schedule_27_0_e642: f64 = (params[55] * noise_metadata_schedule_27_0_e641);
-            let noise_metadata_schedule_27_0_e643: f64 = (1.0 + noise_metadata_schedule_27_0_e642);
-            let noise_metadata_schedule_27_0_e644: f64 = (params[56] * noise_metadata_schedule_27_0_e643);
-            w[29] = noise_metadata_schedule_27_0_e644;
-        }
-        if (active[0] & 0x3b) != 0 {
-            w[9] = params[29];
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_66_0_e930: f64 = (w[9] * (ctx.node_voltage(self.nodes[5]) - ctx.node_voltage(self.nodes[6])));
-            w[76] = noise_metadata_schedule_66_0_e930;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_67_0_e933: f64 = (w[9] * (ctx.node_voltage(self.nodes[5]) - ctx.node_voltage(self.nodes[4])));
-            w[77] = noise_metadata_schedule_67_0_e933;
-        }
-        if (active[0] & 0x1) != 0 {
-            let noise_metadata_schedule_69_0_e939: f64 = (w[9] * (ctx.node_voltage(self.nodes[1]) - ctx.node_voltage(self.nodes[5])));
-            w[79] = noise_metadata_schedule_69_0_e939;
-        }
-        if (active[0] & 0x2) != 0 {
-            let noise_metadata_schedule_70_0_e942: f64 = (w[9] * (ctx.node_voltage(self.nodes[2]) - ctx.node_voltage(self.nodes[6])));
-            w[80] = noise_metadata_schedule_70_0_e942;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_71_0_e945: f64 = if w[19] > 0.0 { 1.0 } else { 0.0 };
-            w[105] = noise_metadata_schedule_71_0_e945;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_72_0_e953,) = {
-    if (w[105] != 0.0) {
-        let noise_metadata_schedule_72_0_e950: f64 = (params[1] * w[15]);
-        let noise_metadata_schedule_72_0_e951: f64 = (w[76] / noise_metadata_schedule_72_0_e950);
-        (noise_metadata_schedule_72_0_e951,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_72_0_e953;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_73_0_e964,) = {
-    if (w[105] != 0.0) {
-        let noise_metadata_schedule_73_0_e956: f64 = (-w[76]);
-        let noise_metadata_schedule_73_0_e958: f64 = (noise_metadata_schedule_73_0_e956 - w[30]);
-        let noise_metadata_schedule_73_0_e961: f64 = (params[11] * w[15]);
-        let noise_metadata_schedule_73_0_e962: f64 = (noise_metadata_schedule_73_0_e958 / noise_metadata_schedule_73_0_e961);
-        (noise_metadata_schedule_73_0_e962,)
-    } else {
-        (w[90],)
-    }
-};
-            w[90] = noise_metadata_schedule_73_0_e964;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_74_0_e973,) = {
-    if (w[105] != 0.0) {
-        let noise_metadata_schedule_74_0_e967: f64 = (-w[30]);
-        let noise_metadata_schedule_74_0_e970: f64 = (params[11] * w[15]);
-        let noise_metadata_schedule_74_0_e971: f64 = (noise_metadata_schedule_74_0_e967 / noise_metadata_schedule_74_0_e970);
-        (noise_metadata_schedule_74_0_e971,)
-    } else {
-        (w[91],)
-    }
-};
-            w[91] = noise_metadata_schedule_74_0_e973;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_75_0_e976: f64 = if w[0] > 80.0 { 1.0 } else { 0.0 };
-            w[106] = noise_metadata_schedule_75_0_e976;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_76_0_e986,) = {
-    if ((w[105] != 0.0) && (w[106] != 0.0)) {
-        let noise_metadata_schedule_76_0_e983: f64 = (w[0] - 80.0);
-        let noise_metadata_schedule_76_0_e984: f64 = (1.0 + noise_metadata_schedule_76_0_e983);
-        (noise_metadata_schedule_76_0_e984,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_76_0_e986;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_77_0_e992,) = {
-    if ((w[105] != 0.0) && (w[106] != 0.0)) {
-        (80.0,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_77_0_e992;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_78_0_e999,) = {
-    if ((w[105] != 0.0) && (w[106] == 0.0)) {
-        (1.0,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_78_0_e999;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_79_0_e1006,) = {
-    if (w[105] != 0.0) {
-        let noise_metadata_schedule_79_0_e1003: f64 = (w[0]).exp();
-        let noise_metadata_schedule_79_0_e1004: f64 = (w[1] * noise_metadata_schedule_79_0_e1003);
-        (noise_metadata_schedule_79_0_e1004,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_79_0_e1006;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_80_0_e1078,) = {
-    if (w[105] != 0.0) {
-        let noise_metadata_schedule_80_0_e1014: f64 = (-37.0);
-        let (noise_metadata_schedule_80_0_e1041,) = {
-            if ((!(w[90] >= 37.0)) && (!(w[90] <= noise_metadata_schedule_80_0_e1014))) {
-                let noise_metadata_schedule_80_0_e1019: f64 = (w[90]).exp();
-                let noise_metadata_schedule_80_0_e1021: f64 = (noise_metadata_schedule_80_0_e1019 + 1.0);
-                let noise_metadata_schedule_80_0_e1022: f64 = (noise_metadata_schedule_80_0_e1021).ln();
-                (noise_metadata_schedule_80_0_e1022,)
-            } else {
-                let noise_metadata_schedule_80_0_e1029: f64 = (-37.0);
-                let (noise_metadata_schedule_80_0_e1040,) = {
-                    if ((!(w[90] >= 37.0)) && (w[90] <= noise_metadata_schedule_80_0_e1029)) {
-                        let noise_metadata_schedule_80_0_e1033: f64 = (w[90]).exp();
-                        (noise_metadata_schedule_80_0_e1033,)
-                    } else {
-                        let (noise_metadata_schedule_80_0_e1039,) = {
-                            if (w[90] >= 37.0) {
-                                (w[90],)
-                            } else {
-                                (0.0,)
-                            }
-                        };
-                        (noise_metadata_schedule_80_0_e1039,)
-                    }
-                };
-                (noise_metadata_schedule_80_0_e1040,)
-            }
-        };
-        let noise_metadata_schedule_80_0_e1048: f64 = (-37.0);
-        let (noise_metadata_schedule_80_0_e1075,) = {
-            if ((!(w[91] >= 37.0)) && (!(w[91] <= noise_metadata_schedule_80_0_e1048))) {
-                let noise_metadata_schedule_80_0_e1053: f64 = (w[91]).exp();
-                let noise_metadata_schedule_80_0_e1055: f64 = (noise_metadata_schedule_80_0_e1053 + 1.0);
-                let noise_metadata_schedule_80_0_e1056: f64 = (noise_metadata_schedule_80_0_e1055).ln();
-                (noise_metadata_schedule_80_0_e1056,)
-            } else {
-                let noise_metadata_schedule_80_0_e1063: f64 = (-37.0);
-                let (noise_metadata_schedule_80_0_e1074,) = {
-                    if ((!(w[91] >= 37.0)) && (w[91] <= noise_metadata_schedule_80_0_e1063)) {
-                        let noise_metadata_schedule_80_0_e1067: f64 = (w[91]).exp();
-                        (noise_metadata_schedule_80_0_e1067,)
-                    } else {
-                        let (noise_metadata_schedule_80_0_e1073,) = {
-                            if (w[91] >= 37.0) {
-                                (w[91],)
-                            } else {
-                                (0.0,)
-                            }
-                        };
-                        (noise_metadata_schedule_80_0_e1073,)
-                    }
-                };
-                (noise_metadata_schedule_80_0_e1074,)
-            }
-        };
-        let noise_metadata_schedule_80_0_e1076: f64 = (noise_metadata_schedule_80_0_e1041 - noise_metadata_schedule_80_0_e1075);
-        (noise_metadata_schedule_80_0_e1076,)
-    } else {
-        (w[2],)
-    }
-};
-            w[2] = noise_metadata_schedule_80_0_e1078;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_81_0_e1099,) = {
-    if (w[105] != 0.0) {
-        let noise_metadata_schedule_81_0_e1083: f64 = (w[1] - 1.0);
-        let noise_metadata_schedule_81_0_e1084: f64 = (w[19] * noise_metadata_schedule_81_0_e1083);
-        let noise_metadata_schedule_81_0_e1087: f64 = (w[28] * w[2]);
-        let noise_metadata_schedule_81_0_e1091: f64 = (w[76]).abs();
-        let noise_metadata_schedule_81_0_e1093: f64 = (noise_metadata_schedule_81_0_e1091).powf(w[31]);
-        let noise_metadata_schedule_81_0_e1094: f64 = (params[8] * noise_metadata_schedule_81_0_e1093);
-        let noise_metadata_schedule_81_0_e1095: f64 = (1.0 + noise_metadata_schedule_81_0_e1094);
-        let noise_metadata_schedule_81_0_e1096: f64 = (noise_metadata_schedule_81_0_e1087 / noise_metadata_schedule_81_0_e1095);
-        let noise_metadata_schedule_81_0_e1097: f64 = (noise_metadata_schedule_81_0_e1084 - noise_metadata_schedule_81_0_e1096);
-        (noise_metadata_schedule_81_0_e1097,)
-    } else {
-        (w[35],)
-    }
-};
-            w[35] = noise_metadata_schedule_81_0_e1099;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_82_0_e1104,) = {
-    if (w[105] == 0.0) {
-        (0.0,)
-    } else {
-        (w[35],)
-    }
-};
-            w[35] = noise_metadata_schedule_82_0_e1104;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_83_0_e1107: f64 = if w[93] > 0.0 { 1.0 } else { 0.0 };
-            w[107] = noise_metadata_schedule_83_0_e1107;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_84_0_e1115,) = {
-    if (w[107] != 0.0) {
-        let noise_metadata_schedule_84_0_e1111: f64 = (params[4] - w[76]);
-        let noise_metadata_schedule_84_0_e1113: f64 = (noise_metadata_schedule_84_0_e1111).max(0.001);
-        (noise_metadata_schedule_84_0_e1113,)
-    } else {
-        (w[101],)
-    }
-};
-            w[101] = noise_metadata_schedule_84_0_e1115;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_85_0_e1130,) = {
-    if (w[107] != 0.0) {
-        let noise_metadata_schedule_85_0_e1118: f64 = (-1.0);
-        let noise_metadata_schedule_85_0_e1120: f64 = (noise_metadata_schedule_85_0_e1118 * w[76]);
-        let noise_metadata_schedule_85_0_e1122: f64 = (noise_metadata_schedule_85_0_e1120 * params[4]);
-        let noise_metadata_schedule_85_0_e1125: f64 = (params[3] * w[15]);
-        let noise_metadata_schedule_85_0_e1127: f64 = (noise_metadata_schedule_85_0_e1125 * w[101]);
-        let noise_metadata_schedule_85_0_e1128: f64 = (noise_metadata_schedule_85_0_e1122 / noise_metadata_schedule_85_0_e1127);
-        (noise_metadata_schedule_85_0_e1128,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_85_0_e1130;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_86_0_e1133: f64 = if w[0] > 80.0 { 1.0 } else { 0.0 };
-            w[108] = noise_metadata_schedule_86_0_e1133;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_87_0_e1143,) = {
-    if ((w[107] != 0.0) && (w[108] != 0.0)) {
-        let noise_metadata_schedule_87_0_e1140: f64 = (w[0] - 80.0);
-        let noise_metadata_schedule_87_0_e1141: f64 = (1.0 + noise_metadata_schedule_87_0_e1140);
-        (noise_metadata_schedule_87_0_e1141,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_87_0_e1143;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_88_0_e1149,) = {
-    if ((w[107] != 0.0) && (w[108] != 0.0)) {
-        (80.0,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_88_0_e1149;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_89_0_e1156,) = {
-    if ((w[107] != 0.0) && (w[108] == 0.0)) {
-        (1.0,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_89_0_e1156;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_90_0_e1163,) = {
-    if (w[107] != 0.0) {
-        let noise_metadata_schedule_90_0_e1160: f64 = (w[0]).exp();
-        let noise_metadata_schedule_90_0_e1161: f64 = (w[1] * noise_metadata_schedule_90_0_e1160);
-        (noise_metadata_schedule_90_0_e1161,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_90_0_e1163;
-        }
-        if (active[0] & 0x18) != 0 {
-            let (noise_metadata_schedule_91_0_e1171,) = {
-    if (w[107] != 0.0) {
-        let noise_metadata_schedule_91_0_e1168: f64 = (w[1] - 1.0);
-        let noise_metadata_schedule_91_0_e1169: f64 = (w[93] * noise_metadata_schedule_91_0_e1168);
-        (noise_metadata_schedule_91_0_e1169,)
-    } else {
-        (w[47],)
-    }
-};
-            w[47] = noise_metadata_schedule_91_0_e1171;
-        }
-        if (active[0] & 0x18) != 0 {
-            let (noise_metadata_schedule_92_0_e1176,) = {
-    if (w[107] == 0.0) {
-        (0.0,)
-    } else {
-        (w[47],)
-    }
-};
-            w[47] = noise_metadata_schedule_92_0_e1176;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_93_0_e1179: f64 = if w[20] > 0.0 { 1.0 } else { 0.0 };
-            w[109] = noise_metadata_schedule_93_0_e1179;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_94_0_e1187,) = {
-    if (w[109] != 0.0) {
-        let noise_metadata_schedule_94_0_e1184: f64 = (params[59] * w[15]);
-        let noise_metadata_schedule_94_0_e1185: f64 = (w[76] / noise_metadata_schedule_94_0_e1184);
-        (noise_metadata_schedule_94_0_e1185,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_94_0_e1187;
-        }
-    }
-
-    #[inline(never)]
-    fn noise_metadata_schedule_part_1(&self, ctx: &GeneratedEvalContext<'_>, w: &mut [f64; 128], active: &[u128; 1]) {
-        let params = &*self.params;
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_95_0_e1198,) = {
-    if (w[109] != 0.0) {
-        let noise_metadata_schedule_95_0_e1190: f64 = (-w[76]);
-        let noise_metadata_schedule_95_0_e1192: f64 = (noise_metadata_schedule_95_0_e1190 - w[30]);
-        let noise_metadata_schedule_95_0_e1195: f64 = (params[57] * w[15]);
-        let noise_metadata_schedule_95_0_e1196: f64 = (noise_metadata_schedule_95_0_e1192 / noise_metadata_schedule_95_0_e1195);
-        (noise_metadata_schedule_95_0_e1196,)
-    } else {
-        (w[90],)
-    }
-};
-            w[90] = noise_metadata_schedule_95_0_e1198;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_96_0_e1207,) = {
-    if (w[109] != 0.0) {
-        let noise_metadata_schedule_96_0_e1201: f64 = (-w[30]);
-        let noise_metadata_schedule_96_0_e1204: f64 = (params[57] * w[15]);
-        let noise_metadata_schedule_96_0_e1205: f64 = (noise_metadata_schedule_96_0_e1201 / noise_metadata_schedule_96_0_e1204);
-        (noise_metadata_schedule_96_0_e1205,)
-    } else {
-        (w[91],)
-    }
-};
-            w[91] = noise_metadata_schedule_96_0_e1207;
-        }
-        if (active[0] & 0x38) != 0 {
-            let noise_metadata_schedule_97_0_e1210: f64 = if w[0] > 80.0 { 1.0 } else { 0.0 };
-            w[110] = noise_metadata_schedule_97_0_e1210;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_98_0_e1220,) = {
-    if ((w[109] != 0.0) && (w[110] != 0.0)) {
-        let noise_metadata_schedule_98_0_e1217: f64 = (w[0] - 80.0);
-        let noise_metadata_schedule_98_0_e1218: f64 = (1.0 + noise_metadata_schedule_98_0_e1217);
-        (noise_metadata_schedule_98_0_e1218,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_98_0_e1220;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_99_0_e1226,) = {
-    if ((w[109] != 0.0) && (w[110] != 0.0)) {
-        (80.0,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_99_0_e1226;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_100_0_e1233,) = {
-    if ((w[109] != 0.0) && (w[110] == 0.0)) {
-        (1.0,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_100_0_e1233;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_101_0_e1240,) = {
-    if (w[109] != 0.0) {
-        let noise_metadata_schedule_101_0_e1237: f64 = (w[0]).exp();
-        let noise_metadata_schedule_101_0_e1238: f64 = (w[1] * noise_metadata_schedule_101_0_e1237);
-        (noise_metadata_schedule_101_0_e1238,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_101_0_e1240;
-        }
-        if (active[0] & 0x38) != 0 {
-            let (noise_metadata_schedule_102_0_e1312,) = {
-    if (w[109] != 0.0) {
-        let noise_metadata_schedule_102_0_e1248: f64 = (-37.0);
-        let (noise_metadata_schedule_102_0_e1275,) = {
-            if ((!(w[90] >= 37.0)) && (!(w[90] <= noise_metadata_schedule_102_0_e1248))) {
-                let noise_metadata_schedule_102_0_e1253: f64 = (w[90]).exp();
-                let noise_metadata_schedule_102_0_e1255: f64 = (noise_metadata_schedule_102_0_e1253 + 1.0);
-                let noise_metadata_schedule_102_0_e1256: f64 = (noise_metadata_schedule_102_0_e1255).ln();
-                (noise_metadata_schedule_102_0_e1256,)
-            } else {
-                let noise_metadata_schedule_102_0_e1263: f64 = (-37.0);
-                let (noise_metadata_schedule_102_0_e1274,) = {
-                    if ((!(w[90] >= 37.0)) && (w[90] <= noise_metadata_schedule_102_0_e1263)) {
-                        let noise_metadata_schedule_102_0_e1267: f64 = (w[90]).exp();
-                        (noise_metadata_schedule_102_0_e1267,)
-                    } else {
-                        let (noise_metadata_schedule_102_0_e1273,) = {
-                            if (w[90] >= 37.0) {
-                                (w[90],)
-                            } else {
-                                (0.0,)
-                            }
-                        };
-                        (noise_metadata_schedule_102_0_e1273,)
-                    }
-                };
-                (noise_metadata_schedule_102_0_e1274,)
-            }
-        };
-        let noise_metadata_schedule_102_0_e1282: f64 = (-37.0);
-        let (noise_metadata_schedule_102_0_e1309,) = {
-            if ((!(w[91] >= 37.0)) && (!(w[91] <= noise_metadata_schedule_102_0_e1282))) {
-                let noise_metadata_schedule_102_0_e1287: f64 = (w[91]).exp();
-                let noise_metadata_schedule_102_0_e1289: f64 = (noise_metadata_schedule_102_0_e1287 + 1.0);
-                let noise_metadata_schedule_102_0_e1290: f64 = (noise_metadata_schedule_102_0_e1289).ln();
-                (noise_metadata_schedule_102_0_e1290,)
-            } else {
-                let noise_metadata_schedule_102_0_e1297: f64 = (-37.0);
-                let (noise_metadata_schedule_102_0_e1308,) = {
-                    if ((!(w[91] >= 37.0)) && (w[91] <= noise_metadata_schedule_102_0_e1297)) {
-                        let noise_metadata_schedule_102_0_e1301: f64 = (w[91]).exp();
-                        (noise_metadata_schedule_102_0_e1301,)
-                    } else {
-                        let (noise_metadata_schedule_102_0_e1307,) = {
-                            if (w[91] >= 37.0) {
-                                (w[91],)
-                            } else {
-                                (0.0,)
-                            }
-                        };
-                        (noise_metadata_schedule_102_0_e1307,)
-                    }
-                };
-                (noise_metadata_schedule_102_0_e1308,)
-            }
-        };
-        let noise_metadata_schedule_102_0_e1310: f64 = (noise_metadata_schedule_102_0_e1275 - noise_metadata_schedule_102_0_e1309);
-        (noise_metadata_schedule_102_0_e1310,)
-    } else {
-        (w[2],)
-    }
-};
-            w[2] = noise_metadata_schedule_102_0_e1312;
-        }
-        if (active[0] & 0x18) != 0 {
-            let (noise_metadata_schedule_103_0_e1333,) = {
-    if (w[109] != 0.0) {
-        let noise_metadata_schedule_103_0_e1317: f64 = (w[1] - 1.0);
-        let noise_metadata_schedule_103_0_e1318: f64 = (w[20] * noise_metadata_schedule_103_0_e1317);
-        let noise_metadata_schedule_103_0_e1325: f64 = (w[76]).abs();
-        let noise_metadata_schedule_103_0_e1327: f64 = (noise_metadata_schedule_103_0_e1325).powf(w[31]);
-        let noise_metadata_schedule_103_0_e1328: f64 = (params[8] * noise_metadata_schedule_103_0_e1327);
-        let noise_metadata_schedule_103_0_e1329: f64 = (1.0 + noise_metadata_schedule_103_0_e1328);
-        let noise_metadata_schedule_103_0_e1330: f64 = 0.0;
-        let noise_metadata_schedule_103_0_e1331: f64 = (noise_metadata_schedule_103_0_e1318 - noise_metadata_schedule_103_0_e1330);
-        (noise_metadata_schedule_103_0_e1331,)
-    } else {
-        (w[36],)
-    }
-};
-            w[36] = noise_metadata_schedule_103_0_e1333;
-        }
-        if (active[0] & 0x18) != 0 {
-            let (noise_metadata_schedule_104_0_e1338,) = {
-    if (w[109] == 0.0) {
-        (0.0,)
-    } else {
-        (w[36],)
-    }
-};
-            w[36] = noise_metadata_schedule_104_0_e1338;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_105_0_e1341: f64 = if w[19] > 0.0 { 1.0 } else { 0.0 };
-            w[111] = noise_metadata_schedule_105_0_e1341;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_106_0_e1349,) = {
-    if (w[111] != 0.0) {
-        let noise_metadata_schedule_106_0_e1346: f64 = (params[61] * w[15]);
-        let noise_metadata_schedule_106_0_e1347: f64 = (w[77] / noise_metadata_schedule_106_0_e1346);
-        (noise_metadata_schedule_106_0_e1347,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_106_0_e1349;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_107_0_e1360,) = {
-    if (w[111] != 0.0) {
-        let noise_metadata_schedule_107_0_e1352: f64 = (-w[77]);
-        let noise_metadata_schedule_107_0_e1354: f64 = (noise_metadata_schedule_107_0_e1352 - w[30]);
-        let noise_metadata_schedule_107_0_e1357: f64 = (params[57] * w[15]);
-        let noise_metadata_schedule_107_0_e1358: f64 = (noise_metadata_schedule_107_0_e1354 / noise_metadata_schedule_107_0_e1357);
-        (noise_metadata_schedule_107_0_e1358,)
-    } else {
-        (w[90],)
-    }
-};
-            w[90] = noise_metadata_schedule_107_0_e1360;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_108_0_e1369,) = {
-    if (w[111] != 0.0) {
-        let noise_metadata_schedule_108_0_e1363: f64 = (-w[30]);
-        let noise_metadata_schedule_108_0_e1366: f64 = (params[57] * w[15]);
-        let noise_metadata_schedule_108_0_e1367: f64 = (noise_metadata_schedule_108_0_e1363 / noise_metadata_schedule_108_0_e1366);
-        (noise_metadata_schedule_108_0_e1367,)
-    } else {
-        (w[91],)
-    }
-};
-            w[91] = noise_metadata_schedule_108_0_e1369;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_109_0_e1372: f64 = if w[0] > 80.0 { 1.0 } else { 0.0 };
-            w[112] = noise_metadata_schedule_109_0_e1372;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_110_0_e1382,) = {
-    if ((w[111] != 0.0) && (w[112] != 0.0)) {
-        let noise_metadata_schedule_110_0_e1379: f64 = (w[0] - 80.0);
-        let noise_metadata_schedule_110_0_e1380: f64 = (1.0 + noise_metadata_schedule_110_0_e1379);
-        (noise_metadata_schedule_110_0_e1380,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_110_0_e1382;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_111_0_e1388,) = {
-    if ((w[111] != 0.0) && (w[112] != 0.0)) {
-        (80.0,)
-    } else {
-        (w[0],)
-    }
-};
-            w[0] = noise_metadata_schedule_111_0_e1388;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_112_0_e1395,) = {
-    if ((w[111] != 0.0) && (w[112] == 0.0)) {
-        (1.0,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_112_0_e1395;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_113_0_e1402,) = {
-    if (w[111] != 0.0) {
-        let noise_metadata_schedule_113_0_e1399: f64 = (w[0]).exp();
-        let noise_metadata_schedule_113_0_e1400: f64 = (w[1] * noise_metadata_schedule_113_0_e1399);
-        (noise_metadata_schedule_113_0_e1400,)
-    } else {
-        (w[1],)
-    }
-};
-            w[1] = noise_metadata_schedule_113_0_e1402;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_114_0_e1474,) = {
-    if (w[111] != 0.0) {
-        let noise_metadata_schedule_114_0_e1410: f64 = (-37.0);
-        let (noise_metadata_schedule_114_0_e1437,) = {
-            if ((!(w[90] >= 37.0)) && (!(w[90] <= noise_metadata_schedule_114_0_e1410))) {
-                let noise_metadata_schedule_114_0_e1415: f64 = (w[90]).exp();
-                let noise_metadata_schedule_114_0_e1417: f64 = (noise_metadata_schedule_114_0_e1415 + 1.0);
-                let noise_metadata_schedule_114_0_e1418: f64 = (noise_metadata_schedule_114_0_e1417).ln();
-                (noise_metadata_schedule_114_0_e1418,)
-            } else {
-                let noise_metadata_schedule_114_0_e1425: f64 = (-37.0);
-                let (noise_metadata_schedule_114_0_e1436,) = {
-                    if ((!(w[90] >= 37.0)) && (w[90] <= noise_metadata_schedule_114_0_e1425)) {
-                        let noise_metadata_schedule_114_0_e1429: f64 = (w[90]).exp();
-                        (noise_metadata_schedule_114_0_e1429,)
-                    } else {
-                        let (noise_metadata_schedule_114_0_e1435,) = {
-                            if (w[90] >= 37.0) {
-                                (w[90],)
-                            } else {
-                                (0.0,)
-                            }
-                        };
-                        (noise_metadata_schedule_114_0_e1435,)
-                    }
-                };
-                (noise_metadata_schedule_114_0_e1436,)
-            }
-        };
-        let noise_metadata_schedule_114_0_e1444: f64 = (-37.0);
-        let (noise_metadata_schedule_114_0_e1471,) = {
-            if ((!(w[91] >= 37.0)) && (!(w[91] <= noise_metadata_schedule_114_0_e1444))) {
-                let noise_metadata_schedule_114_0_e1449: f64 = (w[91]).exp();
-                let noise_metadata_schedule_114_0_e1451: f64 = (noise_metadata_schedule_114_0_e1449 + 1.0);
-                let noise_metadata_schedule_114_0_e1452: f64 = (noise_metadata_schedule_114_0_e1451).ln();
-                (noise_metadata_schedule_114_0_e1452,)
-            } else {
-                let noise_metadata_schedule_114_0_e1459: f64 = (-37.0);
-                let (noise_metadata_schedule_114_0_e1470,) = {
-                    if ((!(w[91] >= 37.0)) && (w[91] <= noise_metadata_schedule_114_0_e1459)) {
-                        let noise_metadata_schedule_114_0_e1463: f64 = (w[91]).exp();
-                        (noise_metadata_schedule_114_0_e1463,)
-                    } else {
-                        let (noise_metadata_schedule_114_0_e1469,) = {
-                            if (w[91] >= 37.0) {
-                                (w[91],)
-                            } else {
-                                (0.0,)
-                            }
-                        };
-                        (noise_metadata_schedule_114_0_e1469,)
-                    }
-                };
-                (noise_metadata_schedule_114_0_e1470,)
-            }
-        };
-        let noise_metadata_schedule_114_0_e1472: f64 = (noise_metadata_schedule_114_0_e1437 - noise_metadata_schedule_114_0_e1471);
-        (noise_metadata_schedule_114_0_e1472,)
-    } else {
-        (w[2],)
-    }
-};
-            w[2] = noise_metadata_schedule_114_0_e1474;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_115_0_e1495,) = {
-    if (w[111] != 0.0) {
-        let noise_metadata_schedule_115_0_e1479: f64 = (w[1] - 1.0);
-        let noise_metadata_schedule_115_0_e1480: f64 = (w[19] * noise_metadata_schedule_115_0_e1479);
-        let noise_metadata_schedule_115_0_e1483: f64 = (w[29] * w[2]);
-        let noise_metadata_schedule_115_0_e1487: f64 = (w[77]).abs();
-        let noise_metadata_schedule_115_0_e1489: f64 = (noise_metadata_schedule_115_0_e1487).powf(w[31]);
-        let noise_metadata_schedule_115_0_e1490: f64 = (params[8] * noise_metadata_schedule_115_0_e1489);
-        let noise_metadata_schedule_115_0_e1491: f64 = (1.0 + noise_metadata_schedule_115_0_e1490);
-        let noise_metadata_schedule_115_0_e1492: f64 = (noise_metadata_schedule_115_0_e1483 / noise_metadata_schedule_115_0_e1491);
-        let noise_metadata_schedule_115_0_e1493: f64 = (noise_metadata_schedule_115_0_e1480 - noise_metadata_schedule_115_0_e1492);
-        (noise_metadata_schedule_115_0_e1493,)
-    } else {
-        (w[38],)
-    }
-};
-            w[38] = noise_metadata_schedule_115_0_e1495;
-        }
-        if (active[0] & 0x20) != 0 {
-            let (noise_metadata_schedule_116_0_e1500,) = {
-    if (w[111] == 0.0) {
-        (0.0,)
-    } else {
-        (w[38],)
-    }
-};
-            w[38] = noise_metadata_schedule_116_0_e1500;
-        }
-        if (active[0] & 0x18) != 0 {
-            let noise_metadata_schedule_130_0_e1674: f64 = (w[35] - w[47]);
-            let noise_metadata_schedule_130_0_e1676: f64 = (noise_metadata_schedule_130_0_e1674 / w[16]);
-            let noise_metadata_schedule_130_0_e1678: f64 = (noise_metadata_schedule_130_0_e1676 + w[36]);
-            w[37] = noise_metadata_schedule_130_0_e1678;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_132_0_e1688: f64 = (w[77] * params[81]);
-            let noise_metadata_schedule_132_0_e1689: f64 = (1.0 + noise_metadata_schedule_132_0_e1688);
-            let noise_metadata_schedule_132_0_e1690: f64 = (w[66] * noise_metadata_schedule_132_0_e1689);
-            w[66] = noise_metadata_schedule_132_0_e1690;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_133_0_e1693: f64 = (w[35] * w[66]);
-            let noise_metadata_schedule_133_0_e1696: f64 = (w[38] * w[67]);
-            let noise_metadata_schedule_133_0_e1697: f64 = (noise_metadata_schedule_133_0_e1693 + noise_metadata_schedule_133_0_e1696);
-            w[42] = noise_metadata_schedule_133_0_e1697;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_134_0_e1701: f64 = (w[76] * w[65]);
-            let noise_metadata_schedule_134_0_e1702: f64 = (1.0 - noise_metadata_schedule_134_0_e1701);
-            let noise_metadata_schedule_134_0_e1705: f64 = (w[77] * w[64]);
-            let noise_metadata_schedule_134_0_e1706: f64 = (noise_metadata_schedule_134_0_e1702 - noise_metadata_schedule_134_0_e1705);
-            w[41] = noise_metadata_schedule_134_0_e1706;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_135_0_e1711: f64 = (4.0 * w[42]);
-            let noise_metadata_schedule_135_0_e1712: f64 = (1.0 + noise_metadata_schedule_135_0_e1711);
-            let noise_metadata_schedule_135_0_e1713: f64 = (noise_metadata_schedule_135_0_e1712).abs();
-            let noise_metadata_schedule_135_0_e1715: f64 = (noise_metadata_schedule_135_0_e1713).powf(params[82]);
-            let noise_metadata_schedule_135_0_e1716: f64 = (1.0 + noise_metadata_schedule_135_0_e1715);
-            w[96] = noise_metadata_schedule_135_0_e1716;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_136_0_e1719: f64 = (2.0 * w[41]);
-            let noise_metadata_schedule_136_0_e1721: f64 = (noise_metadata_schedule_136_0_e1719 / w[96]);
-            w[43] = noise_metadata_schedule_136_0_e1721;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_137_0_e1724: f64 = (w[38] * w[43]);
-            w[45] = noise_metadata_schedule_137_0_e1724;
-        }
-        if (active[0] & 0x20) != 0 {
-            let noise_metadata_schedule_138_0_e1727: f64 = (w[35] * w[43]);
-            w[44] = noise_metadata_schedule_138_0_e1727;
-        }
-        if (active[0] & 0x1) != 0 {
-            let noise_metadata_schedule_140_0_e1746: f64 = (w[79] / params[48]);
-            let noise_metadata_schedule_140_0_e1747: f64 = (noise_metadata_schedule_140_0_e1746).abs();
-            let noise_metadata_schedule_140_0_e1749: f64 = (noise_metadata_schedule_140_0_e1747).powf(params[49]);
-            let noise_metadata_schedule_140_0_e1750: f64 = (1.0 + noise_metadata_schedule_140_0_e1749);
-            w[99] = noise_metadata_schedule_140_0_e1750;
-        }
-        if (active[0] & 0x2) != 0 {
-            let noise_metadata_schedule_141_0_e1754: f64 = (w[80] / params[50]);
-            let noise_metadata_schedule_141_0_e1755: f64 = (noise_metadata_schedule_141_0_e1754).abs();
-            let noise_metadata_schedule_141_0_e1757: f64 = (noise_metadata_schedule_141_0_e1755).powf(params[51]);
-            let noise_metadata_schedule_141_0_e1758: f64 = (1.0 + noise_metadata_schedule_141_0_e1757);
-            w[100] = noise_metadata_schedule_141_0_e1758;
-        }
-        if (active[0] & 0x1) != 0 {
-            let noise_metadata_schedule_142_0_e1762: f64 = (w[14] * params[37]);
-            let noise_metadata_schedule_142_0_e1763: f64 = (noise_metadata_schedule_142_0_e1762).exp();
-            let noise_metadata_schedule_142_0_e1764: f64 = (params[12] * noise_metadata_schedule_142_0_e1763);
-            let noise_metadata_schedule_142_0_e1768: f64 = (1.0 / params[49]);
-            let noise_metadata_schedule_142_0_e1769: f64 = (w[99]).powf(noise_metadata_schedule_142_0_e1768);
-            let noise_metadata_schedule_142_0_e1770: f64 = (noise_metadata_schedule_142_0_e1764 * noise_metadata_schedule_142_0_e1769);
-            w[51] = noise_metadata_schedule_142_0_e1770;
-        }
-        if (active[0] & 0x4) != 0 {
-            let noise_metadata_schedule_143_0_e1774: f64 = (w[14] * params[78]);
-            let noise_metadata_schedule_143_0_e1775: f64 = (noise_metadata_schedule_143_0_e1774).exp();
-            let noise_metadata_schedule_143_0_e1776: f64 = (params[66] * noise_metadata_schedule_143_0_e1775);
-            w[52] = noise_metadata_schedule_143_0_e1776;
-        }
-        if (active[0] & 0x2) != 0 {
-            let noise_metadata_schedule_144_0_e1780: f64 = (w[14] * params[38]);
-            let noise_metadata_schedule_144_0_e1781: f64 = (noise_metadata_schedule_144_0_e1780).exp();
-            let noise_metadata_schedule_144_0_e1782: f64 = (params[14] * noise_metadata_schedule_144_0_e1781);
-            let noise_metadata_schedule_144_0_e1786: f64 = (1.0 / params[51]);
-            let noise_metadata_schedule_144_0_e1787: f64 = (w[100]).powf(noise_metadata_schedule_144_0_e1786);
-            let noise_metadata_schedule_144_0_e1788: f64 = (noise_metadata_schedule_144_0_e1782 * noise_metadata_schedule_144_0_e1787);
-            w[53] = noise_metadata_schedule_144_0_e1788;
-        }
-        if (active[0] & 0x1) != 0 {
-            let noise_metadata_schedule_150_0_e1819: f64 = if params[32] == 1.0 { 1.0 } else { 0.0 };
-            w[115] = noise_metadata_schedule_150_0_e1819;
-        }
-        if (active[0] & 0x1) != 0 {
-            let (noise_metadata_schedule_151_0_e1832,) = {
-    if (w[115] != 0.0) {
-        let noise_metadata_schedule_151_0_e1824: f64 = ((ctx.node_voltage(self.nodes[8]) - 0.0)).abs();
-        let noise_metadata_schedule_151_0_e1826: f64 = (noise_metadata_schedule_151_0_e1824 / params[20]);
-        let noise_metadata_schedule_151_0_e1828: f64 = (noise_metadata_schedule_151_0_e1826).powf(params[44]);
-        let noise_metadata_schedule_151_0_e1829: f64 = (1.0 + noise_metadata_schedule_151_0_e1828);
-        let noise_metadata_schedule_151_0_e1830: f64 = (w[51] / noise_metadata_schedule_151_0_e1829);
-        (noise_metadata_schedule_151_0_e1830,)
-    } else {
-        (w[51],)
-    }
-};
-            w[51] = noise_metadata_schedule_151_0_e1832;
-        }
-        if (active[0] & 0x1) != 0 {
-            let (noise_metadata_schedule_152_0_e1837,) = {
-    if (w[115] == 0.0) {
-        (w[51],)
-    } else {
-        (w[51],)
-    }
-};
-            w[51] = noise_metadata_schedule_152_0_e1837;
-        }
-        if (active[0] & 0x7) != 0 {
-            let noise_metadata_schedule_153_0_e1840: f64 = if params[31] == 1.0 { 1.0 } else { 0.0 };
-            w[116] = noise_metadata_schedule_153_0_e1840;
-        }
-        if (active[0] & 0x1) != 0 {
-            let (noise_metadata_schedule_154_0_e1846,) = {
-    if (w[116] != 0.0) {
-        let noise_metadata_schedule_154_0_e1844: f64 = (w[51] + params[13]);
-        (noise_metadata_schedule_154_0_e1844,)
-    } else {
-        (w[51],)
-    }
-};
-            w[51] = noise_metadata_schedule_154_0_e1846;
-        }
-        if (active[0] & 0x4) != 0 {
-            let (noise_metadata_schedule_155_0_e1852,) = {
-    if (w[116] != 0.0) {
-        let noise_metadata_schedule_155_0_e1850: f64 = (w[52] + params[67]);
-        (noise_metadata_schedule_155_0_e1850,)
-    } else {
-        (w[52],)
-    }
-};
-            w[52] = noise_metadata_schedule_155_0_e1852;
-        }
-        if (active[0] & 0x2) != 0 {
-            let (noise_metadata_schedule_156_0_e1858,) = {
-    if (w[116] != 0.0) {
-        let noise_metadata_schedule_156_0_e1856: f64 = (w[53] + params[15]);
-        (noise_metadata_schedule_156_0_e1856,)
-    } else {
-        (w[53],)
-    }
-};
-            w[53] = noise_metadata_schedule_156_0_e1858;
-        }
-        if (active[0] & 0x7) != 0 {
-            let noise_metadata_schedule_195_0_e2243: f64 = (4.0 * 1.3806226e-23);
-            let noise_metadata_schedule_195_0_e2245: f64 = (noise_metadata_schedule_195_0_e2243 * w[10]);
-            w[69] = noise_metadata_schedule_195_0_e2245;
-        }
-    }
-
-    #[inline(never)]
-    fn noise_metadata_schedule_part_2(&self, ctx: &GeneratedEvalContext<'_>, w: &mut [f64; 128], active: &[u128; 1]) {
-        let params = &*self.params;
-        if (active[0] & 0x1) != 0 {
-            let noise_metadata_schedule_196_0_e2249: f64 = (params[31] * params[13]);
-            let noise_metadata_schedule_196_0_e2250: f64 = (params[12] + noise_metadata_schedule_196_0_e2249);
-            let noise_metadata_schedule_196_0_e2252: f64 = (noise_metadata_schedule_196_0_e2250 / w[3]);
-            w[50] = noise_metadata_schedule_196_0_e2252;
-        }
-        if (active[0] & 0x2) != 0 {
-            let noise_metadata_schedule_197_0_e2256: f64 = (params[31] * params[15]);
-            let noise_metadata_schedule_197_0_e2257: f64 = (params[14] + noise_metadata_schedule_197_0_e2256);
-            let noise_metadata_schedule_197_0_e2259: f64 = (noise_metadata_schedule_197_0_e2257 / w[3]);
-            w[48] = noise_metadata_schedule_197_0_e2259;
-        }
-        if (active[0] & 0x4) != 0 {
-            let noise_metadata_schedule_198_0_e2263: f64 = (params[31] * params[67]);
-            let noise_metadata_schedule_198_0_e2264: f64 = (params[66] + noise_metadata_schedule_198_0_e2263);
-            let noise_metadata_schedule_198_0_e2266: f64 = (noise_metadata_schedule_198_0_e2264 / w[3]);
-            w[49] = noise_metadata_schedule_198_0_e2266;
-        }
-        if (active[0] & 0x1) != 0 {
-            let noise_metadata_schedule_199_0_e2273: f64 = if ((w[50] > 0.0) && (w[50] >= params[46])) { 1.0 } else { 0.0 };
-            w[125] = noise_metadata_schedule_199_0_e2273;
-        }
-        if (active[0] & 0x1) != 0 {
-            let (noise_metadata_schedule_200_0_e2288,) = {
-    if (w[125] != 0.0) {
-        let noise_metadata_schedule_200_0_e2277: f64 = (w[51] / w[3]);
-        let (noise_metadata_schedule_200_0_e2286,) = {
-            if (noise_metadata_schedule_200_0_e2277 >= params[46]) {
-                let noise_metadata_schedule_200_0_e2283: f64 = (w[51] / w[3]);
-                let noise_metadata_schedule_200_0_e2284: f64 = (w[69] / noise_metadata_schedule_200_0_e2283);
-                (noise_metadata_schedule_200_0_e2284,)
-            } else {
-                (0.0,)
-            }
-        };
-        (noise_metadata_schedule_200_0_e2286,)
-    } else {
-        (w[72],)
-    }
-};
-            w[72] = noise_metadata_schedule_200_0_e2288;
-        }
-        if (active[0] & 0x2) != 0 {
-            let noise_metadata_schedule_201_0_e2295: f64 = if ((w[48] > 0.0) && (w[48] >= params[46])) { 1.0 } else { 0.0 };
-            w[126] = noise_metadata_schedule_201_0_e2295;
-        }
-        if (active[0] & 0x2) != 0 {
-            let (noise_metadata_schedule_202_0_e2310,) = {
-    if (w[126] != 0.0) {
-        let noise_metadata_schedule_202_0_e2299: f64 = (w[53] / w[3]);
-        let (noise_metadata_schedule_202_0_e2308,) = {
-            if (noise_metadata_schedule_202_0_e2299 >= params[46]) {
-                let noise_metadata_schedule_202_0_e2305: f64 = (w[53] / w[3]);
-                let noise_metadata_schedule_202_0_e2306: f64 = (w[69] / noise_metadata_schedule_202_0_e2305);
-                (noise_metadata_schedule_202_0_e2306,)
-            } else {
-                (0.0,)
-            }
-        };
-        (noise_metadata_schedule_202_0_e2308,)
-    } else {
-        (w[73],)
-    }
-};
-            w[73] = noise_metadata_schedule_202_0_e2310;
-        }
-        if (active[0] & 0x4) != 0 {
-            let noise_metadata_schedule_203_0_e2317: f64 = if ((w[49] > 0.0) && (w[49] >= params[46])) { 1.0 } else { 0.0 };
-            w[127] = noise_metadata_schedule_203_0_e2317;
-        }
-        if (active[0] & 0x4) != 0 {
-            let (noise_metadata_schedule_204_0_e2332,) = {
-    if (w[127] != 0.0) {
-        let noise_metadata_schedule_204_0_e2321: f64 = (w[52] / w[3]);
-        let (noise_metadata_schedule_204_0_e2330,) = {
-            if (noise_metadata_schedule_204_0_e2321 >= params[46]) {
-                let noise_metadata_schedule_204_0_e2327: f64 = (w[52] / w[3]);
-                let noise_metadata_schedule_204_0_e2328: f64 = (w[69] / noise_metadata_schedule_204_0_e2327);
-                (noise_metadata_schedule_204_0_e2328,)
-            } else {
-                (0.0,)
-            }
-        };
-        (noise_metadata_schedule_204_0_e2330,)
-    } else {
-        (w[74],)
-    }
-};
-            w[74] = noise_metadata_schedule_204_0_e2332;
-        }
-        if (active[0] & 0x8) != 0 {
-            let noise_metadata_schedule_205_0_e2339: f64 = if ((params[28] > 0.0) && (params[27] > 0.0)) { 1.0 } else { 0.0 };
-            let (noise_metadata_schedule_205_0_e2349,) = {
-    if (noise_metadata_schedule_205_0_e2339 > 0.0) {
-        let noise_metadata_schedule_205_0_e2344: f64 = (w[37]).abs();
-        let noise_metadata_schedule_205_0_e2346: f64 = (noise_metadata_schedule_205_0_e2344).powf(params[28]);
-        let noise_metadata_schedule_205_0_e2347: f64 = (params[27] * noise_metadata_schedule_205_0_e2346);
-        (noise_metadata_schedule_205_0_e2347,)
-    } else {
-        (0.0,)
-    }
-};
-            w[71] = noise_metadata_schedule_205_0_e2349;
-        }
-        if (active[0] & 0x30) != 0 {
-            let noise_metadata_schedule_206_0_e2352: f64 = (2.0 * 1.6021918e-19);
-            w[70] = noise_metadata_schedule_206_0_e2352;
-        }
     }
 }

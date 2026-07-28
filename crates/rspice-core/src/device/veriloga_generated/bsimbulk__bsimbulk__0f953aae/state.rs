@@ -2560,26 +2560,12 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct StructuredStaticState<const INSTANCE_VALUES: usize, const TEMPERATURE_VALUES: usize> {
-    pub(crate) instance_values: [f64; INSTANCE_VALUES],
-    pub(crate) temperature_values: [f64; TEMPERATURE_VALUES],
-    pub(crate) instance_valid: bool,
-    pub(crate) temperature_valid: bool,
-    pub(crate) temperature: f64,
-    pub(crate) thermal_voltage: f64,
-}
-
-impl<const INSTANCE_VALUES: usize, const TEMPERATURE_VALUES: usize> StructuredStaticState<INSTANCE_VALUES, TEMPERATURE_VALUES> {
-    fn new_shared() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self {
-            instance_values: [0.0; INSTANCE_VALUES],
-            temperature_values: [0.0; TEMPERATURE_VALUES],
-            instance_valid: false,
-            temperature_valid: false,
-            temperature: 0.0,
-            thermal_voltage: 0.0,
-        })
+fn canonical_boxed_zero_f64<const N: usize>() -> Box<[f64; N]> {
+    // SAFETY: every slot is an f64, and all-zero bytes are 0.0.
+    let mut boxed = Box::<[f64; N]>::new_uninit();
+    unsafe {
+        std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);
+        boxed.assume_init()
     }
 }
 
@@ -2593,7 +2579,12 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) structured_static: std::sync::Arc<StructuredStaticState<757, 0>>,
+    pub(crate) canonical_reactive: Box<[f64; 103]>,
+    pub(crate) canonical_staged: Box<[f64; 890]>,
+    pub(crate) canonical_instance_valid: bool,
+    pub(crate) canonical_temperature_valid: bool,
+    pub(crate) canonical_temperature: f64,
+    pub(crate) canonical_thermal_voltage: f64,
 }
 
 impl Clone for Instance {
@@ -2609,7 +2600,12 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
-            structured_static: self.structured_static.clone(),
+            canonical_reactive: self.canonical_reactive.clone(),
+            canonical_staged: self.canonical_staged.clone(),
+            canonical_instance_valid: self.canonical_instance_valid,
+            canonical_temperature_valid: self.canonical_temperature_valid,
+            canonical_temperature: self.canonical_temperature,
+            canonical_thermal_voltage: self.canonical_thermal_voltage,
         }
     }
 }
@@ -2622,10 +2618,10 @@ impl Instance {
 
     pub const BRANCH_COUNT: usize = 14;
     pub const PARAMETER_COUNT: usize = 1138;
-    pub const VARIABLE_COUNT: usize = 1631;
+    pub const VARIABLE_COUNT: usize = 1839;
     pub const DDT_STATE_COUNT: usize = 16;
     pub const IDT_STATE_COUNT: usize = 0;
-    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6852b233caabbf66cd88227c8fd56b3671149813c50b4da1a424b22058ba8607";
+    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "4eb4d648e844b1a02276046865732496a5a9911c1c15a88e4f0cf47b41d8d402";
     pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
     pub const DDT_EPSILON: f64 = 1.0e-20;
 
@@ -2643,7 +2639,12 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            structured_static: StructuredStaticState::new_shared(),
+            canonical_reactive: canonical_boxed_zero_f64(),
+            canonical_staged: canonical_boxed_zero_f64(),
+            canonical_instance_valid: false,
+            canonical_temperature_valid: false,
+            canonical_temperature: 0.0,
+            canonical_thermal_voltage: 0.0,
         }
     }
 
@@ -2778,9 +2779,8 @@ impl Instance {
     fn finish_set_parameter(&mut self, index: usize, invalidates_caches: bool) {
         self.mark_param_given(index);
         if invalidates_caches {
-            let cache = std::sync::Arc::make_mut(&mut self.structured_static);
-            cache.instance_valid = false;
-            cache.temperature_valid = false;
+            self.canonical_instance_valid = false;
+            self.canonical_temperature_valid = false;
         }
     }
 
