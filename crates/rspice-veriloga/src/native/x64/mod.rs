@@ -16,7 +16,7 @@ pub mod encoder;
 
 use super::expr::{
     BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateOperator, EntryKind,
-    NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+    NativeIdentifierIndex, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
     canonical_state_slots_for_expression, canonical_table_lookup_slots_for_equation,
     constant_dynamic_variable_slot, native_op_stack_effect,
 };
@@ -66,8 +66,14 @@ fn compile_model_inner(
         Some(mir) => canonical_branch_unknown_runtime_map(model, mir)?,
         None => Vec::new(),
     };
+    let identifier_index =
+        canonical_mir.map(|mir| NativeIdentifierIndex::new(mir, &model.variable_names));
     let base_limits = NativeLoweringLimits::for_model(model)
         .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
+    let base_limits = match &identifier_index {
+        Some(identifier_index) => base_limits.with_identifier_index(identifier_index),
+        None => base_limits,
+    };
     let base_limits = if canonical_mir.is_some() {
         base_limits.with_prevalidated_mir()
     } else {

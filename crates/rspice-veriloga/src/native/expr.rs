@@ -19,6 +19,7 @@ use crate::canonical_ir::{
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
@@ -208,12 +209,44 @@ impl CanonicalDerivativeAxis {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeIdentifierSlot {
+    Parameter(usize),
+    Variable(usize),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct NativeIdentifierIndex {
+    slots: HashMap<SmolStr, NativeIdentifierSlot>,
+}
+
+impl NativeIdentifierIndex {
+    pub(crate) fn new(mir: &MirModel, variable_names: &[SmolStr]) -> Self {
+        let mut slots = HashMap::with_capacity(mir.parameters.len() + variable_names.len());
+        for (index, name) in variable_names.iter().enumerate() {
+            slots.insert(name.clone(), NativeIdentifierSlot::Variable(index));
+        }
+        for parameter in &mir.parameters {
+            slots.insert(
+                parameter.name.clone(),
+                NativeIdentifierSlot::Parameter(usize::from(parameter.id)),
+            );
+        }
+        Self { slots }
+    }
+
+    fn get(&self, name: &str) -> Option<NativeIdentifierSlot> {
+        self.slots.get(name).copied()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NativeLoweringLimits<'a> {
     terminal_count: usize,
     internal_node_count: usize,
     parameter_count: usize,
     variable_count: usize,
     variable_names: &'a [SmolStr],
+    identifier_index: Option<&'a NativeIdentifierIndex>,
     branch_unknown_count: usize,
     canonical_branch_unknown_map: &'a [BranchUnknownRuntimeMapping],
     lookup_table_count: usize,
@@ -251,6 +284,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count,
             variable_count,
             variable_names: &[],
+            identifier_index: None,
             branch_unknown_count,
             canonical_branch_unknown_map: &[],
             lookup_table_count: 0,
@@ -296,6 +330,44 @@ impl<'a> NativeLoweringLimits<'a> {
         }
     }
 
+    pub(crate) fn with_identifier_index<'b>(
+        self,
+        identifier_index: &'b NativeIdentifierIndex,
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            identifier_index: Some(identifier_index),
+            branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
+            canonical_absdelay_slots: self.canonical_absdelay_slots,
+            canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
+            canonical_cross_slots: self.canonical_cross_slots,
+            canonical_above_slots: self.canonical_above_slots,
+            canonical_timer_slots: self.canonical_timer_slots,
+            canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
+        }
+    }
+
     fn validate_mir(self, model: &SmolStr, mir: &MirModel) -> JitResult<()> {
         if self.mir_prevalidated {
             return Ok(());
@@ -311,6 +383,23 @@ impl<'a> NativeLoweringLimits<'a> {
             })
     }
 
+    fn identifier_slot(self, mir: &MirModel, name: &str) -> Option<NativeIdentifierSlot> {
+        if let Some(index) = self.identifier_index {
+            return index.get(name);
+        }
+        if let Some(parameter) = mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == name)
+        {
+            return Some(NativeIdentifierSlot::Parameter(usize::from(parameter.id)));
+        }
+        self.variable_names
+            .iter()
+            .position(|variable| variable.as_str() == name)
+            .map(NativeIdentifierSlot::Variable)
+    }
+
     pub(crate) fn with_canonical_branch_unknown_map<'b>(
         self,
         canonical_branch_unknown_map: &'b [BranchUnknownRuntimeMapping],
@@ -324,6 +413,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -361,6 +451,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -398,6 +489,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -442,6 +534,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names,
+            identifier_index: None,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -493,6 +586,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -530,6 +624,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -567,6 +662,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -604,6 +700,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -641,6 +738,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -678,6 +776,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -715,6 +814,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -752,6 +852,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -789,6 +890,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -826,6 +928,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -863,6 +966,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -900,6 +1004,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -937,6 +1042,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -3449,28 +3555,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn identifier_derivative_is_zero(&self, name: &str, wrt: CanonicalDerivativeAxis) -> bool {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return true;
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => true,
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
+                self.limits
+                    .identifier_slot(self.mir, &shadow_name)
+                    .is_none()
+            }
+            None => false,
         }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
-            return !self
-                .limits
-                .variable_names
-                .iter()
-                .any(|variable| variable.as_str() == shadow_name);
-        }
-        false
     }
 
     fn identifier_second_derivative_is_zero(
@@ -3479,29 +3573,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> bool {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return true;
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => true,
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let first_shadow = format!("{name}@{}", first.shadow_suffix());
+                let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
+                self.limits
+                    .identifier_slot(self.mir, &second_shadow)
+                    .is_none()
+            }
+            None => false,
         }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let first_shadow = format!("{name}@{}", first.shadow_suffix());
-            let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
-            return !self
-                .limits
-                .variable_names
-                .iter()
-                .any(|variable| variable.as_str() == second_shadow);
-        }
-        false
     }
 
     fn array_derivative_is_zero(&self, array: &str, wrt: CanonicalDerivativeAxis) -> bool {
@@ -3801,38 +3883,25 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         name: &str,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return self.push(NativeOp::Const(0.0));
-        }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
-            if let Some(shadow_index) = self
-                .limits
-                .variable_names
-                .iter()
-                .position(|variable| variable.as_str() == shadow_name)
-            {
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => self.push(NativeOp::Const(0.0)),
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
+                let Some(NativeIdentifierSlot::Variable(shadow_index)) =
+                    self.limits.identifier_slot(self.mir, &shadow_name)
+                else {
+                    return self.push(NativeOp::Const(0.0));
+                };
                 validate_index(
                     self.model.clone(),
                     "canonical variable derivative shadow",
                     shadow_index,
                     self.limits.variable_count,
                 )?;
-                return self.push(NativeOp::LoadVariable(shadow_index));
+                self.push(NativeOp::LoadVariable(shadow_index))
             }
-            return self.push(NativeOp::Const(0.0));
+            None => Err(self.unsupported(format!("ddx derivative of identifier {name}"))),
         }
-        Err(self.unsupported(format!("ddx derivative of identifier {name}")))
     }
 
     fn lower_identifier_second_derivative(
@@ -3841,39 +3910,26 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return self.push(NativeOp::Const(0.0));
-        }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let first_shadow = format!("{name}@{}", first.shadow_suffix());
-            let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
-            if let Some(shadow_index) = self
-                .limits
-                .variable_names
-                .iter()
-                .position(|variable| variable.as_str() == second_shadow)
-            {
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => self.push(NativeOp::Const(0.0)),
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let first_shadow = format!("{name}@{}", first.shadow_suffix());
+                let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
+                let Some(NativeIdentifierSlot::Variable(shadow_index)) =
+                    self.limits.identifier_slot(self.mir, &second_shadow)
+                else {
+                    return self.push(NativeOp::Const(0.0));
+                };
                 validate_index(
                     self.model.clone(),
                     "canonical variable second-derivative shadow",
                     shadow_index,
                     self.limits.variable_count,
                 )?;
-                return self.push(NativeOp::LoadVariable(shadow_index));
+                self.push(NativeOp::LoadVariable(shadow_index))
             }
-            return self.push(NativeOp::Const(0.0));
+            None => Err(self.unsupported(format!("second derivative of identifier {name}"))),
         }
-        Err(self.unsupported(format!("second derivative of identifier {name}")))
     }
 
     fn lower_identifier_third_derivative(
@@ -3883,43 +3939,30 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         second: CanonicalDerivativeAxis,
         third: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return self.push(NativeOp::Const(0.0));
-        }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let shadow_name = format!(
-                "{name}@{}@{}@{}",
-                first.shadow_suffix(),
-                second.shadow_suffix(),
-                third.shadow_suffix()
-            );
-            if let Some(shadow_index) = self
-                .limits
-                .variable_names
-                .iter()
-                .position(|variable| variable.as_str() == shadow_name)
-            {
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => self.push(NativeOp::Const(0.0)),
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let shadow_name = format!(
+                    "{name}@{}@{}@{}",
+                    first.shadow_suffix(),
+                    second.shadow_suffix(),
+                    third.shadow_suffix()
+                );
+                let Some(NativeIdentifierSlot::Variable(shadow_index)) =
+                    self.limits.identifier_slot(self.mir, &shadow_name)
+                else {
+                    return self.push(NativeOp::Const(0.0));
+                };
                 validate_index(
                     self.model.clone(),
                     "canonical variable third-derivative shadow",
                     shadow_index,
                     self.limits.variable_count,
                 )?;
-                return self.push(NativeOp::LoadVariable(shadow_index));
+                self.push(NativeOp::LoadVariable(shadow_index))
             }
-            return self.push(NativeOp::Const(0.0));
+            None => Err(self.unsupported(format!("third derivative of identifier {name}"))),
         }
-        Err(self.unsupported(format!("third derivative of identifier {name}")))
     }
 
     fn lower_branch_access_derivative(
@@ -7161,38 +7204,27 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_identifier(&mut self, name: &str) -> JitResult<()> {
-        if let Some(parameter) = self
-            .mir
-            .parameters
-            .iter()
-            .find(|parameter| parameter.name == name)
-        {
-            let index = usize::from(parameter.id);
-            validate_index(
-                self.model.clone(),
-                "canonical parameter",
-                index,
-                self.limits.parameter_count,
-            )?;
-            return self.push(NativeOp::LoadParam(index));
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(index)) => {
+                validate_index(
+                    self.model.clone(),
+                    "canonical parameter",
+                    index,
+                    self.limits.parameter_count,
+                )?;
+                self.push(NativeOp::LoadParam(index))
+            }
+            Some(NativeIdentifierSlot::Variable(index)) => {
+                validate_index(
+                    self.model.clone(),
+                    "canonical variable",
+                    index,
+                    self.limits.variable_count,
+                )?;
+                self.push(NativeOp::LoadVariable(index))
+            }
+            None => Err(self.unsupported(format!("identifier {name}"))),
         }
-
-        if let Some(index) = self
-            .limits
-            .variable_names
-            .iter()
-            .position(|variable| variable.as_str() == name)
-        {
-            validate_index(
-                self.model.clone(),
-                "canonical variable",
-                index,
-                self.limits.variable_count,
-            )?;
-            return self.push(NativeOp::LoadVariable(index));
-        }
-
-        Err(self.unsupported(format!("identifier {name}")))
     }
 
     fn lower_array_access(&mut self, array: &str, index: ExprId) -> JitResult<()> {
