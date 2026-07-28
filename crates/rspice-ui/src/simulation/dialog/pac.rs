@@ -113,51 +113,6 @@ impl Default for PacConfig {
 }
 
 impl PacConfig {
-    /// Create new PAC config
-    pub fn new(start: f64, stop: f64, points: u32) -> Self {
-        Self {
-            start_freq: start,
-            stop_freq: stop,
-            num_points: points,
-            ..Default::default()
-        }
-    }
-
-    /// Set sideband range
-    pub fn with_sidebands(mut self, max: i32) -> Self {
-        self.max_sideband = max.abs();
-        self
-    }
-
-    /// Set input source
-    pub fn with_input(mut self, source: &str) -> Self {
-        self.input_source = source.to_uppercase();
-        self
-    }
-
-    /// Set output node
-    pub fn with_output(mut self, node: &str) -> Self {
-        self.output_node = node.to_uppercase();
-        self
-    }
-
-    /// Set sweep type
-    pub fn with_sweep_type(mut self, sweep_type: PacSweepType) -> Self {
-        self.sweep_type = sweep_type;
-        self
-    }
-
-    /// Set PAC magnitude
-    pub fn with_magnitude(mut self, mag: f64) -> Self {
-        self.pac_magnitude = mag;
-        self
-    }
-
-    /// Set fundamental frequency
-    pub fn with_fundamental(mut self, freq: f64) -> Self {
-        self.fundamental_freq = freq;
-        self
-    }
 
     /// Total number of sidebands
     pub fn num_sidebands(&self) -> usize {

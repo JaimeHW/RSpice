@@ -47,33 +47,6 @@ impl Default for EnvelopeConfig {
 }
 
 impl EnvelopeConfig {
-    pub fn new(fundamental: f64, stop: f64) -> Self {
-        Self {
-            carrier_tones: vec![fundamental],
-            stop_time: stop,
-            ..Self::default()
-        }
-    }
-
-    pub fn with_harmonics(mut self, harmonic_order: u32) -> Self {
-        self.harmonic_order = harmonic_order;
-        self
-    }
-
-    pub fn carrier_period(&self) -> f64 {
-        self.carrier_tones
-            .first()
-            .filter(|frequency| frequency.is_finite() && **frequency > 0.0)
-            .map_or(1.0, |frequency| 1.0 / frequency)
-    }
-
-    pub fn num_cycles(&self) -> u64 {
-        self.carrier_tones
-            .first()
-            .filter(|frequency| frequency.is_finite() && **frequency > 0.0)
-            .map_or(0, |frequency| (self.stop_time * frequency) as u64)
-    }
-
     /// Serializes every user-owned setting into the canonical envelope
     /// command form used by generated decks and diagnostics.
     pub fn to_spice(&self) -> String {

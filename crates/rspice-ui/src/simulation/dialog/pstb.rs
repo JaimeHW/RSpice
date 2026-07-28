@@ -58,32 +58,6 @@ impl Default for PstbConfig {
 }
 
 impl PstbConfig {
-    /// Create new PSTB config with probe name
-    pub fn new(probe: &str) -> Self {
-        Self {
-            probe: probe.to_uppercase(),
-            ..Default::default()
-        }
-    }
-
-    /// Set maximum harmonics
-    pub fn with_harmonics(mut self, max: u32) -> Self {
-        self.max_harmonics = max;
-        self
-    }
-
-    /// Set number of multipliers
-    pub fn with_multipliers(mut self, num: u32) -> Self {
-        self.num_multipliers = num;
-        self
-    }
-
-    /// Enable/disable annotation
-    pub fn with_annotate(mut self, enable: bool) -> Self {
-        self.annotate = enable;
-        self
-    }
-
     /// Generate SPICE directive
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(".pstb probe={}", self.probe);

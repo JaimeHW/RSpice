@@ -50,11 +50,6 @@ impl FourierConfig {
         }
     }
 
-    pub fn with_output(mut self, node: &str) -> Self {
-        self.output_node = node.to_uppercase();
-        self
-    }
-
     pub fn with_window(mut self, start: f64, stop: f64) -> Self {
         self.start_time = start;
         self.stop_time = stop;

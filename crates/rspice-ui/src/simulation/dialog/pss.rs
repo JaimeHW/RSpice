@@ -76,13 +76,6 @@ impl Default for PssConfig {
 }
 
 impl PssConfig {
-    pub fn new(freq: f64) -> Self {
-        Self {
-            fund_freq: freq,
-            ..Default::default()
-        }
-    }
-
     pub fn validate(&self) -> Result<(), String> {
         if self.method != PssSolverMethod::Shooting {
             return Err(
@@ -151,9 +144,6 @@ impl PssConfig {
         )
     }
 
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
 
 /// Raw persisted PSS editor state.

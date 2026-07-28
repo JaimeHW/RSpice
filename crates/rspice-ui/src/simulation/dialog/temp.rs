@@ -81,9 +81,6 @@ impl TempConfig {
         Ok(())
     }
 
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 
     pub fn num_temps(&self) -> usize {
         if !self.specific_temps.is_empty() {

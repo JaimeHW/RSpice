@@ -107,56 +107,6 @@ impl Default for PxfConfig {
 }
 
 impl PxfConfig {
-    /// Create new PXF config
-    pub fn new(start: f64, stop: f64, points: u32) -> Self {
-        Self {
-            start_freq: start,
-            stop_freq: stop,
-            num_points: points,
-            ..Default::default()
-        }
-    }
-
-    /// Set output node and sideband
-    pub fn with_output(mut self, node: &str, sideband: i32) -> Self {
-        self.output_node = node.to_uppercase();
-        self.output_sideband = sideband;
-        self
-    }
-
-    /// Set input source
-    pub fn with_input(mut self, source: &str) -> Self {
-        self.input_source = source.to_uppercase();
-        self
-    }
-
-    /// Set sideband range
-    pub fn with_sidebands(mut self, max: i32) -> Self {
-        self.max_sideband = max.abs();
-        self
-    }
-
-    /// Total number of frequency points
-    pub fn total_points(&self) -> u32 {
-        match self.sweep_type {
-            PxfSweepType::Decade => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let decades = (self.stop_freq / self.start_freq).log10();
-                (decades * self.num_points as f64).ceil() as u32 + 1
-            }
-            PxfSweepType::Octave => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let octaves = (self.stop_freq / self.start_freq).log2();
-                (octaves * self.num_points as f64).ceil() as u32 + 1
-            }
-            PxfSweepType::Linear => self.num_points,
-        }
-    }
-
     /// Generate SPICE directive
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
@@ -215,10 +165,6 @@ impl PxfConfig {
         Ok(())
     }
 
-    /// Reset to defaults
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
 
 // =============================================================================

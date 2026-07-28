@@ -42,22 +42,6 @@ impl Default for StbConfig {
 }
 
 impl StbConfig {
-    pub fn new(probe: &str) -> Self {
-        Self {
-            probe_source: probe.to_uppercase(),
-            ..Default::default()
-        }
-    }
-    pub fn with_freq_range(mut self, start: f64, stop: f64) -> Self {
-        self.start_freq = start;
-        self.stop_freq = stop;
-        self
-    }
-    pub fn with_points(mut self, ppd: u32) -> Self {
-        self.points_per_decade = ppd;
-        self
-    }
-
     pub fn to_spice(&self) -> String {
         format!(
             ".stb probe={} dec {} {} {}",
@@ -87,14 +71,6 @@ impl StbConfig {
         Ok(())
     }
 
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-
-    pub fn total_points(&self) -> u32 {
-        let decades = (self.stop_freq / self.start_freq).log10();
-        (decades * self.points_per_decade as f64).ceil() as u32 + 1
-    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
