@@ -164,6 +164,28 @@ impl Engine {
         (normalized, normalized_steps)
     }
 
+    /// A contraction inside a locked Xyce grid is the observable trace of an
+    /// adaptive retry that restarted OneStep at order one. The locked grid
+    /// contains only accepted targets, so replay that restart before the next
+    /// interior target while leaving source-breakpoint landings untouched.
+    #[inline]
+    fn locked_grid_requires_xyce_order_restart(
+        grid: &[Value],
+        cursor: usize,
+        target_is_breakpoint: bool,
+    ) -> bool {
+        if target_is_breakpoint || cursor < 2 || cursor + 1 >= grid.len() {
+            return false;
+        }
+        let previous_step = grid[cursor - 1] - grid[cursor - 2];
+        let current_step = grid[cursor] - grid[cursor - 1];
+        previous_step.is_finite()
+            && previous_step > 0.0
+            && current_step.is_finite()
+            && current_step > 0.0
+            && current_step < 0.75 * previous_step
+    }
+
     /// Xyce IC capacitors use an operating-point-only branch unknown. Their
     /// transient lead current is reconstructed by the time integrator from
     /// the capacitor charge history, rather than being solved as an MNA
@@ -2494,6 +2516,14 @@ impl Engine {
                     || Self::xyce_one_step_requires_order_one_for_stateful_topology(&circuit)
                     || !circuit.tlines.is_empty()
                     || !circuit.coupled_tlines.is_empty();
+            let locked_reference_order_restart = !xyce_one_step_stateful_topology
+                && locked_grid.as_ref().is_some_and(|grid| {
+                    Self::locked_grid_requires_xyce_order_restart(
+                        grid,
+                        locked_cursor,
+                        breakpoints.at_breakpoint(step_time),
+                    )
+                });
             // A locked oracle grid contains accepted points only.  Its interval
             // ratios therefore cannot identify the rejected candidates that
             // changed Xyce's OneStep order; the replay path above preserves
@@ -2518,7 +2548,8 @@ impl Engine {
                     trap_order,
                     (at_breakpoint
                         && Self::breakpoint_landing_forces_order_one(self.config.spice_dialect))
-                        || locked_edge_order_reset,
+                        || locked_edge_order_reset
+                        || locked_reference_order_restart,
                 )
             };
             let xyce_one_step_order2 = self.config.spice_dialect == SpiceDialect::Xyce
