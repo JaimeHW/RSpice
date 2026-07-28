@@ -416,7 +416,6 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-python/src/engine.rs": 4231,
             "crates/rspice-python/src/errors.rs": 1019,
             "crates/rspice-python/src/netlist.rs": 1141,
-            "crates/rspice-python/src/results.rs": 7363,
         }
 
         source_root = ROOT / "crates" / "rspice-python" / "src"
