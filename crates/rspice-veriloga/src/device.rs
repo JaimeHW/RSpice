@@ -244,6 +244,26 @@ impl VerilogADevice {
         }
     }
 
+    #[cfg(feature = "native")]
+    #[inline]
+    fn finite_native_stamp_value(
+        value: f64,
+        stamp: usize,
+        entry: Option<usize>,
+        phase: &'static str,
+    ) -> Result<f64, VmError> {
+        if value.is_finite() {
+            return Ok(value);
+        }
+        let context = match entry {
+            Some(entry) => format!("{phase} {stamp}:{entry}"),
+            None => format!("{phase} {stamp}"),
+        };
+        Err(VmError::InvalidNumericResult(format!(
+            "{context} evaluated to {value}"
+        )))
+    }
+
     fn noise_power(value: f64, source_index: usize) -> Result<f64, VmError> {
         let value = Self::finite_result(value, format!("noise source {source_index} power"))?;
         if value < 0.0 {
@@ -2798,11 +2818,7 @@ impl VerilogADevice {
         let model = &self.model;
         let native = self.native_model.as_ref();
         let stamp_count = model.stamp_programs.len();
-        let expected_jacobians = model
-            .stamp_programs
-            .iter()
-            .map(|program| program.jacobian_programs.len())
-            .sum::<usize>();
+        let expected_jacobians = native.plan_stats().jacobian_entry_points;
         if self.native_program_active.len() != stamp_count
             || self.native_stamp_jacobians.len() != expected_jacobians
         {
@@ -2815,8 +2831,11 @@ impl VerilogADevice {
 
         {
             let context = &mut self.context;
-            context.clear_currents();
-            context.currents.resize(stamp_count, 0.0);
+            if context.currents.len() != stamp_count {
+                context.currents.resize(stamp_count, 0.0);
+            } else {
+                context.currents.fill(0.0);
+            }
             if context.variables.len() < model.num_variables {
                 context.variables.resize(model.num_variables, 0.0);
             }
@@ -2829,27 +2848,7 @@ impl VerilogADevice {
             Self::validate_native_prior_currents(context, native.assignment_prior_currents())?;
             Self::validate_native_branch_unknowns(context, native.assignment_branch_unknowns())?;
 
-            for (stamp_index, program) in model.stamp_programs.iter().enumerate() {
-                if self.native_program_active[stamp_index] == 0 {
-                    continue;
-                }
-                Self::validate_native_branch_unknowns(
-                    context,
-                    native
-                        .stamp_value_branch_unknowns(stamp_index)
-                        .ok_or_else(|| Self::missing_native_stamp_value_entry(stamp_index))?,
-                )?;
-                for entry_index in 0..program.jacobian_programs.len() {
-                    Self::validate_native_branch_unknowns(
-                        context,
-                        native
-                            .jacobian_branch_unknowns(stamp_index, entry_index)
-                            .ok_or_else(|| {
-                                Self::missing_native_jacobian_entry(stamp_index, entry_index)
-                            })?,
-                    )?;
-                }
-            }
+            Self::validate_native_branch_unknowns(context, native.stamp_kernel_branch_unknowns())?;
 
             self.native_stamp_jacobians.fill(0.0);
             let ctx = Self::eval_context_from(context);
@@ -2875,9 +2874,11 @@ impl VerilogADevice {
         let mut jacobian_base = 0usize;
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             if self.native_program_active[program_idx] != 0 {
-                let value = Self::finite_result(
+                let value = Self::finite_native_stamp_value(
                     self.context.currents[program_idx],
-                    format!("contribution {program_idx}"),
+                    program_idx,
+                    None,
+                    "contribution",
                 )?;
                 self.context.currents[program_idx] = value;
                 if program.branch_ordinal.is_none()
@@ -2886,9 +2887,11 @@ impl VerilogADevice {
                     self.context.set_branch_current(pos, neg, value);
                 }
                 for entry_idx in 0..program.jacobian_programs.len() {
-                    Self::finite_result(
+                    Self::finite_native_stamp_value(
                         self.native_stamp_jacobians[jacobian_base + entry_idx],
-                        format!("Jacobian {program_idx}:{entry_idx}"),
+                        program_idx,
+                        Some(entry_idx),
+                        "Jacobian",
                     )?;
                 }
             }
@@ -2911,15 +2914,21 @@ impl VerilogADevice {
                 1.0
             };
             let value = self.context.currents[program_idx];
-            let mut eq_value =
-                Self::finite_result(value * scale, format!("scaled contribution {program_idx}"))?;
+            let mut eq_value = Self::finite_native_stamp_value(
+                value * scale,
+                program_idx,
+                None,
+                "scaled contribution",
+            )?;
 
             for jacobian_entry in &self.matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
-                let deriv = Self::finite_result(
+                let deriv = Self::finite_native_stamp_value(
                     self.native_stamp_jacobians[jacobian_base + jacobian_entry.jacobian_idx]
                         * scale,
-                    format!("Jacobian {}:{}", program_idx, jacobian_entry.jacobian_idx),
+                    program_idx,
+                    Some(jacobian_entry.jacobian_idx),
+                    "Jacobian",
                 )?;
 
                 match (program.branch_ordinal, program.indirect) {
@@ -2940,9 +2949,11 @@ impl VerilogADevice {
                 }
             }
 
-            eq_value = Self::finite_result(
+            eq_value = Self::finite_native_stamp_value(
                 eq_value,
-                format!("equivalent source for contribution {program_idx}"),
+                program_idx,
+                None,
+                "equivalent source for contribution",
             )?;
             for entry in &self.matrix_indices.rhs[program_idx] {
                 if let Some(row) = entry.node {

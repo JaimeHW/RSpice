@@ -274,6 +274,7 @@ pub struct NativeModel {
     image: ExecutableMemory,
     entries: NativeEntryOffsets,
     current_dependencies: NativeCurrentDependencies,
+    stamp_kernel_branch_unknowns: Vec<usize>,
     required_storage: NativeRequiredStorage,
     stats: PlanStats,
 }
@@ -347,6 +348,25 @@ impl NativeModel {
         let static_condition_entry_points = entries.static_conditions.iter().flatten().count();
         let noise_source_entry_points =
             entries.noise_psd.len() + entries.noise_exponents.iter().flatten().count();
+        let mut stamp_kernel_branch_unknowns =
+            current_dependencies.assignment_branch_unknowns.clone();
+        stamp_kernel_branch_unknowns.extend(
+            current_dependencies
+                .stamp_value_branch_unknowns
+                .iter()
+                .flatten()
+                .copied(),
+        );
+        stamp_kernel_branch_unknowns.extend(
+            current_dependencies
+                .jacobian_branch_unknowns
+                .iter()
+                .flatten()
+                .flatten()
+                .copied(),
+        );
+        stamp_kernel_branch_unknowns.sort_unstable();
+        stamp_kernel_branch_unknowns.dedup();
         let stats = PlanStats {
             assignment_entry_points: 1,
             stamp_kernel_entry_points: usize::from(entries.stamp_kernel.is_some()),
@@ -366,6 +386,7 @@ impl NativeModel {
             image,
             entries,
             current_dependencies,
+            stamp_kernel_branch_unknowns,
             required_storage,
             stats,
         })
@@ -1004,6 +1025,10 @@ impl NativeModel {
                 .iter()
                 .flatten()
                 .all(Vec::is_empty)
+    }
+
+    pub(crate) fn stamp_kernel_branch_unknowns(&self) -> &[usize] {
+        &self.stamp_kernel_branch_unknowns
     }
 
     pub(crate) fn run_parameter_default(
