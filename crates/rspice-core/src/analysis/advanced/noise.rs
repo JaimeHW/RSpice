@@ -1,8 +1,7 @@
 //! Noise Analysis Module
 //!
 //! Computes noise spectral density as a function of frequency.
-
-#![allow(clippy::needless_range_loop)]
+//!
 //! Supports:
 //! - **Thermal noise**: Johnson-Nyquist noise from resistors (4kTR)
 //! - **Shot noise**: From PN junctions in diodes and BJTs (2qI)
@@ -19,6 +18,8 @@
 //! .NOISE V(out) Vin DEC 10 1Hz 100kHz
 //! ```
 //! This computes noise at output node referenced to input source Vin.
+
+#![allow(clippy::needless_range_loop)]
 
 use crate::analysis::AnalysisConfig;
 use crate::{Complex64, Value};

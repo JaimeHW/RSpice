@@ -3,12 +3,12 @@
 //! `tests/ngspice_regression.rs` shells out to this binary once per deck so
 //! that a panic, hang, or stack overflow in one case cannot take the whole
 //! suite down with it. The comparison itself lives in
-//! [`rspice_core::testing`]; this binary is only the process boundary and the
-//! result-file protocol.
+//! [`rspice_conformance::suites::ngspice`]; this binary is only the process
+//! boundary and the result-file protocol.
 //!
-//! The encoded [`TestResult`](rspice_core::testing::TestResult) is written to
-//! `--result` and decoded by the parent with
-//! [`decode_test_result`](rspice_core::testing::decode_test_result). A
+//! The encoded [`TestResult`](rspice_conformance::suites::ngspice::TestResult)
+//! is written to `--result` and decoded by the parent with
+//! [`decode_test_result`](rspice_conformance::suites::ngspice::decode_test_result). A
 //! missing or unparsable result file is how the parent detects a crash, so
 //! this binary writes the file even for a failing case and reserves a
 //! non-zero exit for argument and I/O errors.

@@ -6,7 +6,7 @@
 //! live in [`XyceTestRunner`]; this binary is the process boundary.
 //!
 //! Results use a local `key=value` encoding rather than the shared
-//! [`result_codec`](rspice_core::testing) format, because
+//! [`codec`](rspice_conformance::suites::ngspice) format, because
 //! [`XyceTestResult`] carries a per-deck contract label and richer mismatch
 //! rows (row index, probe, expected/actual, relative error) that the ngspice
 //! codec does not model. Values are written at full `f64` precision so the
