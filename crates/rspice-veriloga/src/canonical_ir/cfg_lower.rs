@@ -380,7 +380,7 @@ impl<'a> CfgLowerer<'a> {
                 self.named_branch_access(access, name, span)
             }
             HirExprKind::SystemFunction { name, args } => self.system_function(name, args, span),
-            HirExprKind::Call { name, args } => self.call(name, args, span),
+            HirExprKind::Call { name, args } => self.call(expression.id, name, args, span),
             HirExprKind::AnalogOperator { op } => self.analog_operator(op, expression, span),
             // Noise sources are lifted into their own plan before codegen and
             // contribute nothing to the time-domain residual, exactly as in the
@@ -913,19 +913,31 @@ impl<'a> CfgLowerer<'a> {
         self.parameters_by_name.get(name).copied()
     }
 
-    fn call(&mut self, name: &SmolStr, args: &[ExprId], span: SourceSpanRef) -> ValueId {
+    fn call(
+        &mut self,
+        expression: ExprId,
+        name: &SmolStr,
+        args: &[ExprId],
+        span: SourceSpanRef,
+    ) -> ValueId {
         let lowered = name.to_ascii_lowercase();
         if is_noise_name(lowered.as_str()) {
             return self.real_constant(0.0);
         }
         match (lowered.as_str(), args.len()) {
+            // Keyed by the *call*, not by its argument. The other `ddt` path —
+            // `HirAnalogOperator::Ddt`, below — always did, and so does the
+            // state-slot allocation every backend reads, so keying this one by
+            // the operand named a slot that does not exist.
             ("ddt", 1) => {
                 let input = self.expr(args[0]);
-                let operator = args[0];
                 self.builder.push(
                     self.block,
                     CfgValueType::Real,
-                    CfgValueKind::Ddt { operator, input },
+                    CfgValueKind::Ddt {
+                        operator: expression,
+                        input,
+                    },
                 )
             }
             ("analysis", 1) => self.analysis_call(args[0], span),
