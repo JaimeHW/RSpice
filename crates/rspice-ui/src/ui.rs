@@ -25,5 +25,5 @@ pub(crate) mod tokens;
 pub(crate) mod viewport;
 pub(crate) mod widgets;
 
-pub use theme::{EngineeringCanvasTheme, FontWeight, Theme};
-pub use tokens::{Density, Direction, Mode, Tokens};
+pub use theme::{EngineeringCanvasTheme, Theme};
+pub use tokens::{Density, Direction, Mode};

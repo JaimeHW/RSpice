@@ -24,8 +24,7 @@
 
 use egui::Context;
 
-use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
-use crate::state::{SchematicState, SimulationState};
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::veriloga_library::{
     VERILOGA_LIBRARY_NAME, restore_global_veriloga_library, save_global_veriloga_library,
@@ -130,7 +129,7 @@ pub(crate) use dialogs::state::{
     StretchSelectionDialogState, ViewOperation, ViewOperationDialogState, WindowLayoutChoice,
     WindowSessionPage, WindowWorkflow,
 };
-pub use dialogs::state::{DialogState, LicenseDialogState, LicensePhase};
+pub use dialogs::state::{DialogState, LicensePhase};
 
 pub(crate) use schematic::edit_authority::SchematicEditAuthority;
 

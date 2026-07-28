@@ -178,9 +178,8 @@ pub(crate) fn close_model_editor_workflow() {
 }
 
 pub use registry::{
-    CommandAvailability, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
+    CommandAvailability, ShortcutContext, ShortcutKind,
 };
-pub use vocabulary::CommandPlatform;
 
 impl Command {
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
