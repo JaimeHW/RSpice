@@ -43,8 +43,6 @@ pub struct McConfig {
     pub mismatch_variations: bool,
     /// Save each run
     pub save_all_runs: bool,
-    /// Compute statistics
-    pub compute_stats: bool,
 }
 
 impl Default for McConfig {
@@ -58,7 +56,6 @@ impl Default for McConfig {
             process_variations: true,
             mismatch_variations: true,
             save_all_runs: false,
-            compute_stats: true,
         }
     }
 }
@@ -144,7 +141,6 @@ impl McDialogState {
             process_variations: self.process_variations,
             mismatch_variations: self.mismatch_variations,
             save_all_runs: self.save_all_runs,
-            compute_stats: true,
         };
         config.validate()?;
         Ok(config)

@@ -11,6 +11,6 @@ mod validation;
 
 pub use enums::{DampingStrategy, IntegrationMethod, MatrixSolver};
 pub use model::SimulationOptions;
-pub use si::{ParseError, format_si_value, parse_si_value};
+pub use si::{format_si_value, parse_si_value};
 pub use state::OptionsDialogState;
 pub use validation::ValidationError;

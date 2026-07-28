@@ -91,10 +91,6 @@ impl EnvelopeConfig {
         }
         Ok(())
     }
-
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
 
 /// Serializable state for the exact workbench Envelope form.

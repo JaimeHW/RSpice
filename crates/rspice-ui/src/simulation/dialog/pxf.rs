@@ -36,15 +36,6 @@ pub enum PxfSweepType {
 }
 
 impl PxfSweepType {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Decade => "Decade",
-            Self::Octave => "Octave",
-            Self::Linear => "Linear",
-        }
-    }
-
     /// SPICE keyword
     pub fn spice_keyword(&self) -> &'static str {
         match self {
@@ -52,11 +43,6 @@ impl PxfSweepType {
             Self::Octave => "oct",
             Self::Linear => "lin",
         }
-    }
-
-    /// All types
-    pub fn all() -> &'static [PxfSweepType] {
-        &[Self::Decade, Self::Octave, Self::Linear]
     }
 }
 
@@ -85,8 +71,6 @@ pub struct PxfConfig {
     pub input_source: String,
     /// Maximum sideband index
     pub max_sideband: i32,
-    /// Fundamental frequency from PSS
-    pub fundamental_freq: f64,
 }
 
 impl Default for PxfConfig {
@@ -101,7 +85,6 @@ impl Default for PxfConfig {
             output_sideband: 1,
             input_source: "VIN".to_string(),
             max_sideband: 5,
-            fundamental_freq: 0.0,
         }
     }
 }
@@ -241,7 +224,6 @@ impl PxfDialogState {
             output_sideband: out_sb,
             input_source: self.input_source.clone(),
             max_sideband: max_sb,
-            fundamental_freq: 0.0,
         };
 
         config.validate()?;

@@ -133,8 +133,11 @@ pub struct XfDialogState {
     pub output_node: String,
     #[serde(default, skip_serializing)]
     pub output_ref: String,
-    #[serde(default, skip_serializing)]
-    pub group_delay: bool,
+    /// Accepted so `deny_unknown_fields` does not reject a pre-correction
+    /// project, then dropped: group delay is a frequency-domain quantity and
+    /// the DC `.TF` model it was saved beside no longer computes one.
+    #[serde(default, skip_serializing, rename = "group_delay")]
+    pub _group_delay: bool,
     #[serde(default, skip_serializing)]
     pub input_impedance: Option<bool>,
     #[serde(default, skip_serializing)]

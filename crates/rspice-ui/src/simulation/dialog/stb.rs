@@ -22,8 +22,6 @@ pub struct StbConfig {
     pub phase_margin: bool,
     /// Compute crossover frequency
     pub crossover_freq: bool,
-    /// Relative tolerance
-    pub reltol: f64,
 }
 
 impl Default for StbConfig {
@@ -36,7 +34,6 @@ impl Default for StbConfig {
             gain_margin: true,
             phase_margin: true,
             crossover_freq: true,
-            reltol: 1e-3,
         }
     }
 }
@@ -116,7 +113,6 @@ impl StbDialogState {
             gain_margin: self.gain_margin,
             phase_margin: self.phase_margin,
             crossover_freq: self.crossover_freq,
-            reltol: 1e-3,
         };
         config.validate()?;
         Ok(config)

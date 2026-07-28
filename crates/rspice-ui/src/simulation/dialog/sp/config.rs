@@ -15,15 +15,6 @@ pub enum SpSweepType {
 }
 
 impl SpSweepType {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Decade => "Decade",
-            Self::Octave => "Octave",
-            Self::Linear => "Linear",
-        }
-    }
-
     /// SPICE keyword
     pub fn spice_keyword(&self) -> &'static str {
         match self {
@@ -31,11 +22,6 @@ impl SpSweepType {
             Self::Octave => "oct",
             Self::Linear => "lin",
         }
-    }
-
-    /// All types
-    pub fn all() -> &'static [SpSweepType] {
-        &[Self::Decade, Self::Octave, Self::Linear]
     }
 }
 
@@ -73,12 +59,6 @@ impl SpPortConfig {
         }
     }
 
-    /// Set port-specific impedance
-    pub fn with_z0(mut self, z0: f64) -> Self {
-        self.z0 = Some(z0);
-        self
-    }
-
     /// Check if differential
     pub fn is_differential(&self) -> bool {
         self.node_neg != "0"
@@ -112,8 +92,6 @@ pub struct SpConfig {
     pub touchstone_export: bool,
     /// Touchstone format version (1 or 2)
     pub touchstone_version: u32,
-    /// Save all internal nodes
-    pub save_all: bool,
 }
 
 impl Default for SpConfig {
@@ -131,91 +109,11 @@ impl Default for SpConfig {
             do_noise: false,
             touchstone_export: true,
             touchstone_version: 2,
-            save_all: false,
         }
     }
 }
 
 impl SpConfig {
-    /// Create new linear sweep config
-    pub fn linear(start: f64, stop: f64, points: u32) -> Self {
-        Self {
-            start_freq: start,
-            stop_freq: stop,
-            num_points: points,
-            sweep_type: SpSweepType::Linear,
-            ..Default::default()
-        }
-    }
-
-    /// Create new decade sweep config
-    pub fn decade(start: f64, stop: f64, points_per_decade: u32) -> Self {
-        Self {
-            start_freq: start,
-            stop_freq: stop,
-            num_points: points_per_decade,
-            sweep_type: SpSweepType::Decade,
-            ..Default::default()
-        }
-    }
-
-    /// Set reference impedance
-    pub fn with_z0(mut self, z0: f64) -> Self {
-        self.z0 = z0;
-        self
-    }
-
-    /// Set ports
-    pub fn with_ports(mut self, ports: Vec<SpPortConfig>) -> Self {
-        self.ports = ports;
-        self
-    }
-
-    /// Add a port
-    pub fn add_port(mut self, port: SpPortConfig) -> Self {
-        self.ports.push(port);
-        self
-    }
-
-    /// Enable noise analysis
-    pub fn with_noise(mut self, enable: bool) -> Self {
-        self.do_noise = enable;
-        self
-    }
-
-    /// Enable Touchstone export
-    pub fn with_touchstone(mut self, enable: bool, version: u32) -> Self {
-        self.touchstone_export = enable;
-        self.touchstone_version = version;
-        self
-    }
-
-    /// Number of ports
-    pub fn num_ports(&self) -> usize {
-        self.ports.len()
-    }
-
-    /// Total number of frequency points
-    pub fn total_points(&self) -> u32 {
-        match self.sweep_type {
-            SpSweepType::Decade => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let decades = (self.stop_freq / self.start_freq).log10();
-                (decades * self.num_points as f64).ceil() as u32 + 1
-            }
-            SpSweepType::Octave => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let octaves = (self.stop_freq / self.start_freq).log2();
-                (octaves * self.num_points as f64).ceil() as u32 + 1
-            }
-            SpSweepType::Linear => self.num_points,
-        }
-    }
-
     /// Generate SPICE directive
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
@@ -298,10 +196,5 @@ impl SpConfig {
         }
 
         Ok(())
-    }
-
-    /// Reset to defaults
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }

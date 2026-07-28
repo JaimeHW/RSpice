@@ -37,15 +37,6 @@ pub enum PnoiseSweepType {
 }
 
 impl PnoiseSweepType {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Decade => "Decade",
-            Self::Octave => "Octave",
-            Self::Linear => "Linear",
-        }
-    }
-
     /// SPICE keyword
     pub fn spice_keyword(&self) -> &'static str {
         match self {
@@ -53,11 +44,6 @@ impl PnoiseSweepType {
             Self::Octave => "oct",
             Self::Linear => "lin",
         }
-    }
-
-    /// All types
-    pub fn all() -> &'static [PnoiseSweepType] {
-        &[Self::Decade, Self::Octave, Self::Linear]
     }
 }
 
@@ -78,15 +64,6 @@ pub enum NoiseReferenceType {
 }
 
 impl NoiseReferenceType {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Output => "Output-Referred",
-            Self::Input => "Input-Referred",
-            Self::Phase => "Phase Noise (dBc/Hz)",
-        }
-    }
-
     /// SPICE keyword
     pub fn spice_keyword(&self) -> &'static str {
         match self {
@@ -94,11 +71,6 @@ impl NoiseReferenceType {
             Self::Input => "input",
             Self::Phase => "phase",
         }
-    }
-
-    /// All types
-    pub fn all() -> &'static [NoiseReferenceType] {
-        &[Self::Output, Self::Input, Self::Phase]
     }
 }
 
@@ -135,8 +107,6 @@ pub struct PnoiseConfig {
     pub integrated_noise: bool,
     /// Noise summary (per-device contributions)
     pub noise_summary: bool,
-    /// Fundamental frequency from PSS (set from PSS result)
-    pub fundamental_freq: f64,
 }
 
 impl Default for PnoiseConfig {
@@ -154,98 +124,11 @@ impl Default for PnoiseConfig {
             spot_noise: true,
             integrated_noise: false,
             noise_summary: true,
-            fundamental_freq: 0.0, // Set from PSS
         }
     }
 }
 
 impl PnoiseConfig {
-    /// Create new PNoise config
-    pub fn new(start: f64, stop: f64, points: u32) -> Self {
-        Self {
-            start_freq: start,
-            stop_freq: stop,
-            num_points: points,
-            ..Default::default()
-        }
-    }
-
-    /// Create config for phase noise analysis
-    pub fn phase_noise(offset_start: f64, offset_stop: f64) -> Self {
-        Self {
-            start_freq: offset_start,
-            stop_freq: offset_stop,
-            num_points: 10,
-            sweep_type: PnoiseSweepType::Decade,
-            noise_ref: NoiseReferenceType::Phase,
-            spot_noise: true,
-            ..Default::default()
-        }
-    }
-
-    /// Set output node
-    pub fn with_output(mut self, node: &str) -> Self {
-        self.output_node = node.to_uppercase();
-        self
-    }
-
-    /// Set noise reference type
-    pub fn with_noise_ref(mut self, noise_ref: NoiseReferenceType) -> Self {
-        self.noise_ref = noise_ref;
-        self
-    }
-
-    /// Set input source
-    pub fn with_input(mut self, source: &str) -> Self {
-        self.input_source = source.to_uppercase();
-        self
-    }
-
-    /// Set sideband range
-    pub fn with_sidebands(mut self, max: i32) -> Self {
-        self.max_sideband = max.abs();
-        self
-    }
-
-    /// Set sweep type
-    pub fn with_sweep_type(mut self, sweep_type: PnoiseSweepType) -> Self {
-        self.sweep_type = sweep_type;
-        self
-    }
-
-    /// Enable integrated noise calculation
-    pub fn with_integrated_noise(mut self, enable: bool) -> Self {
-        self.integrated_noise = enable;
-        self
-    }
-
-    /// Set fundamental frequency
-    pub fn with_fundamental(mut self, freq: f64) -> Self {
-        self.fundamental_freq = freq;
-        self
-    }
-
-    /// Total number of frequency points
-    pub fn total_points(&self) -> u32 {
-        match self.sweep_type {
-            PnoiseSweepType::Decade => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let decades = (self.stop_freq / self.start_freq).log10();
-                (decades * self.num_points as f64).ceil() as u32 + 1
-            }
-            PnoiseSweepType::Octave => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let octaves = (self.stop_freq / self.start_freq).log2();
-                (octaves * self.num_points as f64).ceil() as u32 + 1
-            }
-            PnoiseSweepType::Linear => self.num_points,
-        }
-    }
-
     /// Generate SPICE directive
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
@@ -318,11 +201,6 @@ impl PnoiseConfig {
         }
 
         Ok(())
-    }
-
-    /// Reset to defaults
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }
 
@@ -428,7 +306,6 @@ impl PnoiseDialogState {
             spot_noise: self.spot_noise,
             integrated_noise: self.integrated_noise,
             noise_summary: self.noise_summary,
-            fundamental_freq: 0.0,
         };
 
         config.validate()?;

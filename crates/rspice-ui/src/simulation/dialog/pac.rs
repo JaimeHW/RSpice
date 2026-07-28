@@ -37,15 +37,6 @@ pub enum PacSweepType {
 }
 
 impl PacSweepType {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Decade => "Decade",
-            Self::Octave => "Octave",
-            Self::Linear => "Linear",
-        }
-    }
-
     /// SPICE keyword
     pub fn spice_keyword(&self) -> &'static str {
         match self {
@@ -53,11 +44,6 @@ impl PacSweepType {
             Self::Octave => "oct",
             Self::Linear => "lin",
         }
-    }
-
-    /// All types
-    pub fn all() -> &'static [PacSweepType] {
-        &[Self::Decade, Self::Octave, Self::Linear]
     }
 }
 
@@ -90,8 +76,6 @@ pub struct PacConfig {
     pub pac_magnitude: f64,
     /// Include DC sideband (band 0)
     pub include_dc: bool,
-    /// Fundamental frequency from PSS (set from PSS result)
-    pub fundamental_freq: f64,
 }
 
 impl Default for PacConfig {
@@ -107,45 +91,11 @@ impl Default for PacConfig {
             output_ref: String::new(),
             pac_magnitude: 1.0, // 1V default
             include_dc: true,
-            fundamental_freq: 0.0, // Set from PSS
         }
     }
 }
 
 impl PacConfig {
-
-    /// Total number of sidebands
-    pub fn num_sidebands(&self) -> usize {
-        // -max to +max inclusive
-        (2 * self.max_sideband + 1) as usize
-    }
-
-    /// Get sideband indices
-    pub fn sideband_indices(&self) -> Vec<i32> {
-        (-self.max_sideband..=self.max_sideband).collect()
-    }
-
-    /// Total number of frequency points
-    pub fn total_points(&self) -> u32 {
-        match self.sweep_type {
-            PacSweepType::Decade => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let decades = (self.stop_freq / self.start_freq).log10();
-                (decades * self.num_points as f64).ceil() as u32 + 1
-            }
-            PacSweepType::Octave => {
-                if self.start_freq <= 0.0 || self.stop_freq <= 0.0 {
-                    return self.num_points;
-                }
-                let octaves = (self.stop_freq / self.start_freq).log2();
-                (octaves * self.num_points as f64).ceil() as u32 + 1
-            }
-            PacSweepType::Linear => self.num_points,
-        }
-    }
-
     /// Generate SPICE directive
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
@@ -219,11 +169,6 @@ impl PacConfig {
         }
 
         Ok(())
-    }
-
-    /// Reset to defaults
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }
 
@@ -316,7 +261,6 @@ impl PacDialogState {
             output_ref: self.output_ref.clone(),
             pac_magnitude: mag,
             include_dc: self.include_dc,
-            fundamental_freq: 0.0,
         };
 
         config.validate()?;

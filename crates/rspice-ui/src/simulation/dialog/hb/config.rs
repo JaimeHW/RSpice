@@ -13,29 +13,6 @@ pub enum HbSolverType {
     Krylov,
 }
 
-impl HbSolverType {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Newton => "Newton-Raphson",
-            Self::Krylov => "Krylov (GMRES)",
-        }
-    }
-
-    /// SPICE keyword
-    pub fn spice_keyword(&self) -> &'static str {
-        match self {
-            Self::Newton => "newton",
-            Self::Krylov => "krylov",
-        }
-    }
-
-    /// All available solvers
-    pub fn all() -> &'static [HbSolverType] {
-        &[Self::Newton, Self::Krylov]
-    }
-}
-
 /// Configuration for a single tone in multi-tone HB
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HbToneConfig {
@@ -149,122 +126,6 @@ impl Default for HbConfig {
 }
 
 impl HbConfig {
-    /// Create new single-tone HB config
-    pub fn new(fundamental: f64, harmonics: u32) -> Self {
-        Self {
-            fundamental_freq: fundamental,
-            num_harmonics: harmonics,
-            fundamental_name: "tone1".to_string(),
-            fundamental_source: None,
-            ..Default::default()
-        }
-    }
-
-    /// Create multi-tone HB config
-    pub fn multi_tone(tones: Vec<HbToneConfig>) -> Self {
-        let fundamental = tones.first().map(|t| t.frequency).unwrap_or(1e9);
-        let harmonics = tones.first().map(|t| t.harmonics).unwrap_or(9);
-        let additional = if tones.len() > 1 {
-            tones[1..].to_vec()
-        } else {
-            Vec::new()
-        };
-
-        Self {
-            fundamental_freq: fundamental,
-            num_harmonics: harmonics,
-            fundamental_name: tones
-                .first()
-                .map(|tone| tone.name.clone())
-                .unwrap_or_else(|| "tone1".to_string()),
-            fundamental_source: tones.first().and_then(|tone| tone.source.clone()),
-            additional_tones: additional,
-            ..Default::default()
-        }
-    }
-
-    /// Set oversampling factor
-    pub fn with_oversample(mut self, factor: u32) -> Self {
-        self.oversample = factor.max(1);
-        self
-    }
-
-    /// Set convergence tolerance
-    pub fn with_tolerance(mut self, reltol: f64) -> Self {
-        self.reltol = reltol;
-        self
-    }
-
-    /// Set solver type
-    pub fn with_solver(mut self, solver: HbSolverType) -> Self {
-        self.solver = solver;
-        self
-    }
-
-    /// Enable source stepping
-    pub fn with_source_stepping(mut self, enable: bool) -> Self {
-        self.source_stepping = enable;
-        self
-    }
-
-    /// Add a tone for multi-tone analysis
-    pub fn add_tone(mut self, tone: HbToneConfig) -> Self {
-        self.additional_tones.push(tone);
-        self
-    }
-
-    /// Check if multi-tone
-    pub fn is_multi_tone(&self) -> bool {
-        !self.additional_tones.is_empty()
-    }
-
-    /// Primary tone as a full tone config.
-    pub fn primary_tone(&self) -> HbToneConfig {
-        let mut tone = HbToneConfig::new(self.fundamental_freq, self.num_harmonics);
-        tone.name = self.fundamental_name.clone();
-        tone.source = self.fundamental_source.clone();
-        tone
-    }
-
-    /// Get all tones (primary + additional) in execution order.
-    pub fn all_tones(&self) -> Vec<HbToneConfig> {
-        let mut tones = Vec::with_capacity(1 + self.additional_tones.len());
-        tones.push(self.primary_tone());
-        tones.extend(self.additional_tones.iter().cloned());
-        tones
-    }
-
-    /// Total number of spectral components per node
-    pub fn num_spectral_components(&self) -> u32 {
-        if self.is_multi_tone() {
-            // Approximate for multi-tone (box truncation)
-            let mut count = 1_u32; // DC
-            count += 2 * self.num_harmonics;
-            for tone in &self.additional_tones {
-                count += 2 * tone.harmonics;
-            }
-            count
-        } else {
-            // Single-tone: DC + harmonics (negative are conjugates)
-            self.num_harmonics + 1
-        }
-    }
-
-    /// Estimated FFT size
-    pub fn fft_size(&self) -> u32 {
-        let min_size = self.num_spectral_components() * self.oversample;
-        min_size.next_power_of_two()
-    }
-
-    /// Fundamental period in seconds
-    pub fn period(&self) -> f64 {
-        if self.fundamental_freq > 0.0 {
-            1.0 / self.fundamental_freq
-        } else {
-            1.0
-        }
-    }
-
     /// Generate SPICE directive
     pub fn to_spice(&self) -> String {
         let mut cmd = format!(
@@ -306,11 +167,6 @@ impl HbConfig {
         }
 
         cmd
-    }
-
-    /// Generate SPICE directive (legacy compatibility helper).
-    pub fn to_spice_string(&self) -> String {
-        self.to_spice()
     }
 
     /// Validate configuration
@@ -366,10 +222,5 @@ impl HbConfig {
         }
 
         Ok(())
-    }
-
-    /// Reset to defaults
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }

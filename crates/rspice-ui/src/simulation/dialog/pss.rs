@@ -20,13 +20,6 @@ pub enum PssSolverMethod {
 }
 
 impl PssSolverMethod {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Shooting => "Driven shooting",
-            Self::HarmonicBalance => "Unsupported legacy HB-PSS",
-        }
-    }
-
     pub fn spice_keyword(&self) -> &'static str {
         match self {
             Self::Shooting => "shooting",

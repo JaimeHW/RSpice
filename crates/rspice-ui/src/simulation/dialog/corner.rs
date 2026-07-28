@@ -41,11 +41,6 @@ pub enum ProcessCorner {
 }
 
 impl ProcessCorner {
-    /// Standard 5-corner set
-    pub fn standard_five() -> Vec<ProcessCorner> {
-        vec![Self::TT, Self::SS, Self::FF, Self::SF, Self::FS]
-    }
-
     /// Short name
     pub fn short_name(&self) -> &'static str {
         match self {
@@ -101,8 +96,6 @@ pub struct CornerConfig {
     pub full_matrix: bool,
     /// Base analysis type
     pub base_analysis: CornerBaseAnalysis,
-    /// Enabled (run corner analysis)
-    pub enabled: bool,
 }
 
 impl Default for CornerConfig {
@@ -114,20 +107,11 @@ impl Default for CornerConfig {
             temp_in_kelvin: false,
             full_matrix: true,
             base_analysis: CornerBaseAnalysis::Transient,
-            enabled: true,
         }
     }
 }
 
 impl CornerConfig {
-    /// Create with standard 5 process corners
-    pub fn standard_corners() -> Self {
-        Self {
-            process_corners: ProcessCorner::standard_five(),
-            ..Default::default()
-        }
-    }
-
     /// Create typical commercial PVT setup
     pub fn commercial_pvt() -> Self {
         Self {
@@ -137,36 +121,6 @@ impl CornerConfig {
             full_matrix: true,
             ..Default::default()
         }
-    }
-
-    /// Set process corners
-    pub fn with_process_corners(mut self, corners: Vec<ProcessCorner>) -> Self {
-        self.process_corners = corners;
-        self
-    }
-
-    /// Set voltage sweep
-    pub fn with_voltages(mut self, voltages: Vec<f64>) -> Self {
-        self.voltages = voltages;
-        self
-    }
-
-    /// Set temperature sweep
-    pub fn with_temperatures(mut self, temps: Vec<f64>) -> Self {
-        self.temperatures = temps;
-        self
-    }
-
-    /// Set to diagonal sweep (matched corners)
-    pub fn diagonal(mut self) -> Self {
-        self.full_matrix = false;
-        self
-    }
-
-    /// Set base analysis
-    pub fn with_base_analysis(mut self, analysis: CornerBaseAnalysis) -> Self {
-        self.base_analysis = analysis;
-        self
     }
 
     /// Total number of corners
@@ -248,11 +202,6 @@ impl CornerConfig {
         }
 
         Ok(())
-    }
-
-    /// Reset to defaults
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }
 
@@ -404,7 +353,6 @@ impl CornerDialogState {
             temp_in_kelvin: false,
             full_matrix: self.full_matrix,
             base_analysis,
-            enabled: true,
         };
 
         config.validate()?;

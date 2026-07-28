@@ -101,10 +101,6 @@ impl FourierConfig {
         }
         Ok(())
     }
-
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

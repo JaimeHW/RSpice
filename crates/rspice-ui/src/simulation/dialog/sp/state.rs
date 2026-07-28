@@ -166,7 +166,6 @@ impl SpDialogState {
             do_noise: self.do_noise,
             touchstone_export: self.touchstone_export,
             touchstone_version: self.touchstone_version.clamp(1, 2),
-            save_all: false,
         };
 
         config.validate()?;

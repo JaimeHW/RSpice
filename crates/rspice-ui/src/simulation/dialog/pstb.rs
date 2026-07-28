@@ -34,12 +34,8 @@ pub struct PstbConfig {
     pub phase_margin: bool,
     /// Compute gain margin
     pub gain_margin: bool,
-    /// Frequency for stability check (0 = all)
-    pub check_freq: f64,
     /// Number of Floquet multipliers to compute
     pub num_multipliers: u32,
-    /// Fundamental frequency from PSS
-    pub fundamental_freq: f64,
 }
 
 impl Default for PstbConfig {
@@ -50,9 +46,7 @@ impl Default for PstbConfig {
             annotate: true,
             phase_margin: true,
             gain_margin: true,
-            check_freq: 0.0,
             num_multipliers: 10,
-            fundamental_freq: 0.0,
         }
     }
 }
@@ -89,10 +83,6 @@ impl PstbConfig {
         Ok(())
     }
 
-    /// Reset to defaults
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
 
 // =============================================================================
@@ -144,9 +134,7 @@ impl PstbDialogState {
             annotate: self.annotate,
             phase_margin: self.phase_margin,
             gain_margin: self.gain_margin,
-            check_freq: 0.0,
             num_multipliers: num_mult,
-            fundamental_freq: 0.0,
         };
 
         config.validate()?;
