@@ -72,7 +72,7 @@ pub use transient::TransientConfig;
 // matching `*Config` types are deliberately absent: a dialog's config is its
 // own business, and execution takes `simulation::config` types instead, so
 // re-exporting both here only invited the two to be confused.
-pub use hb::{HbDialogState, HbSolverType};
+pub use hb::HbDialogState;
 pub use pss::{PssConfig, PssDialogState, PssSolverMethod};
 
 // Re-exports - Periodic Small-Signal

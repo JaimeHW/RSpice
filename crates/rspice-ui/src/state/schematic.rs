@@ -112,9 +112,8 @@ pub use symbol_gen::generate_symbol;
 pub use tool::Tool;
 pub use undo_history::SchematicSnapshot;
 pub use validated_revision::{
-    AdvisoryDisposition, AdvisoryDispositionKind, MAX_ADVISORY_DISPOSITION_REASON_LEN,
-    MAX_VALIDATED_REVISION_IDENTITY_LEN, MAX_VALIDATED_REVISION_NOTE_LEN,
-    ValidatedRevisionDependency, ValidatedRevisionError, ValidatedRevisionJournal,
+    AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionDependency,
+    ValidatedRevisionJournal,
     ValidatedRevisionObjectDelta, ValidatedRevisionRequest, ValidatedRevisionSemanticDelta,
     ValidatedSchematicRevision, ValidatedSchematicRevisionId, ValidationFindingCounts,
 };
@@ -123,30 +122,4 @@ pub use visibility::{
     SchematicHierarchyVisibility, SchematicNetHighlighting, SchematicParameterLabelVisibility,
     SchematicReviewMarkerVisibility, SchematicVisibilityPolicy, SchematicWireRoutingStyle,
 };
-pub use wire::{
-    // Connection types
-    ConnectionSet,
-    DragConstraint,
-    JunctionType,
-    // Core types
-    Wire,
-    WireConnection,
-    WireDragContext,
-    // Drag types
-    WireDragMode,
-    WireDrawing,
-    WireHitResult,
-    WireRoutingMode,
-    // Segment types
-    WireSegment,
-    convert_to_orthogonal,
-    count_bends,
-    // Convenience functions
-    create_wire,
-    find_wire_intersections,
-    is_valid_route,
-    // Routing utilities
-    optimize_route,
-    route_length,
-    wires_connected,
-};
+pub use wire::{Wire, WireConnection, WireRoutingMode, WireSegment};

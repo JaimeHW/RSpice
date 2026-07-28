@@ -83,21 +83,18 @@ pub use lifecycle::session::{
 };
 pub(crate) use lifecycle::session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};
 pub use shortcuts::{
-    ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding,
-    ProtectedShortcutPolicy, ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
-    ShortcutPolicies, ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileError,
-    ShortcutProfileIssue, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity, ShortcutSequence,
-    ShortcutStroke, SingleKeyCanvasPolicy, shortcut_context_precedence_rank,
+    ChordTimeoutPolicy, ContextPrecedencePolicy, ProtectedShortcutPolicy, ShortcutBindingSlot,
+    ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,
+    ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
+    shortcut_context_precedence_rank,
 };
 pub use state::{EngineeringProfile, WorkbenchState};
 pub use routing::surface_catalog::{
-    CanonicalTier, NonPrimarySurface, ReleaseStatus, SurfaceArchetype, SurfaceId,
-    SurfaceIdParseError, SurfaceMetadata,
+    SurfaceArchetype, SurfaceId,
 };
-pub use routing::surface_route::{SurfaceRoute, SurfaceRouteParseError};
+pub use routing::surface_route::SurfaceRoute;
 pub use lifecycle::window_session::{
-    ApplicationWindowBounds, ApplicationWindowId, ApplicationWindowState, WindowSessionError,
-    WindowSessionRegistry,
+    ApplicationWindowId,
 };
 
 pub use app::RSpiceApp;
