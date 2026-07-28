@@ -4634,6 +4634,85 @@ pub(crate) struct SParameterNoiseData {
 }
 
 impl PySParameterResult {
+    /// Per-frequency stability analysis, for two-port results only.
+    ///
+    /// K, mu, and the stability circles are defined for a two-port; deriving
+    /// them from a sub-matrix of a larger network would describe a different
+    /// device, so anything else yields None.
+    fn two_port_stability(
+        &self,
+    ) -> Option<Vec<rspice_core::analysis::advanced::s_param::StabilityAnalysis>> {
+        Some(
+            self.two_port_matrices()?
+                .iter()
+                .map(rspice_core::analysis::advanced::s_param::StabilityAnalysis::from_s_matrix)
+                .collect(),
+        )
+    }
+
+    /// Per-frequency gain analysis, for two-port results only.
+    fn two_port_gain(
+        &self,
+    ) -> Option<Vec<rspice_core::analysis::advanced::s_param::GainAnalysis>> {
+        Some(
+            self.two_port_matrices()?
+                .iter()
+                .map(rspice_core::analysis::advanced::s_param::GainAnalysis::from_s_matrix)
+                .collect(),
+        )
+    }
+
+    /// Rebuild core's one-based `SMatrix` at each frequency.
+    fn two_port_matrices(
+        &self,
+    ) -> Option<Vec<rspice_core::analysis::advanced::s_param::SMatrix>> {
+        use rspice_core::analysis::advanced::s_param::{Complex as SComplex, SMatrix};
+        if self.parameters.len() != 2 {
+            return None;
+        }
+        Some(
+            self.frequencies
+                .iter()
+                .enumerate()
+                .map(|(index, frequency)| {
+                    let mut matrix = SMatrix::new(*frequency, 2);
+                    for row in 0..2 {
+                        for column in 0..2 {
+                            let value = self.parameters[row][column]
+                                .get(index)
+                                .copied()
+                                .unwrap_or_else(|| Complex64::new(f64::NAN, f64::NAN));
+                            matrix.set(row + 1, column + 1, SComplex::new(value.re, value.im));
+                        }
+                    }
+                    matrix
+                })
+                .collect(),
+        )
+    }
+
+    /// Project one scalar out of the per-frequency stability analyses.
+    fn stability_series<'py, F>(
+        &self,
+        py: Python<'py>,
+        select: F,
+    ) -> Option<Bound<'py, PyArray1<f64>>>
+    where
+        F: Fn(&rspice_core::analysis::advanced::s_param::StabilityAnalysis) -> f64,
+    {
+        let values: Vec<f64> = self.two_port_stability()?.iter().map(select).collect();
+        Some(values.to_pyarray(py))
+    }
+
+    /// Project one scalar out of the per-frequency gain analyses.
+    fn gain_series<'py, F>(&self, py: Python<'py>, select: F) -> Option<Bound<'py, PyArray1<f64>>>
+    where
+        F: Fn(&rspice_core::analysis::advanced::s_param::GainAnalysis) -> f64,
+    {
+        let values: Vec<f64> = self.two_port_gain()?.iter().map(select).collect();
+        Some(values.to_pyarray(py))
+    }
+
     pub(crate) fn new(
         frequencies: Vec<f64>,
         port_names: Vec<String>,
@@ -4914,6 +4993,149 @@ impl PySParameterResult {
     #[getter]
     fn touchstone_extension(&self) -> String {
         crate::export::touchstone_extension(self.parameters.len())
+    }
+
+    /// Whether the two-port stability and gain figures are available.
+    ///
+    /// K, mu, MAG, MSG, and the stability circles are two-port quantities;
+    /// they are None for any other port count rather than silently reported
+    /// from a sub-matrix.
+    #[getter]
+    fn has_two_port_stability(&self) -> bool {
+        self.parameters.len() == 2
+    }
+
+    /// Rollett stability factor K at each frequency.
+    ///
+    /// A two-port is unconditionally stable where `K > 1` and `|delta| < 1`;
+    /// `unconditionally_stable` reports that combined test directly.
+    #[getter]
+    fn k_factor<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.stability_series(py, |analysis| analysis.k_factor)
+    }
+
+    /// Edwards-Sinsky mu factor at each frequency (`mu > 1` is stable).
+    #[getter]
+    fn mu_factor<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.stability_series(py, |analysis| analysis.mu_factor)
+    }
+
+    /// Load-side mu' factor at each frequency.
+    #[getter]
+    fn mu_prime<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.stability_series(py, |analysis| analysis.mu_prime)
+    }
+
+    /// Determinant of the scattering matrix at each frequency.
+    #[getter]
+    fn delta<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<Complex64>>> {
+        let values: Vec<Complex64> = self
+            .two_port_stability()?
+            .iter()
+            .map(|analysis| Complex64::new(analysis.delta.re, analysis.delta.im))
+            .collect();
+        Some(values.to_pyarray(py))
+    }
+
+    /// Whether the device is unconditionally stable at each frequency.
+    #[getter]
+    fn unconditionally_stable<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<bool>>> {
+        let values: Vec<bool> = self
+            .two_port_stability()?
+            .iter()
+            .map(|analysis| analysis.unconditionally_stable)
+            .collect();
+        Some(values.to_pyarray(py))
+    }
+
+    /// Maximum available gain in dB at each frequency.
+    ///
+    /// MAG is defined only where the device is unconditionally stable; it is
+    /// negative infinity elsewhere, and `max_stable_gain_db` is the figure to
+    /// use there.
+    #[getter]
+    fn max_available_gain_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.gain_series(py, |analysis| analysis.mag_db)
+    }
+
+    /// Maximum stable gain `|S21/S12|` in dB at each frequency.
+    #[getter]
+    fn max_stable_gain_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.gain_series(py, |analysis| analysis.msg_db)
+    }
+
+    /// Mason's unilateral gain U in dB at each frequency.
+    #[getter]
+    fn mason_unilateral_gain_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.gain_series(py, |analysis| analysis.mason_u_db)
+    }
+
+    /// Forward transducer gain `|S21|^2` in dB at each frequency.
+    #[getter]
+    fn transducer_gain_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.gain_series(py, |analysis| analysis.s21_gain_db)
+    }
+
+    /// Reverse isolation `|S12|^2` in dB at each frequency.
+    #[getter]
+    fn reverse_isolation_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.gain_series(py, |analysis| analysis.s12_isolation_db)
+    }
+
+    /// Source and load stability circles at one frequency.
+    ///
+    /// Returns a dict with `input_center`, `input_radius`,
+    /// `input_stable_inside`, and the matching `output_*` entries. The
+    /// `*_stable_inside` flags say which side of each circle is the stable
+    /// region, which the centre and radius alone do not determine.
+    ///
+    /// Raises:
+    ///     IndexError: If the frequency index is out of range
+    ///     ValueError: If this is not a two-port result
+    ///
+    /// Example:
+    ///     >>> circles = sparams.stability_circles(0)
+    ///     >>> circles["input_center"], circles["input_radius"]
+    fn stability_circles<'py>(
+        &self,
+        py: Python<'py>,
+        frequency_index: usize,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let analyses = self.two_port_stability().ok_or_else(|| {
+            crate::errors::value_error(format!(
+                "stability circles are a two-port quantity, but this result has {} ports",
+                self.parameters.len()
+            ))
+        })?;
+        let analysis = analyses.get(frequency_index).ok_or_else(|| {
+            crate::errors::index_error(format!(
+                "frequency index {frequency_index} is out of range for result with {} points",
+                self.frequencies.len()
+            ))
+        })?;
+
+        let result = PyDict::new(py);
+        result.set_item(
+            "input_center",
+            pyo3::types::PyComplex::from_doubles(
+                py,
+                analysis.input_stability_center.re,
+                analysis.input_stability_center.im,
+            ),
+        )?;
+        result.set_item("input_radius", analysis.input_stability_radius)?;
+        result.set_item("input_stable_inside", analysis.input_stable_inside)?;
+        result.set_item(
+            "output_center",
+            pyo3::types::PyComplex::from_doubles(
+                py,
+                analysis.output_stability_center.re,
+                analysis.output_stability_center.im,
+            ),
+        )?;
+        result.set_item("output_radius", analysis.output_stability_radius)?;
+        result.set_item("output_stable_inside", analysis.output_stable_inside)?;
+        Ok(result)
     }
 
     /// Render this sweep as a Touchstone v1 document.

@@ -385,6 +385,11 @@ spnoise = engine.run_s_parameters(netlist, np.logspace(6, 10, 101),
                                   do_noise=True)
 cy12 = spnoise.cy(1, 2)                        # complex A²/Hz correlation
 print(spnoise.rn, spnoise.nf, spnoise.nfmin, spnoise.sopt)
+# Two-port stability and gain (None for any other port count)
+print(sparams.k_factor, sparams.mu_factor, abs(sparams.delta))
+print(sparams.unconditionally_stable, sparams.max_available_gain_db)
+circles = sparams.stability_circles(0)         # centres, radii, stable side
+sparams.write_touchstone("dut.s2p", format="ma")
 pss = engine.run_pss(
     netlist,
     fundamental_frequency=1e9,

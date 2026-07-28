@@ -39,29 +39,12 @@ Release numbers remain tied to the workspace version.
 - `RunReport.all_op`, `all_dc`, `all_tran`, `all_ac`, and `all_noise` retain
   every result when a deck carries more than one directive of a kind.
 - `MonteCarloResult.try_variable()`, `__getitem__`, and `__contains__`.
-
-### Changed
-
-- `Engine.run()` records a directive that fails as `skipped=True` with its
-  error text and continues with the remaining directives, which is what the
-  documentation already described. `continue_on_error=False` restores the
-  previous abort-and-raise behaviour.
-- Lookup and argument failures now derive from `RSpiceError` in addition to
-  their builtin base, so `except rspice.RSpiceError` covers every failure the
-  library raises. `except KeyError` and friends keep working unchanged.
-- `MonteCarloResult.get_variable()`, `mean()`, `std_dev()`, and `range()`
-  raise `KeyError` for an unknown variable instead of returning `None`.
-- `SimulationConfig`, `ConvergenceConfig`, `BypassConfig`, and
-  `ResourceLimits` compare by value.
-
-### Fixed
-
-- `DcSweepResult.result_at()` carries the per-device operating points that
-  `sweep[i]` and `points()` already provided.
-- `.four 1k I(V1)` and `.four 1k V(a,b)` are evaluated instead of failing
-  with "unknown node", which previously made `assert_passed()` fail on decks
-  those directives are valid in.
-
+- Two-port stability and gain figures on `SParameterResult`: Rollett `K`,
+  Edwards-Sinsky `mu` and `mu_prime`, the scattering determinant `delta`, an
+  `unconditionally_stable` verdict, MAG/MSG/Mason-U/transducer-gain/reverse
+  isolation in dB, and source and load `stability_circles()`. These are
+  two-port quantities and read `None` for any other port count rather than
+  being derived from a sub-matrix.
 - `Engine.health_check()` and a typed `HealthReport`: a readiness probe that
   exercises the configured parser-to-solver path against a fixed in-memory
   circuit, with no filesystem or network I/O.
@@ -120,6 +103,17 @@ Release numbers remain tied to the workspace version.
 
 ### Changed
 
+- `Engine.run()` records a directive that fails as `skipped=True` with its
+  error text and continues with the remaining directives, which is what the
+  documentation already described. `continue_on_error=False` restores the
+  previous abort-and-raise behaviour.
+- Lookup and argument failures now derive from `RSpiceError` in addition to
+  their builtin base, so `except rspice.RSpiceError` covers every failure the
+  library raises. `except KeyError` and friends keep working unchanged.
+- `MonteCarloResult.get_variable()`, `mean()`, `std_dev()`, and `range()`
+  raise `KeyError` for an unknown variable instead of returning `None`.
+- `SimulationConfig`, `ConvergenceConfig`, `BypassConfig`, and
+  `ResourceLimits` compare by value.
 - Marked the package as private/Do Not Upload, documented that release
   artifacts are not published to PyPI, and aligned distribution language with
   the repository-wide RSpice Personal Use License.
@@ -128,7 +122,6 @@ Release numbers remain tied to the workspace version.
 - `SimulationConfig.max_timestep` defaults to unbounded, so a large
   `min_timestep` is no longer rejected against a built-in ceiling. Pass a
   finite `max_timestep` when the embedding application requires one.
-
 - NumPy result arrays have explicit owned-copy semantics so their lifetime is
   independent of the Rust result object.
 - Long simulations release the GIL and may share immutable Engine, Netlist,
@@ -136,6 +129,11 @@ Release numbers remain tied to the workspace version.
 
 ### Fixed
 
+- `DcSweepResult.result_at()` carries the per-device operating points that
+  `sweep[i]` and `points()` already provided.
+- `.four 1k I(V1)` and `.four 1k V(a,b)` are evaluated instead of failing
+  with "unknown node", which previously made `assert_passed()` fail on decks
+  those directives are valid in.
 - `SimulationConfig.max_timestep` now accepts `float('inf')` in both the
   constructor and the setter. The getter already returned `inf` for the
   unbounded default, so the value could be read but never written back: a

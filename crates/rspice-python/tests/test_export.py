@@ -234,3 +234,70 @@ class TestDcSweepExport:
         header = parse_raw_header(sweep.to_raw().decode())
         assert header["Plotname"] == "DC transfer characteristic"
         assert header["Flags"] == "real"
+
+
+class TestTwoPortStability:
+    """K, mu, MAG, MSG, and the stability circles.
+
+    The fixture is a resistive tee whose S-parameters are all exactly 0.25,
+    so every figure below has a closed form: Delta = 0, K = 7, mu = 3,
+    MSG = 0 dB, and MAG = 10*log10(7 - sqrt(48)).
+    """
+
+    def test_availability_is_reported(self, sparams):
+        assert sparams.has_two_port_stability
+
+    def test_rollett_and_edwards_sinsky_factors(self, sparams):
+        np.testing.assert_allclose(sparams.k_factor, 7.0, rtol=1e-9)
+        np.testing.assert_allclose(sparams.mu_factor, 3.0, rtol=1e-9)
+        np.testing.assert_allclose(sparams.mu_prime, 3.0, rtol=1e-9)
+
+    def test_determinant_and_stability_verdict(self, sparams):
+        np.testing.assert_allclose(np.abs(sparams.delta), 0.0, atol=1e-12)
+        assert sparams.unconditionally_stable.all()
+
+    def test_gain_figures(self, sparams):
+        np.testing.assert_allclose(sparams.max_stable_gain_db, 0.0, atol=1e-9)
+        expected_mag = 10.0 * np.log10(7.0 - np.sqrt(48.0))
+        np.testing.assert_allclose(
+            sparams.max_available_gain_db, expected_mag, rtol=1e-9
+        )
+        np.testing.assert_allclose(
+            sparams.transducer_gain_db, 20.0 * np.log10(0.25), rtol=1e-9
+        )
+
+    def test_transducer_gain_matches_the_s_parameter(self, sparams):
+        np.testing.assert_allclose(
+            sparams.transducer_gain_db,
+            20.0 * np.log10(np.abs(sparams.s(2, 1))),
+            rtol=1e-9,
+        )
+
+    def test_stability_circles(self, sparams):
+        circles = sparams.stability_circles(0)
+        # Cs = S11 / |S11|^2 = 4, rs = |S12 S21| / |S11|^2 = 1.
+        assert circles["input_center"] == pytest.approx(4.0 + 0j)
+        assert circles["input_radius"] == pytest.approx(1.0)
+        assert circles["output_center"] == pytest.approx(4.0 + 0j)
+        assert circles["output_radius"] == pytest.approx(1.0)
+        # The circle sits outside the unit disc, so the stable region is the
+        # outside of it, which contains every passive termination.
+        assert circles["input_stable_inside"] is False
+        assert circles["output_stable_inside"] is False
+
+    def test_a_one_port_reports_no_two_port_figures(self, engine):
+        one_port = rspice.Netlist.parse(
+            "* One port\nV1 in 0 AC 0 portnum=1 z0=50\nR1 in 0 50\n.end"
+        )
+        result = engine.run_s_parameters(one_port, np.array([1e9]))
+
+        assert not result.has_two_port_stability
+        assert result.k_factor is None
+        assert result.delta is None
+        assert result.max_available_gain_db is None
+        with pytest.raises(ValueError, match="two-port"):
+            result.stability_circles(0)
+
+    def test_out_of_range_frequency_index_is_rejected(self, sparams):
+        with pytest.raises(IndexError, match="out of range"):
+            sparams.stability_circles(99)
