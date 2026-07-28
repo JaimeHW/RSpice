@@ -213,7 +213,7 @@ fn download_browser_canvas_png(
     let data_url = export_canvas
         .to_data_url_with_type("image/png")
         .map_err(js_error_message)?;
-    crate::workbench::browser_download::download_href(filename, &data_url)
+    crate::workbench::browser::download::download_href(filename, &data_url)
 }
 
 #[cfg(target_arch = "wasm32")]

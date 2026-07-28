@@ -264,13 +264,13 @@ fn schematic_save_dialog_default_name(state: &AppState) -> Option<String> {
 enum BrowserSchematicImportResult {
     Cancelled,
     Failed(String),
-    Loaded(crate::workbench::browser_file_import::PickedTextFile),
+    Loaded(crate::workbench::browser::file_import::PickedTextFile),
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct BrowserSchematicImportCompletion {
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: BrowserSchematicImportResult,
 }
 
@@ -282,15 +282,15 @@ thread_local! {
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_schematic_import() -> Result<(), String> {
-    let token = crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::Schematic,
+    let token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::Schematic,
     )?;
 
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         crate::io::schematic_io::SCHEMATIC_FILTER.0,
         crate::io::schematic_io::SCHEMATIC_FILTER.1,
         move |result| {
-            if !crate::workbench::browser_file_import::text_import_is_current(token) {
+            if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
             }
             let event = match result {
@@ -315,7 +315,7 @@ pub(crate) fn poll_browser_schematic_import(state: &mut AppState) -> bool {
     else {
         return false;
     };
-    if !crate::workbench::browser_file_import::finish_text_import(completion.token) {
+    if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return false;
     }
     match completion.result {

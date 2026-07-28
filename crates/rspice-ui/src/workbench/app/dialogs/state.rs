@@ -222,7 +222,7 @@ pub(crate) struct EngineeringTableDialogState {
     pub(crate) saved_edit_id: Option<String>,
     pub(crate) saved_edit_name: String,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) saved_import_token: Option<crate::workbench::browser_file_import::TextImportToken>,
+    pub(crate) saved_import_token: Option<crate::workbench::browser::file_import::TextImportToken>,
     pub(crate) error: Option<String>,
 }
 
@@ -242,7 +242,7 @@ impl EngineeringTableDialogState {
     pub(crate) fn close(&mut self) {
         #[cfg(target_arch = "wasm32")]
         if let Some(token) = self.saved_import_token.take() {
-            let _ = crate::workbench::browser_file_import::finish_text_import(token);
+            let _ = crate::workbench::browser::file_import::finish_text_import(token);
         }
         *self = Self::default();
     }

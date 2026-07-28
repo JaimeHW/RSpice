@@ -198,7 +198,7 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
 
     #[cfg(target_arch = "wasm32")]
     fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
-        crate::workbench::browser_download::download_text_file(path, contents)
+        crate::workbench::browser::download::download_text_file(path, contents)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -208,7 +208,7 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
         contents: &[u8],
         mime_type: &str,
     ) -> Result<(), String> {
-        crate::workbench::browser_download::download_bytes_file(
+        crate::workbench::browser::download::download_bytes_file(
             destination.path(),
             contents,
             mime_type,
@@ -244,7 +244,7 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
     ) -> Result<(), String> {
         let contents =
             crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv).write_text(dataset)?;
-        crate::workbench::browser_download::download_text_file(path, &contents)
+        crate::workbench::browser::download::download_text_file(path, &contents)
     }
 
     fn saved_paths_are_reopenable(&self) -> bool {

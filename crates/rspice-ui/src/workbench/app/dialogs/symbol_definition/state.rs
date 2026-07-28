@@ -24,16 +24,16 @@ pub(crate) struct SymbolImportDialogState {
     pub(crate) source_error: Option<String>,
     pub(crate) validation_error: Option<String>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) picker_token: Option<crate::workbench::browser_file_import::TextImportToken>,
+    pub(crate) picker_token: Option<crate::workbench::browser::file_import::TextImportToken>,
 }
 
 impl SymbolImportDialogState {
     pub(crate) fn close_and_discard(&mut self) {
         #[cfg(target_arch = "wasm32")]
         if let Some(token) = self.picker_token.take()
-            && crate::workbench::browser_file_import::text_import_is_current(token)
+            && crate::workbench::browser::file_import::text_import_is_current(token)
         {
-            let _ = crate::workbench::browser_file_import::cancel_active_text_import();
+            let _ = crate::workbench::browser::file_import::cancel_active_text_import();
         }
         *self = Self::default();
     }

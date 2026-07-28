@@ -812,7 +812,7 @@ impl RSpiceApp {
         self.state.poll_shortcut_library_persistence();
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::browser_file_import::register_text_import_repaint_context(ctx);
+        crate::workbench::browser::file_import::register_text_import_repaint_context(ctx);
         #[cfg(target_arch = "wasm32")]
         crate::workbench::project_lifecycle::poll_browser_binding_restore(&mut self.state);
         #[cfg(target_arch = "wasm32")]
@@ -1108,7 +1108,7 @@ pub(crate) fn close_design_management_dialog_route(state: &mut AppState) {
 #[cfg(target_arch = "wasm32")]
 fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
     use crate::workbench::RouteTransitionSource;
-    use crate::workbench::browser_navigation::{
+    use crate::workbench::browser::navigation::{
         current_location, install_popstate_listener, restart_history_session,
     };
 
@@ -1153,7 +1153,7 @@ fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
 
 #[cfg(target_arch = "wasm32")]
 fn synchronize_browser_surface_navigation(state: &mut AppState) {
-    use crate::workbench::browser_navigation::{
+    use crate::workbench::browser::navigation::{
         ensure_popstate_listener, history_session_ready, poll_popstate, push_route, replace_route,
         traversal_in_flight, traversal_watchdog_expired, traverse_history,
     };
@@ -1243,7 +1243,7 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
             return;
         }
         let canonical = state.workbench.current_route();
-        match crate::workbench::browser_navigation::restart_history_session(canonical) {
+        match crate::workbench::browser::navigation::restart_history_session(canonical) {
             Ok(()) => {
                 state
                     .workbench
@@ -1282,7 +1282,7 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
 
 #[cfg(target_arch = "wasm32")]
 fn recover_browser_history_at_active_task(state: &mut AppState) {
-    use crate::workbench::browser_navigation::{ensure_popstate_listener, restart_history_session};
+    use crate::workbench::browser::navigation::{ensure_popstate_listener, restart_history_session};
 
     state.workbench.clear_browser_history_effects();
     let canonical = state.workbench.current_route();
@@ -1305,10 +1305,10 @@ fn recover_browser_history_at_active_task(state: &mut AppState) {
 #[cfg(target_arch = "wasm32")]
 fn rollback_browser_navigation_after_sync_failure(
     state: &mut AppState,
-    error: crate::workbench::browser_navigation::BrowserNavigationError,
+    error: crate::workbench::browser::navigation::BrowserNavigationError,
 ) {
     use crate::workbench::RouteTransitionSource;
-    use crate::workbench::browser_navigation::{active_browser_route, restart_history_session};
+    use crate::workbench::browser::navigation::{active_browser_route, restart_history_session};
 
     match active_browser_route() {
         Ok(browser_route) => {
@@ -1385,7 +1385,7 @@ impl eframe::App for RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(enabled) =
-                crate::workbench::browser_accessibility::spoken_feedback_override()
+                crate::workbench::browser::accessibility::spoken_feedback_override()
             {
                 self.state.ui.browser_spoken_feedback = enabled;
             }
@@ -1411,7 +1411,7 @@ impl eframe::App for RSpiceApp {
     fn on_exit(&mut self) {
         log::info!("eframe on_exit — application shutting down");
         #[cfg(target_arch = "wasm32")]
-        if let Err(error) = crate::workbench::browser_navigation::uninstall_popstate_listener() {
+        if let Err(error) = crate::workbench::browser::navigation::uninstall_popstate_listener() {
             log::warn!("Failed to remove browser route listener: {error}");
         }
     }

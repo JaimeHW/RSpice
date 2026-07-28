@@ -25,8 +25,8 @@ use super::{
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct BrowserImportCompletion {
-    token: crate::workbench::browser_file_import::TextImportToken,
-    result: Result<Option<crate::workbench::browser_file_import::PickedTextFile>, String>,
+    token: crate::workbench::browser::file_import::TextImportToken,
+    result: Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -201,8 +201,8 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
     {
         let dependency_import = app.state.ui.code_workspace.veriloga.import_target.is_some();
-        let token = match crate::workbench::browser_file_import::try_begin_text_import(
-            crate::workbench::browser_file_import::BrowserTextImportKind::VerilogA,
+        let token = match crate::workbench::browser::file_import::try_begin_text_import(
+            crate::workbench::browser::file_import::BrowserTextImportKind::VerilogA,
         ) {
             Ok(token) => token,
             Err(error) => {
@@ -219,11 +219,11 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
         } else {
             &["va"]
         };
-        crate::workbench::browser_file_import::pick_text_file(
+        crate::workbench::browser::file_import::pick_text_file(
             "Verilog-A",
             extensions,
             move |result| {
-                if crate::workbench::browser_file_import::text_import_is_current(token) {
+                if crate::workbench::browser::file_import::text_import_is_current(token) {
                     BROWSER_IMPORT_COMPLETION.with(|slot| {
                         *slot.borrow_mut() = Some(BrowserImportCompletion { token, result });
                     });
@@ -239,7 +239,7 @@ fn poll_browser_import_completion(app: &mut RSpiceApp) {
         return;
     };
     app.state.ui.code_workspace.veriloga.import_in_progress = false;
-    if !crate::workbench::browser_file_import::finish_text_import(completion.token) {
+    if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return;
     }
     match completion.result {

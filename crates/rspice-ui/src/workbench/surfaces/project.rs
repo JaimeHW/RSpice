@@ -2715,7 +2715,7 @@ fn poll_browser_recovery_completions(ctx: &Context, app: &mut RSpiceApp) {
             continue;
         }
         let result = completion.result.and_then(|bytes| {
-            crate::workbench::browser_download::download_bytes_file(
+            crate::workbench::browser::download::download_bytes_file(
                 std::path::Path::new(&completion.filename),
                 &bytes,
                 "application/vnd.rspice.project+json",

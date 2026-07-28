@@ -936,14 +936,14 @@ pub(crate) fn import_netlist(state: &mut AppState) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 enum BrowserNetlistImportResult {
-    Loaded(crate::workbench::browser_file_import::PickedTextFile),
+    Loaded(crate::workbench::browser::file_import::PickedTextFile),
     Failed(String),
     Cancelled,
 }
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserNetlistImportCompletion {
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: BrowserNetlistImportResult,
 }
 
@@ -955,15 +955,15 @@ thread_local! {
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_netlist_import() -> Result<(), String> {
-    let token = crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::Netlist,
+    let token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::Netlist,
     )?;
 
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         NETLIST_FILTER.0,
         NETLIST_FILTER.1,
         move |result| {
-            if !crate::workbench::browser_file_import::text_import_is_current(token) {
+            if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
             }
             let event = match result {
@@ -988,7 +988,7 @@ pub(crate) fn poll_browser_netlist_import(state: &mut AppState) -> bool {
     else {
         return false;
     };
-    if !crate::workbench::browser_file_import::finish_text_import(completion.token) {
+    if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return false;
     }
     match completion.result {

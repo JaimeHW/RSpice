@@ -30,13 +30,7 @@
 pub(crate) mod account_organization;
 pub(crate) mod app;
 pub(crate) mod availability;
-#[cfg(target_arch = "wasm32")]
-pub(crate) mod browser_accessibility;
-#[cfg(target_arch = "wasm32")]
-pub(crate) mod browser_download;
-#[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) mod browser_file_import;
-pub(crate) mod browser_navigation;
+pub(crate) mod browser;
 pub(crate) mod calculator_tool;
 pub(crate) mod capability_workflow;
 pub(crate) mod chrome;

@@ -287,7 +287,7 @@ fn start_browser_project_save(
             }
         };
         let path = std::path::PathBuf::from(&prepared.suggested_name);
-        match crate::workbench::browser_download::download_text_file(&path, &text) {
+        match crate::workbench::browser::download::download_text_file(&path, &text) {
             Ok(()) => {
                 crate::workbench::project_lifecycle::cancel_transaction_if(
                     state,
@@ -328,7 +328,7 @@ fn start_browser_project_save(
                     .borrow_mut()
                     .push_back(BrowserProjectSaveCompletion { prepared, result });
             });
-            crate::workbench::browser_file_import::request_browser_import_repaint();
+            crate::workbench::browser::file_import::request_browser_import_repaint();
         },
     ) {
         Ok(()) => {
@@ -663,7 +663,7 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn browser_file_operation_label(state: &AppState) -> Option<String> {
-    if let Some(kind) = crate::workbench::browser_file_import::active_text_import_kind() {
+    if let Some(kind) = crate::workbench::browser::file_import::active_text_import_kind() {
         return Some(format!(
             "Waiting for the browser {} picker or permission request to finish.",
             kind.label()
@@ -679,7 +679,7 @@ pub(crate) fn browser_file_operation_label(state: &AppState) -> Option<String> {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn cancel_pending_browser_file_operation(state: &mut AppState) -> bool {
     let import_cancelled =
-        crate::workbench::browser_file_import::cancel_active_text_import().is_some();
+        crate::workbench::browser::file_import::cancel_active_text_import().is_some();
     let lifecycle_cancelled =
         crate::workbench::project_lifecycle::cancel_pending_browser_operation(state);
     let continuation_cancelled = state
@@ -1004,7 +1004,7 @@ enum BrowserProjectImportResult {
 struct BrowserProjectImportCompletion {
     transaction: crate::workbench::project_lifecycle::TransactionId,
     context: crate::workbench::project_lifecycle::BrowserOperationContext,
-    import_token: crate::workbench::browser_file_import::TextImportToken,
+    import_token: crate::workbench::browser::file_import::TextImportToken,
     payload: BrowserProjectImportPayload,
 }
 
@@ -1014,7 +1014,7 @@ enum BrowserProjectImportPayload {
     Cancelled,
     Failed(String),
     Canonical(crate::workbench::project_lifecycle::BrowserOpenResult),
-    Loaded(crate::workbench::browser_file_import::PickedTextFile),
+    Loaded(crate::workbench::browser::file_import::PickedTextFile),
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1028,8 +1028,8 @@ fn start_browser_project_import(
     transaction: crate::workbench::project_lifecycle::TransactionId,
     context: crate::workbench::project_lifecycle::BrowserOperationContext,
 ) -> Result<(), String> {
-    let import_token = crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::Project,
+    let import_token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::Project,
     )?;
 
     if crate::workbench::project_lifecycle::browser_open_file_picker_supported() {
@@ -1047,7 +1047,7 @@ fn start_browser_project_import(
                         },
                     ));
             });
-            crate::workbench::browser_file_import::request_browser_import_repaint();
+            crate::workbench::browser::file_import::request_browser_import_repaint();
         });
         match started {
             Ok(()) => return Ok(()),
@@ -1059,7 +1059,7 @@ fn start_browser_project_import(
         }
     }
 
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         crate::io::project_io::PROJECT_FILTER.0,
         crate::io::project_io::PROJECT_FILTER.1,
         move |result| {
@@ -1177,8 +1177,8 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn finish_browser_project_import(token: crate::workbench::browser_file_import::TextImportToken) {
-    let _ = crate::workbench::browser_file_import::finish_text_import(token);
+fn finish_browser_project_import(token: crate::workbench::browser::file_import::TextImportToken) {
+    let _ = crate::workbench::browser::file_import::finish_text_import(token);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1270,7 +1270,7 @@ fn finish_browser_canonical_open(
                         result,
                     });
             });
-            crate::workbench::browser_file_import::request_browser_import_repaint();
+            crate::workbench::browser::file_import::request_browser_import_repaint();
         },
     );
     true

@@ -512,7 +512,7 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
                             .borrow_mut()
                             .push_back(BrowserRestoreCompletion { context, result });
                     });
-                    crate::workbench::browser_file_import::request_browser_import_repaint();
+                    crate::workbench::browser::file_import::request_browser_import_repaint();
                 });
             }
         }

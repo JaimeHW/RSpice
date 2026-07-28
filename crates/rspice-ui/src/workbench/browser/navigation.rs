@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 #[cfg(any(test, target_arch = "wasm32"))]
 use serde::{Deserialize, Serialize};
 
-use super::surface_route::{SurfaceRoute, SurfaceRouteParseError};
+use crate::workbench::surface_route::{SurfaceRoute, SurfaceRouteParseError};
 
 const VIEW_KEY: &str = "view";
 const SURFACE_KEY: &str = "surface";

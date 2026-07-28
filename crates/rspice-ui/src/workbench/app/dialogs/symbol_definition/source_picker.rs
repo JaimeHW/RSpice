@@ -51,13 +51,13 @@ pub(super) fn pick_symbol_source(state: &mut SymbolImportDialogState) {
 enum BrowserSymbolImportResult {
     Cancelled,
     Failed(String),
-    Loaded(crate::workbench::browser_file_import::PickedTextFile),
+    Loaded(crate::workbench::browser::file_import::PickedTextFile),
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct BrowserSymbolImportCompletion {
-    token: crate::workbench::browser_file_import::TextImportToken,
+    token: crate::workbench::browser::file_import::TextImportToken,
     result: BrowserSymbolImportResult,
 }
 
@@ -73,8 +73,8 @@ pub(super) fn pick_symbol_source(state: &mut SymbolImportDialogState) {
         state.source_error = Some("A symbol definition picker is already open".to_owned());
         return;
     }
-    let token = match crate::workbench::browser_file_import::try_begin_text_import(
-        crate::workbench::browser_file_import::BrowserTextImportKind::SymbolDefinition,
+    let token = match crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::SymbolDefinition,
     ) {
         Ok(token) => token,
         Err(error) => {
@@ -84,11 +84,11 @@ pub(super) fn pick_symbol_source(state: &mut SymbolImportDialogState) {
     };
     state.picker_token = Some(token);
     state.source_error = None;
-    crate::workbench::browser_file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_text_file(
         SYMBOL_SOURCE_FILTER_NAME,
         SYMBOL_SOURCE_EXTENSIONS,
         move |result| {
-            if !crate::workbench::browser_file_import::text_import_is_current(token) {
+            if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
             }
             let result = match result {
@@ -110,7 +110,7 @@ pub(super) fn consume_symbol_source_result(state: &mut SymbolImportDialogState) 
         return;
     };
     if state.picker_token != Some(completion.token)
-        || !crate::workbench::browser_file_import::finish_text_import(completion.token)
+        || !crate::workbench::browser::file_import::finish_text_import(completion.token)
     {
         return;
     }

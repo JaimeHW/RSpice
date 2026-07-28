@@ -411,7 +411,7 @@ impl ShortcutArtifactIo for NativeShortcutArtifactIo {
         destination: &ObservedArtifactDestination,
         artifact: &PreparedShortcutArtifact,
     ) -> Result<ArtifactPublication, String> {
-        crate::workbench::browser_download::download_bytes_file(
+        crate::workbench::browser::download::download_bytes_file(
             &destination.path,
             artifact.bytes(),
             artifact.format().mime_type(),
