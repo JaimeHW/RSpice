@@ -9,7 +9,7 @@ use crate::simulation::reliability_engine::{
     ParamShift, ReliabilityEngine, ReliabilityResult, StressMetrics,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
@@ -100,82 +100,22 @@ pub struct ReliabilityData {
     pub device_results: Vec<ReliabilityResult>,
 }
 
-/// Run reliability analysis with default configuration.
-pub fn run_reliability_analysis(netlist_text: &str) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run reliability analysis with cooperative cancellation.
+/// Run reliability analysis with default configuration and no source path.
+///
+/// Test-only. The shipping path is
+/// [`run_reliability_analysis_with_config_and_source_path_and_abort`], which the
+/// device spec calls with the configuration the user set.
+#[cfg(test)]
 pub fn run_reliability_analysis_with_abort(
     netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ReliabilityData> {
-    run_reliability_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run reliability analysis with default configuration and a source path used
-/// to resolve relative includes and model file references.
-pub fn run_reliability_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run reliability analysis with source-path resolution and cooperative
-/// cancellation.
-pub fn run_reliability_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<ReliabilityData> {
     run_reliability_analysis_with_config_and_source_path_and_abort(
         netlist_text,
         &ReliabilityRunConfig::default(),
-        source_path,
-        abort,
-    )
-}
-
-/// Run reliability analysis using explicit configuration.
-pub fn run_reliability_analysis_with_config(
-    netlist_text: &str,
-    config: &ReliabilityRunConfig,
-) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run explicitly configured reliability analysis with cooperative
-/// cancellation.
-pub fn run_reliability_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &ReliabilityRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<ReliabilityData> {
-    run_reliability_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
         None,
         abort,
     )
-}
-
-/// Run reliability analysis using explicit configuration and a source path used
-/// to resolve relative includes and model file references.
-pub fn run_reliability_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &ReliabilityRunConfig,
-    source_path: Option<&Path>,
-) -> Result<ReliabilityData, String> {
-    run_reliability_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run explicitly configured reliability analysis with source-path resolution

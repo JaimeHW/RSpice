@@ -106,33 +106,16 @@ pub use pss::{
     run_pss_analysis_with_dc_seed_and_source_path_and_abort, run_pss_analysis_with_source_path,
     run_pss_analysis_with_source_path_and_abort,
 };
-pub use pstb::{
-    PstbData, PstbRunConfig, run_pstb_analysis, run_pstb_analysis_from_pss_with_abort,
-    run_pstb_analysis_from_pss_with_source_path_and_abort, run_pstb_analysis_with_abort,
-    run_pstb_analysis_with_config, run_pstb_analysis_with_config_and_abort,
-    run_pstb_analysis_with_config_and_source_path,
-    run_pstb_analysis_with_config_and_source_path_and_abort, run_pstb_analysis_with_source_path,
-    run_pstb_analysis_with_source_path_and_abort,
-};
+pub use pstb::{PstbData, PstbRunConfig, run_pstb_analysis_from_pss_with_source_path_and_abort};
 pub use reliability::{
-    ReliabilityData, ReliabilityRunConfig, run_reliability_analysis,
-    run_reliability_analysis_with_abort, run_reliability_analysis_with_config,
-    run_reliability_analysis_with_config_and_abort,
-    run_reliability_analysis_with_config_and_source_path,
+    ReliabilityData, ReliabilityRunConfig,
     run_reliability_analysis_with_config_and_source_path_and_abort,
-    run_reliability_analysis_with_source_path, run_reliability_analysis_with_source_path_and_abort,
 };
 pub use sensitivity::{
     SensitivityData, run_sensitivity_analysis, run_sensitivity_analysis_with_abort,
     run_sensitivity_analysis_with_source_path, run_sensitivity_analysis_with_source_path_and_abort,
 };
-pub use soa::{
-    SoaData, SoaRunConfig, run_soa_analysis, run_soa_analysis_with_abort,
-    run_soa_analysis_with_config, run_soa_analysis_with_config_and_abort,
-    run_soa_analysis_with_config_and_source_path,
-    run_soa_analysis_with_config_and_source_path_and_abort, run_soa_analysis_with_source_path,
-    run_soa_analysis_with_source_path_and_abort,
-};
+pub use soa::{SoaData, SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort};
 pub use sparameter::{
     SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep,
     run_sparameter_analysis_with_abort,

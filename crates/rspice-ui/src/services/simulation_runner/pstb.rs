@@ -10,7 +10,7 @@ use super::{
     parse_runner_netlist_with_abort,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use std::fmt;
 use std::path::Path;
@@ -363,66 +363,20 @@ fn normalized_probe_participation_with_abort(
     }
 }
 
-/// Run PSTB analysis using a PSS operating point and monodromy-based Floquet analysis.
-pub fn run_pstb_analysis_with_config(
-    netlist_text: &str,
-    config: &PstbRunConfig,
-) -> Result<PstbData, String> {
-    run_pstb_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run PSTB analysis with cooperative cancellation.
+/// Run PSTB standalone -- computing its own PSS operating point rather than
+/// receiving one -- with cooperative cancellation.
+///
+/// Test-only. PSTB ships as a dependent task: the frequency spec runs PSS
+/// first and hands the authenticated monodromy matrix to
+/// [`run_pstb_analysis_from_pss_with_source_path_and_abort`], so nothing in the
+/// product takes this path.
+#[cfg(test)]
 pub fn run_pstb_analysis_with_config_and_abort(
     netlist_text: &str,
     config: &PstbRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
-    run_pstb_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run PSTB analysis using a PSS operating point and monodromy-based Floquet
-/// analysis, resolving relative includes from the source path when provided.
-pub fn run_pstb_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &PstbRunConfig,
-    source_path: Option<&Path>,
-) -> Result<PstbData, String> {
-    run_pstb_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Run PSTB analysis with cooperative cancellation and source-relative include
-/// resolution.
-pub fn run_pstb_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &PstbRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    run_pstb_analysis_impl(netlist_text, config, source_path, None, abort)
-}
-
-/// Run PSTB from the exact authenticated monodromy matrix produced by the
-/// prerequisite PSS task.
-pub fn run_pstb_analysis_from_pss_with_abort(
-    netlist_text: &str,
-    config: &PstbRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    run_pstb_analysis_from_pss_with_source_path_and_abort(
-        netlist_text,
-        config,
-        operating_point,
-        None,
-        abort,
-    )
+    run_pstb_analysis_impl(netlist_text, config, None, None, abort)
 }
 
 /// Run PSTB from an exact retained PSS state with direct-call source-relative
@@ -606,40 +560,6 @@ fn run_pstb_analysis_impl(
         stability_classification: stability_type_label(pstb_result.stability).to_string(),
         is_stable: pstb_result.is_stable(),
     })
-}
-
-/// Run PSTB analysis with default configuration.
-pub fn run_pstb_analysis(netlist_text: &str) -> Result<PstbData, String> {
-    run_pstb_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run PSTB analysis with default configuration and cooperative cancellation.
-pub fn run_pstb_analysis_with_abort(
-    netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    run_pstb_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run PSTB analysis with default configuration and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_pstb_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<PstbData, String> {
-    run_pstb_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run PSTB analysis with default configuration, source-relative include
-/// resolution, and cooperative cancellation.
-pub fn run_pstb_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    let cfg = PstbRunConfig::default();
-    run_pstb_analysis_with_config_and_source_path_and_abort(netlist_text, &cfg, source_path, abort)
 }
 
 #[cfg(test)]

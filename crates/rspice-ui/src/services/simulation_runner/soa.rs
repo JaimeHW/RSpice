@@ -12,7 +12,9 @@ use crate::services::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
 use rspice_core::netlist::{Element, ElementKind};
 use std::collections::HashMap;
 use std::path::Path;
@@ -103,75 +105,22 @@ pub struct SoaData {
     pub evaluations: Vec<SoAEvaluation>,
 }
 
-/// Run SOA analysis using default configuration.
-pub fn run_soa_analysis(netlist_text: &str) -> Result<SoaData, String> {
-    run_soa_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run SOA analysis with cooperative cancellation.
+/// Run SOA analysis with default configuration and no source path.
+///
+/// Test-only. The shipping path is
+/// [`run_soa_analysis_with_config_and_source_path_and_abort`], which the device
+/// spec calls with the configuration the user set.
+#[cfg(test)]
 pub fn run_soa_analysis_with_abort(
     netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<SoaData> {
-    run_soa_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run SOA analysis using default configuration and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_soa_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<SoaData, String> {
-    run_soa_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run SOA analysis with source-path resolution and cooperative cancellation.
-pub fn run_soa_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<SoaData> {
     run_soa_analysis_with_config_and_source_path_and_abort(
         netlist_text,
         &SoaRunConfig::default(),
-        source_path,
+        None,
         abort,
     )
-}
-
-/// Run SOA analysis using explicit configuration.
-pub fn run_soa_analysis_with_config(
-    netlist_text: &str,
-    config: &SoaRunConfig,
-) -> Result<SoaData, String> {
-    run_soa_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run explicitly configured SOA analysis with cooperative cancellation.
-pub fn run_soa_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &SoaRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<SoaData> {
-    run_soa_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run SOA analysis using explicit configuration and a source path used to
-/// resolve relative includes and model file references.
-pub fn run_soa_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &SoaRunConfig,
-    source_path: Option<&Path>,
-) -> Result<SoaData, String> {
-    run_soa_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run explicitly configured SOA analysis with source-path resolution and
