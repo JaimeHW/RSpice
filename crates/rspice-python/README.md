@@ -514,9 +514,14 @@ with ProcessPoolExecutor() as pool:
 
 A `Netlist` pickles by replaying its parse from the deck text it retains, so
 the payload stays the size of the source rather than the whole AST, and the
-`ResourceLimits` it was parsed under are reapplied. `PssResult`, `HbResult`,
-`PacResult`, `CompressedTransientResult`, and `DistortionResult` are not yet
-picklable.
+`ResourceLimits` it was parsed under are reapplied.
+
+Every result type pickles, including the periodic and RF families. A result
+carries the state behind everything its own accessors expose, so each readable
+quantity — and each quantity derived from one, such as `PssResult.thd_percent`
+or `HbResult.is_valid` — is unchanged across a round trip. Internal traces with
+no accessor on the class holding them are not carried: `CompressedTransientResult`
+device store traces and `PacResult` branch currents fall in that group.
 
 ## Error Handling
 

@@ -15,9 +15,17 @@ Release numbers remain tied to the workspace version.
   A Touchstone export whose ports do not share one reference impedance is
   refused rather than written with a silently wrong `R`.
 - Pickle and `copy.deepcopy` support for `Netlist`, every configuration class
-  and enum, and twenty result types, so netlists and results can cross a
+  and enum, and every result type, so netlists and results can cross a
   process boundary with `multiprocessing`. A `Netlist` pickles by replaying
   its parse from the retained source text under the same `ResourceLimits`.
+  A result carries the state behind everything its own accessors expose, so
+  each readable quantity, and each quantity derived from one, is unchanged
+  across a round trip; internal traces no accessor reaches are not carried.
+- Pickle support for the periodic and RF results: `PssResult`, `HbResult`,
+  `PacResult`, `CompressedTransientResult`, and `DistortionResult`. `PacResult`
+  restores its per-sideband spectra and its conversion matrix independently,
+  and `HbResult` retains the branch-current and reactive spectra that
+  `is_valid` tests so the verdict cannot change across a round trip.
 - Netlist introspection: an `Element` projection (name, kind, nodes, value,
   value expression, model, instance parameters) behind `Netlist.elements` and
   `Netlist.element()`, plus `Netlist.node_names`, `Netlist.parameters`,

@@ -24,6 +24,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rspice_core::analysis::{
     AcResult, AcSensitivityResult, DistortionAnalysisResult, DistortionProduct,
+    HbContinuationLimitation, HbReactiveKind,
 };
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::Complex64;
@@ -115,6 +116,113 @@ fn rebuild_ac_row(state: AcRowState) -> AcResult {
         branch_names,
         voltages: complex_from_state(voltages),
         currents: complex_from_state(currents),
+    }
+}
+
+/// One named complex spectrum: `(name, coefficients, harmonic frequencies)`.
+///
+/// `SpectralVoltage` and `SpectralBranchCurrent` share this shape.
+type SpectralSeriesState = (String, Vec<(f64, f64)>, Vec<f64>);
+
+/// One reactive element's retained HB spectra:
+/// `(device, kind, voltage phasors, current phasors, DC current is exact)`.
+type HbReactiveState = (String, String, Vec<(f64, f64)>, Vec<(f64, f64)>, bool);
+
+/// Complex values indexed `[frequency][sideband][node]` or
+/// `[frequency][output sideband][input sideband]`.
+type ComplexGridState = Vec<Vec<Vec<(f64, f64)>>>;
+
+/// One distortion product and its per-F1-point rows, keyed by stable label.
+type DistortionProductState = (String, Vec<AcRowState>);
+
+fn spectral_series_state(
+    name: &str,
+    coefficients: &[Complex64],
+    frequencies: &[f64],
+) -> SpectralSeriesState {
+    (
+        name.to_string(),
+        complex_state(coefficients),
+        frequencies.to_vec(),
+    )
+}
+
+/// `HbReactiveKind` travels as its lowercase element name.
+fn hb_reactive_kind_label(kind: HbReactiveKind) -> &'static str {
+    match kind {
+        HbReactiveKind::Capacitor => "capacitor",
+        HbReactiveKind::Inductor => "inductor",
+    }
+}
+
+fn rebuild_hb_reactive(
+    state: HbReactiveState,
+) -> PyResult<rspice_core::analysis::HbReactiveSpectrum> {
+    let (device_name, kind, voltage, current, dc_current_is_exact) = state;
+    Ok(rspice_core::analysis::HbReactiveSpectrum {
+        device_name,
+        kind: hb_reactive_kind_from_label(&kind)?,
+        voltage_coefficients: complex_from_state(voltage),
+        current_coefficients: complex_from_state(current),
+        dc_current_is_exact,
+    })
+}
+
+fn hb_reactive_kind_from_label(label: &str) -> PyResult<HbReactiveKind> {
+    match label {
+        "capacitor" => Ok(HbReactiveKind::Capacitor),
+        "inductor" => Ok(HbReactiveKind::Inductor),
+        other => Err(crate::errors::value_error(format!(
+            "unknown reactive element kind '{other}' in pickled state"
+        ))),
+    }
+}
+
+/// Continuation limitations travel as stable snake-case tags rather than
+/// ordinals, so a state pickled by one build still reads correctly under a
+/// later one that reorders the enum.
+fn hb_limitation_label(limitation: &HbContinuationLimitation) -> &'static str {
+    match limitation {
+        HbContinuationLimitation::NonlinearVoltageSourcesUseNortonEquivalent => {
+            "nonlinear_voltage_sources_use_norton_equivalent"
+        }
+        HbContinuationLimitation::InductorDcCurrentUsesShortSurrogate => {
+            "inductor_dc_current_uses_short_surrogate"
+        }
+        HbContinuationLimitation::VerilogAInternalStateNotRetained => {
+            "veriloga_internal_state_not_retained"
+        }
+    }
+}
+
+fn hb_limitation_from_label(label: &str) -> PyResult<HbContinuationLimitation> {
+    match label {
+        "nonlinear_voltage_sources_use_norton_equivalent" => {
+            Ok(HbContinuationLimitation::NonlinearVoltageSourcesUseNortonEquivalent)
+        }
+        "inductor_dc_current_uses_short_surrogate" => {
+            Ok(HbContinuationLimitation::InductorDcCurrentUsesShortSurrogate)
+        }
+        "veriloga_internal_state_not_retained" => {
+            Ok(HbContinuationLimitation::VerilogAInternalStateNotRetained)
+        }
+        other => Err(crate::errors::value_error(format!(
+            "unknown continuation limitation '{other}' in pickled state"
+        ))),
+    }
+}
+
+/// Distortion products travel as the same stable labels the accessors accept.
+fn distortion_product_from_label(label: &str) -> PyResult<DistortionProduct> {
+    match label {
+        "2f1" => Ok(DistortionProduct::SecondHarmonic),
+        "3f1" => Ok(DistortionProduct::ThirdHarmonic),
+        "f1+f2" => Ok(DistortionProduct::Sum),
+        "f1-f2" => Ok(DistortionProduct::Difference),
+        "2f1-f2" => Ok(DistortionProduct::ThirdOrderDifference),
+        other => Err(crate::errors::value_error(format!(
+            "unknown distortion product '{other}' in pickled state"
+        ))),
     }
 }
 
@@ -677,6 +785,51 @@ impl PyCompressedTransientResult {
             self.inner.input_points,
             self.inner.compression_ratio
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// Device store traces have no accessor on this class, so they are not
+    /// carried; every quantity a caller can read back is.
+    #[staticmethod]
+    fn _unpickle(
+        time: Vec<f64>,
+        voltages: Vec<Vec<f64>>,
+        num_nodes: usize,
+        node_names: Vec<String>,
+        compression_ratio: f64,
+        input_points: usize,
+    ) -> Self {
+        Self::new(rspice_core::analysis::TransientResultCompressed {
+            time,
+            voltages,
+            num_nodes,
+            node_names,
+            store_traces: Vec::new(),
+            compression_ratio,
+            input_points,
+        })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (Vec<f64>, Vec<Vec<f64>>, usize, Vec<String>, f64, usize),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.inner.time.clone(),
+                self.inner.voltages.clone(),
+                self.inner.num_nodes,
+                self.inner.node_names.clone(),
+                self.inner.compression_ratio,
+                self.inner.input_points,
+            ),
+        ))
     }
 }
 
@@ -2146,6 +2299,76 @@ impl PyDistortionResult {
             self.num_points(),
             self.available_product_labels().join(", ")
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        f2_over_f1: Option<f64>,
+        f1_frequencies: Vec<f64>,
+        fundamental_f1: Vec<AcRowState>,
+        fundamental_f2: Option<Vec<AcRowState>>,
+        products: Vec<DistortionProductState>,
+        node_names: Vec<String>,
+        branch_names: Vec<String>,
+    ) -> PyResult<Self> {
+        let products = products
+            .into_iter()
+            .map(|(label, rows)| {
+                let rows: Vec<AcResult> = rows.into_iter().map(rebuild_ac_row).collect();
+                Ok((distortion_product_from_label(&label)?, rows))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(Self {
+            f2_over_f1,
+            f1_frequencies,
+            fundamental_f1: fundamental_f1.into_iter().map(rebuild_ac_row).collect(),
+            fundamental_f2: fundamental_f2
+                .map(|rows| rows.into_iter().map(rebuild_ac_row).collect()),
+            products,
+            node_names,
+            branch_names,
+        })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            Option<f64>,
+            Vec<f64>,
+            Vec<AcRowState>,
+            Option<Vec<AcRowState>>,
+            Vec<DistortionProductState>,
+            Vec<String>,
+            Vec<String>,
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.f2_over_f1,
+                self.f1_frequencies.clone(),
+                self.fundamental_f1.iter().map(ac_row_state).collect(),
+                self.fundamental_f2
+                    .as_ref()
+                    .map(|rows| rows.iter().map(ac_row_state).collect()),
+                self.products
+                    .iter()
+                    .map(|(product, rows)| {
+                        (
+                            product.label().to_string(),
+                            rows.iter().map(ac_row_state).collect(),
+                        )
+                    })
+                    .collect(),
+                self.node_names.clone(),
+                self.branch_names.clone(),
+            ),
+        ))
     }
 }
 
@@ -5464,6 +5687,88 @@ impl PyPssResult {
             self.residual_norm
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// The orbit group is the converged periodic solution; the diagnostics
+    /// group is what the shooting run reported around it.
+    #[staticmethod]
+    fn _unpickle(
+        orbit: (f64, f64, usize, f64, bool),
+        time: Vec<f64>,
+        waveforms: Vec<Vec<f64>>,
+        node_names: Vec<String>,
+        floquet_multipliers: Vec<(f64, f64)>,
+        diagnostics: (usize, usize, f64, f64, bool),
+    ) -> Self {
+        let (period, frequency, iterations, residual_norm, period_detected) = orbit;
+        let (num_harmonics, run_iterations, run_residual, run_period, is_stable) = diagnostics;
+        Self {
+            inner: rspice_core::analysis::PssResult {
+                period,
+                frequency,
+                iterations,
+                residual_norm,
+                time,
+                waveforms: waveforms
+                    .into_iter()
+                    .map(rspice_core::analysis::PeriodicWaveform::from_values)
+                    .collect(),
+                node_names,
+                period_detected,
+                floquet_multipliers: complex_from_state(floquet_multipliers),
+            },
+            num_harmonics,
+            iterations: run_iterations,
+            residual_norm: run_residual,
+            period: run_period,
+            is_stable,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            (f64, f64, usize, f64, bool),
+            Vec<f64>,
+            Vec<Vec<f64>>,
+            Vec<String>,
+            Vec<(f64, f64)>,
+            (usize, usize, f64, f64, bool),
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                (
+                    self.inner.period,
+                    self.inner.frequency,
+                    self.inner.iterations,
+                    self.inner.residual_norm,
+                    self.inner.period_detected,
+                ),
+                self.inner.time.clone(),
+                self.inner
+                    .waveforms
+                    .iter()
+                    .map(|waveform| waveform.values.clone())
+                    .collect(),
+                self.inner.node_names.clone(),
+                complex_state(&self.inner.floquet_multipliers),
+                (
+                    self.num_harmonics,
+                    self.iterations,
+                    self.residual_norm,
+                    self.period,
+                    self.is_stable,
+                ),
+            ),
+        ))
+    }
 }
 
 /// Harmonic-balance spectra and convergence diagnostics.
@@ -5591,6 +5896,149 @@ impl PyHbResult {
             self.inner.node_names.len(),
             self.inner.converged
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// Branch-current and reactive spectra are carried even though this class
+    /// exposes no accessor for them, because `is_valid` is a finiteness test
+    /// over all three spectra and would otherwise change across a round-trip.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(
+        convergence: (bool, usize, f64, f64, usize, f64),
+        spectral_voltages: Vec<SpectralSeriesState>,
+        node_names: Vec<String>,
+        harmonic_frequencies: Vec<f64>,
+        tones: Vec<String>,
+        mna_branch_currents: Vec<SpectralSeriesState>,
+        reactive_spectra: Vec<HbReactiveState>,
+        continuation_limitations: Vec<String>,
+    ) -> PyResult<Self> {
+        let (
+            converged,
+            iterations,
+            residual_norm,
+            fundamental_freq,
+            num_harmonics,
+            solve_time_seconds,
+        ) = convergence;
+        Ok(Self {
+            inner: rspice_core::analysis::HbResult {
+                converged,
+                iterations,
+                residual_norm,
+                fundamental_freq,
+                spectral_voltages: spectral_voltages
+                    .into_iter()
+                    .map(|(node_name, coefficients, frequencies)| {
+                        rspice_core::analysis::SpectralVoltage {
+                            node_name,
+                            coefficients: complex_from_state(coefficients),
+                            frequencies,
+                        }
+                    })
+                    .collect(),
+                node_names,
+                num_harmonics,
+                harmonic_frequencies,
+                solve_time_seconds,
+                tones,
+                mna_branch_currents: mna_branch_currents
+                    .into_iter()
+                    .map(|(device_name, coefficients, frequencies)| {
+                        rspice_core::analysis::SpectralBranchCurrent {
+                            device_name,
+                            coefficients: complex_from_state(coefficients),
+                            frequencies,
+                        }
+                    })
+                    .collect(),
+                reactive_spectra: reactive_spectra
+                    .into_iter()
+                    .map(rebuild_hb_reactive)
+                    .collect::<PyResult<Vec<_>>>()?,
+                continuation_limitations: continuation_limitations
+                    .iter()
+                    .map(|label| hb_limitation_from_label(label))
+                    .collect::<PyResult<Vec<_>>>()?,
+            },
+        })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            (bool, usize, f64, f64, usize, f64),
+            Vec<SpectralSeriesState>,
+            Vec<String>,
+            Vec<f64>,
+            Vec<String>,
+            Vec<SpectralSeriesState>,
+            Vec<HbReactiveState>,
+            Vec<String>,
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                (
+                    self.inner.converged,
+                    self.inner.iterations,
+                    self.inner.residual_norm,
+                    self.inner.fundamental_freq,
+                    self.inner.num_harmonics,
+                    self.inner.solve_time_seconds,
+                ),
+                self.inner
+                    .spectral_voltages
+                    .iter()
+                    .map(|value| {
+                        spectral_series_state(
+                            &value.node_name,
+                            &value.coefficients,
+                            &value.frequencies,
+                        )
+                    })
+                    .collect(),
+                self.inner.node_names.clone(),
+                self.inner.harmonic_frequencies.clone(),
+                self.inner.tones.clone(),
+                self.inner
+                    .mna_branch_currents
+                    .iter()
+                    .map(|branch| {
+                        spectral_series_state(
+                            &branch.device_name,
+                            &branch.coefficients,
+                            &branch.frequencies,
+                        )
+                    })
+                    .collect(),
+                self.inner
+                    .reactive_spectra
+                    .iter()
+                    .map(|reactive| {
+                        (
+                            reactive.device_name.clone(),
+                            hb_reactive_kind_label(reactive.kind).to_string(),
+                            complex_state(&reactive.voltage_coefficients),
+                            complex_state(&reactive.current_coefficients),
+                            reactive.dc_current_is_exact,
+                        )
+                    })
+                    .collect(),
+                self.inner
+                    .continuation_limitations
+                    .iter()
+                    .map(|limitation| hb_limitation_label(limitation).to_string())
+                    .collect(),
+            ),
+        ))
     }
 }
 
@@ -5724,6 +6172,138 @@ impl PyPacResult {
             self.inner.sideband_max,
             self.converged
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// Branch currents have no accessor on this class and are not carried.
+    /// Each sideband's absolute frequency is recomputed by `PacResult::new`
+    /// from the same `sideband * f0 + offset` relation that produced it.
+    #[staticmethod]
+    fn _unpickle(
+        sweep: (f64, i32, i32, usize, f64, bool),
+        frequencies: Vec<f64>,
+        names: (Vec<String>, Vec<String>),
+        node_voltages: ComplexGridState,
+        conversion_matrix: ComplexGridState,
+        sources: (Option<String>, Option<String>),
+    ) -> Self {
+        let (fundamental_frequency, sideband_min, sideband_max, iterations, residual, converged) =
+            sweep;
+        let (node_names, branch_names) = names;
+        let mut inner = rspice_core::analysis::advanced::PacResult::new(
+            fundamental_frequency,
+            frequencies.clone(),
+            sideband_min,
+            sideband_max,
+            node_names,
+            branch_names,
+        );
+        for (freq_idx, per_frequency) in node_voltages.into_iter().enumerate() {
+            for (offset, voltages) in per_frequency.into_iter().enumerate() {
+                let sideband = sideband_min + offset as i32;
+                if let Some(data) = inner.get_sideband_data_mut(freq_idx, sideband) {
+                    data.node_voltages = complex_from_state(voltages);
+                }
+            }
+        }
+        let mut matrix = rspice_core::analysis::advanced::ConversionMatrix::new(
+            fundamental_frequency,
+            sideband_min,
+            sideband_max,
+            frequencies,
+        );
+        for (freq_idx, per_frequency) in conversion_matrix.into_iter().enumerate() {
+            for (output_offset, row) in per_frequency.into_iter().enumerate() {
+                for (input_offset, (re, im)) in row.into_iter().enumerate() {
+                    matrix.set(
+                        freq_idx,
+                        sideband_min + output_offset as i32,
+                        sideband_min + input_offset as i32,
+                        Complex64::new(re, im),
+                    );
+                }
+            }
+        }
+        inner.conversion_matrix = matrix;
+        inner.iterations = iterations;
+        inner.residual = residual;
+        let (input_source, output_node) = sources;
+        inner.input_source = input_source;
+        inner.output_node = output_node;
+        Self { inner, converged }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            (f64, i32, i32, usize, f64, bool),
+            Vec<f64>,
+            (Vec<String>, Vec<String>),
+            ComplexGridState,
+            ComplexGridState,
+            (Option<String>, Option<String>),
+        ),
+    )> {
+        let sidebands: Vec<i32> = (self.inner.sideband_min..=self.inner.sideband_max).collect();
+        let node_voltages = (0..self.inner.frequencies.len())
+            .map(|freq_idx| {
+                sidebands
+                    .iter()
+                    .map(|&sideband| {
+                        self.inner
+                            .get_sideband_data(freq_idx, sideband)
+                            .map(|data| complex_state(&data.node_voltages))
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .collect();
+        let conversion_matrix = (0..self.inner.frequencies.len())
+            .map(|freq_idx| {
+                sidebands
+                    .iter()
+                    .map(|&output| {
+                        sidebands
+                            .iter()
+                            .map(|&input| {
+                                let value =
+                                    self.inner.conversion_matrix.get(freq_idx, output, input);
+                                (value.re, value.im)
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                (
+                    self.inner.fundamental_frequency,
+                    self.inner.sideband_min,
+                    self.inner.sideband_max,
+                    self.inner.iterations,
+                    self.inner.residual,
+                    self.converged,
+                ),
+                self.inner.frequencies.clone(),
+                (
+                    self.inner.node_names.clone(),
+                    self.inner.branch_names.clone(),
+                ),
+                node_voltages,
+                conversion_matrix,
+                (
+                    self.inner.input_source.clone(),
+                    self.inner.output_node.clone(),
+                ),
+            ),
+        ))
     }
 }
 
