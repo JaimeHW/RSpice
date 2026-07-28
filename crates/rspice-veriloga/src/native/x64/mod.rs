@@ -7376,6 +7376,11 @@ endmodule
             device.is_using_native(),
             "{name}: shipped device must use native code"
         );
+        if matches!(name, "hicuml0" | "hicuml2") {
+            device
+                .try_set_analysis_type(2)
+                .unwrap_or_else(|error| panic!("{name}: set transient analysis: {error}"));
+        }
         shipped_probe_trace(name, "native-device:ready");
 
         let terminal_count = model.num_terminals;
