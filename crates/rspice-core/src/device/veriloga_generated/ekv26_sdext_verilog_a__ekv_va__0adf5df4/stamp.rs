@@ -201,6 +201,12 @@ impl Instance {
                 let v137 = parameters[10];
                 let v143 = parameters[12];
                 let v149 = 8.617333262e-5f64;
+                let mut out32: f64 = 0.0;
+                let mut out59: f64 = 0.0;
+                let mut out60: f64 = 0.0;
+                let mut out64: f64 = 0.0;
+                let mut out66: f64 = 0.0;
+                let mut out69: f64 = 0.0;
                 let v2 = v0 / v1;
                 let v5 = (v2 * v3).sqrt();
                 let v7 = v5 * v6;
@@ -220,6 +226,7 @@ impl Instance {
                 if v30 != 0.0 {
                 } else {
                     let v32 = v28 + v31;
+                    out32 = v32;
                 }
                 let v35 = if v33 == v34 { 1.0 } else { 0.0 };
                 let v38: f64;
@@ -236,20 +243,25 @@ impl Instance {
                 let v56 = v55 / (v53.sqrt());
                 if v24 != 0.0 {
                     let v59 = if v57 != v58 { 1.0 } else { 0.0 };
+                    out59 = v59;
                     if v59 != 0.0 {
                         let v64 = v56 * (v57 - v58);
+                        out64 = v64;
                     } else {
                     }
                 } else {
                     let v60 = if v57 != v58 { 1.0 } else { 0.0 };
+                    out60 = v60;
                     if v60 != 0.0 {
                         let v66 = v56 * (v58 - v57);
+                        out66 = v66;
                     } else {
                     }
                 }
                 let v62 = if v61 != v58 { 1.0 } else { 0.0 };
                 if v62 != 0.0 {
                     let v69 = v55 + ((v61 - v58) * v56);
+                    out69 = v69;
                 } else {
                 }
                 let v71 = if v70 != v58 { 1.0 } else { 0.0 };
@@ -323,7 +335,7 @@ impl Instance {
                 }
                 let v151 = v46 / (v38 * v149);
                 let v152 = -v52;
-            [v5, v7, v15, v18, v24, v27, v30, v32, v35, v38, v46, v49, v52, v59, v64, v60, v66, v62, v69, v71, v76, v77, v96, v99, v101, v104, v105, v107, v109, v110, v111, v112, v117, v118, v125, v132, v139, v145, v151, v142, v148, v152, v129, v136, v121]
+            [v5, v7, v15, v18, v24, v27, v30, out32, v35, v38, v46, v49, v52, out59, out64, out60, out66, v62, out69, v71, v76, v77, v96, v99, v101, v104, v105, v107, v109, v110, v111, v112, v117, v118, v125, v132, v139, v145, v151, v142, v148, v152, v129, v136, v121]
         };
         self.canonical_staged[2] = produced[0];
         self.canonical_staged[25] = produced[1];
@@ -459,6 +471,7 @@ impl Instance {
                 let v179 = staged[50];
                 let v184 = staged[58];
                 let v186 = staged[59];
+                let mut out110: f64 = 0.0;
                 let v6: f64;
                 if v1 != 0.0 {
                     let v4 = v2 + v3;
@@ -526,6 +539,7 @@ impl Instance {
                 if v103 != 0.0 {
                 } else {
                     let v110 = v97 * (v11 + (v107 * v99));
+                    out110 = v110;
                 }
                 let v106 = (v14 + v14) * v105;
                 let v112 = if v73 > v111 { 1.0 } else { 0.0 };
@@ -555,7 +569,7 @@ impl Instance {
                 let v185 = v123 * v184;
                 let v187 = v125 * v186;
                 let v189 = (v185 + v187) + v176;
-            [v8, v10, v12, v14, v16, v18, v29, v66, v68, v70, v71, v73, v75, v81, v97, v99, v84, v101, v102, v110, v106, v112, v131, v135, v139, v144, v149, v154, v172, v174, v177, v178, v180, v181, v182, v183, v185, v187, v189]
+            [v8, v10, v12, v14, v16, v18, v29, v66, v68, v70, v71, v73, v75, v81, v97, v99, v84, v101, v102, out110, v106, v112, v131, v135, v139, v144, v149, v154, v172, v174, v177, v178, v180, v181, v182, v183, v185, v187, v189]
         };
         self.canonical_staged[28] = produced[0];
         self.canonical_staged[17] = produced[1];
