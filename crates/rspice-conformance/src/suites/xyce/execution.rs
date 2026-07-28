@@ -7978,19 +7978,19 @@ impl XyceTestRunner {
                 );
             }
 
-            let target_locked_time_grid = contract
-                .comparison
-                .compares_waveforms_exactly()
-                .then(|| baseline_result.time.clone());
-            let target_locked_step_sizes = contract
-                .comparison
-                .compares_waveforms_exactly()
-                .then(|| baseline_result.step_sizes.clone());
+            // Exact relational families compare the independently integrated
+            // target waveform against the baseline. Replaying the baseline's
+            // accepted-step grid here is not semantics-preserving: companion
+            // histories and nonlinear state evolve from the actual accepted
+            // steps, so a forced grid can change target physics even when both
+            // independent runs already produce the same grid. The exact
+            // comparator below remains authoritative for rejecting any target
+            // whose grid or serialized waveform is not identical.
             let (target_netlist, target_result) = match self.run_transient_family_plan(
                 &target_plan,
                 start,
-                target_locked_time_grid,
-                target_locked_step_sizes,
+                None,
+                None,
             ) {
                 Ok(result) => result,
                 Err(SimulationError::Aborted) => {
