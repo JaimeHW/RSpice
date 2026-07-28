@@ -12,33 +12,29 @@
 //! Resolving a live document into one of these lives in the parent module;
 //! this half is a value model and validates only itself.
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest as _, Sha256};
+use serde::{Deserialize, Serialize};
+use sha2::Digest as _;
 
 use crate::hardcopy::sources::{
     DISPLAY_NAME_LIMIT, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, validate_label,
 };
 use crate::hardcopy::{
     ActiveHardcopySource, ContentExtent, HardcopyContentSection, HardcopyDocumentId,
-    HardcopyDocumentKind, HardcopyScope, Length, PrintColor, PrintMappingEntry, PrintMappingTable,
-    PrintObjectIdentity, PrintObjectKind, PrintRedundancy,
+    HardcopyDocumentKind, HardcopyScope, Length, PrintMappingTable,
 };
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::results::report_document::{
-    FigureSizing, FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportPage,
-    ReportReferenceMode,
+    FigureSizing, FrozenReportArtifact, ReportBlockId, ReportPage, ReportReferenceMode,
 };
 use crate::state::{
     AnalysisResultPayload, Bus, BusTap, Component, DesignNote, DocumentationShape, Junction,
-    NetLabel, ResolvedSymbolIssueKind, ResolvedSymbolSource, SheetId, SymbolDocument, SymbolShape,
-    Wire,
+    NetLabel, SymbolDocument, Wire,
 };
 use crate::workbench::documents::result_document::ResultViewer;
 
 use super::{
-    HardcopySourceError, MAX_WORKER_SNAPSHOT_BYTES, PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION,
-    WORKER_SNAPSHOT_SCHEMA_VERSION, canonical_digest, default_print_mapping,
-    validate_frozen_report_png,
+    HardcopySourceError, MAX_WORKER_SNAPSHOT_BYTES, WORKER_SNAPSHOT_SCHEMA_VERSION,
+    canonical_digest, default_print_mapping, validate_frozen_report_png,
 };
 
 /// One exact point in the source's natural physical coordinate system.

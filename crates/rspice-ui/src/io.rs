@@ -21,18 +21,14 @@ pub(crate) mod schematic_io;
 pub(crate) mod waveform_io;
 
 // Re-exports
-pub use lib_parser::{
-    IncludeDirective, IncludeType, LibrarySection, ModelDef, ParamValue, ParsedLibrary,
-    SubcircuitDef,
-};
-pub use netlist_export::{ExportOptions, NetlistExporter, NetlistFormat};
+pub use netlist_export::NetlistFormat;
 pub use project_execution::{
-    PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext, ProjectModelLibrary,
+    PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext,
 };
 #[allow(deprecated)]
 pub use project_io::{
-    ProjectFile, ProjectIoError, ProjectSimulationResults, ProjectVersion, load_project_file,
-    save_project_file, show_open_project_dialog, show_save_project_dialog,
+    ProjectFile, ProjectIoError, ProjectSimulationResults, load_project_file,
+    show_open_project_dialog, show_save_project_dialog,
 };
 pub use schematic_io::{
     SchematicFile, SchematicIoError, SchematicVersion, load_schematic, save_schematic,
