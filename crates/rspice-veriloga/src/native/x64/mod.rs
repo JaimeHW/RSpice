@@ -326,12 +326,31 @@ fn compile_model_inner(
         noise_exponents.push(exponent_entry);
     }
 
+    let published_current_pairs = model
+        .stamp_programs
+        .iter()
+        .map(|stamp| {
+            let Some((pos, neg)) = (stamp.branch_ordinal.is_none())
+                .then(|| infer_current_terminal_pair(stamp))
+                .flatten()
+            else {
+                return Ok(None);
+            };
+            let forward = terminal_pair_current_index(pos, neg, model.num_terminals)
+                .ok_or_else(|| current_pair_unavailable(model, pos, neg))?;
+            let reverse = terminal_pair_current_index(neg, pos, model.num_terminals)
+                .ok_or_else(|| current_pair_unavailable(model, neg, pos))?;
+            Ok(Some((forward, reverse)))
+        })
+        .collect::<JitResult<Vec<_>>>()?;
+
     let stamp_kernel = align_image_for_entry(&mut image, &mut entry_starts);
     let stamp_kernel_bytes = driver::compile_stamp_kernel(
         stamp_kernel.as_usize(),
         assignment,
         &stamp_values,
         &jacobians,
+        &published_current_pairs,
     )?;
     image.extend_from_slice(&stamp_kernel_bytes);
 

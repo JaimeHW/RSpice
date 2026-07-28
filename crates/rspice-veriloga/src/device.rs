@@ -2831,11 +2831,7 @@ impl VerilogADevice {
 
         {
             let context = &mut self.context;
-            if context.currents.len() != stamp_count {
-                context.currents.resize(stamp_count, 0.0);
-            } else {
-                context.currents.fill(0.0);
-            }
+            context.prepare_indexed_currents(stamp_count);
             if context.variables.len() < model.num_variables {
                 context.variables.resize(model.num_variables, 0.0);
             }

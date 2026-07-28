@@ -10,6 +10,7 @@ use crate::native::model::{CodeOffset, NativeStampKernelIo};
 use crate::native::{EvalContext, JitError, JitResult};
 
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
+const BRANCH_CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_currents) as i32;
 const CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, currents) as i32;
 const ACTIVE_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, program_active) as i32;
 const JACOBIANS_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, jacobians) as i32;
@@ -30,8 +31,10 @@ pub(crate) fn compile_stamp_kernel(
     assignment: CodeOffset,
     stamp_values: &[CodeOffset],
     jacobians: &[Vec<CodeOffset>],
+    published_current_pairs: &[Option<(usize, usize)>],
 ) -> JitResult<Vec<u8>> {
-    if stamp_values.len() != jacobians.len() {
+    if stamp_values.len() != jacobians.len() || stamp_values.len() != published_current_pairs.len()
+    {
         return Err(internal_error(
             "stamp-kernel value and Jacobian entry shapes differ",
         ));
@@ -48,8 +51,11 @@ pub(crate) fn compile_stamp_kernel(
     emit_entry_call(&mut encoder, driver_image_offset, assignment)?;
 
     let mut jacobian_index = 0usize;
-    for (stamp_index, (value_entry, stamp_jacobians)) in
-        stamp_values.iter().zip(jacobians).enumerate()
+    for (stamp_index, ((value_entry, stamp_jacobians), current_pair)) in stamp_values
+        .iter()
+        .zip(jacobians)
+        .zip(published_current_pairs)
+        .enumerate()
     {
         let active_disp = byte_offset(stamp_index, "stamp active-mask")?;
         encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::Rsp, IO_STACK_OFFSET);
@@ -62,6 +68,25 @@ pub(crate) fn compile_stamp_kernel(
         let current_disp = word_offset(stamp_index, "stamp value")?;
         encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::R12, CURRENTS_OFFSET);
         encoder.movsd_m64_base_disp32_xmm(Gpr::R11, current_disp, Xmm::Xmm0);
+
+        if let Some((forward, reverse)) = current_pair {
+            encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::R12, BRANCH_CURRENTS_OFFSET);
+            encoder.movsd_m64_base_disp32_xmm(
+                Gpr::R11,
+                word_offset(*forward, "forward terminal-pair current")?,
+                Xmm::Xmm0,
+            );
+            if forward != reverse {
+                encoder.movq_r64_xmm(Gpr::R10, Xmm::Xmm0);
+                encoder.btc_r64_imm8(Gpr::R10, 63);
+                encoder.movq_xmm_r64(Xmm::Xmm1, Gpr::R10);
+                encoder.movsd_m64_base_disp32_xmm(
+                    Gpr::R11,
+                    word_offset(*reverse, "reverse terminal-pair current")?,
+                    Xmm::Xmm1,
+                );
+            }
+        }
 
         for entry in stamp_jacobians {
             emit_entry_call(&mut encoder, driver_image_offset, *entry)?;
@@ -177,8 +202,14 @@ mod tests {
 
     #[test]
     fn rejects_mismatched_entry_shapes() {
-        let error = compile_stamp_kernel(128, CodeOffset::new(0), &[CodeOffset::new(16)], &[])
-            .expect_err("shape mismatch must fail");
+        let error = compile_stamp_kernel(
+            128,
+            CodeOffset::new(0),
+            &[CodeOffset::new(16)],
+            &[],
+            &[None],
+        )
+        .expect_err("shape mismatch must fail");
         assert!(error.to_string().contains("entry shapes differ"));
     }
 
@@ -192,6 +223,7 @@ mod tests {
                 vec![CodeOffset::new(48), CodeOffset::new(64)],
                 vec![CodeOffset::new(80)],
             ],
+            &[None, None],
         )
         .expect("compile driver");
 

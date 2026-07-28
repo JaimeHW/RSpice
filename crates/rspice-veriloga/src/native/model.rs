@@ -275,6 +275,7 @@ pub struct NativeModel {
     entries: NativeEntryOffsets,
     current_dependencies: NativeCurrentDependencies,
     stamp_kernel_branch_unknowns: Vec<usize>,
+    stamp_kernel_current_order_safe: bool,
     required_storage: NativeRequiredStorage,
     stats: PlanStats,
 }
@@ -367,6 +368,25 @@ impl NativeModel {
         );
         stamp_kernel_branch_unknowns.sort_unstable();
         stamp_kernel_branch_unknowns.dedup();
+        let stamp_kernel_current_order_safe =
+            current_dependencies.assignment_prior_currents.is_empty()
+                && current_dependencies
+                    .stamp_value_prior_currents
+                    .iter()
+                    .enumerate()
+                    .all(|(stamp, dependencies)| {
+                        dependencies.iter().all(|dependency| *dependency < stamp)
+                    })
+                && current_dependencies
+                    .jacobian_prior_currents
+                    .iter()
+                    .enumerate()
+                    .all(|(stamp, entries)| {
+                        entries
+                            .iter()
+                            .flatten()
+                            .all(|dependency| *dependency <= stamp)
+                    });
         let stats = PlanStats {
             assignment_entry_points: 1,
             stamp_kernel_entry_points: usize::from(entries.stamp_kernel.is_some()),
@@ -387,6 +407,7 @@ impl NativeModel {
             entries,
             current_dependencies,
             stamp_kernel_branch_unknowns,
+            stamp_kernel_current_order_safe,
             required_storage,
             stats,
         })
@@ -998,33 +1019,7 @@ impl NativeModel {
     /// deliberately kept on the scalar path until the driver publishes those
     /// values at the exact expression boundary.
     pub(crate) fn stamp_kernel_is_eligible(&self) -> bool {
-        self.entries.stamp_kernel.is_some()
-            && self
-                .current_dependencies
-                .assignment_prior_currents
-                .is_empty()
-            && self
-                .current_dependencies
-                .stamp_values
-                .iter()
-                .all(Vec::is_empty)
-            && self
-                .current_dependencies
-                .stamp_value_prior_currents
-                .iter()
-                .all(Vec::is_empty)
-            && self
-                .current_dependencies
-                .jacobians
-                .iter()
-                .flatten()
-                .all(Vec::is_empty)
-            && self
-                .current_dependencies
-                .jacobian_prior_currents
-                .iter()
-                .flatten()
-                .all(Vec::is_empty)
+        self.entries.stamp_kernel.is_some() && self.stamp_kernel_current_order_safe
     }
 
     pub(crate) fn stamp_kernel_branch_unknowns(&self) -> &[usize] {
