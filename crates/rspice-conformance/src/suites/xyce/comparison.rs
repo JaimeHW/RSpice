@@ -4654,6 +4654,33 @@ impl XyceTestRunner {
         let output_initial_interval = Self::output_initial_interval(source)?;
         let tran_time_scale_factor = Self::tran_print_time_scale_factor(source)?;
         Self::validate_transient_result_time_grid(result)?;
+        let reference_times = reference
+            .rows
+            .iter()
+            .map(|row| {
+                row.get(layout.time_column)
+                    .copied()
+                    .unwrap_or(f64::NAN)
+                    / tran_time_scale_factor
+            })
+            .collect::<Vec<_>>();
+        let index_aligned_grid = result.time.len() == reference_times.len()
+            && reference_times
+                .windows(2)
+                .zip(result.time.windows(2))
+                .all(|(reference_window, actual_window)| {
+                    let reference_dt = reference_window[1] - reference_window[0];
+                    let actual_dt = actual_window[1] - actual_window[0];
+                    if !reference_dt.is_finite()
+                        || !actual_dt.is_finite()
+                        || reference_dt <= 0.0
+                        || actual_dt <= 0.0
+                    {
+                        return false;
+                    }
+                    let ratio = actual_dt / reference_dt;
+                    ratio.is_finite() && (0.75..=1.333_333_333_333_333_3).contains(&ratio)
+                });
         let stateful_waveforms = data_columns
             .iter()
             .map(|probe| Self::derived_tran_probe_waveform(probe, netlist, result))
@@ -4730,8 +4757,31 @@ impl XyceTestRunner {
                 } else {
                     match &stateful_waveforms[column_index] {
                         Some(values) => {
-                            Self::interpolate_transient_waveform_at(&result.time, values, time)?
+                            if index_aligned_grid {
+                                values
+                                    .get(row_index)
+                                    .copied()
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "stateful transient waveform is missing aligned row {row_index}"
+                                        )
+                                    })?
+                            } else {
+                                Self::interpolate_transient_waveform_at(
+                                    &result.time,
+                                    values,
+                                    time,
+                                )?
+                            }
                         }
+                        None if index_aligned_grid => Self::evaluate_tran_probe(
+                            probe,
+                            netlist,
+                            result,
+                            result.time.get(row_index).copied().ok_or_else(|| {
+                                format!("transient result is missing aligned row {row_index}")
+                            })?,
+                        )?,
                         None => Self::evaluate_tran_probe(probe, netlist, result, time)?,
                     }
                 };
