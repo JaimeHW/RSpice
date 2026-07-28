@@ -28,6 +28,7 @@
 //! rather than left behind.
 
 mod builtins;
+pub mod canonical;
 mod compact;
 mod device;
 mod discover;
