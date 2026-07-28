@@ -1640,14 +1640,19 @@ mod tests {
         fs::write(root.join("support.rs"), "legacy support").expect("write legacy support fixture");
         let device = root.join("fixture");
         fs::create_dir_all(&device).expect("create generated device fixture");
+        // The import line matters as much as the calls: a device that names no
+        // part of this module gets an empty one, so a fixture without it would
+        // be testing the wrong branch.
         fs::write(
             device.join("stamp.rs"),
-            "fn stamp(s: &mut Scratch) { s.store_scalar(0, 1.0); }",
+            "use crate::device::veriloga_generated::kernel_runtime::{Scratch};\n\
+             fn stamp(s: &mut Scratch) { s.store_scalar(0, 1.0); }",
         )
         .expect("write generated stamp fixture");
         fs::write(
             device.join("state.rs"),
-            "fn allocate() { KernelScratch::new_box(); }",
+            "use crate::device::veriloga_generated::kernel_runtime::KernelScratch;\n\
+             fn allocate() { KernelScratch::new_box(); }",
         )
         .expect("write generated state fixture");
 
@@ -1678,6 +1683,19 @@ mod tests {
             "{runtime}"
         );
         reject_legacy_ad_runtime_files(&root).expect("validate generated kernel runtime");
+
+        // And the other branch, which is the one the shipped corpus takes: a
+        // device that names nothing here gets an empty module rather than a
+        // pruned skeleton. Pruning is per method, so it cannot express "all of
+        // it" — it removes the scratch matrix's accessors and leaves the
+        // `Index` impls that call them, which does not compile.
+        fs::write(device.join("stamp.rs"), "fn stamp() {}").expect("rewrite stamp fixture");
+        fs::write(device.join("state.rs"), "fn allocate() {}").expect("rewrite state fixture");
+        write_kernel_runtime(&root).expect("write kernel runtime");
+        let runtime = fs::read_to_string(root.join("kernel_runtime.rs"))
+            .expect("read generated kernel runtime");
+        assert!(!runtime.contains("struct Scratch<"), "{runtime}");
+        assert!(!runtime.contains("fn "), "{runtime}");
         fs::remove_dir_all(root).expect("remove generated root");
     }
 

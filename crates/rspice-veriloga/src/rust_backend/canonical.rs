@@ -58,7 +58,8 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use crate::canonical_ir::cfg::{
-    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValue, CfgValueKind, CfgValueType,
+    CfgBinaryOp, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp, CfgValue, CfgValueKind,
+    CfgValueType,
 };
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::schedule::{InvalidationClass, Stage, schedule, split, worth_splitting};
@@ -285,10 +286,7 @@ impl ModelPlan {
         // *adding* a merge to the graph and a value added afterwards would have
         // no derivative. Differentiating a block parameter is the ordinary case,
         // so nothing else has to know this happened.
-        let charges: Vec<Option<ValueId>> = residuals
-            .iter()
-            .map(|residual| stored_charge(&mut cfg.function, *residual))
-            .collect();
+        let charges = stored_charges(&mut cfg.function, &residuals);
         cfg.function
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
@@ -1771,9 +1769,56 @@ impl Wants {
 /// charge with conduction in one statement: separating those needs the reactive
 /// part tracked through the arithmetic, and calling the whole expression a
 /// charge would put conduction into the reactive matrix.
-fn stored_charge(function: &mut CfgFunction, residual: ValueId) -> Option<ValueId> {
-    let charge = resolve_charge(function, residual, 0)?;
-    materialise_charge(function, &charge)
+fn stored_charges(function: &mut CfgFunction, residuals: &[ValueId]) -> Vec<Option<ValueId>> {
+    let reaches = values_reaching_a_ddt(function);
+    let mut insertions: Vec<(ValueId, ValueId)> = Vec::new();
+    let charges: Vec<Option<ValueId>> = residuals
+        .iter()
+        .map(|residual| {
+            resolve_charge(function, &reaches, *residual, 0)
+                .and_then(|charge| materialise_charge(function, &charge, &mut insertions))
+        })
+        .collect();
+    // Once, at the end: an instruction list cannot be rebuilt while it is still
+    // being read for the next residual, and two residuals routinely share a
+    // subexpression.
+    apply_insertions(function, &insertions);
+    charges
+}
+
+/// Splice each built instruction in directly after the one it mirrors.
+fn apply_insertions(function: &mut CfgFunction, insertions: &[(ValueId, ValueId)]) {
+    if insertions.is_empty() {
+        return;
+    }
+    let mut after: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
+    for (anchor, value) in insertions {
+        after.entry(*anchor).or_default().push(*value);
+    }
+    for block in &mut function.blocks {
+        if !block
+            .instructions
+            .iter()
+            .any(|instruction| after.contains_key(&instruction.result))
+        {
+            continue;
+        }
+        let mut rebuilt = Vec::with_capacity(block.instructions.len() + insertions.len());
+        for instruction in std::mem::take(&mut block.instructions) {
+            let anchor = instruction.result;
+            rebuilt.push(instruction);
+            if let Some(values) = after.get(&anchor) {
+                rebuilt.extend(values.iter().map(|result| CfgInstruction { result: *result }));
+            }
+        }
+        block.instructions = rebuilt;
+    }
+}
+
+impl Charge {
+    fn is_nothing(&self) -> bool {
+        matches!(self, Self::Nothing)
+    }
 }
 
 /// How deep a chain of merges to follow before giving up.
@@ -1789,37 +1834,197 @@ const MAX_CHARGE_MERGE_DEPTH: usize = 8;
 /// bottom-up: the parameter that carries a guarded charge can only be added once
 /// every arm's charge exists to be passed on the edges.
 enum Charge {
-    /// The operand of a `ddt`.
+    /// A value the graph already holds — the operand of a `ddt`, or one side of
+    /// an operation that carries no charge of its own.
     Value(ValueId),
     /// This path stores nothing. At the top that means the contribution is not
-    /// reactive at all; inside a merge it is the arm that was not taken.
+    /// reactive at all; inside a merge it is the arm that was not taken, and
+    /// inside a sum it is the conduction half.
     Nothing,
     /// One charge per edge into `block`, in the order [`edges_into`] gives them.
     Merge { block: BlockId, arms: Vec<Charge> },
+    /// An operation the charge needs that the graph only has in its `ddt` form.
+    ///
+    /// `I(db) <+ TYPE * ddt(QD)` stores `TYPE * QD`, and that product exists
+    /// nowhere until it is built. It is inserted directly after `anchor` — the
+    /// instruction it mirrors — so its operands are in scope exactly where the
+    /// original's were, without any dominance question to answer.
+    Op {
+        anchor: ValueId,
+        kind: Box<ChargeOp>,
+    },
 }
 
-fn resolve_charge(function: &CfgFunction, residual: ValueId, depth: usize) -> Option<Charge> {
-    if depth > MAX_CHARGE_MERGE_DEPTH {
+enum ChargeOp {
+    Binary {
+        op: CfgBinaryOp,
+        left: Charge,
+        right: Charge,
+    },
+    Unary {
+        op: CfgUnaryOp,
+        input: Charge,
+    },
+}
+
+/// Which values can reach a `ddt` at all.
+///
+/// A fixed point rather than one pass, because a loop-carried block parameter
+/// depends on values computed from itself. It exists so resolution can answer
+/// "stores nothing" in O(1) instead of walking a residual's whole expression
+/// DAG as a tree — which on a compact model is both exponential and, if it were
+/// bounded to stop that, silently wrong for anything deeper than the bound.
+fn values_reaching_a_ddt(function: &CfgFunction) -> Vec<bool> {
+    let incoming = {
+        let mut incoming: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
+        for block in &function.blocks {
+            for (target, args) in outgoing_edges(block) {
+                for (param, argument) in function.block(target).params.iter().zip(args) {
+                    incoming.entry(*param).or_default().push(argument);
+                }
+            }
+        }
+        incoming
+    };
+    let mut reaches = vec![false; function.values.len()];
+    loop {
+        let mut changed = false;
+        for value in &function.values {
+            let index = usize::from(value.id);
+            if reaches[index] {
+                continue;
+            }
+            let reached = match &value.kind {
+                CfgValueKind::Ddt { .. } => true,
+                CfgValueKind::BlockParameter => incoming
+                    .get(&value.id)
+                    .is_some_and(|args| args.iter().any(|arg| reaches[usize::from(*arg)])),
+                kind => kind
+                    .operands()
+                    .into_iter()
+                    .any(|operand| reaches[usize::from(operand)]),
+            };
+            if reached {
+                reaches[index] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return reaches;
+        }
+    }
+}
+
+fn outgoing_edges(block: &crate::canonical_ir::cfg::CfgBlock) -> Vec<(BlockId, Vec<ValueId>)> {
+    match &block.terminator {
+        CfgTerminator::Jump { target, args } => vec![(*target, args.clone())],
+        CfgTerminator::Branch {
+            then_target,
+            then_args,
+            else_target,
+            else_args,
+            ..
+        } => vec![
+            (*then_target, then_args.clone()),
+            (*else_target, else_args.clone()),
+        ],
+        CfgTerminator::Return | CfgTerminator::Unset => Vec::new(),
+    }
+}
+
+/// `merges` counts only nested merges — arithmetic recurses freely, because in
+/// SSA it is a DAG and the only way back to a value already on the stack is
+/// through a loop-carried block parameter.
+fn resolve_charge(
+    function: &CfgFunction,
+    reaches: &[bool],
+    residual: ValueId,
+    merges: usize,
+) -> Option<Charge> {
+    if !reaches.get(usize::from(residual)).copied().unwrap_or(false) {
+        return Some(Charge::Nothing);
+    }
+    if merges > MAX_CHARGE_MERGE_DEPTH {
         return None;
     }
+
     match &function.value(residual).kind {
         CfgValueKind::Ddt { input, .. } => Some(Charge::Value(*input)),
         CfgValueKind::RealConstant(constant) if *constant == 0.0 => Some(Charge::Nothing),
-        CfgValueKind::Binary {
-            op: CfgBinaryOp::Add,
-            left,
-            right,
-        } => {
-            let zero = |value: ValueId| {
-                matches!(
-                    function.value(value).kind,
-                    CfgValueKind::RealConstant(constant) if constant == 0.0
-                )
-            };
-            match (zero(*left), zero(*right)) {
-                (true, false) => resolve_charge(function, *right, depth + 1),
-                (false, true) => resolve_charge(function, *left, depth + 1),
+        // Linear arithmetic is pushed inside the `ddt`, which is what makes a
+        // scaled or summed charge recoverable. `k * ddt(q)` stores `k * q`;
+        // `ddt(q1) + ddt(q2)` stores `q1 + q2`. Only the operations that
+        // commute with `d/dt` are followed — a product of two charges is not
+        // linear in either, so it is refused rather than approximated.
+        CfgValueKind::Binary { op, left, right } => {
+            let (op, left, right) = (*op, *left, *right);
+            let charged_left = resolve_charge(function, reaches, left, merges);
+            let charged_right = resolve_charge(function, reaches, right, merges);
+            let stores =
+                |charge: &Option<Charge>| matches!(charge, Some(charge) if !charge.is_nothing());
+            match (op, stores(&charged_left), stores(&charged_right)) {
+                // A sum of a conduction term and a charge stores only the
+                // charge — the conduction half is already in the residual and
+                // the reactive matrix does not want it. That is what the `0 + x`
+                // accumulator is, generalised.
+                (CfgBinaryOp::Add | CfgBinaryOp::Sub, true, false) => charged_left,
+                (CfgBinaryOp::Add, false, true) => charged_right,
+                (CfgBinaryOp::Sub, false, true) => Some(Charge::Op {
+                    anchor: residual,
+                    kind: Box::new(ChargeOp::Unary {
+                        op: CfgUnaryOp::Neg,
+                        input: charged_right?,
+                    }),
+                }),
+                (CfgBinaryOp::Add | CfgBinaryOp::Sub, true, true) => Some(Charge::Op {
+                    anchor: residual,
+                    kind: Box::new(ChargeOp::Binary {
+                        op,
+                        left: charged_left?,
+                        right: charged_right?,
+                    }),
+                }),
+                (CfgBinaryOp::Mul, true, false) => Some(Charge::Op {
+                    anchor: residual,
+                    kind: Box::new(ChargeOp::Binary {
+                        op,
+                        left: charged_left?,
+                        right: Charge::Value(right),
+                    }),
+                }),
+                (CfgBinaryOp::Mul, false, true) => Some(Charge::Op {
+                    anchor: residual,
+                    kind: Box::new(ChargeOp::Binary {
+                        op,
+                        left: Charge::Value(left),
+                        right: charged_right?,
+                    }),
+                }),
+                // Dividing a charge by something that carries none is still
+                // linear in the charge; the other way round is not.
+                (CfgBinaryOp::Div, true, false) => Some(Charge::Op {
+                    anchor: residual,
+                    kind: Box::new(ChargeOp::Binary {
+                        op,
+                        left: charged_left?,
+                        right: Charge::Value(right),
+                    }),
+                }),
+                (_, false, false) => Some(Charge::Nothing),
                 _ => None,
+            }
+        }
+        CfgValueKind::Unary {
+            op: op @ CfgUnaryOp::Neg,
+            input,
+        } => {
+            let (op, input) = (*op, *input);
+            match resolve_charge(function, reaches, input, merges)? {
+                Charge::Nothing => Some(Charge::Nothing),
+                charge => Some(Charge::Op {
+                    anchor: residual,
+                    kind: Box::new(ChargeOp::Unary { op, input: charge }),
+                }),
             }
         }
         // A guarded contribution. `I(a, b) <+ ddt(q)` inside an `if` reaches its
@@ -1839,7 +2044,7 @@ fn resolve_charge(function: &CfgFunction, residual: ValueId, depth: usize) -> Op
             let mut stores = false;
             for (source, slot) in edges_into(function, block) {
                 let argument = *edge_arguments(function, source, slot).get(position)?;
-                let arm = resolve_charge(function, argument, depth + 1)?;
+                let arm = resolve_charge(function, reaches, argument, merges + 1)?;
                 stores |= !matches!(arm, Charge::Nothing);
                 arms.push(arm);
             }
@@ -1852,16 +2057,47 @@ fn resolve_charge(function: &CfgFunction, residual: ValueId, depth: usize) -> Op
     }
 }
 
-fn materialise_charge(function: &mut CfgFunction, charge: &Charge) -> Option<ValueId> {
+fn materialise_charge(
+    function: &mut CfgFunction,
+    charge: &Charge,
+    insertions: &mut Vec<(ValueId, ValueId)>,
+) -> Option<ValueId> {
     match charge {
         Charge::Value(value) => Some(*value),
         Charge::Nothing => None,
+        Charge::Op { anchor, kind } => {
+            let result = match &**kind {
+                ChargeOp::Binary { op, left, right } => {
+                    let left = materialise_operand(function, left, insertions);
+                    let right = materialise_operand(function, right, insertions);
+                    push_value(
+                        function,
+                        CfgValueType::Real,
+                        CfgValueKind::Binary {
+                            op: *op,
+                            left,
+                            right,
+                        },
+                    )
+                }
+                ChargeOp::Unary { op, input } => {
+                    let input = materialise_operand(function, input, insertions);
+                    push_value(
+                        function,
+                        CfgValueType::Real,
+                        CfgValueKind::Unary { op: *op, input },
+                    )
+                }
+            };
+            insertions.push((*anchor, result));
+            Some(result)
+        }
         Charge::Merge { block, arms } => {
             // Depth first: an arm that is itself a merge has to own a parameter
             // before this one can name it on an edge.
             let mut arguments = Vec::with_capacity(arms.len());
             for arm in arms {
-                let value = match materialise_charge(function, arm) {
+                let value = match materialise_charge(function, arm, insertions) {
                     Some(value) => value,
                     None => zero_constant(function),
                 };
@@ -1875,6 +2111,18 @@ fn materialise_charge(function: &mut CfgFunction, charge: &Charge) -> Option<Val
             }
             Some(parameter)
         }
+    }
+}
+
+/// An operand of a built operation, with "stores nothing" spelled as a zero.
+fn materialise_operand(
+    function: &mut CfgFunction,
+    charge: &Charge,
+    insertions: &mut Vec<(ValueId, ValueId)>,
+) -> ValueId {
+    match materialise_charge(function, charge, insertions) {
+        Some(value) => value,
+        None => zero_constant(function),
     }
 }
 
