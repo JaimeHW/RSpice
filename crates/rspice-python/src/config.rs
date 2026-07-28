@@ -210,6 +210,38 @@ impl PyDampingStrategy {
             PyDampingStrategy::Combined => "DampingStrategy.COMBINED".to_string(),
         }
     }
+
+    /// Pickle as a reference to the class attribute, so an unpickled member
+    /// is the same singleton the module exposes.
+    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str))> {
+        enum_reduce(py, py.get_type::<Self>(), self.variant_name())
+    }
+}
+
+impl PyDampingStrategy {
+    fn variant_name(self) -> &'static str {
+        match self {
+            PyDampingStrategy::None => "NONE",
+            PyDampingStrategy::LineSearch => "LINE_SEARCH",
+            PyDampingStrategy::VoltageLimiting => "VOLTAGE_LIMITING",
+            PyDampingStrategy::BankRose => "BANK_ROSE",
+            PyDampingStrategy::Combined => "COMBINED",
+        }
+    }
+}
+
+/// Shared `__reduce__` body for the module's simple enums.
+///
+/// `getattr(EnumClass, "MEMBER")` is picklable by reference and always
+/// resolves to the canonical member, so round-tripping preserves identity
+/// semantics rather than creating a detached copy.
+fn enum_reduce<'py>(
+    py: Python<'py>,
+    class: Bound<'py, pyo3::types::PyType>,
+    member: &'static str,
+) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str))> {
+    let getattr = py.import("builtins")?.getattr("getattr")?;
+    Ok((getattr, (class.into_any(), member)))
 }
 
 /// Transient integration method
@@ -268,6 +300,22 @@ impl PyIntegrationMethod {
             PyIntegrationMethod::Trapezoidal => "IntegrationMethod.TRAPEZOIDAL".to_string(),
             PyIntegrationMethod::Gear2 => "IntegrationMethod.GEAR2".to_string(),
             PyIntegrationMethod::TrapGear => "IntegrationMethod.TRAP_GEAR".to_string(),
+        }
+    }
+
+    /// Pickle as a reference to the class attribute.
+    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str))> {
+        enum_reduce(py, py.get_type::<Self>(), self.variant_name())
+    }
+}
+
+impl PyIntegrationMethod {
+    fn variant_name(self) -> &'static str {
+        match self {
+            PyIntegrationMethod::BackwardEuler => "BACKWARD_EULER",
+            PyIntegrationMethod::Trapezoidal => "TRAPEZOIDAL",
+            PyIntegrationMethod::Gear2 => "GEAR2",
+            PyIntegrationMethod::TrapGear => "TRAP_GEAR",
         }
     }
 }
@@ -361,6 +409,22 @@ impl PyBypassConfig {
             "BypassConfig(enabled={}, reltol={:.0e}, abstol={:.0e})",
             self.inner.enabled, self.inner.reltol, self.inner.abstol
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(enabled: bool, reltol: f64, abstol: f64) -> PyResult<Self> {
+        Self::new(Some(enabled), Some(reltol), Some(abstol))
+    }
+
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (bool, f64, f64))> {
+        Ok((
+            py.get_type::<Self>().getattr("_unpickle")?,
+            (self.inner.enabled, self.inner.reltol, self.inner.abstol),
+        ))
     }
 }
 
@@ -637,6 +701,71 @@ impl PyConvergenceConfig {
             self.inner.charge_abstol
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// State is grouped into flags, the damping strategy, and the tolerance
+    /// vector so it stays inside PyO3's tuple conversion limit and reads as
+    /// three coherent groups rather than a thirteen-slot positional list.
+    #[staticmethod]
+    fn _unpickle(
+        flags: (bool, bool, bool, bool, bool),
+        damping_strategy: PyDampingStrategy,
+        tolerances: [f64; 7],
+    ) -> PyResult<Self> {
+        let (gmin_stepping, source_stepping, pseudo_transient, arc_length, verbose) = flags;
+        Self::new(
+            Some(gmin_stepping),
+            Some(source_stepping),
+            Some(pseudo_transient),
+            Some(arc_length),
+            Some(damping_strategy),
+            Some(tolerances[0]),
+            Some(tolerances[1]),
+            Some(tolerances[2]),
+            Some(tolerances[3]),
+            Some(tolerances[4]),
+            Some(tolerances[5]),
+            Some(tolerances[6]),
+            Some(verbose),
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            (bool, bool, bool, bool, bool),
+            PyDampingStrategy,
+            [f64; 7],
+        ),
+    )> {
+        Ok((
+            py.get_type::<Self>().getattr("_unpickle")?,
+            (
+                (
+                    self.inner.gmin_stepping,
+                    self.inner.source_stepping,
+                    self.inner.pseudo_transient,
+                    self.inner.arc_length,
+                    self.inner.verbose,
+                ),
+                self.inner.damping_strategy.into(),
+                [
+                    self.inner.gmin_initial,
+                    self.inner.gmin_target,
+                    self.inner.voltage_reltol,
+                    self.inner.residual_reltol,
+                    self.inner.voltage_abstol,
+                    self.inner.current_abstol,
+                    self.inner.charge_abstol,
+                ],
+            ),
+        ))
+    }
 }
 
 /// Resource ceilings for untrusted, interactive, and batch workloads.
@@ -824,6 +953,57 @@ impl PyResourceLimits {
             self.max_parallel_workers,
             self.max_batch_runs
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(fields: [usize; 16]) -> Self {
+        Self {
+            max_netlist_bytes: fields[0],
+            max_netlist_lines: fields[1],
+            max_expanded_source_bytes: fields[2],
+            max_dependency_source_bytes: fields[3],
+            max_external_data_bytes: fields[4],
+            max_external_data_values: fields[5],
+            max_shared_cache_bytes: fields[6],
+            max_include_depth: fields[7],
+            max_hierarchy_depth: fields[8],
+            max_flattened_elements: fields[9],
+            max_circuit_nodes: fields[10],
+            max_matrix_unknowns: fields[11],
+            max_analysis_points: fields[12],
+            max_result_values: fields[13],
+            max_parallel_workers: fields[14],
+            max_batch_runs: fields[15],
+        }
+    }
+
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, ([usize; 16],))> {
+        Ok((
+            py.get_type::<Self>().getattr("_unpickle")?,
+            ([
+                self.max_netlist_bytes,
+                self.max_netlist_lines,
+                self.max_expanded_source_bytes,
+                self.max_dependency_source_bytes,
+                self.max_external_data_bytes,
+                self.max_external_data_values,
+                self.max_shared_cache_bytes,
+                self.max_include_depth,
+                self.max_hierarchy_depth,
+                self.max_flattened_elements,
+                self.max_circuit_nodes,
+                self.max_matrix_unknowns,
+                self.max_analysis_points,
+                self.max_result_values,
+                self.max_parallel_workers,
+                self.max_batch_runs,
+            ],),
+        ))
     }
 }
 
@@ -1077,5 +1257,74 @@ impl PySimulationConfig {
             self.inner.temperature,
             self.inner.integration_method
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(
+        tolerance: f64,
+        max_iterations: usize,
+        transient_max_iterations: usize,
+        min_timestep: f64,
+        max_timestep: f64,
+        temperature: f64,
+        integration_method: PyIntegrationMethod,
+        transient_trtol: f64,
+        convergence: PyConvergenceConfig,
+        bypass: PyBypassConfig,
+        resource_limits: PyResourceLimits,
+    ) -> PyResult<Self> {
+        Self::new(
+            Some(tolerance),
+            Some(max_iterations),
+            Some(transient_max_iterations),
+            Some(min_timestep),
+            Some(max_timestep),
+            Some(temperature),
+            Some(integration_method),
+            Some(transient_trtol),
+            Some(convergence),
+            Some(bypass),
+            Some(resource_limits),
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            f64,
+            usize,
+            usize,
+            f64,
+            f64,
+            f64,
+            PyIntegrationMethod,
+            f64,
+            PyConvergenceConfig,
+            PyBypassConfig,
+            PyResourceLimits,
+        ),
+    )> {
+        Ok((
+            py.get_type::<Self>().getattr("_unpickle")?,
+            (
+                self.inner.tolerance,
+                self.inner.max_iterations,
+                self.inner.transient_max_iterations,
+                self.inner.min_timestep,
+                self.inner.max_timestep,
+                self.inner.temperature,
+                self.inner.integration_method.into(),
+                self.inner.transient_trtol,
+                self.get_convergence(),
+                self.get_bypass(),
+                self.get_resource_limits(),
+            ),
+        ))
     }
 }

@@ -43,6 +43,9 @@ use crate::config::PyResourceLimits;
 #[pyclass(name = "Netlist", module = "rspice")]
 pub struct PyNetlist {
     pub(crate) inner: Netlist,
+    /// Policy this netlist was parsed under. Core keeps the source text but
+    /// not the ceilings applied to it, and pickling has to reproduce both.
+    pub(crate) resource_limits: rspice_core::ResourceLimits,
 }
 
 /// Non-fatal parser diagnostic attached to a parsed netlist.
@@ -401,12 +404,13 @@ impl PyNetlist {
     #[pyo3(signature = (content, *, resource_limits=None))]
     pub fn parse(content: &str, resource_limits: Option<PyResourceLimits>) -> PyResult<Self> {
         let normalized = ensure_statement_content(content);
-        let inner = Netlist::parse_validated_with_options(
-            &normalized,
-            parse_options(resource_limits.as_ref()),
-        )
-        .map_err(crate::errors::parse_error_to_pyerr)?;
-        Ok(Self { inner })
+        let options = parse_options(resource_limits.as_ref());
+        let inner = Netlist::parse_validated_with_options(&normalized, options)
+            .map_err(crate::errors::parse_error_to_pyerr)?;
+        Ok(Self {
+            inner,
+            resource_limits: options.resource_limits,
+        })
     }
 
     /// Parse a raw SPICE deck where the first line is always the title
@@ -429,10 +433,13 @@ impl PyNetlist {
     #[staticmethod]
     #[pyo3(signature = (content, *, resource_limits=None))]
     pub fn parse_spice(content: &str, resource_limits: Option<PyResourceLimits>) -> PyResult<Self> {
-        let inner =
-            Netlist::parse_validated_with_options(content, parse_options(resource_limits.as_ref()))
-                .map_err(crate::errors::parse_error_to_pyerr)?;
-        Ok(Self { inner })
+        let options = parse_options(resource_limits.as_ref());
+        let inner = Netlist::parse_validated_with_options(content, options)
+            .map_err(crate::errors::parse_error_to_pyerr)?;
+        Ok(Self {
+            inner,
+            resource_limits: options.resource_limits,
+        })
     }
 
     /// Parse a netlist from a file with include resolution
@@ -465,7 +472,10 @@ impl PyNetlist {
             .map_err(crate::errors::parse_error_to_pyerr)?;
         let inner = Netlist::parse_validated_with_path_and_options(&content, &path, options)
             .map_err(crate::errors::parse_error_to_pyerr)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            resource_limits: options.resource_limits,
+        })
     }
 
     /// Parse statements from a string, resolving includes against a base path
@@ -500,13 +510,13 @@ impl PyNetlist {
         } else {
             base_path
         };
-        let inner = Netlist::parse_validated_with_path_and_options(
-            &normalized,
-            &anchor,
-            parse_options(resource_limits.as_ref()),
-        )
-        .map_err(crate::errors::parse_error_to_pyerr)?;
-        Ok(Self { inner })
+        let options = parse_options(resource_limits.as_ref());
+        let inner = Netlist::parse_validated_with_path_and_options(&normalized, &anchor, options)
+            .map_err(crate::errors::parse_error_to_pyerr)?;
+        Ok(Self {
+            inner,
+            resource_limits: options.resource_limits,
+        })
     }
 
     /// Get the number of device elements in the netlist
@@ -643,5 +653,88 @@ impl PyNetlist {
         } else {
             format!("Netlist with {} elements", self.inner.elements.len())
         }
+    }
+
+    /// The exact deck text this netlist was parsed from.
+    ///
+    /// `parse` records the text after its synthetic title is prepended, so
+    /// re-parsing this string with `parse_spice` reproduces the same netlist.
+    /// None only if the netlist was produced without retaining its source.
+    #[getter]
+    fn source(&self) -> Option<String> {
+        self.inner.source_text.clone()
+    }
+
+    /// Path includes were resolved against, when one was supplied.
+    #[getter]
+    fn source_path(&self) -> Option<String> {
+        self.inner
+            .source_path
+            .as_deref()
+            .map(crate::errors::public_path_string)
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        source: String,
+        source_path: Option<std::path::PathBuf>,
+        resource_limits: PyResourceLimits,
+    ) -> PyResult<Self> {
+        // The stored text is already normalized, so raw SPICE semantics
+        // reproduce the original parse exactly.
+        match source_path {
+            Some(path) => Self::parse_file_source(&source, &path, resource_limits),
+            None => Self::parse_spice(&source, Some(resource_limits)),
+        }
+    }
+
+    /// Pickle by replaying the parse, which is deterministic and keeps the
+    /// pickled payload to the size of the deck rather than the whole AST.
+    ///
+    /// Raises:
+    ///     ValueError: If the netlist did not retain its source text, which
+    ///                 would make the round-trip lossy.
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (String, Option<String>, PyResourceLimits),
+    )> {
+        let source = self.inner.source_text.clone().ok_or_else(|| {
+            crate::errors::value_error(
+                "this netlist did not retain its source text and cannot be pickled",
+            )
+        })?;
+        Ok((
+            py.get_type::<Self>().getattr("_unpickle")?,
+            (
+                source,
+                self.inner
+                    .source_path
+                    .as_deref()
+                    .map(crate::errors::public_path_string),
+                PyResourceLimits::from_core(self.resource_limits),
+            ),
+        ))
+    }
+}
+
+impl PyNetlist {
+    /// Re-parse retained source against a known anchor path.
+    fn parse_file_source(
+        source: &str,
+        path: &std::path::Path,
+        resource_limits: PyResourceLimits,
+    ) -> PyResult<Self> {
+        let options = parse_options(Some(&resource_limits));
+        let inner = Netlist::parse_validated_with_path_and_options(source, path, options)
+            .map_err(crate::errors::parse_error_to_pyerr)?;
+        Ok(Self {
+            inner,
+            resource_limits: options.resource_limits,
+        })
     }
 }

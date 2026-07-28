@@ -1,7 +1,7 @@
 """Type stubs for the rspice extension module."""
 
 import os
-from typing import Iterator, Literal, Sequence, final
+from typing import Any, Iterator, Literal, Sequence, final
 
 import numpy as np
 import numpy.typing as npt
@@ -293,6 +293,17 @@ class Netlist:
         resource_limits: ResourceLimits | None = None,
     ) -> Netlist: ...
     @property
+    def source(self) -> str | None: ...
+    @property
+    def source_path(self) -> str | None: ...
+    @staticmethod
+    def _unpickle(
+        source: str,
+        source_path: str | os.PathLike[str] | None,
+        resource_limits: ResourceLimits,
+    ) -> Netlist: ...
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
+    @property
     def num_elements(self) -> int: ...
     @property
     def num_models(self) -> int: ...
@@ -331,6 +342,7 @@ class DampingStrategy:
     VOLTAGE_LIMITING: DampingStrategy
     BANK_ROSE: DampingStrategy
     COMBINED: DampingStrategy
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
 @final
 class IntegrationMethod:
@@ -338,6 +350,7 @@ class IntegrationMethod:
     TRAPEZOIDAL: IntegrationMethod
     GEAR2: IntegrationMethod
     TRAP_GEAR: IntegrationMethod
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
 @final
 class BypassConfig:
@@ -353,6 +366,9 @@ class BypassConfig:
     enabled: bool
     reltol: float
     abstol: float
+    @staticmethod
+    def _unpickle(enabled: bool, reltol: float, abstol: float) -> BypassConfig: ...
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
 @final
 class ConvergenceConfig:
@@ -390,6 +406,13 @@ class ConvergenceConfig:
     current_abstol: float
     charge_abstol: float
     verbose: bool
+    @staticmethod
+    def _unpickle(
+        flags: tuple[bool, bool, bool, bool, bool],
+        damping_strategy: DampingStrategy,
+        tolerances: Sequence[float],
+    ) -> ConvergenceConfig: ...
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
 @final
 class ResourceLimits:
@@ -431,6 +454,9 @@ class ResourceLimits:
     max_result_values: int
     max_parallel_workers: int
     max_batch_runs: int
+    @staticmethod
+    def _unpickle(fields: Sequence[int]) -> ResourceLimits: ...
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
 @final
 class SimulationConfig:
@@ -460,6 +486,21 @@ class SimulationConfig:
     convergence: ConvergenceConfig
     bypass: BypassConfig
     resource_limits: ResourceLimits
+    @staticmethod
+    def _unpickle(
+        tolerance: float,
+        max_iterations: int,
+        transient_max_iterations: int,
+        min_timestep: float,
+        max_timestep: float,
+        temperature: float,
+        integration_method: IntegrationMethod,
+        transient_trtol: float,
+        convergence: ConvergenceConfig,
+        bypass: BypassConfig,
+        resource_limits: ResourceLimits,
+    ) -> SimulationConfig: ...
+    def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
 @final
 class DeviceOperatingPoint:
