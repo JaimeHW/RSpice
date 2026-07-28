@@ -39,13 +39,7 @@ Thumbs.db
 *.so
 *.dylib
 
-# Python tooling caches and environments.
-#
-# uv, mypy, and pytest each write their own .gitignore inside these, so they
-# are already excluded in practice. Listing them anyway means `git status`
-# stays honest if a tool ever stops doing that, and it documents that the
-# virtualenv inside crates/rspice-python is deliberate: maturin develop needs
-# an active venv, and the crate-local one is what the build instructions use.
+# Python tooling caches and environments
 .venv/
 .mypy_cache/
 .pytest_cache/

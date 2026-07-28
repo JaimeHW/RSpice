@@ -2,17 +2,6 @@
 requires = ["maturin==1.14.1"]
 build-backend = "maturin"
 
-# Release checklist -- these four are correct for a pre-release crate and must
-# change together at the first public release, along with the CI assertions in
-# tools/ci/test_ci_configuration.py that pin this file:
-#
-#   1. Drop the "Private :: Do Not Upload" classifier, which is the guard that
-#      makes an accidental `twine upload` fail rather than publish.
-#   2. Raise Development Status past "3 - Alpha".
-#   3. Replace the placeholder author with the releasing legal entity.
-#   4. Migrate `license = { text = ... }` to PEP 639: a `license` SPDX
-#      expression plus `license-files`. The table form is deprecated and newer
-#      build backends warn on it.
 [project]
 name = "rspice"
 description = "Python bindings for the RSpice circuit simulation engine"
