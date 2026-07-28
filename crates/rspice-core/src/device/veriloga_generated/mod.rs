@@ -471,14 +471,16 @@ pub struct BuiltinVerilogAInstance {
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BuiltinEvaluatedNoiseSource {
+/// One noise source a generated device contributes at a bias point.
+pub struct BuiltinEvaluatedNoiseSource {
     pub mapped: GeneratedMappedNoiseDescriptor,
     pub evaluation: GeneratedNoiseEvaluation,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug)]
-pub(crate) enum BuiltinNoiseEvaluationError {
+/// Why a generated device could not evaluate its noise sources.
+pub enum BuiltinNoiseEvaluationError {
     Topology {
         index: usize,
         mechanism: &'static str,
@@ -895,7 +897,14 @@ impl BuiltinVerilogAInstance {
         );
     }
 
-    pub(crate) fn evaluate_noise_sources(
+    /// Evaluate this instance's noise sources at a bias point.
+    ///
+    /// Public for the same reason as the stamp entry points beside it: the
+    /// noise power spectral densities are part of what a generated device
+    /// computes, so anything auditing a model — a fingerprint capture, a
+    /// noise-contribution report — has to be able to observe them without
+    /// running an analysis around them.
+    pub fn evaluate_noise_sources(
         &self,
         voltages: &[Value],
         num_nodes: usize,
@@ -1020,9 +1029,8 @@ impl BuiltinVerilogAInstance {
     /// which is correct inside Newton and useless to anything that needs the
     /// device's own constitutive relation: a numerical derivative of a limited
     /// stamp differentiates the limiter. Callers that must observe the model
-    /// itself — the derivative oracle in
-    /// [`crate::device::veriloga_harness::golden`], small-signal probes — take
-    /// this entry point instead.
+    /// itself — the derivative oracle in `rspice-conformance`'s Verilog-A
+    /// suite, small-signal probes — take this entry point instead.
     #[inline]
     pub fn stamp_probe(
         &mut self,

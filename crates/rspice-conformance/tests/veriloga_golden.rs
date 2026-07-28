@@ -46,7 +46,7 @@
 
 use rspice_core::constants::GMIN;
 use rspice_core::device::veriloga_generated::{GeneratedSimulationParameters, builtins};
-use rspice_core::device::veriloga_harness::golden::GoldenHarness;
+use rspice_conformance::suites::veriloga::golden::GoldenHarness;
 
 /// Bias points per model. One is equilibrium; the rest are drawn from the
 /// model's own deterministic stream.

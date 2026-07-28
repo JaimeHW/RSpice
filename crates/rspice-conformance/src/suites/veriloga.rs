@@ -1,6 +1,6 @@
 //! Hand-written harnesses that measure the generated Verilog-A built-ins.
 //!
-//! Everything here drives `super::veriloga_generated` from the outside and is
+//! Everything here drives `rspice_core::device::veriloga_generated` from the outside and is
 //! maintained by hand. It lives in its own module for one reason: the generated
 //! tree is generator-owned output that is rewritten wholesale by
 //! `rspice-veriloga-gen`, and hand-written code sitting inside it cannot be
@@ -21,7 +21,7 @@
 
 // `bench` and `reference` are timing harnesses, and `std::time::Instant::now()`
 // aborts at runtime on `wasm32-unknown-unknown` — there is no clock in the bare
-// wasm ABI. `crate::time_compat` is the shim everywhere else in the crate, but
+// wasm ABI. `rspice_core::time_compat` is the shim used inside the engine, but
 // it is deliberately not the answer here: its `elapsed()` is always zero, which
 // is right for threshold-triggered diagnostics that should simply stay quiet,
 // and wrong for a benchmark, where it would report a fabricated `0.0 ns/stamp`

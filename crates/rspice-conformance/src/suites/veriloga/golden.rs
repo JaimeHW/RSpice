@@ -46,12 +46,12 @@
 //! the same model draws the same points on every machine and every run, and
 //! adding a model never perturbs another model's points.
 
-use crate::Value;
-use crate::device::veriloga_generated::{
+use rspice_core::Value;
+use rspice_core::device::veriloga_generated::{
     BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedDdtCoefficients,
     GeneratedEvaluationError, GeneratedSimulationParameters, builtins,
 };
-use crate::solver::{ComplexMatrix, StaticMatrix};
+use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 
 /// Format version of a captured record set.
 ///
@@ -438,7 +438,7 @@ impl GoldenHarness {
             format!("xgolden_{model_name}"),
             nodes,
             branches,
-            crate::constants::TEMP_REFERENCE,
+            rspice_core::constants::TEMP_REFERENCE,
             overrides,
         )
         .map_err(setup_error)?;

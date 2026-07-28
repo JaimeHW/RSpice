@@ -8,10 +8,10 @@
 
 use crate::error::BenchError;
 use clap::Args;
-use rspice_core::device::veriloga_harness::bench::{
+use rspice_conformance::suites::veriloga::bench::{
     GeneratedStampBenchConfig, GeneratedStampBenchResult, run_generated_stamp_benchmarks,
 };
-use rspice_core::device::veriloga_harness::reference::{
+use rspice_conformance::suites::veriloga::reference::{
     ReferenceStampBenchConfig, run_reference_stamp_benchmark,
 };
 use serde::Serialize;

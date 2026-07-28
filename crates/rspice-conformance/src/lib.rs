@@ -29,9 +29,27 @@
 //!
 //! - [`suites::ngspice`] — the ngspice conformance corpus
 //! - [`suites::xyce`] — the Xyce conformance corpus
+//! - `suites::veriloga` — the generated Verilog-A built-ins, behind
+//!   `veriloga-builtins-base`
 //!
-//! `rspice-core` now contains no conformance harness at all, which
+//! The first two compare RSpice against *another simulator's* published
+//! output. The Verilog-A suite is a different instrument and is kept
+//! distinct on purpose: it compares each generated device against RSpice's
+//! own captured stamps, plus a finite-difference oracle that shares no code
+//! with the chain rule under test. Snapshot and independent mathematics
+//! rather than external conformance — which is the right tool when the thing
+//! under test is a code generator, since there is no second simulator
+//! computing the same Jacobian to ask.
+//!
+//! `rspice-core` now contains no validation harness at all, which
 //! `tools/ci/test_ci_configuration.py` also asserts.
+//!
+//! ## Dependency direction
+//!
+//! Nothing a user installs may depend on this crate. `rspice-bench` does,
+//! deliberately: it is a benchmark rig rather than a product, and the
+//! Verilog-A stamp bench and golden-fingerprint capture belong with the suite
+//! rather than inside the library they measure.
 //!
 //! ## Feature forwarding
 //!

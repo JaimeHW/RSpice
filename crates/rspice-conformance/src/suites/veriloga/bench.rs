@@ -20,11 +20,11 @@
 
 use std::time::Instant;
 
-use crate::Value;
-use crate::device::veriloga_generated::{
+use rspice_core::Value;
+use rspice_core::device::veriloga_generated::{
     BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedSimulationParameters, builtins,
 };
-use crate::solver::StaticMatrix;
+use rspice_core::solver::StaticMatrix;
 
 /// Bias applied to every ungrounded node, in volts.
 ///
@@ -193,7 +193,7 @@ fn benchmark_model(
         format!("xbench_{model_name}"),
         nodes,
         branches,
-        crate::constants::TEMP_REFERENCE,
+        rspice_core::constants::TEMP_REFERENCE,
         &[],
     )
     .map_err(setup_error)?;

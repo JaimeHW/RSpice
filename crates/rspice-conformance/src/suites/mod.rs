@@ -23,3 +23,18 @@
 
 pub mod ngspice;
 pub mod xyce;
+
+/// The generated Verilog-A built-ins, checked against captured fingerprints
+/// and a finite-difference derivative oracle.
+///
+/// A different kind of regression suite from its neighbours, and worth being
+/// precise about: ngspice and Xyce compare against *another simulator's*
+/// published output, while this compares against RSpice's own captured stamps
+/// plus an oracle that shares no code with the chain rule under test. It is a
+/// snapshot plus an independent mathematical check, not external conformance.
+///
+/// Gated on the feature that compiles the models it measures — with the
+/// built-ins absent there is nothing to fingerprint — so it costs a default
+/// build nothing.
+#[cfg(feature = "veriloga-builtins-base")]
+pub mod veriloga;

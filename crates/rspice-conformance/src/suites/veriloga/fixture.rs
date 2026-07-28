@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use super::golden::{GOLDEN_FORMAT_VERSION, GoldenNoiseSample, GoldenRecord};
-use crate::Value;
+use rspice_core::Value;
 
 /// A model's complete captured fingerprint.
 #[derive(Debug, Clone, PartialEq)]
