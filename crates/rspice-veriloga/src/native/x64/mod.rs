@@ -4599,9 +4599,9 @@ fn format_current_endpoint(endpoint: usize) -> String {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        NativeModel, compile_model_with_canonical_ir, live_native_assignment_steps,
-        lower_assignment_step, lower_static_condition_program, native_assignment_roots,
-        validate_compiled_entry_shape,
+        NativeModel, canonical_branch_unknown_runtime_map, compile_model_with_canonical_ir,
+        live_canonical_assignment_slots, live_native_assignment_steps, lower_assignment_step,
+        lower_static_condition_program, native_assignment_roots, validate_compiled_entry_shape,
     };
     use crate::canonical_ir::hir::HirRegion;
     use crate::canonical_ir::{
@@ -5783,9 +5783,14 @@ endmodule
         context.voltages[1] = 0.0;
         context.voltages[2] = 0.2;
         resolve_native_parameter_defaults(&model, &native, &mut context);
-        let oracle_stats =
-            assert_native_matches_bytecode_finite_entries(&model, &native, context, "generated")
-                .expect("generated-model native values match bytecode oracle");
+        let oracle_stats = assert_native_matches_bytecode_finite_entries(
+            &model,
+            &artifact,
+            &native,
+            context,
+            "generated",
+        )
+        .expect("generated-model native values match bytecode oracle");
         assert!(
             oracle_stats.variables >= 7
                 && oracle_stats.stamps >= 6
@@ -7053,9 +7058,14 @@ endmodule
         let mut context = native_model_benchmark_context(&runtime.model, name);
         resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
 
-        let stats =
-            assert_native_matches_bytecode_finite_entries(&runtime.model, &native, context, name)
-                .unwrap_or_else(|error| panic!("{name}: finite native oracle failed: {error}"));
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .unwrap_or_else(|error| panic!("{name}: finite native oracle failed: {error}"));
         eprintln!(
             "native-x64-shipped-oracle model={name} variables={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={}",
             stats.variables,
@@ -7272,10 +7282,18 @@ endmodule
 
     fn assert_native_matches_bytecode_finite_entries(
         model: &CompiledModel,
+        artifact: &CanonicalIrArtifact,
         native: &NativeModel,
         base_context: VmContext,
         name: &str,
     ) -> Result<FiniteOracleStats, String> {
+        let canonical_branch_unknown_map =
+            canonical_branch_unknown_runtime_map(model, &artifact.mir)
+                .map_err(|error| error.to_string())?;
+        let limits = NativeLoweringLimits::for_model(model)
+            .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
+        let live_variables = live_canonical_assignment_slots(model, &artifact.mir, limits)
+            .map_err(|error| error.to_string())?;
         let mut bytecode_context = base_context.clone();
         bytecode_context.clear_currents();
         bytecode_context
@@ -7298,7 +7316,10 @@ endmodule
         }
 
         let mut stats = FiniteOracleStats::default();
-        for index in 0..model.num_variables {
+        for (index, is_live) in live_variables.iter().copied().enumerate() {
+            if !is_live {
+                continue;
+            }
             assert_close_or_skip_nonfinite(
                 name,
                 format!("variable {index}"),
