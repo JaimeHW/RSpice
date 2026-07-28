@@ -469,37 +469,37 @@ impl Instance {
             let v507 = node_potentials[6];
             let v509 = Lanes([1e0f64; 1]);
             let v510 = ddt_scale();
-            let v523 = parameters[20];
-            let v526 = parameters[44];
-            let v528 = staged[13];
-            let v540 = Lanes([0e0f64; 5]);
-            let v541 = Lanes([0e0f64; 1]);
-            let v542 = Lanes([0e0f64; 3]);
-            let v553 = parameters[24];
-            let v561 = -1e0f64;
-            let v575 = 5e-1f64;
-            let v627 = staged[16];
-            let v639 = -1e0f64;
-            let v642 = parameters[33];
-            let v645 = parameters[34];
-            let v650 = Lanes([0e0f64; 2]);
-            let v651 = Lanes([0e0f64; 1]);
-            let v652 = staged[17];
-            let v680 = staged[18];
-            let v692 = -1e0f64;
-            let v695 = node_potentials[5];
-            let v698 = Lanes([1e0f64; 1]);
-            let v707 = parameters[35];
-            let v710 = parameters[36];
-            let v715 = staged[19];
-            let v743 = -1e0f64;
-            let v748 = staged[6];
-            let v751 = parameters[46];
-            let v753 = Lanes([0e0f64; 4]);
-            let v756 = staged[20];
-            let v768 = Lanes([0e0f64; 3]);
-            let v858 = 0e0f64;
-            let v859 = 0e0f64;
+            let v529 = parameters[20];
+            let v532 = parameters[44];
+            let v534 = staged[13];
+            let v546 = Lanes([0e0f64; 5]);
+            let v547 = Lanes([0e0f64; 1]);
+            let v548 = Lanes([0e0f64; 3]);
+            let v561 = parameters[24];
+            let v569 = -1e0f64;
+            let v583 = 5e-1f64;
+            let v635 = staged[16];
+            let v647 = -1e0f64;
+            let v650 = parameters[33];
+            let v653 = parameters[34];
+            let v658 = Lanes([0e0f64; 2]);
+            let v659 = Lanes([0e0f64; 1]);
+            let v660 = staged[17];
+            let v688 = staged[18];
+            let v700 = -1e0f64;
+            let v703 = node_potentials[5];
+            let v706 = Lanes([1e0f64; 1]);
+            let v715 = parameters[35];
+            let v718 = parameters[36];
+            let v723 = staged[19];
+            let v751 = -1e0f64;
+            let v756 = staged[6];
+            let v759 = parameters[46];
+            let v761 = Lanes([0e0f64; 4]);
+            let v764 = staged[20];
+            let v776 = Lanes([0e0f64; 3]);
+            let v869 = 0e0f64;
+            let v870 = 0e0f64;
             let v4 = (v0 + v1) + v3;
             let v6 = if v4 > v5 { 1.0 } else { 0.0 };
             let v8: f64;
@@ -780,14 +780,16 @@ impl Instance {
             let v493 = v491 * v243;
             let v494 = v244 * v490;
             let v497 = (Lanes([v493[0], v493[1], 0.0, 0.0, 0.0])) + (Lanes([0.0, 0.0, v494[0], v494[1], v494[2]]));
-            let v543: f64;
-            let v544: f64;
-            let v545: f64;
-            let v546: f64;
-            let v547: Lanes<4>;
-            let v548: Lanes<5>;
-            let v549: Lanes<1>;
-            let v550: Lanes<3>;
+            let v549: f64;
+            let v550: f64;
+            let v551: f64;
+            let v552: f64;
+            let v553: f64;
+            let v554: Lanes<4>;
+            let v555: Lanes<5>;
+            let v556: Lanes<1>;
+            let v557: Lanes<3>;
+            let v558: Lanes<3>;
             if v498 != 0.0 {
                 let v499 = -v243;
                 let v501 = v499 * v490;
@@ -799,375 +801,386 @@ impl Instance {
                 let v513 = v491 * v508;
                 let v514 = (v509 * v510) * v490;
                 let v517 = (Lanes([v513[0], v513[1], 0.0])) + (Lanes([0.0, 0.0, v514[0]]));
-                let v524 = (v507.abs()) / v523;
-                let v532 = v36 + (v524.powf(v526));
-                let v533 = v455 / v532;
-                let v534 = (((v509 * ((v296 * (if v507 >= v294 { 1.0 } else { 0.0 })) - v30)) / v523) * (v526 * (v524.powf(v528)))) * v533;
-                let v538 = ((Lanes([v457[0], v457[1], v457[2], 0.0])) - (Lanes([0.0, 0.0, 0.0, v534[0]]))) / v532;
-                v543 = v533;
-                v544 = v501;
-                v545 = v507;
-                v546 = v512;
-                v547 = v538;
-                v548 = v506;
-                v549 = v509;
-                v550 = v517;
+                let v518 = v490 * v507;
+                let v519 = v491 * v507;
+                let v520 = v509 * v490;
+                let v523 = (Lanes([v519[0], v519[1], 0.0])) + (Lanes([0.0, 0.0, v520[0]]));
+                let v530 = (v507.abs()) / v529;
+                let v538 = v36 + (v530.powf(v532));
+                let v539 = v455 / v538;
+                let v540 = (((v509 * ((v296 * (if v507 >= v294 { 1.0 } else { 0.0 })) - v30)) / v529) * (v532 * (v530.powf(v534)))) * v539;
+                let v544 = ((Lanes([v457[0], v457[1], v457[2], 0.0])) - (Lanes([0.0, 0.0, 0.0, v540[0]]))) / v538;
+                v549 = v539;
+                v550 = v501;
+                v551 = v507;
+                v552 = v512;
+                v553 = v518;
+                v554 = v544;
+                v555 = v506;
+                v556 = v509;
+                v557 = v517;
+                v558 = v523;
             } else {
-                let v539 = Lanes([v457[0], v457[1], v457[2], 0.0]);
-                v543 = v455;
-                v544 = v209;
-                v545 = v209;
-                v546 = v209;
-                v547 = v539;
-                v548 = v540;
-                v549 = v541;
-                v550 = v542;
+                let v545 = Lanes([v457[0], v457[1], v457[2], 0.0]);
+                v549 = v455;
+                v550 = v209;
+                v551 = v209;
+                v552 = v209;
+                v553 = v209;
+                v554 = v545;
+                v555 = v546;
+                v556 = v547;
+                v557 = v548;
+                v558 = v548;
             }
-            let v555 = (v162 * v99) * v553;
-            let v556 = v191 + ((-v161) * v553);
-            let v557 = Lanes([0.0, v192[0], v192[1]]);
-            let v559 = v557 + (Lanes([v555[0], 0.0, 0.0]));
-            let v560 = if v556 > v209 { 1.0 } else { 0.0 };
-            let v616: f64;
-            let v617: f64;
-            let v618: Lanes<3>;
-            let v619: Lanes<3>;
-            if v560 != 0.0 {
-                let v563 = v36 - v553;
-                let v566 = ((v561 - v148) * (v563.ln())).exp();
-                let v569 = v36 - ((v566 * v563) * v563);
-                let v572 = v36 - v148;
-                let v573 = (v161 * v569) / v572;
-                let v574 = (v162 * v569) / v572;
-                let v576 = v575 * v148;
-                let v579 = (v576 * v556) / v161;
-                let v580 = v162 * v579;
-                let v584 = v563 + v579;
-                let v589 = (v556 * v584) * v566;
-                let v590 = ((v559 * v584) + ((((v559 * v576) - (Lanes([v580[0], 0.0, 0.0]))) / v161) * v556)) * v566;
-                let v591 = Lanes([v574[0], 0.0, 0.0]);
-                v616 = v573;
-                v617 = v589;
-                v618 = v591;
-                v619 = v590;
+            let v563 = (v162 * v99) * v561;
+            let v564 = v191 + ((-v161) * v561);
+            let v565 = Lanes([0.0, v192[0], v192[1]]);
+            let v567 = v565 + (Lanes([v563[0], 0.0, 0.0]));
+            let v568 = if v564 > v209 { 1.0 } else { 0.0 };
+            let v624: f64;
+            let v625: f64;
+            let v626: Lanes<3>;
+            let v627: Lanes<3>;
+            if v568 != 0.0 {
+                let v571 = v36 - v561;
+                let v574 = ((v569 - v148) * (v571.ln())).exp();
+                let v577 = v36 - ((v574 * v571) * v571);
+                let v580 = v36 - v148;
+                let v581 = (v161 * v577) / v580;
+                let v582 = (v162 * v577) / v580;
+                let v584 = v583 * v148;
+                let v587 = (v584 * v564) / v161;
+                let v588 = v162 * v587;
+                let v592 = v571 + v587;
+                let v597 = (v564 * v592) * v574;
+                let v598 = ((v567 * v592) + ((((v567 * v584) - (Lanes([v588[0], 0.0, 0.0]))) / v161) * v564)) * v574;
+                let v599 = Lanes([v582[0], 0.0, 0.0]);
+                v624 = v581;
+                v625 = v597;
+                v626 = v599;
+                v627 = v598;
             } else {
-                let v592 = v36 - v148;
-                let v593 = v191 / v161;
-                let v594 = v162 * v593;
-                let v598 = v36 - v593;
-                let v605 = (v592 * (v598.ln())).exp();
-                let v607 = v36 - v605;
-                let v610 = v162 * v607;
-                let v614 = (v161 * v607) / v592;
-                let v615 = ((Lanes([v610[0], 0.0, 0.0])) + ((((((((v557 - (Lanes([v594[0], 0.0, 0.0]))) / v161) * v99) * (v30 / v598)) * v592) * v605) * v99) * v161)) / v592;
-                v616 = v614;
-                v617 = v209;
-                v618 = v615;
-                v619 = v242;
+                let v600 = v36 - v148;
+                let v601 = v191 / v161;
+                let v602 = v162 * v601;
+                let v606 = v36 - v601;
+                let v613 = (v600 * (v606.ln())).exp();
+                let v615 = v36 - v613;
+                let v618 = v162 * v615;
+                let v622 = (v161 * v615) / v600;
+                let v623 = ((Lanes([v618[0], 0.0, 0.0])) + ((((((((v565 - (Lanes([v602[0], 0.0, 0.0]))) / v161) * v99) * (v30 / v606)) * v600) * v613) * v99) * v161)) / v600;
+                v624 = v622;
+                v625 = v209;
+                v626 = v623;
+                v627 = v242;
             }
-            let v620 = v616 + v617;
-            let v622 = v178 * v620;
-            let v623 = v181 * v620;
-            let v626 = (Lanes([v623[0], 0.0, 0.0])) + ((v618 + v619) * v178);
-            let v653: f64;
-            let v654: f64;
-            let v655: f64;
-            let v656: f64;
-            let v657: f64;
-            let v658: f64;
-            let v659: f64;
-            let v660: f64;
+            let v628 = v624 + v625;
+            let v630 = v178 * v628;
+            let v631 = v181 * v628;
+            let v634 = (Lanes([v631[0], 0.0, 0.0])) + ((v626 + v627) * v178);
             let v661: f64;
             let v662: f64;
             let v663: f64;
             let v664: f64;
-            let v665: Lanes<5>;
-            let v666: Lanes<1>;
-            let v667: Lanes<1>;
-            let v668: Lanes<5>;
-            let v669: Lanes<2>;
-            let v670: Lanes<1>;
-            let v671: Lanes<1>;
-            let v672: Lanes<1>;
+            let v665: f64;
+            let v666: f64;
+            let v667: f64;
+            let v668: f64;
+            let v669: f64;
+            let v670: f64;
+            let v671: f64;
+            let v672: f64;
             let v673: Lanes<5>;
             let v674: Lanes<1>;
             let v675: Lanes<1>;
-            let v676: Lanes<1>;
-            if v627 != 0.0 {
-                let v628 = v360 * v459;
-                let v629 = v361 * v459;
-                let v630 = v462 * v360;
-                let v640 = v639 * (v628.abs());
-                let v641 = (((Lanes([0.0, 0.0, v629[0], v629[1], v629[2]])) + (Lanes([v630[0], v630[1], 0.0, 0.0, 0.0]))) * ((v296 * (if v628 >= v294 { 1.0 } else { 0.0 })) - v30)) * v639;
-                let v643 = v1 / v642;
-                let v644 = v17 / v642;
-                let v646 = v1 * v645;
-                let v647 = v17 * v645;
-                let v648 = ddt(1615, v646);
-                let v649 = v647 * v510;
-                v653 = v640;
-                v654 = v643;
-                v655 = v648;
-                v656 = v209;
-                v657 = v209;
-                v658 = v209;
-                v659 = v209;
-                v660 = v209;
-                v661 = v209;
-                v662 = v646;
-                v663 = v209;
+            let v676: Lanes<5>;
+            let v677: Lanes<2>;
+            let v678: Lanes<1>;
+            let v679: Lanes<1>;
+            let v680: Lanes<1>;
+            let v681: Lanes<5>;
+            let v682: Lanes<1>;
+            let v683: Lanes<1>;
+            let v684: Lanes<1>;
+            if v635 != 0.0 {
+                let v636 = v360 * v459;
+                let v637 = v361 * v459;
+                let v638 = v462 * v360;
+                let v648 = v647 * (v636.abs());
+                let v649 = (((Lanes([0.0, 0.0, v637[0], v637[1], v637[2]])) + (Lanes([v638[0], v638[1], 0.0, 0.0, 0.0]))) * ((v296 * (if v636 >= v294 { 1.0 } else { 0.0 })) - v30)) * v647;
+                let v651 = v1 / v650;
+                let v652 = v17 / v650;
+                let v654 = v1 * v653;
+                let v655 = v17 * v653;
+                let v656 = ddt(1615, v654);
+                let v657 = v655 * v510;
+                v661 = v648;
+                v662 = v651;
+                v663 = v656;
                 v664 = v209;
-                v665 = v641;
-                v666 = v644;
-                v667 = v649;
-                v668 = v540;
-                v669 = v650;
-                v670 = v12;
-                v671 = v651;
-                v672 = v651;
-                v673 = v540;
-                v674 = v647;
-                v675 = v12;
-                v676 = v651;
+                v665 = v209;
+                v666 = v209;
+                v667 = v209;
+                v668 = v209;
+                v669 = v209;
+                v670 = v654;
+                v671 = v209;
+                v672 = v209;
+                v673 = v649;
+                v674 = v652;
+                v675 = v657;
+                v676 = v546;
+                v677 = v658;
+                v678 = v12;
+                v679 = v659;
+                v680 = v659;
+                v681 = v546;
+                v682 = v655;
+                v683 = v12;
+                v684 = v659;
             } else {
-                let v716: f64;
-                let v717: f64;
-                let v718: f64;
-                let v719: f64;
-                let v720: f64;
-                let v721: f64;
-                let v722: f64;
-                let v723: f64;
-                let v724: Lanes<5>;
-                let v725: Lanes<2>;
-                let v726: Lanes<1>;
-                let v727: Lanes<1>;
-                let v728: Lanes<1>;
-                let v729: Lanes<5>;
-                let v730: Lanes<1>;
-                let v731: Lanes<1>;
-                if v652 != 0.0 {
-                    let v681 = v360 * v459;
-                    let v682 = v361 * v459;
-                    let v683 = v462 * v360;
-                    let v693 = v692 * (v681.abs());
-                    let v694 = (((Lanes([0.0, 0.0, v682[0], v682[1], v682[2]])) + (Lanes([v683[0], v683[1], 0.0, 0.0, 0.0]))) * ((v296 * (if v681 >= v294 { 1.0 } else { 0.0 })) - v30)) * v692;
-                    let v701 = (v1 - v695) / v642;
-                    let v702 = ((Lanes([v17[0], 0.0])) - (Lanes([0.0, v698[0]]))) / v642;
-                    let v703 = v645 * v1;
-                    let v704 = v17 * v645;
-                    let v705 = ddt(1641, v703);
-                    let v706 = v704 * v510;
-                    let v708 = v695 / v707;
-                    let v709 = v698 / v707;
-                    let v711 = v710 * v695;
-                    let v712 = v698 * v710;
-                    let v713 = ddt(1648, v711);
+                let v724: f64;
+                let v725: f64;
+                let v726: f64;
+                let v727: f64;
+                let v728: f64;
+                let v729: f64;
+                let v730: f64;
+                let v731: f64;
+                let v732: Lanes<5>;
+                let v733: Lanes<2>;
+                let v734: Lanes<1>;
+                let v735: Lanes<1>;
+                let v736: Lanes<1>;
+                let v737: Lanes<5>;
+                let v738: Lanes<1>;
+                let v739: Lanes<1>;
+                if v660 != 0.0 {
+                    let v689 = v360 * v459;
+                    let v690 = v361 * v459;
+                    let v691 = v462 * v360;
+                    let v701 = v700 * (v689.abs());
+                    let v702 = (((Lanes([0.0, 0.0, v690[0], v690[1], v690[2]])) + (Lanes([v691[0], v691[1], 0.0, 0.0, 0.0]))) * ((v296 * (if v689 >= v294 { 1.0 } else { 0.0 })) - v30)) * v700;
+                    let v709 = (v1 - v703) / v650;
+                    let v710 = ((Lanes([v17[0], 0.0])) - (Lanes([0.0, v706[0]]))) / v650;
+                    let v711 = v653 * v1;
+                    let v712 = v17 * v653;
+                    let v713 = ddt(1641, v711);
                     let v714 = v712 * v510;
-                    v716 = v693;
-                    v717 = v701;
-                    v718 = v705;
-                    v719 = v708;
-                    v720 = v713;
-                    v721 = v209;
-                    v722 = v703;
-                    v723 = v711;
-                    v724 = v694;
-                    v725 = v702;
-                    v726 = v706;
-                    v727 = v709;
-                    v728 = v714;
-                    v729 = v540;
-                    v730 = v704;
-                    v731 = v712;
+                    let v716 = v703 / v715;
+                    let v717 = v706 / v715;
+                    let v719 = v718 * v703;
+                    let v720 = v706 * v718;
+                    let v721 = ddt(1648, v719);
+                    let v722 = v720 * v510;
+                    v724 = v701;
+                    v725 = v709;
+                    v726 = v713;
+                    v727 = v716;
+                    v728 = v721;
+                    v729 = v209;
+                    v730 = v711;
+                    v731 = v719;
+                    v732 = v702;
+                    v733 = v710;
+                    v734 = v714;
+                    v735 = v717;
+                    v736 = v722;
+                    v737 = v546;
+                    v738 = v712;
+                    v739 = v720;
                 } else {
-                    let v746: f64;
-                    let v747: Lanes<5>;
-                    if v715 != 0.0 {
-                        let v732 = v360 * v459;
-                        let v733 = v361 * v459;
-                        let v734 = v462 * v360;
-                        let v744 = v743 * (v732.abs());
-                        let v745 = (((Lanes([0.0, 0.0, v733[0], v733[1], v733[2]])) + (Lanes([v734[0], v734[1], 0.0, 0.0, 0.0]))) * ((v296 * (if v732 >= v294 { 1.0 } else { 0.0 })) - v30)) * v743;
-                        v746 = v744;
-                        v747 = v745;
+                    let v754: f64;
+                    let v755: Lanes<5>;
+                    if v723 != 0.0 {
+                        let v740 = v360 * v459;
+                        let v741 = v361 * v459;
+                        let v742 = v462 * v360;
+                        let v752 = v751 * (v740.abs());
+                        let v753 = (((Lanes([0.0, 0.0, v741[0], v741[1], v741[2]])) + (Lanes([v742[0], v742[1], 0.0, 0.0, 0.0]))) * ((v296 * (if v740 >= v294 { 1.0 } else { 0.0 })) - v30)) * v751;
+                        v754 = v752;
+                        v755 = v753;
                     } else {
-                        v746 = v209;
-                        v747 = v540;
+                        v754 = v209;
+                        v755 = v546;
                     }
-                    v716 = v209;
-                    v717 = v209;
-                    v718 = v209;
-                    v719 = v209;
-                    v720 = v209;
-                    v721 = v746;
-                    v722 = v209;
-                    v723 = v209;
-                    v724 = v540;
-                    v725 = v650;
-                    v726 = v12;
-                    v727 = v651;
-                    v728 = v651;
-                    v729 = v747;
-                    v730 = v12;
-                    v731 = v651;
+                    v724 = v209;
+                    v725 = v209;
+                    v726 = v209;
+                    v727 = v209;
+                    v728 = v209;
+                    v729 = v754;
+                    v730 = v209;
+                    v731 = v209;
+                    v732 = v546;
+                    v733 = v658;
+                    v734 = v12;
+                    v735 = v659;
+                    v736 = v659;
+                    v737 = v755;
+                    v738 = v12;
+                    v739 = v659;
                 }
-                v653 = v209;
-                v654 = v209;
-                v655 = v209;
-                v656 = v716;
-                v657 = v717;
-                v658 = v718;
-                v659 = v719;
-                v660 = v720;
-                v661 = v721;
+                v661 = v209;
                 v662 = v209;
-                v663 = v722;
-                v664 = v723;
-                v665 = v540;
-                v666 = v12;
-                v667 = v12;
-                v668 = v724;
-                v669 = v725;
-                v670 = v726;
-                v671 = v727;
-                v672 = v728;
-                v673 = v729;
+                v663 = v209;
+                v664 = v724;
+                v665 = v725;
+                v666 = v726;
+                v667 = v727;
+                v668 = v728;
+                v669 = v729;
+                v670 = v209;
+                v671 = v730;
+                v672 = v731;
+                v673 = v546;
                 v674 = v12;
-                v675 = v730;
-                v676 = v731;
+                v675 = v12;
+                v676 = v732;
+                v677 = v733;
+                v678 = v734;
+                v679 = v735;
+                v680 = v736;
+                v681 = v737;
+                v682 = v12;
+                v683 = v738;
+                v684 = v739;
             }
-            let v677 = ctx.simparam_or("gmin", v209);
-            let v678 = v677 * v184;
-            let v679 = v189 * v677;
-            let v754: f64;
-            let v755: Lanes<4>;
-            if v680 != 0.0 {
-                let v749 = v543 / v748;
-                let v750 = v547 / v748;
-                let v752 = if v749 > v751 { 1.0 } else { 0.0 };
-                let v757: f64;
-                let v758: Lanes<4>;
-                if v752 != 0.0 {
-                    v757 = v749;
-                    v758 = v750;
+            let v685 = ctx.simparam_or("gmin", v209);
+            let v686 = v685 * v184;
+            let v687 = v189 * v685;
+            let v762: f64;
+            let v763: Lanes<4>;
+            if v688 != 0.0 {
+                let v757 = v549 / v756;
+                let v758 = v554 / v756;
+                let v760 = if v757 > v759 { 1.0 } else { 0.0 };
+                let v765: f64;
+                let v766: Lanes<4>;
+                if v760 != 0.0 {
+                    v765 = v757;
+                    v766 = v758;
                 } else {
-                    v757 = v751;
-                    v758 = v753;
+                    v765 = v759;
+                    v766 = v761;
                 }
-                let v759 = v194 / v757;
-                let v763 = ((Lanes([v198[0], 0.0, v198[1], 0.0])) - (v758 * v759)) / v757;
-                let v764 = if v749 >= v751 { 1.0 } else { 0.0 };
-                v754 = v759;
-                v755 = v763;
+                let v767 = v194 / v765;
+                let v771 = ((Lanes([v198[0], 0.0, v198[1], 0.0])) - (v766 * v767)) / v765;
+                let v772 = if v757 >= v759 { 1.0 } else { 0.0 };
+                v762 = v767;
+                v763 = v771;
             } else {
-                v754 = v209;
-                v755 = v753;
+                v762 = v209;
+                v763 = v761;
             }
-            let v769: f64;
-            let v770: Lanes<3>;
-            if v756 != 0.0 {
-                let v765 = v456 / v748;
-                let v766 = v458 / v748;
-                let v767 = if v765 > v751 { 1.0 } else { 0.0 };
-                let v787: f64;
-                let v788: Lanes<3>;
-                if v767 != 0.0 {
-                    v787 = v765;
-                    v788 = v766;
+            let v777: f64;
+            let v778: Lanes<3>;
+            if v764 != 0.0 {
+                let v773 = v456 / v756;
+                let v774 = v458 / v756;
+                let v775 = if v773 > v759 { 1.0 } else { 0.0 };
+                let v795: f64;
+                let v796: Lanes<3>;
+                if v775 != 0.0 {
+                    v795 = v773;
+                    v796 = v774;
                 } else {
-                    v787 = v751;
-                    v788 = v768;
+                    v795 = v759;
+                    v796 = v776;
                 }
-                let v789 = v202 / v787;
-                let v793 = ((Lanes([v206[0], 0.0, v206[1]])) - (v788 * v789)) / v787;
-                let v794 = if v765 >= v751 { 1.0 } else { 0.0 };
-                v769 = v789;
-                v770 = v793;
+                let v797 = v202 / v795;
+                let v801 = ((Lanes([v206[0], 0.0, v206[1]])) - (v796 * v797)) / v795;
+                let v802 = if v773 >= v759 { 1.0 } else { 0.0 };
+                v777 = v797;
+                v778 = v801;
             } else {
-                v769 = v209;
-                v770 = v768;
+                v777 = v209;
+                v778 = v776;
             }
-            let v771 = v190 * v360;
-            let v773 = v771 * v748;
-            let v774 = (v361 * v190) * v748;
-            let v777 = (v190 * v622) * v748;
-            let v778 = (v626 * v190) * v748;
-            let v779 = ddt(1767, v777);
-            let v780 = v778 * v510;
-            let v783 = (v190 * v492) * v748;
-            let v784 = (v497 * v190) * v748;
-            let v785 = ddt(1773, v783);
-            let v786 = v784 * v510;
-            let v795 = if v771 >= v209 { 1.0 } else { 0.0 };
-            let v796 = v548[0];
-            let v797 = v548[1];
-            let v798 = v548[2];
-            let v799 = v548[3];
-            let v800 = v548[4];
-            let v801 = v549[0];
-            let v802 = v550[0];
-            let v803 = v550[1];
-            let v804 = v550[2];
-            let v805 = v665[0];
-            let v806 = v665[1];
-            let v807 = v665[2];
-            let v808 = v665[3];
-            let v809 = v665[4];
-            let v810 = v666[0];
-            let v811 = v667[0];
-            let v812 = v668[0];
-            let v813 = v668[1];
-            let v814 = v668[2];
-            let v815 = v668[3];
-            let v816 = v668[4];
-            let v817 = v669[0];
-            let v818 = v669[1];
-            let v819 = v670[0];
-            let v820 = v671[0];
-            let v821 = v672[0];
-            let v822 = v673[0];
-            let v823 = v673[1];
-            let v824 = v673[2];
-            let v825 = v673[3];
-            let v826 = v673[4];
-            let v827 = v679[0];
-            let v828 = v679[1];
-            let v829 = v755[0];
-            let v830 = v755[1];
-            let v831 = v755[2];
-            let v832 = v755[3];
-            let v833 = v770[0];
-            let v834 = v770[1];
-            let v835 = v770[2];
-            let v836 = v774[0];
-            let v837 = v774[1];
-            let v838 = v774[2];
-            let v839 = v780[0];
-            let v840 = v780[1];
-            let v841 = v780[2];
-            let v842 = v786[0];
-            let v843 = v786[1];
-            let v844 = v786[2];
-            let v845 = v786[3];
-            let v846 = v786[4];
-            let v847 = v674[0];
-            let v848 = v675[0];
-            let v849 = v676[0];
-            let v850 = v778[0];
-            let v851 = v778[1];
-            let v852 = v778[2];
-            let v853 = v784[0];
-            let v854 = v784[1];
-            let v855 = v784[2];
-            let v856 = v784[3];
-            let v857 = v784[4];
+            let v779 = v190 * v360;
+            let v781 = v779 * v756;
+            let v782 = (v361 * v190) * v756;
+            let v785 = (v190 * v630) * v756;
+            let v786 = (v634 * v190) * v756;
+            let v787 = ddt(1767, v785);
+            let v788 = v786 * v510;
+            let v791 = (v190 * v492) * v756;
+            let v792 = (v497 * v190) * v756;
+            let v793 = ddt(1773, v791);
+            let v794 = v792 * v510;
+            let v803 = if v779 >= v209 { 1.0 } else { 0.0 };
+            let v804 = v555[0];
+            let v805 = v555[1];
+            let v806 = v555[2];
+            let v807 = v555[3];
+            let v808 = v555[4];
+            let v809 = v556[0];
+            let v810 = v557[0];
+            let v811 = v557[1];
+            let v812 = v557[2];
+            let v813 = v673[0];
+            let v814 = v673[1];
+            let v815 = v673[2];
+            let v816 = v673[3];
+            let v817 = v673[4];
+            let v818 = v674[0];
+            let v819 = v675[0];
+            let v820 = v676[0];
+            let v821 = v676[1];
+            let v822 = v676[2];
+            let v823 = v676[3];
+            let v824 = v676[4];
+            let v825 = v677[0];
+            let v826 = v677[1];
+            let v827 = v678[0];
+            let v828 = v679[0];
+            let v829 = v680[0];
+            let v830 = v681[0];
+            let v831 = v681[1];
+            let v832 = v681[2];
+            let v833 = v681[3];
+            let v834 = v681[4];
+            let v835 = v687[0];
+            let v836 = v687[1];
+            let v837 = v763[0];
+            let v838 = v763[1];
+            let v839 = v763[2];
+            let v840 = v763[3];
+            let v841 = v778[0];
+            let v842 = v778[1];
+            let v843 = v778[2];
+            let v844 = v782[0];
+            let v845 = v782[1];
+            let v846 = v782[2];
+            let v847 = v788[0];
+            let v848 = v788[1];
+            let v849 = v788[2];
+            let v850 = v794[0];
+            let v851 = v794[1];
+            let v852 = v794[2];
+            let v853 = v794[3];
+            let v854 = v794[4];
+            let v855 = v558[0];
+            let v856 = v558[1];
+            let v857 = v558[2];
+            let v858 = v682[0];
+            let v859 = v683[0];
+            let v860 = v684[0];
+            let v861 = v786[0];
+            let v862 = v786[1];
+            let v863 = v786[2];
+            let v864 = v792[0];
+            let v865 = v792[1];
+            let v866 = v792[2];
+            let v867 = v792[3];
+            let v868 = v792[4];
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(6),
             None,
-            multiplicity * (v544),
+            multiplicity * (v550),
             [0, 1, 2, 3, 4],
-            [v796, v797, v798, v799, v800],
+            [v804, v805, v806, v807, v808],
             [],
             [],
             multiplicity,
@@ -1175,9 +1188,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(6),
             None,
-            multiplicity * (v545),
+            multiplicity * (v551),
             [6],
-            [v801],
+            [v809],
             [],
             [],
             multiplicity,
@@ -1185,9 +1198,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(6),
             None,
-            multiplicity * (v546),
+            multiplicity * (v552),
             [0, 1, 6],
-            [v802, v803, v804],
+            [v810, v811, v812],
             [],
             [],
             multiplicity,
@@ -1204,9 +1217,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(2),
             None,
-            multiplicity * (v653),
+            multiplicity * (v661),
             [0, 1, 2, 3, 4],
-            [v805, v806, v807, v808, v809],
+            [v813, v814, v815, v816, v817],
             [],
             [],
             multiplicity,
@@ -1214,9 +1227,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             None,
-            multiplicity * (v654),
+            multiplicity * (v662),
             [2],
-            [v810],
+            [v818],
             [],
             [],
             multiplicity,
@@ -1224,9 +1237,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             None,
-            multiplicity * (v655),
+            multiplicity * (v663),
             [2],
-            [v811],
+            [v819],
             [],
             [],
             multiplicity,
@@ -1243,9 +1256,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(2),
             None,
-            multiplicity * (v656),
+            multiplicity * (v664),
             [0, 1, 2, 3, 4],
-            [v812, v813, v814, v815, v816],
+            [v820, v821, v822, v823, v824],
             [],
             [],
             multiplicity,
@@ -1253,9 +1266,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(2),
             Some(5),
-            multiplicity * (v657),
+            multiplicity * (v665),
             [2, 5],
-            [v817, v818],
+            [v825, v826],
             [],
             [],
             multiplicity,
@@ -1263,9 +1276,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             None,
-            multiplicity * (v658),
+            multiplicity * (v666),
             [2],
-            [v819],
+            [v827],
             [],
             [],
             multiplicity,
@@ -1273,9 +1286,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             None,
-            multiplicity * (v659),
+            multiplicity * (v667),
             [5],
-            [v820],
+            [v828],
             [],
             [],
             multiplicity,
@@ -1283,9 +1296,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             None,
-            multiplicity * (v660),
+            multiplicity * (v668),
             [5],
-            [v821],
+            [v829],
             [],
             [],
             multiplicity,
@@ -1293,9 +1306,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(2),
             None,
-            multiplicity * (v661),
+            multiplicity * (v669),
             [0, 1, 2, 3, 4],
-            [v822, v823, v824, v825, v826],
+            [v830, v831, v832, v833, v834],
             [],
             [],
             multiplicity,
@@ -1330,9 +1343,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(3),
             Some(4),
-            multiplicity * (v678),
+            multiplicity * (v686),
             [3, 4],
-            [v827, v828],
+            [v835, v836],
             [],
             [],
             multiplicity,
@@ -1340,9 +1353,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(0),
             Some(3),
-            multiplicity * (v754),
+            multiplicity * (v762),
             [0, 2, 3, 6],
-            [v829, v830, v831, v832],
+            [v837, v838, v839, v840],
             [],
             [],
             multiplicity,
@@ -1369,9 +1382,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(4),
-            multiplicity * (v769),
+            multiplicity * (v777),
             [1, 2, 4],
-            [v833, v834, v835],
+            [v841, v842, v843],
             [],
             [],
             multiplicity,
@@ -1398,9 +1411,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(3),
             Some(4),
-            multiplicity * (v773),
+            multiplicity * (v781),
             [2, 3, 4],
-            [v836, v837, v838],
+            [v844, v845, v846],
             [],
             [],
             multiplicity,
@@ -1408,9 +1421,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(3),
             Some(4),
-            multiplicity * (v779),
+            multiplicity * (v787),
             [2, 3, 4],
-            [v839, v840, v841],
+            [v847, v848, v849],
             [],
             [],
             multiplicity,
@@ -1418,9 +1431,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(3),
             Some(4),
-            multiplicity * (v785),
+            multiplicity * (v793),
             [0, 1, 2, 3, 4],
-            [v842, v843, v844, v845, v846],
+            [v850, v851, v852, v853, v854],
             [],
             [],
             multiplicity,
@@ -1428,7 +1441,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(3),
             Some(4),
-            multiplicity * (v858),
+            multiplicity * (v869),
             [],
             [],
             [],
@@ -1438,63 +1451,66 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(3),
             Some(4),
-            multiplicity * (v859),
+            multiplicity * (v870),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = v544;
-        self.canonical_reactive[1] = v545;
-        self.canonical_reactive[2] = v546;
-        self.canonical_reactive[3] = staged[22];
-        self.canonical_reactive[4] = v653;
-        self.canonical_reactive[5] = v654;
-        self.canonical_reactive[6] = v662;
-        self.canonical_reactive[7] = v847;
-        self.canonical_reactive[8] = staged[23];
-        self.canonical_reactive[9] = v656;
-        self.canonical_reactive[10] = v657;
-        self.canonical_reactive[11] = v663;
-        self.canonical_reactive[12] = v848;
-        self.canonical_reactive[13] = v659;
-        self.canonical_reactive[14] = v664;
-        self.canonical_reactive[15] = v849;
-        self.canonical_reactive[16] = v661;
-        self.canonical_reactive[17] = staged[24];
-        self.canonical_reactive[18] = staged[25];
-        self.canonical_reactive[19] = staged[26];
-        self.canonical_reactive[20] = v678;
-        self.canonical_reactive[21] = v754;
-        self.canonical_reactive[22] = staged[27];
-        self.canonical_reactive[23] = staged[28];
-        self.canonical_reactive[24] = v769;
-        self.canonical_reactive[25] = staged[29];
-        self.canonical_reactive[26] = staged[30];
-        self.canonical_reactive[27] = v773;
-        self.canonical_reactive[28] = v777;
-        self.canonical_reactive[29] = v850;
-        self.canonical_reactive[30] = v851;
-        self.canonical_reactive[31] = v852;
-        self.canonical_reactive[32] = v783;
-        self.canonical_reactive[33] = v853;
-        self.canonical_reactive[34] = v854;
-        self.canonical_reactive[35] = v855;
-        self.canonical_reactive[36] = v856;
-        self.canonical_reactive[37] = v857;
-        self.canonical_reactive[38] = v858;
-        self.canonical_reactive[39] = v859;
+        self.canonical_reactive[0] = v550;
+        self.canonical_reactive[1] = v551;
+        self.canonical_reactive[2] = v553;
+        self.canonical_reactive[3] = v855;
+        self.canonical_reactive[4] = v856;
+        self.canonical_reactive[5] = v857;
+        self.canonical_reactive[6] = staged[22];
+        self.canonical_reactive[7] = v661;
+        self.canonical_reactive[8] = v662;
+        self.canonical_reactive[9] = v670;
+        self.canonical_reactive[10] = v858;
+        self.canonical_reactive[11] = staged[23];
+        self.canonical_reactive[12] = v664;
+        self.canonical_reactive[13] = v665;
+        self.canonical_reactive[14] = v671;
+        self.canonical_reactive[15] = v859;
+        self.canonical_reactive[16] = v667;
+        self.canonical_reactive[17] = v672;
+        self.canonical_reactive[18] = v860;
+        self.canonical_reactive[19] = v669;
+        self.canonical_reactive[20] = staged[24];
+        self.canonical_reactive[21] = staged[25];
+        self.canonical_reactive[22] = staged[26];
+        self.canonical_reactive[23] = v686;
+        self.canonical_reactive[24] = v762;
+        self.canonical_reactive[25] = staged[27];
+        self.canonical_reactive[26] = staged[28];
+        self.canonical_reactive[27] = v777;
+        self.canonical_reactive[28] = staged[29];
+        self.canonical_reactive[29] = staged[30];
+        self.canonical_reactive[30] = v781;
+        self.canonical_reactive[31] = v785;
+        self.canonical_reactive[32] = v861;
+        self.canonical_reactive[33] = v862;
+        self.canonical_reactive[34] = v863;
+        self.canonical_reactive[35] = v791;
+        self.canonical_reactive[36] = v864;
+        self.canonical_reactive[37] = v865;
+        self.canonical_reactive[38] = v866;
+        self.canonical_reactive[39] = v867;
+        self.canonical_reactive[40] = v868;
+        self.canonical_reactive[41] = v869;
+        self.canonical_reactive[42] = v870;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
         let multiplicity = self.multiplicity;
         let cached = &*self.canonical_reactive;
         stamper.stamp_current_reactive_indexed_dense_local(
-            Some(2),
+            Some(6),
             None,
-            &[2],
-            &[cached[7]],
+            &[0, 1, 6],
+            &[cached[3], cached[4], cached[5]],
             &[],
             &[],
             multiplicity,
@@ -1503,7 +1519,16 @@ impl Instance {
             Some(2),
             None,
             &[2],
-            &[cached[12]],
+            &[cached[10]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(2),
+            None,
+            &[2],
+            &[cached[15]],
             &[],
             &[],
             multiplicity,
@@ -1512,7 +1537,7 @@ impl Instance {
             Some(5),
             None,
             &[5],
-            &[cached[15]],
+            &[cached[18]],
             &[],
             &[],
             multiplicity,
@@ -1521,7 +1546,7 @@ impl Instance {
             Some(3),
             Some(4),
             &[2, 3, 4],
-            &[cached[29], cached[30], cached[31]],
+            &[cached[32], cached[33], cached[34]],
             &[],
             &[],
             multiplicity,
@@ -1530,7 +1555,7 @@ impl Instance {
             Some(3),
             Some(4),
             &[0, 1, 2, 3, 4],
-            &[cached[33], cached[34], cached[35], cached[36], cached[37]],
+            &[cached[36], cached[37], cached[38], cached[39], cached[40]],
             &[],
             &[],
             multiplicity,
