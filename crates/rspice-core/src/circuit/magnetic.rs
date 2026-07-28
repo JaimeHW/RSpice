@@ -39,19 +39,49 @@ impl CircuitData {
             .iter()
             .flat_map(|group| group.windings.iter().map(|winding| winding.inductor_index))
             .collect::<std::collections::HashSet<_>>();
-        self.inductors.stamp_transient_companion_where(
-            matrix,
-            rhs,
-            dt,
-            coeff,
-            num_nodes,
-            |index| {
-                core_bindings
-                    .iter()
-                    .any(|binding| binding.inductor_index == index && binding.device.is_xyce_core())
-                    || grouped_indices.contains(&index)
-            },
-        );
+        for index in 0..self.inductors.names.len() {
+            let np = self.inductors.node_pos[index];
+            let nn = self.inductors.node_neg[index];
+            let branch = num_nodes + self.inductors.branch_indices[index];
+            let is_core = core_bindings.iter().any(|binding| {
+                binding.inductor_index == index && binding.device.is_xyce_core()
+            }) || grouped_indices.contains(&index);
+
+            // Core rows own the constitutive branch equation, but their MNA
+            // KCL/branch-incidence entries are still needed here.  Do not
+            // stamp the authored L-card companion (its 1/dt terms can be
+            // many orders larger than Core's geometry-only Q coefficient).
+            if is_core {
+                if np > 0 {
+                    matrix.add(branch - 1, np - 1, 1.0);
+                    matrix.add(np - 1, branch - 1, 1.0);
+                }
+                if nn > 0 {
+                    matrix.add(branch - 1, nn - 1, -1.0);
+                    matrix.add(nn - 1, branch - 1, -1.0);
+                }
+                continue;
+            }
+
+            let r_eq = coeff.inductor_req(self.inductors.inductances[index], dt);
+            let v_eq = coeff.inductor_veq(
+                self.inductors.inductances[index],
+                dt,
+                self.inductors.i_prev[index],
+                self.inductors.i_prev_prev[index],
+                self.inductors.v_prev[index],
+            );
+            if np > 0 {
+                matrix.add(branch - 1, np - 1, 1.0);
+                matrix.add(np - 1, branch - 1, 1.0);
+            }
+            if nn > 0 {
+                matrix.add(branch - 1, nn - 1, -1.0);
+                matrix.add(nn - 1, branch - 1, -1.0);
+            }
+            matrix.add(branch - 1, branch - 1, -r_eq);
+            rhs[branch - 1] = -v_eq;
+        }
     }
 
     /// Whether the circuit contains a single-winding Xyce nonlinear Core.
@@ -101,6 +131,17 @@ impl CircuitData {
                 .all(|group| group.device.is_xyce_core())
     }
 
+    /// Whether a shared LEVEL=2 Xyce Core has the coupled constitutive
+    /// topology for which the transient solver uses its stabilized Picard
+    /// Jacobian.
+    pub(crate) fn has_xyce_core_shared_level2(&self) -> bool {
+        self.xyce_core_groups.iter().any(|group| {
+            group.device.is_xyce_core()
+                && group.device.is_xyce_core_level2()
+                && group.windings.len() > 1
+        })
+    }
+
     /// Restamp the single-winding Xyce Core branch equations with the pure
     /// constitutive endpoint evaluated at the current Newton iterate.
     ///
@@ -118,6 +159,7 @@ impl CircuitData {
         dt: Value,
         coeff: &CompanionCoefficients,
         one_step_order2: bool,
+        stabilized_jacobian: bool,
     ) {
         // This status belongs to the current Newton assembly only.  Any
         // constitutive failure below must make the candidate non-converged;
@@ -136,9 +178,6 @@ impl CircuitData {
                 continue;
             }
             let index = binding.inductor_index;
-            let Some(&l_slot) = self.inductors.inductances.get(index) else {
-                continue;
-            };
             let Some(&i_prev) = self.inductors.i_prev.get(index) else {
                 continue;
             };
@@ -386,25 +425,12 @@ impl CircuitData {
                     -d_voltage + 1.0,
                 );
             }
-            // OneStep's outer assembler stamps the generic inductor with a
-            // backward-Euler Q companion.  Cancel that exact stamp before
-            // installing the Core DAE row; using the caller's trapezoidal
-            // coefficients here would leave a second Q difference in the
-            // branch equation.
-            let cancellation_coeff = if one_step_order2 {
-                CompanionCoefficients::backward_euler()
-            } else {
-                *coeff
-            };
-            let old_req = cancellation_coeff.inductor_req(l_slot, dt);
-            let old_veq = cancellation_coeff.inductor_veq(l_slot, dt, i_prev, i_prev_prev, v_prev);
-            // The ordinary companion is stamped after the global OneStep
-            // static half-scaling, so its Q-history row is not half-scaled.
-            // Cancel that full companion before installing the Core DAE
-            // derivative; only the physical static F term carries the
-            // order-two half factor in `d_current`/`d_voltage`.
-            matrix.add(branch - 1, branch - 1, d_current + old_req);
-            rhs[branch - 1] += desired_rhs + old_veq;
+            // Core branches own their complete DAE row.  The transient
+            // companion pass contributes only the MNA incidence entries;
+            // avoid adding and then cancelling the authored L-card
+            // companion, whose 1/dt terms can dwarf the geometry-only Q row.
+            matrix.add(branch - 1, branch - 1, d_current);
+            rhs[branch - 1] += desired_rhs;
             if let Some(hidden_branch) = hidden_branch {
                 if let Some((g_m, g_happ, g_voltage, g_rate)) = hidden_partials {
                     if !g_m.is_finite()
@@ -642,7 +668,6 @@ impl CircuitData {
                 let winding_i = &group.windings[i];
                 let index_i = winding_i.inductor_index;
                 let branch_i = self.num_nodes + self.inductors.branch_indices[index_i];
-                let l_slot = self.inductors.inductances[index_i];
                 let mut charge_derivative = 0.0;
                 for j in 0..group.windings.len() {
                     let winding_j = &group.windings[j];
@@ -739,13 +764,25 @@ impl CircuitData {
                         trial.latest_magnetization,
                         current_happ_slope,
                     );
-                    let static_derivative = d_mid_d_current.map_or(0.0, |value| {
-                        if one_step_order2 {
-                            static_scale * voltages[i] * value / (trial.mid * trial.mid)
-                        } else {
-                            -static_scale * voltages[i] * value / (trial.mid * trial.mid)
-                        }
-                    });
+                    // Shared LEVEL=2 cores use a bounded Picard Jacobian in
+                    // the transient solve. Their physical residual and
+                    // constitutive endpoint remain canonical; omitting this
+                    // non-monotone tangent from the solve matrix avoids a
+                    // spurious relative-winding mode while preserving the
+                    // exact converged solution.
+                    let static_derivative = if stabilized_jacobian
+                        && group.device.is_xyce_core_level2()
+                    {
+                        0.0
+                    } else {
+                        d_mid_d_current.map_or(0.0, |value| {
+                            if one_step_order2 {
+                                static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                            } else {
+                                -static_scale * voltages[i] * value / (trial.mid * trial.mid)
+                            }
+                        })
+                    };
                     let charge_derivative_j = if one_step_order2 {
                         charge_coeff * l0 / dt
                     } else {
@@ -766,11 +803,6 @@ impl CircuitData {
                 }
                 let voltage_linear = d_voltage * voltages[i] + cross_first_voltage * first_voltage;
                 let desired_rhs = -reduced_f0 + linearized + hidden_linearized + voltage_linear;
-                let cancellation_coeff = if one_step_order2 {
-                    CompanionCoefficients::backward_euler()
-                } else {
-                    *coeff
-                };
                 if self.inductors.node_pos[index_i] > 0 {
                     matrix.add(
                         branch_i - 1,
@@ -796,16 +828,12 @@ impl CircuitData {
                         matrix.add(branch_i - 1, first_neg - 1, -cross_first_voltage);
                     }
                 }
-                let old_req = cancellation_coeff.inductor_req(l_slot, dt);
-                let old_veq = cancellation_coeff.inductor_veq(
-                    l_slot,
-                    dt,
-                    previous[i],
-                    previous_previous[i],
-                    self.inductors.v_prev[index_i],
-                );
-                matrix.add(branch_i - 1, branch_i - 1, old_req);
-                rhs[branch_i - 1] += desired_rhs + old_veq;
+                // Core branches own their complete DAE row.  The transient
+                // companion pass contributes only the MNA incidence entries;
+                // avoid adding and then cancelling the authored L-card
+                // companion, whose 1/dt terms can dwarf the geometry-only Q
+                // row at tiny timesteps.
+                rhs[branch_i - 1] += desired_rhs;
             }
             if let (Some(hidden_branch), Some((g_m, g_happ, g_voltage, g_rate))) =
                 (hidden_branch, hidden_partials)

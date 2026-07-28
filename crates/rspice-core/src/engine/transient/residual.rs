@@ -18,6 +18,10 @@ pub(super) struct TransientSystemContext<'a> {
     /// previous static residual is carried separately because it is not part
     /// of the reactive companion histories.
     pub(super) xyce_one_step_order2: bool,
+    /// Use the bounded Picard form for shared Xyce LEVEL=2 cores. The
+    /// residual and physical constitutive endpoint remain unchanged; only
+    /// the local Jacobian is stabilized for this coupled topology.
+    pub(super) xyce_core_stabilized_jacobian: bool,
     pub(super) xyce_static_history: Option<&'a [Value]>,
     pub(super) bsim4_trnqs_coeff: &'a CompanionCoefficients,
     pub(super) bjt_history: &'a BjtTransientHistory,
@@ -202,9 +206,13 @@ impl Engine {
                 &companion_coeff,
             )
             .map_err(SimulationError::Circuit)?;
-        circuit
-            .inductors
-            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        circuit.stamp_transient_inductor_companions(
+            matrix,
+            rhs,
+            dt,
+            &companion_coeff,
+            num_nodes,
+        );
         if ctx.xyce_one_step_order2 {
             circuit
                 .inductors
@@ -217,6 +225,7 @@ impl Engine {
             dt,
             &companion_coeff,
             ctx.xyce_one_step_order2,
+            ctx.xyce_core_stabilized_jacobian,
         );
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
         circuit.stamp_multi_winding_transformers_transient(matrix, rhs, dt, &companion_coeff);
@@ -715,6 +724,7 @@ Q1 C B E 0 QN
         let ctx = TransientSystemContext {
             coeff: &coeff,
             xyce_one_step_order2: false,
+            xyce_core_stabilized_jacobian: false,
             xyce_static_history: None,
             bsim4_trnqs_coeff: &coeff,
             bjt_history: &bjt_history,
@@ -1153,6 +1163,7 @@ Q1 C B E 0 QN
             let ctx = TransientSystemContext {
                 coeff: &coeff,
                 xyce_one_step_order2: false,
+                xyce_core_stabilized_jacobian: false,
                 xyce_static_history: None,
                 bsim4_trnqs_coeff: &coeff,
                 bjt_history: &bjt_history,
