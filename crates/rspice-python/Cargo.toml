@@ -12,6 +12,12 @@ rust-version.workspace = true
 [lib]
 name = "rspice"
 crate-type = ["cdylib"]
+# A cdylib cannot be linked into a test harness the way an rlib can, so this
+# crate is excluded from the workspace sweep in ci.yml and `cargo test -p
+# rspice-python` runs nothing by design. The Rust-side unit tests are real and
+# do run: python.yml invokes `cargo test --locked -p rspice-python --lib`,
+# which builds the lib target explicitly and overrides this setting. Run that
+# command, not a bare `cargo test`, when changing anything under src/.
 test = false
 doctest = false
 
