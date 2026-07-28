@@ -22,8 +22,6 @@ pub(crate) mod complex;
 pub(crate) mod impedance;
 pub(crate) mod state;
 
-pub use complex::Complex;
-pub use impedance::{Admittance, Impedance};
 pub use state::{SmithChartMode, SmithChartState};
 
 // =============================================================================

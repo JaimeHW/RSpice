@@ -9,8 +9,8 @@ mod diagram;
 mod display;
 mod mask;
 
-pub use cache::{EyePersistenceCache, EyePersistenceCacheKey};
-pub use cursor::{EyeCursorMode, EyeCursorState, EyeViewRange};
+pub use cache::EyePersistenceCache;
+pub use cursor::{EyeCursorState, EyeViewRange};
 pub use diagram::EyeDiagramState;
 pub use display::{ColorMap, EyeDisplayMode};
 pub use mask::{EyeMask, MaskPolygon};

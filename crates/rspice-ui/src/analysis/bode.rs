@@ -18,7 +18,7 @@ pub(crate) mod data;
 pub(crate) mod state;
 
 pub use data::{BodeData, FrequencyResponse};
-pub use state::{BodeDisplayMode, BodePlotState};
+pub use state::BodePlotState;
 
 // =============================================================================
 // Tests

@@ -29,10 +29,9 @@
 pub(crate) mod state;
 
 pub use rspice_core::analysis::signal_integrity::{
-    AmplitudeStats, Edge, EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, calculate_edge_rate,
-    calculate_eye_measurements, find_edges,
+    EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, calculate_eye_measurements, find_edges,
 };
-pub use state::{EyeDiagramState, EyeDisplayMode};
+pub use state::EyeDiagramState;
 
 // =============================================================================
 // Tests

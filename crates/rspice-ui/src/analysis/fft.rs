@@ -22,12 +22,10 @@ pub(crate) mod pipeline;
 pub(crate) mod state;
 pub(crate) mod window;
 
-pub use compute::{FftResult, compute_fft};
-pub use data::{FftData, FftPoint, SpectrumAnalysis};
+pub use compute::compute_fft;
+pub use data::FftData;
 pub use pipeline::{
-    DEFAULT_MAX_FFT_POINTS, FftInputOptions, FftInputPolicy, FftTimeWindow,
-    MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES, PreparedFftInput, prepare_fft_input,
-    prepare_fft_input_with_options, prepare_fft_input_with_policy,
+    FftInputOptions, MIN_FFT_SAMPLES, PreparedFftInput, prepare_fft_input_with_options,
 };
 pub use state::{FftState, InputFidelity};
 pub use window::WindowFunction;
