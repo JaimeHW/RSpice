@@ -99,20 +99,6 @@ impl VisualizationRasterPalette {
         Ok(palette)
     }
 
-    #[must_use]
-    pub const fn plot_background(&self) -> Rgb8 {
-        self.plot_background
-    }
-
-    #[must_use]
-    pub const fn grid(&self) -> Rgb8 {
-        self.grid
-    }
-
-    #[must_use]
-    pub const fn axes(&self) -> Rgb8 {
-        self.axes
-    }
 
     #[must_use]
     pub fn traces(&self) -> &[Rgb8] {
@@ -178,20 +164,6 @@ impl VisualizationRasterProfile {
         Ok(profile)
     }
 
-    #[must_use]
-    pub const fn pixel_width(&self) -> u32 {
-        self.pixel_width
-    }
-
-    #[must_use]
-    pub const fn pixel_height(&self) -> u32 {
-        self.pixel_height
-    }
-
-    #[must_use]
-    pub const fn background(&self) -> Rgb8 {
-        self.background
-    }
 
     #[must_use]
     pub const fn palette(&self) -> &VisualizationRasterPalette {
@@ -284,11 +256,6 @@ impl ResolvedRasterTrace {
     }
 
     #[must_use]
-    pub const fn binding(&self) -> DatasetBinding {
-        self.binding
-    }
-
-    #[must_use]
     pub fn points(&self) -> &[ResolvedRasterPoint] {
         &self.points
     }
@@ -332,11 +299,6 @@ impl ResolvedCartesianLineScene {
     #[must_use]
     pub const fn pane_id(&self) -> PaneId {
         self.pane_id
-    }
-
-    #[must_use]
-    pub fn dataset_bindings(&self) -> &[DatasetBinding] {
-        &self.dataset_bindings
     }
 
     #[must_use]
@@ -389,10 +351,6 @@ impl VisualizationRasterArtifact {
         &self.artifact
     }
 
-    #[must_use]
-    pub fn into_artifact(self) -> FrozenReportArtifact {
-        self.artifact
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
