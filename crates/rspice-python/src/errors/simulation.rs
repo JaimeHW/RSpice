@@ -8,7 +8,7 @@
 use super::*;
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct SimulationErrorAttributes {
+struct SimulationErrorAttributes {
     kind: &'static str,
     code: &'static str,
     category: &'static str,
@@ -19,7 +19,7 @@ pub(super) struct SimulationErrorAttributes {
     limit: Option<usize>,
 }
 
-pub(super) fn simulation_error_attributes(
+fn simulation_error_attributes(
     error: &rspice_core::engine::SimulationError,
 ) -> SimulationErrorAttributes {
     let descriptor = error.descriptor();

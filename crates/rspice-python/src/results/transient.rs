@@ -169,7 +169,7 @@ impl PyTransientResult {
         self.checked_waveform(node)
     }
 
-    pub(crate) fn waveform_for(&self, node: &NodeIdentifier) -> PyResult<Vec<f64>> {
+    fn waveform_for(&self, node: &NodeIdentifier) -> PyResult<Vec<f64>> {
         match node {
             NodeIdentifier::Index(idx) => self.checked_waveform(*idx),
             NodeIdentifier::Name(name) => self.checked_waveform_named(name),

@@ -96,14 +96,14 @@ impl PyDampingStrategy {
 
 /// A `__reduce__` payload for an enum member: the `getattr` builtin plus the
 /// class and member name it should look up.
-pub(super) type EnumReduction<'py> = (Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str));
+type EnumReduction<'py> = (Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str));
 
 /// Shared `__reduce__` body for the module's simple enums.
 ///
 /// `getattr(EnumClass, "MEMBER")` is picklable by reference and always
 /// resolves to the canonical member, so round-tripping preserves identity
 /// semantics rather than creating a detached copy.
-pub(super) fn enum_reduce<'py>(
+fn enum_reduce<'py>(
     py: Python<'py>,
     class: Bound<'py, pyo3::types::PyType>,
     member: &'static str,

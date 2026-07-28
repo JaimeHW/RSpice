@@ -196,7 +196,7 @@ impl RawPlot {
     }
 
     /// ASCII raw text. Complex values are written `re,im`, as ngspice does.
-    pub(crate) fn to_ascii(&self) -> Result<String, String> {
+    fn to_ascii(&self) -> Result<String, String> {
         let points = self.validate()?;
         let mut output = self.header(points);
         let _ = writeln!(output, "Values:");
@@ -220,7 +220,7 @@ impl RawPlot {
     }
 
     /// Binary raw bytes: the same header, then little-endian f64 values.
-    pub(crate) fn to_binary(&self) -> Result<Vec<u8>, String> {
+    fn to_binary(&self) -> Result<Vec<u8>, String> {
         let points = self.validate()?;
         let mut output = self.header(points).into_bytes();
         output.extend_from_slice(b"Binary:\n");

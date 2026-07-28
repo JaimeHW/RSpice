@@ -97,7 +97,7 @@ pub(super) fn override_param_source(
 ///
 /// A `.param` value may be a brace expression containing spaces, so naive
 /// whitespace splitting would tear one assignment into several tokens.
-pub(super) fn split_outside_braces(line: &str) -> Vec<&str> {
+fn split_outside_braces(line: &str) -> Vec<&str> {
     let bytes = line.as_bytes();
     let mut tokens = Vec::new();
     let (mut start, mut depth) = (None::<usize>, 0usize);

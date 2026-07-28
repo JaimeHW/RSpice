@@ -4625,7 +4625,6 @@ dependencies = [
 name = "rspice-python"
 version = "0.1.0"
 dependencies = [
- "num-complex",
  "numpy",
  "pyo3",
  "pyo3-build-config",
