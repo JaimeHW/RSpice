@@ -382,31 +382,10 @@ pub struct ResultsPreferences {
 }
 
 impl ResultsPreferences {
-    #[must_use]
-    pub const fn displayed_significant_digits(&self) -> DisplayedSignificantDigits {
-        self.displayed_significant_digits
-    }
-
-    #[must_use]
-    pub const fn cursor_interpolation(&self) -> CursorInterpolation {
-        self.cursor_interpolation
-    }
-
-    #[must_use]
-    pub const fn complex_number_display(&self) -> ComplexNumberDisplay {
-        self.complex_number_display
-    }
-
-    #[must_use]
-    pub const fn large_dataset_display(&self) -> LargeDatasetDisplay {
-        self.large_dataset_display
-    }
-
-    #[must_use]
-    pub const fn engineering_export(&self) -> EngineeringExportFormat {
-        self.engineering_export
-    }
-
+    // The per-setting getters that used to sit here had no callers: everything
+    // downstream takes the whole `ResultPresentationPolicy` below rather than
+    // reading settings one at a time, which is what keeps the runtime-support
+    // fallback on `engineering_export` from being bypassed.
     fn presentation_policy(&self) -> ResultPresentationPolicy {
         ResultPresentationPolicy {
             displayed_significant_digits: self.displayed_significant_digits,

@@ -123,25 +123,6 @@ impl<'a> WaveformInterpolator<'a> {
         self
     }
 
-    /// Get waveform length
-    pub fn len(&self) -> usize {
-        self.x.len()
-    }
-
-    /// Check if waveform is empty
-    pub fn is_empty(&self) -> bool {
-        self.x.is_empty()
-    }
-
-    /// Get x range
-    pub fn x_range(&self) -> Option<(f64, f64)> {
-        if self.x.is_empty() {
-            None
-        } else {
-            Some((self.x[0], self.x[self.x.len() - 1]))
-        }
-    }
-
     /// Interpolate at a single point
     pub fn interpolate_at(&self, target_x: f64) -> Result<f64, InterpolationError> {
         if self.x.is_empty() {
@@ -332,8 +313,6 @@ pub enum InterpolationError {
     EmptyWaveform,
     /// Target x is out of range
     OutOfRange(f64),
-    /// Waveforms cannot be aligned
-    AlignmentFailed,
 }
 
 impl std::fmt::Display for InterpolationError {
@@ -341,7 +320,6 @@ impl std::fmt::Display for InterpolationError {
         match self {
             Self::EmptyWaveform => write!(f, "Empty waveform"),
             Self::OutOfRange(x) => write!(f, "Value {} is out of interpolation range", x),
-            Self::AlignmentFailed => write!(f, "Waveform alignment failed"),
         }
     }
 }
@@ -374,45 +352,6 @@ pub fn align_waveforms(
     let y2_resampled = interp.resample(x1)?;
 
     Ok((x1.to_vec(), y1.to_vec(), y2_resampled))
-}
-
-/// Align waveforms to a union of both time bases
-///
-/// Creates a merged time base containing all unique points from both waveforms.
-pub fn align_waveforms_union(
-    x1: &[f64],
-    y1: &[f64],
-    x2: &[f64],
-    y2: &[f64],
-    method: InterpolationMethod,
-) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), InterpolationError> {
-    if x1.is_empty() || x2.is_empty() {
-        return Err(InterpolationError::EmptyWaveform);
-    }
-
-    // Merge time bases
-    let mut merged_x: Vec<f64> = Vec::with_capacity(x1.len() + x2.len());
-    merged_x.extend_from_slice(x1);
-    merged_x.extend_from_slice(x2);
-    merged_x.retain(|x| x.is_finite());
-    if merged_x.is_empty() {
-        return Err(InterpolationError::AlignmentFailed);
-    }
-    merged_x.sort_by(|a, b| a.total_cmp(b));
-    merged_x.dedup_by(|a, b| (*a - *b).abs() < 1e-15);
-
-    // Resample both waveforms onto merged grid
-    let interp1 = WaveformInterpolator::new(x1, y1)
-        .with_method(method)
-        .with_extrapolation(ExtrapolationMode::Flat);
-    let interp2 = WaveformInterpolator::new(x2, y2)
-        .with_method(method)
-        .with_extrapolation(ExtrapolationMode::Flat);
-
-    let y1_resampled = interp1.resample(&merged_x)?;
-    let y2_resampled = interp2.resample(&merged_x)?;
-
-    Ok((merged_x, y1_resampled, y2_resampled))
 }
 
 // =============================================================================
