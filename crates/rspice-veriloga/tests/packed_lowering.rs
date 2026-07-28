@@ -199,7 +199,10 @@ fn report_how_much_of_the_graph_is_newton_loop_work() {
             *count as f64 * 100.0 / total as f64
         );
     }
-    eprintln!("scheduled total       {total:>7} of {} values", shape.primal.values.len());
+    eprintln!(
+        "scheduled total       {total:>7} of {} values",
+        shape.primal.values.len()
+    );
 
     assert!(
         per_class.contains_key(&format!("{:?}", InvalidationClass::NewtonIteration)),
@@ -234,13 +237,26 @@ fn unscheduled_values_are_not_needed_by_the_equations() {
         match kind {
             OptValueKind::Unary { input, .. } => vec![*input],
             OptValueKind::Binary { left, right, .. } => vec![*left, *right],
-            OptValueKind::Select { condition, then_value, else_value } => {
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
                 vec![*condition, *then_value, *else_value]
             }
             OptValueKind::Ddt { input, .. } => vec![*input],
             OptValueKind::SimParam { fallback, .. } => vec![*fallback],
-            OptValueKind::CountedSum { count, initial, term, .. } => vec![*count, *initial, *term],
-            OptValueKind::Limit { proposed, candidate, .. } => vec![*proposed, *candidate],
+            OptValueKind::CountedSum {
+                count,
+                initial,
+                term,
+                ..
+            } => vec![*count, *initial, *term],
+            OptValueKind::Limit {
+                proposed,
+                candidate,
+                ..
+            } => vec![*proposed, *candidate],
             OptValueKind::Ddx { value, .. } => vec![*value],
             OptValueKind::LimitPrevious { proposed, .. } => vec![*proposed],
             _ => Vec::new(),
@@ -284,9 +300,9 @@ fn report_how_sparse_the_derivatives_actually_are() {
     let path = model_path(&["BSIM-BULK107.2.1_02112025", "code", "bsimbulk.va"]);
     let source = std::fs::read_to_string(&path).expect("read model source");
     let mut options = CompilerOptions::default();
-    options.include_paths.push(
-        path.parent().expect("model directory").to_path_buf(),
-    );
+    options
+        .include_paths
+        .push(path.parent().expect("model directory").to_path_buf());
     let artifact = VerilogACompiler::new(options)
         .compile_canonical_ir_module(&source, Some("bsimbulk"))
         .expect("compile bsimbulk");

@@ -261,12 +261,7 @@ pub(super) fn unary_rule(op: OptUnaryOp, input: &str, value: &str) -> LaneRule {
 ///
 /// `left`/`right` are the operand primals and `value` this value's primal.
 /// Lane arrays are referred to as `l` and `r`.
-pub(super) fn binary_rule(
-    op: OptBinaryOp,
-    left: &str,
-    right: &str,
-    value: &str,
-) -> LaneRule {
+pub(super) fn binary_rule(op: OptBinaryOp, left: &str, right: &str, value: &str) -> LaneRule {
     match op {
         OptBinaryOp::Add => LaneRule::Binary {
             lane_expr: "l[k] + r[k]".to_string(),
@@ -286,9 +281,7 @@ pub(super) fn binary_rule(
         // d(a^b) = a^b (b/a da + ln(a) db). Left as a single expression so the
         // exponent term vanishes cleanly when the exponent is constant.
         OptBinaryOp::Pow => LaneRule::Binary {
-            lane_expr: format!(
-                "{value} * (({right} / {left}) * l[k] + ({left}).ln() * r[k])"
-            ),
+            lane_expr: format!("{value} * (({right} / {left}) * l[k] + ({left}).ln() * r[k])"),
         },
         // Comparisons, logic and modulo are piecewise constant.
         OptBinaryOp::Mod
@@ -308,7 +301,13 @@ impl LaneRule {
     ///
     /// `input` names the single operand array for the unary forms; `left` and
     /// `right` name the two arrays the binary form reads as `l` and `r`.
-    pub(super) fn emit(&self, width: usize, input: &str, left: &str, right: &str) -> Option<String> {
+    pub(super) fn emit(
+        &self,
+        width: usize,
+        input: &str,
+        left: &str,
+        right: &str,
+    ) -> Option<String> {
         match self {
             Self::Zero => None,
             Self::Copied => Some(input.to_string()),
@@ -428,8 +427,10 @@ pub(super) fn emit_body(
     let mut source = String::new();
     // Bound once so a rule can name it wherever an undifferentiated operand
     // appears, instead of every such value paying for its own zero array.
-    source.push_str(&format!("const {ZERO_ARRAY}: [f64; {width}] = [0.0; {width}];
-"));
+    source.push_str(&format!(
+        "const {ZERO_ARRAY}: [f64; {width}] = [0.0; {width}];
+"
+    ));
     let mut primal_bindings = 0usize;
     let mut derivative_bindings = 0usize;
 
@@ -449,15 +450,7 @@ pub(super) fn emit_body(
                 initial,
                 term,
                 ..
-            } => counted_sum_expr(
-                opt,
-                value.id,
-                *count,
-                *initial,
-                *term,
-                &loop_interior,
-                ctx,
-            )?,
+            } => counted_sum_expr(opt, value.id, *count, *initial, *term, &loop_interior, ctx)?,
             other => primal_expr(value.id, other, ctx)?,
         };
         source.push_str(&format!("let v{id} = {primal};\n"));
@@ -466,7 +459,8 @@ pub(super) fn emit_body(
         if !differentiated.contains(&value.id) {
             continue;
         }
-        let Some(rendered) = derivative_binding(value.id, &value.kind, width, lane_slot, differentiated, ctx)?
+        let Some(rendered) =
+            derivative_binding(value.id, &value.kind, width, lane_slot, differentiated, ctx)?
         else {
             continue;
         };
@@ -558,7 +552,10 @@ fn counted_sum_expr(
     let index = format!("li{id}");
     let mut out = String::new();
     out.push_str("{\n");
-    out.push_str(&format!("    let mut acc{id} = v{};\n", usize::from(initial)));
+    out.push_str(&format!(
+        "    let mut acc{id} = v{};\n",
+        usize::from(initial)
+    ));
     out.push_str(&format!("    let n{id} = v{};\n", usize::from(count)));
     out.push_str(&format!("    let mut c{id}: i64 = 0;\n"));
     out.push_str(&format!("    while (c{id} as f64) < n{id} {{\n"));
@@ -621,9 +618,30 @@ pub(super) fn emit_scheduled(
         // iteration. Treating an unrecognized class as static would cache a
         // value that changes, which is silent and wrong; treating it as
         // dynamic only costs time.
-        (InvalidationClass::InstanceStatic, PackedBody { source: String::new(), primal_bindings: 0, derivative_bindings: 0 }),
-        (InvalidationClass::TemperatureStatic, PackedBody { source: String::new(), primal_bindings: 0, derivative_bindings: 0 }),
-        (InvalidationClass::NewtonIteration, PackedBody { source: String::new(), primal_bindings: 0, derivative_bindings: 0 }),
+        (
+            InvalidationClass::InstanceStatic,
+            PackedBody {
+                source: String::new(),
+                primal_bindings: 0,
+                derivative_bindings: 0,
+            },
+        ),
+        (
+            InvalidationClass::TemperatureStatic,
+            PackedBody {
+                source: String::new(),
+                primal_bindings: 0,
+                derivative_bindings: 0,
+            },
+        ),
+        (
+            InvalidationClass::NewtonIteration,
+            PackedBody {
+                source: String::new(),
+                primal_bindings: 0,
+                derivative_bindings: 0,
+            },
+        ),
     ];
 
     for value in &opt.values {
@@ -639,9 +657,12 @@ pub(super) fn emit_scheduled(
 
         let id = usize::from(value.id);
         let primal = match &value.kind {
-            OptValueKind::CountedSum { count, initial, term, .. } => counted_sum_expr(
-                opt, value.id, *count, *initial, *term, &loop_interior, ctx,
-            )?,
+            OptValueKind::CountedSum {
+                count,
+                initial,
+                term,
+                ..
+            } => counted_sum_expr(opt, value.id, *count, *initial, *term, &loop_interior, ctx)?,
             other => primal_expr(value.id, other, ctx)?,
         };
         let body = &mut bodies[slot].1;
@@ -727,11 +748,7 @@ fn derivative_binding(
     Ok(rule.emit(width, &input, &left, &right))
 }
 
-fn primal_expr(
-    id: ValueId,
-    kind: &OptValueKind,
-    ctx: &PackedContext,
-) -> Result<String, String> {
+fn primal_expr(id: ValueId, kind: &OptValueKind, ctx: &PackedContext) -> Result<String, String> {
     let _ = id;
     Ok(match kind {
         OptValueKind::RealConstant(value) => format_f64(*value),
@@ -824,9 +841,8 @@ fn unary_primal(op: OptUnaryOp, input: &str) -> String {
 }
 
 fn binary_primal(op: OptBinaryOp, left: &str, right: &str) -> String {
-    let compare = |symbol: &str| {
-        format!("(if {left} {symbol} {right} {{ 1.0f64 }} else {{ 0.0f64 }})")
-    };
+    let compare =
+        |symbol: &str| format!("(if {left} {symbol} {right} {{ 1.0f64 }} else {{ 0.0f64 }})");
     match op {
         OptBinaryOp::Add => format!("({left} + {right})"),
         OptBinaryOp::Sub => format!("({left} - {right})"),
@@ -840,12 +856,12 @@ fn binary_primal(op: OptBinaryOp, left: &str, right: &str) -> String {
         OptBinaryOp::Le => compare("<="),
         OptBinaryOp::Gt => compare(">"),
         OptBinaryOp::Ge => compare(">="),
-        OptBinaryOp::And => format!(
-            "(if {left} != 0.0 && {right} != 0.0 {{ 1.0f64 }} else {{ 0.0f64 }})"
-        ),
-        OptBinaryOp::Or => format!(
-            "(if {left} != 0.0 || {right} != 0.0 {{ 1.0f64 }} else {{ 0.0f64 }})"
-        ),
+        OptBinaryOp::And => {
+            format!("(if {left} != 0.0 && {right} != 0.0 {{ 1.0f64 }} else {{ 0.0f64 }})")
+        }
+        OptBinaryOp::Or => {
+            format!("(if {left} != 0.0 || {right} != 0.0 {{ 1.0f64 }} else {{ 0.0f64 }})")
+        }
     }
 }
 
@@ -887,7 +903,9 @@ mod tests {
             multiplicity: "mult".to_string(),
             ddt_scale: "ddt_scale".to_string(),
             simparam: |name, fallback| format!("simparam_or(\"{name}\", {fallback})"),
-            simparam_given: |name| format!("(if simparam_given(\"{name}\") {{ 1.0f64 }} else {{ 0.0f64 }})"),
+            simparam_given: |name| {
+                format!("(if simparam_given(\"{name}\") {{ 1.0f64 }} else {{ 0.0f64 }})")
+            },
         }
     }
 
@@ -960,8 +978,8 @@ endmodule
         let artifact = VerilogACompiler::new(options)
             .compile_canonical_ir_module(&source, Some("bsimbulk"))
             .expect("compile bsimbulk");
-        let opt = OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir)
-            .expect("primal OptIR");
+        let opt =
+            OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir).expect("primal OptIR");
 
         let differentiated = differentiated_values(&opt);
         // Which awkward kinds actually need a derivative rule, as opposed to
@@ -1118,8 +1136,8 @@ endmodule
         let artifact = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(source)
             .expect("compile parity fixture");
-        let primal = OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir)
-            .expect("primal OptIR");
+        let primal =
+            OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir).expect("primal OptIR");
 
         let node_potentials = vec![0.55, 0.0];
         let parameters: Vec<f64> = artifact
@@ -1202,7 +1220,11 @@ endmodule
         let dir = std::env::temp_dir().join(format!("rspice-packed-parity-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("scratch dir");
         let source_path = dir.join("parity.rs");
-        let binary_path = dir.join(if cfg!(windows) { "parity.exe" } else { "parity" });
+        let binary_path = dir.join(if cfg!(windows) {
+            "parity.exe"
+        } else {
+            "parity"
+        });
         std::fs::write(&source_path, program).expect("write parity program");
 
         let compile = std::process::Command::new("rustc")
@@ -1259,8 +1281,8 @@ endmodule
         let artifact = VerilogACompiler::new(options)
             .compile_canonical_ir_module(&source, Some("bsimbulk"))
             .expect("compile bsimbulk");
-        let opt = OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir)
-            .expect("primal OptIR");
+        let opt =
+            OptModel::primal_from_hir_and_mir(&artifact.hir, &artifact.mir).expect("primal OptIR");
 
         let differentiated = differentiated_values(&opt);
         let ctx = test_context();
@@ -1346,13 +1368,7 @@ endmodule
 "#,
         );
         let differentiated = differentiated_values(&opt);
-        let result = emit_body(
-            &opt,
-            2,
-            &|_| None,
-            &differentiated,
-            &test_context(),
-        );
+        let result = emit_body(&opt, 2, &|_| None, &differentiated, &test_context());
         assert!(
             result.is_err(),
             "$abstime has no packed rule yet and must be reported"
@@ -1592,7 +1608,10 @@ endmodule
         // Not an array of zeros: a value with no dependence on any unknown
         // should cost no binding, which is most of a compact model's
         // temperature and geometry arithmetic.
-        assert_eq!(unary_rule(OptUnaryOp::Floor, "a", "b").emit(8, "d", "", ""), None);
+        assert_eq!(
+            unary_rule(OptUnaryOp::Floor, "a", "b").emit(8, "d", "", ""),
+            None
+        );
         assert_eq!(
             binary_rule(OptBinaryOp::Gt, "a", "b", "v").emit(8, "", "l", "r"),
             None

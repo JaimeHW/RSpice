@@ -10749,6 +10749,7 @@ mod tests {
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),
+            body: Vec::new(),
             expressions: Vec::new(),
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
