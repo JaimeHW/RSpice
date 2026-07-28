@@ -8,7 +8,9 @@ use super::{
     EvalContext, NativeModel, PlanStats, clear_native_runtime_error,
     compile_native_with_canonical_ir, take_native_runtime_error,
 };
-use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
+use crate::codegen::{
+    AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, StampIndex,
+};
 use crate::device::VerilogADevice;
 use crate::vm::{Vm, VmContext, VmError};
 use crate::{CompilerOptions, VerilogACompiler};
@@ -20,6 +22,7 @@ const DEFAULT_SAMPLES: usize = 7;
 const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
 const DEVICE_NODE_MAPPING: &[usize] = &[1, 0, 2];
 const DEVICE_CIRCUIT_VOLTAGES: &[f64] = &[0.8, 0.2];
+const DEVICE_MATRIX_DIMENSION: usize = 2;
 const DENSE_MODEL_SOURCE: &str = r#"
 `include "disciplines.vams"
 module native_jit_dense_perf_guard(p, n, ctrl);
@@ -69,7 +72,9 @@ pub struct NativeBenchConfig {
     pub iterations: usize,
     pub samples: usize,
     pub min_speedup: f64,
+    pub min_full_stamp_speedup: f64,
     pub max_native_p95_ns_per_sweep: Option<f64>,
+    pub max_relative_stddev: Option<f64>,
 }
 
 impl Default for NativeBenchConfig {
@@ -78,7 +83,9 @@ impl Default for NativeBenchConfig {
             iterations: DEFAULT_ITERATIONS,
             samples: DEFAULT_SAMPLES,
             min_speedup: 1.10,
+            min_full_stamp_speedup: 0.40,
             max_native_p95_ns_per_sweep: None,
+            max_relative_stddev: None,
         }
     }
 }
@@ -91,7 +98,9 @@ pub struct NativeBenchReport {
     pub iterations: usize,
     pub samples: usize,
     pub min_speedup: f64,
+    pub min_full_stamp_speedup: f64,
     pub max_native_p95_ns_per_sweep: Option<f64>,
+    pub max_relative_stddev: Option<f64>,
     pub cases: Vec<NativeBenchCaseReport>,
     pub passed: bool,
 }
@@ -101,9 +110,12 @@ pub struct NativeBenchCaseReport {
     pub name: &'static str,
     pub plan_stats: PlanStats,
     pub model_shape: NativeBenchModelShape,
+    pub native_setup_ns: f64,
+    pub native_code_bytes: usize,
     pub native_ns_per_sweep: TimingStats,
     pub bytecode_ns_per_sweep: TimingStats,
     pub speedup_median: f64,
+    pub required_speedup: f64,
     pub checksum_native: f64,
     pub checksum_bytecode: f64,
     pub passed: bool,
@@ -127,6 +139,8 @@ pub struct TimingStats {
     pub median: f64,
     pub p95: f64,
     pub mean: f64,
+    pub standard_deviation: f64,
+    pub relative_standard_deviation: f64,
 }
 
 pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenchReport, String> {
@@ -136,6 +150,26 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
     if config.samples == 0 {
         return Err("native JIT benchmark samples must be greater than zero".into());
     }
+    if !config.min_speedup.is_finite() || config.min_speedup < 0.0 {
+        return Err("native JIT minimum speedup must be finite and non-negative".into());
+    }
+    if !config.min_full_stamp_speedup.is_finite() || config.min_full_stamp_speedup < 0.0 {
+        return Err("native JIT full-stamp minimum speedup must be finite and non-negative".into());
+    }
+    if config
+        .max_native_p95_ns_per_sweep
+        .is_some_and(|budget| !budget.is_finite() || budget <= 0.0)
+    {
+        return Err("native JIT p95 budget must be finite and greater than zero".into());
+    }
+    if config
+        .max_relative_stddev
+        .is_some_and(|budget| !budget.is_finite() || budget < 0.0)
+    {
+        return Err(
+            "native JIT relative standard-deviation budget must be finite and non-negative".into(),
+        );
+    }
 
     let target = super::TargetSpec::host()
         .map(|target| target.display_name())
@@ -143,17 +177,22 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
     let cases = vec![
         run_dense_entrypoint_case(config)?,
         run_device_evaluate_case(config)?,
+        run_device_stamp_case(config)?,
     ];
     let passed = cases.iter().all(|case| case.passed);
     Ok(NativeBenchReport {
         generated_with: "rspice-veriloga-native-bench",
-        methodology: "in-process native JIT entrypoint sweeps compared against the bytecode VM; \
-            one warmup precedes timed samples; report uses median and p95 ns per sweep",
+        methodology: "in-process native JIT entrypoint, device-evaluation, and full-stamp sweeps \
+            compared against bytecode VM references; one warmup precedes timed samples; native \
+            and reference order alternates by sample; report uses median, p95, and relative \
+            standard deviation in ns per sweep",
         target,
         iterations: config.iterations,
         samples: config.samples,
         min_speedup: config.min_speedup,
+        min_full_stamp_speedup: config.min_full_stamp_speedup,
         max_native_p95_ns_per_sweep: config.max_native_p95_ns_per_sweep,
+        max_relative_stddev: config.max_relative_stddev,
         cases,
         passed,
     })
@@ -167,8 +206,10 @@ fn run_dense_entrypoint_case(config: NativeBenchConfig) -> Result<NativeBenchCas
     let artifact = compiler
         .compile_canonical_ir(DENSE_MODEL_SOURCE)
         .map_err(|error| format!("compile dense native benchmark canonical IR: {error}"))?;
+    let native_setup_start = Instant::now();
     let native = compile_native_with_canonical_ir(&model, &artifact)
         .map_err(|error| format!("compile dense model to native JIT: {error}"))?;
+    let native_setup_ns = native_setup_start.elapsed().as_nanos() as f64;
     let shape = model_shape(&model);
     validate_shape(&shape, &native.plan_stats())?;
 
@@ -203,47 +244,52 @@ fn run_dense_entrypoint_case(config: NativeBenchConfig) -> Result<NativeBenchCas
     let mut bytecode_samples = Vec::with_capacity(config.samples);
     let mut native_checksum = 0.0;
     let mut bytecode_checksum = 0.0;
-    for _ in 0..config.samples {
-        let mut context = native_context.clone();
-        let start = Instant::now();
-        native_checksum += run_native_sample(&model, &native, &mut context, config.iterations)?;
-        native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+    for sample_index in 0..config.samples {
+        if sample_index.is_multiple_of(2) {
+            let mut context = native_context.clone();
+            let start = Instant::now();
+            native_checksum += run_native_sample(&model, &native, &mut context, config.iterations)?;
+            native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
 
-        let mut context = bytecode_context.clone();
-        let start = Instant::now();
-        bytecode_checksum += run_bytecode_sample(&model, &mut context, config.iterations)?;
-        bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+            let mut context = bytecode_context.clone();
+            let start = Instant::now();
+            bytecode_checksum += run_bytecode_sample(&model, &mut context, config.iterations)?;
+            bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+        } else {
+            let mut context = bytecode_context.clone();
+            let start = Instant::now();
+            bytecode_checksum += run_bytecode_sample(&model, &mut context, config.iterations)?;
+            bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+
+            let mut context = native_context.clone();
+            let start = Instant::now();
+            native_checksum += run_native_sample(&model, &native, &mut context, config.iterations)?;
+            native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+        }
     }
 
     let native_stats = timing_stats(native_samples);
     let bytecode_stats = timing_stats(bytecode_samples);
     let speedup_median = bytecode_stats.median / native_stats.median.max(f64::MIN_POSITIVE);
-    let mut failures = Vec::new();
-    if speedup_median < config.min_speedup {
-        failures.push(format!(
-            "median speedup {:.3}x is below required {:.3}x",
-            speedup_median, config.min_speedup
-        ));
-    }
-    if let Some(max_native_p95) = config.max_native_p95_ns_per_sweep
-        && native_stats.p95 > max_native_p95
-    {
-        failures.push(format!(
-            "native p95 {:.3} ns/sweep exceeds {:.3} ns/sweep",
-            native_stats.p95, max_native_p95
-        ));
-    }
-    if !native_checksum.is_finite() || !bytecode_checksum.is_finite() {
-        failures.push("benchmark checksum became non-finite".into());
-    }
+    let failures = benchmark_failures(
+        config,
+        config.min_speedup,
+        native_stats,
+        speedup_median,
+        native_checksum,
+        bytecode_checksum,
+    );
 
     Ok(NativeBenchCaseReport {
         name: "dense_entrypoint_sweep",
         plan_stats: native.plan_stats(),
         model_shape: shape,
+        native_setup_ns,
+        native_code_bytes: native.code_size_bytes(),
         native_ns_per_sweep: native_stats,
         bytecode_ns_per_sweep: bytecode_stats,
         speedup_median,
+        required_speedup: config.min_speedup,
         checksum_native: std::hint::black_box(native_checksum),
         checksum_bytecode: std::hint::black_box(bytecode_checksum),
         passed: failures.is_empty(),
@@ -260,6 +306,7 @@ fn run_device_evaluate_case(config: NativeBenchConfig) -> Result<NativeBenchCase
         .compile_canonical_ir(DENSE_MODEL_SOURCE)
         .map_err(|error| format!("compile device native benchmark canonical IR: {error}"))?;
     let shape = model_shape(&model);
+    let native_setup_start = Instant::now();
     let mut native_device = VerilogADevice::try_new_with_canonical_ir(
         "native-jit-device-bench",
         model.clone(),
@@ -267,6 +314,7 @@ fn run_device_evaluate_case(config: NativeBenchConfig) -> Result<NativeBenchCase
         DEVICE_NODE_MAPPING,
     )
     .map_err(|error| format!("construct native device benchmark model: {error}"))?;
+    let native_setup_ns = native_setup_start.elapsed().as_nanos() as f64;
     let plan_stats = native_device.native_plan_stats();
     validate_shape(&shape, &plan_stats)?;
 
@@ -296,47 +344,152 @@ fn run_device_evaluate_case(config: NativeBenchConfig) -> Result<NativeBenchCase
     let mut bytecode_samples = Vec::with_capacity(config.samples);
     let mut native_checksum = 0.0;
     let mut bytecode_checksum = 0.0;
-    for _ in 0..config.samples {
-        let start = Instant::now();
-        native_checksum +=
-            run_native_device_evaluate_sample(&mut native_device, config.iterations)?;
-        native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+    for sample_index in 0..config.samples {
+        if sample_index.is_multiple_of(2) {
+            let start = Instant::now();
+            native_checksum +=
+                run_native_device_evaluate_sample(&mut native_device, config.iterations)?;
+            native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
 
-        let mut context = bytecode_context.clone();
-        let start = Instant::now();
-        bytecode_checksum += run_bytecode_evaluate_sample(&model, &mut context, config.iterations)?;
-        bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+            let mut context = bytecode_context.clone();
+            let start = Instant::now();
+            bytecode_checksum +=
+                run_bytecode_evaluate_sample(&model, &mut context, config.iterations)?;
+            bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+        } else {
+            let mut context = bytecode_context.clone();
+            let start = Instant::now();
+            bytecode_checksum +=
+                run_bytecode_evaluate_sample(&model, &mut context, config.iterations)?;
+            bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+
+            let start = Instant::now();
+            native_checksum +=
+                run_native_device_evaluate_sample(&mut native_device, config.iterations)?;
+            native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+        }
     }
 
     let native_stats = timing_stats(native_samples);
     let bytecode_stats = timing_stats(bytecode_samples);
     let speedup_median = bytecode_stats.median / native_stats.median.max(f64::MIN_POSITIVE);
-    let mut failures = Vec::new();
-    if speedup_median < config.min_speedup {
-        failures.push(format!(
-            "median speedup {:.3}x is below required {:.3}x",
-            speedup_median, config.min_speedup
-        ));
-    }
-    if let Some(max_native_p95) = config.max_native_p95_ns_per_sweep
-        && native_stats.p95 > max_native_p95
-    {
-        failures.push(format!(
-            "native p95 {:.3} ns/sweep exceeds {:.3} ns/sweep",
-            native_stats.p95, max_native_p95
-        ));
-    }
-    if !native_checksum.is_finite() || !bytecode_checksum.is_finite() {
-        failures.push("benchmark checksum became non-finite".into());
-    }
+    let failures = benchmark_failures(
+        config,
+        config.min_speedup,
+        native_stats,
+        speedup_median,
+        native_checksum,
+        bytecode_checksum,
+    );
 
     Ok(NativeBenchCaseReport {
         name: "device_evaluate_sweep",
         plan_stats,
         model_shape: shape,
+        native_setup_ns,
+        native_code_bytes: native_device.native_code_size_bytes(),
         native_ns_per_sweep: native_stats,
         bytecode_ns_per_sweep: bytecode_stats,
         speedup_median,
+        required_speedup: config.min_speedup,
+        checksum_native: std::hint::black_box(native_checksum),
+        checksum_bytecode: std::hint::black_box(bytecode_checksum),
+        passed: failures.is_empty(),
+        failure: (!failures.is_empty()).then(|| failures.join("; ")),
+    })
+}
+
+fn run_device_stamp_case(config: NativeBenchConfig) -> Result<NativeBenchCaseReport, String> {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
+        .compile(DENSE_MODEL_SOURCE)
+        .map_err(|error| format!("compile stamp native benchmark model: {error}"))?;
+    let artifact = compiler
+        .compile_canonical_ir(DENSE_MODEL_SOURCE)
+        .map_err(|error| format!("compile stamp native benchmark canonical IR: {error}"))?;
+    let shape = model_shape(&model);
+    let native_setup_start = Instant::now();
+    let mut native_device = VerilogADevice::try_new_with_canonical_ir(
+        "native-jit-stamp-bench",
+        model.clone(),
+        &artifact,
+        DEVICE_NODE_MAPPING,
+    )
+    .map_err(|error| format!("construct native stamp benchmark model: {error}"))?;
+    let native_setup_ns = native_setup_start.elapsed().as_nanos() as f64;
+    let plan_stats = native_device.native_plan_stats();
+    validate_shape(&shape, &plan_stats)?;
+
+    let mut bytecode_context = benchmark_context(&model);
+    resolve_bytecode_defaults(&model, &mut bytecode_context)?;
+
+    let native_snapshot = run_native_device_stamp_sweep(&mut native_device)?;
+    let bytecode_snapshot = run_bytecode_stamp_sweep(&model, &mut bytecode_context)?;
+    assert_stamp_close(&bytecode_snapshot, &native_snapshot)?;
+
+    std::hint::black_box(run_native_device_stamp_sample(
+        &mut native_device,
+        (config.iterations / 10).max(1),
+    )?);
+    let mut bytecode_warmup = bytecode_context.clone();
+    std::hint::black_box(run_bytecode_stamp_sample(
+        &model,
+        &mut bytecode_warmup,
+        (config.iterations / 10).max(1),
+    )?);
+
+    let mut native_samples = Vec::with_capacity(config.samples);
+    let mut bytecode_samples = Vec::with_capacity(config.samples);
+    let mut native_checksum = 0.0;
+    let mut bytecode_checksum = 0.0;
+    for sample_index in 0..config.samples {
+        if sample_index.is_multiple_of(2) {
+            let start = Instant::now();
+            native_checksum +=
+                run_native_device_stamp_sample(&mut native_device, config.iterations)?;
+            native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+
+            let mut context = bytecode_context.clone();
+            let start = Instant::now();
+            bytecode_checksum +=
+                run_bytecode_stamp_sample(&model, &mut context, config.iterations)?;
+            bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+        } else {
+            let mut context = bytecode_context.clone();
+            let start = Instant::now();
+            bytecode_checksum +=
+                run_bytecode_stamp_sample(&model, &mut context, config.iterations)?;
+            bytecode_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+
+            let start = Instant::now();
+            native_checksum +=
+                run_native_device_stamp_sample(&mut native_device, config.iterations)?;
+            native_samples.push(start.elapsed().as_nanos() as f64 / config.iterations as f64);
+        }
+    }
+
+    let native_stats = timing_stats(native_samples);
+    let bytecode_stats = timing_stats(bytecode_samples);
+    let speedup_median = bytecode_stats.median / native_stats.median.max(f64::MIN_POSITIVE);
+    let failures = benchmark_failures(
+        config,
+        config.min_full_stamp_speedup,
+        native_stats,
+        speedup_median,
+        native_checksum,
+        bytecode_checksum,
+    );
+
+    Ok(NativeBenchCaseReport {
+        name: "device_full_stamp_sweep",
+        plan_stats,
+        model_shape: shape,
+        native_setup_ns,
+        native_code_bytes: native_device.native_code_size_bytes(),
+        native_ns_per_sweep: native_stats,
+        bytecode_ns_per_sweep: bytecode_stats,
+        speedup_median,
+        required_speedup: config.min_full_stamp_speedup,
         checksum_native: std::hint::black_box(native_checksum),
         checksum_bytecode: std::hint::black_box(bytecode_checksum),
         passed: failures.is_empty(),
@@ -497,6 +650,239 @@ fn run_bytecode_evaluate_sample(
         checksum += std::hint::black_box(run_bytecode_evaluate_sweep(model, context)?);
     }
     Ok(std::hint::black_box(checksum))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StampSnapshot {
+    matrix: [f64; DEVICE_MATRIX_DIMENSION * DEVICE_MATRIX_DIMENSION],
+    rhs: [f64; DEVICE_MATRIX_DIMENSION],
+}
+
+impl StampSnapshot {
+    fn checksum(self) -> f64 {
+        let matrix = self
+            .matrix
+            .iter()
+            .enumerate()
+            .map(|(index, value)| (index + 1) as f64 * value)
+            .sum::<f64>();
+        let rhs = self
+            .rhs
+            .iter()
+            .enumerate()
+            .map(|(index, value)| (index + self.matrix.len() + 1) as f64 * value)
+            .sum::<f64>();
+        matrix + rhs
+    }
+}
+
+fn run_native_device_stamp_sample(
+    device: &mut VerilogADevice,
+    iterations: usize,
+) -> Result<f64, String> {
+    let mut checksum = 0.0;
+    for _ in 0..iterations {
+        checksum += std::hint::black_box(run_native_device_stamp_sweep(device)?.checksum());
+    }
+    Ok(std::hint::black_box(checksum))
+}
+
+fn run_bytecode_stamp_sample(
+    model: &CompiledModel,
+    context: &mut VmContext,
+    iterations: usize,
+) -> Result<f64, String> {
+    let mut checksum = 0.0;
+    for _ in 0..iterations {
+        checksum += std::hint::black_box(run_bytecode_stamp_sweep(model, context)?.checksum());
+    }
+    Ok(std::hint::black_box(checksum))
+}
+
+fn run_native_device_stamp_sweep(device: &mut VerilogADevice) -> Result<StampSnapshot, String> {
+    let mut matrix = [0.0; DEVICE_MATRIX_DIMENSION * DEVICE_MATRIX_DIMENSION];
+    let mut rhs = [0.0; DEVICE_MATRIX_DIMENSION];
+    let mut matrix_error = None;
+    let mut rhs_error = None;
+    device
+        .try_stamp(
+            DEVICE_CIRCUIT_VOLTAGES,
+            |row, col, value| {
+                if row < DEVICE_MATRIX_DIMENSION && col < DEVICE_MATRIX_DIMENSION {
+                    matrix[row * DEVICE_MATRIX_DIMENSION + col] += value;
+                } else {
+                    matrix_error = Some(format!(
+                        "native stamp emitted matrix index ({row}, {col}) outside benchmark dimension {DEVICE_MATRIX_DIMENSION}"
+                    ));
+                }
+            },
+            |row, value| {
+                if let Some(slot) = rhs.get_mut(row) {
+                    *slot += value;
+                } else {
+                    rhs_error = Some(format!(
+                        "native stamp emitted RHS index {row} outside benchmark dimension {DEVICE_MATRIX_DIMENSION}"
+                    ));
+                }
+            },
+        )
+        .map_err(|error| format!("native device stamp: {error}"))?;
+    if let Some(error) = matrix_error.or(rhs_error) {
+        return Err(error);
+    }
+    Ok(StampSnapshot { matrix, rhs })
+}
+
+fn run_bytecode_stamp_sweep(
+    model: &CompiledModel,
+    context: &mut VmContext,
+) -> Result<StampSnapshot, String> {
+    if model.internal_nodes != 0 || !model.branch_sources.is_empty() {
+        return Err(
+            "dense bytecode stamp reference only supports terminal-only current contributions"
+                .into(),
+        );
+    }
+
+    context.clear_currents();
+    context.currents.reserve(model.stamp_programs.len());
+    {
+        let mut vm = Vm::new(context);
+        execute_assignment_steps(&mut vm, &model.assignment_steps)
+            .map_err(|error| format!("bytecode stamp assignments: {error}"))?;
+    }
+
+    let mut matrix = [0.0; DEVICE_MATRIX_DIMENSION * DEVICE_MATRIX_DIMENSION];
+    let mut rhs = [0.0; DEVICE_MATRIX_DIMENSION];
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        if stamp.branch_ordinal.is_some() || stamp.indirect {
+            return Err(format!(
+                "dense bytecode stamp reference encountered non-current contribution {stamp_index}"
+            ));
+        }
+
+        let active = if let Some(condition) = &stamp.static_condition {
+            let mut vm = Vm::new(context);
+            vm.execute(condition)
+                .map_err(|error| format!("bytecode stamp condition {stamp_index}: {error}"))?
+                != 0.0
+        } else {
+            true
+        };
+        if !active {
+            continue;
+        }
+
+        let value = {
+            let mut vm = Vm::new(context);
+            vm.execute(&stamp.value_program)
+                .map_err(|error| format!("bytecode stamp value {stamp_index}: {error}"))?
+        };
+        if !value.is_finite() {
+            return Err(format!(
+                "bytecode stamp value {stamp_index} became non-finite: {value}"
+            ));
+        }
+        context.currents.push(value);
+        let mut equivalent_source = value;
+
+        for (entry_index, jacobian) in stamp.jacobian_programs.iter().enumerate() {
+            let derivative = {
+                let mut vm = Vm::new(context);
+                vm.execute(&jacobian.program).map_err(|error| {
+                    format!("bytecode stamp Jacobian {stamp_index}.{entry_index}: {error}")
+                })?
+            };
+            if !derivative.is_finite() {
+                return Err(format!(
+                    "bytecode stamp Jacobian {stamp_index}.{entry_index} became non-finite: {derivative}"
+                ));
+            }
+            if jacobian.sign > 0.0 {
+                equivalent_source -=
+                    derivative * benchmark_axis_value(context, &jacobian.col_axis)?;
+            }
+            if let (Some(row), Some(col)) = (
+                benchmark_stamp_index(&jacobian.row)?,
+                benchmark_stamp_index(&jacobian.col)?,
+            ) {
+                matrix[row * DEVICE_MATRIX_DIMENSION + col] += jacobian.sign * derivative;
+            }
+        }
+
+        if !equivalent_source.is_finite() {
+            return Err(format!(
+                "bytecode equivalent source {stamp_index} became non-finite: {equivalent_source}"
+            ));
+        }
+        for location in &stamp.stamp_locations {
+            if let Some(row) = benchmark_stamp_index(&location.row)? {
+                rhs[row] += location.sign * equivalent_source;
+            }
+        }
+    }
+
+    Ok(StampSnapshot { matrix, rhs })
+}
+
+fn benchmark_stamp_index(index: &StampIndex) -> Result<Option<usize>, String> {
+    let mapped = match index {
+        StampIndex::Terminal(terminal) => {
+            let node = DEVICE_NODE_MAPPING.get(*terminal).copied().ok_or_else(|| {
+                format!("benchmark stamp terminal {terminal} has no circuit-node mapping")
+            })?;
+            (node > 0).then_some(node.saturating_sub(1))
+        }
+        StampIndex::Ground => None,
+        StampIndex::Internal(index) => {
+            return Err(format!(
+                "benchmark bytecode stamp reference cannot map internal node {index}"
+            ));
+        }
+        StampIndex::Branch(index) => {
+            return Err(format!(
+                "benchmark bytecode stamp reference cannot map branch unknown {index}"
+            ));
+        }
+    };
+    if mapped.is_some_and(|node| node >= DEVICE_MATRIX_DIMENSION) {
+        return Err(format!(
+            "benchmark stamp maps to node outside dimension {DEVICE_MATRIX_DIMENSION}"
+        ));
+    }
+    Ok(mapped)
+}
+
+fn benchmark_axis_value(context: &VmContext, axis: &ColumnAxis) -> Result<f64, String> {
+    match axis {
+        ColumnAxis::Node(node) if *node == usize::MAX => Ok(0.0),
+        ColumnAxis::Node(node) if *node < context.terminal_count() => context
+            .voltages
+            .get(*node)
+            .copied()
+            .ok_or_else(|| format!("benchmark axis terminal {node} is unavailable")),
+        ColumnAxis::Node(node) => context
+            .internal_voltages
+            .get(*node - context.terminal_count())
+            .copied()
+            .ok_or_else(|| format!("benchmark axis internal node {node} is unavailable")),
+        ColumnAxis::Branch(index) => context
+            .branch_current_values
+            .get(*index)
+            .copied()
+            .ok_or_else(|| format!("benchmark axis branch unknown {index} is unavailable")),
+    }
+}
+
+fn assert_stamp_close(expected: &StampSnapshot, actual: &StampSnapshot) -> Result<(), String> {
+    for (index, (expected, actual)) in expected.matrix.iter().zip(actual.matrix.iter()).enumerate()
+    {
+        assert_close(&format!("stamp matrix entry {index}"), *expected, *actual)?;
+    }
+    for (index, (expected, actual)) in expected.rhs.iter().zip(actual.rhs.iter()).enumerate() {
+        assert_close(&format!("stamp RHS entry {index}"), *expected, *actual)?;
+    }
+    Ok(())
 }
 
 fn run_native_device_evaluate_sweep(device: &mut VerilogADevice) -> Result<f64, String> {
@@ -907,6 +1293,43 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
     }
 }
 
+fn benchmark_failures(
+    config: NativeBenchConfig,
+    required_speedup: f64,
+    native_stats: TimingStats,
+    speedup_median: f64,
+    native_checksum: f64,
+    bytecode_checksum: f64,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    if speedup_median < required_speedup {
+        failures.push(format!(
+            "median speedup {:.3}x is below required {:.3}x",
+            speedup_median, required_speedup
+        ));
+    }
+    if let Some(max_native_p95) = config.max_native_p95_ns_per_sweep
+        && native_stats.p95 > max_native_p95
+    {
+        failures.push(format!(
+            "native p95 {:.3} ns/sweep exceeds {:.3} ns/sweep",
+            native_stats.p95, max_native_p95
+        ));
+    }
+    if let Some(max_relative_stddev) = config.max_relative_stddev
+        && native_stats.relative_standard_deviation > max_relative_stddev
+    {
+        failures.push(format!(
+            "native relative standard deviation {:.4} exceeds required {:.4}",
+            native_stats.relative_standard_deviation, max_relative_stddev
+        ));
+    }
+    if !native_checksum.is_finite() || !bytecode_checksum.is_finite() {
+        failures.push("benchmark checksum became non-finite".into());
+    }
+    failures
+}
+
 fn timing_stats(mut samples: Vec<f64>) -> TimingStats {
     samples.sort_by(|left, right| left.total_cmp(right));
     let count = samples.len();
@@ -917,11 +1340,22 @@ fn timing_stats(mut samples: Vec<f64>) -> TimingStats {
     };
     let p95_index = ((count as f64 * 0.95).ceil() as usize).saturating_sub(1);
     let mean = samples.iter().sum::<f64>() / count as f64;
+    let variance = samples
+        .iter()
+        .map(|sample| {
+            let delta = sample - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / count as f64;
+    let standard_deviation = variance.sqrt();
     TimingStats {
         min: samples[0],
         median,
         p95: samples[p95_index.min(count - 1)],
         mean,
+        standard_deviation,
+        relative_standard_deviation: standard_deviation / mean.max(f64::MIN_POSITIVE),
     }
 }
 
@@ -951,14 +1385,19 @@ fn take_native_error(phase: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeBenchConfig, run_dense_entrypoint_case, run_device_evaluate_case};
+    use super::{
+        NativeBenchConfig, run_dense_entrypoint_case, run_device_evaluate_case,
+        run_device_stamp_case, timing_stats,
+    };
 
     fn smoke_config() -> NativeBenchConfig {
         NativeBenchConfig {
             iterations: 1,
             samples: 1,
             min_speedup: 0.0,
+            min_full_stamp_speedup: 0.0,
             max_native_p95_ns_per_sweep: None,
+            max_relative_stddev: None,
         }
     }
 
@@ -978,5 +1417,27 @@ mod tests {
 
         assert!(report.checksum_native.is_finite());
         assert!(report.checksum_bytecode.is_finite());
+    }
+
+    #[test]
+    fn device_stamp_benchmark_smoke_matches_matrix_and_rhs_reference() {
+        let report =
+            run_device_stamp_case(smoke_config()).expect("device stamp native benchmark case runs");
+
+        assert!(report.checksum_native.is_finite());
+        assert!(report.checksum_bytecode.is_finite());
+        assert!(report.native_code_bytes > 0);
+    }
+
+    #[test]
+    fn timing_stats_report_population_standard_deviation() {
+        let stats = timing_stats(vec![1.0, 2.0, 3.0]);
+
+        assert_eq!(stats.mean, 2.0);
+        assert!((stats.standard_deviation - (2.0_f64 / 3.0).sqrt()).abs() <= f64::EPSILON);
+        assert!(
+            (stats.relative_standard_deviation - stats.standard_deviation / 2.0).abs()
+                <= f64::EPSILON
+        );
     }
 }
