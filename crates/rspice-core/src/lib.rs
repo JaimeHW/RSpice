@@ -96,6 +96,9 @@
 )]
 
 pub mod analysis;
+/// Starter model cards embedded in the binary; a leaf with no dependencies so
+/// that library, netlist and engine can all share one copy.
+pub(crate) mod builtin_lib;
 pub mod circuit;
 pub mod compat;
 pub mod constants;

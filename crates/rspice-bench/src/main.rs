@@ -23,6 +23,8 @@ mod generated_rust;
 mod generated_stamp;
 mod native_jit;
 mod runner;
+#[cfg(feature = "generated-stamp")]
+mod veriloga_golden;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -50,6 +52,9 @@ enum BenchCommand {
     NativeJit(native_jit::NativeJitArgs),
     /// Run the benchmark suite and emit a JSON scoreboard.
     Run(runner::RunArgs),
+    /// Capture, verify, and independently audit generated Verilog-A numerics.
+    #[cfg(feature = "generated-stamp")]
+    VerilogAGolden(veriloga_golden::VerilogAGoldenArgs),
 }
 
 fn main() -> ExitCode {
@@ -61,6 +66,8 @@ fn main() -> ExitCode {
         BenchCommand::GeneratedStamp(args) => generated_stamp::run(&args),
         BenchCommand::NativeJit(args) => native_jit::run(&args),
         BenchCommand::Run(args) => runner::run(&args),
+        #[cfg(feature = "generated-stamp")]
+        BenchCommand::VerilogAGolden(args) => veriloga_golden::run(&args),
     };
     match outcome {
         Ok(code) => code,

@@ -8,8 +8,11 @@
 
 use crate::error::BenchError;
 use clap::Args;
-use rspice_core::device::veriloga_generated::bench::{
+use rspice_core::device::veriloga_harness::bench::{
     GeneratedStampBenchConfig, GeneratedStampBenchResult, run_generated_stamp_benchmarks,
+};
+use rspice_core::device::veriloga_harness::reference::{
+    ReferenceStampBenchConfig, run_reference_stamp_benchmark,
 };
 use serde::Serialize;
 use std::fs;
@@ -66,11 +69,35 @@ impl From<&GeneratedStampBenchResult> for ModelReport {
 }
 
 #[derive(Serialize)]
+struct ReferenceReport {
+    model_name: String,
+    node_count: usize,
+    ns_per_stamp_median: f64,
+    ns_per_stamp_p95: f64,
+    ns_per_stamp_min: f64,
+}
+
+#[derive(Serialize)]
 struct StampReport {
     iterations: usize,
     samples: usize,
     measured: Vec<ModelReport>,
+    /// Hand-written model measured in the same run, when available.
+    reference: Option<ReferenceReport>,
     failed: Vec<String>,
+}
+
+/// Median of the sweep, over a list already sorted slowest-first.
+fn median_of(measured: &[GeneratedStampBenchResult]) -> f64 {
+    if measured.is_empty() {
+        return 0.0;
+    }
+    let mut medians: Vec<f64> = measured
+        .iter()
+        .map(|result| result.ns_per_stamp_median)
+        .collect();
+    medians.sort_by(f64::total_cmp);
+    medians[medians.len() / 2]
 }
 
 pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
@@ -111,6 +138,38 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
             result.ns_per_stamp_p95,
         );
     }
+    // The hand-written reference, in the same units and on the same machine.
+    // Printed last and labelled, because it is the yardstick the generated
+    // numbers above are meant to be read against rather than another entry in
+    // the sweep.
+    let reference = run_reference_stamp_benchmark(&ReferenceStampBenchConfig {
+        iterations: args.iterations,
+        samples: args.samples,
+    });
+    match &reference {
+        Ok(result) => {
+            println!(
+                "{:<24} {:>6} {:>7} {:>8} {:>12.1} {:>12.1}   <- hand-written reference",
+                result.model_name,
+                result.node_count,
+                "-",
+                "-",
+                result.ns_per_stamp_median,
+                result.ns_per_stamp_p95,
+            );
+            let median = median_of(&measured);
+            if median > 0.0 && result.ns_per_stamp_median > 0.0 {
+                println!(
+                    "\ncorpus median {:.1} ns is {:.2}x the hand-written reference ({:.1} ns)",
+                    median,
+                    median / result.ns_per_stamp_median,
+                    result.ns_per_stamp_median,
+                );
+            }
+        }
+        Err(error) => eprintln!("reference measurement unavailable: {error}"),
+    }
+
     for failure in &failed {
         eprintln!("skipped: {failure}");
     }
@@ -119,6 +178,13 @@ pub fn run(args: &GeneratedStampArgs) -> Result<ExitCode, BenchError> {
         iterations: args.iterations,
         samples: args.samples,
         measured: measured.iter().map(ModelReport::from).collect(),
+        reference: reference.as_ref().ok().map(|result| ReferenceReport {
+            model_name: result.model_name.to_string(),
+            node_count: result.node_count,
+            ns_per_stamp_median: result.ns_per_stamp_median,
+            ns_per_stamp_p95: result.ns_per_stamp_p95,
+            ns_per_stamp_min: result.ns_per_stamp_min,
+        }),
         failed: failed.clone(),
     };
     if let Some(path) = &args.out {

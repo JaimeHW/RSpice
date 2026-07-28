@@ -26,5 +26,5 @@ devices = ["nmos", "pmos", "diode", "resistor", "capacitor", "bipolar"]
 corners = ["typical", "ff", "ss", "sf", "fs", "statistical"]
 entry = "upstream/models/ngspice/sm141064.ngspice"
 files = 9
-bytes = 2196792
-digest = "7db24f4a4ef155b353593f205bcec18abbdcc1cc476f352f039a93f4d0e65219"
+bytes = 2148250
+digest = "e913417a8b7ceb67652764f771a9980ec4fb7dc9f54133df362e5d2574a75fe1"

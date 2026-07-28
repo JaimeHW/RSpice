@@ -26,5 +26,5 @@ devices = ["nmos", "pmos", "finfet"]
 corners = ["typical"]
 entry = ""
 files = 58
-bytes = 532414
-digest = "0af745c78f802a93a4b0b061bd2a64c70d746a4d3c4e33115dfd2d326a21c7f8"
+bytes = 526807
+digest = "beb2fd0cefbf8cd77b38f8237121bfe84c0e016029cb9bbeb47eefbe22cff82c"

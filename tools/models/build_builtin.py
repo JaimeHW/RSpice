@@ -313,8 +313,15 @@ def main() -> int:
     for card in cards:
         by_category.setdefault(card.category, []).append(card)
 
+    # Line terminators are normalized to LF, matching the `text eol=lf` rule
+    # .gitattributes puts on this directory. These files are include_str!'d into
+    # the binary, so leaving the CRLF that CRLF-shipping packs (Micro-Cap, the
+    # Granada collection) carry into their cards would make the compiled output
+    # depend on which host built it. Only CRLF pairs are rewritten: a lone CR is
+    # left exactly as found, because git does not touch those either and because
+    # mid-card it is content rather than a line break.
     rendered = {
-        category: render_category(category, group)
+        category: render_category(category, group).replace("\r\n", "\n")
         for category, group in by_category.items()
     }
 
@@ -326,8 +333,9 @@ def main() -> int:
         for category, text in rendered.items():
             target = LIB_DIR / f"{category}.lib"
             # Compared as bytes: some vendored cards carry lone CR characters,
-            # and text-mode newline translation would rewrite them on the
-            # round-trip, reporting an identical file as stale.
+            # which are preserved above, and text-mode newline translation would
+            # rewrite them on the round-trip, reporting an identical file as
+            # stale.
             if not target.exists() or target.read_bytes() != text.encode("utf-8"):
                 stale.append(f"{target.relative_to(REPO_ROOT).as_posix()} is stale")
         if stale:
@@ -346,8 +354,8 @@ def main() -> int:
     total_bytes = 0
     for category, text in sorted(rendered.items()):
         target = LIB_DIR / f"{category}.lib"
-        # Written as bytes so the vendored cards land byte for byte, including
-        # any legacy line endings they carry.
+        # Written as bytes so the normalized text lands exactly, without the
+        # platform newline translation Python's text mode would apply.
         encoded = text.encode("utf-8")
         target.write_bytes(encoded)
         total_bytes += len(encoded)

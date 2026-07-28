@@ -172,9 +172,18 @@ def load_packs() -> list[Pack]:
 #==============================================================================
 
 
+# Vendoring copies upstream bytes verbatim, so the cache must hold exactly what
+# upstream published. Git's end-of-line translation is the one thing that will
+# silently rewrite those bytes: on a machine with `core.autocrlf=true` a clone
+# expands LF to CRLF, and the digest then pins the local checkout rather than
+# the upstream commit. Pin the translation off for every cache operation so a
+# pack materializes identically on every platform.
+_BYTE_EXACT = ["-c", "core.autocrlf=false", "-c", "core.eol=lf"]
+
+
 def _git(args: list[str], cwd: Path) -> str:
     result = subprocess.run(
-        ["git", *args],
+        ["git", *_BYTE_EXACT, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -200,8 +209,8 @@ def fetch_git(pack: Pack) -> Path:
         print(f"  cloning {url}")
         subprocess.run(
             [
-                "git", "clone", "--filter=blob:none", "--no-checkout",
-                "--sparse", url, str(cache),
+                "git", *_BYTE_EXACT, "clone", "--filter=blob:none",
+                "--no-checkout", "--sparse", url, str(cache),
             ],
             check=True,
             capture_output=True,
@@ -542,6 +551,7 @@ def sync_pack(pack: Pack, check: bool) -> tuple[int, int]:
         stale_note.write_text(
             render_license_note(pack),
             encoding="utf-8",
+            newline="\n",
         )
     else:
         raise SyncError(
@@ -551,6 +561,7 @@ def sync_pack(pack: Pack, check: bool) -> tuple[int, int]:
     (pack.dest / "pack.toml").write_text(
         render_pack_toml(pack, files, digest, total_bytes),
         encoding="utf-8",
+        newline="\n",
     )
     print(f"  {len(files)} files, {total_bytes / 1e6:.1f} MB -> {pack.dest.relative_to(REPO_ROOT)}")
     return len(files), total_bytes

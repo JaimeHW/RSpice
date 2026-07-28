@@ -26,5 +26,5 @@ devices = ["nfet", "pfet"]
 corners = ["tt", "ff", "ss"]
 entry = "upstream/models/hspice/7nm_TT.pm"
 files = 7
-bytes = 128156
-digest = "1960dfc0386a7ee167c027ba563d3e4a1400a7307a07fbb7062b9c5144953e11"
+bytes = 126496
+digest = "4f0340e70ab13330409b30c0b93b7707406a891706da3c3a37a94134090c0c37"

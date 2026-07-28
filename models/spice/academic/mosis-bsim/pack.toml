@@ -26,5 +26,5 @@ devices = ["nmos", "pmos"]
 corners = ["measured-lot"]
 entry = ""
 files = 2528
-bytes = 8197250
-digest = "99d766c23ce4b0c83ae10b63b1491ddac1122ddf33d9dd8850683f04a50c5c50"
+bytes = 7972572
+digest = "7063984fbff96823b1bebd1bfc78739096845899c3ad7308863830596a750d9b"

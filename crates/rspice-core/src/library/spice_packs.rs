@@ -1,10 +1,15 @@
 //! Discovery and lookup across the shipped SPICE model packs.
 //!
 //! The built-in library ([`super::LibraryManager`]) is compiled into the binary
-//! and is deliberately small. The bulk of the model tree — roughly 191,000
-//! model cards and 68,000 subcircuits across the foundry PDKs, academic sets
-//! and vendor libraries — ships as data beside the binary and is found at
-//! runtime through this module.
+//! and is deliberately small. The bulk of the model tree — 142,333 model cards
+//! and 56,601 subcircuits across the foundry PDKs, academic sets and vendor
+//! libraries — ships as data beside the binary and is found at runtime through
+//! this module.
+//!
+//! Only 68,676 of those are addressable from a netlist. The remainder are
+//! helper cards declared inside macromodel bodies, which the catalog records
+//! with `scope=nested` and the lookups here exclude by default. Quoting the raw
+//! definition total as a part count overstates it roughly threefold.
 //!
 //! Two generated indexes back it, both produced by
 //! `tools/models/build_manifest.py` and both tab-separated so that no TOML
@@ -12,12 +17,12 @@
 //!
 //! * `PACKS.tsv` — one row per pack: identity, licence tier, redistribution
 //!   flag and counts. Small, always loaded.
-//! * `CATALOG.tsv` — one row per definition. Around 19 MB, so it is streamed
+//! * `CATALOG.tsv` — one row per definition. Around 16 MB, so it is streamed
 //!   for lookups rather than held in memory; [`SpiceLibraryIndex::load_catalog`]
 //!   is available when a caller genuinely wants the whole list.
 //!
 //! Parts are addressed by pack, not by a flat global namespace. That is
-//! deliberate: 20,771 part names occur in more than one pack, often with
+//! deliberate: part names routinely occur in more than one pack, often with
 //! materially different parameter fits, so a lookup returns every match and
 //! leaves the choice to the caller rather than silently picking one.
 
@@ -90,10 +95,14 @@ pub struct SpicePack {
     pub entry: Option<PathBuf>,
     /// Device classes the pack covers.
     pub devices: Vec<String>,
-    /// Count of `.model` cards.
+    /// Count of `.model` cards, at any nesting depth.
     pub models: usize,
-    /// Count of `.subckt` definitions.
+    /// Count of `.subckt` definitions, at any nesting depth.
     pub subcircuits: usize,
+    /// Count of `.model` cards at file scope.
+    pub models_top: usize,
+    /// Count of `.subckt` definitions at file scope.
+    pub subcircuits_top: usize,
     /// Count of files.
     pub files: usize,
     /// Total bytes on disk.
@@ -106,6 +115,34 @@ impl SpicePack {
         self.entry
             .as_ref()
             .map(|entry| root.join(&self.path).join(entry))
+    }
+}
+
+/// Where a definition sits in its source file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DefinitionScope {
+    /// Declared at file scope, so a netlist can reference it by name.
+    TopLevel,
+    /// Declared inside a `.SUBCKT` body and private to it.
+    ///
+    /// Macromodels routinely declare helper cards this way — `.model DX D(...)`
+    /// inside an op-amp subcircuit is the standard idiom, and `DX` alone occurs
+    /// over six thousand times across the shipped packs. Such a name cannot be
+    /// referenced from a netlist, so a parts browser must not offer it.
+    Nested,
+}
+
+impl DefinitionScope {
+    fn parse(value: &str) -> Self {
+        match value {
+            "nested" => DefinitionScope::Nested,
+            _ => DefinitionScope::TopLevel,
+        }
+    }
+
+    /// Whether a netlist can reference this definition by name.
+    pub fn is_addressable(&self) -> bool {
+        matches!(self, DefinitionScope::TopLevel)
     }
 }
 
@@ -126,10 +163,13 @@ pub struct CatalogEntry {
     pub line: usize,
     /// The defining file is marked non-shippable by the licence audit.
     ///
-    /// This is per *file*, not per pack: `microcap-library` holds 154 clean
-    /// files alongside 27 restricted ones, so the pack flag alone is too blunt
+    /// This is per *file*, not per pack: upstream `microcap-library` holds 153
+    /// clean files alongside 28 restricted ones, so the pack flag is too blunt
     /// to decide whether one card may be shipped.
     pub restricted: bool,
+    /// Whether the definition is addressable from a netlist or private to an
+    /// enclosing subcircuit.
+    pub scope: DefinitionScope,
 }
 
 impl CatalogEntry {
@@ -224,7 +264,8 @@ impl SpiceLibraryIndex {
         self.packs.iter().filter(|pack| pack.redistributable)
     }
 
-    /// Total `.model` and `.subckt` definitions across all packs.
+    /// Total `.model` and `.subckt` definitions across all packs, including
+    /// those private to a subcircuit body.
     pub fn definition_count(&self) -> usize {
         self.packs
             .iter()
@@ -232,23 +273,52 @@ impl SpiceLibraryIndex {
             .sum()
     }
 
-    /// Every definition matching `name`, compared case-insensitively.
+    /// Definitions a netlist can actually reference by name.
+    ///
+    /// Two thirds of the shipped definitions are helper cards inside macromodel
+    /// bodies, so this is the figure to show a user as a part count;
+    /// [`Self::definition_count`] overstates it by roughly a factor of three.
+    pub fn part_count(&self) -> usize {
+        self.packs
+            .iter()
+            .map(|pack| pack.models_top + pack.subcircuits_top)
+            .sum()
+    }
+
+    /// Every addressable definition matching `name`, compared case-insensitively.
     ///
     /// A part number routinely appears in several packs with different
     /// parameter fits, so this returns all of them rather than choosing.
+    /// Subcircuit-private cards are excluded; use
+    /// [`Self::find_definition_any_scope`] when tracing one to its source.
     pub fn find_part(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
+        self.filter_catalog(|entry| {
+            entry.scope.is_addressable() && entry.name.eq_ignore_ascii_case(name)
+        })
+    }
+
+    /// Every definition matching `name` at any nesting depth.
+    ///
+    /// For diagnostics: when a deck fails on a card declared inside a
+    /// macromodel, the name is not addressable but still needs locating.
+    pub fn find_definition_any_scope(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
         self.filter_catalog(|entry| entry.name.eq_ignore_ascii_case(name))
     }
 
-    /// Definitions of `name` whose defining file may be shipped.
+    /// Addressable definitions of `name` whose defining file may be shipped.
     ///
     /// Narrower than [`Self::find_part`]: a pack can be usable while individual
     /// files inside it are not.
     pub fn find_shippable_part(&self, name: &str) -> io::Result<Vec<CatalogEntry>> {
-        self.filter_catalog(|entry| !entry.restricted && entry.name.eq_ignore_ascii_case(name))
+        self.filter_catalog(|entry| {
+            entry.scope.is_addressable()
+                && !entry.restricted
+                && entry.name.eq_ignore_ascii_case(name)
+        })
     }
 
-    /// Every definition whose name contains `needle`, compared case-insensitively.
+    /// Every addressable definition whose name contains `needle`,
+    /// compared case-insensitively.
     pub fn search_parts(&self, needle: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
         let needle = needle.to_ascii_uppercase();
         let mut found = Vec::new();
@@ -256,7 +326,7 @@ impl SpiceLibraryIndex {
             if found.len() >= limit {
                 return false;
             }
-            if entry.name.to_ascii_uppercase().contains(&needle) {
+            if entry.scope.is_addressable() && entry.name.to_ascii_uppercase().contains(&needle) {
                 found.push(entry);
             }
             true
@@ -264,14 +334,14 @@ impl SpiceLibraryIndex {
         Ok(found)
     }
 
-    /// Every definition of a given canonical device class.
+    /// Every addressable definition of a given canonical device class.
     pub fn parts_by_device(&self, device: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
         let mut found = Vec::new();
         self.for_each_catalog_entry(|entry| {
             if found.len() >= limit {
                 return false;
             }
-            if entry.device == device {
+            if entry.scope.is_addressable() && entry.device == device {
                 found.push(entry);
             }
             true
@@ -279,7 +349,8 @@ impl SpiceLibraryIndex {
         Ok(found)
     }
 
-    /// The whole catalog. Around 260,000 entries; prefer the search methods.
+    /// The whole catalog, nested definitions included. Around 199,000 entries;
+    /// prefer the search methods.
     pub fn load_catalog(&self) -> io::Result<Vec<CatalogEntry>> {
         self.filter_catalog(|_| true)
     }
@@ -300,8 +371,8 @@ impl SpiceLibraryIndex {
 
     /// Stream the catalog, stopping early when `visit` returns `false`.
     ///
-    /// The catalog is around 19 MB. Streaming keeps a part lookup from paying
-    /// the allocation cost of materialising a quarter of a million entries.
+    /// The catalog is around 16 MB. Streaming keeps a part lookup from paying
+    /// the allocation cost of materialising nearly 200,000 entries.
     fn for_each_catalog_entry(
         &self,
         mut visit: impl FnMut(CatalogEntry) -> bool,
@@ -342,6 +413,10 @@ fn parse_catalog_row(line: &str) -> Option<CatalogEntry> {
     let line_number = fields.next()?.parse().ok()?;
     // Older catalogs predate the restriction column; absent means unflagged.
     let restricted = fields.next().is_some_and(|value| value == "1");
+    // Likewise for scope: a catalog without the column predates nesting being
+    // tracked, and treating those rows as addressable preserves the old
+    // behaviour rather than silently emptying a browser.
+    let scope = fields.next().map_or(DefinitionScope::TopLevel, DefinitionScope::parse);
     Some(CatalogEntry {
         name: name.to_string(),
         kind: kind.to_string(),
@@ -350,6 +425,7 @@ fn parse_catalog_row(line: &str) -> Option<CatalogEntry> {
         path: index_path(path),
         line: line_number,
         restricted,
+        scope,
     })
 }
 
@@ -360,7 +436,7 @@ fn parse_packs(text: &str) -> Vec<SpicePack> {
             continue;
         }
         let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 13 {
+        if fields.len() < 15 {
             continue;
         }
         let entry = fields[6].trim();
@@ -374,14 +450,16 @@ fn parse_packs(text: &str) -> Vec<SpicePack> {
             entry: (!entry.is_empty()).then(|| index_path(entry)),
             models: fields[7].parse().unwrap_or(0),
             subcircuits: fields[8].parse().unwrap_or(0),
-            files: fields[9].parse().unwrap_or(0),
-            bytes: fields[10].parse().unwrap_or(0),
-            devices: fields[11]
+            models_top: fields[9].parse().unwrap_or(0),
+            subcircuits_top: fields[10].parse().unwrap_or(0),
+            files: fields[11].parse().unwrap_or(0),
+            bytes: fields[12].parse().unwrap_or(0),
+            devices: fields[13]
                 .split(',')
                 .filter(|d| !d.is_empty())
                 .map(str::to_string)
                 .collect(),
-            name: fields[12].to_string(),
+            name: fields[14].to_string(),
         });
     }
     packs
@@ -426,6 +504,60 @@ mod tests {
             index.definition_count() > 190_000,
             "expected the full tree, counted {}",
             index.definition_count()
+        );
+    }
+
+    #[test]
+    fn macromodel_internals_are_not_offered_as_parts() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+
+        // `DX` is the canonical helper-diode name inside op-amp macromodels,
+        // declared thousands of times across these corpora and referenceable
+        // from almost none of them. This is the regression that made the
+        // browser unusable: every diode search surfaced the same private card
+        // over and over. Two packs do declare a `dx` at file scope, so the
+        // addressable result is small rather than empty — the point is that it
+        // collapses by three orders of magnitude.
+        let as_part = index.find_part("DX").expect("catalog readable");
+        let anywhere = index
+            .find_definition_any_scope("DX")
+            .expect("catalog readable");
+
+        assert!(
+            anywhere.len() > 1000,
+            "expected DX throughout the macromodels, found {}",
+            anywhere.len()
+        );
+        assert!(
+            as_part.len() < 10,
+            "DX is macromodel-private nearly everywhere, got {} part hits",
+            as_part.len()
+        );
+        assert!(
+            as_part
+                .iter()
+                .all(|entry| entry.scope == DefinitionScope::TopLevel),
+            "a part hit must be addressable"
+        );
+        assert!(
+            anywhere
+                .iter()
+                .filter(|entry| entry.scope == DefinitionScope::Nested)
+                .count()
+                > 1000,
+            "the bulk of DX cards should be nested"
+        );
+    }
+
+    #[test]
+    fn addressable_parts_are_a_fraction_of_all_definitions() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let parts = index.part_count();
+        let all = index.definition_count();
+        assert!(parts > 60_000, "expected a real part count, got {parts}");
+        assert!(
+            parts * 2 < all,
+            "most definitions are macromodel internals: {parts} of {all}"
         );
     }
 

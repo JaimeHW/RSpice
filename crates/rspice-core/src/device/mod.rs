@@ -38,6 +38,10 @@ pub mod veriloga;
 // Generated Verilog-A runtime ABI; the built-in registry remains feature-gated inside the module.
 pub mod veriloga_generated;
 
+// Hand-written benchmark and correctness harnesses over the generated built-ins.
+// Deliberately outside the generated tree, which is generator-owned output.
+pub mod veriloga_harness;
+
 // Batch device storage for SIMD acceleration (feature-gated)
 #[cfg(feature = "simd")]
 pub mod batch;

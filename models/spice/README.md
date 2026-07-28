@@ -11,7 +11,8 @@ models/spice/
   sources.toml       upstream registry - the single source of truth
   MANIFEST.toml      generated pack index, for humans and packaging
   PACKS.tsv          the same pack data, read by the engine at runtime
-  CATALOG.tsv        generated part index, one row per .MODEL/.SUBCKT
+  CATALOG.tsv        generated part index, one row per .MODEL/.SUBCKT,
+                     each tagged scope=top or scope=nested
   LICENSE-AUDIT.tsv  generated per-file restriction findings
   builtin/           the pack compiled into the binary
   foundry/           open process design kits
@@ -31,9 +32,32 @@ Every pack is a directory holding:
 Nothing under `upstream/` is edited. Fixes belong in the loader, never in the
 vendored copy, so that the recorded digest keeps meaning.
 
+"Verbatim" is enforced rather than asserted. `.gitattributes` marks the vendored
+trees `-text`, and `sync_packs.py` pins `core.autocrlf=false` on every cache
+operation. Without both, git's end-of-line translation rewrites the bytes on
+checkout: several packs — Micro-Cap and the Granada collection among them —
+genuinely ship CRLF, and normalizing it would mean the recorded digest described
+the checkout rather than upstream, differently on each platform.
+
+`builtin` is the exception to the layout above. It sits directly under
+`models/spice/` rather than in a category directory, holds `lib/` rather than
+`upstream/`, and is authored here rather than vendored — it has no upstream to
+be verbatim against. Tools discover packs by searching for `pack.toml` at any
+depth, so a glob of `*/*/pack.toml` would silently skip the one pack whose
+licensing must be unconditionally clear.
+
 ## Contents
 
-15 packs, 4,973 files, 128 MB: **142,333 model cards and 56,601 subcircuits**.
+15 packs, 4,973 files, 126 MB: **198,934 definitions**, of which **68,676 are
+addressable from a netlist**.
+
+The difference is not padding. 127,178 `.model` cards are declared inside a
+`.SUBCKT` body — the standard macromodel idiom, where an op-amp subcircuit
+declares its own `.model DX D(...)` helper diode. `DX` alone occurs 6,044 times.
+Those names are private to their enclosing subcircuit and cannot be referenced
+from a netlist, so `CATALOG.tsv` marks them `scope=nested` and the parts
+browser excludes them. Quote 68,676 as the part count; the raw definition total
+overstates it roughly threefold.
 
 That is what remains after the vendoring filter described under
 [Licensing](#licensing) drops files whose terms forbid redistribution.
@@ -79,9 +103,19 @@ is the reference source for discrete JFET coverage.
 | `ambiguous` | no explicit grant either way | decide per release |
 | `own` | authored by RSpice | yes |
 
-Currently **5 packs are permissive** (the four PDKs plus `mosis-bsim`) and
-**9 are ambiguous**. Packs whose terms explicitly forbid redistribution are not
-vendored at all and must not be added.
+Currently **5 packs are permissive** (the four PDKs plus `mosis-bsim`), **1 is
+`own`** (`builtin`) and **9 are ambiguous**. Packs whose terms explicitly forbid
+redistribution are not vendored at all and must not be added.
+
+Seven packs are flagged `redistributable`, which is one more than the permissive
+and `own` tiers account for. The extra is `sjtu-bsim-ptm`: upstream declares
+CC-BY-4.0, which grants redistribution with attribution, but also says its
+contents are "provided under their respective open source licenses" without
+saying which, and the PTM cards it mirrors came from ASU under separate terms.
+The declared grant is enough to ship on; the unresolved provenance behind it is
+why the tier stays `ambiguous` rather than being promoted. Tier records what is
+established, `redistributable` records the shipping decision, and this is the
+one pack where they differ deliberately. See its `LICENSE-NOTE.md`.
 
 ### Per-file restrictions
 
@@ -107,8 +141,9 @@ update cannot quietly reintroduce restricted material. The audit is now a safety
 net that verifies the vendoring filter did its job, and CI fails if it ever
 reports a finding.
 
-733 files carrying 59,810 definitions were excluded on that basis — 23% of what
-upstream ships.
+734 files carrying 61,085 definitions were excluded on that basis — 23% of the
+260,019 definitions upstream ships. Definitions are counted the same way
+`CATALOG.tsv` counts them: every `.model` and `.subckt` at any nesting depth.
 
 | Marker | Files excluded | What it is |
 | --- | --- | --- |
@@ -117,10 +152,10 @@ upstream ships.
 | `confidential` | 1 | `nation.lib` was marked "NATIONAL SEMICONDUCTOR CONFIDENTIAL"; `nichicon.LIB` likewise |
 
 The restricted set is concentrated in exactly the mainstream vendor libraries:
-`On_Semi.lib` (21,923 definitions), `irf.lib` (7,333),
-`Rohm_Transistor.lib` (4,713), `nation.lib` (2,785), `on_fet.lib` (2,461),
-`vishaydiode.lib` (1,589). 706 of the 1,828 files in `ngspice-models-ugr` are
-affected, against 27 of 181 in `microcap-library`.
+`On_Semi.lib` (21,923 definitions), `irf.lib` (9,582),
+`Rohm_Transistor.lib` (4,713), `nation.lib` (3,988), `on_fet.lib` (2,461),
+`on_diode.lib` (2,415), `vishaydiode.lib` (1,589). 706 of the 1,828 files in
+`ngspice-models-ugr` are affected, against 28 of 181 in `microcap-library`.
 
 A free-of-charge product tier does not clear these. The restricted axis is
 commercial *use*, not sale, and a free tier inside a commercial product is still
@@ -156,6 +191,19 @@ Regenerates `MANIFEST.toml`, `PACKS.tsv` and `CATALOG.tsv`. All are committed,
 and `--check` fails when any has drifted. This runs in CI: it needs no network,
 since it only reads what is already vendored.
 
+Committing them is deliberate, `CATALOG.tsv` at 16 MB included. The engine reads
+the index directly from the shipped tree, so it has to exist beside the models
+whether or not a build step ran; committing it means CI verifies the exact bytes
+users get, and the file only changes when a pack does. The generators write LF
+explicitly and `.gitattributes` pins it, so regenerating on Windows and on Linux
+produces identical output — `--check` compares bytes with newline translation
+disabled, which is what previously let a CRLF copy pass as equal.
+
+`MANIFEST.toml` and `PACKS.tsv` carry the same data on purpose: the first is the
+human- and packaging-facing document, the second is the form the engine already
+parses, so pack discovery needs no TOML parser in the hot path. Both come from
+one render pass, so they cannot drift from each other.
+
 Regenerate in dependency order — `license_audit.py`, then `build_manifest.py`,
 then `build_builtin.py`. The catalog's per-file `restricted` column is joined
 from the audit, and the built-in generator refuses to read a restricted file, so
@@ -166,6 +214,23 @@ upstream. That one does reach the network, so it is a maintenance command
 rather than a CI gate.
 
 To add a pack, add one `[[pack]]` entry to `sources.toml` and run both tools.
+
+## Packaging notes
+
+The vendored trees are upstream's, not ours, and two properties of them matter
+when a build turns this directory into an installer payload.
+
+**98 files are not model data** — `index.html` directory listings, `.out`
+transcripts, `.ndx` indexes, a stray `.m` and `.pro`. They are kept because the
+digest covers the upstream file set as published and dropping them here would
+mean the pin no longer describes what upstream shipped. Excluding them belongs
+in the packaging manifest, not in the vendored copy.
+
+**481 paths are non-ASCII**, all under
+`ngspice-models-ugr/upstream/Analógicos/`. The tree is UTF-8 throughout and git
+handles it, but installer formats and archive tooling do not agree on path
+encoding, so any packaging step that reaches this directory needs testing on
+Windows specifically rather than being assumed to work.
 
 ## Known upstream defects
 

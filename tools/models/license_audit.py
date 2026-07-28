@@ -236,7 +236,7 @@ def main() -> int:
         print(f"up to date - {len(findings)} findings")
         return 0
 
-    AUDIT.write_text(rendered, encoding="utf-8")
+    AUDIT.write_text(rendered, encoding="utf-8", newline="\n")
 
     restricted = restricted_files(findings)
     by_pack: dict[str, int] = {}

@@ -26,5 +26,5 @@ devices = ["nfet", "pfet", "diode", "resistor", "capacitor", "bipolar", "inducto
 corners = ["tt", "ff", "ss", "sf", "fs", "leak", "mismatch"]
 entry = "upstream/models/sky130.lib.spice"
 files = 943
-bytes = 52713740
-digest = "d22e12ffa98cf26e72fb196620c96cc4ab3365ce0f4c2fb0ad09a82e89e6dce5"
+bytes = 50888221
+digest = "5ed10118ad5b46b5284cfb51d385ca740c0c68fd356f9ae509c101f8e48e721b"

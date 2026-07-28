@@ -13,27 +13,8 @@ use super::parser::parse_library_content;
 //=============================================================================
 
 // The built-in libraries are the `builtin` pack of the repository model tree
-// (models/spice/builtin). They are compiled into the binary so that the starter
-// set is available everywhere, including the browser build, which has no
-// filesystem to load the vendored packs from.
-
-/// Embedded diode, rectifier, zener and LED library
-const DIODE_LIB: &str = include_str!("../../../../models/spice/builtin/lib/diode.lib");
-
-/// Embedded bipolar transistor library
-const BJT_LIB: &str = include_str!("../../../../models/spice/builtin/lib/bjt.lib");
-
-/// Embedded junction FET library
-const JFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/jfet.lib");
-
-/// Embedded MOSFET library
-const MOSFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/mosfet.lib");
-
-/// Embedded operational amplifier library
-const OPAMP_LIB: &str = include_str!("../../../../models/spice/builtin/lib/opamp.lib");
-
-/// Embedded integrated circuit, timer and regulator library
-const IC_LIB: &str = include_str!("../../../../models/spice/builtin/lib/ic.lib");
+// (models/spice/builtin), embedded by crate::builtin_lib.
+use crate::builtin_lib::{BJT_LIB, DIODE_LIB, IC_LIB, JFET_LIB, MOSFET_LIB, OPAMP_LIB};
 
 //=============================================================================
 // Model Types

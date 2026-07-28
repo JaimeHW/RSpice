@@ -26,5 +26,5 @@ devices = ["hbt", "nmos", "pmos", "diode", "schottky", "resistor", "capacitor", 
 corners = ["typical", "fast", "slow", "mismatch", "statistical"]
 entry = "upstream/ihp-sg13g2/libs.tech/ngspice/models/cornerMOSlv.lib"
 files = 94
-bytes = 1214473
-digest = "210854f5fceada528a43220cc815444fc2260ed0263499e9ddafd158990efc1f"
+bytes = 1192015
+digest = "f5f59b74213b023552b50c2b9018bb78d0435e324f0a64311011fa88264bc853"

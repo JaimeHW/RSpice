@@ -20,13 +20,11 @@
 
 use std::time::Instant;
 
-use super::{
-    BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedSimulationParameters,
-    GeneratedStaticStampCache, builtins,
-};
 use crate::Value;
+use crate::device::veriloga_generated::{
+    BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedSimulationParameters, builtins,
+};
 use crate::solver::StaticMatrix;
-use std::sync::Arc;
 
 /// Bias applied to every ungrounded node, in volts.
 ///
@@ -190,23 +188,17 @@ fn benchmark_model(
     let mut matrix = StaticMatrix::from_triplets(size, size, &triplets)
         .map_err(|error| setup_error(format!("matrix assembly failed: {error}")))?;
 
-    let kind = builtins::instantiate(model_name, &nodes, &branches, &[])
-        .map_err(|error| setup_error(format!("instantiation failed: {error}")))?
-        .ok_or_else(|| setup_error("model is not compiled into this binary".to_string()))?;
-
-    let mut instance = BuiltinVerilogAInstance {
+    let mut instance = BuiltinVerilogAInstance::standalone(
         model_name,
-        instance_name: format!("xbench_{model_name}"),
+        format!("xbench_{model_name}"),
         nodes,
         branches,
-        temperature: crate::constants::TEMP_REFERENCE,
-        analysis_initial_step: false,
-        analysis_final_step: false,
-        static_stamp_cache: Arc::new(GeneratedStaticStampCache::default()),
-        kind,
-    };
+        crate::constants::TEMP_REFERENCE,
+        &[],
+    )
+    .map_err(setup_error)?;
     instance.link_static_stamps(&matrix, node_count);
-    let linked_slot_count = instance.static_stamp_cache.linked_slot_count();
+    let linked_slot_count = instance.linked_slot_count();
 
     let mut voltages = vec![BENCH_NODE_BIAS; size];
     for value in voltages.iter_mut().skip(node_count) {
@@ -288,7 +280,7 @@ fn stamp_produced_contribution(matrix: &mut StaticMatrix, rhs: &[Value]) -> bool
 }
 
 /// Nearest-rank percentile over an ascending slice.
-fn percentile(ascending: &[f64], fraction: f64) -> f64 {
+pub(super) fn percentile(ascending: &[f64], fraction: f64) -> f64 {
     debug_assert!(!ascending.is_empty(), "percentile of an empty sample set");
     let rank = (fraction * ascending.len() as f64).ceil() as usize;
     ascending[rank.saturating_sub(1).min(ascending.len() - 1)]

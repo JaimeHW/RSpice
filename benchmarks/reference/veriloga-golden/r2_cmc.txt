@@ -1,0 +1,37 @@
+# RSpice Verilog-A golden fingerprint.
+# Written by `rspice-bench veriloga-golden capture`. Do not edit by hand.
+format 1
+model r2_cmc
+nodes 2
+branches 0
+case default
+point 0
+unknowns 0e0 0e0
+rhs 
+jac 0,0:1e-2 0,1:-1e-2 1,0:-1e-2 1,1:1e-2
+cap 
+point 1
+unknowns 8.101628181656306e-2 -3.9580574254450973e-1
+rhs 
+jac 0,0:1e-2 0,1:-1e-2 1,0:-1e-2 1,1:1e-2
+cap 
+point 2
+unknowns 2.3297415014245804e-1 -2.4108362365145042e-1
+rhs 0:4.336808689942018e-19 1:-4.336808689942018e-19
+jac 0,0:1e-2 0,1:-1e-2 1,0:-1e-2 1,1:1e-2
+cap 
+point 3
+unknowns 3.50659739277262e-1 -7.0806979293128736e-3
+rhs 0:-1.3552527156068805e-19 1:1.3552527156068805e-19
+jac 0,0:1e-2 0,1:-1e-2 1,0:-1e-2 1,1:1e-2
+cap 
+point 4
+unknowns 1.8418649644621343e-1 4.5643160235832925e-2
+rhs 0:1.6263032587282567e-19 1:-1.6263032587282567e-19
+jac 0,0:1e-2 0,1:-1e-2 1,0:-1e-2 1,1:1e-2
+cap 
+point 5
+unknowns -2.910578846259792e-1 5.708997039863821e-1
+rhs 0:1.734723475976807e-18 1:-1.734723475976807e-18
+jac 0,0:1e-2 0,1:-1e-2 1,0:-1e-2 1,1:1e-2
+cap 

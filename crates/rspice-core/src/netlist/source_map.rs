@@ -3,10 +3,10 @@ use super::{Netlist, SubcircuitDef};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-const BUILTIN_BJT_LIB: &str = include_str!("../../../../models/spice/builtin/lib/bjt.lib");
-const BUILTIN_DIODE_LIB: &str = include_str!("../../../../models/spice/builtin/lib/diode.lib");
-const BUILTIN_JFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/jfet.lib");
-const BUILTIN_MOSFET_LIB: &str = include_str!("../../../../models/spice/builtin/lib/mosfet.lib");
+use crate::builtin_lib::{
+    BJT_LIB as BUILTIN_BJT_LIB, DIODE_LIB as BUILTIN_DIODE_LIB, JFET_LIB as BUILTIN_JFET_LIB,
+    MOSFET_LIB as BUILTIN_MOSFET_LIB,
+};
 
 /// Byte range on one physical source line.
 ///
@@ -738,9 +738,13 @@ mod tests {
 
     #[test]
     fn builtin_and_embedded_fallback_models_do_not_lint_unknown() {
+        // 2N2222A, not 2N2222: the built-in pack sources this card from Zetex,
+        // where it is the A variant, and `selection.toml` deliberately does not
+        // rename it. The two are different parts and the library should not
+        // claim one while shipping the other.
         let deck = "source map\n\
             D1 a 0 1N4148\n\
-            Q1 c b e 2N2222\n\
+            Q1 c b e 2N2222A\n\
             M1 d g s b NMOS\n\
             J1 jd jg js NJF\n\
             Z1 zd zg zs NMF\n\

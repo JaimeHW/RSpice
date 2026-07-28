@@ -1,10 +1,7 @@
 use super::*;
 
-/// Embedded bipolar model library used for fallback model resolution.
-const BUILTIN_TRANSISTOR_LIB: &str =
-    include_str!("../../../../../models/spice/builtin/lib/bjt.lib");
-/// Embedded diode model library used for fallback model resolution.
-const BUILTIN_DIODE_LIB: &str = include_str!("../../../../../models/spice/builtin/lib/diode.lib");
+// Embedded bipolar and diode cards used for fallback model resolution.
+use crate::builtin_lib::{BJT_LIB as BUILTIN_TRANSISTOR_LIB, DIODE_LIB as BUILTIN_DIODE_LIB};
 
 /// Lazily parsed builtin BJT model parameter map (MODEL_NAME -> params).
 pub(in crate::engine::builder) fn builtin_bjt_model_map()
