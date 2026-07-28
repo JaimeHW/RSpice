@@ -44,7 +44,8 @@
 
 #![cfg(feature = "veriloga-builtins-base")]
 
-use rspice_core::device::veriloga_generated::builtins;
+use rspice_core::constants::GMIN;
+use rspice_core::device::veriloga_generated::{GeneratedSimulationParameters, builtins};
 use rspice_core::device::veriloga_harness::golden::GoldenHarness;
 
 /// Bias points per model. One is equilibrium; the rest are drawn from the
@@ -73,43 +74,23 @@ struct KnownDeviation {
 const KNOWN_DEVIATIONS: &[KnownDeviation] = &[
     KnownDeviation {
         model: "asmesd",
-        relative_error: 1.0,
-        unverified_significant: 16,
-        why: "d(I)/d(V thermal node) is not stamped though shmod defaults to 2; \
-              the current demonstrably depends on it (rows sum to zero, so the \
-              omission is KCL-consistent and therefore a whole missing column)",
+        relative_error: 2.0e-5,
+        unverified_significant: 12,
+        why: "was a whole missing thermal column on the old backend, at a full \
+              unit of disagreement; the canonical backend stamps it and what \
+              remains is ordinary difference precision",
     },
     KnownDeviation {
         model: "asmesd_dio",
-        relative_error: 1.0,
-        unverified_significant: 10,
-        why: "same missing thermal column as asmesd",
+        relative_error: 2.0e-5,
+        unverified_significant: 8,
+        why: "same missing thermal column as asmesd, and fixed with it",
     },
     KnownDeviation {
         model: "bsimimg",
-        relative_error: 1.0e-3,
-        unverified_significant: 8,
+        relative_error: 2.0e-4,
+        unverified_significant: 5,
         why: "non-finite at equilibrium; small disagreements away from it",
-    },
-    KnownDeviation {
-        model: "hisimsoi_va__5be18005",
-        relative_error: 2.0e-3,
-        unverified_significant: 0,
-        why: "a symmetric 2x2 conductance block stamps as zero at exactly zero \
-              bias while the difference sees it on both sides — a guarded term \
-              that vanishes only at the origin",
-    },
-    KnownDeviation {
-        model: "hisimsoi_va__242bc21d",
-        relative_error: 2.0e-3,
-        unverified_significant: 0,
-        why: "same zero-bias kink as hisimsoi_va__5be18005",
-    },
-    KnownDeviation {
-        model: "hisimsoi_va__38074d06",
-        relative_error: 2.0e-3,
-        unverified_significant: 0,
-        why: "same zero-bias kink as hisimsoi_va__5be18005",
     },
     KnownDeviation {
         model: "hisimsotb_va",
@@ -119,33 +100,16 @@ const KNOWN_DEVIATIONS: &[KnownDeviation] = &[
     },
     KnownDeviation {
         model: "l_utsoi__485e0ac9",
-        relative_error: 9.0e-2,
+        relative_error: 2.0e-3,
         unverified_significant: 4,
-        why: "branch incidence stamps as -1 where the difference reads -0.914; \
-              may still be the oracle on a stiff NQS branch rather than the model",
-    },
-    KnownDeviation {
-        model: "bsimsoi_va",
-        relative_error: 5.0e-5,
-        unverified_significant: 0,
-        why: "one near-floor entry disagrees just above the base tolerance",
-    },
-    KnownDeviation {
-        model: "vbic13",
-        relative_error: 2.0e-5,
-        unverified_significant: 0,
-        why: "one entry at 1e-12 magnitude disagrees just above the base tolerance",
+        why: "was 9e-2 on the old backend, described there as a branch incidence \
+              stamping -1 against a difference reading -0.914; the canonical \
+              backend brings it to 1.6e-3, so whatever that was, it was the model",
     },
     KnownDeviation {
         model: "EPFL_HEMT_10a",
         relative_error: 1.0e-5,
         unverified_significant: 10,
-        why: "equilibrium entries the difference cannot resolve",
-    },
-    KnownDeviation {
-        model: "r3_cmc",
-        relative_error: 1.0e-5,
-        unverified_significant: 4,
         why: "equilibrium entries the difference cannot resolve",
     },
 ];
@@ -180,7 +144,126 @@ struct KnownCapacitanceDeviation {
     why: &'static str,
 }
 
-const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[];
+/// Measured on the canonical backend, 2026-07-28, all 42 models.
+///
+/// Two real defect clusters and a spread of coverage gaps. The clusters are
+/// worth naming because each is one shared body appearing under several model
+/// names, not several independent problems:
+///
+/// - **The `bjt505` family** stamps `9.294565833142348e-16` where the difference
+///   reads `2.096719149589923e-15` — a factor of 2.26, at equilibrium, on a
+///   femtofarad. All four variants report the *same digits*, so it is one term
+///   in the shared body.
+/// - **The `bsimsoi` family** disagrees in *sign*: `-1.44e-15` against
+///   `+3.25e-15`. `bsimsoi__18c250bc` also stamps `-1.55e-26` where the
+///   difference sees `-4.69e-15`, which is a capacitance that is simply absent.
+///
+/// Both are new findings — the reactive block had no oracle until now, so
+/// nothing had ever checked them.
+const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[
+    KnownCapacitanceDeviation {
+        model: "bjt505_va",
+        relative_error: 6.0e-1,
+        unverified_significant: 5,
+        why: "stamps 9.2946e-16 F where the difference reads 2.0967e-15 F at \
+              equilibrium, a factor of 2.26 on a femtofarad",
+    },
+    KnownCapacitanceDeviation {
+        model: "bjt505t_va",
+        relative_error: 6.0e-1,
+        unverified_significant: 0,
+        why: "identical digits to bjt505_va; one term in the shared body",
+    },
+    KnownCapacitanceDeviation {
+        model: "bjtd505_va",
+        relative_error: 6.0e-1,
+        unverified_significant: 9,
+        why: "identical digits to bjt505_va",
+    },
+    KnownCapacitanceDeviation {
+        model: "bjtd505t_va",
+        relative_error: 6.0e-1,
+        unverified_significant: 11,
+        why: "identical digits to bjt505_va",
+    },
+    KnownCapacitanceDeviation {
+        model: "bsimsoi__18c250bc",
+        relative_error: 1.5e0,
+        unverified_significant: 0,
+        why: "sign disagreement, -1.44e-15 F against +3.25e-15 F, and a \
+              4.69e-15 F entry stamped as 1.55e-26 — an absent capacitance",
+    },
+    KnownCapacitanceDeviation {
+        model: "bsimsoi_va",
+        relative_error: 1.7e0,
+        unverified_significant: 7,
+        why: "same sign disagreement as bsimsoi__18c250bc",
+    },
+    KnownCapacitanceDeviation {
+        model: "PSP104TVA",
+        relative_error: 1.0e-2,
+        unverified_significant: 1,
+        why: "1.6157e-19 F against 1.6314e-19 F; small, but the difference \
+              claims to have resolved it an order tighter than they disagree",
+    },
+    KnownCapacitanceDeviation {
+        model: "PSPNQS104VA",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 3,
+        why: "coverage gaps only; every comparable entry agrees",
+    },
+    KnownCapacitanceDeviation {
+        model: "asmesd",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 1,
+        why: "coverage gaps only",
+    },
+    KnownCapacitanceDeviation {
+        model: "asmesd_dio",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 1,
+        why: "coverage gaps only",
+    },
+    KnownCapacitanceDeviation {
+        model: "bsimimg",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 32,
+        why: "coverage gaps only, and the most of any model; it is also the one \
+              that is non-finite at equilibrium",
+    },
+    KnownCapacitanceDeviation {
+        model: "hicumL0va",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 8,
+        why: "coverage gaps only; its whole reactive block sits at 1e-20 F",
+    },
+    KnownCapacitanceDeviation {
+        model: "hicumL2va",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 9,
+        why: "coverage gaps only; its whole reactive block sits at 1e-20 F",
+    },
+    KnownCapacitanceDeviation {
+        model: "hisimhv_va",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 3,
+        why: "coverage gaps only",
+    },
+    KnownCapacitanceDeviation {
+        model: "l_utsoi__485e0ac9",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 28,
+        why: "coverage gaps only; NQS internal nodes carry 1 nF regularising \
+              capacitors against femtofarad physics, which is a hard block to \
+              difference",
+    },
+    KnownCapacitanceDeviation {
+        model: "l_utsoi__832ce87d",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 3,
+        why: "coverage gaps only",
+    },
+];
 
 fn known_capacitance(model: &str) -> Option<&'static KnownCapacitanceDeviation> {
     KNOWN_CAPACITANCE_DEVIATIONS
@@ -295,7 +378,7 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
         }
 
         eprintln!(
-            "{model_name:<24} entries {entries:>6}  verified {:>5.1}%  gaps {gaps:>4}  worst {worst:.2e}",
+            "{model_name:<24} entries {entries:>6}  verified {:>5.1}%  gaps {gaps:>4}  strict {strict:>3}  worst {worst:.2e}",
             if entries == 0 { 100.0 } else { tight as f64 * 100.0 / entries as f64 },
         );
 
@@ -314,12 +397,15 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
         }
     }
 
-    assert!(
-        clean.is_empty(),
-        "these models are listed in KNOWN_DEVIATIONS but now meet the gate; \
-         remove them so the list keeps describing something:\n{}",
-        clean.join("\n")
-    );
+    // Reported together rather than as two asserts, so one run says everything
+    // it found instead of only whichever tripped first. These runs are not
+    // cheap.
+    for model_name in &clean {
+        failures.push(format!(
+            "{model_name}: listed in KNOWN_DEVIATIONS but now meets the gate; \
+             remove the entry so the list keeps describing something"
+        ));
+    }
     assert!(
         failures.is_empty(),
         "stamped Jacobians must match a numerical derivative of the stamped currents:\n{}",
@@ -391,7 +477,7 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
             reactive_models += 1;
         }
         eprintln!(
-            "{model_name:<24} charge {stored_charge:.2e} reactive {}  verified {:>5.1}%  gaps {gaps:>4}  worst {worst:.2e}",
+            "{model_name:<24} charge {stored_charge:.2e} reactive {}  verified {:>5.1}%  gaps {gaps:>4}  strict {strict:>3}  worst {worst:.2e}",
             if stamped_anything { "yes" } else { " no" },
             if entries == 0 {
                 100.0
@@ -424,15 +510,152 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
     }
 
     eprintln!("{reactive_models} built-ins stamp a reactive block");
-    assert!(
-        clean.is_empty(),
-        "these models are listed in KNOWN_CAPACITANCE_DEVIATIONS but now meet the gate; \
-         remove them so the list keeps describing something:\n{}",
-        clean.join("\n")
-    );
+    for model_name in &clean {
+        failures.push(format!(
+            "{model_name}: listed in KNOWN_CAPACITANCE_DEVIATIONS but now meets the \
+             gate; remove the entry so the list keeps describing something"
+        ));
+    }
     assert!(
         failures.is_empty(),
         "stamped reactive blocks must match a numerical derivative of the stored charge:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// A raised junction gmin, standing in for the solver's convergence assistance.
+///
+/// The engine does not read a single named endpoint — `junction_gmin` is passed
+/// down as a parameter from whichever homotopy is running
+/// (`engine/convergence/stamping.rs:107`), so there is no constant to borrow.
+/// This is the magnitude the crate's own unit test for the plumbing uses
+/// (`circuit/nonlinear.rs`, `generated_simparam_gmin_is_solver_controlled_...`),
+/// and the exact value does not matter: what is under test is whether the device
+/// sees a change at all.
+const GMIN_RAISED: f64 = 1.0e-6;
+
+/// Models whose stamp does not move when gmin does, at their probe biases.
+///
+/// Measured 2026-07-28 across all 42: twenty do not move and twenty-two do.
+/// Eight of these twenty carry no `$simparam` read in their generated source at
+/// all and are correctly inert — `EPFL_HEMT_10a`, `JUNCAP200`, `angelov`,
+/// `angelov_gan`, `ekv_va`, `mosvar`, `r2_cmc`, `r2_et_cmc`. The rest do read
+/// gmin, behind a guard their probe biases do not take.
+///
+/// Checked in both directions, and scoped to models this build contains.
+const GMIN_INERT: &[&str] = &[
+    "EPFL_HEMT_10a",
+    "JUNCAP200",
+    "angelov",
+    "angelov_gan",
+    "asmhemt",
+    "bsimcmg_va",
+    "bsimsoi_va",
+    "ekv_va",
+    "hisimhv_n4_va",
+    "hisimhv_n5_va",
+    "hisimhv_va",
+    "hisimsoi_va__242bc21d",
+    "hisimsoi_va__38074d06",
+    "hisimsoi_va__5be18005",
+    "hisimsotb_va",
+    "mosvar",
+    "r2_cmc",
+    "r2_et_cmc",
+    "r3_cmc",
+    "vbic_4T_et_cf",
+];
+
+/// Gmin stepping has to reach the devices, and for the shipped corpus it did not.
+///
+/// A DC solve that will not converge raises the junction gmin and walks it back
+/// down, and `circuit/nonlinear.rs:542` hands the current value to every
+/// generated device through `GeneratedSimulationParameters::set_gmin`, which the
+/// stamp then reads (`circuit/nonlinear.rs:1093`). Thirty of the forty-two
+/// generated devices read `$simparam("gmin")`. The backend that produced the
+/// shipped corpus folded that call to its literal fallback at generation time —
+/// its emitted source contains no `simparam` at all for `diode_cmc`,
+/// `bsimbulk` or `hicumL2va` — so the solver could raise gmin as far as it liked
+/// and those devices behaved as though it were still zero. The homotopy was
+/// running against models that could not feel it.
+///
+/// This pins the fix. It is a convergence property, so nothing in the numerical
+/// gates would ever have caught it: a device that ignores gmin stamps a
+/// perfectly correct Jacobian for the wrong gmin.
+#[test]
+fn gmin_stepping_reaches_the_devices_that_read_it() {
+    let mut failures = Vec::new();
+    let mut inert = Vec::new();
+
+    for model_name in builtins::builtin_names() {
+        let Ok(mut harness) = GoldenHarness::new(model_name, &[]) else {
+            continue;
+        };
+
+        let mut response = 0.0_f64;
+        for point in harness.probe_points(PROBE_POINTS) {
+            let mut target = GeneratedSimulationParameters::new();
+            target.set_gmin(GMIN);
+            let mut start = GeneratedSimulationParameters::new();
+            start.set_gmin(GMIN_RAISED);
+
+            let (Ok((settled, _)), Ok((stepped, _))) = (
+                harness.stamp_with(&point, target),
+                harness.stamp_with(&point, start),
+            ) else {
+                continue;
+            };
+            let scale = settled
+                .iter()
+                .chain(stepped.iter())
+                .filter(|value| value.is_finite())
+                .fold(0.0_f64, |worst, value| worst.max(value.abs()));
+            if scale == 0.0 {
+                continue;
+            }
+            for (left, right) in settled.iter().zip(stepped.iter()) {
+                if left.is_finite() && right.is_finite() {
+                    response = response.max((left - right).abs() / scale);
+                }
+            }
+        }
+
+        // Exactly zero, not a tolerance. A device that never reads gmin
+        // recomputes its whole stamp from inputs that did not change, so its
+        // output is bit-identical and the difference is exactly `0.0`. Measured,
+        // the corpus splits at fourteen orders of clear air: every responding
+        // model moves by at least 2.5e-14 and every inert one by exactly nothing.
+        // A threshold here would only be a way to get that wrong — the first
+        // attempt used 1e-6 and reported DIODE_CMC, whose response is exactly
+        // 1.00e-6, as inert.
+        eprintln!("{model_name:<24} gmin response {response:.2e}");
+        if response == 0.0 {
+            inert.push(*model_name);
+            if !GMIN_INERT.contains(model_name) {
+                failures.push(format!(
+                    "{model_name}: stamp does not move when gmin steps from \
+                     {GMIN_RAISED:e} to {GMIN:e}, so the device cannot benefit \
+                     from gmin stepping"
+                ));
+            }
+        }
+    }
+
+    for model_name in GMIN_INERT {
+        if !builtins::builtin_names().contains(model_name) {
+            continue;
+        }
+        if !inert.contains(model_name) {
+            failures.push(format!(
+                "{model_name}: listed in GMIN_INERT but now responds to gmin; \
+                 remove the entry"
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "a device that reads $simparam(\"gmin\") must see the solver's value:\n{}",
         failures.join("\n")
     );
 }
