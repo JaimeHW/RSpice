@@ -2,10 +2,15 @@
 //!
 //! [`HirModel::from_analyzed_module`] takes the semantic analyzer's output and
 //! assigns stable ids to every port, node, branch, parameter, variable, array,
-//! and contribution. Control flow is preserved as written — `if`/`case`/loops
-//! remain nested statements — so HIR is where a construct can still be
-//! reported against the shape the author wrote. Flattening happens later, in
-//! [`super::mir`].
+//! and contribution.
+//!
+//! The module body arrives in two forms. [`HirModel::body`] is the analog block
+//! as written: `if`/`case`/loops are nested [`HirRegion`]s, so a construct can
+//! still be reported — and compiled — against the shape the author wrote.
+//! [`HirModel::statements`] is the same block with conditionals already folded
+//! into `guard ? value : previous`; it is what the backends being replaced read,
+//! and it goes away with the last of them. See
+//! `design/VERILOGA_BACKEND_PLAN.md`.
 
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -15,7 +20,7 @@ use crate::ast::{
     AnalogOperator, BranchAccess, CrossDirection, Expression, LaplaceKind, LimiterArgument,
     NoiseSource, PortDirection, ZiKind,
 };
-use crate::semantic::{AnalyzedModule, AnalyzedStatement};
+use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement};
 use crate::types::{ParameterRange, ValueType};
 
 use super::{
@@ -398,6 +403,34 @@ pub enum HirStatement {
     Loop(HirLoop),
 }
 
+/// One step of the analog block, with control flow intact.
+///
+/// The counterpart of [`HirStatement`] for consumers that need the shape rather
+/// than the guard-folded flattening. Expressions here are as the source wrote
+/// them: an assignment inside a conditional holds its own right-hand side, not
+/// `cond ? written : previous`.
+///
+/// [`HirModel::statements`] and [`HirModel::body`] describe the same module by
+/// two routes. The flat list is what the existing backends read; this is what
+/// the CFG level consumes, and the flat list goes away with the last of those
+/// backends. See `design/VERILOGA_BACKEND_PLAN.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirRegion {
+    Assignment(HirAssignment),
+    Contribution(HirContribution),
+    Conditional {
+        condition: HirExprRef,
+        then_body: Vec<HirRegion>,
+        else_body: Vec<HirRegion>,
+        span: SourceSpanRef,
+    },
+    Loop {
+        condition: HirExprRef,
+        body: Vec<HirRegion>,
+        span: SourceSpanRef,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirModel {
     pub module_id: ModuleId,
@@ -414,6 +447,8 @@ pub struct HirModel {
     pub branches: Vec<HirBranch>,
     pub contributions: Vec<HirContribution>,
     pub statements: Vec<HirStatement>,
+    /// The analog block with its control flow intact; see [`HirRegion`].
+    pub body: Vec<HirRegion>,
     pub expressions: Vec<HirExpression>,
     pub internal_nodes: Vec<HirInternalNode>,
     pub ground_nodes: Vec<SmolStr>,
@@ -502,6 +537,17 @@ impl HirModel {
             .map(|statement| lower_statement(&mut lowerer, statement))
             .collect();
 
+        // The analyzer records a region and pushes the flat contribution at the
+        // same program point, so a pre-order walk of the body meets them in the
+        // order they were assigned ids. `validate_body` re-checks that against
+        // the flat list rather than trusting it.
+        let mut next_contribution = 0usize;
+        let body = module
+            .body
+            .iter()
+            .map(|region| lower_region(&mut lowerer, &mut next_contribution, region))
+            .collect();
+
         let expressions = lowerer.expressions;
 
         Self {
@@ -552,6 +598,7 @@ impl HirModel {
                 .collect(),
             contributions,
             statements,
+            body,
             expressions,
             internal_nodes: module
                 .internal_nodes
@@ -598,6 +645,7 @@ impl HirModel {
         self.validate_branches(&mut diagnostics);
         self.validate_contributions(&mut diagnostics);
         self.validate_statements(&mut diagnostics, &self.statements);
+        self.validate_body(&mut diagnostics);
 
         if diagnostics.is_empty() {
             Ok(())
@@ -1247,6 +1295,129 @@ impl HirModel {
         }
     }
 
+    /// Check the structured body against the flat lists it duplicates.
+    ///
+    /// The two are produced by one walk, so they must agree: every region
+    /// contribution carries the id of the flat contribution recorded at the
+    /// same program point, and the body must account for all of them. If that
+    /// correspondence ever slips, a CFG built from the body would stamp the
+    /// wrong branch — so it is checked, not assumed.
+    fn validate_body(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let mut expected_contribution = 0usize;
+        self.validate_regions(diagnostics, &self.body, &mut expected_contribution);
+
+        if expected_contribution != self.contributions.len() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR body holds {} contributions but the module records {}",
+                    expected_contribution,
+                    self.contributions.len()
+                ),
+            ));
+        }
+    }
+
+    fn validate_regions(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        regions: &[HirRegion],
+        next_contribution: &mut usize,
+    ) {
+        for region in regions {
+            match region {
+                HirRegion::Assignment(assignment) => {
+                    self.validate_expr_ref(
+                        diagnostics,
+                        &format!("region assignment '{}' expression", assignment.target_name),
+                        &assignment.expr,
+                    );
+                    if let Some(index) = &assignment.index {
+                        self.validate_expr_ref(
+                            diagnostics,
+                            &format!("region assignment '{}' index", assignment.target_name),
+                            index,
+                        );
+                    }
+
+                    let target_index = usize::from(assignment.target);
+                    if target_index >= self.variables.len() {
+                        diagnostics.push(IrDiagnostic::error(
+                            CompilerPhase::HirValidation,
+                            format!(
+                                "HIR region assignment target {} is outside variable count {}",
+                                assignment.target,
+                                self.variables.len()
+                            ),
+                            assignment.span,
+                        ));
+                        continue;
+                    }
+
+                    self.validate_assignment_shape(diagnostics, assignment);
+                }
+                HirRegion::Contribution(contribution) => {
+                    self.validate_expr_ref(
+                        diagnostics,
+                        &format!("region contribution '{}' expression", contribution.branch),
+                        &contribution.expression,
+                    );
+
+                    let index = usize::from(contribution.id);
+                    if index != *next_contribution {
+                        diagnostics.push(IrDiagnostic::error(
+                            CompilerPhase::HirValidation,
+                            format!(
+                                "HIR region contribution id {} is out of walk order; expected {}",
+                                contribution.id, next_contribution
+                            ),
+                            contribution.span,
+                        ));
+                    } else if let Some(flat) = self.contributions.get(index) {
+                        if flat.branch != contribution.branch || flat.kind != contribution.kind {
+                            diagnostics.push(IrDiagnostic::error(
+                                CompilerPhase::HirValidation,
+                                format!(
+                                    "HIR region contribution {} targets '{}' but the flat form targets '{}'",
+                                    contribution.id, contribution.branch, flat.branch
+                                ),
+                                contribution.span,
+                            ));
+                        }
+                    } else {
+                        diagnostics.push(IrDiagnostic::error(
+                            CompilerPhase::HirValidation,
+                            format!(
+                                "HIR region contribution id {} is outside contribution count {}",
+                                contribution.id,
+                                self.contributions.len()
+                            ),
+                            contribution.span,
+                        ));
+                    }
+
+                    *next_contribution += 1;
+                }
+                HirRegion::Conditional {
+                    condition,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    self.validate_expr_ref(diagnostics, "region condition", condition);
+                    self.validate_regions(diagnostics, then_body, next_contribution);
+                    self.validate_regions(diagnostics, else_body, next_contribution);
+                }
+                HirRegion::Loop {
+                    condition, body, ..
+                } => {
+                    self.validate_expr_ref(diagnostics, "region loop condition", condition);
+                    self.validate_regions(diagnostics, body, next_contribution);
+                }
+            }
+        }
+    }
+
     fn validate_expr_ref(
         &self,
         diagnostics: &mut Vec<IrDiagnostic>,
@@ -1551,6 +1722,81 @@ fn lower_statement(lowerer: &mut HirLowerer, statement: &AnalyzedStatement) -> H
             span: SourceSpanRef::from(loop_statement.span),
         }),
     }
+}
+
+/// Lower one region, numbering contributions in the order the analyzer met them.
+fn lower_region(
+    lowerer: &mut HirLowerer,
+    next_contribution: &mut usize,
+    region: &AnalyzedRegion,
+) -> HirRegion {
+    match region {
+        AnalyzedRegion::Assignment(assignment) => HirRegion::Assignment(HirAssignment {
+            target: VariableId::from(assignment.var_index),
+            target_name: assignment.target.clone(),
+            index: assignment
+                .index
+                .as_ref()
+                .map(|expr| lowerer.lower_expr(expr)),
+            expr: lowerer.lower_expr(&assignment.expression),
+            expr_type: CanonicalValueType::from(assignment.expr_type),
+            span: SourceSpanRef::from(assignment.span),
+            unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.clone(),
+        }),
+        AnalyzedRegion::Contribution(contribution) => {
+            let id = ContributionId::from(*next_contribution);
+            *next_contribution += 1;
+            HirRegion::Contribution(HirContribution {
+                id,
+                branch: contribution.branch.clone(),
+                declared_branch: contribution.declared_branch.clone(),
+                kind: contribution_kind(contribution.indirect, contribution.is_current),
+                expression: lowerer.lower_expr(&contribution.expression),
+                expr_type: CanonicalValueType::from(contribution.expr_type),
+                span: SourceSpanRef::from(contribution.span),
+            })
+        }
+        AnalyzedRegion::Conditional {
+            condition,
+            then_body,
+            else_body,
+            span,
+        } => {
+            let condition = lowerer.lower_expr(condition);
+            let then_body = lower_regions(lowerer, next_contribution, then_body);
+            let else_body = lower_regions(lowerer, next_contribution, else_body);
+            HirRegion::Conditional {
+                condition,
+                then_body,
+                else_body,
+                span: SourceSpanRef::from(*span),
+            }
+        }
+        AnalyzedRegion::Loop {
+            condition,
+            body,
+            span,
+        } => {
+            let condition = lowerer.lower_expr(condition);
+            let body = lower_regions(lowerer, next_contribution, body);
+            HirRegion::Loop {
+                condition,
+                body,
+                span: SourceSpanRef::from(*span),
+            }
+        }
+    }
+}
+
+fn lower_regions(
+    lowerer: &mut HirLowerer,
+    next_contribution: &mut usize,
+    regions: &[AnalyzedRegion],
+) -> Vec<HirRegion> {
+    regions
+        .iter()
+        .map(|region| lower_region(lowerer, next_contribution, region))
+        .collect()
 }
 
 #[derive(Debug, Default)]

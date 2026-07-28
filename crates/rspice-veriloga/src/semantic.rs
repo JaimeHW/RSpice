@@ -37,6 +37,12 @@ pub struct SemanticAnalyzer {
     user_functions: HashMap<SmolStr, FunctionDef>,
     /// Stack of active guard conditions (innermost last)
     guard_stack: Vec<Expression>,
+    /// Structured regions being built, innermost last.
+    ///
+    /// Runs alongside `guard_stack` and records the shape the guards are about
+    /// to erase. The bottom frame is the module's analog block; each nested
+    /// construct pushes a frame and pops it into an [`AnalyzedRegion`].
+    region_stack: Vec<Vec<AnalyzedRegion>>,
     /// Stack of identifier substitution frames (innermost last). Used for
     /// hoisted block locals, unrolled loop variables, and inlined function
     /// locals.
@@ -88,6 +94,7 @@ impl SemanticAnalyzer {
             errors: Vec::new(),
             user_functions: HashMap::new(),
             guard_stack: Vec::new(),
+            region_stack: vec![Vec::new()],
             subst_stack: Vec::new(),
             function_side_effects: Vec::new(),
             local_counter: 0,
@@ -124,6 +131,8 @@ impl SemanticAnalyzer {
                 self.errors.clear();
                 self.user_functions.clear();
                 self.guard_stack.clear();
+                self.region_stack.clear();
+                self.region_stack.push(Vec::new());
                 self.subst_stack.clear();
                 self.function_side_effects.clear();
                 self.local_counter = 0;
@@ -253,6 +262,7 @@ impl SemanticAnalyzer {
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),
+            body: Vec::new(),
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
             arrays: HashMap::new(),
@@ -804,6 +814,7 @@ impl SemanticAnalyzer {
         }
 
         analyzed.statements = statements;
+        analyzed.body = self.take_body();
 
         // Surface every recorded diagnostic instead of silently succeeding
         if !self.errors.is_empty() {
@@ -923,6 +934,45 @@ impl SemanticAnalyzer {
         }))
     }
 
+    /// Record a step in the innermost open region.
+    ///
+    /// Called at each point [`Self::apply_guard`] is about to fold a guard into
+    /// an expression, with the expression as written.
+    fn record_region(&mut self, region: AnalyzedRegion) {
+        if let Some(frame) = self.region_stack.last_mut() {
+            frame.push(region);
+        }
+    }
+
+    /// Begin collecting a nested region.
+    fn open_region(&mut self) {
+        self.region_stack.push(Vec::new());
+    }
+
+    /// Finish the innermost region and return what it collected.
+    fn close_region(&mut self) -> Vec<AnalyzedRegion> {
+        // The bottom frame is the analog block itself and is closed by
+        // `take_body`; popping it here would silently discard the module.
+        debug_assert!(
+            self.region_stack.len() > 1,
+            "close_region beyond the analog block frame"
+        );
+        self.region_stack.pop().unwrap_or_default()
+    }
+
+    /// Take the module's structured body, leaving a fresh frame behind.
+    fn take_body(&mut self) -> Vec<AnalyzedRegion> {
+        debug_assert_eq!(
+            self.region_stack.len(),
+            1,
+            "analog block finished with {} regions still open",
+            self.region_stack.len().saturating_sub(1)
+        );
+        let body = self.region_stack.pop().unwrap_or_default();
+        self.region_stack.push(Vec::new());
+        body
+    }
+
     /// Build `guard ? value : fallback` under the active guard (or `value`
     /// when unguarded)
     fn apply_guard(&self, value: Expression, fallback: Expression) -> Expression {
@@ -997,10 +1047,51 @@ impl SemanticAnalyzer {
         })
     }
 
+    /// Whether a call to this function *must* be lowered at a statement
+    /// boundary. An output or inout argument writes a caller variable, which an
+    /// expression cannot do.
     fn function_needs_materialization(func: &FunctionDef) -> bool {
         func.params
             .iter()
             .any(|param| param.direction != ParamDirection::Input)
+    }
+
+    /// Whether a call to this function *should* be lowered at a statement
+    /// boundary even when it need not be.
+    ///
+    /// A body with control flow should, because the alternative —
+    /// [`Self::inline_function`] — dissolves that control flow into
+    /// `guard ? value : previous` and duplicates the whole tree built so far at
+    /// every assignment. Materialising instead runs the body through the
+    /// ordinary statement path, where one `if` stays one conditional.
+    ///
+    /// Measured on `EPFL_HEMT_10a`, whose `core` nests three arms over five
+    /// chained locals: 186,444 HIR expressions from an analog block holding 191
+    /// assignments.
+    fn function_should_materialize(func: &FunctionDef) -> bool {
+        if Self::function_needs_materialization(func) {
+            return true;
+        }
+        // A clamped exponential is recognised and replaced by an intrinsic
+        // further down, which is both smaller and differentiable in closed
+        // form. Hoisting it to a statement would happen first and take that
+        // away, so its conditionals are left alone.
+        if Self::is_recognized_limited_exp_function(func) {
+            return false;
+        }
+        func.body.statements.iter().any(Self::statement_branches)
+    }
+
+    fn statement_branches(statement: &AnalogStatement) -> bool {
+        match statement {
+            AnalogStatement::Conditional(_)
+            | AnalogStatement::Case(_)
+            | AnalogStatement::While(_)
+            | AnalogStatement::For(_)
+            | AnalogStatement::Repeat(_) => true,
+            AnalogStatement::Block(block) => block.statements.iter().any(Self::statement_branches),
+            _ => false,
+        }
     }
 
     fn is_recognized_limited_exp_function(func: &FunctionDef) -> bool {
@@ -1369,17 +1460,37 @@ impl SemanticAnalyzer {
                 // branch runs: the then-branch may assign variables the
                 // condition reads, and a re-evaluated else-guard would then
                 // see the mutated state and fire as well.
+                //
+                // The structured form needs no snapshot and must not use one.
+                // Its condition is evaluated once, at the branch, and every read
+                // inside an arm resolves against the definitions reaching that
+                // arm — so the hazard the snapshot exists for cannot arise, and
+                // the snapshot variable's own assignment only ever went into the
+                // flat list.
+                let unsnapshotted = condition.clone();
                 let condition = self.snapshot_guard(condition, cond.span, module, sink)?;
 
                 self.guard_stack.push(condition.clone());
+                self.open_region();
                 self.analyze_statement(&cond.then_branch, module, sink)?;
+                let then_body = self.close_region();
                 self.guard_stack.pop();
 
+                let mut else_body = Vec::new();
                 if let Some(else_branch) = &cond.else_branch {
-                    self.guard_stack.push(Self::not_expr(condition));
+                    self.guard_stack.push(Self::not_expr(condition.clone()));
+                    self.open_region();
                     self.analyze_statement(else_branch, module, sink)?;
+                    else_body = self.close_region();
                     self.guard_stack.pop();
                 }
+
+                self.record_region(AnalyzedRegion::Conditional {
+                    condition: unsnapshotted,
+                    then_body,
+                    else_body,
+                    span: cond.span,
+                });
             }
             AnalogStatement::Case(case_stmt) => {
                 // The selector and ALL match comparisons are evaluated
@@ -1387,17 +1498,34 @@ impl SemanticAnalyzer {
                 // them so arm bodies cannot perturb later guards.
                 let selector =
                     self.lower_expression_with_side_effects(&case_stmt.expr, module, sink)?;
+                // The structured form keeps the comparisons as written; a case
+                // arm's condition is evaluated once at its branch, so the
+                // snapshot the flat form needs would only be a variable the
+                // region body never assigns.
+                let unsnapshotted_selector = selector.clone();
                 let selector = self.snapshot_guard(selector, case_stmt.span, module, sink)?;
 
                 let mut item_guards: Vec<Option<Expression>> = Vec::new();
+                let mut unsnapshotted_guards: Vec<Option<Expression>> = Vec::new();
                 for item in &case_stmt.items {
                     let mut item_match: Option<Expression> = None;
+                    let mut unsnapshotted_match: Option<Expression> = None;
                     for m in &item.matches {
                         let m_lowered = self.lower_expression_with_side_effects(m, module, sink)?;
-                        let eq = Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered);
+                        let eq =
+                            Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered.clone());
                         item_match = Some(match item_match {
                             Some(acc) => Self::binary_expr(BinaryOp::Or, acc, eq),
                             None => eq,
+                        });
+                        let raw_eq = Self::binary_expr(
+                            BinaryOp::Eq,
+                            unsnapshotted_selector.clone(),
+                            m_lowered,
+                        );
+                        unsnapshotted_match = Some(match unsnapshotted_match {
+                            Some(acc) => Self::binary_expr(BinaryOp::Or, acc, raw_eq),
+                            None => raw_eq,
                         });
                     }
                     let snapshotted = match item_match {
@@ -1407,14 +1535,27 @@ impl SemanticAnalyzer {
                         None => None,
                     };
                     item_guards.push(snapshotted);
+                    unsnapshotted_guards.push(unsnapshotted_match);
                 }
 
                 // OR of all guards matched so far (case items are priority
                 // ordered: the first matching item wins)
                 let mut prior_match: Option<Expression> = None;
+                // Structured arms, each holding the item's own match condition
+                // rather than the flat form's `match AND NOT prior`. Priority
+                // becomes the nesting below, which is what lets the CFG emit
+                // one branch per arm instead of an accumulating conjunction.
+                let mut arms: Vec<(Expression, Vec<AnalyzedRegion>)> = Vec::new();
 
-                for (item, item_match) in case_stmt.items.iter().zip(item_guards) {
-                    let Some(item_match) = item_match else {
+                for ((item, item_match), unsnapshotted_match) in case_stmt
+                    .items
+                    .iter()
+                    .zip(item_guards)
+                    .zip(unsnapshotted_guards)
+                {
+                    let (Some(item_match), Some(unsnapshotted_match)) =
+                        (item_match, unsnapshotted_match)
+                    else {
                         continue;
                     };
 
@@ -1428,8 +1569,11 @@ impl SemanticAnalyzer {
                     };
 
                     self.guard_stack.push(guard);
+                    self.open_region();
                     self.analyze_statement(&item.statement, module, sink)?;
+                    let body = self.close_region();
                     self.guard_stack.pop();
+                    arms.push((unsnapshotted_match, body));
 
                     prior_match = Some(match prior_match {
                         Some(prior) => Self::binary_expr(BinaryOp::Or, prior, item_match),
@@ -1437,15 +1581,35 @@ impl SemanticAnalyzer {
                     });
                 }
 
+                let mut chain: Vec<AnalyzedRegion> = Vec::new();
                 if let Some(default) = &case_stmt.default {
                     match prior_match {
                         Some(prior) => {
                             self.guard_stack.push(Self::not_expr(prior));
+                            self.open_region();
                             self.analyze_statement(default, module, sink)?;
+                            chain = self.close_region();
                             self.guard_stack.pop();
                         }
-                        None => self.analyze_statement(default, module, sink)?,
+                        None => {
+                            self.open_region();
+                            self.analyze_statement(default, module, sink)?;
+                            chain = self.close_region();
+                        }
                     }
+                }
+
+                // Fold innermost-first so arm order becomes else-nesting depth.
+                for (condition, then_body) in arms.into_iter().rev() {
+                    chain = vec![AnalyzedRegion::Conditional {
+                        condition,
+                        then_body,
+                        else_body: chain,
+                        span: case_stmt.span,
+                    }];
+                }
+                for region in chain {
+                    self.record_region(region);
                 }
             }
             AnalogStatement::For(for_stmt) => {
@@ -1497,8 +1661,19 @@ impl SemanticAnalyzer {
                                 while_stmt.span,
                             );
                         }
+                        // The structured loop sits inside whatever conditional
+                        // region encloses it, so folding the guard in again
+                        // would only add a read of a snapshot variable that the
+                        // region body never assigns.
+                        let unguarded = condition.clone();
                         let condition = self.fold_guard_into_condition(condition);
-                        let body = self.analyze_loop_body(&while_stmt.body, None, module)?;
+                        let (body, regions) =
+                            self.analyze_loop_body(&while_stmt.body, None, module)?;
+                        self.record_region(AnalyzedRegion::Loop {
+                            condition: unguarded,
+                            body: regions,
+                            span: while_stmt.span,
+                        });
                         sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
                             condition,
                             body,
@@ -1864,23 +2039,29 @@ impl SemanticAnalyzer {
     /// runtime-loop nesting depth (contributions inside are rejected).
     /// An optional trailing statement (the for-loop update) is analyzed
     /// after the body.
+    /// Analyze a runtime loop body, returning both forms of it.
+    ///
+    /// The single funnel for every runtime-bounded loop, which is why the
+    /// structured capture lives here rather than at the three record sites.
     fn analyze_loop_body(
         &mut self,
         body: &AnalogStatement,
         trailing: Option<&AnalogStatement>,
         module: &mut AnalyzedModule,
-    ) -> CompileResult<Vec<AnalyzedStatement>> {
+    ) -> CompileResult<(Vec<AnalyzedStatement>, Vec<AnalyzedRegion>)> {
         let mut statements = Vec::new();
         self.runtime_loop_depth += 1;
+        self.open_region();
         let result = self
             .analyze_statement(body, module, &mut statements)
             .and_then(|()| match trailing {
                 Some(stmt) => self.analyze_statement(stmt, module, &mut statements),
                 None => Ok(()),
             });
+        let regions = self.close_region();
         self.runtime_loop_depth -= 1;
         result?;
-        Ok(statements)
+        Ok((statements, regions))
     }
 
     /// Lower a for loop with runtime-dependent bounds (e.g. iterating to a
@@ -1915,12 +2096,18 @@ impl SemanticAnalyzer {
                 for_stmt.span,
             );
         }
+        let unguarded = condition.clone();
         let condition = self.fold_guard_into_condition(condition);
 
         // Body, then the update assignment, inside the loop sink
         let update_stmt = AnalogStatement::Assignment((*for_stmt.update).clone());
-        let body = self.analyze_loop_body(&for_stmt.body, Some(&update_stmt), module)?;
+        let (body, regions) = self.analyze_loop_body(&for_stmt.body, Some(&update_stmt), module)?;
 
+        self.record_region(AnalyzedRegion::Loop {
+            condition: unguarded,
+            body: regions,
+            span: for_stmt.span,
+        });
         sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
             condition,
             body,
@@ -1993,14 +2180,13 @@ impl SemanticAnalyzer {
         }));
 
         // while (guard && idx < cnt) { body; idx = idx + 1; }
-        let condition = self.fold_guard_into_condition(Self::binary_expr(
-            BinaryOp::Lt,
-            ident(&idx_name),
-            ident(&cnt_name),
-        ));
+        let unguarded = Self::binary_expr(BinaryOp::Lt, ident(&idx_name), ident(&cnt_name));
+        let condition = self.fold_guard_into_condition(unguarded.clone());
 
-        let mut body = self.analyze_loop_body(&repeat.body, None, module)?;
-        body.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+        let (mut body, mut regions) = self.analyze_loop_body(&repeat.body, None, module)?;
+        // The synthesized counter bump closes the loop in both forms; a
+        // structured body without it would describe a loop that never advances.
+        let increment = AnalyzedAssignment {
             target: idx_name.clone(),
             var_index: idx_index,
             index: None,
@@ -2012,8 +2198,15 @@ impl SemanticAnalyzer {
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,
-        }));
+        };
+        regions.push(AnalyzedRegion::Assignment(increment.clone()));
+        body.push(AnalyzedStatement::Assignment(increment));
 
+        self.record_region(AnalyzedRegion::Loop {
+            condition: unguarded,
+            body: regions,
+            span,
+        });
         sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
             condition,
             body,
@@ -2220,6 +2413,15 @@ impl SemanticAnalyzer {
             );
         }
 
+        self.record_region(AnalyzedRegion::Contribution(AnalyzedContribution {
+            branch: branch_name.clone(),
+            declared_branch: declared_branch.clone(),
+            is_current,
+            indirect: false,
+            expression: expression.clone(),
+            expr_type,
+            span: contrib.span,
+        }));
         // A guarded contribution contributes zero when inactive
         let expression = self.apply_guard(expression, Self::number_expr(0.0, contrib.span));
 
@@ -2292,6 +2494,15 @@ impl SemanticAnalyzer {
                 span: *span,
             },
         });
+        self.record_region(AnalyzedRegion::Contribution(AnalyzedContribution {
+            branch: branch_name.clone(),
+            declared_branch: declared_branch.clone(),
+            is_current,
+            indirect: true,
+            expression: residual.clone(),
+            expr_type: ValueType::Real,
+            span: stmt.span,
+        }));
         let expression = self.apply_guard(residual, fallback);
 
         module.contributions.push(AnalyzedContribution {
@@ -2701,6 +2912,17 @@ impl SemanticAnalyzer {
             name: target_name.clone(),
             span,
         });
+        // Structured form first: it needs the expression as written, and the
+        // next line is where that stops being available.
+        self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
+            target: target_name.clone(),
+            var_index,
+            index: None,
+            expression: expression.clone(),
+            expr_type: value_type,
+            span,
+            unfiltered_initial_step_guard: self.unfiltered_initial_step_guards.last().cloned(),
+        }));
         let expression = self.apply_guard(expression, fallback);
 
         // Record the assignment for code generation
@@ -2735,6 +2957,15 @@ impl SemanticAnalyzer {
             index: Box::new(index.clone()),
             span,
         });
+        self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
+            target: array_name.clone(),
+            var_index: layout.base,
+            index: Some(index.clone()),
+            expression: expression.clone(),
+            expr_type: value_type,
+            span,
+            unfiltered_initial_step_guard: None,
+        }));
         let expression = self.apply_guard(expression, fallback);
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: array_name,
@@ -2806,7 +3037,7 @@ impl SemanticAnalyzer {
         let Some(func) = self.user_functions.get(&call.name).cloned() else {
             return Ok(None);
         };
-        if !Self::function_needs_materialization(&func) {
+        if !Self::function_should_materialize(&func) {
             return Ok(None);
         }
         if self.inline_depth >= Self::MAX_INLINE_DEPTH {
@@ -3070,7 +3301,7 @@ impl SemanticAnalyzer {
             }
             Expression::Call(call) => {
                 if let Some(func) = self.user_functions.get(&call.name).cloned()
-                    && Self::function_needs_materialization(&func)
+                    && Self::function_should_materialize(&func)
                 {
                     let args = if call.args.len() == func.params.len() {
                         call.args
@@ -4029,6 +4260,30 @@ impl SemanticAnalyzer {
     /// Inline a call to a user-defined analog function by symbolically
     /// executing its body. The return value is the final expression bound
     /// to the function-name variable.
+    ///
+    /// # This is guard flattening, and it is the backend rebuild's last one
+    ///
+    /// A function body's control flow is dissolved here exactly as the analog
+    /// block's used to be: each assignment under a guard becomes
+    /// `guard ? value : previous`, where `previous` is the *entire* expression
+    /// tree built so far. A chain of `n` assignments under nested conditions
+    /// therefore duplicates its predecessor at every step, and the tree grows
+    /// multiplicatively rather than additively.
+    ///
+    /// Measured on `EPFL_HEMT_10a`: its analog block holds **6 conditionals and
+    /// 191 assignments**, and the front end turns them into **186,444 HIR
+    /// expressions** — roughly a thousand nodes per assignment — because its
+    /// `core` function nests three arms over five chained locals and is called
+    /// from several places. Lowering those `?:` trees produces 8,248 CFG blocks
+    /// and 6.3 MB of Rust against 78 KB from the tier being replaced. It is the
+    /// single largest obstacle to the plan's size gate.
+    ///
+    /// The fix is the one Phase 1 applied a level up: materialise a call whose
+    /// body has control flow at a statement boundary and inline the body as
+    /// statements, so one `if` in a function becomes one
+    /// [`AnalyzedRegion::Conditional`] rather than a duplicated expression. The
+    /// machinery for statement-boundary materialisation already exists here for
+    /// output/inout arguments. See `design/VERILOGA_BACKEND_PLAN.md`.
     fn inline_function(
         &mut self,
         name: &SmolStr,

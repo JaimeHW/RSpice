@@ -29,12 +29,53 @@ pub struct AnalyzedModule {
     /// Ordered evaluation statements (assignments and runtime loops),
     /// executed before the contributions on every device evaluation
     pub statements: Vec<AnalyzedStatement>,
+    /// The same analog block with its control flow intact.
+    ///
+    /// [`Self::statements`] is the historical form: conditionals dissolved into
+    /// `guard ? value : previous` so the list is flat. That representation
+    /// cannot be recovered from, which is what the backend rebuild
+    /// (`design/VERILOGA_BACKEND_PLAN.md`) is about, so the analyzer now also
+    /// records the shape it saw.
+    ///
+    /// Both are produced by one walk and describe the same module. The flat
+    /// list is what every current consumer reads and is unchanged; this is what
+    /// the CFG level consumes. The flat list goes away with the last of those
+    /// consumers.
+    pub body: Vec<AnalyzedRegion>,
     pub internal_nodes: Vec<AnalyzedInternalNode>,
     /// Names of nets declared `ground` (they map to the global reference)
     pub ground_nodes: Vec<SmolStr>,
     /// Array variables: name -> contiguous element storage layout
     pub arrays: HashMap<SmolStr, AnalyzedArray>,
     pub symbol_table: SymbolTable,
+}
+
+/// One step of the analog block, with control flow intact.
+///
+/// The expressions here are *unguarded*: an assignment inside an `if` carries
+/// what the source wrote, not `cond ? written : previous`. Reconstructing
+/// "previous" is precisely the bounded-search problem this representation
+/// exists to delete, and it is only recoverable while the walk still knows
+/// which branch it is in.
+#[derive(Debug, Clone)]
+pub enum AnalyzedRegion {
+    Assignment(AnalyzedAssignment),
+    Contribution(AnalyzedContribution),
+    Conditional {
+        condition: Expression,
+        then_body: Vec<AnalyzedRegion>,
+        else_body: Vec<AnalyzedRegion>,
+        span: Span,
+    },
+    /// Loop whose trip count is not known until run time.
+    ///
+    /// Compile-time-bounded loops are unrolled before they reach here, as they
+    /// are for the flat list.
+    Loop {
+        condition: Expression,
+        body: Vec<AnalyzedRegion>,
+        span: Span,
+    },
 }
 
 /// An analyzed array variable: elements occupy contiguous slots in the

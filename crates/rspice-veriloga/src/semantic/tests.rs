@@ -370,8 +370,15 @@ fn recognized_limited_exp_function_assignment_keeps_real_type() {
     ));
 }
 
+/// A function whose body branches is inlined as statements, not folded into a
+/// ternary.
+///
+/// Folding is what the inliner used to do, and it duplicates the tree built so
+/// far at every assignment — which is how a 686-line model reached 186,444
+/// expressions. The contribution now just reads the function's return
+/// temporary, and the branch is a region the CFG can turn into one diamond.
 #[test]
-fn function_with_conditional_inlines_to_ternary() {
+fn a_function_that_branches_is_inlined_as_statements() {
     let m = analyze_one(&module_src(
         r#"
             analog function real clip;
@@ -386,10 +393,31 @@ fn function_with_conditional_inlines_to_ternary() {
             analog I(p, n) <+ clip(V(p, n));
             "#,
     ));
-    assert!(matches!(
-        m.contributions[0].expression,
-        Expression::Conditional(_)
-    ));
+    assert!(
+        matches!(&m.contributions[0].expression, Expression::Identifier(_)),
+        "the contribution reads the call's result, it does not contain the body"
+    );
+    assert_eq!(
+        conditional_regions(&m.body),
+        1,
+        "the function's one `if` is one region"
+    );
+}
+
+/// Conditionals anywhere in a structured body, counted recursively.
+fn conditional_regions(regions: &[AnalyzedRegion]) -> usize {
+    regions
+        .iter()
+        .map(|region| match region {
+            AnalyzedRegion::Conditional {
+                then_body,
+                else_body,
+                ..
+            } => 1 + conditional_regions(then_body) + conditional_regions(else_body),
+            AnalyzedRegion::Loop { body, .. } => conditional_regions(body),
+            AnalyzedRegion::Assignment(_) | AnalyzedRegion::Contribution(_) => 0,
+        })
+        .sum()
 }
 
 #[test]
@@ -1072,5 +1100,234 @@ fn source_defined_limit_requires_real_return_and_formals() {
             .to_string()
             .contains("requires real formal 'previous'"),
         "unexpected diagnostic: {integer_formal}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Structured body
+//
+// `AnalyzedModule::body` records the analog block with its control flow intact,
+// alongside the flat `statements` list that folds the same conditionals into
+// per-assignment guards. These pin the property the CFG level depends on: that
+// the shape survives, and that the expressions in it are the ones the source
+// wrote rather than the guarded rewrites.
+
+fn assignment_targets(regions: &[AnalyzedRegion]) -> Vec<String> {
+    regions
+        .iter()
+        .filter_map(|region| match region {
+            AnalyzedRegion::Assignment(assignment) => Some(assignment.target.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_conditional_survives_as_a_region_rather_than_a_guard() {
+    let module = analyze_one(&module_src(
+        r#"
+        real x;
+        analog begin
+            if (V(p, n) > 0.5)
+                x = 1.0;
+            else
+                x = 2.0;
+            I(p, n) <+ x;
+        end
+        "#,
+    ));
+
+    let [
+        AnalyzedRegion::Conditional {
+            then_body,
+            else_body,
+            ..
+        },
+        AnalyzedRegion::Contribution(_),
+    ] = module.body.as_slice()
+    else {
+        panic!(
+            "expected a conditional then a contribution, got {:?}",
+            module.body
+        );
+    };
+    assert_eq!(assignment_targets(then_body), vec!["x"]);
+    assert_eq!(assignment_targets(else_body), vec!["x"]);
+}
+
+#[test]
+fn a_region_assignment_carries_the_expression_as_written() {
+    let module = analyze_one(&module_src(
+        r#"
+        real x;
+        analog begin
+            x = 0.0;
+            if (V(p, n) > 0.5)
+                x = 1.0;
+            I(p, n) <+ x;
+        end
+        "#,
+    ));
+
+    let Some(AnalyzedRegion::Conditional { then_body, .. }) = module.body.get(1) else {
+        panic!("expected a conditional, got {:?}", module.body);
+    };
+    let [AnalyzedRegion::Assignment(assignment)] = then_body.as_slice() else {
+        panic!("expected one guarded assignment");
+    };
+    // The flat list rewrites this to `cond ? 1.0 : x`. The structured form must
+    // not: recovering "x" is exactly the search the CFG level removes.
+    assert!(
+        matches!(&assignment.expression, Expression::Number(number) if number.value == 1.0),
+        "structured assignment should hold the literal, got {:?}",
+        assignment.expression
+    );
+
+    let flat_guarded = module.statements.iter().any(|statement| match statement {
+        AnalyzedStatement::Assignment(assignment) => {
+            matches!(assignment.expression, Expression::Conditional(_))
+        }
+        AnalyzedStatement::Loop(_) => false,
+    });
+    assert!(
+        flat_guarded,
+        "the flat list must still carry the guarded rewrite; both forms describe one module"
+    );
+}
+
+#[test]
+fn nested_conditionals_nest_rather_than_flatten() {
+    let module = analyze_one(&module_src(
+        r#"
+        real x;
+        analog begin
+            if (V(p, n) > 0.5) begin
+                if (V(p, n) > 1.0)
+                    x = 1.0;
+                else
+                    x = 2.0;
+            end else
+                x = 3.0;
+            I(p, n) <+ x;
+        end
+        "#,
+    ));
+
+    let Some(AnalyzedRegion::Conditional {
+        then_body,
+        else_body,
+        ..
+    }) = module.body.first()
+    else {
+        panic!("expected an outer conditional");
+    };
+    assert!(
+        matches!(then_body.as_slice(), [AnalyzedRegion::Conditional { .. }]),
+        "the inner conditional must remain nested, got {then_body:?}"
+    );
+    assert_eq!(assignment_targets(else_body), vec!["x"]);
+}
+
+#[test]
+fn an_unconditional_module_records_a_flat_region_list() {
+    let module = analyze_one(&module_src(
+        r#"
+        real x;
+        analog begin
+            x = 2.0;
+            I(p, n) <+ x * V(p, n);
+        end
+        "#,
+    ));
+    assert!(
+        module
+            .body
+            .iter()
+            .all(|region| !matches!(region, AnalyzedRegion::Conditional { .. })),
+        "straight-line source must not grow a conditional"
+    );
+    assert_eq!(assignment_targets(&module.body), vec!["x"]);
+}
+
+#[test]
+fn a_case_statement_nests_its_arms_by_priority() {
+    let module = analyze_one(&module_src(
+        r#"
+        parameter integer sel = 0;
+        real x;
+        analog begin
+            case (sel)
+                0: x = 1.0;
+                1: x = 2.0;
+                default: x = 3.0;
+            endcase
+            I(p, n) <+ x;
+        end
+        "#,
+    ));
+
+    // Case priority becomes else-nesting depth: the first arm is the outer
+    // conditional, so the CFG emits one branch per arm rather than an
+    // accumulating `match AND NOT prior` conjunction per arm.
+    let Some(AnalyzedRegion::Conditional {
+        then_body: first_arm,
+        else_body: rest,
+        ..
+    }) = module.body.first()
+    else {
+        panic!(
+            "expected the first case arm as a conditional, got {:?}",
+            module.body
+        );
+    };
+    assert_eq!(assignment_targets(first_arm), vec!["x"]);
+
+    let [
+        AnalyzedRegion::Conditional {
+            then_body: second_arm,
+            else_body: default_arm,
+            ..
+        },
+    ] = rest.as_slice()
+    else {
+        panic!("expected the second arm nested in the first's else, got {rest:?}");
+    };
+    assert_eq!(assignment_targets(second_arm), vec!["x"]);
+    assert_eq!(assignment_targets(default_arm), vec!["x"]);
+}
+
+#[test]
+fn a_runtime_loop_keeps_its_body_as_a_region() {
+    let module = analyze_one(&module_src(
+        r#"
+        parameter real fingers = 4.0;
+        real x;
+        integer i;
+        analog begin
+            x = 0.0;
+            for (i = 0; i < fingers; i = i + 1)
+                x = x + 1.0;
+            I(p, n) <+ x;
+        end
+        "#,
+    ));
+
+    let loop_region = module
+        .body
+        .iter()
+        .find(|region| matches!(region, AnalyzedRegion::Loop { .. }))
+        .unwrap_or_else(|| panic!("expected a runtime loop region, got {:?}", module.body));
+    let AnalyzedRegion::Loop { body, .. } = loop_region else {
+        unreachable!("matched above");
+    };
+    // Body plus the loop's own update assignment; a body that lost the update
+    // would describe a loop that never advances.
+    assert!(
+        assignment_targets(body).contains(&"x".to_string()),
+        "loop body must retain its assignment, got {body:?}"
+    );
+    assert!(
+        assignment_targets(body).contains(&"i".to_string()),
+        "loop body must retain the update that advances it, got {body:?}"
     );
 }
