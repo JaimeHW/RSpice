@@ -1,3 +1,8 @@
+//! Touchstone export after an S-parameter run.
+//!
+//! Builds the port-ordered network dataset and writes it in the requested
+//! format when the run configuration asked for an export.
+
 use crate::diagnostics::ConsoleMessage;
 use super::*;
 

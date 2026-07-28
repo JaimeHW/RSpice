@@ -1,3 +1,9 @@
+//! Harmonic balance frequency layouts.
+//!
+//! Chooses the set of mixing products a multi-tone harmonic-balance solve
+//! carries: which combinations of the tones, truncated to the requested
+//! order, and in what index order the spectrum is stored.
+
 use super::error::ensure_not_aborted;
 use super::{HbToneRunConfig, ServiceRunError, ServiceRunResult};
 use rspice_core::Value;

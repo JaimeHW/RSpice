@@ -1,3 +1,9 @@
+//! Turning a configured analysis into a SPICE control line.
+//!
+//! One place where the typed analysis setup becomes the text the engine
+//! parses. Sweeps, Monte Carlo, and corner runs each expand into the command
+//! form their analysis expects.
+
 use super::*;
 
 fn is_terminal_end_card(line: &str) -> bool {

@@ -1,3 +1,10 @@
+//! Converting engine output into the viewer result model.
+//!
+//! Engine results arrive as raw vectors keyed by node and sweep variable.
+//! This maps them onto the typed analysis results the viewers read, carrying
+//! units and sweep metadata across the boundary rather than re-deriving them
+//! downstream.
+
 use super::*;
 use crate::state::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,

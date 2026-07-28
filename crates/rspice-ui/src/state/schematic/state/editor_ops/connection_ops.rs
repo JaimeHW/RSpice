@@ -1,3 +1,10 @@
+//! Terminal-to-wire connectivity.
+//!
+//! Finding the terminal under a point, and rebuilding the connection set
+//! after geometry moves. Connectivity is derived, never stored by hand: any
+//! operation that changes where a terminal or a wire end sits rebuilds from
+//! the terminals rather than patching individual connections.
+
 use super::super::*;
 
 impl SchematicState {

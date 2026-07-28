@@ -1,3 +1,9 @@
+//! Shared parsing for analysis setup fields.
+//!
+//! Expanding a temperature list into its points, and reading the counts and
+//! step values a user typed, with the field name carried into the error so a
+//! rejection says which input was wrong.
+
 use super::*;
 
 impl SimulationController {

@@ -1,3 +1,10 @@
+//! Envelope-following analysis.
+//!
+//! Integrates the slowly-varying envelope of a modulated carrier instead of
+//! every RF cycle, and reports the Fourier content of each envelope sample.
+//! The adaptive path skips periods whose envelope is not changing, which is
+//! the whole point of the analysis.
+
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, TransientData, build_engine_config,

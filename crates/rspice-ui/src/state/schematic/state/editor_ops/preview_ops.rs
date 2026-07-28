@@ -1,3 +1,8 @@
+//! In-progress drawing previews.
+//!
+//! The provisional geometry shown while a wire is being routed, before it
+//! is committed, including the snap to a nearby terminal.
+
 use super::super::*;
 
 impl SchematicState {

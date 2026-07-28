@@ -1,3 +1,8 @@
+//! Safe operating area checks.
+//!
+//! Compares simulated device stress against the limits the model declares,
+//! and reports every violation with the instance and the margin.
+
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{
     is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort,

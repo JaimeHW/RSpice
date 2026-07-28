@@ -1,3 +1,9 @@
+//! Wire creation and hit-testing.
+//!
+//! Adding wires, and locating what is under a point: the wire itself, one of
+//! its vertices, or an endpoint. The distinction drives the cursor and what
+//! a drag does.
+
 use super::super::*;
 
 impl SchematicState {

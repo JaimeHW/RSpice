@@ -1,3 +1,9 @@
+//! Junctions and net labels.
+//!
+//! The two annotations that change what a drawing means: a junction makes
+//! crossing wires connect, and a net label names the net it sits on. Adding
+//! or removing either invalidates cached connectivity.
+
 use super::super::*;
 
 impl SchematicState {

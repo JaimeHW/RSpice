@@ -1,3 +1,9 @@
+//! Small-signal distortion analysis.
+//!
+//! Volterra-series harmonic and intermodulation distortion about the
+//! operating point: second and third order products for a one- or two-tone
+//! excitation.
+
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_disto_two_tone_harmonic_plan_with_abort,

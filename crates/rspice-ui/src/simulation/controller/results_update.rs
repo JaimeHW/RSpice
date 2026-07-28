@@ -1,3 +1,9 @@
+//! Result side effects.
+//!
+//! What a completed run changes beyond the waveforms themselves: run
+//! history, the active viewer selection, and the console and log entries
+//! that record what happened.
+
 use super::*;
 
 /// Echo evaluated `.MEAS` results to the console, the way the CLI prints

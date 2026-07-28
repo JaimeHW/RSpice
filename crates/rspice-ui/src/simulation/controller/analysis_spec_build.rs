@@ -1,3 +1,9 @@
+//! Assembling the analysis specification for a run.
+//!
+//! Resolves one row of the configured run set into a fully-determined
+//! [`AnalysisSpec`]: the analysis itself, its sweep, its outputs, and the
+//! manifest entry that records what was executed.
+
 use super::*;
 
 impl SimulationController {

@@ -1,3 +1,8 @@
+//! S-parameter analysis.
+//!
+//! Sweeps frequency and extracts the scattering matrix between the declared
+//! ports, with the port impedances the run configuration sets.
+
 #![allow(clippy::needless_range_loop)]
 
 use super::error::{ensure_not_aborted, poll_periodically};

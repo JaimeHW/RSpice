@@ -1,3 +1,9 @@
+//! Periodic steady-state analysis.
+//!
+//! Finds the periodic operating point a driven circuit settles into, and the
+//! autonomous oscillation frequency for an oscillator. Every periodic
+//! small-signal analysis linearizes about the result.
+
 #![allow(clippy::type_complexity)]
 
 use super::error::{ensure_not_aborted, poll_periodically};

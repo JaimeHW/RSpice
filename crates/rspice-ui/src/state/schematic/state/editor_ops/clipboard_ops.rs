@@ -1,3 +1,9 @@
+//! Cut, copy, and paste.
+//!
+//! Capturing a selection with everything it needs to stand alone — the wires
+//! between the copied objects, their junctions, and their labels — and
+//! re-anchoring it at the paste point with fresh object identities.
+
 use super::super::super::clamped_documentation_shape_translation;
 #[cfg(test)]
 use super::super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};

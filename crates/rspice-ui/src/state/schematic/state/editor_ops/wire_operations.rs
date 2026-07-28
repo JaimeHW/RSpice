@@ -1,3 +1,9 @@
+//! Reshaping existing wires.
+//!
+//! Splitting a wire at a point or a segment, merging two collinear wires,
+//! straightening a route, and dropping degenerate zero-length segments.
+//! Every one preserves the net the wire belongs to.
+
 use super::super::*;
 
 impl SchematicState {

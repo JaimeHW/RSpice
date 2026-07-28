@@ -1,3 +1,9 @@
+//! Shared runner plumbing.
+//!
+//! Parsing a deck under the run resource limits, building the output
+//! expressions an analysis asks for, and the abort-aware wrappers every
+//! runner shares.
+
 use std::path::{Path, PathBuf};
 
 use rspice_core::Value;

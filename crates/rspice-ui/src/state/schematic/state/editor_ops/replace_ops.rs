@@ -1,3 +1,10 @@
+//! Replacing an instance in place.
+//!
+//! Swapping the master behind a placed instance while preserving what the
+//! designer set: parameter overrides that the new master also accepts, and
+//! wiring to pins that survive the swap. Refuses the replacement outright
+//! when the new master cannot carry the existing connections.
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::super::super::replacement::{

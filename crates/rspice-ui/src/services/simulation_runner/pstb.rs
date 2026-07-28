@@ -1,3 +1,9 @@
+//! Periodic stability analysis.
+//!
+//! Loop gain and phase margin about a periodic steady state, for feedback
+//! that is only meaningful over a cycle — switched-mode regulators and
+//! sampled loops.
+
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config,
     error::{ensure_not_aborted, poll_periodically},

@@ -1,3 +1,9 @@
+//! Runner errors, and cooperative abort.
+//!
+//! Every runner polls the abort signal between stages rather than only at
+//! the end, so cancelling a long analysis takes effect promptly instead of
+//! at the next natural boundary.
+
 use rspice_core::abort_signal::AbortSignal;
 
 /// Typed error returned by cancellable simulation-service APIs.

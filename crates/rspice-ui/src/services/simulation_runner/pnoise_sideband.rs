@@ -1,3 +1,9 @@
+//! Sideband folding for periodic noise.
+//!
+//! Resolves how many sidebands a pnoise run carries and at what stride,
+//! translates each to its true frequency, and folds their contributions onto
+//! the output band.
+
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::noise::NoiseResult;

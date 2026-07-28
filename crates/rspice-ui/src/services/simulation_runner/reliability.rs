@@ -1,3 +1,8 @@
+//! Reliability analysis.
+//!
+//! Ages the design under its operating stress and reports the degradation:
+//! device lifetime, and which instances are the limiting ones.
+
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, parse_runner_netlist_with_abort};
 use crate::simulation::reliability_engine::{

@@ -1,3 +1,9 @@
+//! Building a runner configuration from a dialog.
+//!
+//! The bridge between what the analysis options sheet holds and the typed
+//! run configuration each service runner takes. Kept apart from the dialogs
+//! so a run configuration can be built without an egui context.
+
 use super::*;
 
 impl SimulationController {

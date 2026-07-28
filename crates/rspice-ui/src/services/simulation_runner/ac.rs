@@ -1,3 +1,8 @@
+//! Small-signal AC analysis.
+//!
+//! Linearizes about the DC operating point and sweeps frequency, returning
+//! complex node voltages and branch currents per frequency.
+
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,

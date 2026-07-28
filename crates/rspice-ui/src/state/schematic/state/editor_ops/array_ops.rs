@@ -1,3 +1,10 @@
+//! Array replication.
+//!
+//! Replicating a selection across a row/column grid, and keeping the result
+//! electrically sound: replicas are collision-checked against existing
+//! geometry before they are committed, and pin-to-pin abutment between
+//! adjacent replicas becomes a real connection rather than a coincidence.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::state::DocumentationShapeGeometry;

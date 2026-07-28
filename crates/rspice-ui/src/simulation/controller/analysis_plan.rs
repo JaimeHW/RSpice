@@ -1,3 +1,9 @@
+//! Preflight over a saved analysis plan.
+//!
+//! Checks that a stored plan still describes something the current design
+//! can run — that its saved outputs still exist, and that its analyses are
+//! still available — before a run is allowed to start on it.
+
 use super::*;
 use std::collections::HashMap;
 

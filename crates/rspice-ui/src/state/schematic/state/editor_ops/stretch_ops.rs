@@ -1,3 +1,9 @@
+//! Stretching.
+//!
+//! Moving one edge or vertex of an object while the rest stays put — the
+//! operation that resizes a shape or reroutes one leg of a wire without
+//! detaching either end.
+
 use super::super::super::{BusTargetKind, DocumentationShapeGeometry, WireSegment};
 use super::super::*;
 

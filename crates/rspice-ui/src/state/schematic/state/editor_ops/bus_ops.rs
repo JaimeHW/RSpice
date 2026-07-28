@@ -1,3 +1,9 @@
+//! Buses.
+//!
+//! Drawing and editing bus segments, hit-testing them, and the taps that
+//! break individual signals out of a bus. A bus carries a ripped range of
+//! nets, so adding or removing a tap changes connectivity, not just drawing.
+
 use super::super::super::{
     BusDeclaration, BusParseError, BusPropertyImpact, BusSlice, BusTapOrientation, BusTargetKind,
     PendingBusTap,

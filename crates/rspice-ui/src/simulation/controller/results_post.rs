@@ -1,3 +1,9 @@
+//! Populating the post-run viewers.
+//!
+//! After a run completes, seeds each analysis viewer with the data it needs
+//! — transient traces, AC magnitude and phase, and the specialized viewers
+//! behind the analysis workspace.
+
 use super::*;
 
 impl SimulationController {

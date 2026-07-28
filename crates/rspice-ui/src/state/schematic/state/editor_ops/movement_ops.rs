@@ -1,3 +1,10 @@
+//! Moving a selection.
+//!
+//! Dragging components and wires while keeping the connections that cross
+//! the selection boundary attached — the rubber-band behaviour a schematic
+//! editor is judged on. A wire with one end inside the selection stretches;
+//! a wire wholly inside travels.
+
 use super::super::super::{BusTargetKind, clamped_documentation_shape_translation};
 use super::super::*;
 

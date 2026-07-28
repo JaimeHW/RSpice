@@ -1,3 +1,8 @@
+//! Transient viewer data.
+//!
+//! Prepares and caches what the transient viewers draw, so switching between
+//! viewers after a run does not re-derive the same traces.
+
 use super::*;
 use crate::analysis::eye_diagram::{EyeData, EyeDataBuilder};
 use crate::analysis::fft::{FftInputOptions, PreparedFftInput};

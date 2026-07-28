@@ -1,3 +1,9 @@
+//! Optimization runs.
+//!
+//! Drives repeated analyses while varying design parameters toward a goal:
+//! the variables and their bounds, the goal formulation, and the algorithm
+//! that searches.
+
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
 use crate::simulation::optimizer::{

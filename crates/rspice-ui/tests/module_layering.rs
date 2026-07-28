@@ -953,7 +953,7 @@ fn source_files_have_no_byte_order_mark() {
 /// Files with no `//!` module doc, frozen at the current count.
 ///
 /// Lower it as modules gain documentation. Never raise it.
-const MAX_UNDOCUMENTED_MODULES: usize = 313;
+const MAX_UNDOCUMENTED_MODULES: usize = 275;
 
 /// Every module that owns a directory explains itself, and the rest are a
 /// shrinking number.
@@ -1066,59 +1066,76 @@ fn whole_application_mutable_access_does_not_grow() {
 /// should, which is how `hardcopy_sources.rs` came to hold both the persisted
 /// source-set records and the adapters that resolve live documents.
 ///
+/// The leading `//!` header does not count. The budget exists so the *code*
+/// in a file stays reviewable, and a module header is what makes it easier to
+/// review — a budget that turns writing one into a build failure is measuring
+/// the wrong thing. Everything below the header counts, including ordinary
+/// comments.
+///
 /// Everything currently over budget is listed with its exact length. As with
 /// the layering table, the number is a ceiling: a file may shrink, never grow,
 /// and an entry that drops under budget must be deleted.
 const LINE_BUDGET: usize = 2500;
 
+/// Lines in a file, not counting its leading `//!` module header.
+fn budgeted_lines(source: &str) -> usize {
+    source
+        .lines()
+        .skip_while(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("//!") || trimmed.is_empty()
+        })
+        .count()
+}
+
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("workbench/hardcopy_adapters/sources.rs", 8326),
+    ("workbench/hardcopy_adapters/sources.rs", 8317),
     ("simulation/runner/worker_contract.rs", 8226),
-    ("io/project_io.rs", 8214),
-    ("workbench/hardcopy_adapters/render.rs", 8096),
-    ("state/workspace.rs", 7524),
-    ("workbench/documents/visualization_studio.rs", 7601),
-    ("state/model_library/qualification.rs", 6924),
-    ("workbench/surfaces/model_editor.rs", 6892),
-    ("workbench/surfaces/verify.rs", 6794),
-    ("workbench/surfaces/simulate.rs", 6406),
-    ("results/visualization_document.rs", 6394),
-    ("workbench/documents/model_editor.rs", 5107),
-    ("results/report_document.rs", 4877),
-    ("workbench/commands.rs", 4716),
-    ("io/durable_file.rs", 4689),
-    ("product/capability_readiness.rs", 4593),
+    ("io/project_io.rs", 8206),
+    ("workbench/hardcopy_adapters/render.rs", 8088),
+    ("state/workspace.rs", 7517),
+    ("workbench/documents/visualization_studio.rs", 7592),
+    ("state/model_library/qualification.rs", 6916),
+    ("workbench/surfaces/model_editor.rs", 6882),
+    ("workbench/surfaces/verify.rs", 6792),
+    ("workbench/surfaces/simulate.rs", 6404),
+    ("results/visualization_document.rs", 6388),
+    ("workbench/documents/model_editor.rs", 5101),
+    ("results/report_document.rs", 4869),
+    ("workbench/commands.rs", 3716),
+    ("io/durable_file.rs", 4682),
+    ("product/capability_readiness.rs", 4582),
     ("simulation/plan/model.rs", 4241),
-    ("workbench/surfaces/models.rs", 4229),
-    ("workbench/documents/result_document/waves.rs", 4199),
+    ("workbench/surfaces/models.rs", 4226),
+    ("workbench/documents/result_document/waves.rs", 4191),
     ("state/model_library/manager.rs", 4171),
-    ("state/model_library/correlation.rs", 4049),
-    ("hardcopy/contract.rs", 4031),
-    ("workbench/docks/inspector/design.rs", 3994),
-    ("workbench/surfaces/project.rs", 3994),
-    ("workbench/feature_availability_data.rs", 3872),
-    ("workbench/lifecycle/project_lifecycle.rs", 3741),
-    ("workbench/surfaces/model_correlation.rs", 3631),
-    ("workbench/state.rs", 3507),
+    ("state/model_library/correlation.rs", 4042),
+    ("hardcopy/contract.rs", 4022),
+    ("workbench/docks/inspector/design.rs", 3985),
+    ("workbench/surfaces/project.rs", 3988),
+    ("workbench/feature_availability_data.rs", 3864),
+    ("workbench/lifecycle/project_lifecycle.rs", 3734),
+    ("workbench/surfaces/model_correlation.rs", 3624),
+    ("workbench/state.rs", 3501),
     ("schematic/view/interaction.rs", 3491),
-    ("workbench/app/actions/workspace.rs", 3064),
-    ("workbench/hardcopy_adapters/print.rs", 3357),
-    ("workbench/app/dialogs/hardcopy/render.rs", 3348),
+    ("workbench/app/actions/workspace.rs", 3057),
+    ("workbench/hardcopy_adapters/print.rs", 3348),
+    ("workbench/app/dialogs/hardcopy/render.rs", 3338),
     ("state/schematic/state/editor_ops/array_ops.rs", 3320),
-    ("simulation/controller.rs", 3214),
+    ("simulation/controller.rs", 3199),
     ("simulation/execution/snapshot.rs", 3068),
-    ("workbench/lifecycle/project_lifecycle/persistence.rs", 3004),
-    ("workbench/feature_availability.rs", 2988),
-    ("workbench/tools/project_launcher.rs", 2932),
-    ("workbench/docks/navigator.rs", 2877),
-    ("workbench/chrome/title_bar.rs", 2775),
-    ("state/project_sources.rs", 2709),
-    ("io/project_execution.rs", 2709),
+    ("workbench/lifecycle/project_lifecycle/persistence.rs", 3002),
+    ("workbench/feature_availability.rs", 2981),
+    ("workbench/tools/project_launcher.rs", 2925),
+    ("workbench/docks/navigator.rs", 2875),
+    ("workbench/chrome/title_bar.rs", 2773),
+    ("state/project_sources.rs", 2701),
+    ("io/project_execution.rs", 2702),
     ("simulation/controller/prepared_run.rs", 2679),
     ("state/schematic/state/editor_ops/movement_ops.rs", 2629),
     ("workbench/shortcuts/artifacts/merge.rs", 2597),
     ("state/netlist_document/document.rs", 2579),
-    ("workbench/app/dialogs/hardcopy/publish.rs", 2565),
+    ("workbench/app/dialogs/hardcopy/publish.rs", 2558),
     (
         "workbench/app/dialogs/preferences/shortcut_preferences.rs",
         2530,
@@ -1146,10 +1163,10 @@ fn source_files_stay_within_the_line_budget() {
             .display()
             .to_string()
             .replace('\\', "/");
-        let lines = fs::read_to_string(&file)
-            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()))
-            .lines()
-            .count();
+        let lines = budgeted_lines(
+            &fs::read_to_string(&file)
+                .unwrap_or_else(|error| panic!("read {}: {error}", file.display())),
+        );
         match allowed.get(relative.as_str()) {
             Some(ceiling) => {
                 seen.push(relative.clone());
