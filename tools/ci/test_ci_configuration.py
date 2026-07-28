@@ -422,10 +422,7 @@ class CiConfigurationTests(unittest.TestCase):
         # builders, the value types, the private helper impl, and the directive
         # runner all live in sibling modules.
         allowlist = {
-            "crates/rspice-python/src/config.rs": 1338,
             "crates/rspice-python/src/engine/mod.rs": 1940,
-            "crates/rspice-python/src/errors.rs": 1019,
-            "crates/rspice-python/src/netlist.rs": 1141,
         }
 
         source_root = ROOT / "crates" / "rspice-python" / "src"
