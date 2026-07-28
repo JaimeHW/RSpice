@@ -68,6 +68,8 @@ pub struct EmitBindings {
     pub time: String,
     pub ddt: String,
     pub ddt_scale: String,
+    pub idt: String,
+    pub idt_scale: String,
     /// Called as `analysis("dc")`.
     pub analysis: String,
     /// Called as `simparam("gmin", fallback)`.
@@ -94,6 +96,8 @@ impl Default for EmitBindings {
             time: "time".into(),
             ddt: "ddt".into(),
             ddt_scale: "ddt_scale".into(),
+            idt: "idt".into(),
+            idt_scale: "idt_scale".into(),
             analysis: "analysis".into(),
             simparam: "simparam".into(),
             limit: "limit".into(),
@@ -704,6 +708,14 @@ impl Emitter<'_> {
                 self.operand(*input)
             ),
             CfgValueKind::DdtScale => format!("{}()", bindings.ddt_scale),
+            CfgValueKind::Idt { operator, input, ic } => format!(
+                "{}({}, {}, {})",
+                bindings.idt,
+                usize::from(*operator),
+                self.operand(*input),
+                self.operand(*ic)
+            ),
+            CfgValueKind::IdtScale => format!("{}()", bindings.idt_scale),
             CfgValueKind::Limit {
                 operator,
                 proposed,

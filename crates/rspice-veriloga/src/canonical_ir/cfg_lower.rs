@@ -1380,6 +1380,25 @@ impl<'a> CfgLowerer<'a> {
                     },
                 )
             }
+            // Keyed by the call for the same reason. One argument means no
+            // initial condition, which the LRM says is zero; three or four add
+            // `assert` and `abstol`, which the operator path refuses too.
+            ("idt", 1 | 2) => {
+                let input = self.expr(args[0]);
+                let ic = match args.get(1) {
+                    Some(ic) => self.expr(*ic),
+                    None => self.real_constant(0.0),
+                };
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Idt {
+                        operator: expression,
+                        input,
+                        ic,
+                    },
+                )
+            }
             ("analysis", 1) => self.analysis_call(args[0], span),
             ("ddx", 2) => self.ddx(args[0], args[1], span),
             ("expm1", 1) => {
@@ -1515,6 +1534,37 @@ impl<'a> CfgLowerer<'a> {
                     CfgValueKind::Ddt {
                         operator: expression.id,
                         input,
+                    },
+                )
+            }
+            HirAnalogOperator::Idt {
+                expr,
+                ic,
+                assert,
+                abstol,
+            } => {
+                // `assert` restarts the integral on an event and `abstol` sets a
+                // per-operator tolerance; neither is expressible here yet, and
+                // an integral that silently ignored its reset would drift
+                // without ever failing.
+                if assert.is_some() || abstol.is_some() {
+                    self.unsupported(span, "idt with an assert or abstol argument".to_string());
+                    return self.real_constant(0.0);
+                }
+                let input = self.expr(*expr);
+                // Absent means zero, which is what the LRM says an unstated
+                // initial condition is.
+                let ic = match ic {
+                    Some(ic) => self.expr(*ic),
+                    None => self.real_constant(0.0),
+                };
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::Idt {
+                        operator: expression.id,
+                        input,
+                        ic,
                     },
                 )
             }

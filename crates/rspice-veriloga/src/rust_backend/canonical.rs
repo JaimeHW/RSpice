@@ -89,7 +89,7 @@ pub fn generate_device(
         options,
         &parameter_fields,
         plan.ddt_slots.len(),
-        0,
+        plan.idt_slots.len(),
         artifact.mir.branch_unknowns.len(),
         &plan.state_extensions(),
     )?;
@@ -199,6 +199,8 @@ struct ModelPlan {
     /// is what this backend emits, so it is also what decides how many slots
     /// there are and which is which.
     ddt_slots: HashMap<ExprId, usize>,
+    /// One history slot per `idt`, allocated from the CFG for the same reason.
+    idt_slots: HashMap<ExprId, usize>,
 }
 
 impl ModelPlan {
@@ -221,10 +223,18 @@ impl ModelPlan {
         // In value order, which is the lowering's order, so the numbering is a
         // property of the model rather than of a hash map's iteration.
         let mut ddt_slots: HashMap<ExprId, usize> = HashMap::new();
+        let mut idt_slots: HashMap<ExprId, usize> = HashMap::new();
         for value in &cfg.function.values {
-            if let CfgValueKind::Ddt { operator, .. } = &value.kind {
-                let next = ddt_slots.len();
-                ddt_slots.entry(*operator).or_insert(next);
+            match &value.kind {
+                CfgValueKind::Ddt { operator, .. } => {
+                    let next = ddt_slots.len();
+                    ddt_slots.entry(*operator).or_insert(next);
+                }
+                CfgValueKind::Idt { operator, .. } => {
+                    let next = idt_slots.len();
+                    idt_slots.entry(*operator).or_insert(next);
+                }
+                _ => {}
             }
         }
 
@@ -353,6 +363,7 @@ impl ModelPlan {
             branch_of_equation,
             noise,
             ddt_slots,
+            idt_slots,
         })
     }
 }
@@ -595,6 +606,9 @@ impl ModelPlan {
         );
         out.push_str(RUNTIME_PRELUDE);
         out.push_str(EVAL_DDT);
+        if !self.idt_slots.is_empty() {
+            out.push_str(EVAL_IDT);
+        }
         out.push_str("impl Instance {\n");
 
         for stage in &self.stages {
@@ -1234,6 +1248,65 @@ impl ModelPlan {
             );
             let _ = writeln!(out, "{pad}let ddt_scale = move || ddt_scale_value;");
         }
+        if wants.idt_scale {
+            // Zero where there is no step, which is what makes an integral
+            // contribute nothing to the Jacobian at an operating point rather
+            // than an arbitrary multiple of the last timestep.
+            let _ = writeln!(
+                out,
+                "{pad}let idt_scale_value = if self.ddt_coefficients.active {{ self.timestep }} else {{ 0.0 }};\n\
+                 {pad}let idt_scale = move || idt_scale_value;"
+            );
+        }
+        if wants.idt {
+            let mut arms: Vec<String> = Vec::new();
+            for value in &function.values {
+                if let CfgValueKind::Idt { operator, .. } = &value.kind {
+                    let slot = self.idt_slots.get(operator).copied().ok_or_else(|| {
+                        unsupported(
+                            artifact,
+                            format!("an idt at {operator} with no generated state slot"),
+                        )
+                    })?;
+                    let arm = format!("{} => {slot}usize, ", usize::from(*operator));
+                    if !arms.contains(&arm) {
+                        arms.push(arm);
+                    }
+                }
+            }
+            // The same out-of-range fallback `ddt` uses, and for the same
+            // reason: integrating into the wrong history looks like a converged
+            // answer.
+            let resolve = match arms.len() {
+                1 => arms[0]
+                    .split_once("=> ")
+                    .map(|(_, slot)| slot.trim_end_matches(", ").to_string())
+                    .unwrap_or_else(|| "usize::MAX".to_string()),
+                _ => format!("match operator {{ {}_ => usize::MAX }}", arms.concat()),
+            };
+            if !wants.ddt {
+                let _ = writeln!(out, "{pad}let ddt_state = self.stamp_state.as_mut();");
+            }
+            let _ = writeln!(
+                out,
+                "{pad}let idt_active = self.ddt_coefficients.active;\n\
+                 {pad}let idt_step = self.timestep;\n\
+                 {pad}let mut idt = |operator: usize, value: f64, ic: f64| -> f64 {{\n\
+                 {pad}    let _ = operator;\n\
+                 {pad}    let slot = {resolve};\n\
+                 {pad}    rspice_eval_idt(\n\
+                 {pad}        &mut ddt_state.idt_current,\n\
+                 {pad}        &mut ddt_state.idt_previous,\n\
+                 {pad}        &mut ddt_state.idt_initialized,\n\
+                 {pad}        idt_active,\n\
+                 {pad}        idt_step,\n\
+                 {pad}        slot,\n\
+                 {pad}        value,\n\
+                 {pad}        ic,\n\
+                 {pad}    )\n\
+                 {pad}}};"
+            );
+        }
         if wants.ddt {
             // `ddt` is the one binding that is a call rather than an expression,
             // because it reads and writes per-instance history. The operator id
@@ -1376,6 +1449,8 @@ struct Wants {
     time: bool,
     ddt: bool,
     ddt_scale: bool,
+    idt: bool,
+    idt_scale: bool,
     staged: bool,
 }
 
@@ -1392,6 +1467,8 @@ impl Wants {
             CfgValueKind::Time => self.time = true,
             CfgValueKind::Ddt { .. } => self.ddt = true,
             CfgValueKind::DdtScale => self.ddt_scale = true,
+            CfgValueKind::Idt { .. } => self.idt = true,
+            CfgValueKind::IdtScale => self.idt_scale = true,
             CfgValueKind::Staged { .. } => self.staged = true,
             _ => {}
         }
@@ -1525,6 +1602,36 @@ fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> Ru
 
 /// The one runtime helper an emitted body cannot express: `ddt` reads and writes
 /// per-instance history, so it is a call rather than an expression.
+/// `idt`'s counterpart, and a call for the same reason: it carries a running
+/// total across evaluations.
+///
+/// A step that is not integrating returns the initial condition and *records*
+/// it, so the next step that does integrate starts from there rather than from
+/// whatever the last operating-point solve happened to leave behind.
+const EVAL_IDT: &str = r#"
+#[inline]
+fn rspice_eval_idt<const STATE_COUNT: usize>(
+    current: &mut [f64; STATE_COUNT],
+    previous: &mut [f64; STATE_COUNT],
+    initialized: &mut [bool; STATE_COUNT],
+    active: bool,
+    step: f64,
+    slot: usize,
+    value: f64,
+    ic: f64,
+) -> f64 {
+    debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
+    let started_from = if initialized[slot] { previous[slot] } else { ic };
+    let total = if active { started_from + value * step } else { ic };
+    current[slot] = total;
+    if !active {
+        previous[slot] = total;
+        initialized[slot] = true;
+    }
+    total
+}
+"#;
+
 const EVAL_DDT: &str = r#"
 #[inline]
 fn rspice_eval_ddt<const STATE_COUNT: usize>(

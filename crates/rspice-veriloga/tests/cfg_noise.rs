@@ -67,6 +67,8 @@ fn evaluate(artifact: &CanonicalIrArtifact, model: &CfgModel) -> impl Fn(ValueId
         simparams: HashMap::new(),
         ddt: 0.0,
         ddt_scale: 0.0,
+        idt: 0.0,
+        idt_scale: 0.0,
         staged: Vec::new(),
     };
     let snapshot = evaluate_cfg(&model.function, &inputs)

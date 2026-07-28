@@ -151,6 +151,24 @@ pub enum CfgValueKind {
     /// than to another `ddt`: a second `ddt` would claim a second state slot for
     /// a quantity that has no history of its own.
     DdtScale,
+    /// `idt(x, ic)` — the time integral of `x`, in companion form.
+    ///
+    /// Carries its initial condition rather than defaulting it, because a step
+    /// with no history to integrate from returns `ic` and not zero, and the
+    /// operator id because the running total is a per-instance slot keyed by the
+    /// call — the same reason [`Self::Ddt`] carries one.
+    Idt {
+        operator: ExprId,
+        input: ValueId,
+        ic: ValueId,
+    },
+    /// The integration rule's `dt` for the current step, and zero where there is
+    /// no step to integrate over.
+    ///
+    /// `idt` differentiates to this times the derivative of its input, for the
+    /// reason [`Self::DdtScale`] exists: a second `idt` would claim a second
+    /// slot for a quantity with no history of its own.
+    IdtScale,
     /// Newton limiting; carries an affine correction lane in the derivative
     /// pass whether or not `proposed` depends on an unknown.
     ///
@@ -262,6 +280,7 @@ impl CfgValueKind {
                 vec![*left, *right]
             }
             Self::LaneScalar { input, scalar, .. } => vec![*input, *scalar],
+            Self::Idt { input, ic, .. } => vec![*input, *ic],
             Self::Limit {
                 proposed,
                 candidate,
@@ -289,6 +308,10 @@ impl CfgValueKind {
             Self::LaneScalar { input, scalar, .. } => {
                 *input = map(*input);
                 *scalar = map(*scalar);
+            }
+            Self::Idt { input, ic, .. } => {
+                *input = map(*input);
+                *ic = map(*ic);
             }
             Self::Limit {
                 proposed,
@@ -539,6 +562,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::Time
             | CfgValueKind::Analysis(_)
             | CfgValueKind::DdtScale
+            | CfgValueKind::IdtScale
             | CfgValueKind::NodePotential(_)
             | CfgValueKind::BranchFlow(_)
             | CfgValueKind::BranchUnknownFlow(_)

@@ -1490,6 +1490,10 @@ fn leaf_class(kind: &CfgValueKind) -> InvalidationClass {
         | CfgValueKind::BranchFlow(_)
         | CfgValueKind::BranchUnknownFlow(_)
         | CfgValueKind::Ddt { .. }
+        // `idt` accumulates into per-instance history on every evaluation, so
+        // caching it at a coarser class would integrate a step the solver did
+        // not take.
+        | CfgValueKind::Idt { .. }
         | CfgValueKind::Limit { .. }
         | CfgValueKind::LimitPrevious { .. }
         // Both of these are constant within an analysis, and both are put here
@@ -1501,7 +1505,9 @@ fn leaf_class(kind: &CfgValueKind) -> InvalidationClass {
         | CfgValueKind::Analysis(_)
         | CfgValueKind::SimParam { .. } => InvalidationClass::Newton,
 
-        CfgValueKind::Time | CfgValueKind::DdtScale => InvalidationClass::Timestep,
+        CfgValueKind::Time | CfgValueKind::DdtScale | CfgValueKind::IdtScale => {
+            InvalidationClass::Timestep
+        }
 
         CfgValueKind::Temperature | CfgValueKind::ThermalVoltage => InvalidationClass::Temperature,
 

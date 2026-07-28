@@ -436,6 +436,22 @@ module vsrc(p, n);
 endmodule
 "#,
         ),
+        // `idt`, which needs a history slot of its own and an initial condition
+        // that is returned rather than integrated when there is no step.
+        (
+            "integrator",
+            r#"
+module integrator(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 1.0e-6;
+    parameter real start = 0.25;
+    analog begin
+        I(p, n) <+ gain * idt(V(p, n), start);
+    end
+endmodule
+"#,
+        ),
         // Noise, in the three shapes the descriptors distinguish. The table one
         // is here because its operands are the only magnitudes that reach the
         // visitor as a slice, and the guarded flicker because an inactive source

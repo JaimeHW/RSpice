@@ -198,7 +198,7 @@ fn differentiable(kind: &CfgValueKind) -> bool {
                 | CfgUnaryOp::LimitedExpDerivative
         ),
         CfgValueKind::Binary { op, .. } => !is_predicate(*op),
-        CfgValueKind::Ddt { .. } | CfgValueKind::Limit { .. } => true,
+        CfgValueKind::Ddt { .. } | CfgValueKind::Idt { .. } | CfgValueKind::Limit { .. } => true,
         // The previous iterate is a constant as far as this iteration's Newton
         // step is concerned; that is what makes limiting a damping and not a
         // change of equations.
@@ -327,6 +327,7 @@ struct AdBuilder<'a> {
     /// The shared `d/dt` coefficient, created on first use so a purely
     /// resistive model carries no reference to it.
     ddt_scale: Option<ValueId>,
+    idt_scale: Option<ValueId>,
     /// Derivative parameters each block gained: the position of the primal
     /// parameter they follow, and the shape they merge into.
     added_params: HashMap<BlockId, Vec<(usize, ShapeId)>>,
@@ -357,6 +358,7 @@ impl<'a> AdBuilder<'a> {
             constants: HashMap::from([(1.0f64.to_bits(), one)]),
             one,
             ddt_scale: None,
+            idt_scale: None,
             added_params: HashMap::new(),
             emitted: Vec::new(),
         };
@@ -420,6 +422,17 @@ impl<'a> AdBuilder<'a> {
             None => {
                 let value = self.new_value(CfgValueType::Real, CfgValueKind::DdtScale);
                 self.ddt_scale = Some(value);
+                value
+            }
+        }
+    }
+
+    fn idt_scale(&mut self) -> ValueId {
+        match self.idt_scale {
+            Some(value) => value,
+            None => {
+                let value = self.new_value(CfgValueType::Real, CfgValueKind::IdtScale);
+                self.idt_scale = Some(value);
                 value
             }
         }
@@ -669,6 +682,16 @@ impl<'a> AdBuilder<'a> {
             CfgValueKind::Ddt { input, .. } => {
                 let derivative = self.derivatives[usize::from(*input)]?;
                 let scale = self.ddt_scale();
+                Some(self.scale(derivative, scale))
+            }
+            // The same companion-form argument, integrated rather than
+            // differentiated: the running total contributes `dt` times this
+            // step's input, so that is what the unknowns see. The initial
+            // condition is not differentiated — it is where the integral starts,
+            // not something the solve moves.
+            CfgValueKind::Idt { input, .. } => {
+                let derivative = self.derivatives[usize::from(*input)]?;
+                let scale = self.idt_scale();
                 Some(self.scale(derivative, scale))
             }
             // The limiter body is what actually computes the returned value, so

@@ -198,6 +198,12 @@ pub struct CfgEvalInputs<S> {
     /// for a static evaluation, so a reactive branch contributes nothing to
     /// either the residual or the Jacobian.
     pub ddt_scale: S,
+    /// What `idt` returns, and the `dt` it accumulates by. Zero alongside
+    /// [`Self::ddt`] for the same reason: a static evaluation has no step to
+    /// integrate over, and the running total is per-instance history the
+    /// interpreter does not keep.
+    pub idt: S,
+    pub idt_scale: S,
     /// What coarser invalidation stages cached, by slot. Empty for a whole
     /// unsplit function, which reads no slot.
     pub staged: Vec<S>,
@@ -514,6 +520,15 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.ddt
             }
             CfgValueKind::DdtScale => self.inputs.ddt_scale,
+            // Same static treatment: the running total is supplied, and both
+            // operands are still evaluated because either may carry a side
+            // condition the path depends on.
+            CfgValueKind::Idt { input, ic, .. } => {
+                self.read(input)?;
+                self.read(ic)?;
+                self.inputs.idt
+            }
+            CfgValueKind::IdtScale => self.inputs.idt_scale,
             CfgValueKind::Staged { slot } => *self
                 .inputs
                 .staged

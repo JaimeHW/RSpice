@@ -494,6 +494,8 @@ fn cfg_inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
         simparams: HashMap::new(),
         ddt: 0.0,
         ddt_scale: 0.0,
+        idt: 0.0,
+        idt_scale: 0.0,
         staged: Vec::new(),
     }
 }

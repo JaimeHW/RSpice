@@ -184,6 +184,8 @@ fn inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
         simparams: HashMap::new(),
         ddt: 0.0,
         ddt_scale: 0.0,
+        idt: 0.0,
+        idt_scale: 0.0,
         staged: Vec::new(),
     }
 }
@@ -413,6 +415,8 @@ fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
         simparams: HashMap::new(),
         ddt: ComplexStep::from_f64(0.0),
         ddt_scale: ComplexStep::from_f64(0.0),
+        idt: ComplexStep::from_f64(0.0),
+        idt_scale: ComplexStep::from_f64(0.0),
         staged: Vec::new(),
     }
 }

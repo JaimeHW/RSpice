@@ -297,6 +297,8 @@ fn inputs(staged: &[f64]) -> CfgEvalInputs<f64> {
         simparams: HashMap::new(),
         ddt: 0.0,
         ddt_scale: 0.0,
+        idt: 0.0,
+        idt_scale: 0.0,
         staged: staged.to_vec(),
     }
 }
