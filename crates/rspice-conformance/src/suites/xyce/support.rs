@@ -4946,7 +4946,7 @@ impl XyceTestRunner {
 
     pub(super) fn thermal_voltage_celsius(temp_c: Value) -> Value {
         rspice_core::constants::thermal_voltage(
-            rspice_core::analysis::temperature::celsius_to_kelvin(temp_c),
+            rspice_core::constants::celsius_to_kelvin(temp_c),
         )
     }
 
