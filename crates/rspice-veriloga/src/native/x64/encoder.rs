@@ -23,6 +23,7 @@ pub(crate) enum Gpr {
     R11,
     R12,
     R13,
+    R14,
 }
 
 #[allow(dead_code)]
@@ -41,6 +42,7 @@ impl Gpr {
             Self::R11 => 11,
             Self::R12 => 12,
             Self::R13 => 13,
+            Self::R14 => 14,
         }
     }
 }
@@ -784,6 +786,16 @@ mod tests {
             encoder.into_bytes(),
             [0xB8, 42, 0, 0, 0, 0x41, 0xBA, 1, 0, 0, 0]
         );
+    }
+
+    #[test]
+    fn encodes_extended_callee_saved_push_pop() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.push_r64(Gpr::R14);
+        encoder.pop_r64(Gpr::R14);
+
+        assert_eq!(encoder.into_bytes(), [0x41, 0x56, 0x41, 0x5E]);
     }
 
     #[test]

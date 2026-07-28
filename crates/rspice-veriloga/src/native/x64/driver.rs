@@ -16,13 +16,9 @@ const ACTIVE_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, program_act
 const JACOBIANS_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, jacobians) as i32;
 
 #[cfg(windows)]
-const DRIVER_FRAME_BYTES: i32 = 40;
-#[cfg(windows)]
-const IO_STACK_OFFSET: i32 = 32;
+const DRIVER_FRAME_BYTES: i32 = 32;
 #[cfg(not(windows))]
-const DRIVER_FRAME_BYTES: i32 = 8;
-#[cfg(not(windows))]
-const IO_STACK_OFFSET: i32 = 0;
+const DRIVER_FRAME_BYTES: i32 = 0;
 
 /// Compiles a driver whose address will be `driver_image_offset` in the final
 /// executable image.
@@ -43,10 +39,13 @@ pub(crate) fn compile_stamp_kernel(
     let mut encoder = X64Encoder::new();
     encoder.push_r64(Gpr::R12);
     encoder.push_r64(Gpr::R13);
+    encoder.push_r64(Gpr::R14);
     encoder.mov_r64_r64(Gpr::R12, host_ctx_arg_reg());
     encoder.mov_r64_r64(Gpr::R13, host_vars_arg_reg());
-    encoder.sub_rsp_imm32(DRIVER_FRAME_BYTES);
-    encoder.mov_m64_base_disp32_r64(Gpr::Rsp, IO_STACK_OFFSET, host_io_arg_reg());
+    encoder.mov_r64_r64(Gpr::R14, host_io_arg_reg());
+    if DRIVER_FRAME_BYTES > 0 {
+        encoder.sub_rsp_imm32(DRIVER_FRAME_BYTES);
+    }
 
     emit_entry_call(&mut encoder, driver_image_offset, assignment)?;
 
@@ -58,8 +57,7 @@ pub(crate) fn compile_stamp_kernel(
         .enumerate()
     {
         let active_disp = byte_offset(stamp_index, "stamp active-mask")?;
-        encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::Rsp, IO_STACK_OFFSET);
-        encoder.mov_r64_m64_base_disp32(Gpr::R10, Gpr::R11, ACTIVE_OFFSET);
+        encoder.mov_r64_m64_base_disp32(Gpr::R10, Gpr::R14, ACTIVE_OFFSET);
         encoder.movzx_r32_m8_base_disp32(Gpr::Rax, Gpr::R10, active_disp);
         encoder.test_r8_r8(Gpr::Rax, Gpr::Rax);
         let skip_stamp = encoder.jcc_rel32_placeholder(ConditionCode::Equal);
@@ -91,8 +89,7 @@ pub(crate) fn compile_stamp_kernel(
         for entry in stamp_jacobians {
             emit_entry_call(&mut encoder, driver_image_offset, *entry)?;
             let jacobian_disp = word_offset(jacobian_index, "Jacobian value")?;
-            encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::Rsp, IO_STACK_OFFSET);
-            encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::R11, JACOBIANS_OFFSET);
+            encoder.mov_r64_m64_base_disp32(Gpr::R11, Gpr::R14, JACOBIANS_OFFSET);
             encoder.movsd_m64_base_disp32_xmm(Gpr::R11, jacobian_disp, Xmm::Xmm0);
             jacobian_index += 1;
         }
@@ -100,7 +97,10 @@ pub(crate) fn compile_stamp_kernel(
         patch_local_branch(&mut encoder, skip_stamp)?;
     }
 
-    encoder.add_rsp_imm32(DRIVER_FRAME_BYTES);
+    if DRIVER_FRAME_BYTES > 0 {
+        encoder.add_rsp_imm32(DRIVER_FRAME_BYTES);
+    }
+    encoder.pop_r64(Gpr::R14);
     encoder.pop_r64(Gpr::R13);
     encoder.pop_r64(Gpr::R12);
     encoder.ret();
