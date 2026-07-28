@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::schema::DecodedShortcutArtifact;
 use super::{canonical_json_bytes, hex_digest, sha256};
-use crate::workbench::commands::{COMMAND_REGISTRY, Command, CommandPlatform, ShortcutContext};
+use crate::workbench::commands::{ShortcutContext, vocabulary::{Command, COMMAND_REGISTRY, CommandPlatform}};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutPreferences,
     ShortcutProfileAudit, ShortcutProfileIssueCode, ShortcutProfileIssueSeverity,

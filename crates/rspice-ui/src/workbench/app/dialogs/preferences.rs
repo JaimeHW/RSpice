@@ -138,7 +138,7 @@ impl RSpiceApp {
             }
         }
         if shell_response.account_organization_requested {
-            crate::workbench::commands::Command::AccountOrganization.execute(self);
+            crate::workbench::commands::vocabulary::Command::AccountOrganization.execute(self);
             self.state.dialogs.preferences_open =
                 self.state.workbench.current_route().surface_id() == SurfaceId::AccountOrganization;
         }
@@ -151,7 +151,7 @@ impl RSpiceApp {
 
     fn execute_preference_page_actions(&mut self, ctx: &Context, actions: PreferencePageActions) {
         if actions.open_capability_matrix {
-            crate::workbench::commands::Command::FeatureAvailability.execute(self);
+            crate::workbench::commands::vocabulary::Command::FeatureAvailability.execute(self);
             self.state.dialogs.preferences_open =
                 self.state.workbench.current_route().surface_id() == SurfaceId::FeatureAvailability;
         }
@@ -661,7 +661,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn menu_and_shortcut_entries_open_the_canonical_preferences_route() {
-        use crate::workbench::commands::Command;
+        use crate::workbench::commands::vocabulary::Command;
         let mut menu_app = test_app();
         Command::Preferences.execute(&mut menu_app);
         assert_eq!(

@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn legacy_export_strips_device_local_protected_acknowledgements() {
         let mut profile = ShortcutPreferences::default();
-        profile.acknowledge_protected_override(crate::workbench::commands::Command::Save);
+        profile.acknowledge_protected_override(crate::workbench::commands::vocabulary::Command::Save);
 
         let encoded = serialize_shortcut_profile(&profile).unwrap();
         let document: Value = serde_json::from_str(&encoded).unwrap();
@@ -620,7 +620,7 @@ mod tests {
         assert!(
             !staged
                 .candidate()
-                .protected_override_acknowledged(crate::workbench::commands::Command::Save)
+                .protected_override_acknowledged(crate::workbench::commands::vocabulary::Command::Save)
         );
         let reencoded = serialize_shortcut_profile(staged.candidate()).unwrap();
         assert!(!reencoded.contains("protected-override-acknowledgements"));

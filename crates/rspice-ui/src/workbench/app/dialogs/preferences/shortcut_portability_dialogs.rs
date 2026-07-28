@@ -11,7 +11,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::{Command, CommandPlatform, ShortcutContext};
+use crate::workbench::commands::ShortcutContext;
+use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
 use crate::workbench::shortcuts::artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,
     PreparedShortcutArtifact, ReadyShortcutArtifactSource, ShortcutArtifactExportOutcome,

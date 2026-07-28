@@ -11,9 +11,8 @@ use super::{
     ShortcutProfileError, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
 use crate::product::CommandId;
-use crate::workbench::commands::{
-    COMMAND_REGISTRY, Command, CommandPlatform, ShortcutContext, ShortcutKind,
-};
+use crate::workbench::commands::{ShortcutContext, ShortcutKind};
+use crate::workbench::commands::vocabulary::{Command, COMMAND_REGISTRY, CommandPlatform};
 
 /// Persisted user shortcut profile. Command entries remain raw until they are
 /// requested so a malformed or future command cannot invalidate the complete

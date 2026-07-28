@@ -7,7 +7,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
-use super::super::commands::Command;
+use super::super::commands::vocabulary::Command;
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::Workspace;

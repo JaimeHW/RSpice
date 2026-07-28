@@ -18,7 +18,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::projection::{ShortcutReferenceModel, ShortcutReferenceRow, ShortcutReferenceStatus};
 use super::schema::ShortcutArtifactScope;
 use super::{hex_digest, sha256};
-use crate::workbench::commands::CommandPlatform;
+use crate::workbench::commands::vocabulary::CommandPlatform;
 use crate::workbench::shortcuts::ShortcutBindingSlot;
 
 const PAGE_WIDTH: f32 = 595.28;
@@ -776,7 +776,7 @@ mod tests {
 
     use super::*;
     use crate::workbench::ShortcutPreferences;
-    use crate::workbench::commands::Command;
+    use crate::workbench::commands::vocabulary::Command;
     use crate::workbench::shortcuts::artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };

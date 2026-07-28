@@ -24,7 +24,7 @@ use crate::ui::{
 };
 use crate::workbench::{AppState, RSpiceApp};
 
-use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute, commands::Command};
+use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute, commands::vocabulary::Command};
 
 const DESCRIPTION: &str = "Review active execution, retained run history, immutable run authority, qualified targets, and exact run-manifest exports.";
 const TABLE_MIN_WIDTH: f32 = 800.0;

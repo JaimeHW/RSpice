@@ -24,11 +24,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::RSpiceApp;
 
-use super::super::commands::{
-    Command, CommandAvailability, ModelEditorWorkflow, active_model_editor_workflow,
-    close_model_editor_workflow, prepare_model_editor_workflow, request_model_editor_workflow,
-    set_model_editor_workflow_error,
-};
+use crate::workbench::commands::{CommandAvailability, ModelEditorWorkflow, active_model_editor_workflow, close_model_editor_workflow, prepare_model_editor_workflow, request_model_editor_workflow, set_model_editor_workflow_error};
+use crate::workbench::commands::vocabulary::Command;
 use super::super::design_system::{self, WorkbenchIcon};
 use crate::workbench::documents::model_editor::{
     ModelComparisonDisposition, ModelEditorSection, ModelParameterKind,

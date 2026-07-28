@@ -5,7 +5,7 @@ use egui::{Align2, Context, Id, Order, Rect, Sense, Stroke, Ui, Vec2};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::commands::Command;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 

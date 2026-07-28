@@ -12,7 +12,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 
-use super::super::commands::Command;
+use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
 };
@@ -819,7 +819,7 @@ fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     theme::paint_focus_ring(ui, &response, add_rect);
     if response.on_hover_text("Open calculator").clicked() {
-        super::super::commands::Command::WaveformCalculator.execute(app);
+        super::super::commands::vocabulary::Command::WaveformCalculator.execute(app);
     }
 }
 

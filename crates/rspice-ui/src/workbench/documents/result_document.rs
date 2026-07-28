@@ -1134,7 +1134,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 
     if !app.state.simulation.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
-            crate::workbench::commands::Command::RunSimulation,
+            crate::workbench::commands::vocabulary::Command::RunSimulation,
             crate::workbench::app_state::runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );
@@ -1299,7 +1299,7 @@ fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
     match state.ui.results.viewer {
         ResultViewer::Waves => {
             let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
-                crate::workbench::commands::Command::ToggleLinkedCursors,
+                crate::workbench::commands::vocabulary::Command::ToggleLinkedCursors,
                 crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );

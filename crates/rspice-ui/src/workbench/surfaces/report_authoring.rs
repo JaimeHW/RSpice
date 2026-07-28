@@ -17,7 +17,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, input_row, select};
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::super::commands::Command;
+use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     WorkbenchIcon, code_inspector_property_list, code_inspector_section, code_workspace_heading,
     icon_button, property_row, workspace_title_row,
@@ -2193,7 +2193,7 @@ mod tests {
             Command::AddReportPage,
             Command::ReportPageProperties,
         ] {
-            assert!(!crate::workbench::commands::COMMAND_REGISTRY.contains(&command));
+            assert!(!crate::workbench::commands::vocabulary::COMMAND_REGISTRY.contains(&command));
         }
     }
 

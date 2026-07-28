@@ -22,7 +22,7 @@ use crate::workbench::app::{
     open_symbol_parameter_form_dialog,
 };
 
-use super::super::commands::{Command, CommandAvailability};
+use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 use super::super::design_system::{
     property_card, property_row, property_row_toned, workspace_title_row,
 };

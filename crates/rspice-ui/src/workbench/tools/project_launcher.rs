@@ -20,7 +20,7 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, IconButton, s
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{RecentFile, RecentKind};
 
-use crate::workbench::commands::Command;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,

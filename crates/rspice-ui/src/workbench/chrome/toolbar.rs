@@ -10,7 +10,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
 use super::super::RouteTransitionSource;
-use super::super::commands::{Command, CommandAvailability};
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
 use crate::workbench::lifecycle::session::SymbolTool;

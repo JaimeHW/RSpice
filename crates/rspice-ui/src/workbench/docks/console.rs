@@ -11,7 +11,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::panels::ConsoleHistoryItem;
 
-use super::super::commands::{Command, CommandAvailability, command_catalog};
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::commands::vocabulary::{Command, command_catalog};
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::ConsolePage;

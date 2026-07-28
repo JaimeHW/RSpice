@@ -1,4 +1,4 @@
-use crate::workbench::commands::{COMMAND_REGISTRY, Command};
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShortcutCategory {
@@ -78,7 +78,7 @@ impl ShortcutCategory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::CommandPlatform;
+    use crate::workbench::commands::vocabulary::CommandPlatform;
 
     #[test]
     fn command_reference_is_a_lossless_projection_of_discoverable_commands() {

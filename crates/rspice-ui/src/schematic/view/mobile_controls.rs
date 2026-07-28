@@ -4,7 +4,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::commands::Command;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::{
     CapabilityWorkflowId, RouteTransitionSource, SurfaceRoute, route_availability,

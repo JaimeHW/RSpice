@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::projection::{ShortcutReferenceModel, ShortcutReferenceRow, ShortcutReferenceStatus};
 use super::schema::ShortcutArtifactScope;
-use crate::workbench::commands::CommandPlatform;
+use crate::workbench::commands::vocabulary::CommandPlatform;
 use crate::workbench::shortcuts::ShortcutBindingSlot;
 
 /// Deterministic UTF-8 Markdown generated from the same immutable reference

@@ -532,7 +532,8 @@ mod tests {
 
     use super::*;
     use crate::workbench::ShortcutPreferences;
-    use crate::workbench::commands::{CommandPlatform, ShortcutContext};
+    use crate::workbench::commands::ShortcutContext;
+use crate::workbench::commands::vocabulary::CommandPlatform;
     use crate::workbench::shortcuts::artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };

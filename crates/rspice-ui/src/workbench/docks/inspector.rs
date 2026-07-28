@@ -10,7 +10,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::super::commands::Command;
+use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row, property_row_status,
     schematic_section_header as design_schematic_section_header,

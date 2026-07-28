@@ -1,7 +1,7 @@
 use egui::{InputState, Key, Modifiers};
 
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::{Command, CommandPlatform};
+use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
 
 mod canvas_focus;
 mod category;

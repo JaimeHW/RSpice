@@ -557,11 +557,11 @@ fn schematic_accessibility_label() -> &'static str {
 
 fn schematic_accessibility_description(
     state: &AppState,
-    platform: crate::workbench::commands::CommandPlatform,
+    platform: crate::workbench::commands::vocabulary::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
     use crate::ui::accessibility::counted;
-    use crate::workbench::commands::Command;
+    use crate::workbench::commands::vocabulary::Command;
     let schematic = &state.schematic;
     let tool = if schematic.tool.is_place_tool() {
         format!("Place {}", schematic.tool.display_name())
@@ -1435,7 +1435,7 @@ mod tests {
 
         let description = schematic_accessibility_description(
             &state,
-            crate::workbench::commands::CommandPlatform::Desktop,
+            crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
         );
 
@@ -1459,7 +1459,7 @@ mod tests {
         assert_eq!(
             schematic_accessibility_description(
                 &state,
-                crate::workbench::commands::CommandPlatform::Desktop,
+                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
             ),
             description

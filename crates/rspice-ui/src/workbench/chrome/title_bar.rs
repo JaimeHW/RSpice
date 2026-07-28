@@ -9,7 +9,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
-use super::super::commands::{Command, CommandAvailability};
+use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{ModelsPage, VerificationPage, Workspace};
@@ -1319,7 +1319,7 @@ fn menu_separator(ui: &mut Ui) {
 
 fn shortcut_for_occurrence(
     shortcuts: &crate::workbench::ShortcutPreferences,
-    platform: crate::workbench::commands::CommandPlatform,
+    platform: crate::workbench::commands::vocabulary::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
     command: Command,
     shortcut_override: Option<&str>,
@@ -1380,10 +1380,10 @@ fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
     (viewport_height - 64.0).clamp(MENU_ROW_HEIGHT * 3.0, 560.0)
 }
 
-const fn file_menu_shows_exit(platform: crate::workbench::commands::CommandPlatform) -> bool {
+const fn file_menu_shows_exit(platform: crate::workbench::commands::vocabulary::CommandPlatform) -> bool {
     matches!(
         platform,
-        crate::workbench::commands::CommandPlatform::Desktop
+        crate::workbench::commands::vocabulary::CommandPlatform::Desktop
     )
 }
 
@@ -2487,7 +2487,7 @@ mod tests {
         assert_eq!(
             shortcut_for_occurrence(
                 &shortcuts,
-                crate::workbench::commands::CommandPlatform::Desktop,
+                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
                 Command::KeyboardShortcuts,
                 Some("")
@@ -2497,7 +2497,7 @@ mod tests {
         assert_eq!(
             shortcut_for_occurrence(
                 &shortcuts,
-                crate::workbench::commands::CommandPlatform::Desktop,
+                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
                 Command::KeyboardShortcuts,
                 Some("Ctrl+Alt+R")
@@ -2510,7 +2510,7 @@ mod tests {
 
     #[test]
     fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
-        use crate::workbench::commands::CommandPlatform;
+        use crate::workbench::commands::vocabulary::CommandPlatform;
 
         assert!(file_menu_shows_exit(CommandPlatform::Desktop));
         for platform in [
@@ -2531,7 +2531,7 @@ mod tests {
 
     #[test]
     fn menu_shortcuts_are_projected_from_the_typed_registry() {
-        let platform = crate::workbench::commands::CommandPlatform::Desktop;
+        let platform = crate::workbench::commands::vocabulary::CommandPlatform::Desktop;
         let shortcuts = crate::workbench::ShortcutPreferences::default();
         for command in [
             Command::OpenProject,

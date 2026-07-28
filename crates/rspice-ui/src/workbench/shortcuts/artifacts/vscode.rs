@@ -16,7 +16,7 @@ use super::schema::{
     ShortcutArtifactSchemaError, decode_shortcut_artifact_json_with_provenance,
 };
 use super::{canonical_json_bytes, sha256};
-use crate::workbench::commands::{Command, CommandPlatform};
+use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
 use crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding, ShortcutBindingSlot,
@@ -1232,7 +1232,7 @@ fn build_native_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::COMMAND_REGISTRY;
+    use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
 
     fn vscode(source: &str, platform: VscodeHostPlatform) -> VscodeShortcutAdaptation {
         adapt_vscode_keybindings(r"C:\private\keybindings.json", source.as_bytes(), platform)

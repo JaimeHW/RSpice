@@ -775,7 +775,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn typed_command_and_rendered_surface_disclose_the_same_offline_boundary() {
-        use crate::workbench::commands::{COMMAND_REGISTRY, Command};
+        use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 
         assert!(COMMAND_REGISTRY.contains(&Command::AccountOrganization));
         let ctx = egui::Context::default();

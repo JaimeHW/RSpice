@@ -12,7 +12,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::app::{
     NewWindowInitialContent, RSpiceApp, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
-use crate::workbench::commands::Command;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{ProjectPage, Workspace, WorkspaceDocumentId, WorkspaceLayoutState};
 use crate::workbench::{ApplicationWindowId, WorkspacePreset};
 

@@ -40,11 +40,11 @@ fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
     state: &AppState,
     read_only: bool,
-    platform: crate::workbench::commands::CommandPlatform,
+    platform: crate::workbench::commands::vocabulary::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
     use crate::ui::accessibility::counted;
-    use crate::workbench::commands::Command;
+    use crate::workbench::commands::vocabulary::Command;
     let placed_pins = document
         .pins
         .iter()
@@ -2080,7 +2080,7 @@ mod tests {
             &document,
             &state,
             false,
-            crate::workbench::commands::CommandPlatform::Desktop,
+            crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
         );
 

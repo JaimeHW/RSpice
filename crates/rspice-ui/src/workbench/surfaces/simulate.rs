@@ -24,7 +24,7 @@ use crate::workbench::state::{
     ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationWorkflowDialog,
 };
 
-use super::super::commands::Command;
+use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     StatusMark, WorkbenchIcon, heading, paint_status_mark, property_row, status_dot,
     workspace_title_row,

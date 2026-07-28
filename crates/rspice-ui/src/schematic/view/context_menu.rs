@@ -20,7 +20,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus};
 use crate::workbench::ResultViewer;
 use crate::workbench::app_state::{AppState, ContextTarget};
-use crate::workbench::commands::Command;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 

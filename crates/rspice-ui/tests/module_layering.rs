@@ -399,6 +399,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "workflows/capability_workflow",
     "logging",
     "layout",
+    // The command vocabulary: what commands exist, their portable identity,
+    // and the label a menu shows. Shortcut profiles, preferences, and the
+    // artifact writers name a command without reaching the dispatcher that
+    // runs it, which is up at `commands`.
+    "commands/vocabulary",
     "shortcuts",
     "preferences",
     "feature_availability",
@@ -533,14 +538,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("feature_availability", "app", 1),
     ("browser/file_import", "app", 1),
     ("lifecycle/recovery", "app", 1),
-    // `commands` is a dispatcher and a command vocabulary in one file.
-    // Retired by dropping the vocabulary to `commands::registry` at rank 0.
-    ("shortcuts/artifacts", "commands", 11),
-    ("documents/result_document", "commands", 3),
-    ("preferences", "commands", 3),
-    ("shortcuts", "commands", 2),
-    ("shortcuts/profile_workflow", "commands", 2),
-    ("shortcuts/library_persistence", "commands", 1),
+    // What still names the dispatcher rather than the vocabulary it routes.
+    // These are shortcut artifacts asking whether a command is *available*,
+    // which needs the running application, so they retire with the
+    // `&mut RSpiceApp` burndown rather than with another module move.
+    ("shortcuts/artifacts", "commands", 3),
+    ("shortcuts", "commands", 1),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),

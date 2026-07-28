@@ -1,8 +1,7 @@
 use super::*;
 use crate::analysis::eye_diagram::{EyeData, EyeDataBuilder};
 use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
-use crate::workbench::app_state::ActiveViewer;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{ActiveViewer, AppState};
 use crate::state::{AnalysisType, SharedWaveformValues};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};

@@ -1646,7 +1646,7 @@ mod tests {
             restored
                 .library()
                 .active()
-                .protected_override_acknowledged(crate::workbench::commands::Command::Save)
+                .protected_override_acknowledged(crate::workbench::commands::vocabulary::Command::Save)
         );
     }
 

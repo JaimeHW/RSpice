@@ -11,7 +11,8 @@ use super::schema::{
     ShortcutArtifactManifest, portable_profile_value, scrub_private_profile_state,
 };
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::{COMMAND_REGISTRY, Command, CommandPlatform, ShortcutContext};
+use crate::workbench::commands::ShortcutContext;
+use crate::workbench::commands::vocabulary::{Command, COMMAND_REGISTRY, CommandPlatform};
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutSequence,
@@ -404,7 +405,7 @@ fn sort_rows(rows: &mut [ShortcutReferenceRow]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::Command;
+    use crate::workbench::commands::vocabulary::Command;
     use crate::workbench::shortcuts::{ShortcutSequence, ShortcutStroke};
 
     #[test]

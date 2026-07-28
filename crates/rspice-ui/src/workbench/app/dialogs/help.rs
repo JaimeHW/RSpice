@@ -9,7 +9,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
-use crate::workbench::commands::{Command, CommandPlatform};
+use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
 const PRODUCT_LICENSE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));

@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use super::{canonical_json_bytes, canonicalize_value, sha256};
 use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::CommandPlatform;
+use crate::workbench::commands::vocabulary::CommandPlatform;
 use crate::workbench::shortcuts::profile_workflow::{
     MAX_SHORTCUT_PROFILE_BYTES, SHORTCUT_PROFILE_FORMAT, stage_shortcut_profile_json,
 };
@@ -352,7 +352,7 @@ fn normalized_source_name(source_name: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::Command;
+    use crate::workbench::commands::vocabulary::Command;
 
     #[test]
     fn legacy_artifact_migrates_to_explicit_full_coverage() {

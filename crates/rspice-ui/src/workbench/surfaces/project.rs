@@ -17,7 +17,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select};
 use crate::workbench::RSpiceApp;
 
-use super::super::commands::Command;
+use super::super::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, card, property_card, property_row, status_dot};
 use super::super::state::{ModelsPage, ProjectPage, Workspace};
 

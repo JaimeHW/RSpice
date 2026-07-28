@@ -8,7 +8,7 @@ use egui::{Context, Popup};
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
 use crate::state::{Point, SymbolDocument, SymbolShape};
-use crate::workbench::commands::Command as ShortcutCommand;
+use crate::workbench::commands::vocabulary::Command as ShortcutCommand;
 use crate::workbench::{
     SymbolClipboard, SymbolSelection, mirror_point_h_about, mirror_point_v_about,
     mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
@@ -1175,7 +1175,7 @@ mod shortcut_ownership_tests {
     #[test]
     fn next_marker_resolves_again_after_first_jump_activates_design() {
         use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
-        use crate::workbench::commands::CommandPlatform;
+        use crate::workbench::commands::vocabulary::CommandPlatform;
 
         let mut app = RSpiceApp::test_instance();
         let mut result = DrcResult::new();

@@ -15,7 +15,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
-use super::super::super::commands::Command;
+use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{
     PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, schematic_section_header as shelf_section_header,
 };
@@ -1259,7 +1259,7 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
         return None;
     }
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
-        crate::workbench::commands::Command::PlaceInstance,
+        crate::workbench::commands::vocabulary::Command::PlaceInstance,
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
@@ -1628,7 +1628,7 @@ fn cell_candidates(app: &RSpiceApp) -> Vec<CellCandidate> {
 
 fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
     if kind == ComponentType::Port {
-        crate::workbench::commands::Command::PlacePin.execute(app);
+        crate::workbench::commands::vocabulary::Command::PlacePin.execute(app);
         return;
     }
     app.state.schematic.pending_library_cell = None;

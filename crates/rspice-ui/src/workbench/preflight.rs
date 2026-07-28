@@ -13,7 +13,7 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
-use super::commands::Command;
+use super::commands::vocabulary::Command;
 use super::design_system::property_row;
 use super::state::{
     ConsolePage, PreflightIssue, PreflightRemediation, PreflightReport, PreflightToast,

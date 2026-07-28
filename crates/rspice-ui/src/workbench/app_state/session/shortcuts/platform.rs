@@ -1,4 +1,4 @@
-use crate::workbench::commands::CommandPlatform;
+use crate::workbench::commands::vocabulary::CommandPlatform;
 use crate::workbench::state::WidthClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

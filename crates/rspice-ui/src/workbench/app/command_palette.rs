@@ -20,7 +20,8 @@ use egui::{
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Mode, Tokens};
-use crate::workbench::commands::{Command, CommandAvailability, CommandPlatform, command_catalog};
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::commands::vocabulary::{Command, command_catalog, CommandPlatform};
 
 use crate::workbench::app::RSpiceApp;
 
@@ -1781,7 +1782,7 @@ mod tests {
         );
         assert_eq!(PaletteScope::from_label("unknown"), None);
     }
-    use crate::workbench::commands::COMMAND_REGISTRY;
+    use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
 
     #[test]
     fn desktop_and_phone_layouts_match_the_mockup_contract() {

@@ -138,7 +138,7 @@ impl ShortcutEditorContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ShortcutCaptureTarget {
-    pub(crate) command: crate::workbench::commands::Command,
+    pub(crate) command: crate::workbench::commands::vocabulary::Command,
     pub(crate) slot: crate::workbench::ShortcutBindingSlot,
 }
 
@@ -258,7 +258,7 @@ pub(crate) struct ShortcutEditorState {
     pub(crate) draft: Option<crate::workbench::ShortcutPreferences>,
     pub(crate) query: String,
     pub(crate) context: ShortcutEditorContext,
-    pub(crate) selected_command: Option<crate::workbench::commands::Command>,
+    pub(crate) selected_command: Option<crate::workbench::commands::vocabulary::Command>,
     pub(crate) recording: Option<ShortcutCaptureTarget>,
     pub(crate) capture_strokes: Vec<crate::workbench::ShortcutStroke>,
     pub(crate) capture_last_input_at: Option<f64>,
@@ -327,7 +327,7 @@ pub struct CommandPaletteState {
     pub(crate) initial_scope: Option<String>,
     /// Commands run from the palette, newest first — leads the empty-query
     /// list under a RECENT header. Survives close/reopen, capped at five.
-    pub(crate) recent: Vec<crate::workbench::commands::Command>,
+    pub(crate) recent: Vec<crate::workbench::commands::vocabulary::Command>,
 }
 
 /// Retained draft for the mockup-owned project technology transaction.

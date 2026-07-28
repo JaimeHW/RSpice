@@ -8,35 +8,9 @@
 use egui::Key;
 use serde::{Deserialize, Serialize};
 
-use super::Command;
+use super::vocabulary::{Command, CommandPlatform};
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::Workspace;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CommandPlatform {
-    Desktop,
-    Browser,
-    Tablet,
-    Phone,
-}
-
-impl CommandPlatform {
-    pub const ALL: [Self; 4] = [Self::Desktop, Self::Browser, Self::Tablet, Self::Phone];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Desktop => "Desktop",
-            Self::Browser => "Browser",
-            Self::Tablet => "Tablet",
-            Self::Phone => "Phone",
-        }
-    }
-
-    const fn has_browser_reserved_primary(self) -> bool {
-        matches!(self, Self::Browser)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutContext {
@@ -862,8 +836,10 @@ impl Command {
             }
             Self::ToggleResultsSplit => "no retained result dataset is available",
             Self::ResultViewer(viewer) => {
-                crate::workbench::documents::result_document::viewer_unavailability_reason(&app.state, viewer)
-                    .unwrap_or("the active dataset is incompatible with this viewer")
+                crate::workbench::documents::result_document::viewer_unavailability_reason(
+                    &app.state, viewer,
+                )
+                .unwrap_or("the active dataset is incompatible with this viewer")
             }
             Self::VerificationPage(crate::workbench::state::VerificationPage::Drc) => {
                 "no retained layout, qualified rule deck, or immutable marker database is available"
@@ -938,7 +914,7 @@ mod tests {
     use crate::workbench::state::VerificationPage;
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
-        super::super::COMMAND_REGISTRY
+        crate::workbench::commands::vocabulary::COMMAND_REGISTRY
             .iter()
             .copied()
             .filter(|command| {

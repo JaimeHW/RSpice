@@ -340,7 +340,7 @@ fn interface_section(
         )
         .clicked()
         {
-            crate::workbench::commands::Command::OpenWorkspace(
+            crate::workbench::commands::vocabulary::Command::OpenWorkspace(
                 crate::workbench::state::Workspace::Models,
             )
             .execute(app);

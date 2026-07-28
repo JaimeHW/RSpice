@@ -1870,9 +1870,9 @@ mod tests {
             .shortcuts_mut()
             .unwrap()
             .set_binding(
-                crate::workbench::commands::Command::Save,
+                crate::workbench::commands::vocabulary::Command::Save,
                 crate::workbench::shortcuts::ShortcutBindingSlot::Primary,
-                crate::workbench::commands::CommandPlatform::ALL.to_vec(),
+                crate::workbench::commands::vocabulary::CommandPlatform::ALL.to_vec(),
                 Some(crate::workbench::shortcuts::ShortcutSequence::single(
                     crate::workbench::shortcuts::ShortcutStroke::new(
                         egui::Key::F6,
@@ -1888,7 +1888,7 @@ mod tests {
         assert_eq!(
             restored
                 .shortcuts()
-                .resolved_bindings(crate::workbench::commands::Command::Save)
+                .resolved_bindings(crate::workbench::commands::vocabulary::Command::Save)
                 .into_iter()
                 .find(|binding| {
                     binding.slot() == crate::workbench::shortcuts::ShortcutBindingSlot::Primary
