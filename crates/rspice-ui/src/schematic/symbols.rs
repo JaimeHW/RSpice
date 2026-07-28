@@ -12,8 +12,6 @@ mod pins;
 mod render;
 mod types;
 
-pub use self::error::SymbolError;
 pub use self::library::SymbolLibrary;
-pub use self::parser::parse_svg;
-pub use self::render::{BakedSymbol, draw_baked, draw_symbol};
-pub use self::types::{PathCommand, PinDirection, Symbol, SymbolPath, SymbolPin};
+pub use self::render::{draw_baked, draw_symbol};
+pub use self::types::{PathCommand, Symbol};

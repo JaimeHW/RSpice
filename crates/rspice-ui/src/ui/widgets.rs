@@ -26,13 +26,12 @@ pub use dialog::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, dialog_tabs,
     dialog_tabs_in_width,
 };
-pub use docbar::{crumb_text, docbar, docbar_at_height};
-pub use form::{check_row, choice_row, input_row, input_row_readonly, kv_row, mono_input};
+pub use docbar::docbar_at_height;
+pub use form::{check_row, choice_row, input_row, kv_row, mono_input};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
     pane_section_label, two_pane,
 };
-pub use pill::{Pill, PillState};
 pub(crate) use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
 pub use section::section_header;
 pub use select::select;
@@ -42,5 +41,5 @@ pub(crate) use selection_command::{
     selection_command_options_paint_width, selection_command_workflow, workflow_preview_status,
 };
 pub use table::measurement_table;
-pub use toast::{NotificationCategory, NotificationRecord, Toast, ToastKind, Toasts};
+pub use toast::{NotificationCategory, NotificationRecord, ToastKind, Toasts};
 pub use tree::{TreeRow, TreeRowResult};

@@ -17,7 +17,7 @@
 pub(crate) mod bus_connectivity;
 pub(crate) mod bus_geometry;
 mod component_palette;
-pub use component_palette::{ComponentPaletteEntry, ComponentPaletteSection, component_palette};
+pub use component_palette::{ComponentPaletteEntry, component_palette};
 pub(crate) mod export;
 mod source_labels;
 pub(crate) mod symbol_editor;
@@ -25,6 +25,4 @@ pub(crate) mod symbols;
 pub(crate) mod view;
 
 // Re-export main types
-pub use export::SvgExportConfig;
-pub use symbols::{Symbol, SymbolLibrary, draw_symbol};
-pub use view::render_schematic_view;
+pub use symbols::{SymbolLibrary, draw_symbol};

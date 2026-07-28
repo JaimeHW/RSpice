@@ -9,16 +9,6 @@ mod input;
 mod net;
 mod types;
 
-pub use self::checker::{DrcChecker, DrcConfig};
-pub use self::extraction::{
-    extract_drc_data, extract_drc_data_with_hierarchy,
-    extract_drc_data_with_hierarchy_and_junctions, extract_drc_data_with_junctions, run_drc_check,
-    run_drc_check_with_config, run_drc_check_with_hierarchy,
-    run_drc_check_with_hierarchy_and_config,
-};
-pub use self::input::{
-    ComponentInfo, JunctionInfo, NetLabelInfo, ParameterRangeIssue, PinInfo, WireInfo,
-};
-pub use self::types::{
-    DrcLocation, DrcResult, DrcSeverity, DrcSummary, DrcViolation, DrcViolationType,
-};
+pub use self::checker::DrcConfig;
+pub use self::extraction::{run_drc_check, run_drc_check_with_hierarchy_and_config};
+pub use self::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};

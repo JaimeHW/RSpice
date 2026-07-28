@@ -33,6 +33,10 @@ pub(crate) mod smith_chart;
 // submodule)", and every caller took the submodule. Bode, Nyquist, Smith chart,
 // eye diagram, and pole-zero are all reached as `analysis::<module>::Type`, so
 // only the handful of names below were ever used flattened.
+// The `*Data` types below are reached through this flattened path only by
+// tests; the product code uses `analysis::<module>::Type`. The lib build
+// therefore reports them unused and will keep doing so until the tests are
+// moved onto the module path -- removing them here breaks the test build.
 pub use bode::{BodeData, FrequencyResponse};
 pub use eye_diagram::{EyeData, EyeTrace};
 pub use fft::{FftData, FftState, InputFidelity, WindowFunction};
