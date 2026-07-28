@@ -1484,11 +1484,13 @@ pub(crate) fn canonical_state_slots_for_expression(
         return Err(JitError::InvalidCanonicalIr {
             model,
             detail: format!(
-                "canonical expression {expr_id} has {} {} operators but bytecode program has {} {}State slots",
+                "canonical expression {expr_id} has {} {} operators {:?} but bytecode program has {} {}State slots {:?}",
                 canonical_exprs.len(),
                 operator.name(),
+                canonical_exprs,
                 bytecode_slots.len(),
-                operator.name()
+                operator.name(),
+                bytecode_slots,
             )
             .into(),
         });
@@ -6323,7 +6325,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
         let Some(slot) = self.limits.canonical_ddt_slot(expr_id) else {
             return Err(self.unsupported(format!(
-                "analog operator ddt expression {expr_id} state slot"
+                "analog operator ddt expression {expr_id} state slot (available canonical ddt slots: {:?})",
+                self.limits.canonical_ddt_slots
             )));
         };
         self.lower(args[0])?;

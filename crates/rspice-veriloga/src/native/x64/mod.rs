@@ -3078,6 +3078,76 @@ struct AssignmentShadowIndex {
     malformed_arrays: HashMap<String, Vec<MalformedArrayDerivativeShadow>>,
 }
 
+#[derive(Default)]
+struct AssignmentProgramCursor<'a> {
+    scalar: HashMap<usize, Vec<&'a BytecodeProgram>>,
+    scalar_next: HashMap<usize, usize>,
+    indexed: HashMap<(usize, usize, i64), Vec<(&'a BytecodeProgram, &'a BytecodeProgram)>>,
+    indexed_next: HashMap<(usize, usize, i64), usize>,
+}
+
+impl<'a> AssignmentProgramCursor<'a> {
+    fn for_steps(steps: &'a [AssignmentStep]) -> Self {
+        let mut cursor = Self::default();
+        cursor.collect_steps(steps);
+        cursor
+    }
+
+    fn collect_steps(&mut self, steps: &'a [AssignmentStep]) {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    self.scalar
+                        .entry(assignment.var_index)
+                        .or_default()
+                        .push(&assignment.program);
+                }
+                AssignmentStep::AssignIndexed {
+                    base,
+                    len,
+                    lower,
+                    index,
+                    value,
+                } => {
+                    self.indexed
+                        .entry((*base, *len, *lower))
+                        .or_default()
+                        .push((index, value));
+                }
+                AssignmentStep::Loop { body, .. } => self.collect_steps(body),
+            }
+        }
+    }
+
+    fn next_scalar(&mut self, var_index: usize) -> Option<&'a BytecodeProgram> {
+        let next = self.scalar_next.entry(var_index).or_default();
+        let program = self
+            .scalar
+            .get(&var_index)
+            .and_then(|programs| programs.get(*next))
+            .copied();
+        *next += usize::from(program.is_some());
+        program
+    }
+
+    fn next_indexed(
+        &mut self,
+        base: usize,
+        len: usize,
+        lower: i64,
+    ) -> Option<(&'a BytecodeProgram, &'a BytecodeProgram)> {
+        let key = (base, len, lower);
+        let next = self.indexed_next.entry(key).or_default();
+        let programs = self
+            .indexed
+            .get(&key)
+            .and_then(|programs| programs.get(*next))
+            .copied();
+        *next += usize::from(programs.is_some());
+        programs
+    }
+}
+
 struct ScalarDerivativeShadow {
     var_index: usize,
     name: SmolStr,
@@ -3286,6 +3356,7 @@ fn lower_live_canonical_assignment_statements(
 ) -> JitResult<Vec<NativeAssignment>> {
     let live = live_canonical_assignment_slots(model, mir, limits)?;
     let shadow_index = AssignmentShadowIndex::for_model(model)?;
+    let mut program_cursor = AssignmentProgramCursor::for_steps(&model.assignment_steps);
     lower_canonical_assignment_statements(
         model,
         hir,
@@ -3293,6 +3364,7 @@ fn lower_live_canonical_assignment_statements(
         &hir.statements,
         &live,
         &shadow_index,
+        &mut program_cursor,
         limits,
     )
 }
@@ -3304,6 +3376,7 @@ fn lower_canonical_assignment_statements(
     statements: &[HirStatement],
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let mut assignments = Vec::new();
@@ -3315,6 +3388,7 @@ fn lower_canonical_assignment_statements(
             statement,
             live,
             shadow_index,
+            program_cursor,
             limits,
         )?);
     }
@@ -3328,12 +3402,20 @@ fn lower_canonical_assignment_statement(
     statement: &HirStatement,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     match statement {
-        HirStatement::Assignment(assignment) => {
-            lower_canonical_assignment(model, hir, mir, assignment, live, shadow_index, limits)
-        }
+        HirStatement::Assignment(assignment) => lower_canonical_assignment(
+            model,
+            hir,
+            mir,
+            assignment,
+            live,
+            shadow_index,
+            program_cursor,
+            limits,
+        ),
         HirStatement::Loop(loop_statement) => lower_canonical_assignment_loop(
             model,
             hir,
@@ -3341,6 +3423,7 @@ fn lower_canonical_assignment_statement(
             loop_statement,
             live,
             shadow_index,
+            program_cursor,
             limits,
         ),
     }
@@ -3353,6 +3436,7 @@ fn lower_canonical_assignment(
     assignment: &HirAssignment,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     if let Some(index) = &assignment.index {
@@ -3364,12 +3448,13 @@ fn lower_canonical_assignment(
             index.id,
             live,
             shadow_index,
+            program_cursor,
             limits,
         );
     }
 
     let var_index = validate_canonical_scalar_assignment_target(model, assignment)?;
-    let bytecode_program = find_scalar_assignment_program(&model.assignment_steps, var_index);
+    let bytecode_program = program_cursor.next_scalar(var_index);
     let mut assignments = canonical_scalar_shadow_assignments(
         model,
         mir,
@@ -3410,9 +3495,11 @@ fn lower_canonical_indexed_assignment(
     index_expr: ExprId,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let (base, len, lower) = canonical_assignment_array_range(model, hir, assignment)?;
+    let bytecode_programs = program_cursor.next_indexed(base, len, lower);
     let mut assignments = canonical_array_shadow_assignments(
         model,
         mir,
@@ -3422,6 +3509,7 @@ fn lower_canonical_indexed_assignment(
         lower,
         index_expr,
         assignment.expr.id,
+        bytecode_programs,
         live,
         shadow_index,
         limits,
@@ -3430,16 +3518,14 @@ fn lower_canonical_indexed_assignment(
         return Ok(assignments);
     }
     let (index_program, value_program) =
-        find_indexed_assignment_programs(&model.assignment_steps, base, len, lower).ok_or_else(
-            || JitError::InvalidCanonicalIr {
-                model: model.name.clone(),
-                detail: format!(
-                    "canonical indexed assignment '{}' has no matching compiled assignment program",
-                    assignment.target_name
-                )
-                .into(),
-            },
-        )?;
+        bytecode_programs.ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical indexed assignment '{}' has no matching compiled assignment program",
+                assignment.target_name
+            )
+            .into(),
+        })?;
     let index = lower_canonical_assignment_expression_program(
         model,
         mir,
@@ -3480,6 +3566,7 @@ fn lower_canonical_assignment_loop(
     loop_statement: &HirLoop,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let body = lower_canonical_assignment_statements(
@@ -3489,6 +3576,7 @@ fn lower_canonical_assignment_loop(
         &loop_statement.body,
         live,
         shadow_index,
+        program_cursor,
         limits,
     )?;
     if body.is_empty() {
@@ -3554,6 +3642,7 @@ fn canonical_array_shadow_assignments(
     source_lower: i64,
     index_expr: ExprId,
     value_expr: ExprId,
+    bytecode_programs: Option<(&BytecodeProgram, &BytecodeProgram)>,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
     limits: NativeLoweringLimits<'_>,
@@ -3612,15 +3701,14 @@ fn canonical_array_shadow_assignments(
             continue;
         }
         let (index_program, value_program) =
-            find_indexed_assignment_programs(&model.assignment_steps, source_base, source_len, source_lower)
-                .ok_or_else(|| JitError::InvalidCanonicalIr {
-                    model: model.name.clone(),
-                    detail: format!(
-                        "canonical indexed assignment '{array_name}' derivative shadow '{}' has no matching compiled assignment program",
-                        shadow.suffix
-                    )
-                    .into(),
-                })?;
+            bytecode_programs.ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{array_name}' derivative shadow '{}' has no matching compiled assignment program",
+                    shadow.suffix
+                )
+                .into(),
+            })?;
         let index = lower_canonical_assignment_expression_program(
             model,
             mir,
@@ -3781,54 +3869,6 @@ impl CanonicalExpressionStateSlots {
             .with_canonical_limit_slots(&self.limit)
             .with_canonical_table_lookup_slots(&self.table_lookup)
     }
-}
-
-fn find_scalar_assignment_program(
-    steps: &[AssignmentStep],
-    var_index: usize,
-) -> Option<&BytecodeProgram> {
-    for step in steps {
-        match step {
-            AssignmentStep::Assign(assignment) if assignment.var_index == var_index => {
-                return Some(&assignment.program);
-            }
-            AssignmentStep::Loop { body, .. } => {
-                if let Some(program) = find_scalar_assignment_program(body, var_index) {
-                    return Some(program);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn find_indexed_assignment_programs(
-    steps: &[AssignmentStep],
-    base: usize,
-    len: usize,
-    lower: i64,
-) -> Option<(&BytecodeProgram, &BytecodeProgram)> {
-    for step in steps {
-        match step {
-            AssignmentStep::AssignIndexed {
-                base: step_base,
-                len: step_len,
-                lower: step_lower,
-                index,
-                value,
-            } if *step_base == base && *step_len == len && *step_lower == lower => {
-                return Some((index, value));
-            }
-            AssignmentStep::Loop { body, .. } => {
-                if let Some(programs) = find_indexed_assignment_programs(body, base, len, lower) {
-                    return Some(programs);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 fn trace_assignment_program_stack(model: &CompiledModel, label: &str, program: &NativeProgram) {
@@ -5402,6 +5442,60 @@ endmodule
             -2.0,
             "canonical_ddx_jacobian d/dn",
         );
+    }
+
+    #[test]
+    fn canonical_repeated_assignment_uses_matching_state_program_occurrence() {
+        let source = r#"
+module native_canonical_repeated_assignment_state(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = V(p, n);
+    x = ddt(V(p, n));
+    I(p, n) <+ x;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let x_index = model
+            .variable_names
+            .iter()
+            .position(|name| name == "x")
+            .expect("fixture has x variable");
+        let x_programs = model
+            .assignment_steps
+            .iter()
+            .filter_map(|step| match step {
+                AssignmentStep::Assign(assignment) if assignment.var_index == x_index => {
+                    Some(&assignment.program)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(x_programs.len(), 2, "fixture repeats the x assignment");
+        assert!(
+            !x_programs[0]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::DdtState(_))),
+            "first x assignment must not own a ddt slot"
+        );
+        assert!(
+            x_programs[1]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::DdtState(_))),
+            "second x assignment must own the ddt slot"
+        );
+
+        compile_model_with_canonical_ir(&model, &artifact)
+            .expect("repeated canonical assignments pair state slots by occurrence");
     }
 
     #[test]
