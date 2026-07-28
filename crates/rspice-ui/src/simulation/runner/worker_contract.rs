@@ -351,7 +351,7 @@ mod tests {
             Some("worker_owned"),
         )
         .unwrap();
-        let runtime = crate::workbench::code_workspace::PreparedVerilogARuntime::try_from_current_bundle_receipt(
+        let runtime = crate::simulation::veriloga::PreparedVerilogARuntime::try_from_current_bundle_receipt(
             project_id, &bundle, &receipt,
         )
         .unwrap();
@@ -366,14 +366,14 @@ mod tests {
             }),
             netlist: format!(
                 "{}\n.end\n",
-                crate::workbench::code_workspace::project_veriloga_directive(
+                crate::simulation::veriloga::project_veriloga_directive(
                     runtime.source_key(),
                     runtime.module_name()
                 )
             ),
             source_path: None,
             project_veriloga_runtimes:
-                crate::workbench::code_workspace::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+                crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
                     .unwrap(),
             dependencies: Default::default(),
         };
@@ -2524,7 +2524,7 @@ pub(crate) struct WorkerRequest {
     pub netlist: String,
     pub source_path: Option<String>,
     #[serde(default)]
-    pub project_veriloga_runtimes: crate::workbench::code_workspace::PreparedVerilogARuntimeSet,
+    pub project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     #[serde(default)]
     pub(in crate::simulation) dependencies:
         crate::simulation::execution::ResolvedExecutionDependencies,

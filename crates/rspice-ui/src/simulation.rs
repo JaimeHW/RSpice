@@ -27,6 +27,7 @@ pub mod results;
 pub mod runner;
 pub(crate) mod spice_value;
 pub mod status;
+pub mod veriloga;
 
 pub use automation::{CommandOutput, ScriptExecutor};
 pub use optimizer::{

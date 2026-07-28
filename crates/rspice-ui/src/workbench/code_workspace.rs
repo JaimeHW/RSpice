@@ -19,18 +19,15 @@ pub use automation::{
     export_automation_artifact, poll_automation_workflow, start_automation_workflow,
 };
 pub use editor::{CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity, show_code_editor};
-pub(crate) use page::compile_project_source_bundle_runtime;
 pub use page::{
     AutomationDispatchSnapshot, AutomationExecutionState, AutomationValidationReceipt,
-    CodeWorkspacePage, CodeWorkspaceRuntimeState, PendingVerilogACompile, PreparedVerilogARuntime,
-    PreparedVerilogARuntimeSet, SourceOperationToken, TargetQualification, VerilogACompileOutcome,
-    VerilogACompileReceipt, VerilogAFileEditorKind, VerilogAFileEditorState, VerilogAFileSelection,
-    VerilogAImportTarget, VerilogASourceOperationToken, append_project_veriloga_directive,
-    project_veriloga_directive,
+    CodeWorkspacePage, CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
+    TargetQualification, VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileEditorKind,
+    VerilogAFileEditorState, VerilogAFileSelection, VerilogAImportTarget,
 };
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, compile_project_bundle_receipt,
-    project_bundle_as_virtual, project_virtual_compile_limits, replace_selected_veriloga_file,
+    project_bundle_as_virtual, replace_selected_veriloga_file,
     selected_veriloga_source,
 };
 pub use veriloga::{poll_veriloga_compile, poll_veriloga_import, start_veriloga_compile};

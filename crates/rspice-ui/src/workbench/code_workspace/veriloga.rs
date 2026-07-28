@@ -4,8 +4,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{
     CompileDiagnosticPhase, CompilerOptions, RuntimeCompileReport, RuntimeTarget,
-    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler,
-    VirtualCompileLimits, VirtualSourceBundle, VirtualSourceFile,
+    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler, VirtualSourceBundle, VirtualSourceFile,
 };
 
 use crate::diagnostics::ConsoleMessage;
@@ -15,10 +14,11 @@ use crate::state::{
     ProjectSourceOwner, ViewType,
 };
 
+use crate::simulation::veriloga::VerilogASourceOperationToken;
+
 use super::{
     CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile, TargetQualification,
     VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection,
-    VerilogASourceOperationToken,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -69,7 +69,7 @@ impl SelectedVerilogASource {
             requested_module_digest: self
                 .selected_module
                 .as_deref()
-                .map(super::page::veriloga_selected_module_digest),
+                .map(crate::simulation::veriloga::veriloga_selected_module_digest),
         }
     }
 
@@ -595,7 +595,7 @@ pub(super) fn compile_project_bundle_source(
         return match compiler.compile_virtual_runtime_diagnosed(
             &bundle,
             module_name,
-            project_virtual_compile_limits(),
+            crate::simulation::veriloga::project_virtual_compile_limits(),
         ) {
             Ok(compilation) => VerilogACompileOutcome::Success(Box::new(compilation.runtime)),
             Err(failure) => virtual_compile_error_outcome(failure),
@@ -700,21 +700,6 @@ pub(crate) fn project_bundle_as_virtual(
     VirtualSourceBundle::new(bundle.root().logical_path(), files).map_err(|error| error.to_string())
 }
 
-pub(crate) fn project_virtual_compile_limits() -> VirtualCompileLimits {
-    VirtualCompileLimits {
-        max_files: crate::state::MAX_PROJECT_SOURCE_FILES,
-        max_path_bytes: crate::state::MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES,
-        max_file_bytes: crate::state::MAX_PROJECT_CODE_SOURCE_BYTES,
-        max_total_source_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES,
-        max_include_depth: crate::state::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
-        // Macro expansion is intentionally bounded separately from retained
-        // source bytes. Keep this identical to the prepared-runtime path so a
-        // bundle accepted by the editor cannot be rejected only at execution.
-        max_expanded_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
-        ..VirtualCompileLimits::default()
-    }
-}
-
 pub(crate) fn compile_project_bundle_receipt(
     project_id: crate::product::ProjectId,
     bundle: &ProjectSourceBundle,
@@ -787,7 +772,7 @@ mod tests {
 
     #[test]
     fn editor_and_execution_share_the_project_macro_expansion_contract() {
-        let limits = project_virtual_compile_limits();
+        let limits = crate::simulation::veriloga::project_virtual_compile_limits();
         assert_eq!(
             limits.max_expanded_bytes,
             crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2)
@@ -803,7 +788,7 @@ mod tests {
         )
         .expect("valid virtual diagnostic fixture");
         let failure = VerilogACompiler::default()
-            .compile_virtual_runtime_diagnosed(&bundle, "selected", VirtualCompileLimits::default())
+            .compile_virtual_runtime_diagnosed(&bundle, "selected", rspice_veriloga::VirtualCompileLimits::default())
             .expect_err("included syntax error must fail");
 
         let VerilogACompileOutcome::Failure(diagnostics) = virtual_compile_error_outcome(failure)
