@@ -32,8 +32,8 @@ pub use decimate::{
 };
 pub use format::{fmt_si, fmt_si_significant, fmt_significant};
 pub use render::{
-    InteractionMode, PlotResponse, ViewChange, plot_rect, set_interaction_mode, show,
+    InteractionMode, ViewChange, plot_rect, set_interaction_mode, show,
     square_outer_rect,
 };
 pub use scale::XScale;
-pub use spec::{Axis, Band, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine, Trace, YSide};
+pub use spec::{Axis, Band, Marker, MarkerShape, PlotSpec, RefLine, Trace, YSide};

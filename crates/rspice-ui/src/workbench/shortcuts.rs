@@ -13,7 +13,7 @@ mod profile;
 mod types;
 
 pub use library::{
-    NamedShortcutPreset, ShortcutPresetName, ShortcutProfileLibrary, ShortcutProfileLibraryError,
+    ShortcutProfileLibrary, ShortcutProfileLibraryError,
 };
 pub(crate) use profile::shortcut_contexts_overlap;
 pub use profile::{
@@ -23,7 +23,7 @@ pub use profile::{
 pub use types::{
     ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy,
     MAX_SHORTCUT_SEQUENCE_STROKES, ProfileShortcutBinding, ProtectedShortcutPolicy,
-    ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource, ShortcutKey,
+    ResolvedShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutPolicies, ShortcutProfileError, ShortcutSequence, ShortcutStroke,
     SingleKeyCanvasPolicy,
 };

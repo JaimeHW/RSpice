@@ -32,15 +32,11 @@ mod types;
 mod wire;
 
 // Re-export all public types for backwards compatibility
-pub use connection::{ConnectionSet, WireConnection};
-pub use drag::WireDragContext;
+pub use connection::WireConnection;
 pub use drawing::WireDrawing;
-pub use routing::{
-    WireRoutingMode, convert_to_orthogonal, count_bends, is_valid_route, optimize_route,
-    route_length,
-};
-pub use segment::{WireHitResult, WireSegment};
-pub use types::{DragConstraint, JunctionType, WireDragMode};
+pub use routing::WireRoutingMode;
+pub use segment::WireSegment;
+pub use types::JunctionType;
 // Note: SnapTarget is intentionally not re-exported here to avoid conflict with snap::SnapTarget
 // Use wire::types::SnapTarget internally if needed, or snap::SnapTarget for public use
 pub use wire::Wire;

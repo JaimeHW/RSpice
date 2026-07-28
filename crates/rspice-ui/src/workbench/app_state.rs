@@ -37,11 +37,10 @@ pub(crate) use session::shortcuts::{
 };
 pub(crate) use session::state_init::default_model_library_manager;
 pub use sim_setup::plan_catalog::{
-    SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
+    SimulationPlanCloneOptions,
     SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
 };
 pub use sim_setup::{AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, TranSetup};
-pub use viewer_capabilities::ViewerCapability;
 
 /// Analysis viewer state grouped behind a dedicated workspace surface.
 #[derive(Clone, Default)]
