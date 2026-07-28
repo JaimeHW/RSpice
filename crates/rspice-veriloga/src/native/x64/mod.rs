@@ -7196,6 +7196,7 @@ endmodule
 
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
         shipped_probe_trace(name, "compile-runtime:start");
+        let frontend_start = web_time::Instant::now();
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let runtime = compiler
             .compile_file_runtime_with_metadata(path, module)
@@ -7205,7 +7206,9 @@ endmodule
                     path.display()
                 )
             });
+        let frontend_elapsed = frontend_start.elapsed();
         shipped_probe_trace(name, "native-device:start");
+        let native_start = web_time::Instant::now();
         let model = std::sync::Arc::new(runtime.model.clone());
         let nodes = (1..=model.num_terminals).collect::<Vec<_>>();
         let mut device = VerilogADevice::try_new_with_canonical_ir(
@@ -7217,6 +7220,7 @@ endmodule
         .unwrap_or_else(|error| {
             panic!("{name}: shipped device native construction failed: {error}")
         });
+        let native_elapsed = native_start.elapsed();
         assert!(
             device.is_using_native(),
             "{name}: shipped device must use native code"
@@ -7320,7 +7324,9 @@ endmodule
         );
 
         eprintln!(
-            "native-x64-shipped-device model={name} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
+            "native-x64-shipped-device model={name} frontend_ms={:.3} native_ms={:.3} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
+            frontend_elapsed.as_secs_f64() * 1000.0,
+            native_elapsed.as_secs_f64() * 1000.0,
             device.native_chunk_count(),
             finite_currents,
             matrix_entries,
