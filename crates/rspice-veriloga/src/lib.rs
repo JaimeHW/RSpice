@@ -89,6 +89,8 @@ pub mod lexer;
 pub mod parser;
 pub mod preprocessor;
 pub mod runtime_report;
+#[cfg(feature = "cranelift")]
+pub mod cranelift_backend;
 pub mod rust_backend;
 pub mod semantic;
 pub mod source;
