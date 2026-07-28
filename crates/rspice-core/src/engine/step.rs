@@ -1,4 +1,9 @@
-use super::*;
+use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::netlist::{ElementKind, SourceSpec, StepCommand, StepTarget};
+use crate::solver::SimulationResult;
+use crate::{Netlist, Value};
+use std::collections::HashSet;
 use crate::netlist::{ModelDef, StepSweep};
 
 #[derive(Clone, Copy)]
@@ -1150,7 +1155,7 @@ impl Engine {
         Ok((stepped, bindings.max(1)))
     }
 
-    pub(in crate::engine::advanced) fn run_step_temp(
+    pub(in crate::engine) fn run_step_temp(
         &self,
         netlist: &Netlist,
         values: &[Value],
@@ -1185,7 +1190,7 @@ impl Engine {
         Ok(results)
     }
 
-    pub(in crate::engine::advanced) fn run_step_device(
+    pub(in crate::engine) fn run_step_device(
         &self,
         netlist: &Netlist,
         device_name: &str,
@@ -1277,7 +1282,7 @@ impl Engine {
         Ok(results)
     }
 
-    pub(in crate::engine::advanced) fn run_step_model(
+    pub(in crate::engine) fn run_step_model(
         &self,
         netlist: &Netlist,
         model_name: &str,
@@ -1553,7 +1558,7 @@ impl Engine {
         netlist.source_path = None;
     }
 
-    pub(in crate::engine::advanced) fn apply_device_step_value(
+    pub(in crate::engine) fn apply_device_step_value(
         kind: &mut ElementKind,
         param_name: Option<&str>,
         value: Value,
@@ -1918,7 +1923,7 @@ impl Engine {
         }
     }
 
-    pub(in crate::engine::advanced) fn set_source_dc_value(
+    pub(in crate::engine) fn set_source_dc_value(
         spec: &mut SourceSpec,
         value: Value,
     ) -> Result<(), SimulationError> {

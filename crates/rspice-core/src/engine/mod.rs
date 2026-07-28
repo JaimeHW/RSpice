@@ -30,10 +30,15 @@
 //! - `pss`, `pss_noise` - periodic steady state and periodic noise
 //! - `stb` - loop-gain stability
 //! - `transfer` - small-signal transfer function (`.TF`)
-//! - `advanced` - noise, Monte Carlo, pole-zero, sensitivity, and `.STEP`
+//! - `noise`, `monte_carlo`, `pole_zero`, `sensitivity`, `step` - the rest,
+//!   one module each
+//!
+//! Those last five used to sit together under an `advanced` submodule, which
+//! drew a line no rule justified: `distortion` and `stb` are no less advanced
+//! than `noise`, and the split meant knowing which of two directories to look
+//! in. Every driver is now a sibling.
 
 mod ac;
-mod advanced;
 mod builder;
 pub use builder::{
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor,
@@ -49,18 +54,23 @@ mod error;
 mod hb;
 mod health;
 mod matrix;
+mod monte_carlo;
+mod noise;
+mod pole_zero;
 mod pss;
 mod pss_noise;
 mod result;
+mod sensitivity;
 mod source_values;
 mod stamping;
 mod stb;
+mod step;
 mod transfer;
 mod transient;
 pub mod waveform;
 
 pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
-pub use advanced::{MaterializedStepRun, StepPlan, StepPlanLimits};
+pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{
     ProjectVerilogARuntimeRegistration, VerilogACacheEntry, VerilogACachePruneReport,

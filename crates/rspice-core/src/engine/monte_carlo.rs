@@ -1,4 +1,10 @@
-use super::*;
+use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::monte_carlo::{
+    Distribution, MonteCarloResult, VariableStatistics, Xorshift128Plus,
+};
+use crate::{Netlist, Value};
+use std::collections::{HashMap, HashSet};
 
 impl Engine {
     /// Run Monte Carlo analysis
@@ -361,7 +367,7 @@ impl Engine {
         })
     }
 
-    pub(in crate::engine::advanced) fn sample_monte_carlo_value(
+    pub(in crate::engine) fn sample_monte_carlo_value(
         rng: &mut Xorshift128Plus,
         nominal: Value,
         distribution: Distribution,

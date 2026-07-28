@@ -1,4 +1,13 @@
-use super::*;
+use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::sensitivity::{
+    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
+    SensitivityAnalyzer, SensitivityResult,
+};
+use crate::netlist::{ElementKind, SourceSpec};
+use crate::solver::SimulationResult;
+use crate::{CircuitData, Complex64, Netlist, Value};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy)]
 enum AcSensitivityElementField {
@@ -81,7 +90,7 @@ struct AcSensitivityTarget {
 }
 
 impl Engine {
-    pub(in crate::engine::advanced) fn collect_sensitivity_elements(
+    pub(in crate::engine) fn collect_sensitivity_elements(
         circuit: &CircuitData,
     ) -> Vec<ElementDesc> {
         let mut elements = Vec::new();
@@ -414,7 +423,7 @@ impl Engine {
         Ok(applied)
     }
 
-    pub(in crate::engine::advanced) fn logical_lines_after_title(source: &str) -> Vec<String> {
+    pub(in crate::engine) fn logical_lines_after_title(source: &str) -> Vec<String> {
         let mut lines = Vec::new();
         let mut continuation = String::new();
 
@@ -446,7 +455,7 @@ impl Engine {
         lines
     }
 
-    pub(in crate::engine::advanced) fn contains_identifier(
+    pub(in crate::engine) fn contains_identifier(
         haystack_upper: &str,
         needle_upper: &str,
     ) -> bool {
@@ -469,11 +478,11 @@ impl Engine {
         false
     }
 
-    pub(in crate::engine::advanced) fn is_identifier_byte(b: u8) -> bool {
+    pub(in crate::engine) fn is_identifier_byte(b: u8) -> bool {
         b.is_ascii_alphanumeric() || b == b'_'
     }
 
-    pub(in crate::engine::advanced) fn param_assignment_present(
+    pub(in crate::engine) fn param_assignment_present(
         line: &str,
         param_upper: &str,
     ) -> bool {
@@ -525,7 +534,7 @@ impl Engine {
             || upper_trimmed_line.starts_with(".GLOBAL_PARAM")
     }
 
-    pub(in crate::engine::advanced) fn source_references_param(
+    pub(in crate::engine) fn source_references_param(
         source: &str,
         param_name: &str,
     ) -> bool {
@@ -553,7 +562,7 @@ impl Engine {
     /// than a parameter reference — searching it made `run_sensitivity` and
     /// `.STEP` silently no-op when handed an element name. Dot commands have
     /// no such token and are searched whole.
-    pub(in crate::engine::advanced) fn binding_search_span(line_upper: &str) -> &str {
+    pub(in crate::engine) fn binding_search_span(line_upper: &str) -> &str {
         let trimmed = line_upper.trim_start();
         if trimmed.starts_with('.') {
             return trimmed;
@@ -563,7 +572,7 @@ impl Engine {
             .map_or("", |idx| &trimmed[idx..])
     }
 
-    pub(in crate::engine::advanced) fn build_overridden_source_multi_with_abort(
+    pub(in crate::engine) fn build_overridden_source_multi_with_abort(
         source: &str,
         overrides: &[(String, Value)],
         abort: &dyn AbortSignal,

@@ -1,11 +1,16 @@
 #![allow(clippy::needless_range_loop)]
 
-use super::*;
+use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
+use crate::device::semiconductor::{
+    BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
+};
+use crate::{CircuitData, Netlist, Value};
 
 impl Engine {
     #[inline]
-    pub(in crate::engine::advanced) fn optional_system_index(node_id: usize) -> Option<usize> {
+    pub(in crate::engine) fn optional_system_index(node_id: usize) -> Option<usize> {
         if node_id == 0 {
             None
         } else {
@@ -14,7 +19,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::advanced) fn ac_linearization_node_voltage(
+    pub(in crate::engine) fn ac_linearization_node_voltage(
         voltages: &[Value],
         node: usize,
     ) -> Value {
@@ -25,7 +30,7 @@ impl Engine {
         }
     }
 
-    pub(in crate::engine::advanced) fn warn_xspice_mif_analysis_boundary(
+    pub(in crate::engine) fn warn_xspice_mif_analysis_boundary(
         circuit: &CircuitData,
         analysis: &str,
         detail: &str,
@@ -63,7 +68,7 @@ impl Engine {
         Ok(())
     }
 
-    pub(in crate::engine::advanced) fn descriptor_expand_square(
+    pub(in crate::engine) fn descriptor_expand_square(
         g_matrix: &mut Matrix,
         c_matrix: &mut Matrix,
         extra_states: usize,
@@ -82,7 +87,7 @@ impl Engine {
         n
     }
 
-    pub(in crate::engine::advanced) fn stamp_vbic_pz_descriptor_states(
+    pub(in crate::engine) fn stamp_vbic_pz_descriptor_states(
         circuit: &CircuitData,
         op_voltages: &[Value],
         g_matrix: &mut Matrix,

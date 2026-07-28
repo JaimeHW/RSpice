@@ -1,7 +1,15 @@
-use super::*;
+use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::noise::{
+    Bsim3FlickerNoise, Bsim4FlickerNoise, CorrelatedNoisePair, NoiseContribution, NoisePort,
+    NoiseResult, NoiseSource, PortNoiseCorrelationResult,
+};
+use crate::{CircuitData, Complex64, Netlist, Value};
+use std::collections::{HashMap, HashSet};
+use std::f64::consts::PI;
 
 #[derive(Clone, Copy)]
-pub(in crate::engine::advanced) enum NoiseOutputPort<'a> {
+pub(in crate::engine) enum NoiseOutputPort<'a> {
     NodeIds {
         positive: usize,
         negative: Option<usize>,
@@ -35,7 +43,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::advanced) fn noise_node_voltage(
+    pub(in crate::engine) fn noise_node_voltage(
         voltages: &[Value],
         node: usize,
     ) -> Value {
@@ -47,7 +55,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::advanced) fn differential_noise_output_complex(
+    pub(in crate::engine) fn differential_noise_output_complex(
         solution: &[Complex64],
         output_pos: usize,
         output_neg: Option<usize>,
@@ -66,7 +74,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::advanced) fn differential_noise_output(
+    pub(in crate::engine) fn differential_noise_output(
         solution: &[Complex64],
         output_pos: usize,
         output_neg: Option<usize>,
@@ -679,7 +687,7 @@ impl Engine {
     }
 
     #[cfg(test)]
-    pub(in crate::engine::advanced) fn collect_noise_sources(
+    pub(in crate::engine) fn collect_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
     ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
@@ -1905,7 +1913,7 @@ impl Engine {
         Ok(())
     }
 
-    pub(in crate::engine::advanced) fn run_noise_internal(
+    pub(in crate::engine) fn run_noise_internal(
         &self,
         netlist: &Netlist,
         output_port: NoiseOutputPort<'_>,
@@ -2786,7 +2794,7 @@ r1 a 0 rmod
     /// onoise_spectrum table of [`RB_NOISE_DECK`] from the official
     /// ngspice-46 binary, in its default root-spectral-density units.
     const RB_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/vbic_noise_rb_ngspice46.dat");
+        include_str!("../../tests/testdata/vbic_noise_rb_ngspice46.dat");
 
     /// A low-impedance-driven CE stage with large RBX/RBI: the parasitic
     /// base-resistance thermal sources dominate the output noise, so this
@@ -2816,7 +2824,7 @@ Q1 C B 0 0 N1
     /// onoise_spectrum table of [`DIODE_FLICKER_DECK`] from the official
     /// ngspice-46 binary, in its default root-spectral-density units.
     const DIODE_FLICKER_ORACLE: &str =
-        include_str!("../../../tests/testdata/diode_flicker_ngspice46.dat");
+        include_str!("../../tests/testdata/diode_flicker_ngspice46.dat");
 
     /// Forward-biased diode with KF flicker at AF=1.3 and instance M=3:
     /// the low-frequency rows are flicker-lifted above the white floor,
@@ -2890,9 +2898,9 @@ D1 A 0 DM M=3
     /// onoise tables of [`MOS_FLICKER_DECK`] (default NLEV) and its NLEV=0
     /// variant from the official ngspice-46 binary.
     const MOS_FLICKER_NLEV2_ORACLE: &str =
-        include_str!("../../../tests/testdata/mos_flicker_nlev2_ngspice46.dat");
+        include_str!("../../tests/testdata/mos_flicker_nlev2_ngspice46.dat");
     const MOS_FLICKER_NLEV0_ORACLE: &str =
-        include_str!("../../../tests/testdata/mos_flicker_nlev0_ngspice46.dat");
+        include_str!("../../tests/testdata/mos_flicker_nlev0_ngspice46.dat");
 
     /// A common-source stage whose low-frequency output noise is flicker
     /// dominated, with AF=1.2 and instance M=2 so both the geometry
@@ -2961,7 +2969,7 @@ M1 D G 0 0 NM W=20u L=2u M=2
     /// onoise table of [`GP_RCRE_NOISE_DECK`] from the official ngspice-46
     /// binary.
     const GP_RCRE_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/gp_rcre_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/gp_rcre_noise_ngspice46.dat");
 
     /// A Gummel-Poon CE stage with RB=0 and dominant collector/emitter
     /// resistances: the builder externalizes RC and RE onto real internal
@@ -2989,7 +2997,7 @@ Q1 C B 0 QN
     /// onoise table of [`MOS_RDRS_NOISE_DECK`] from the official ngspice-46
     /// binary.
     const MOS_RDRS_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/mos_rdrs_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/mos_rdrs_noise_ngspice46.dat");
 
     /// A common-source stage whose card carries RD=2k and RS=1k: the source
     /// degeneration reshapes the operating point and gain while both
@@ -3016,7 +3024,7 @@ M1 D G 0 0 NM W=20u L=2u
     /// onoise table of the DTEMP=150 variant of [`MOS_RDRS_NOISE_DECK`]
     /// from the official ngspice-46 binary.
     const MOS_DTEMP_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/mos_dtemp_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/mos_dtemp_noise_ngspice46.dat");
 
     #[test]
     fn classic_mos_noise_catalog_owns_series_sources_and_retains_inactive_flicker() {
@@ -3146,7 +3154,7 @@ M1 D G 0 0 NM W=20u L=2u
     /// onoise table of [`DIODE_DTEMP_NOISE_DECK`] from the official
     /// ngspice-46 binary.
     const DIODE_DTEMP_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/diode_dtemp_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/diode_dtemp_noise_ngspice46.dat");
 
     /// A forward-biased diode at DTEMP=150 whose series resistance carries a
     /// comparable share of the output noise: dionoise.c heats the RS thermal
@@ -3216,7 +3224,7 @@ D1 A 0 DM DTEMP=150
     /// onoise table of [`RES_DTEMP_NOISE_DECK`] from the official ngspice-46
     /// binary.
     const RES_DTEMP_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/res_dtemp_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/res_dtemp_noise_ngspice46.dat");
 
     /// Two equal resistors where one carries DTEMP=150: its thermal noise
     /// runs 150 K hotter (nevalsrc.c THERMNOISE 4k·(CKTtemp+dtemp)·g) while
@@ -3283,7 +3291,7 @@ R2 OUT 0 10k DTEMP=150
     /// onoise table of [`GP_RB_NOISE_DECK`] from the official ngspice-46
     /// binary.
     const GP_RB_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/gp_rb_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/gp_rb_noise_ngspice46.dat");
 
     /// The quantifying deck for the GP noise gap: RB=500 driven from a
     /// low-impedance source, where the base-resistance thermal noise
@@ -3394,9 +3402,9 @@ Q1 C B 0 QN
     /// onoise tables of the DTEMP=150 variants of the VBIC rb deck and the
     /// GP rc/re deck from the official ngspice-46 binary.
     const VBIC_DTEMP_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/vbic_dtemp_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/vbic_dtemp_noise_ngspice46.dat");
     const GP_DTEMP_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/gp_dtemp_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/gp_dtemp_noise_ngspice46.dat");
 
     fn assert_onoise_matches(
         deck: &str,
@@ -3457,25 +3465,25 @@ Q1 C B 0 QN
     }
 
     const BSIM4_MODELS45: &str =
-        include_str!("../../../src/device/mosfet/bsim4v8/testdata/models45.lib");
+        include_str!("../device/mosfet/bsim4v8/testdata/models45.lib");
     const BSIM4_FNOI1_TNOI0_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim4_fnoi1_tnoi0_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim4_fnoi1_tnoi0_noise_ngspice46.dat");
     const BSIM4_FNOI0_TNOI0_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim4_fnoi0_tnoi0_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim4_fnoi0_tnoi0_noise_ngspice46.dat");
     const BSIM4_TNOI2_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim4_tnoi2_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim4_tnoi2_noise_ngspice46.dat");
     const BSIM4_TNOI1_SERIES_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim4_tnoi1_series_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim4_tnoi1_series_noise_ngspice46.dat");
     const BSIM4_RDSMOD1_TNOI1_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim4_rdsmod1_tnoi1_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim4_rdsmod1_tnoi1_noise_ngspice46.dat");
     const BSIM4_RBODYMOD1_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim4_rbodymod1_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim4_rbodymod1_noise_ngspice46.dat");
     const BSIM3_MODELS018: &str =
-        include_str!("../../../src/device/mosfet/bsim3v3/testdata/models018.lib");
+        include_str!("../device/mosfet/bsim3v3/testdata/models018.lib");
     const BSIM3_NOIMOD1_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim3_noimod1_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim3_noimod1_noise_ngspice46.dat");
     const BSIM3_NOIMOD2_ORACLE: &str =
-        include_str!("../../../tests/testdata/bsim3_noimod2_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/bsim3_noimod2_noise_ngspice46.dat");
 
     fn bsim3_noise_deck(model_header_suffix: &str) -> String {
         let models = if model_header_suffix.is_empty() {
@@ -3978,7 +3986,7 @@ Q1 C B 0 QN
     /// onoise table of [`JFET_FLICKER_DECK`] from the official ngspice-46
     /// binary.
     const JFET_FLICKER_ORACLE: &str =
-        include_str!("../../../tests/testdata/jfet_flicker_ngspice46.dat");
+        include_str!("../../tests/testdata/jfet_flicker_ngspice46.dat");
 
     /// A common-source JFET stage with flicker-dominated low-frequency
     /// noise; AF=1.4 with instance M=2 makes the per-finger multiplicity
@@ -4004,8 +4012,8 @@ J1 D G 0 JN M=2
     /// onoise tables of [`RES_FLICKER_DECK`] and its quiet-R2 variant from
     /// the official ngspice-46 binary.
     const RES_FLICKER_ORACLE: &str =
-        include_str!("../../../tests/testdata/res_flicker_ngspice46.dat");
-    const RES_QUIET_ORACLE: &str = include_str!("../../../tests/testdata/res_quiet_ngspice46.dat");
+        include_str!("../../tests/testdata/res_flicker_ngspice46.dat");
+    const RES_QUIET_ORACLE: &str = include_str!("../../tests/testdata/res_quiet_ngspice46.dat");
 
     /// A current-carrying semiconductor resistor with model-card flicker:
     /// KF at AF=1.5 over the effective noise area
@@ -4066,7 +4074,7 @@ R2 OUT 0 1k
     /// onoise table of the DTEMP=150 variant of [`JFET_FLICKER_DECK`] from
     /// the official ngspice-46 binary.
     const JFET_DTEMP_NOISE_ORACLE: &str =
-        include_str!("../../../tests/testdata/jfet_dtemp_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/jfet_dtemp_noise_ngspice46.dat");
 
     /// Instance DTEMP must heat the JFET channel thermal source and the
     /// externalized drain/source resistances exactly as jfetnoi.c does
