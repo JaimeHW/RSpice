@@ -74,6 +74,11 @@ fn compile_model_inner(
     };
     let base_limits = NativeLoweringLimits::for_model(model)
         .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
+    let base_limits = if canonical_mir.is_some() {
+        base_limits.with_prevalidated_mir()
+    } else {
+        base_limits
+    };
     let canonical_noise_plan = match canonical_mir {
         Some(mir) => Some(build_canonical_noise_plan(model, mir)?),
         None => None,

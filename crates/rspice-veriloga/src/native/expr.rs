@@ -234,6 +234,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     canonical_timer_slots: &'a [(ExprId, usize)],
     canonical_limit_slots: &'a [(ExprId, usize)],
     canonical_table_lookup_slots: &'a [(ExprId, usize)],
+    mir_prevalidated: bool,
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -270,6 +271,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: &[],
             canonical_limit_slots: &[],
             canonical_table_lookup_slots: &[],
+            mir_prevalidated: false,
         }
     }
 
@@ -285,6 +287,28 @@ impl<'a> NativeLoweringLimits<'a> {
         .with_lookup_table_count(model.lookup_tables.len())
         .with_laplace_filter_count(model.laplace_filters.len())
         .with_zi_filter_count(model.zi_filters.len())
+    }
+
+    pub(crate) fn with_prevalidated_mir(self) -> Self {
+        Self {
+            mir_prevalidated: true,
+            ..self
+        }
+    }
+
+    fn validate_mir(self, model: &SmolStr, mir: &MirModel) -> JitResult<()> {
+        if self.mir_prevalidated {
+            return Ok(());
+        }
+        mir.validate()
+            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| "MIR validation failed".into())
+                    .into(),
+            })
     }
 
     pub(crate) fn with_canonical_branch_unknown_map<'b>(
@@ -320,6 +344,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -356,6 +381,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -392,6 +418,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -435,6 +462,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -485,6 +513,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -521,6 +550,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -557,6 +587,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -593,6 +624,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -629,6 +661,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -665,6 +698,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -701,6 +735,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -737,6 +772,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -773,6 +809,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -809,6 +846,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -845,6 +883,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -881,6 +920,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -917,6 +957,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -2307,15 +2348,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let equation = mir
             .equations
@@ -2378,15 +2411,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
@@ -2424,15 +2449,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
@@ -2471,15 +2488,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
@@ -2519,15 +2528,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
@@ -2564,15 +2565,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let equation = mir
             .equations
