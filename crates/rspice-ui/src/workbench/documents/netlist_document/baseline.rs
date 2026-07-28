@@ -29,7 +29,7 @@ pub(super) fn changed_lines_against_baseline(current: &str, baseline: &str) -> H
 fn param_values(buffer: &str) -> HashMap<String, f64> {
     let mut values = HashMap::new();
     for line in buffer.lines() {
-        let Some(assignments) = super::tuner::scan_assignments(line) else {
+        let Some(assignments) = super::param_scan::scan_assignments(line) else {
             continue;
         };
         for (name, start, end) in assignments {

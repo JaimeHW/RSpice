@@ -13,12 +13,11 @@ mod completion;
 pub(crate) mod diagnostics;
 mod editor;
 mod highlight;
+mod param_scan;
 mod summary;
-mod tuner;
 
 pub use diagnostics::{Diagnostic, DiagnosticSeverity};
 pub use editor::show as show_editor;
-pub use tuner::right_panel as show_parameter_inspector;
 
 /// Stable identity for the exact UTF-8 source bytes visible in the editor.
 pub fn source_content_digest(source: &str) -> crate::product::ContentDigest {
@@ -393,5 +392,5 @@ pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
 
 /// Numeric assignments in the active source, used by automation and tests.
 pub fn buffer_assignments(buffer: &str) -> Vec<(String, usize, usize)> {
-    tuner::buffer_assignments(buffer)
+    param_scan::buffer_assignments(buffer)
 }

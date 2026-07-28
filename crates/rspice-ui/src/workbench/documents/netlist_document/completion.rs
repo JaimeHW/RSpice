@@ -291,7 +291,7 @@ fn collect_candidates(
         }
     }
     // Parameter names complete inside `{expressions}` and values.
-    for (name, _, _) in super::tuner::buffer_assignments(buffer) {
+    for (name, _, _) in super::param_scan::buffer_assignments(buffer) {
         let name_lower = name.to_ascii_lowercase();
         if name_lower.starts_with(&lower) && name_lower != lower {
             out.push(Candidate {
