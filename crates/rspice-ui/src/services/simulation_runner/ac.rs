@@ -89,7 +89,13 @@ impl AcData {
     }
 }
 
-/// Run AC small-signal analysis
+/// Run AC small-signal analysis.
+///
+/// Test-only. The shipping path is
+/// [`run_ac_analysis_with_source_path_and_abort`], reached from
+/// `simulation::runner::spec`; this wrapper and the one below it exist so
+/// tests can omit the source path and abort signal.
+#[cfg(test)]
 pub fn run_ac_analysis(
     netlist_text: &str,
     start_freq: Value,
@@ -108,7 +114,9 @@ pub fn run_ac_analysis(
     .map_err(|error| error.to_string())
 }
 
-/// Run AC small-signal analysis with cooperative cancellation.
+/// Run AC small-signal analysis with cooperative cancellation. Test-only;
+/// see [`run_ac_analysis`].
+#[cfg(test)]
 pub fn run_ac_analysis_with_abort(
     netlist_text: &str,
     start_freq: Value,
@@ -126,28 +134,6 @@ pub fn run_ac_analysis_with_abort(
         None,
         abort,
     )
-}
-
-/// Run AC small-signal analysis with a source path used to resolve relative
-/// includes and model file references.
-pub fn run_ac_analysis_with_source_path(
-    netlist_text: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    num_points: usize,
-    sweep_type: &str, // "dec", "oct", or "lin"
-    source_path: Option<&Path>,
-) -> Result<AcData, String> {
-    run_ac_analysis_with_source_path_and_abort(
-        netlist_text,
-        start_freq,
-        stop_freq,
-        num_points,
-        sweep_type,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run AC small-signal analysis with source-path resolution and cooperative

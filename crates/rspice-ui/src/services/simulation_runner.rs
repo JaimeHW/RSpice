@@ -34,10 +34,7 @@ mod stb;
 mod sweeps;
 mod tf;
 mod transient;
-pub use ac::{
-    AcData, run_ac_analysis, run_ac_analysis_with_abort, run_ac_analysis_with_source_path,
-    run_ac_analysis_with_source_path_and_abort,
-};
+pub use ac::{AcData, run_ac_analysis_with_source_path_and_abort};
 pub use dc_sweep::{
     DcSweepData, run_dc_sweep, run_dc_sweep_with_abort, run_dc_sweep_with_source_path,
     run_dc_sweep_with_source_path_and_abort,
