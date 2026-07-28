@@ -185,6 +185,9 @@ impl Instance {
                 let v85 = parameters[28];
                 let v87 = parameters[27];
                 let v91 = 0e0f64;
+                let mut out30: f64 = 0.0;
+                let mut out45: f64 = 0.0;
+                let mut out65: f64 = 0.0;
                 let v2 = v0 * v1;
                 let v5 = v3 + v4;
                 let v7 = v5 / v6;
@@ -203,6 +206,7 @@ impl Instance {
                 let v33: f64;
                 if v28 != 0.0 {
                     let v30 = v29 - v12;
+                    out30 = v30;
                     v33 = v31;
                 } else {
                     v33 = v32;
@@ -220,6 +224,7 @@ impl Instance {
                     v49 = v31;
                 } else {
                     let v45 = if (if (if v34 == v40 { 1.0 } else { 0.0 }) != 0.0 && v37 != 0.0 { 1.0 } else { 0.0 }) != 0.0 && (if v43 > v31 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out45 = v45;
                     let v66: f64;
                     let v67: f64;
                     let v68: f64;
@@ -229,6 +234,7 @@ impl Instance {
                         v68 = v31;
                     } else {
                         let v65 = if v34 == v64 { 1.0 } else { 0.0 };
+                        out65 = v65;
                         let v72: f64;
                         let v73: f64;
                         let v74: f64;
@@ -273,7 +279,7 @@ impl Instance {
                     v84 = v82;
                 }
                 let v90 = if (if (if v85 > v31 { 1.0 } else { 0.0 }) != 0.0 && (if v87 > v31 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) > v31 { 1.0 } else { 0.0 };
-            [v2, v5, v7, v10, v17, v19, v22, v25, v28, v38, v45, v65, v63, v80, v90, v33, v46, v47, v48, v49, v76, v77, v83, v84, v13, v15, v18, v20, v24, v26, v30]
+            [v2, v5, v7, v10, v17, v19, v22, v25, v28, v38, out45, out65, v63, v80, v90, v33, v46, v47, v48, v49, v76, v77, v83, v84, v13, v15, v18, v20, v24, v26, out30]
         };
         self.canonical_staged[6] = produced[0];
         self.canonical_staged[0] = produced[1];

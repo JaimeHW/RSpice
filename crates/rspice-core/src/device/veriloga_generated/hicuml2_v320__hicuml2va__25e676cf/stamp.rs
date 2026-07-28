@@ -285,6 +285,72 @@ impl Instance {
                 let v511 = 0e0f64;
                 let v519 = 0e0f64;
                 let v520 = 0e0f64;
+                let mut out98: f64 = 0.0;
+                let mut out109: f64 = 0.0;
+                let mut out122: f64 = 0.0;
+                let mut out153: f64 = 0.0;
+                let mut out155: f64 = 0.0;
+                let mut out156: f64 = 0.0;
+                let mut out172: f64 = 0.0;
+                let mut out174: f64 = 0.0;
+                let mut out175: f64 = 0.0;
+                let mut out210: f64 = 0.0;
+                let mut out212: f64 = 0.0;
+                let mut out213: f64 = 0.0;
+                let mut out230: f64 = 0.0;
+                let mut out232: f64 = 0.0;
+                let mut out233: f64 = 0.0;
+                let mut out235: f64 = 0.0;
+                let mut out236: f64 = 0.0;
+                let mut out253: f64 = 0.0;
+                let mut out265: f64 = 0.0;
+                let mut out267: f64 = 0.0;
+                let mut out268: f64 = 0.0;
+                let mut out269: f64 = 0.0;
+                let mut out270: f64 = 0.0;
+                let mut out272: f64 = 0.0;
+                let mut out291: f64 = 0.0;
+                let mut out292: f64 = 0.0;
+                let mut out293: f64 = 0.0;
+                let mut out294: f64 = 0.0;
+                let mut out295: f64 = 0.0;
+                let mut out308: f64 = 0.0;
+                let mut out309: f64 = 0.0;
+                let mut out310: f64 = 0.0;
+                let mut out321: f64 = 0.0;
+                let mut out322: f64 = 0.0;
+                let mut out323: f64 = 0.0;
+                let mut out334: f64 = 0.0;
+                let mut out335: f64 = 0.0;
+                let mut out336: f64 = 0.0;
+                let mut out348: f64 = 0.0;
+                let mut out349: f64 = 0.0;
+                let mut out350: f64 = 0.0;
+                let mut out351: f64 = 0.0;
+                let mut out352: f64 = 0.0;
+                let mut out353: f64 = 0.0;
+                let mut out364: f64 = 0.0;
+                let mut out375: f64 = 0.0;
+                let mut out376: f64 = 0.0;
+                let mut out377: f64 = 0.0;
+                let mut out378: f64 = 0.0;
+                let mut out379: f64 = 0.0;
+                let mut out380: f64 = 0.0;
+                let mut out391: f64 = 0.0;
+                let mut out392: f64 = 0.0;
+                let mut out393: f64 = 0.0;
+                let mut out394: f64 = 0.0;
+                let mut out395: f64 = 0.0;
+                let mut out425: f64 = 0.0;
+                let mut out429: f64 = 0.0;
+                let mut out433: f64 = 0.0;
+                let mut out435: f64 = 0.0;
+                let mut out441: f64 = 0.0;
+                let mut out447: f64 = 0.0;
+                let mut out448: f64 = 0.0;
+                let mut out473: f64 = 0.0;
+                let mut out480: f64 = 0.0;
+                let mut out518: f64 = 0.0;
                 let v2 = if v0 <= v1 { 1.0 } else { 0.0 };
                 let v7: f64;
                 let v8: f64;
@@ -363,6 +429,7 @@ impl Instance {
                 let v99: f64;
                 if v90 != 0.0 {
                     let v98 = if (if (if v91 == v66 { 1.0 } else { 0.0 }) != 0.0 && (if v93 == v66 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 }) != 0.0 || (if v96 == v66 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out98 = v98;
                     let v106: f64;
                     if v98 != 0.0 {
                         v106 = v66;
@@ -385,6 +452,7 @@ impl Instance {
                 if v105 != 0.0 {
                     let v108 = v36 * (v100 - v103);
                     let v109 = if v103 < v100 { 1.0 } else { 0.0 };
+                    out109 = v109;
                     let v120: f64;
                     let v121: f64;
                     if v109 != 0.0 {
@@ -395,6 +463,7 @@ impl Instance {
                         v121 = v103;
                     }
                     let v122 = if v120 < v101 { 1.0 } else { 0.0 };
+                    out122 = v122;
                     let v134: f64;
                     let v135: f64;
                     let v136: f64;
@@ -440,8 +509,11 @@ impl Instance {
                 let v140 = if v139 > v66 { 1.0 } else { 0.0 };
                 if v140 != 0.0 {
                     let v153 = (v141 * v15) * (((((v143 * v36) * v17).exp()) - (((v147 * v143) * v17).exp())).ln());
+                    out153 = v153;
                     let v155 = v154.abs();
+                    out155 = v155;
                     let v156 = if v154 > v66 { 1.0 } else { 0.0 };
+                    out156 = v156;
                 } else {
                 }
                 let v157 = v29 * v17;
@@ -449,8 +521,11 @@ impl Instance {
                 let v160 = v41 * v17;
                 if v86 != 0.0 {
                     let v172 = (v141 * v15) * (((((v162 * v36) * v17).exp()) - (((v166 * v162) * v17).exp())).ln());
+                    out172 = v172;
                     let v174 = v173.abs();
+                    out174 = v174;
                     let v175 = if v173 > v66 { 1.0 } else { 0.0 };
+                    out175 = v175;
                 } else {
                 }
                 let v176 = v32 * v17;
@@ -467,35 +542,49 @@ impl Instance {
                 let v198 = if v197 > v66 { 1.0 } else { 0.0 };
                 if v198 != 0.0 {
                     let v210 = (v141 * v15) * (((((v200 * v36) * v17).exp()) - (((v204 * v200) * v17).exp())).ln());
+                    out210 = v210;
                     let v212 = v211.abs();
+                    out212 = v212;
                     let v213 = if v211 > v66 { 1.0 } else { 0.0 };
+                    out213 = v213;
                 } else {
                 }
                 let v215 = v49 / v214;
                 let v217 = if v216 > v66 { 1.0 } else { 0.0 };
                 if v218 != 0.0 {
                     let v230 = (v141 * v15) * (((((v220 * v36) * v17).exp()) - (((v224 * v220) * v17).exp())).ln());
+                    out230 = v230;
                     let v232 = v231.abs();
+                    out232 = v232;
                     let v233 = if v231 > v66 { 1.0 } else { 0.0 };
+                    out233 = v233;
                 } else {
                 }
                 let v237: f64;
                 if v80 != 0.0 {
                     let v235 = if v234 > v66 { 1.0 } else { 0.0 };
+                    out235 = v235;
                     if v235 != 0.0 {
                         let v253 = (v141 * v15) * (((((v243 * v36) * v17).exp()) - (((v247 * v243) * v17).exp())).ln());
+                        out253 = v253;
                     } else {
                     }
                     v237 = v254;
                 } else {
                     let v236 = if v234 > v66 { 1.0 } else { 0.0 };
+                    out236 = v236;
                     if v236 != 0.0 {
                         let v265 = (v141 * v15) * (((((v243 * v36) * v17).exp()) - (((v259 * v243) * v17).exp())).ln());
+                        out265 = v265;
                         let v267 = -v266;
+                        out267 = v267;
                         let v268 = v267.abs();
+                        out268 = v268;
                         let v269 = if v267 > v66 { 1.0 } else { 0.0 };
+                        out269 = v269;
                     } else {
                         let v270 = -v266;
+                        out270 = v270;
                     }
                     v237 = v266;
                 }
@@ -504,13 +593,19 @@ impl Instance {
                 let v241 = if v240 > v66 { 1.0 } else { 0.0 };
                 if v241 != 0.0 {
                     let v272 = if v271 > v66 { 1.0 } else { 0.0 };
+                    out272 = v272;
                     if v272 != 0.0 {
                         let v291 = (v141 * v15) * (((((v240 * v36) * v17).exp()) - (((v285 * v240) * v17).exp())).ln());
+                        out291 = v291;
                         let v292 = -v237;
+                        out292 = v292;
                         let v293 = v292.abs();
+                        out293 = v293;
                         let v294 = if v292 > v66 { 1.0 } else { 0.0 };
+                        out294 = v294;
                     } else {
                         let v295 = -v237;
+                        out295 = v295;
                     }
                 } else {
                 }
@@ -520,57 +615,84 @@ impl Instance {
                 if v280 != 0.0 {
                     if v140 != 0.0 {
                         let v308 = (v141 * v15) * (((((v143 * v36) * v17).exp()) - (((v302 * v143) * v17).exp())).ln());
+                        out308 = v308;
                         let v309 = v154.abs();
+                        out309 = v309;
                         let v310 = if v154 > v66 { 1.0 } else { 0.0 };
+                        out310 = v310;
                     } else {
                     }
                     if v86 != 0.0 {
                         let v321 = (v141 * v15) * (((((v162 * v36) * v17).exp()) - (((v315 * v162) * v17).exp())).ln());
+                        out321 = v321;
                         let v322 = v173.abs();
+                        out322 = v322;
                         let v323 = if v173 > v66 { 1.0 } else { 0.0 };
+                        out323 = v323;
                     } else {
                     }
                     if v198 != 0.0 {
                         let v334 = (v141 * v15) * (((((v200 * v36) * v17).exp()) - (((v328 * v200) * v17).exp())).ln());
+                        out334 = v334;
                         let v335 = v211.abs();
+                        out335 = v335;
                         let v336 = if v211 > v66 { 1.0 } else { 0.0 };
+                        out336 = v336;
                     } else {
                     }
                     if v337 != 0.0 {
                         let v348 = (v141 * v15) * (((((v220 * v36) * v17).exp()) - (((v342 * v220) * v17).exp())).ln());
+                        out348 = v348;
                         let v349 = v231.abs();
+                        out349 = v349;
                         let v350 = if v231 > v66 { 1.0 } else { 0.0 };
+                        out350 = v350;
                     } else {
                     }
                     let v353: f64;
                     if v80 != 0.0 {
                         let v351 = if v234 > v66 { 1.0 } else { 0.0 };
+                        out351 = v351;
                         if v351 != 0.0 {
                             let v364 = (v141 * v15) * (((((v243 * v36) * v17).exp()) - (((v358 * v243) * v17).exp())).ln());
+                            out364 = v364;
                         } else {
                         }
                         v353 = v254;
                     } else {
                         let v352 = if v234 > v66 { 1.0 } else { 0.0 };
+                        out352 = v352;
                         if v352 != 0.0 {
                             let v375 = (v141 * v15) * (((((v243 * v36) * v17).exp()) - (((v369 * v243) * v17).exp())).ln());
+                            out375 = v375;
                             let v376 = -v266;
+                            out376 = v376;
                             let v377 = v376.abs();
+                            out377 = v377;
                             let v378 = if v376 > v66 { 1.0 } else { 0.0 };
+                            out378 = v378;
                         } else {
                             let v379 = -v266;
+                            out379 = v379;
                         }
                         v353 = v266;
                     }
+                    out353 = v353;
                     if v241 != 0.0 {
                         let v380 = if v271 > v66 { 1.0 } else { 0.0 };
+                        out380 = v380;
                         if v380 != 0.0 {
                             let v391 = (v141 * v15) * (((((v240 * v36) * v17).exp()) - (((v385 * v240) * v17).exp())).ln());
+                            out391 = v391;
                             let v392 = -v353;
+                            out392 = v392;
                             let v393 = v392.abs();
+                            out393 = v393;
                             let v394 = if v392 > v66 { 1.0 } else { 0.0 };
+                            out394 = v394;
                         } else {
                             let v395 = -v353;
+                            out395 = v395;
                         }
                     } else {
                     }
@@ -592,20 +714,24 @@ impl Instance {
                 let v423 = if v422 < v399 { 1.0 } else { 0.0 };
                 if v241 != 0.0 {
                     let v425 = if v424 < v399 { 1.0 } else { 0.0 };
+                    out425 = v425;
                 } else {
                 }
                 let v427 = if v426 > v66 { 1.0 } else { 0.0 };
                 if v427 != 0.0 {
                     let v429 = if v428 > v66 { 1.0 } else { 0.0 };
+                    out429 = v429;
                 } else {
                 }
                 let v431 = if v430 > v66 { 1.0 } else { 0.0 };
                 let v432 = if v277 != 0.0 && v279 != 0.0 { 1.0 } else { 0.0 };
                 if v432 != 0.0 {
                     let v433 = if v273 == v16 { 1.0 } else { 0.0 };
+                    out433 = v433;
                     if v433 != 0.0 {
                     } else {
                         let v435 = if v273 == v141 { 1.0 } else { 0.0 };
+                        out435 = v435;
                     }
                 } else {
                 }
@@ -614,6 +740,7 @@ impl Instance {
                 let v443: f64;
                 if v439 != 0.0 {
                     let v441 = if v440 > v66 { 1.0 } else { 0.0 };
+                    out441 = v441;
                     v443 = v66;
                 } else {
                     v443 = v442;
@@ -621,8 +748,10 @@ impl Instance {
                 let v445 = if v444 == v16 { 1.0 } else { 0.0 };
                 if v445 != 0.0 {
                     let v447 = -v446;
+                    out447 = v447;
                 } else {
                     let v448 = -v446;
+                    out448 = v448;
                 }
                 let v449 = -v446;
                 let v453 = if (if v450 >= v276 { 1.0 } else { 0.0 }) != 0.0 && (if v450 > v66 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
@@ -650,6 +779,7 @@ impl Instance {
                 let v475: f64;
                 if v471 != 0.0 {
                     let v473 = if v472 > v66 { 1.0 } else { 0.0 };
+                    out473 = v473;
                     v475 = v66;
                 } else {
                     v475 = v474;
@@ -658,6 +788,7 @@ impl Instance {
                 let v482: f64;
                 if v478 != 0.0 {
                     let v480 = if v479 > v66 { 1.0 } else { 0.0 };
+                    out480 = v480;
                     v482 = v66;
                 } else {
                     v482 = v481;
@@ -721,6 +852,7 @@ impl Instance {
                 let v515: f64;
                 if v509 != 0.0 {
                     let v518 = (v141 * v93) - (v91 * v91);
+                    out518 = v518;
                     v512 = v519;
                     v513 = v520;
                     v514 = v66;
@@ -731,7 +863,7 @@ impl Instance {
                     v514 = v510;
                     v515 = v511;
                 }
-            [v2, v11, v12, v14, v37, v39, v41, v43, v46, v49, v52, v54, v56, v63, v74, v75, v77, v80, v86, v87, v90, v98, v105, v109, v122, v140, v153, v155, v156, v157, v159, v160, v172, v174, v175, v176, v177, v183, v185, v187, v189, v190, v192, v193, v194, v196, v198, v210, v212, v213, v215, v217, v82, v230, v232, v233, v68, v69, v235, v253, v236, v265, v267, v268, v269, v270, v238, v239, v241, v272, v291, v237, v292, v293, v294, v295, v280, v308, v309, v310, v321, v322, v323, v334, v335, v336, v348, v349, v350, v351, v364, v352, v375, v376, v377, v378, v379, v380, v391, v353, v392, v393, v394, v395, v297, v397, v400, v402, v407, v408, v410, v411, v413, v112, v113, v114, v115, v116, v117, v118, v119, v79, v415, v417, v419, v421, v423, v425, v427, v429, v431, v432, v433, v435, v434, v439, v441, v445, v447, v448, v449, v70, v71, v453, v459, v465, v471, v473, v478, v480, v495, v509, v518, v484, v488, v492, v443, v455, v461, v467, v475, v482, v486, v490, v498, v499, v501, v503, v512, v513, v514, v515]
+            [v2, v11, v12, v14, v37, v39, v41, v43, v46, v49, v52, v54, v56, v63, v74, v75, v77, v80, v86, v87, v90, out98, v105, out109, out122, v140, out153, out155, out156, v157, v159, v160, out172, out174, out175, v176, v177, v183, v185, v187, v189, v190, v192, v193, v194, v196, v198, out210, out212, out213, v215, v217, v82, out230, out232, out233, v68, v69, out235, out253, out236, out265, out267, out268, out269, out270, v238, v239, v241, out272, out291, v237, out292, out293, out294, out295, v280, out308, out309, out310, out321, out322, out323, out334, out335, out336, out348, out349, out350, out351, out364, out352, out375, out376, out377, out378, out379, out380, out391, out353, out392, out393, out394, out395, v297, v397, v400, v402, v407, v408, v410, v411, v413, v112, v113, v114, v115, v116, v117, v118, v119, v79, v415, v417, v419, v421, v423, out425, v427, out429, v431, v432, out433, out435, v434, v439, out441, v445, out447, out448, v449, v70, v71, v453, v459, v465, v471, out473, v478, out480, v495, v509, out518, v484, v488, v492, v443, v455, v461, v467, v475, v482, v486, v490, v498, v499, v501, v503, v512, v513, v514, v515]
         };
         self.canonical_staged[84] = produced[0];
         self.canonical_staged[1] = produced[1];
@@ -1075,6 +1207,7 @@ impl Instance {
                 let v519 = staged[116];
                 let v523 = staged[48];
                 let v526 = staged[117];
+                let mut out8: f64 = 0.0;
                 let v3 = v1 + v2;
                 let v5 = if v3 < v4 { 1.0 } else { 0.0 };
                 let v9: f64;
@@ -1082,6 +1215,7 @@ impl Instance {
                     v9 = v6;
                 } else {
                     let v8 = if v3 > v7 { 1.0 } else { 0.0 };
+                    out8 = v8;
                     let v41: f64;
                     if v8 != 0.0 {
                         v41 = v40;
@@ -1354,7 +1488,7 @@ impl Instance {
                 let v477 = v476 * ((v473 * v18).exp());
                 let v482 = v481 * ((v478 * v18).exp());
                 let v491 = (v486 * ((v483 * v18).exp())) * (v12 + (v488 * v15));
-            [v3, v5, v8, v11, v13, v36, v38, v87, v97, v150, v76, v151, v157, v165, v170, v195, v200, v205, v210, v216, v238, v243, v134, v135, v261, v297, v305, v293, v294, v77, v316, v355, v357, v363, v376, v380, v385, v472, v477, v482, v491, v78, v142, v190, v228, v229, v255, v256, v295, v347, v353, v366, v367, v368, v465, v466, v467]
+            [v3, v5, out8, v11, v13, v36, v38, v87, v97, v150, v76, v151, v157, v165, v170, v195, v200, v205, v210, v216, v238, v243, v134, v135, v261, v297, v305, v293, v294, v77, v316, v355, v357, v363, v376, v380, v385, v472, v477, v482, v491, v78, v142, v190, v228, v229, v255, v256, v295, v347, v353, v366, v367, v368, v465, v466, v467]
         };
         self.canonical_staged[49] = produced[0];
         self.canonical_staged[92] = produced[1];

@@ -215,6 +215,7 @@ impl Instance {
                 let v176 = 0e0f64;
                 let v178 = 0e0f64;
                 let v180 = 0e0f64;
+                let mut out127: f64 = 0.0;
                 let v2 = v0 + v1;
                 let v6 = (v3 * v2) / v5;
                 let v8 = v7 * v2;
@@ -268,6 +269,7 @@ impl Instance {
                 if v121 != 0.0 {
                 } else {
                     let v127 = if (if v122 == v123 { 1.0 } else { 0.0 }) != 0.0 && (if v125 == v123 { 1.0 } else { 0.0 }) != 0.0 { 1.0 } else { 0.0 };
+                    out127 = v127;
                 }
                 let v131 = v25 + ((v25 + v128).sqrt());
                 let v133 = v132 + v25;
@@ -327,7 +329,7 @@ impl Instance {
                 } else {
                     v181 = v37;
                 }
-            [v2, v13, v16, v19, v24, v28, v30, v34, v35, v41, v53, v62, v63, v64, v73, v74, v76, v78, v79, v80, v89, v98, v101, v107, v110, v114, v112, v117, v119, v121, v127, v131, v133, v135, v137, v139, v141, v143, v145, v147, v152, v154, v158, v165, v171, v173, v177, v179, v156, v160, v167, v175, v181]
+            [v2, v13, v16, v19, v24, v28, v30, v34, v35, v41, v53, v62, v63, v64, v73, v74, v76, v78, v79, v80, v89, v98, v101, v107, v110, v114, v112, v117, v119, v121, out127, v131, v133, v135, v137, v139, v141, v143, v145, v147, v152, v154, v158, v165, v171, v173, v177, v179, v156, v160, v167, v175, v181]
         };
         self.canonical_staged[0] = produced[0];
         self.canonical_staged[2] = produced[1];
@@ -500,6 +502,7 @@ impl Instance {
                 let v322 = parameters[105];
                 let v325 = parameters[104];
                 let v327 = parameters[106];
+                let mut out7: f64 = 0.0;
                 let v2 = v0 + v1;
                 let v4 = if v2 < v3 { 1.0 } else { 0.0 };
                 let v8: f64;
@@ -507,6 +510,7 @@ impl Instance {
                     v8 = v5;
                 } else {
                     let v7 = if v2 > v6 { 1.0 } else { 0.0 };
+                    out7 = v7;
                     let v165: f64;
                     if v7 != 0.0 {
                         v165 = v164;
@@ -602,7 +606,7 @@ impl Instance {
                 let v316 = v315 * ((v312 * v18).exp());
                 let v321 = v320 * ((v317 * v18).exp());
                 let v330 = (v325 * ((v322 * v18).exp())) * (v13 + (v327 * v16));
-            [v2, v4, v7, v12, v14, v45, v53, v56, v71, v78, v81, v89, v97, v114, v122, v130, v138, v146, v151, v157, v181, v196, v214, v229, v237, v254, v262, v270, v274, v279, v288, v301, v306, v311, v316, v321, v330, v171, v172, v191, v208, v209]
+            [v2, v4, out7, v12, v14, v45, v53, v56, v71, v78, v81, v89, v97, v114, v122, v130, v138, v146, v151, v157, v181, v196, v214, v229, v237, v254, v262, v270, v274, v279, v288, v301, v306, v311, v316, v321, v330, v171, v172, v191, v208, v209]
         };
         self.canonical_staged[18] = produced[0];
         self.canonical_staged[24] = produced[1];

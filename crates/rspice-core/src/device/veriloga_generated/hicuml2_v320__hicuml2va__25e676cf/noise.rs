@@ -4,6 +4,106 @@ use super::state::Instance;
 use crate::device::veriloga_generated::GeneratedEvalContext;
 pub use crate::device::veriloga_generated::{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor};
 
+
+#[inline(always)]
+fn rspice_limexp(x: f64) -> f64 {
+    if x < 80.0 { x.exp() } else { (80.0f64).exp() * (x - 80.0 + 1.0) }
+}
+
+#[inline(always)]
+fn rspice_limited_exp(x: f64) -> f64 {
+    if x > 80.0 {
+        5.54062238439351e34 * (x - 80.0 + 1.0)
+    } else if x < -80.0 {
+        1.804851387e-35
+    } else {
+        x.exp()
+    }
+}
+
+#[inline(always)]
+fn rspice_limited_exp_derivative(x: f64) -> f64 {
+    if x > 80.0 {
+        5.54062238439351e34
+    } else if x < -80.0 {
+        0.0
+    } else {
+        x.exp()
+    }
+}
+
+/// A packed derivative: one partial per unknown the value can reach.
+///
+/// A newtype rather than a bare `[f64; N]` so the elementwise rules emit as
+/// `a + b` and `a * s` instead of named calls. That is not cosmetic — these
+/// operations are most of a large model's generated source, and an operator is
+/// a dozen characters shorter than a call at every one of them.
+#[derive(Clone, Copy)]
+struct Lanes<const N: usize>([f64; N]);
+
+impl<const N: usize> core::ops::Add for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] + rhs.0[i];
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Sub for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] - rhs.0[i];
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Mul<f64> for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, rhs: f64) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] * rhs;
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Div<f64> for Lanes<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn div(self, rhs: f64) -> Self {
+        let mut out = self.0;
+        let mut i = 0;
+        while i < N {
+            out[i] = self.0[i] / rhs;
+            i += 1;
+        }
+        Self(out)
+    }
+}
+
+impl<const N: usize> core::ops::Index<usize> for Lanes<N> {
+    type Output = f64;
+    #[inline(always)]
+    fn index(&self, index: usize) -> &f64 {
+        &self.0[index]
+    }
+}
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 19] = [
     GeneratedNoiseDescriptor { mechanism: "WHITE_B_BP_RBX", label: Some("rbx"), kind: GeneratedNoiseKind::White, equation: 47, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "b", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, table_len: 0, table_log_interp: false },
     GeneratedNoiseDescriptor { mechanism: "WHITE_BP_BI_RBI", label: Some("rbi"), kind: GeneratedNoiseKind::White, equation: 48, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "bi", is_internal: true }, table_len: 0, table_log_interp: false },
