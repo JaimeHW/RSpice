@@ -64,36 +64,22 @@ pub(crate) mod workflows;
 pub use routing::availability::{
     SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
 };
-pub use workflows::capability_workflow::{
-    CapabilityWorkflowId, CapabilityWorkflowIdParseError, CapabilityWorkflowMetadata,
-};
+pub use workflows::capability_workflow::CapabilityWorkflowId;
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
-pub use documents::model_correlation::{
-    CorrelationAggregationDraft, CorrelationCalculationDraft, CorrelationDatasetClassDraft,
-    CorrelationDatasetDraft, CorrelationMetricDraft, CorrelationReleaseRoleDraft,
-    CorrelationReviewDraft, ModelCorrelationDialog, ModelCorrelationSection,
-    ModelCorrelationWorkspaceState,
-};
-pub use documents::model_editor::{
-    ModelDefinitionDelta, ModelEditorDraft, ModelEditorSection, ModelEditorState,
-    ModelFieldDiagnostic, ModelParameterDraft, ModelParameterKind, ModelValidationEvidence,
-};
 pub use routing::navigation::{
     BrowserHistoryEffect, RouteTransition, RouteTransitionSource, SurfaceNavigation,
 };
 pub use preferences::{
     BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, ConsoleLaunchBehavior,
-    CursorInterpolation, DisplayedSignificantDigits, EngineeringExportFormat, LargeDatasetDisplay,
-    ResultPresentationPolicy, ResultsPreferences, ScalarPreference, TogglePreference,
-    UserPreferences, WorkspacePreferences, WorkspacePreset,
+    CursorInterpolation, EngineeringExportFormat, LargeDatasetDisplay, ResultPresentationPolicy,
+    ScalarPreference, TogglePreference, UserPreferences, WorkspacePreferences, WorkspacePreset,
 };
-pub use documents::result_document::{ResultViewer, ResultsState};
+pub use documents::result_document::ResultViewer;
 pub use lifecycle::session::{
-    InspectorEdit, SavedSelectionBulkFilter, SelectionBulkFilter, SelectionBulkFilterSession,
-    SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard, SymbolDocumentSnapshot,
-    SymbolGridSpacing, SymbolSelection, SymbolTool, SymbolUiState, UiSessionState,
+    SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard,
+    SymbolDocumentSnapshot, SymbolGridSpacing, SymbolSelection, SymbolTool, UiSessionState,
     UiSessionStateSer, mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about,
-    mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about, symbol_shape_bounds,
+    mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
 };
 pub(crate) use lifecycle::session::{SchematicSelectionRecovery, SchematicVisibilityRecovery};
 pub use shortcuts::{

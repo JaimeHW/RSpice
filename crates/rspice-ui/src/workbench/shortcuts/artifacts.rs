@@ -18,44 +18,25 @@ pub use import_io::{
     BrowserShortcutArtifactImportCancelOutcome, cancel_browser_shortcut_artifact_import,
     poll_browser_shortcut_artifact_import, start_browser_shortcut_artifact_import,
 };
-pub use import_io::{
-    MAX_SHORTCUT_ARTIFACT_SOURCE_BYTES, ReadyShortcutArtifactSource, ShortcutArtifactImportError,
-    ShortcutArtifactImportErrorKind, ShortcutArtifactImportOutcome,
-};
+pub use import_io::{ReadyShortcutArtifactSource, ShortcutArtifactImportOutcome};
 #[cfg(not(target_arch = "wasm32"))]
-pub use import_io::{
-    NativeShortcutArtifactImportIo, ShortcutArtifactImportIo, import_shortcut_artifact_source,
-    import_shortcut_artifact_source_with_io,
-};
+pub use import_io::import_shortcut_artifact_source;
 pub use io::{
-    MAX_SHORTCUT_JSON_ARTIFACT_BYTES, MAX_SHORTCUT_MARKDOWN_ARTIFACT_BYTES,
-    MAX_SHORTCUT_PDF_ARTIFACT_BYTES, PreparedShortcutArtifact, ShortcutArtifactExportOutcome,
-    ShortcutArtifactFormat, ShortcutArtifactIoError, export_shortcut_artifact,
-    normalize_shortcut_artifact_filename, prepare_shortcut_artifact,
+    PreparedShortcutArtifact, ShortcutArtifactExportOutcome, ShortcutArtifactFormat,
+    export_shortcut_artifact, prepare_shortcut_artifact,
 };
-pub use markdown::serialize_shortcut_reference_markdown;
 pub use merge::{
-    ImportBindingClass, ImportClassSummary, ShortcutConflictPolicy, ShortcutImportApplyError,
-    ShortcutImportConflict, ShortcutImportConflictKind, ShortcutImportDecision,
-    ShortcutImportOptions, ShortcutImportPlan, ShortcutImportPlanError, ShortcutImportReceipt,
-    ShortcutMergePolicy, apply_shortcut_import, plan_shortcut_import, rollback_shortcut_import,
-    shortcut_library_digest,
+    ImportBindingClass, ShortcutConflictPolicy, ShortcutImportOptions, ShortcutImportPlan,
+    ShortcutImportReceipt, ShortcutMergePolicy, apply_shortcut_import, plan_shortcut_import,
+    rollback_shortcut_import, shortcut_library_digest,
 };
-pub use pdf::{ShortcutPdfError, serialize_shortcut_reference_pdf};
 pub use projection::{
-    ShortcutExportError, ShortcutExportRequest, ShortcutExportScope, ShortcutReferenceModel,
-    ShortcutReferenceRow, build_shortcut_reference_model, serialize_shortcut_reference_json,
+    ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
+    serialize_shortcut_reference_json,
 };
-pub use schema::{
-    DecodedShortcutArtifact, SHORTCUT_ARTIFACT_FORMAT, SHORTCUT_ARTIFACT_SCHEMA_VERSION,
-    ShortcutArtifactCoverage, ShortcutArtifactManifest, ShortcutArtifactSchemaError,
-    decode_shortcut_artifact_json,
-};
+pub use schema::{DecodedShortcutArtifact, decode_shortcut_artifact_json};
 pub use vscode::{
-    DetectedRspiceShortcutArtifact, DetectedShortcutArtifact, VSCODE_COMMAND_MAPPINGS,
-    VSCODE_MAPPING_VERSION, VscodeAdapterError, VscodeCommandMapping, VscodeDiagnosticCode,
-    VscodeDiagnosticSeverity, VscodeEntryDiagnostic, VscodeEntryDisposition, VscodeEntryOutcome,
-    VscodeHostPlatform, VscodeImportReport, VscodeShortcutAdaptation, adapt_vscode_keybindings,
+    DetectedShortcutArtifact, VscodeAdapterError, VscodeHostPlatform, VscodeImportReport,
     detect_shortcut_artifact,
 };
 
