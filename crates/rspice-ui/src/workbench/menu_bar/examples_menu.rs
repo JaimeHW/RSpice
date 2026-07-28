@@ -1,3 +1,7 @@
+//! The examples menu.
+//!
+//! Loads a named demonstration circuit into the session.
+
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app_state::AppState;
 use crate::workbench::examples::{EXAMPLES, load_example_into_app};

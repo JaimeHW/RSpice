@@ -1,3 +1,6 @@
+//! Pole-zero analysis configuration: the transfer function under analysis
+//! and whether poles, zeros, or both are extracted.
+
 // Pole-Zero Configuration
 //=============================================================================
 

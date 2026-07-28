@@ -1,3 +1,8 @@
+//! Number locale.
+//!
+//! Which decimal and grouping separators the host platform uses, so a typed
+//! value is parsed the way the user typed it.
+
 use super::UiNumberLocale;
 
 /// Query the platform's active numeric locale at the application boundary.

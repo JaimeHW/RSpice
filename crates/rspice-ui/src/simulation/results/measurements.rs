@@ -1,3 +1,9 @@
+//! Measurements over a result.
+//!
+//! Derived scalars — rise time, overshoot, bandwidth, gain margin — computed
+//! from the stored traces rather than requested from the engine, so a
+//! measurement can be added without re-running.
+
 use super::*;
 
 impl SimulationResult {

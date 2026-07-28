@@ -1,3 +1,8 @@
+//! The built-in primitive cells.
+//!
+//! The device library every project starts with, which cannot be edited or
+//! removed.
+
 use super::{Cell, Library, LibraryManager};
 
 impl LibraryManager {

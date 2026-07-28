@@ -1,3 +1,8 @@
+//! Optimization algorithms.
+//!
+//! The search strategies the engine can drive: gradient, pattern, and
+//! population methods, each stepping the design variables toward the goal.
+
 use std::collections::HashMap;
 
 use super::*;

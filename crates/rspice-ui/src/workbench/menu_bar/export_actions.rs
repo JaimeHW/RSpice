@@ -1,3 +1,7 @@
+//! Export menu actions.
+//!
+//! Wires the File ▸ Export items to the export workflows.
+
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 

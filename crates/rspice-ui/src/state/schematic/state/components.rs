@@ -1,3 +1,5 @@
+//! Placing and removing components.
+
 use super::*;
 
 impl SchematicState {

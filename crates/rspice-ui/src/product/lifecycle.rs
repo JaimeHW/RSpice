@@ -1,3 +1,9 @@
+//! Object and job lifecycle.
+//!
+//! The states a product object and a background job move through, and the
+//! transitions that are legal between them. Illegal transitions are an
+//! error rather than a silent no-op.
+
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};

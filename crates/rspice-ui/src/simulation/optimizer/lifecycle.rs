@@ -1,3 +1,9 @@
+//! Optimizer run lifecycle.
+//!
+//! Starting, pausing, resuming, and cancelling a search, and the state that
+//! has to be consistent at each boundary for a resumed run to continue
+//! rather than restart.
+
 use crate::time_compat::Instant;
 use std::collections::HashMap;
 

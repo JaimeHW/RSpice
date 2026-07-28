@@ -1,3 +1,5 @@
+//! Property sheet for the MESFET.
+
 use super::*;
 
 impl PropertyRegistry {

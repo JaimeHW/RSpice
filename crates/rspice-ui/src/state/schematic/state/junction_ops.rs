@@ -1,3 +1,9 @@
+//! Junction maintenance.
+//!
+//! Adds and removes the junction dots implied by geometry as wires are
+//! edited, so a crossing that becomes a T-connection gains its dot without
+//! the designer placing one.
+
 use std::collections::HashSet;
 
 use super::*;

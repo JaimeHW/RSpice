@@ -1,3 +1,9 @@
+//! The product object kinds.
+//!
+//! What the application can own — projects, cells, views, plans, runs — as
+//! one enumeration, so identity, lifecycle, and permission checks all speak
+//! about the same set.
+
 use serde::{Deserialize, Serialize};
 
 /// Canonical commercial objects. Serialized names are the stable IDs used by

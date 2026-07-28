@@ -1,3 +1,9 @@
+//! Object identity and reference designators.
+//!
+//! Allocates the ids a schematic addresses its objects by, and the R1/C2
+//! style designators shown on the canvas. Both are stable across a save and
+//! reload; neither is reused after a delete.
+
 use super::*;
 use std::collections::{HashMap, HashSet};
 

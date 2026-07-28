@@ -1,3 +1,9 @@
+//! A design variable.
+//!
+//! The parameter being optimized, its bounds, and its step. Bounds are hard:
+//! the search never proposes a point outside them, so every evaluation is a
+//! deck the engine can actually run.
+
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

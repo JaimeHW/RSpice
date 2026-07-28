@@ -1,3 +1,5 @@
+//! Unit display preferences.
+
 use std::collections::BTreeMap;
 
 use serde::de::DeserializeOwned;

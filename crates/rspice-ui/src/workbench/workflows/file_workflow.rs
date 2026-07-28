@@ -1,3 +1,8 @@
+//! Schematic file workflows.
+//!
+//! New, open, save, and save-as for a standalone schematic, behind the same
+//! I/O trait split as the export workflows.
+
 use std::path::{Path, PathBuf};
 
 use crate::diagnostics::ConsoleMessage;

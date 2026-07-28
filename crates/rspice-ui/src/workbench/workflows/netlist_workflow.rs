@@ -1,3 +1,9 @@
+//! Netlist workspace workflows.
+//!
+//! Validating the visible deck and composing the source a run executes.
+//! Validation is pinned to an exact content digest and project revision, so
+//! an edit after validation invalidates it rather than being carried along.
+
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;

@@ -1,3 +1,5 @@
+//! The Simulate menu.
+
 use crate::workbench::app_state::AppState;
 
 /// Open the simulation options dialog with a fresh draft of the

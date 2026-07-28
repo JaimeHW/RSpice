@@ -1,3 +1,5 @@
+//! Violation severities, kinds, and locations.
+
 use serde::{Deserialize, Serialize};
 
 use crate::state::{CellViewRef, Point};

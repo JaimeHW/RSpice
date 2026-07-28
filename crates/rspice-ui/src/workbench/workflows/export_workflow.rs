@@ -1,3 +1,9 @@
+//! Export workflows.
+//!
+//! Writing a document out — image, netlist, waveform, report — through an
+//! I/O trait so the native path writes a file and the browser path offers a
+//! download, and the workflow itself does not know which.
+
 use std::path::{Path, PathBuf};
 
 /// Save dialog configuration for export workflows.

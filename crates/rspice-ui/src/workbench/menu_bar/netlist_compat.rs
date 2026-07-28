@@ -1,3 +1,9 @@
+//! SPICE-to-AHDL netlist compatibility.
+//!
+//! Rewrites the constructs an AHDL-flavoured engine spells differently, and
+//! resolves Verilog-A include paths so a deck exported for another tool
+//! still finds its sources.
+
 use std::collections::HashSet;
 
 pub(super) fn spice_to_ahdl_compatible_netlist(spice_netlist: &str) -> String {

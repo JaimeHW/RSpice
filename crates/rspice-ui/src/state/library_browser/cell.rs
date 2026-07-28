@@ -1,3 +1,5 @@
+//! A cell: one design, with its views.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

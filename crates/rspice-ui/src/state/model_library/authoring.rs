@@ -1,3 +1,9 @@
+//! Project-authored device models.
+//!
+//! Models a project defines itself rather than inheriting from a PDK. They
+//! carry their own revision so a design can name the exact model text it was
+//! simulated against.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::DeviceModel;

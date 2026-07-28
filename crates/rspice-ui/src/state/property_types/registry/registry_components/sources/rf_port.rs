@@ -1,3 +1,6 @@
+//! Property sheet for the RF port, including its reference impedance and
+//! the port number S-parameter runs index it by.
+
 use super::*;
 
 impl PropertyRegistry {

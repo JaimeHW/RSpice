@@ -1,3 +1,7 @@
+//! Reading a simulation result.
+//!
+//! Signal lookup by name, sweep-axis access, and the unit each carries.
+
 use super::*;
 
 impl SimulationResult {

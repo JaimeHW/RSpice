@@ -1,3 +1,5 @@
+//! Property sheet for the bipolar transistor.
+
 use super::*;
 
 impl PropertyRegistry {

@@ -1,3 +1,10 @@
+//! Model source authority.
+//!
+//! Where a model came from and what that entitles it to. A PDK model is
+//! read-only; a project model can be edited; an unauthenticated source
+//! cannot seal a run. The authority is carried with the model rather than
+//! inferred from its path.
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

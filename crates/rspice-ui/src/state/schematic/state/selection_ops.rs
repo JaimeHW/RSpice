@@ -1,3 +1,8 @@
+//! Selection.
+//!
+//! What is selected, and the set operations over it — rubber band, add,
+//! toggle, and select-all-of-kind.
+
 #[cfg(test)]
 use super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::*;

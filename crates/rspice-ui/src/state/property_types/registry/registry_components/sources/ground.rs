@@ -1,3 +1,5 @@
+//! Property sheet for ground.
+
 use super::shared::source_symbol_property;
 use super::*;
 

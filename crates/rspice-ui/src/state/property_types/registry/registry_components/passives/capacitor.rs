@@ -1,3 +1,5 @@
+//! Property sheet for the capacitor.
+
 use super::*;
 
 impl PropertyRegistry {

@@ -1,3 +1,8 @@
+//! Optimization goals.
+//!
+//! What the search is trying to achieve — minimize, maximize, or meet a
+//! target — and how multiple goals combine into one score.
+
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

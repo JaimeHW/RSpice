@@ -1,3 +1,8 @@
+//! Process corners.
+//!
+//! The named corner a model section is selected by, and the default when a
+//! design does not choose one.
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

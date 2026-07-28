@@ -1,3 +1,7 @@
+//! Transient analysis configuration: stop time, step, and the initial
+//! condition handling that decides whether the run starts from a DC
+//! operating point or from stored conditions.
+
 // Transient Analysis Configuration
 //=============================================================================
 

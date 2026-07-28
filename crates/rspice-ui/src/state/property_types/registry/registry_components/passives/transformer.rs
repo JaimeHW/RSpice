@@ -1,3 +1,5 @@
+//! Property sheet for the transformer: turns ratio and coupling.
+
 use super::*;
 
 impl PropertyRegistry {

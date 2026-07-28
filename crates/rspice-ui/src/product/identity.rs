@@ -1,3 +1,8 @@
+//! Object identity.
+//!
+//! UUID-backed identifiers, and the parse errors that keep an invalid one
+//! from being guessed into a valid object.
+
 use std::fmt;
 use std::str::FromStr;
 

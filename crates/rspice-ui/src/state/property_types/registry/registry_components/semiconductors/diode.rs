@@ -1,3 +1,5 @@
+//! Property sheet for the diode.
+
 use super::*;
 
 impl PropertyRegistry {

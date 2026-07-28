@@ -1,3 +1,5 @@
+//! Canonical capability fixture used by the readiness tests.
+
 use super::*;
 
 pub(super) fn canonical_fixture() -> CapabilityFixture {

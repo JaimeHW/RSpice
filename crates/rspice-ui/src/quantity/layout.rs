@@ -1,3 +1,9 @@
+//! Layout database units.
+//!
+//! The integer grid a schematic stores coordinates in. Geometry is integral
+//! so a saved design is exactly reproducible; conversion to and from
+//! physical units happens only at the edges.
+
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};

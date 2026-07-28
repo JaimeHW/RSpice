@@ -1,3 +1,5 @@
+//! AC analysis configuration: sweep type, range, and points per decade.
+
 // AC Analysis Configuration
 //=============================================================================
 

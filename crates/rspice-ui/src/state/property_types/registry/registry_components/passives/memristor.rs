@@ -1,3 +1,6 @@
+//! Property sheet for the memristor, including the window function and the
+//! state bounds its model integrates between.
+
 use super::*;
 
 impl PropertyRegistry {

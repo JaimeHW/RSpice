@@ -1,3 +1,8 @@
+//! Extracting checkable data from a schematic.
+//!
+//! Flattens the design into the nets, terminals, and parameters the rules
+//! examine, resolving junctions so two wires that meet at a dot are one net.
+
 use super::checker::{DrcChecker, DrcConfig};
 use super::input::{
     ComponentInfo, JunctionInfo, NetLabelInfo, ParameterRangeIssue, PinInfo, WireInfo,

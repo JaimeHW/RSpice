@@ -1,3 +1,9 @@
+//! Net extraction.
+//!
+//! Unions connected geometry into nets with a disjoint-set over point keys,
+//! which is what makes extraction linear in the number of wire endpoints
+//! rather than quadratic.
+
 use std::collections::{HashMap, HashSet};
 
 /// Internal net tracking info.

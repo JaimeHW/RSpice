@@ -1,3 +1,5 @@
+//! Property sheet for the MOSFET.
+
 use super::*;
 
 impl PropertyRegistry {

@@ -1,3 +1,5 @@
+//! Property sheet for the inductor.
+
 use super::*;
 
 impl PropertyRegistry {

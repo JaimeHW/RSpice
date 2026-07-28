@@ -1,3 +1,5 @@
+//! Property sheet for the saturable inductor and its B-H curve parameters.
+
 use super::*;
 
 impl PropertyRegistry {

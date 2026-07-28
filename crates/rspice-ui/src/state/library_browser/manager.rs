@@ -1,3 +1,9 @@
+//! The library/cell/view hierarchy.
+//!
+//! The three-column navigation model every commercial EDA tool uses, and the
+//! resolution rules behind it: a cell is addressed by library and name, and
+//! a view by all three, so the same cell name in two libraries is two cells.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

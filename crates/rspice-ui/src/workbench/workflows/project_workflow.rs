@@ -1,3 +1,9 @@
+//! Project file workflows.
+//!
+//! New, open, save, save-as, and close for a project, including the
+//! checkpoint and binding-receipt bookkeeping that makes a reopened project
+//! resume where it left off.
+
 use std::path::Path;
 
 use crate::diagnostics::ConsoleMessage;

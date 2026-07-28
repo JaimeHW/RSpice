@@ -1,3 +1,9 @@
+//! The optimizer loop.
+//!
+//! Proposes a point, runs the analyses, scores the result against the goals,
+//! and decides whether to continue. Every iteration is recorded so the run
+//! can be inspected after the fact.
+
 use std::collections::HashMap;
 
 use super::*;

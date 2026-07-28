@@ -1,3 +1,10 @@
+//! The model library.
+//!
+//! Owns every model a project can resolve, from every source, and seals the
+//! exact set a run executed against. Sealing is by content digest, so a
+//! library that changes underneath a completed run is detectable rather
+//! than silently assumed identical.
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};

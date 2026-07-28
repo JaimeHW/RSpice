@@ -1,3 +1,6 @@
+//! Property sheets for time-varying voltage sources: pulse, sine, PWL,
+//! exponential, and single-frequency FM.
+
 use super::*;
 
 impl PropertyRegistry {

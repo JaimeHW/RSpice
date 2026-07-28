@@ -1,3 +1,5 @@
+//! Property sheet for the JFET.
+
 use super::*;
 
 impl PropertyRegistry {

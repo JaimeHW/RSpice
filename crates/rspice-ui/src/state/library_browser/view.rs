@@ -1,3 +1,8 @@
+//! View types.
+//!
+//! What a view of a cell can be — schematic, symbol, netlist, Verilog-A —
+//! and which of them a given cell is allowed to have.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

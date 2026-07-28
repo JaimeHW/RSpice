@@ -1,3 +1,9 @@
+//! The design rule checker.
+//!
+//! Runs the configured rules over an extracted design and collects the
+//! violations. Which rules run and at what severity is configuration, so a
+//! project can promote a warning to an error.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

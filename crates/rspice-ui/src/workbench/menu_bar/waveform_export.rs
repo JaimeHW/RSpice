@@ -1,3 +1,5 @@
+//! Waveform export actions.
+
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};

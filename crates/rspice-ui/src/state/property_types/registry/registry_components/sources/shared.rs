@@ -1,3 +1,6 @@
+//! Fields every source shares: the symbol it draws with, and the AC
+//! magnitude and phase that a small-signal analysis excites it at.
+
 use super::*;
 
 pub(super) fn source_symbol_property(

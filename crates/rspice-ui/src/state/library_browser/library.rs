@@ -1,3 +1,5 @@
+//! A library: a named collection of cells.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

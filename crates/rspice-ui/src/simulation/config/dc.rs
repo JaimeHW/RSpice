@@ -1,3 +1,6 @@
+//! DC sweep configuration: the swept source, its range, and any nested
+//! second sweep.
+
 // DC Sweep Configuration
 //=============================================================================
 

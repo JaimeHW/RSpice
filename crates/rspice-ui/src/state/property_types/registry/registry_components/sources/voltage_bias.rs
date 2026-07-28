@@ -1,3 +1,5 @@
+//! Property sheet for the DC voltage source.
+
 use super::shared::source_symbol_property;
 use super::*;
 

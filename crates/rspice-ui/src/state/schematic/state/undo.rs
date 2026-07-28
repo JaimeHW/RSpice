@@ -1,3 +1,9 @@
+//! Schematic undo and redo.
+//!
+//! Snapshot-based history over the schematic document. The stack is bounded,
+//! and a snapshot is taken at the commit boundary of an operation rather
+//! than per mutation, so one user action is one undo step.
+
 use super::*;
 
 impl SchematicState {

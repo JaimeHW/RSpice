@@ -1,3 +1,9 @@
+//! File path helpers shared by the workflows.
+//!
+//! Extension checking and normalization, kept in one place because a
+//! document saved without its expected extension is a document the next
+//! open will not find.
+
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::file_workflow::FileWorkflowIo;
 

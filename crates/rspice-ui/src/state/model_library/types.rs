@@ -1,3 +1,5 @@
+//! Model types, and the device each maps onto.
+
 use serde::{Deserialize, Serialize};
 
 /// Type/category of device model

@@ -1,3 +1,8 @@
+//! Field identity.
+//!
+//! Stable identifiers for the fields a command or a form addresses, so a
+//! recorded interaction can be replayed against a later build.
+
 use std::fmt;
 use std::str::FromStr;
 

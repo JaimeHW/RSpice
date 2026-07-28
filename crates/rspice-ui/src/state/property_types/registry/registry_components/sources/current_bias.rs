@@ -1,3 +1,5 @@
+//! Property sheet for the DC current source.
+
 use super::*;
 
 impl PropertyRegistry {

@@ -1,3 +1,5 @@
+//! Sensitivity analysis configuration.
+
 //=============================================================================
 
 /// Sensitivity analysis configuration

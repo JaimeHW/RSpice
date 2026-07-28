@@ -1,3 +1,5 @@
+//! Property sheet for the resistor.
+
 use super::*;
 
 impl PropertyRegistry {

@@ -1,3 +1,8 @@
+//! DC operating point results.
+//!
+//! Node voltages, branch currents, and the small-signal device parameters
+//! the operating point implies.
+
 use std::collections::HashMap;
 
 //=============================================================================

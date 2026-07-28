@@ -1,3 +1,5 @@
+//! What the rules examine.
+
 /// Simplified component info for DRC checking.
 #[derive(Debug, Clone)]
 pub struct ComponentInfo {

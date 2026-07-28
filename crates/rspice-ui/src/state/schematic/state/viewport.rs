@@ -1,3 +1,7 @@
+//! Persisted view state.
+//!
+//! The pan, zoom, and grid a schematic reopens at.
+
 use super::*;
 
 impl SchematicState {

@@ -1,3 +1,9 @@
+//! Formatting a quantity for display.
+//!
+//! Chooses the engineering prefix and significant-figure count a value is
+//! shown at. The policy is explicit so the same value reads identically in
+//! a property field, a cursor readout, and a printed report.
+
 use std::f64::consts::TAU;
 
 use super::{

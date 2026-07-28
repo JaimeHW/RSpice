@@ -1,3 +1,9 @@
+//! Parsing a typed quantity.
+//!
+//! Accepts SPICE suffixes, engineering prefixes, and plain exponents,
+//! resolved against the field's expected kind so an ambiguous suffix
+//! (`M` for milli against `MEG`) is read the way SPICE reads it.
+
 use std::fmt;
 
 use super::{

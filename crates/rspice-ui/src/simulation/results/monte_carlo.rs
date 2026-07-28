@@ -1,3 +1,8 @@
+//! Monte Carlo results.
+//!
+//! Per-variable statistics across the sample set, and the yield each
+//! specification passed at.
+
 /// Monte Carlo variable summary in UI-friendly form.
 #[derive(Debug, Clone)]
 pub struct MonteCarloVariableResult {
