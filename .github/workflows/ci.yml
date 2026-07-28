@@ -84,6 +84,13 @@ jobs:
           -- --skip test_ngspice_ --skip test_full_ngspice
       - name: Core library unit tests
         run: cargo test --locked -p rspice-core --lib
+      - name: Verilog-A harness unit tests
+        # `device::veriloga_harness` sits behind `veriloga-builtins-base`, so the
+        # featureless run above compiles the whole module — oracle included —
+        # out, and none of its tests had ever executed in CI. The feature enables
+        # no models on its own, so this costs a compile of the harness and
+        # nothing of the corpus.
+        run: cargo test --locked -p rspice-core --lib --features veriloga-builtins-base
       - name: Clear core test artifacts
         run: cargo clean
       - name: Test non-UI crates (fast tier)

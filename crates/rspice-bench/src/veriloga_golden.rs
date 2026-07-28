@@ -309,14 +309,23 @@ fn relative(left: f64, right: f64) -> f64 {
 /// below `abstol` and cannot change any decision it makes. When a whole record
 /// is noise, a relative rule declares the noise significant.
 ///
-/// The floors differ because the quantities do. A current or a conductance two
-/// orders below `abstol`/`GMIN` — both 1e-12 — is beneath the gmin conductance
-/// every node already carries in parallel. A *capacitance* of 1e-15 F is an
-/// ordinary device, so charge is floored near `chgtol` instead; getting this
-/// wrong in the other direction would silently retire the capacitance checks
-/// that found today's defects.
-const CURRENT_FLOOR: f64 = 1.0e-14;
-const CONDUCTANCE_FLOOR: f64 = 1.0e-14;
+/// The floors differ because the quantities do. A current or a conductance
+/// below `abstol`/`GMIN` — both 1e-12 — is beneath the gmin conductance every
+/// node already carries in parallel. A *capacitance* of 1e-15 F is an ordinary
+/// device, so charge is floored near `chgtol` instead; getting this wrong in the
+/// other direction would silently retire the capacitance checks that found
+/// today's defects.
+///
+/// The current and conductance floors sat at 1e-14 until 2026-07-28 — two orders
+/// below the tolerances this comment already claimed they came from, which made
+/// the prose true of the intent and false of the numbers. `hicumL2va` is what
+/// exposed it: its entry is `1.0000000000000002e-12`, one ulp above the old
+/// threshold and exactly the `GMIN` the model asks for and the backend correctly
+/// supplies. The gate was failing a model for being right, on a knife-edge. The
+/// floors now are the tolerances, so an entry the solver provably cannot act on
+/// cannot fail the replay.
+const CURRENT_FLOOR: f64 = 1.0e-12;
+const CONDUCTANCE_FLOOR: f64 = 1.0e-12;
 const CHARGE_FLOOR: f64 = 1.0e-21;
 
 /// Share of the largest entry in the same record below which an entry carries

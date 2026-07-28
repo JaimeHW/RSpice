@@ -100,6 +100,31 @@ const AUDIT_CONVERGENCE_TOLERANCE: Value = 1.0e-6;
 /// is reported as a coverage gap rather than compared.
 const AUDIT_MAX_USABLE_UNCERTAINTY: Value = 1.0e-2;
 
+/// How far the one-sided slopes on either side of the probe point may disagree,
+/// relative to the entry, before the point is suspected of being a kink.
+///
+/// Compact models are full of guards that swap an exact expression for its
+/// numerically stable limit form — Mextram's epilayer picks
+/// `xi_w = pav / (pav + 1)` over `Ec / (Ec + Vc1c2)` inside
+/// `abs(Vc1c2) < 1e-5 * Vt`. The two agree in *value* at the boundary and
+/// generally not in *slope*, so the function is continuous but not
+/// differentiable there. A device is right to stamp the derivative of the branch
+/// it is actually in; a central difference straddling the boundary is measuring
+/// something else entirely.
+const AUDIT_DISCONTINUITY_JUMP: Value = 1.0e-1;
+
+/// How much of the one-sided disagreement must survive a fourfold reduction in
+/// step before it is read as a kink rather than as curvature.
+///
+/// This is what makes the test discriminating rather than a blanket excuse. For
+/// a differentiable function the gap between the slopes measured on either side
+/// is `O(h * f'')` and shrinks with the step — across the ladder's 4:1 span it
+/// should fall to about a quarter. Across a kink it is the jump in slope itself,
+/// which does not shrink at all. Requiring the disagreement to *persist* means a
+/// merely stiff entry cannot excuse itself, and a real dropped term — which is a
+/// smooth error — can never be mistaken for one.
+const AUDIT_DISCONTINUITY_PERSISTENCE: Value = 6.0e-1;
+
 /// How far outside its own error bar a difference may sit before disagreement
 /// counts as real rather than as noise in the measurement.
 const AUDIT_UNCERTAINTY_SLACK: Value = 10.0;
@@ -213,17 +238,32 @@ pub struct StampAuditEntry {
     pub uncertainty: Value,
     /// `|stamped - numeric|` relative to the larger magnitude, floored.
     pub relative_error: Value,
+    /// Whether the probe point sits on a kink in this entry's own dependence.
+    ///
+    /// Set when the slopes measured on either side of the point disagree and go
+    /// on disagreeing as the step shrinks. Where this is true there is no single
+    /// derivative for the stamp to be wrong about, so the entry is a coverage
+    /// gap rather than a failure.
+    pub discontinuous: bool,
 }
 
 impl StampAuditEntry {
     /// Whether the difference is precise enough to judge the stamp tightly.
+    ///
+    /// A kink fails this however tight the ladder looks. Steps either side of a
+    /// slope discontinuity agree with each other beautifully and converge on the
+    /// average of two slopes, neither of which the stamp is obliged to report.
     pub fn converged(&self) -> bool {
-        self.uncertainty <= AUDIT_CONVERGENCE_TOLERANCE
+        !self.discontinuous && self.uncertainty <= AUDIT_CONVERGENCE_TOLERANCE
     }
 
     /// Whether the difference is too imprecise to say anything at all.
+    ///
+    /// A kink counts: a difference taken across one is precise and meaningless
+    /// at the same time, which is exactly the case this has to exclude from
+    /// comparison rather than let through as a tight failure.
     pub fn unverifiable(&self) -> bool {
-        !(self.uncertainty <= AUDIT_MAX_USABLE_UNCERTAINTY)
+        self.discontinuous || !(self.uncertainty <= AUDIT_MAX_USABLE_UNCERTAINTY)
     }
 
     /// Whether either side of this entry is large enough for a solver to act on.
@@ -646,9 +686,10 @@ impl GoldenHarness {
         &mut self,
         unknowns: &[Value],
         relative_step: Value,
-    ) -> Result<Vec<Value>, GoldenError> {
+    ) -> Result<DifferenceRung, GoldenError> {
         let size = self.size();
         let mut jacobian = vec![0.0; size * size];
+        let mut asymmetry = vec![0.0; size * size];
         let mut perturbed = unknowns.to_vec();
 
         for col in 0..size {
@@ -671,10 +712,17 @@ impl GoldenHarness {
                     - 8.0 * sampled[1][row]
                     + sampled[0][row])
                     / (12.0 * step);
+                asymmetry[row * size + col] = one_sided_gap(
+                    [sampled[0][row], sampled[1][row], sampled[2][row], sampled[3][row]],
+                    step,
+                );
             }
         }
 
-        Ok(jacobian)
+        Ok(DifferenceRung {
+            derivative: jacobian,
+            asymmetry,
+        })
     }
 
     /// The same fourth-order rule applied to the recovered charge vector.
@@ -683,9 +731,10 @@ impl GoldenHarness {
         unknowns: &[Value],
         relative_step: Value,
         scale: Value,
-    ) -> Result<Vec<Value>, GoldenError> {
+    ) -> Result<DifferenceRung, GoldenError> {
         let size = self.size();
         let mut derivatives = vec![0.0; size * size];
+        let mut asymmetry = vec![0.0; size * size];
         let mut perturbed = unknowns.to_vec();
 
         for col in 0..size {
@@ -708,10 +757,17 @@ impl GoldenHarness {
                     - 8.0 * sampled[1][row]
                     + sampled[0][row])
                     / (12.0 * step);
+                asymmetry[row * size + col] = one_sided_gap(
+                    [sampled[0][row], sampled[1][row], sampled[2][row], sampled[3][row]],
+                    step,
+                );
             }
         }
 
-        Ok(derivatives)
+        Ok(DifferenceRung {
+            derivative: derivatives,
+            asymmetry,
+        })
     }
 
     /// Stamp at `unknowns` with simulation parameters of the caller's choosing.
@@ -836,14 +892,14 @@ fn audit_against_ladder(
     model_name: &'static str,
     size: usize,
     stamped: &[Value],
-    ladder: &[Vec<Value>],
+    ladder: &[DifferenceRung],
 ) -> StampAudit {
     // Everything is judged relative to the largest entry the device actually
     // stamped, so "verified" means "verified to a precision the solver could act
     // on" rather than "resolved to six figures in isolation".
     let block_scale = stamped
         .iter()
-        .chain(ladder.iter().flatten())
+        .chain(ladder.iter().flat_map(|rung| rung.derivative.iter()))
         .filter(|value| value.is_finite())
         .fold(0.0, |worst: Value, value| worst.max(value.abs()));
     let floor = (block_scale * AUDIT_BLOCK_RELATIVE_FLOOR).max(AUDIT_ABSOLUTE_FLOOR);
@@ -859,7 +915,7 @@ fn audit_against_ladder(
             // truncation error.
             let mut best: Option<(Value, Value)> = None;
             for window in ladder.windows(2) {
-                let (coarser, finer) = (window[0][index], window[1][index]);
+                let (coarser, finer) = (window[0].derivative[index], window[1].derivative[index]);
                 if !coarser.is_finite() || !finer.is_finite() {
                     continue;
                 }
@@ -876,6 +932,21 @@ fn audit_against_ladder(
                 0.0
             };
 
+            // A kink shows up as a one-sided disagreement that is both large
+            // against the entry and stubborn against the step. Curvature clears
+            // the first test and fails the second; a dropped term is smooth and
+            // fails both, which is what keeps this from excusing a real defect.
+            let discontinuous = match (ladder.first(), ladder.last()) {
+                (Some(coarsest), Some(finest)) if ladder.len() > 1 => {
+                    let (coarse_gap, fine_gap) =
+                        (coarsest.asymmetry[index], finest.asymmetry[index]);
+                    let scale = magnitude_scale(stamped_value, numeric, floor);
+                    fine_gap / scale > AUDIT_DISCONTINUITY_JUMP
+                        && fine_gap > coarse_gap * AUDIT_DISCONTINUITY_PERSISTENCE
+                }
+                _ => false,
+            };
+
             entries.push(StampAuditEntry {
                 row: row as u32,
                 col: col as u32,
@@ -883,6 +954,7 @@ fn audit_against_ladder(
                 numeric,
                 uncertainty,
                 relative_error,
+                discontinuous,
             });
         }
     }
@@ -896,6 +968,32 @@ fn audit_against_ladder(
 
 fn magnitude_scale(left: Value, right: Value, floor: Value) -> Value {
     left.abs().max(right.abs()).max(floor)
+}
+
+/// One step of the ladder: the derivative it estimates, and how much the two
+/// sides of the probe point disagreed while estimating it.
+struct DifferenceRung {
+    derivative: Vec<Value>,
+    asymmetry: Vec<Value>,
+}
+
+/// How far the slope left of the probe point differs from the slope right of it.
+///
+/// `samples` are the values at `[-2h, -h, +h, +2h]`. Each side gives a slope
+/// from its own outer pair, so neither straddles the point and the two together
+/// say whether the function has a single tangent there. For a differentiable
+/// function both estimate `f'` and the gap closes as `O(h)`; across a kink they
+/// estimate the two one-sided derivatives and the gap is the jump between them.
+///
+/// Returned unscaled — the caller divides by the same magnitude it judges the
+/// entry against, so a kink in a femtofarad and a kink in an amp are read alike.
+fn one_sided_gap(samples: [Value; 4], step: Value) -> Value {
+    let backward = (samples[1] - samples[0]) / step;
+    let forward = (samples[3] - samples[2]) / step;
+    if !backward.is_finite() || !forward.is_finite() {
+        return 0.0;
+    }
+    (forward - backward).abs()
 }
 
 /// SplitMix64 seeded from the model name.
@@ -940,6 +1038,73 @@ mod tests {
         }
     }
 
+    /// Build a one-entry ladder by hand: the same derivative at every step, with
+    /// the one-sided gap shrinking or holding as the caller dictates.
+    fn rung(derivative: Value, asymmetry: Value) -> DifferenceRung {
+        DifferenceRung {
+            derivative: vec![derivative],
+            asymmetry: vec![asymmetry],
+        }
+    }
+
+    #[test]
+    fn a_persistent_one_sided_gap_reads_as_a_kink() {
+        // The gap does not shrink as the step falls fourfold, which no
+        // differentiable function does.
+        let ladder = [rung(1.0, 0.8), rung(1.0, 0.8), rung(1.0, 0.8)];
+        let audit = audit_against_ladder("kinked", 1, &[1.0], &ladder);
+
+        let entry = audit.entries[0];
+        assert!(entry.discontinuous, "a standing slope jump is a kink");
+        assert!(!entry.converged(), "a kink is never tightly checked");
+        assert!(entry.unverifiable(), "a kink is a coverage gap");
+        assert!(
+            audit.failures(1.0e-9).is_empty(),
+            "there is no single derivative here for a stamp to contradict"
+        );
+    }
+
+    #[test]
+    fn a_shrinking_one_sided_gap_is_only_curvature() {
+        // Halving the step halves the gap: ordinary second-derivative behaviour,
+        // and no excuse for anything.
+        let ladder = [rung(1.0, 0.8), rung(1.0, 0.4), rung(1.0, 0.2)];
+        let audit = audit_against_ladder("curved", 1, &[1.0], &ladder);
+
+        assert!(
+            !audit.entries[0].discontinuous,
+            "curvature must not be mistaken for a discontinuity"
+        );
+    }
+
+    #[test]
+    fn a_wrong_stamp_is_still_a_failure_where_the_difference_is_smooth() {
+        // The guard against the detector going soft: a stamp that disagrees by
+        // half, with no asymmetry at all, has to keep failing.
+        let ladder = [rung(1.0, 0.0), rung(1.0, 0.0), rung(1.0, 0.0)];
+        let audit = audit_against_ladder("wrong", 1, &[1.5], &ladder);
+
+        let entry = audit.entries[0];
+        assert!(!entry.discontinuous);
+        assert_eq!(audit.failures(1.0e-3).len(), 1, "a smooth error still fails");
+    }
+
+    #[test]
+    fn a_kink_cannot_excuse_a_stamp_that_is_orders_out() {
+        // A slope jump is judged against the entry it belongs to. One that is
+        // tiny beside a stamp two orders larger says nothing about that stamp,
+        // so the failure must survive.
+        let ladder = [rung(1.0, 1.0e-3), rung(1.0, 1.0e-3), rung(1.0, 1.0e-3)];
+        let audit = audit_against_ladder("loud", 1, &[100.0], &ladder);
+
+        let entry = audit.entries[0];
+        assert!(
+            !entry.discontinuous,
+            "a gap below the jump threshold is not a kink"
+        );
+        assert_eq!(audit.failures(1.0e-3).len(), 1);
+    }
+
     #[test]
     fn probe_points_differ_between_models() {
         let mut left = seed_for("bsimbulk");
@@ -971,6 +1136,7 @@ mod tests {
             numeric,
             uncertainty,
             relative_error: (stamped - numeric).abs() / stamped.abs().max(numeric.abs()).max(1e-30),
+            discontinuous: false,
         }
     }
 

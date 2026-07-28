@@ -146,58 +146,77 @@ struct KnownCapacitanceDeviation {
 
 /// Measured on the canonical backend, 2026-07-28, all 42 models.
 ///
-/// Two real defect clusters and a spread of coverage gaps. The clusters are
-/// worth naming because each is one shared body appearing under several model
-/// names, not several independent problems:
+/// **Coverage gaps only. There is no capacitance defect in the corpus**: every
+/// model reports zero failures against the strict tolerance, so no entry here
+/// relaxes it except `PSP104TVA`.
 ///
-/// - **The `bjt505` family** stamps `9.294565833142348e-16` where the difference
-///   reads `2.096719149589923e-15` — a factor of 2.26, at equilibrium, on a
-///   femtofarad. All four variants report the *same digits*, so it is one term
-///   in the shared body.
-/// - **The `bsimsoi` family** disagrees in *sign*: `-1.44e-15` against
-///   `+3.25e-15`. `bsimsoi__18c250bc` also stamps `-1.55e-26` where the
-///   difference sees `-4.69e-15`, which is a capacitance that is simply absent.
+/// This list previously named two "defect clusters" — the `bjt505` family
+/// stamping `9.294565833142348e-16` against a difference of
+/// `2.096719149589923e-15`, and the `bsimsoi` family disagreeing in sign,
+/// `-1.44e-15` against `+3.25e-15`. Neither was real. Both were the oracle
+/// differencing across a *kink*, and both dissolved the day it learned to
+/// recognise one.
 ///
-/// Both are new findings — the reactive block had no oracle until now, so
-/// nothing had ever checked them.
+/// Every one of those failures sat at probe point 0, which is exact
+/// equilibrium, and compact models put their numerical-safety guards exactly
+/// there. Mextram's epilayer is the clearest case: inside
+/// `abs(Vc1c2) < 1e-5 * Vt` it swaps `xi_w = Ec / (Ec + Vc1c2)` for the limit
+/// form `pav / (pav + 1)`. The two agree in value at the boundary and not in
+/// slope, so the function is continuous and not differentiable, and the step
+/// ladder's smallest step is a thousand times wider than the guard. The device
+/// stamps the derivative of the branch it is in, which is what Newton needs; the
+/// central difference straddles the boundary and converges — smoothly, with a
+/// convincing error bar — on the average of two one-sided slopes that were never
+/// the same number. The shortfall was equal and opposite across the two columns,
+/// which is the signature of a `Vc1c2` term, and that is exactly what the guard
+/// switches on.
+///
+/// The oracle now detects this directly: a one-sided slope gap that is large
+/// against the entry and *does not shrink* when the step falls fourfold is a
+/// kink, and such entries are reported as coverage gaps rather than failures.
+/// Curvature shrinks with the step and a genuinely dropped term is smooth, so
+/// neither can hide behind it — see `AUDIT_DISCONTINUITY_PERSISTENCE`. The gap
+/// counts below rose by exactly the number of formerly-failing entries in each
+/// model, which is the reclassification and not new blindness.
 const KNOWN_CAPACITANCE_DEVIATIONS: &[KnownCapacitanceDeviation] = &[
     KnownCapacitanceDeviation {
         model: "bjt505_va",
-        relative_error: 6.0e-1,
-        unverified_significant: 5,
-        why: "stamps 9.2946e-16 F where the difference reads 2.0967e-15 F at \
-              equilibrium, a factor of 2.26 on a femtofarad",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 9,
+        why: "coverage gaps only; four of them are the epilayer kink at \
+              equilibrium, where Mextram's `abs(Vc1c2) < 1e-5 * Vt` guard leaves \
+              the charge continuous but not differentiable",
     },
     KnownCapacitanceDeviation {
         model: "bjt505t_va",
-        relative_error: 6.0e-1,
-        unverified_significant: 0,
-        why: "identical digits to bjt505_va; one term in the shared body",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 4,
+        why: "the same four epilayer-kink entries; the body is shared",
     },
     KnownCapacitanceDeviation {
         model: "bjtd505_va",
-        relative_error: 6.0e-1,
-        unverified_significant: 9,
-        why: "identical digits to bjt505_va",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 13,
+        why: "coverage gaps only, four of them the shared epilayer kink",
     },
     KnownCapacitanceDeviation {
         model: "bjtd505t_va",
-        relative_error: 6.0e-1,
-        unverified_significant: 11,
-        why: "identical digits to bjt505_va",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 15,
+        why: "coverage gaps only, four of them the shared epilayer kink",
     },
     KnownCapacitanceDeviation {
         model: "bsimsoi__18c250bc",
-        relative_error: 1.5e0,
-        unverified_significant: 0,
-        why: "sign disagreement, -1.44e-15 F against +3.25e-15 F, and a \
-              4.69e-15 F entry stamped as 1.55e-26 — an absent capacitance",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 3,
+        why: "coverage gaps only; the former sign disagreement was a kink, not \
+              an absent capacitance",
     },
     KnownCapacitanceDeviation {
         model: "bsimsoi_va",
-        relative_error: 1.7e0,
-        unverified_significant: 7,
-        why: "same sign disagreement as bsimsoi__18c250bc",
+        relative_error: CAPACITANCE_TOLERANCE,
+        unverified_significant: 11,
+        why: "coverage gaps only; same kink as bsimsoi__18c250bc",
     },
     KnownCapacitanceDeviation {
         model: "PSP104TVA",
