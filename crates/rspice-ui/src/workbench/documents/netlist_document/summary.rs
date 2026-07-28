@@ -1,3 +1,8 @@
+//! Run summary for the netlist workspace.
+//!
+//! What the active run produced, and how its measurements moved against the
+//! previous run.
+
 use std::collections::HashMap;
 
 #[cfg(test)]

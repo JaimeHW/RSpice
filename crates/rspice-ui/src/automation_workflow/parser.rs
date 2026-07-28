@@ -1,3 +1,8 @@
+//! Workflow script parsing.
+//!
+//! Spans are carried through the parse so an error names the line and column
+//! in the user's script rather than a position in an internal form.
+
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use sha2::{Digest, Sha256};

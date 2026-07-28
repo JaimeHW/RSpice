@@ -1,3 +1,5 @@
+//! Harmonic balance solver configuration.
+
 use super::format::format_freq;
 use serde::{Deserialize, Serialize};
 

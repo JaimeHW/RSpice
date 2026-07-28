@@ -1,3 +1,11 @@
+//! The simulation worker contract.
+//!
+//! Everything crossing the boundary between the application and the engine
+//! worker: the request and result messages, their transport encoding, and
+//! the state each side must hold for a request to be replayable. The two
+//! sides run in different threads natively and different contexts in the
+//! browser, so this is a serialized contract rather than a shared type.
+
 #[cfg(test)]
 mod tests {
     use super::*;

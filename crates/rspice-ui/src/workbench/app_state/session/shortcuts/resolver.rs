@@ -1,3 +1,9 @@
+//! Chord resolution.
+//!
+//! Matches a frame of input against the active profile, holding partial
+//! prefixes across frames until the sequence completes or times out. A
+//! command is only fired when it is also available in the current context.
+
 use std::time::Duration;
 
 use crate::state::ViewType;

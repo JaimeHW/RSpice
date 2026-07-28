@@ -1,3 +1,8 @@
+//! Transient analysis.
+//!
+//! Time-domain integration from an initial condition, returning node
+//! voltages and branch currents per timepoint.
+
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, now_ms, parse_runner_netlist_with_abort,

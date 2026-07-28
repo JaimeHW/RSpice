@@ -1,3 +1,5 @@
+//! Analysis specification types.
+
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::dialog::{
     OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy, OpInitialGuess, OpNodeInitialization,

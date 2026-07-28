@@ -1,3 +1,9 @@
+//! What each analysis viewer can do.
+//!
+//! Drives which affordances a viewer offers — cursors, markers, export — so
+//! the toolbar for a viewer is derived from the viewer rather than
+//! maintained alongside it.
+
 use crate::workbench::app_state::{ActiveViewer, AppState};
 
 /// Availability metadata for a specialized viewer.

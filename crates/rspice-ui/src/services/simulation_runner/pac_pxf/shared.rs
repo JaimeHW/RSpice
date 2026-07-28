@@ -1,3 +1,8 @@
+//! Node resolution shared by PAC and PXF.
+//!
+//! Both name their output node the same way, and both must resolve it
+//! against the flattened deck rather than the schematic.
+
 pub(super) fn normalize_pac_node_name(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.len() >= 3

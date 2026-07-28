@@ -1,3 +1,8 @@
+//! Spectrum normalization.
+//!
+//! How magnitudes are scaled — none, coherent gain, or power — which decides
+//! whether a peak reads as its true amplitude.
+
 /// Amplitude normalization used for FFT magnitudes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SpectrumNormalization {

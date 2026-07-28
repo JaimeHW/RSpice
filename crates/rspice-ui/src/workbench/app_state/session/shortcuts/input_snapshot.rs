@@ -1,3 +1,8 @@
+//! A frame of keyboard input.
+//!
+//! Captured once per frame so every resolution step sees the same input,
+//! and consumed keys are reported back to egui exactly once.
+
 use egui::Event;
 
 use super::{InputState, Key, Modifiers};

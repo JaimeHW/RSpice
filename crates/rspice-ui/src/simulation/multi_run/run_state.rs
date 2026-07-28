@@ -1,3 +1,5 @@
+//! Per-run status within a multi-run job.
+
 use super::{AnalysisRunType, AnalysisSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;

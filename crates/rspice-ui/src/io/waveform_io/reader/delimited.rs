@@ -1,3 +1,5 @@
+//! Delimited-text waveform reader (CSV and TSV).
+
 use super::*;
 
 impl WaveformReader {

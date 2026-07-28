@@ -1,3 +1,10 @@
+//! Resolving which symbol an instance draws with.
+//!
+//! An instance may name a model-bound symbol, inherit its cell's symbol
+//! view, or fall back to the built-in body for its device type. The resolver
+//! reports which source it used and any issue it found, so the canvas can
+//! show an unresolved instance as unresolved rather than as a default.
+
 use std::collections::{HashMap, HashSet};
 
 use super::{

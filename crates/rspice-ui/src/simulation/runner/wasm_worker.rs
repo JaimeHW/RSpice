@@ -1,3 +1,10 @@
+//! Browser worker request sequencing.
+//!
+//! The browser runs simulation in a web worker, so results arrive
+//! asynchronously and out of order. Requests are numbered and results
+//! matched against the active id, which is what keeps a superseded run from
+//! overwriting a newer one.
+
 /// Worker IDs cross the JavaScript number boundary twice. Keeping them in the
 /// exact u32 integer range avoids precision loss while still leaving more than
 /// four billion collision-free requests between wraps.

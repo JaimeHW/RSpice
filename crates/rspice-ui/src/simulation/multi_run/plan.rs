@@ -1,3 +1,9 @@
+//! An analysis plan.
+//!
+//! The ordered set of analyses a run set executes, and the dependencies
+//! between them — a PAC run needs its PSS solution, so order is a
+//! correctness property rather than a preference.
+
 use super::{AnalysisSpec, RunQueue};
 use serde::{Deserialize, Serialize};
 

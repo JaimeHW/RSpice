@@ -1,3 +1,6 @@
+//! The design manager surface: the tabbed body listing libraries, cells,
+//! and views.
+
 use super::widgets::*;
 use super::*;
 

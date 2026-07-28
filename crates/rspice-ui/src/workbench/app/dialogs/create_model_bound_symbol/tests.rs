@@ -1,3 +1,5 @@
+//! Create-symbol dialog tests.
+
 use std::path::PathBuf;
 
 use egui::{Context, Rect, vec2};

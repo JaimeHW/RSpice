@@ -1,3 +1,5 @@
+//! Waveform file formats, and how each is detected.
+
 use super::*;
 
 // =============================================================================

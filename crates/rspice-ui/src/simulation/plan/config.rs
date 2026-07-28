@@ -1,3 +1,8 @@
+//! Analysis drafts.
+//!
+//! The in-progress form of each analysis type as the user edits it, before
+//! it becomes a validated specification.
+
 use serde::{Deserialize, Serialize};
 
 use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};

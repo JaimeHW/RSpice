@@ -1,3 +1,9 @@
+//! Design management operations.
+//!
+//! Renumbering, renaming, and reorganizing across cells. These cross
+//! document boundaries, so they go through the project design history rather
+//! than schematic-local undo.
+
 use super::controller::validate_design_management_page;
 use super::widgets::{parse_reserved_ranges, reorder_sheet_ids};
 use super::*;

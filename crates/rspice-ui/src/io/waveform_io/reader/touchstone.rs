@@ -1,3 +1,5 @@
+//! Touchstone reader, s1p through snp.
+
 use super::*;
 
 impl WaveformReader {

@@ -1,3 +1,5 @@
+//! Frequency formatting for the S-parameter dialog.
+
 pub(super) fn format_freq(freq: f64) -> String {
     if freq >= 1e9 {
         format!("{}G", freq / 1e9)

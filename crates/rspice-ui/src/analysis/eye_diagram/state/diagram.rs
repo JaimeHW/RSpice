@@ -1,3 +1,5 @@
+//! Eye diagram viewer state.
+
 use super::super::EyeData;
 use super::super::EyeMeasurements;
 use super::{

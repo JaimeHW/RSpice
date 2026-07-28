@@ -1,3 +1,8 @@
+//! Whether the engineering canvas holds focus.
+//!
+//! Shortcut scoping depends on it: the same key means one thing over the
+//! canvas and another in a text field.
+
 use egui::{Id, Response};
 
 use crate::state::ViewType;

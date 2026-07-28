@@ -1,3 +1,5 @@
+//! Eye diagram cursors and their readouts.
+
 /// Cursor mode for eye viewer measurements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EyeCursorMode {

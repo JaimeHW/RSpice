@@ -1,3 +1,5 @@
+//! S-parameter port dialog state.
+
 use super::format::format_freq;
 use super::{SpConfig, SpPortConfig, SpSweepType};
 use crate::simulation::dialog::options::parse_si_value;

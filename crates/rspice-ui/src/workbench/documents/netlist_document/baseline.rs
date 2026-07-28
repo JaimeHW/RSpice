@@ -1,3 +1,8 @@
+//! Diffing a deck against its baseline.
+//!
+//! Reports which lines changed since the accepted baseline, for the change
+//! gutter in the netlist editor.
+
 use std::collections::HashSet;
 
 #[cfg(test)]

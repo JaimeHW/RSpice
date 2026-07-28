@@ -1,3 +1,8 @@
+//! Stability analysis.
+//!
+//! Loop gain, phase margin, and gain margin at a designated probe, using the
+//! Middlebrook injection that measures a loop without breaking it.
+
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,

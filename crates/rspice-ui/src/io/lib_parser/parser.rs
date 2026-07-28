@@ -1,3 +1,8 @@
+//! SPICE library parser.
+//!
+//! Reads `.lib` files into sections and model definitions, preserving the
+//! section a model came from because that is what a corner selection names.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

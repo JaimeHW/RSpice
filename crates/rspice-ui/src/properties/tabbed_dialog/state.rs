@@ -1,3 +1,8 @@
+//! Tabbed property dialog state.
+//!
+//! Which tabs a component's property sheet has, which is active, and the
+//! in-progress edits that have not been committed yet.
+
 use crate::properties::model_browser::ModelBrowserState;
 use crate::properties::pwl_editor::PwlEditorState;
 use crate::state::property_types::{

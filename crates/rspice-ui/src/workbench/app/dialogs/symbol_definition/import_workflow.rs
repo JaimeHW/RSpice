@@ -1,3 +1,5 @@
+//! Importing a symbol definition.
+
 use egui::{Align, ComboBox, Context, Frame, Grid, Layout, Margin, Stroke, TextEdit, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;

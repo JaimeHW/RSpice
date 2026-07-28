@@ -1,3 +1,9 @@
+//! Preparing a run.
+//!
+//! Resolves everything a run needs before it starts — the deck, its
+//! includes, the sealed model set, and the export policy — so the run either
+//! begins fully determined or is refused with a reason.
+
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

@@ -1,3 +1,8 @@
+//! Confirming a pending cell or view deletion.
+//!
+//! Deletion is staged rather than immediate so the dialog can report what
+//! else references the object before it is removed.
+
 use crate::diagnostics::ConsoleMessage;
 
 use super::{RSpiceApp, VERILOGA_LIBRARY_NAME};

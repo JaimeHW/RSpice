@@ -1,3 +1,5 @@
+//! Cadence PSF waveform reader.
+
 use super::*;
 
 #[derive(Debug, Clone)]

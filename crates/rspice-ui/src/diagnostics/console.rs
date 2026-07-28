@@ -1,3 +1,8 @@
+//! Console messages.
+//!
+//! The legacy console value model. New messages should be logged through
+//! [`crate::diagnostics::LogBuffer`], which this mirrors into.
+
 /// Console message with severity level.
 #[derive(Debug, Clone)]
 pub struct ConsoleMessage {

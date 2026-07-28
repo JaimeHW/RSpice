@@ -1,3 +1,5 @@
+//! Spectrum metrics shown alongside the plot.
+
 use super::*;
 
 impl FftState {

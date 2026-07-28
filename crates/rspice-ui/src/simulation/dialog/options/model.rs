@@ -1,3 +1,7 @@
+//! Simulator options.
+//!
+//! The tolerances, limits, and integration settings a run is executed under.
+
 use super::{
     DampingStrategy, IntegrationMethod, MatrixSolver, ParseError, ValidationError, parse_si_value,
 };

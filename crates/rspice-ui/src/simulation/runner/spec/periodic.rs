@@ -1,3 +1,6 @@
+//! Dispatch for periodic steady-state analyses and the small-signal
+//! analyses that linearize about one.
+
 use std::collections::HashMap;
 use std::path::Path;
 

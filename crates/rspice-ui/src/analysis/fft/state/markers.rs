@@ -1,3 +1,5 @@
+//! Spectrum markers: peak search, harmonic marking, and delta readouts.
+
 use super::*;
 
 impl FftState {

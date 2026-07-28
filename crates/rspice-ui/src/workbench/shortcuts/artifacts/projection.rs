@@ -1,3 +1,8 @@
+//! Projecting a profile for export.
+//!
+//! Selects the scope being exported and resolves it into the flat binding
+//! set the artifact formats write.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 

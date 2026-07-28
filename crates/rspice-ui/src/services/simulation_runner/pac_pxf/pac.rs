@@ -1,3 +1,8 @@
+//! Periodic AC analysis.
+//!
+//! Small-signal response about a periodic steady state, where a stimulus at
+//! one frequency produces a response at every sideband.
+
 use std::path::Path;
 
 use num_complex::Complex64;

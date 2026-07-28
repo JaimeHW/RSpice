@@ -1,3 +1,5 @@
+//! PWL editor state.
+
 use crate::quantity::parse_engineering_value;
 use std::fmt;
 

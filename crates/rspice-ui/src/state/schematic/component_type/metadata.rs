@@ -1,3 +1,6 @@
+//! Per-component-type metadata: display name, reference-designator prefix,
+//! and SPICE card letter.
+
 use super::ComponentType;
 
 impl ComponentType {

@@ -1,3 +1,5 @@
+//! Options dialog state.
+
 use super::{
     DampingStrategy, IntegrationMethod, MatrixSolver, SimulationOptions, format_si_value,
     parse_si_value,

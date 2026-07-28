@@ -1,3 +1,8 @@
+//! A parsed library.
+//!
+//! Sections, the models each declares, and the parameters each model
+//! carries, indexed for lookup by name.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

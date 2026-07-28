@@ -1,3 +1,9 @@
+//! The analysis plan model.
+//!
+//! A persisted, revisioned plan: its analyses, their dependencies, and the
+//! outputs it saves. The revision is what lets a run receipt name the exact
+//! plan it executed.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 

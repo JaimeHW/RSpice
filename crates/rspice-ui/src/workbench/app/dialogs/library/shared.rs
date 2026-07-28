@@ -1,3 +1,6 @@
+//! Shared library-dialog helpers, including library/cell/view name
+//! validation.
+
 use super::{RSpiceApp, save_global_veriloga_library};
 use crate::diagnostics::ConsoleMessage;
 

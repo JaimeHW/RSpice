@@ -1,3 +1,5 @@
+//! Basic trace statistics: min, max, mean, RMS, and peak-to-peak.
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct BasicStats {
     pub(super) count: usize,

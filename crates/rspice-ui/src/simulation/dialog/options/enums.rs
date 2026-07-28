@@ -1,3 +1,5 @@
+//! Simulator option enumerations, including the integration methods.
+
 /// Integration method for transient analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum IntegrationMethod {

@@ -1,3 +1,8 @@
+//! Spectrum analysis.
+//!
+//! Derived spectral figures — THD, SNR, SFDR, ENOB, and the noise floor —
+//! computed from a transformed record.
+
 use super::FftData;
 use crate::analysis::fft::window::WindowFunction;
 // =============================================================================

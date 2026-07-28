@@ -1,3 +1,5 @@
+//! S-parameter sweep configuration.
+
 use super::format::format_freq;
 
 /// Type of frequency sweep for S-parameter analysis

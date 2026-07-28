@@ -1,3 +1,8 @@
+//! FFT plan and window caches.
+//!
+//! Both are keyed by length so a repeated transform reuses its plan and its
+//! window coefficients instead of rebuilding them each frame.
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, PoisonError},

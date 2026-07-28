@@ -950,61 +950,41 @@ fn source_files_have_no_byte_order_mark() {
     );
 }
 
-/// Files with no `//!` module doc, frozen at the current count.
+/// Every module says what it is.
 ///
-/// Lower it as modules gain documentation. Never raise it.
-const MAX_UNDOCUMENTED_MODULES: usize = 121;
-
-/// Every module that owns a directory explains itself, and the rest are a
-/// shrinking number.
+/// This began as a ceiling over 331 undocumented files, because a burndown
+/// that large is not one change. It reached zero, so it is a gate now: a
+/// module with no `//!` header fails the build.
 ///
-/// The two halves are deliberately different. A module root is what a reader
-/// opens first when they want to know what a directory holds, and there is
-/// nowhere else for that answer to live — so it is a hard requirement with no
-/// allowance. A leaf file usually sits next to siblings that give it context,
-/// so those are a ceiling that ratchets down rather than a gate that blocks.
+/// The bar is not a restatement of the module path. Where a module encodes a
+/// rule its code does not make obvious — why an order matters, what a receipt
+/// is pinned to, what a silent fallback would hide — the header says so.
 #[test]
 fn modules_explain_themselves() {
     let root = src_dir();
-    let mut undocumented_roots = Vec::new();
-    let mut undocumented = 0usize;
-
-    for path in rust_sources(&root) {
-        let documented = fs::read_to_string(&path)
-            .unwrap_or_default()
-            .lines()
-            .next()
-            .is_some_and(|line| line.trim_start().starts_with("//!"));
-        if documented {
-            continue;
-        }
-        undocumented += 1;
-        if path.with_extension("").is_dir() {
-            undocumented_roots.push(
-                path.strip_prefix(&root)
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string(),
-            );
-        }
-    }
+    let undocumented: Vec<String> = rust_sources(&root)
+        .into_iter()
+        .filter(|path| {
+            !fs::read_to_string(path)
+                .unwrap_or_default()
+                .lines()
+                .next()
+                .is_some_and(|line| line.trim_start().starts_with("//!"))
+        })
+        .map(|path| {
+            path.strip_prefix(&root)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+        })
+        .collect();
 
     assert!(
-        undocumented_roots.is_empty(),
-        "these modules own a directory but do not say what is in it:\n  {}\n\
-         Open with a `//!` line naming what the directory holds.",
-        undocumented_roots.join("\n  ")
-    );
-    assert!(
-        undocumented <= MAX_UNDOCUMENTED_MODULES,
-        "{undocumented} files have no `//!` module doc, ceiling is \
-         {MAX_UNDOCUMENTED_MODULES}. A new module explains itself."
-    );
-    assert_eq!(
-        undocumented, MAX_UNDOCUMENTED_MODULES,
-        "{undocumented} files have no `//!` module doc, down from \
-         {MAX_UNDOCUMENTED_MODULES}. Lower MAX_UNDOCUMENTED_MODULES to hold \
-         the ground."
+        undocumented.is_empty(),
+        "these modules do not say what they are:\n  {}\n\
+         Open each with a `//!` header. Name what the module holds, and what \
+         a reader could not infer from the code.",
+        undocumented.join("\n  ")
     );
 }
 

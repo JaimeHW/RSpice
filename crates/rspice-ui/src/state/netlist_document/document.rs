@@ -1,3 +1,8 @@
+//! The netlist document.
+//!
+//! A deck as an editable document: its identity, its text, and the revision
+//! that a validation receipt is pinned to.
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 

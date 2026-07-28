@@ -1,3 +1,9 @@
+//! Piecewise-linear points.
+//!
+//! A PWL source is defined by its breakpoints; time must be strictly
+//! increasing, so the point list enforces ordering rather than leaving a
+//! non-monotonic source to be rejected by the engine.
+
 use crate::quantity::{format_engineering_value, parse_engineering_value};
 use serde::{Deserialize, Serialize};
 use std::fmt;

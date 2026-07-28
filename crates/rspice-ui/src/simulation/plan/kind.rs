@@ -1,3 +1,9 @@
+//! Analysis kinds and their availability.
+//!
+//! Which analyses exist, and whether each is available for the current
+//! design and license. An unavailable analysis is shown with its reason
+//! rather than hidden, so the product does not silently omit capability.
+
 use serde::{Deserialize, Serialize};
 
 /// Canonical identity of an analysis kind supported by the current engine.

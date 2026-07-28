@@ -1,3 +1,6 @@
+//! Shortcut categories, for grouping in the preferences editor and the
+//! keyboard reference.
+
 use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

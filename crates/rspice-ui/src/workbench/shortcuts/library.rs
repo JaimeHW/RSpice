@@ -1,3 +1,5 @@
+//! The named shortcut preset library.
+
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt;

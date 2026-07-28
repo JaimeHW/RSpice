@@ -1,3 +1,5 @@
+//! The transformed record.
+
 use rustfft::num_complex::Complex;
 
 use super::{

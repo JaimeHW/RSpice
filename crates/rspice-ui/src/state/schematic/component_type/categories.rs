@@ -1,3 +1,5 @@
+//! Grouping component types into palette categories.
+
 use super::ComponentType;
 
 impl ComponentType {

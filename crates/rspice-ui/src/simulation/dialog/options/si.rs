@@ -1,3 +1,5 @@
+//! SI value parsing and formatting for option fields.
+
 use std::fmt;
 
 /// Parse a value string with SI prefix (e.g., "1u", "10n", "1e-9").

@@ -1,3 +1,5 @@
+//! Frequency formatting for the harmonic balance dialog.
+
 pub(super) fn format_freq(freq: f64) -> String {
     if freq >= 1e9 {
         format!("{}G", freq / 1e9)

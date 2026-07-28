@@ -1,3 +1,5 @@
+//! Create-symbol dialog rendering.
+
 use egui::{Align, Context, Frame, Layout, Margin, Rect, Response, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::diagnostics::ConsoleMessage;

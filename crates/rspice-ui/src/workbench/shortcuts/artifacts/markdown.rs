@@ -1,3 +1,8 @@
+//! Markdown keyboard reference.
+//!
+//! Renders the resolved bindings as a printable reference, combining rows
+//! that differ only by platform.
+
 use std::collections::BTreeMap;
 
 use super::projection::{ShortcutReferenceModel, ShortcutReferenceRow, ShortcutReferenceStatus};

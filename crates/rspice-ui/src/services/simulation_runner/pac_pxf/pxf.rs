@@ -1,3 +1,8 @@
+//! Periodic transfer function analysis.
+//!
+//! Transfer from every input sideband to one output, which is how conversion
+//! gain and image rejection are measured.
+
 use std::path::Path;
 
 use num_complex::Complex64;

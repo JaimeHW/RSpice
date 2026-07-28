@@ -1,3 +1,8 @@
+//! Option validation.
+//!
+//! Rejects a value the engine would refuse, naming the option and the bound
+//! it violated rather than failing at run time.
+
 use std::fmt;
 
 /// Validation error types.

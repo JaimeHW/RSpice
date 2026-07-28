@@ -1,3 +1,9 @@
+//! A shortcut profile.
+//!
+//! The bindings themselves, and the context overlap rules that decide
+//! whether two bindings actually conflict — the same chord in two contexts
+//! that cannot both be active is not a conflict.
+
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 

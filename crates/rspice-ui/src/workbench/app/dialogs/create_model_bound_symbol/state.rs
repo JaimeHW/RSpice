@@ -1,3 +1,6 @@
+//! Create-symbol dialog state: the source the symbol is built from and the
+//! body template it starts with.
+
 use std::path::PathBuf;
 
 use crate::state::model_library::ModelType;

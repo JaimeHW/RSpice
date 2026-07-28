@@ -1,3 +1,5 @@
+//! Create-symbol dialog flow.
+
 use crate::diagnostics::ConsoleMessage;
 use crate::state::model_library::ModelType;
 use crate::state::{

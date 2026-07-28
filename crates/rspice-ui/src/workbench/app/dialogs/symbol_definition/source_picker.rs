@@ -1,3 +1,8 @@
+//! Choosing the symbol source file.
+//!
+//! Native and browser variants: a file dialog on the desktop, a file input
+//! in the browser.
+
 #[cfg(any(not(target_arch = "wasm32"), test))]
 use super::MAX_SYMBOL_DEFINITION_IMPORT_BYTES;
 use super::state::SymbolImportDialogState;

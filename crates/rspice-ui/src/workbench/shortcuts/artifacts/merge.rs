@@ -1,3 +1,9 @@
+//! Merging an imported shortcut profile.
+//!
+//! The policy decides what happens to a binding that exists on both sides.
+//! Conflicts are resolved by the declared policy rather than by import
+//! order, so the same import produces the same profile every time.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 

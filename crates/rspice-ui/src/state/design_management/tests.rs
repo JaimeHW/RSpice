@@ -1,3 +1,5 @@
+//! Design management tests.
+
 use super::*;
 
 fn sheet(name: &str, page: u32) -> SheetDefinition {

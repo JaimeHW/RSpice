@@ -1,3 +1,9 @@
+//! Eye persistence cache.
+//!
+//! Retains the accumulated eye across frames, keyed by the inputs that
+//! define it, so panning or changing display mode does not re-fold every
+//! bit period.
+
 /// Cache key for persistence rendering.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EyePersistenceCacheKey {

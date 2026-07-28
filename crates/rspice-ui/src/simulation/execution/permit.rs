@@ -1,3 +1,9 @@
+//! Execution permits.
+//!
+//! A run consumes a permit that was issued against a specific prepared
+//! state. The permit is single-use, so a stale one cannot start a run
+//! against inputs that have since changed.
+
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},

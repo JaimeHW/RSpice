@@ -1,3 +1,6 @@
+//! Per-component-type geometry: terminal count and their placement on the
+//! default symbol body.
+
 use super::super::point::Point;
 use super::ComponentType;
 

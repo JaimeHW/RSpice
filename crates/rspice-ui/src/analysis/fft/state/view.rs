@@ -1,3 +1,5 @@
+//! FFT plot view state: axis ranges, zoom, and cursor position.
+
 use super::super::data::{FftData, FftPoint};
 use super::super::window::WindowFunction;
 use super::*;

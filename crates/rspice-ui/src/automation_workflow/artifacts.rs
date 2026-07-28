@@ -1,3 +1,8 @@
+//! Workflow check evidence.
+//!
+//! What a workflow check produced, so an outcome can be re-examined rather
+//! than only re-run.
+
 use std::{error::Error, fmt};
 
 use serde::Serialize;

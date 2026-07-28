@@ -1,3 +1,5 @@
+//! Property sheets for XSPICE code-model devices.
+
 use super::*;
 
 /// Property sheets for the XSPICE code-model blocks.

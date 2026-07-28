@@ -1,3 +1,5 @@
+//! Nutmeg raw-file reader, ASCII and binary.
+
 use super::*;
 
 impl WaveformReader {

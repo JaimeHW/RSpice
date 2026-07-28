@@ -1,3 +1,9 @@
+//! Browser file import.
+//!
+//! Reading a user-chosen file in the browser. Import is token-gated so a
+//! file arriving after the user moved on cannot be applied to whatever is
+//! open now.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PickedTextFile {
     pub name: String,

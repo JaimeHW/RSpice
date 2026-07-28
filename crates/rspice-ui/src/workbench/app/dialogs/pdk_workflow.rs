@@ -1,3 +1,5 @@
+//! PDK setup workflow.
+
 use std::path::Path;
 
 use egui::Context;

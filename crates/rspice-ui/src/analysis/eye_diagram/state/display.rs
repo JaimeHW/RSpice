@@ -1,3 +1,5 @@
+//! Eye display modes: persistence, density, and single-trace.
+
 /// Eye diagram display mode
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EyeDisplayMode {

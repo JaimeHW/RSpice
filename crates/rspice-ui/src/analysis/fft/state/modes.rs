@@ -1,3 +1,5 @@
+//! Magnitude scales and their axis labels.
+
 use super::super::pipeline::FftInputPolicy;
 
 // =============================================================================

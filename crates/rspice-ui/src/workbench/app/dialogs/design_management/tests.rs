@@ -1,3 +1,5 @@
+//! Design management tests.
+
 use super::operations::variant_connectivity_difference_count;
 use super::widgets::reorder_sheet_ids;
 use super::*;

@@ -1,3 +1,10 @@
+//! Session serialization.
+//!
+//! What survives an application restart, and what does not. Runtime-only
+//! state — in-flight operations, prefix chords, file handles — is
+//! deliberately excluded, so a restored session cannot resume authority it
+//! no longer holds.
+
 use crate::diagnostics::ConsoleMessage;
 use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
 use crate::workbench::app_state::AppState;

@@ -1,3 +1,5 @@
+//! Editing the parameter form a symbol exposes.
+
 use egui::{
     Align, ComboBox, Context, Frame, Grid, Layout, Margin, ScrollArea, Stroke, TextEdit, Ui, vec2,
 };

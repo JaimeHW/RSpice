@@ -1,3 +1,9 @@
+//! The shortcut artifact schema.
+//!
+//! What a portable artifact declares about itself — its scope, and the
+//! coverage it claims — so an importer can tell a partial profile from a
+//! complete one.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 

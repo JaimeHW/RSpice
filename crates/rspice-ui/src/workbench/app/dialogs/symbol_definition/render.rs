@@ -1,3 +1,5 @@
+//! Symbol definition dialog rendering.
+
 use egui::Context;
 
 use crate::workbench::RSpiceApp;

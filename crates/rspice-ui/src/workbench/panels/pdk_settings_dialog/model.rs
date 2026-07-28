@@ -1,3 +1,5 @@
+//! PDK settings dialog state.
+
 use std::path::PathBuf;
 
 use crate::state::pdk_config::{DiscoveredFile, PdkConfig};

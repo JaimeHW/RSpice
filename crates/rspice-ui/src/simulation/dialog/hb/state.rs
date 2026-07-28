@@ -1,3 +1,5 @@
+//! Harmonic balance tone dialog state.
+
 use super::format::format_freq;
 use super::{HbConfig, HbSolverType, HbToneConfig};
 use crate::simulation::dialog::options::parse_si_value;

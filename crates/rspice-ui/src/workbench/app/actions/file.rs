@@ -1,3 +1,8 @@
+//! File actions.
+//!
+//! New, open, save, and the recent-files list, including the confirmation
+//! flow that runs first when the current document has unsaved changes.
+
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp};
 

@@ -1,3 +1,8 @@
+//! The analysis tab catalog.
+//!
+//! Every analysis the Simulate workspace offers as a tab, in the order they
+//! are shown.
+
 pub const TAB_DC_OP: usize = 0;
 pub const TAB_TRANSIENT: usize = 1;
 pub const TAB_AC: usize = 2;

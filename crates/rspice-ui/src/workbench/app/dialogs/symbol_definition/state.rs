@@ -1,3 +1,5 @@
+//! Symbol definition dialog state.
+
 use crate::state::CellViewRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

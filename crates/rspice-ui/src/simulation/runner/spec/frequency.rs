@@ -1,3 +1,5 @@
+//! Dispatch for frequency-domain analyses.
+
 use std::{collections::HashMap, path::Path};
 
 use rspice_core::abort_signal::AbortSignal;

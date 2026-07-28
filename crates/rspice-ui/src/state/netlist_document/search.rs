@@ -1,3 +1,5 @@
+//! Find and replace in a netlist document.
+
 use std::ops::Range;
 
 use regex::RegexBuilder;

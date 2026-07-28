@@ -1,3 +1,8 @@
+//! Netlist outline.
+//!
+//! The navigable structure of a deck — subcircuits, models, analyses,
+//! includes — for the outline pane.
+
 use serde::{Deserialize, Serialize};
 
 /// The source construct represented by an outline row.

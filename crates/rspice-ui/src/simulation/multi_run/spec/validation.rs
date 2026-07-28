@@ -1,3 +1,9 @@
+//! Specification validation.
+//!
+//! Rejects a specification the engine could not execute — a missing
+//! dependency, an empty sweep, an output that names nothing — before a run
+//! starts rather than partway through.
+
 use super::{AnalysisSpec, OptimizationGoal};
 use crate::simulation::config::{AcSweepType, NoiseAnalysisConfig, NoiseSweepType};
 use crate::simulation::dialog::OpConfig;

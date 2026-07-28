@@ -1,3 +1,5 @@
+//! Widgets shared by the design management surfaces.
+
 use super::*;
 
 pub(super) fn split_surface(

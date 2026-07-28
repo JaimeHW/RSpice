@@ -1,3 +1,6 @@
+//! Property sheets for the four controlled sources: VCVS, VCCS, CCVS, and
+//! CCCS.
+
 use super::*;
 
 impl PropertyRegistry {

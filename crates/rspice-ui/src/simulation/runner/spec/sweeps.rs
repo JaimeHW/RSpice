@@ -1,3 +1,5 @@
+//! Dispatch for swept and statistical analyses.
+
 use std::collections::HashMap;
 use std::path::Path;
 

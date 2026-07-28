@@ -1,3 +1,5 @@
+//! Shortcut keys, chords, and profile errors.
+
 use std::collections::BTreeMap;
 use std::fmt;
 

@@ -1,3 +1,6 @@
+//! Property sheets for hierarchy interface objects: ports, pins, and
+//! subcircuit instances.
+
 use super::*;
 
 impl PropertyRegistry {

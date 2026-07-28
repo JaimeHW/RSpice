@@ -1,3 +1,8 @@
+//! Building the default session.
+//!
+//! The initial [`AppState`], and the default model library and analysis
+//! viewers behind it.
+
 use crate::workbench::app::DialogState;
 use crate::workbench::app_state::{AnalysisWorkspaceState, AppState};
 

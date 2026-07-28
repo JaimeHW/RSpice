@@ -1,3 +1,6 @@
+//! What kind of run an analysis is: a single point, a sweep, or a
+//! statistical sample set.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

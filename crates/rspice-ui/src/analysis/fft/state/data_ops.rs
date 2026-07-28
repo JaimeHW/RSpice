@@ -1,3 +1,5 @@
+//! Recomputing the spectrum when its inputs change.
+
 use std::sync::Arc;
 
 use super::super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};

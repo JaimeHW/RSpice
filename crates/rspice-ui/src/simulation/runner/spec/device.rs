@@ -1,3 +1,5 @@
+//! Dispatch for device-level analyses.
+
 use std::collections::HashMap;
 use std::path::Path;
 

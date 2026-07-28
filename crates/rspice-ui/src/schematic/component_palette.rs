@@ -1,3 +1,7 @@
+//! The component palette.
+//!
+//! The placeable devices, grouped into the sections the palette shows.
+
 use crate::state::ComponentType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

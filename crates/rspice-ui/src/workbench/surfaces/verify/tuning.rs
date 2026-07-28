@@ -1,3 +1,9 @@
+//! Interactive tuning.
+//!
+//! Live parameter adjustment against the last run, with the dirty tracking
+//! that decides when the displayed result no longer matches the tuned
+//! values.
+
 use super::*;
 
 pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {

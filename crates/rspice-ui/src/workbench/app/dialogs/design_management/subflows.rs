@@ -1,3 +1,5 @@
+//! Design management subflows: the guided forms behind each operation.
+
 use super::widgets::*;
 use super::*;
 

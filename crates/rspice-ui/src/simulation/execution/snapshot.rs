@@ -1,3 +1,9 @@
+//! The prepared execution snapshot.
+//!
+//! An immutable capture of everything a run executes against, taken at the
+//! moment the run is authorized. Preparation errors are reported here rather
+//! than discovered mid-run.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

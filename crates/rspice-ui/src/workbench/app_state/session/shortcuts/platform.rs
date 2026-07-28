@@ -1,3 +1,9 @@
+//! The runtime command platform.
+//!
+//! Which platform's bindings apply — desktop, browser, tablet, or phone —
+//! determined from the host rather than the build target, since a browser
+//! build may be running on any of them.
+
 use crate::workbench::commands::vocabulary::CommandPlatform;
 use crate::workbench::state::WidthClass;
 

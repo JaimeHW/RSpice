@@ -1,3 +1,9 @@
+//! Running a hand-written deck.
+//!
+//! Composes the source a Netlist-workspace run executes and queues the
+//! analyses the deck itself declares, rather than the ones the Simulate
+//! workspace configured.
+
 use super::*;
 use rspice_core::netlist::{
     AnalysisCommand, ElementKind, FreqVariation, Netlist, PoleZeroAnalysisType,
