@@ -87,7 +87,7 @@ impl CompanionCoefficients {
     /// (3·v_{n+1} - 4·v_n + v_{n-1}) / (2·dt) = f_{n+1}
     /// Companion: G_eq = 3C/(2·dt), I_eq = (4C·v_n - C·v_{n-1})/(2·dt)
     #[inline]
-    pub fn gear2() -> Self {
+    pub(crate) fn gear2() -> Self {
         Self {
             coeff_g: 1.5,            // 3/2
             coeff_v_n: 2.0,          // 4/2 = 2
@@ -109,7 +109,7 @@ impl CompanionCoefficients {
     /// `a1 = 1 + r`, and `a2 = -r^2/(1 + r)`. The equal-step case therefore
     /// reduces exactly to the ordinary `(3/2, 2, -1/2)` BDF2 coefficients.
     #[inline]
-    pub fn gear2_variable_step(dt: Value, previous_dt: Value) -> Self {
+    pub(crate) fn gear2_variable_step(dt: Value, previous_dt: Value) -> Self {
         if !dt.is_finite() || dt <= 0.0 || !previous_dt.is_finite() || previous_dt <= 0.0 {
             return Self::backward_euler();
         }
@@ -137,7 +137,7 @@ impl CompanionCoefficients {
 
     /// Get coefficients for the specified integration method
     #[inline]
-    pub fn for_method(method: IntegrationMethod) -> Self {
+    pub(crate) fn for_method(method: IntegrationMethod) -> Self {
         match method {
             IntegrationMethod::BackwardEuler => Self::backward_euler(),
             IntegrationMethod::Trapezoidal => Self::trapezoidal(),
@@ -148,7 +148,7 @@ impl CompanionCoefficients {
 
     /// Get coefficients for a method using the accepted timestep history.
     #[inline]
-    pub fn for_method_with_previous_step(
+    pub(crate) fn for_method_with_previous_step(
         method: IntegrationMethod,
         dt: Value,
         previous_dt: Value,
@@ -161,14 +161,14 @@ impl CompanionCoefficients {
 
     /// Calculate equivalent conductance for a capacitor
     #[inline]
-    pub fn capacitor_geq(&self, capacitance: Value, dt: Value) -> Value {
+    pub(crate) fn capacitor_geq(&self, capacitance: Value, dt: Value) -> Value {
         self.coeff_g * capacitance / dt
     }
 
     /// Calculate equivalent current source for a capacitor
     /// v_n is current voltage, v_n_minus_1 is previous voltage (for Gear2)
     #[inline]
-    pub fn capacitor_ieq(
+    pub(crate) fn capacitor_ieq(
         &self,
         capacitance: Value,
         dt: Value,
@@ -188,7 +188,7 @@ impl CompanionCoefficients {
 
     /// Calculate equivalent resistance for an inductor
     #[inline]
-    pub fn inductor_req(&self, inductance: Value, dt: Value) -> Value {
+    pub(crate) fn inductor_req(&self, inductance: Value, dt: Value) -> Value {
         self.coeff_g * inductance / dt
     }
 
@@ -201,7 +201,7 @@ impl CompanionCoefficients {
     /// terms `R_eq*i`, while keeping the arithmetic order of the underlying
     /// DAE instead of relying on an algebraically equivalent fused expression.
     #[inline]
-    pub fn inductor_charge_derivative_correction(
+    pub(crate) fn inductor_charge_derivative_correction(
         &self,
         inductance: Value,
         dt: Value,

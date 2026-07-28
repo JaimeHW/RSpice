@@ -54,7 +54,7 @@ use std::path::{Path, PathBuf};
 /// Ceiling on public items. Lower it whenever the real count drops; never
 /// raise it. The build fails if the count exceeds this, and also if it falls
 /// far enough below that the ceiling has gone stale.
-const MAX_PUBLIC_ITEMS: usize = 4806;
+const MAX_PUBLIC_ITEMS: usize = 4798;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
