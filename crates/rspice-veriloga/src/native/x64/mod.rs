@@ -6451,9 +6451,33 @@ endmodule
                 Some("bsimsoi"),
             ),
             (
+                "bsimsoi461",
+                shipped_veriloga_model_path(&["bsimsoi_4.6.1", "vacode", "bsimsoi.va"]),
+                Some("bsimsoi_va"),
+            ),
+            (
                 "bsimsoi100",
                 shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
                 Some("bsimsoi"),
+            ),
+            (
+                "l_utsoi102",
+                shipped_cmc_model_path(&[
+                    "L_UTSOI_102.9.0_code_package",
+                    "vacode",
+                    "L_UTSOI_102.va",
+                ]),
+                Some("l_utsoi"),
+            ),
+            (
+                "hisimhv",
+                shipped_cmc_model_path(&[
+                    "HiSIM_HV_2.5.1_Release_20230209",
+                    "HiSIM_HV_2.5.1_VA-Code",
+                    "hisimhv_va",
+                    "hisimhv.va",
+                ]),
+                Some("hisimhv_va"),
             ),
             (
                 "hisimsoi",
@@ -6550,9 +6574,33 @@ endmodule
                 Some("bsimsoi"),
             ),
             (
+                "bsimsoi461",
+                shipped_veriloga_model_path(&["bsimsoi_4.6.1", "vacode", "bsimsoi.va"]),
+                Some("bsimsoi_va"),
+            ),
+            (
                 "bsimsoi100",
                 shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
                 Some("bsimsoi"),
+            ),
+            (
+                "l_utsoi102",
+                shipped_cmc_model_path(&[
+                    "L_UTSOI_102.9.0_code_package",
+                    "vacode",
+                    "L_UTSOI_102.va",
+                ]),
+                Some("l_utsoi"),
+            ),
+            (
+                "hisimhv",
+                shipped_cmc_model_path(&[
+                    "HiSIM_HV_2.5.1_Release_20230209",
+                    "HiSIM_HV_2.5.1_VA-Code",
+                    "hisimhv_va",
+                    "hisimhv.va",
+                ]),
+                Some("hisimhv_va"),
             ),
             (
                 "hisimsoi",
