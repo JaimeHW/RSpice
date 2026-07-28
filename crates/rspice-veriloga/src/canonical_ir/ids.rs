@@ -72,3 +72,5 @@ id_type!(RegionId);
 id_type!(ExprId);
 id_type!(ValueId);
 id_type!(ScheduleId);
+id_type!(BlockId);
+id_type!(ShapeId);

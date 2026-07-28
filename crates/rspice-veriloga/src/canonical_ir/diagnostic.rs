@@ -34,6 +34,7 @@ pub enum CompilerPhase {
     MirValidation,
     OptLowering,
     OptValidation,
+    CfgLowering,
     Scheduling,
     Artifact,
     BackendLowering,
@@ -58,6 +59,15 @@ impl IrDiagnostic {
     pub fn error(phase: CompilerPhase, message: impl Into<String>, span: SourceSpanRef) -> Self {
         Self {
             severity: DiagnosticSeverity::Error,
+            phase,
+            message: message.into(),
+            span: Some(span),
+        }
+    }
+
+    pub fn warning(phase: CompilerPhase, message: impl Into<String>, span: SourceSpanRef) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Warning,
             phase,
             message: message.into(),
             span: Some(span),
