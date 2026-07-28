@@ -240,7 +240,7 @@ impl Engine {
             .transpose()?;
 
         let temperature = self.config.temperature;
-        let k_b = 1.380649e-23;
+        use crate::constants::K_BOLTZMANN;
 
         // Stationary resistor thermal sources: 4kT*G between the resistor
         // terminals (DC-only intensity spectrum).
@@ -278,7 +278,7 @@ impl Engine {
                 name: format!("{name} thermal"),
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
-                psd: vec![Complex64::new(4.0 * k_b * temperature * g, 0.0)],
+                psd: vec![Complex64::new(4.0 * K_BOLTZMANN * temperature * g, 0.0)],
                 flicker: None,
             });
 

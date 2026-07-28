@@ -10,7 +10,7 @@ impl Jfet {
         temp: Value,
         force_inverse: bool,
     ) -> (Value, Value) {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
         let pol = self.jfet_type.polarity();
@@ -155,7 +155,7 @@ impl Jfet {
         temp: Value,
         force_inverse: bool,
     ) -> (Value, Value) {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
 
         let pol = self.jfet_type.polarity();
         let p = &self.params;
@@ -362,7 +362,7 @@ impl Jfet {
     }
 
     pub(super) fn hfet1_capacitances(&self, vgs: Value, vgd: Value, temp: Value) -> (Value, Value) {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
 
         let pol = self.jfet_type.polarity();
         let p = &self.params;

@@ -2,7 +2,7 @@ use super::{MosRegion, Mosfet};
 use crate::Value;
 
 const EPSSIL: Value = 11.7 * 8.854_214_871e-12;
-const CHARGE: Value = 1.602_176_634e-19;
+use crate::constants::Q_ELECTRON as CHARGE;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Mos3State {

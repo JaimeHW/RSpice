@@ -91,7 +91,7 @@ pub fn derive_two_port_noise(
         return TwoPortNoise::undefined();
     }
 
-    let knorm = 4.0 * crate::analysis::noise::K_BOLTZMANN * temperature;
+    let knorm = 4.0 * crate::constants::K_BOLTZMANN * temperature;
     let c11 = cy[0][0] / knorm;
     let c12 = cy[0][1] / knorm;
     let c22 = cy[1][1] / knorm;
@@ -180,7 +180,7 @@ mod tests {
             vec![Complex64::new(g, 0.0), Complex64::new(-g, 0.0)],
             vec![Complex64::new(-g, 0.0), Complex64::new(g, 0.0)],
         ];
-        let power = 4.0 * crate::analysis::noise::K_BOLTZMANN * temperature * g;
+        let power = 4.0 * crate::constants::K_BOLTZMANN * temperature * g;
         let cy = vec![
             vec![Complex64::new(power, 0.0), Complex64::new(-power, 0.0)],
             vec![Complex64::new(-power, 0.0), Complex64::new(power, 0.0)],

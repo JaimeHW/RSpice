@@ -22,20 +22,12 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::analysis::AnalysisConfig;
+use crate::constants::{K_BOLTZMANN, Q_ELECTRON, XYCE_K_BOLTZMANN, XYCE_Q_ELECTRON};
 use crate::{Complex64, Value};
 
 //=============================================================================
 // Constants
 //=============================================================================
-
-/// Boltzmann constant (J/K)
-pub const K_BOLTZMANN: Value = 1.380649e-23;
-/// Electron charge (C)
-pub const Q_ELECTRON: Value = 1.602176634e-19;
-/// Xyce 7.10's legacy Boltzmann constant (J/K).
-pub const XYCE_K_BOLTZMANN: Value = 1.3806226e-23;
-/// Xyce 7.10's legacy electron charge (C).
-pub const XYCE_Q_ELECTRON: Value = 1.6021918e-19;
 
 /// Physical constants used while evaluating primitive noise sources.
 ///

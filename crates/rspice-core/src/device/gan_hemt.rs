@@ -31,10 +31,8 @@ use crate::Value;
 // Physical Constants
 //=============================================================================
 
-/// Boltzmann constant (J/K)
-const KB: Value = 1.380649e-23;
-/// Elementary charge (C)
-const Q: Value = 1.602176634e-19;
+use crate::constants::{K_BOLTZMANN as KB, Q_ELECTRON as Q};
+
 /// Reference temperature (K)
 const TREF: Value = 300.15;
 

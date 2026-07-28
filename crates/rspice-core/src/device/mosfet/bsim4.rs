@@ -22,12 +22,11 @@
 
 use crate::Value;
 use crate::circuit::NodeId;
+use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
 
-/// Physical constants
-const Q_ELECTRON: Value = 1.602176634e-19; // Electron charge (C)
+/// Material constants specific to this model.
 const EPSILON_SI: Value = 1.0359e-10; // Silicon permittivity (F/m)
 const EPSILON_OX: Value = 3.453e-11; // SiO2 permittivity (F/m)
-const K_BOLTZMANN: Value = 1.380649e-23; // Boltzmann constant (J/K)
 const NI_300K: Value = 1.45e16; // Intrinsic carrier concentration at 300K (m^-3)
 
 /// BSIM4 device type

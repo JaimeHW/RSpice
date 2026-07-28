@@ -336,8 +336,8 @@ impl HbSolver {
         state: &HbSolverState,
         temperature: Value,
     ) -> Vec<PeriodicNoiseSource> {
-        const Q_E: Value = 1.602176634e-19;
-        const K_B: Value = 1.380649e-23;
+        use crate::constants::Q_ELECTRON as Q_E;
+        use crate::constants::K_BOLTZMANN as K_B;
 
         let n = self.num_nodes;
         let n_time = self.fft.size();

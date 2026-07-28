@@ -24,15 +24,12 @@
 //! - Mobility degradation
 
 use crate::Value;
+use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
 
 //=============================================================================
 // Constants
 //=============================================================================
 
-/// Boltzmann constant (J/K)
-pub const K_BOLTZMANN: Value = 1.380649e-23;
-/// Electron charge (C)
-pub const Q_ELECTRON: Value = 1.602176634e-19;
 /// Default nominal temperature (K) = 27°C
 pub const T_NOMINAL: Value = 300.15;
 /// Silicon bandgap at 300K (eV)

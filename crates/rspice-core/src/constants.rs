@@ -187,6 +187,18 @@ pub const Q_ELECTRON: Value = 1.602176634e-19;
 /// Thermal voltage at reference temperature (kT/q)
 pub const VT_REFERENCE: Value = TEMP_REFERENCE * K_BOLTZMANN / Q_ELECTRON;
 
+/// Boltzmann constant as Xyce 7.10 rounds it (J/K).
+///
+/// Xyce's device package still carries the SPICE3 values from
+/// `N_DEV_Const.h`. The difference from the CODATA pair above is fifth-digit,
+/// but it is exponentiated by every junction model, so a deck run in Xyce
+/// compatibility mode must use these or it will not reproduce Xyce's numbers.
+/// Which pair applies is a dialect decision, not a precision one.
+pub const XYCE_K_BOLTZMANN: Value = 1.3806226e-23;
+
+/// Elementary charge as Xyce 7.10 rounds it (C). See [`XYCE_K_BOLTZMANN`].
+pub const XYCE_Q_ELECTRON: Value = 1.6021918e-19;
+
 /// Celsius-to-Kelvin offset (K).
 pub const KELVIN_OFFSET: Value = 273.15;
 

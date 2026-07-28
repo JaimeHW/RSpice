@@ -1311,9 +1311,12 @@ impl Bjt {
         // in exponential junction models and is therefore part of dialect
         // compatibility rather than a unit-conversion approximation.
         let (k_boltzmann, q_electron) = if self.xyce_compatibility {
-            (1.3806226e-23, 1.6021918e-19)
+            (
+                crate::constants::XYCE_K_BOLTZMANN,
+                crate::constants::XYCE_Q_ELECTRON,
+            )
         } else {
-            (1.380649e-23, 1.602176634e-19)
+            (crate::constants::K_BOLTZMANN, crate::constants::Q_ELECTRON)
         };
         k_boltzmann * temp_k.max(1.0) / q_electron
     }

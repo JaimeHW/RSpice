@@ -5,8 +5,8 @@ use super::*;
 impl Jfet {
     /// Thermal voltage at given temperature
     pub(super) fn thermal_voltage(&self, temp: Value) -> Value {
-        const K_BOLTZMANN: Value = 1.380649e-23;
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::K_BOLTZMANN;
+        use crate::constants::Q_ELECTRON;
         K_BOLTZMANN * temp / Q_ELECTRON
     }
 
@@ -297,7 +297,7 @@ impl Jfet {
 
     /// MESA gate branch approximation (`mesaload.c`): ASTAR Schottky + GGR + GMIN.
     pub(super) fn mesa_gate_branch(&self, v_int: Value, temp: Value) -> (Value, Value) {
-        const K_BOLTZMANN: Value = 1.380649e-23;
+        use crate::constants::K_BOLTZMANN;
 
         let temp_k = if temp.is_finite() && temp > 0.0 {
             temp
@@ -586,7 +586,7 @@ impl Jfet {
 
     #[inline]
     pub(super) fn mesa_gate_csat(&self, temp_k: Value) -> Value {
-        const K_BOLTZMANN: Value = 1.380649e-23;
+        use crate::constants::K_BOLTZMANN;
 
         let scale = self.hfet_gate_geometry_scale();
         let astar = self.params.mesa_astar.max(0.0);

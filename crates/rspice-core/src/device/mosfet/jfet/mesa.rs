@@ -29,7 +29,7 @@ impl Jfet {
         vto: Value,
         lambda: Value,
     ) -> Value {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
         let p = &self.params;
@@ -103,7 +103,7 @@ impl Jfet {
         vto: Value,
         lambda: Value,
     ) -> MesaLevel2Linearization {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
         let p = &self.params;
@@ -279,7 +279,7 @@ impl Jfet {
         vto: Value,
         lambda: Value,
     ) -> Value {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
         let p = &self.params;
@@ -368,7 +368,7 @@ impl Jfet {
         vto: Value,
         lambda: Value,
     ) -> Value {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
 
         let p = &self.params;
         let w = self.width.max(1e-12);
@@ -565,7 +565,7 @@ impl Jfet {
         temp: Value,
         force_inverse: bool,
     ) -> (Value, Value) {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
         let pol = self.jfet_type.polarity();
@@ -719,7 +719,7 @@ impl Jfet {
         vds: Value,
         temp: Value,
     ) -> (Value, Value, Value, Option<Hfet1GateEval>) {
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::Q_ELECTRON;
         let pol = self.jfet_type.polarity();
         let p = &self.params;
 

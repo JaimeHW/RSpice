@@ -287,7 +287,7 @@ impl Jfet {
         self.params.hfet_cds = 0.0;
         self.params.hfet_cf = 0.0;
         self.params.mesa_astar = 4.0e4;
-        self.params.mesa_phib = 0.5 * 1.602176634e-19;
+        self.params.mesa_phib = 0.5 * crate::constants::Q_ELECTRON;
         self.params.mesa_xchi = 0.033;
         self.params.mesa_du = 0.035e-6;
         self.params.mesa_nd = 2.0e23;
@@ -366,7 +366,7 @@ impl Jfet {
         self.params.hfet_cds = 0.0;
         self.params.hfet_cf = 0.0;
         self.params.mesa_astar = 4.0e4;
-        self.params.mesa_phib = 0.5 * 1.602176634e-19;
+        self.params.mesa_phib = 0.5 * crate::constants::Q_ELECTRON;
         self.params.mesa_xchi = 0.033;
         self.params.mesa_du = 0.035e-6;
         self.params.mesa_nd = 2.0e23;

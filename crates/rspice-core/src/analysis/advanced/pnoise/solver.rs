@@ -98,8 +98,8 @@ pub struct DeviceNoise {
 impl DeviceNoise {
     /// Create thermal noise source (resistor)
     pub fn thermal(name: &str, nodes: Vec<usize>, resistance: Value, temperature: Value) -> Self {
-        let k_boltzmann = 1.380649e-23;
-        let i_noise_psd = 4.0 * k_boltzmann * temperature / resistance;
+        use crate::constants::K_BOLTZMANN;
+        let i_noise_psd = 4.0 * K_BOLTZMANN * temperature / resistance;
 
         Self {
             name: name.to_string(),
@@ -111,8 +111,8 @@ impl DeviceNoise {
 
     /// Create shot noise source
     pub fn shot(name: &str, nodes: Vec<usize>, dc_current: Value) -> Self {
-        let q = 1.602176634e-19;
-        let i_noise_psd = 2.0 * q * dc_current.abs();
+        use crate::constants::Q_ELECTRON;
+        let i_noise_psd = 2.0 * Q_ELECTRON * dc_current.abs();
 
         Self {
             name: name.to_string(),

@@ -2353,7 +2353,7 @@ R2 out 0 1k
         let modern_shot = sources[0].spectral_density(1.0, temperature);
         assert_eq!(
             modern_shot,
-            2.0 * crate::analysis::noise::Q_ELECTRON * current
+            2.0 * crate::constants::Q_ELECTRON * current
         );
 
         Engine::configure_noise_physical_constants(
@@ -2363,11 +2363,11 @@ R2 out 0 1k
         );
         assert_eq!(
             sources[0].spectral_density(1.0, temperature),
-            2.0 * crate::analysis::noise::XYCE_Q_ELECTRON * current
+            2.0 * crate::constants::XYCE_Q_ELECTRON * current
         );
         assert_eq!(
             sources[1].spectral_density(1.0, temperature),
-            4.0 * crate::analysis::noise::XYCE_K_BOLTZMANN * temperature / resistance
+            4.0 * crate::constants::XYCE_K_BOLTZMANN * temperature / resistance
         );
     }
 
@@ -2748,7 +2748,7 @@ r1 a 0 rmod
             .expect("port-noise analysis runs");
         assert_eq!(results.len(), frequencies.len());
 
-        let expected = 4.0 * crate::analysis::noise::K_BOLTZMANN * temperature / 50.0;
+        let expected = 4.0 * crate::constants::K_BOLTZMANN * temperature / 50.0;
         for (point, frequency) in results.iter().zip(frequencies) {
             assert_eq!(point.frequency.to_bits(), frequency.to_bits());
             assert_eq!(point.current_correlation.len(), 2);

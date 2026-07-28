@@ -66,8 +66,8 @@ impl ThermalNetwork {
     /// Get thermal voltage at current junction temperature
     #[inline]
     pub fn thermal_voltage(&self) -> Value {
-        const K_BOLTZMANN: Value = 1.380649e-23;
-        const Q_ELECTRON: Value = 1.602176634e-19;
+        use crate::constants::K_BOLTZMANN;
+        use crate::constants::Q_ELECTRON;
         K_BOLTZMANN * self.t_junction / Q_ELECTRON
     }
 

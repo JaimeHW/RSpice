@@ -501,7 +501,7 @@ impl Mosfet {
         const EPS0: Value = 8.854_214_871e-12;
         const EPS_SI_REL: Value = 11.7;
         const EPS_OX_REL: Value = 3.9;
-        const Q_E: Value = 1.602_176_634e-19;
+        use crate::constants::Q_ELECTRON as Q_E;
         const V_T_REF: Value = 0.025_85;
         const REFTEMP: Value = 300.15;
         const N_I_CM3: Value = 1.45e10;
