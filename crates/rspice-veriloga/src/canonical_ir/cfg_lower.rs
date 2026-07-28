@@ -41,9 +41,10 @@ use super::hir::{
     HirRegion,
 };
 use super::mir::{MirEquationKind, MirModel};
+use super::noise::{contains_noise, is_noise_call, string_literal};
 use super::{
-    BlockId, BranchId, BranchUnknownId, CompilerPhase, ContributionId, DiagnosticSeverity, ExprId,
-    IrDiagnostic, NodeId, ParamId, SourceSpanRef, ValueId, VariableId,
+    BlockId, BranchId, BranchUnknownId, CanonicalNoiseSourceKind, CompilerPhase, ContributionId,
+    DiagnosticSeverity, ExprId, IrDiagnostic, NodeId, ParamId, SourceSpanRef, ValueId, VariableId,
 };
 
 /// A module lowered to a single control-flow graph.
@@ -54,10 +55,44 @@ pub struct CfgModel {
     /// The accumulated residual of each contribution at the exit block, indexed
     /// by [`ContributionId`]. Parallel to `MirModel::equations`.
     pub residuals: Vec<ValueId>,
+    /// Every noise source the body writes, in the order the body writes them.
+    ///
+    /// Kept apart from `residuals` because noise contributes nothing to the
+    /// time-domain equations: these are the small-signal powers, evaluated at
+    /// whatever operating point the same body just computed.
+    pub noise: Vec<CfgNoiseSource>,
     /// Everything the lowering wanted to say that did not stop it. Carried on
     /// the model rather than dropped, because a model that lowered *and* warned
     /// is exactly the case worth surfacing.
     pub warnings: Vec<IrDiagnostic>,
+}
+
+/// One noise source, as values the body already computes.
+///
+/// Every field is read at the exit block, so each is the merge of what the
+/// source's own site assigned with the zero it started at. That is what makes a
+/// source under an untaken `if` inactive, and it costs no separate activation
+/// expression: the guard is the control flow the source was written in, and SSA
+/// construction already knows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CfgNoiseSource {
+    /// The contribution this source was written in, and which of that
+    /// contribution's sources it is, counting in source order. Together they
+    /// name the [`super::CanonicalNoiseSource`] this corresponds to, which
+    /// nothing else can do: the plan is extracted from a second lowering of the
+    /// same expressions, so it shares no expression ids with the body.
+    pub contribution: ContributionId,
+    pub ordinal: usize,
+    pub kind: CanonicalNoiseSourceKind,
+    pub log_interp: bool,
+    pub label: Option<SmolStr>,
+    /// Nonzero exactly when control reached the source.
+    pub active: ValueId,
+    /// Already multiplied by the square of the amplitude the source was scaled
+    /// by, matching what the plan folds into its own `psd`.
+    pub psd: ValueId,
+    pub exponent: Option<ValueId>,
+    pub table: Vec<ValueId>,
 }
 
 impl CfgModel {
@@ -68,7 +103,7 @@ impl CfgModel {
     /// in MIR. Nothing is recomputed here that MIR already decided.
     pub fn from_hir(hir: &HirModel, mir: &MirModel) -> Result<Self, Vec<IrDiagnostic>> {
         let mut lowerer = CfgLowerer::new(hir, mir);
-        let (function, residuals) = lowerer.lower()?;
+        let (function, residuals, noise) = lowerer.lower()?;
         // Errors only. A warning that failed the lowering would be an error
         // wearing a different word.
         if lowerer
@@ -82,9 +117,39 @@ impl CfgModel {
             module_name: hir.module_name.clone(),
             function,
             residuals,
+            noise,
             warnings: lowerer.diagnostics,
         })
     }
+}
+
+/// Re-attach each source to its values once finishing has renumbered them.
+///
+/// `outputs` is the flattening of every source's variables in the order
+/// [`PendingNoise::variables`] yields them, which is the order they were pushed
+/// in, so the two walks stay in step by construction.
+fn resolve_noise(pending: Vec<PendingNoise>, outputs: &[ValueId]) -> Vec<CfgNoiseSource> {
+    let mut next = outputs.iter().copied();
+    let mut sources = Vec::with_capacity(pending.len());
+    for source in pending {
+        let mut take = || next.next().expect("an output for every noise variable");
+        let active = take();
+        let psd = take();
+        let exponent = source.exponent.map(|_| take());
+        let table = source.table.iter().map(|_| take()).collect();
+        sources.push(CfgNoiseSource {
+            contribution: source.contribution,
+            ordinal: source.ordinal,
+            kind: source.kind,
+            log_interp: source.log_interp,
+            label: source.label,
+            active,
+            psd,
+            exponent,
+            table,
+        });
+    }
+    sources
 }
 
 /// A leaf value's identity, for interning.
@@ -123,7 +188,35 @@ struct CfgLowerer<'a> {
     temporary_count: usize,
     /// `$limit` calls whose inlined body is currently being walked.
     limiters: Vec<Limiter>,
+    /// Noise sources found so far, each still holding the SSA variables its
+    /// values are carried in rather than the values themselves.
+    noise: Vec<PendingNoise>,
     diagnostics: Vec<IrDiagnostic>,
+}
+
+/// A noise source between its site and the exit block.
+struct PendingNoise {
+    contribution: ContributionId,
+    ordinal: usize,
+    kind: CanonicalNoiseSourceKind,
+    log_interp: bool,
+    label: Option<SmolStr>,
+    active: CfgVariable,
+    psd: CfgVariable,
+    exponent: Option<CfgVariable>,
+    table: Vec<CfgVariable>,
+}
+
+impl PendingNoise {
+    /// Every variable this source carries, in the order the outputs are laid
+    /// out. Both the zero-initialization and the read-back walk this, so they
+    /// cannot disagree about which variables a source owns.
+    fn variables(&self) -> impl Iterator<Item = CfgVariable> + '_ {
+        [self.active, self.psd]
+            .into_iter()
+            .chain(self.exponent)
+            .chain(self.table.iter().copied())
+    }
 }
 
 /// One `$limit` call, while its body is in scope.
@@ -162,11 +255,15 @@ impl<'a> CfgLowerer<'a> {
             leaves: HashMap::new(),
             temporary_count: 0,
             limiters: Vec::new(),
+            noise: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
 
-    fn lower(&mut self) -> Result<(CfgFunction, Vec<ValueId>), Vec<IrDiagnostic>> {
+    #[allow(clippy::type_complexity)]
+    fn lower(
+        &mut self,
+    ) -> Result<(CfgFunction, Vec<ValueId>, Vec<CfgNoiseSource>), Vec<IrDiagnostic>> {
         let entry = self.builder.create_block();
         self.builder.seal_block(entry);
         self.block = entry;
@@ -192,13 +289,45 @@ impl<'a> CfgLowerer<'a> {
                 self.builder.read_variable(variable, exit).unwrap_or(zero)
             })
             .collect();
+
+        // A noise source's variables are given their zero here, once the body
+        // has been walked and it is known which exist. `write_variable` records
+        // a definition rather than emitting an instruction, and nothing has read
+        // one of these yet, so seeding the entry block after the fact defines
+        // them on every path that does not pass the source — which is what makes
+        // an unreached source read back inactive instead of undefined.
+        //
+        // Only where the entry block has no definition already, because a body
+        // with no control flow around its sources writes them *in* the entry
+        // block, and seeding over that would zero the source that is always on.
+        let pending = std::mem::take(&mut self.noise);
+        for source in &pending {
+            for variable in source.variables() {
+                if self.builder.read_variable(variable, entry).is_none() {
+                    self.builder.write_variable(variable, entry, zero);
+                }
+            }
+        }
+        let mut outputs = residuals.clone();
+        for source in &pending {
+            for variable in source.variables() {
+                outputs.push(self.builder.read_variable(variable, exit).unwrap_or(zero));
+            }
+        }
         self.builder.set_terminator(exit, CfgTerminator::Return);
 
         // Through `finish_with_outputs`, because finishing renumbers values and
         // a residual id read out beforehand names something else afterwards.
         let builder = std::mem::take(&mut self.builder);
-        match builder.finish_with_outputs(entry, &residuals) {
-            Ok((function, residuals)) => Ok((function, residuals)),
+        match builder.finish_with_outputs(entry, &outputs) {
+            Ok((function, outputs)) => {
+                let (residuals, noise) = outputs.split_at(self.hir.contributions.len());
+                Ok((
+                    function,
+                    residuals.to_vec(),
+                    resolve_noise(pending, noise),
+                ))
+            }
             Err(error) => Err(vec![IrDiagnostic::global_error(
                 CompilerPhase::CfgLowering,
                 format!("CFG construction produced an invalid function: {error}"),
@@ -254,6 +383,317 @@ impl<'a> CfgLowerer<'a> {
         };
         let sum = self.binary(CfgBinaryOp::Add, accumulated, value);
         self.builder.write_variable(variable, self.block, sum);
+
+        // After the residual, not before: the two walks read the same variables
+        // in the same block, so which runs first cannot change what either sees,
+        // and this order keeps the contribution itself the first thing here.
+        self.noise_sources(contribution.id, contribution.expression.id);
+    }
+
+    /// Lower whatever noise the contribution's expression carries.
+    ///
+    /// The walk is the one `noise::extract_expression` performs on the folded
+    /// statements, and it has to stay the one: the amplitude a source is scaled
+    /// by is folded into its power there, so descending differently would give
+    /// a source the wrong magnitude, and visiting in a different order would
+    /// give it the wrong identity.
+    fn noise_sources(&mut self, contribution: ContributionId, expression: ExprId) {
+        if !contains_noise(self.hir, expression) {
+            return;
+        }
+        let unit = self.real_constant(1.0);
+        self.noise_term(contribution, expression, unit);
+    }
+
+    fn noise_term(&mut self, contribution: ContributionId, id: ExprId, amplitude: ValueId) {
+        if !contains_noise(self.hir, id) {
+            return;
+        }
+        let Some(expression) = self.hir.expressions.get(usize::from(id)).cloned() else {
+            self.diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::CfgLowering,
+                format!("CFG lowering found expression id {id} outside the arena"),
+            ));
+            return;
+        };
+        let span = expression.span;
+        match &expression.kind {
+            HirExprKind::Call { name, args } | HirExprKind::SystemFunction { name, args }
+                if is_noise_call(name) =>
+            {
+                let label = args.last().and_then(|id| string_literal(self.hir, *id));
+                self.noise_call(
+                    contribution,
+                    name.trim_start_matches('$'),
+                    args,
+                    label,
+                    amplitude,
+                    span,
+                );
+            }
+            HirExprKind::NoiseSource {
+                source,
+                operands,
+                name,
+            } => {
+                let (kind, log_interp) = match source.as_str() {
+                    "White" if operands.len() == 1 => (CanonicalNoiseSourceKind::White, false),
+                    "Flicker" if operands.len() == 2 => (CanonicalNoiseSourceKind::Flicker, false),
+                    "Table" if !operands.is_empty() => (CanonicalNoiseSourceKind::Table, false),
+                    _ => {
+                        self.unsupported(
+                            span,
+                            format!("noise source '{source}' with {} operands", operands.len()),
+                        );
+                        return;
+                    }
+                };
+                let operands = operands.clone();
+                let name = name.clone();
+                self.noise_source(contribution, kind, log_interp, name, &operands, amplitude);
+            }
+            HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Add" | "Sub") => {
+                let (left, right) = (*left, *right);
+                self.noise_term(contribution, left, amplitude);
+                self.noise_term(contribution, right, amplitude);
+            }
+            HirExprKind::Binary { op, left, right } if op == "Mul" => {
+                let (left, right) = (*left, *right);
+                match (
+                    contains_noise(self.hir, left),
+                    contains_noise(self.hir, right),
+                ) {
+                    (true, true) => self.unsupported_noise(span, "product of noise terms"),
+                    (true, false) => {
+                        let scale = self.expr(right);
+                        let scaled = self.binary(CfgBinaryOp::Mul, amplitude, scale);
+                        self.noise_term(contribution, left, scaled);
+                    }
+                    (false, true) => {
+                        let scale = self.expr(left);
+                        let scaled = self.binary(CfgBinaryOp::Mul, amplitude, scale);
+                        self.noise_term(contribution, right, scaled);
+                    }
+                    (false, false) => {}
+                }
+            }
+            HirExprKind::Binary { op, left, right } if op == "Div" => {
+                let (left, right) = (*left, *right);
+                if contains_noise(self.hir, right) {
+                    self.unsupported_noise(span, "divisor");
+                    return;
+                }
+                let divisor = self.expr(right);
+                let scaled = self.binary(CfgBinaryOp::Div, amplitude, divisor);
+                self.noise_term(contribution, left, scaled);
+            }
+            HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Neg" | "Pos") => {
+                let operand = *operand;
+                self.noise_term(contribution, operand, amplitude);
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                let (condition, then_expr, else_expr) = (*condition, *then_expr, *else_expr);
+                if contains_noise(self.hir, condition) {
+                    self.unsupported_noise(span, "condition");
+                    return;
+                }
+                self.noise_conditional(contribution, condition, then_expr, else_expr, amplitude);
+            }
+            _ => self.unsupported_noise(span, "nonlinear or dynamic position"),
+        }
+    }
+
+    /// A ternary with noise in an arm, lowered as the diamond it is.
+    ///
+    /// The arms become real blocks, so a source in the untaken one neither
+    /// evaluates its operands nor writes its variables — it reads back inactive
+    /// through the join, on the same mechanism a source under a statement `if`
+    /// already uses. That is stricter than gating the result by a numeric zero,
+    /// which would still have evaluated an operand that may not be finite here.
+    fn noise_conditional(
+        &mut self,
+        contribution: ContributionId,
+        condition: ExprId,
+        then_expr: ExprId,
+        else_expr: ExprId,
+        amplitude: ValueId,
+    ) {
+        let condition = self.expr(condition);
+        let then_block = self.builder.create_block();
+        let else_block = self.builder.create_block();
+        let join = self.builder.create_block();
+
+        self.builder.set_terminator(
+            self.block,
+            CfgTerminator::Branch {
+                condition,
+                then_target: then_block,
+                then_args: Vec::new(),
+                else_target: else_block,
+                else_args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(then_block);
+        self.builder.seal_block(else_block);
+
+        self.block = then_block;
+        self.noise_term(contribution, then_expr, amplitude);
+        self.builder.set_terminator(
+            self.block,
+            CfgTerminator::Jump {
+                target: join,
+                args: Vec::new(),
+            },
+        );
+
+        self.block = else_block;
+        self.noise_term(contribution, else_expr, amplitude);
+        self.builder.set_terminator(
+            self.block,
+            CfgTerminator::Jump {
+                target: join,
+                args: Vec::new(),
+            },
+        );
+
+        self.builder.seal_block(join);
+        self.block = join;
+    }
+
+    fn noise_call(
+        &mut self,
+        contribution: ContributionId,
+        name: &str,
+        args: &[ExprId],
+        label: Option<SmolStr>,
+        amplitude: ValueId,
+        span: SourceSpanRef,
+    ) {
+        match name {
+            "white_noise" if !args.is_empty() => {
+                let operands = [args[0]];
+                self.noise_source(
+                    contribution,
+                    CanonicalNoiseSourceKind::White,
+                    false,
+                    label,
+                    &operands,
+                    amplitude,
+                );
+            }
+            "flicker_noise" if args.len() >= 2 => {
+                let operands = [args[0], args[1]];
+                self.noise_source(
+                    contribution,
+                    CanonicalNoiseSourceKind::Flicker,
+                    false,
+                    label,
+                    &operands,
+                    amplitude,
+                );
+            }
+            "noise_table" | "noise_table_log" if !args.is_empty() => {
+                // A table given as one array literal is its elements, matching
+                // how the plan counts operands; anything else is one operand.
+                let operands = match &self.hir.expressions[usize::from(args[0])].kind {
+                    HirExprKind::ArrayLiteral { elements } => elements.clone(),
+                    _ => vec![args[0]],
+                };
+                self.noise_source(
+                    contribution,
+                    CanonicalNoiseSourceKind::Table,
+                    name == "noise_table_log",
+                    label,
+                    &operands,
+                    amplitude,
+                );
+            }
+            _ => self.unsupported(
+                span,
+                format!("noise function '{name}' with {} operands", args.len()),
+            ),
+        }
+    }
+
+    fn noise_source(
+        &mut self,
+        contribution: ContributionId,
+        kind: CanonicalNoiseSourceKind,
+        log_interp: bool,
+        label: Option<SmolStr>,
+        operands: &[ExprId],
+        amplitude: ValueId,
+    ) {
+        let squared = self.binary(CfgBinaryOp::Mul, amplitude, amplitude);
+        let (psd, exponent, table) = match kind {
+            CanonicalNoiseSourceKind::White => {
+                let power = self.expr(operands[0]);
+                (self.binary(CfgBinaryOp::Mul, squared, power), None, Vec::new())
+            }
+            CanonicalNoiseSourceKind::Flicker => {
+                let power = self.expr(operands[0]);
+                let psd = self.binary(CfgBinaryOp::Mul, squared, power);
+                let exponent = self.expr(operands[1]);
+                (psd, Some(exponent), Vec::new())
+            }
+            // A table's power is the amplitude alone; the tabulated magnitudes
+            // are the operands, exactly as the plan splits them.
+            CanonicalNoiseSourceKind::Table => {
+                let table = operands
+                    .iter()
+                    .map(|operand| self.expr(*operand))
+                    .collect::<Vec<_>>();
+                (squared, None, table)
+            }
+        };
+
+        let ordinal = self
+            .noise
+            .iter()
+            .filter(|source| source.contribution == contribution)
+            .count();
+        let pending = PendingNoise {
+            contribution,
+            ordinal,
+            kind,
+            log_interp,
+            label,
+            active: CfgVariable::Local(self.result_variable()),
+            psd: CfgVariable::Local(self.result_variable()),
+            exponent: exponent.map(|_| CfgVariable::Local(self.result_variable())),
+            table: table
+                .iter()
+                .map(|_| CfgVariable::Local(self.result_variable()))
+                .collect(),
+        };
+
+        // The block is read now, not before the operands were lowered: a table
+        // magnitude may itself have been a ternary, and the writes belong
+        // wherever lowering the last of them ended up.
+        let block = self.block;
+        let one = self.real_constant(1.0);
+        self.builder.write_variable(pending.active, block, one);
+        self.builder.write_variable(pending.psd, block, psd);
+        if let (Some(variable), Some(value)) = (pending.exponent, exponent) {
+            self.builder.write_variable(variable, block, value);
+        }
+        for (variable, value) in pending.table.iter().zip(table) {
+            self.builder.write_variable(*variable, block, value);
+        }
+        self.noise.push(pending);
+    }
+
+    fn unsupported_noise(&mut self, span: SourceSpanRef, placement: &str) {
+        self.unsupported(
+            span,
+            format!(
+                "a noise function in a {placement} (noise terms must enter contributions additively, optionally scaled)"
+            ),
+        );
     }
 
     fn conditional(&mut self, condition: ExprId, then_body: &[HirRegion], else_body: &[HirRegion]) {

@@ -660,7 +660,7 @@ fn expression_kind_label(kind: &HirExprKind) -> &'static str {
     }
 }
 
-fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
+pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
     let mut stack = vec![root];
     let mut visited = std::collections::HashSet::new();
     while let Some(expr) = stack.pop() {
@@ -703,7 +703,7 @@ fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
     false
 }
 
-fn is_noise_call(name: &str) -> bool {
+pub(super) fn is_noise_call(name: &str) -> bool {
     matches!(
         name.trim_start_matches('$'),
         "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log"
@@ -759,7 +759,7 @@ fn canonical_identifier(value: &str, ground: bool) -> String {
     out
 }
 
-fn string_literal(hir: &HirModel, id: ExprId) -> Option<SmolStr> {
+pub(super) fn string_literal(hir: &HirModel, id: ExprId) -> Option<SmolStr> {
     match &hir.expressions[usize::from(id)].kind {
         HirExprKind::StringLiteral { value } => Some(value.clone()),
         _ => None,
