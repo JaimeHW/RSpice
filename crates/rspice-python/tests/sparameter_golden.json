@@ -1,0 +1,313 @@
+{
+  "three_port_non_uniform_z0": {
+    "delta": null,
+    "frequencies": [
+      "0x1.e848000000000p+19",
+      "0x1.81be000000000p+21",
+      "0x1.312d000000000p+23",
+      "0x1.e22d800000000p+24",
+      "0x1.7d78400000000p+26"
+    ],
+    "has_noise": false,
+    "has_two_port_noise_parameters": false,
+    "has_two_port_stability": false,
+    "k_factor": null,
+    "mason_unilateral_gain_db": null,
+    "matrix": {
+      "s11": [
+        "-0x1.8dc49e86a5210p-4|-0x1.9a597bec09300p-5",
+        "-0x1.4d50a9f5bd380p-3|-0x1.dfcc4c088cb10p-4",
+        "-0x1.2dc891ecebd15p-2|-0x1.87402624c8637p-4",
+        "-0x1.518614df41be7p-2|-0x1.11fc4b9e84186p-5",
+        "-0x1.54f669da11d07p-2|-0x1.5b97309ea5849p-7"
+      ],
+      "s12": [
+        "0x1.8d26a418794c0p-2|-0x1.1f233aa3f7361p-4",
+        "0x1.3511cad315f70p-2|-0x1.5ef0d9a580c5dp-3",
+        "0x1.8b135e15da153p-4|-0x1.5add3d36d8ab7p-3",
+        "0x1.9e6605f63c4dep-7|-0x1.1b20cdd8c0d45p-4",
+        "0x1.5625392f3db0fp-10|-0x1.70fe333ef0c81p-6"
+      ],
+      "s13": [
+        "0x1.7a68cd7cfe456p-1|-0x1.f19c8eac32780p-4",
+        "0x1.3195ee5dcef57p-1|-0x1.38fb739a87e8ep-2",
+        "0x1.bbdf7ffefce47p-3|-0x1.574a5cb38a16cp-2",
+        "0x1.f59b7fd78a9ddp-6|-0x1.2ac5d3b7cd8fbp-3",
+        "0x1.a2d693fe93d8ep-9|-0x1.894363c0bde30p-5"
+      ],
+      "s21": [
+        "0x1.8d26a418794c4p-2|-0x1.1f233aa3f7368p-4",
+        "0x1.3511cad315f70p-2|-0x1.5ef0d9a580c5fp-3",
+        "0x1.8b135e15da154p-4|-0x1.5add3d36d8ab7p-3",
+        "0x1.9e6605f63c4dcp-7|-0x1.1b20cdd8c0d45p-4",
+        "0x1.5625392f3db09p-10|-0x1.70fe333ef0c80p-6"
+      ],
+      "s22": [
+        "0x1.365fe568cfa96p-5|-0x1.0f86d6bcf3bdcp-4",
+        "-0x1.787950dfcc1f8p-5|-0x1.45591a19607a4p-3",
+        "-0x1.d9b2adf35d12ep-3|-0x1.28b3dcaf13cf6p-3",
+        "-0x1.2eab4e04192f5p-2|-0x1.c92c0acd45cbep-5",
+        "-0x1.36bd0e2476b88p-2|-0x1.27110d3fb8d0ep-6"
+      ],
+      "s23": [
+        "0x1.6f373a2350655p-2|-0x1.3e2ef54ca6f5dp-4",
+        "0x1.062bd18fb9de7p-2|-0x1.71fb8325f455bp-3",
+        "0x1.bbd1f1ddf80b9p-5|-0x1.25842a9c00443p-3",
+        "0x1.385775d26f01cp-8|-0x1.903cc85c3ee47p-5",
+        "0x1.dbe2a9660f49fp-12|-0x1.f91d74a8a388fp-7"
+      ],
+      "s31": [
+        "0x1.7a68cd7cfe45ap-1|-0x1.f19c8eac32790p-4",
+        "0x1.3195ee5dcef58p-1|-0x1.38fb739a87e90p-2",
+        "0x1.bbdf7ffefce48p-3|-0x1.574a5cb38a16cp-2",
+        "0x1.f59b7fd78a9dcp-6|-0x1.2ac5d3b7cd8f8p-3",
+        "0x1.a2d693fe93e44p-9|-0x1.894363c0bde30p-5"
+      ],
+      "s32": [
+        "0x1.6f373a2350655p-2|-0x1.3e2ef54ca6f62p-4",
+        "0x1.062bd18fb9de7p-2|-0x1.71fb8325f455bp-3",
+        "0x1.bbd1f1ddf80b7p-5|-0x1.25842a9c00443p-3",
+        "0x1.385775d26f019p-8|-0x1.903cc85c3ee47p-5",
+        "0x1.dbe2a9660f4a1p-12|-0x1.f91d74a8a3889p-7"
+      ],
+      "s33": [
+        "-0x1.3e50f590e3720p-4|-0x1.b4ba7c88c8a40p-6",
+        "-0x1.243ae4d7d5695p-3|-0x1.8be177d1e1120p-6",
+        "-0x1.b4449a45b1dc0p-4|0x1.0fa1a2d45616ap-3",
+        "0x1.bfa2433ff924ep-5|0x1.8d009bc8f01aap-4",
+        "0x1.645744a0f24efp-4|0x1.1506ac0f42fecp-5"
+      ]
+    },
+    "max_available_gain_db": null,
+    "max_stable_gain_db": null,
+    "mu_factor": null,
+    "mu_prime": null,
+    "num_points": 5,
+    "num_ports": 3,
+    "port_names": [
+      "V1",
+      "V2",
+      "V3"
+    ],
+    "reference_impedances": [
+      "0x1.9000000000000p+5",
+      "0x1.2c00000000000p+6",
+      "0x1.9000000000000p+5"
+    ],
+    "reverse_isolation_db": null,
+    "transducer_gain_db": null,
+    "unconditionally_stable": null
+  },
+  "two_port_asymmetric_z0_closed_form": {
+    "delta": [
+      "-0x1.b6db6db6db3fcp-2|0x0.0p+0"
+    ],
+    "frequencies": [
+      "0x1.e848000000000p+19"
+    ],
+    "has_noise": false,
+    "has_two_port_noise_parameters": false,
+    "has_two_port_stability": true,
+    "k_factor": [
+      "0x1.0000000000385p+0"
+    ],
+    "mason_unilateral_gain_db": [
+      "-0x1.7a2fb0c8180a6p+7"
+    ],
+    "matrix": {
+      "s11": [
+        "0x1.2492492491bf4p-3|0x0.0p+0"
+      ],
+      "s12": [
+        "0x1.66534a92eff6bp-1|0x0.0p+0"
+      ],
+      "s21": [
+        "0x1.66534a92eff69p-1|0x0.0p+0"
+      ],
+      "s22": [
+        "0x1.b6db6db6db1fap-2|0x0.0p+0"
+      ]
+    },
+    "max_available_gain_db": [
+      "-0x1.70b73c068a7c0p-19"
+    ],
+    "max_stable_gain_db": [
+      "-0x1.5b6f8288662f4p-49"
+    ],
+    "mu_factor": [
+      "0x1.0000000000385p+0"
+    ],
+    "mu_prime": [
+      "0x1.0000000000547p+0"
+    ],
+    "num_points": 1,
+    "num_ports": 2,
+    "port_names": [
+      "V1",
+      "V2"
+    ],
+    "reference_impedances": [
+      "0x1.2c00000000000p+6",
+      "0x1.9000000000000p+5"
+    ],
+    "reverse_isolation_db": [
+      "-0x1.8cc7d4f222e43p+1"
+    ],
+    "transducer_gain_db": [
+      "-0x1.8cc7d4f222e48p+1"
+    ],
+    "unconditionally_stable": [
+      true
+    ]
+  },
+  "two_port_noise_75_ohm_input": {
+    "cy": {
+      "cy11": [
+        "0x1.90c8ea5b7945ep-72|0x0.0p+0",
+        "0x1.90c8ea5b7945ep-72|0x0.0p+0",
+        "0x1.90c8ea5b7945ep-72|0x0.0p+0"
+      ],
+      "cy12": [
+        "-0x1.90c8ea5b7945ep-72|-0x1.d086e26d3e0edp-136",
+        "-0x1.90c8ea5b7945ep-72|-0x1.22544d8446c94p-132",
+        "-0x1.90c8ea5b7945ep-72|-0x1.6ae960e5587bap-129"
+      ],
+      "cy21": [
+        "-0x1.90c8ea5b7945ep-72|0x1.d086e26d3e0edp-136",
+        "-0x1.90c8ea5b7945ep-72|0x1.22544d8446c94p-132",
+        "-0x1.90c8ea5b7945ep-72|0x1.6ae960e5587bap-129"
+      ],
+      "cy22": [
+        "0x1.90c8ea5b7945ep-72|0x0.0p+0",
+        "0x1.90c8ea5b7945ep-72|0x0.0p+0",
+        "0x1.90c8ea5b7945ep-72|0x0.0p+0"
+      ]
+    },
+    "delta": [
+      "-0x1.b6da9d2a8eb2bp-2|0x1.2e86b89e548bap-10",
+      "-0x1.b68a05deb9233p-2|0x1.79e2f4e8c3a5dp-7",
+      "-0x1.992fbc58f2164p-2|0x1.b8bdecfdb7b90p-4"
+    ],
+    "frequencies": [
+      "0x1.e848000000000p+19",
+      "0x1.312d000000000p+23",
+      "0x1.7d78400000000p+26"
+    ],
+    "has_noise": true,
+    "has_two_port_noise_parameters": true,
+    "has_two_port_stability": true,
+    "k_factor": [
+      "0x1.0000000000382p+0",
+      "0x1.0000000000385p+0",
+      "0x1.0000000000384p+0"
+    ],
+    "mason_unilateral_gain_db": [
+      "-0x1.731bdc8ea8223p+7",
+      "-0x1.8636bd070ffa4p+7",
+      "-0x1.730e60b5d3da0p+7"
+    ],
+    "matrix": {
+      "s11": [
+        "0x1.248df0e2f9798p-3|-0x1.935e4b7dc6084p-9",
+        "0x1.22e01f4e867c8p-3|-0x1.f7d9468baf7eap-6",
+        "0x1.0ca7d90a171f8p-4|-0x1.25d3f353cfcb6p-2"
+      ],
+      "s12": [
+        "0x1.6652a04b92e0bp-1|-0x1.ee05f7507ff9dp-10",
+        "0x1.6610d2e991be7p-1|-0x1.348b0701a843fp-6",
+        "0x1.4e196f1f50d42p-1|-0x1.67dd3fa4230e6p-3"
+      ],
+      "s21": [
+        "0x1.6652a04b92e09p-1|-0x1.ee05f7507ff9bp-10",
+        "0x1.6610d2e991be6p-1|-0x1.348b0701a843dp-6",
+        "0x1.4e196f1f50d40p-1|-0x1.67dd3fa4230e3p-3"
+      ],
+      "s22": [
+        "0x1.b6da9d2a8e92bp-2|-0x1.2e86b89e5475bp-10",
+        "0x1.b68a05deb9034p-2|-0x1.79e2f4e8c38a5p-7",
+        "0x1.992fbc58f1f87p-2|-0x1.b8bdecfdb798fp-4"
+      ]
+    },
+    "max_available_gain_db": [
+      "-0x1.7019f596db8d1p-19",
+      "-0x1.70b73c045e965p-19",
+      "-0x1.7082d6b0135bbp-19"
+    ],
+    "max_stable_gain_db": [
+      "-0x1.5b6f8288662f4p-49",
+      "-0x1.a0ec363d476bfp-50",
+      "-0x1.38b128adf5910p-48"
+    ],
+    "minimum_noise_factor": [
+      "0x1.0000000000384p+0",
+      "0x1.0000000000384p+0",
+      "0x1.0000000000384p+0"
+    ],
+    "minimum_noise_figure_db": [
+      "0x1.e894cf8fcf7cap-41",
+      "0x1.e894cf8fcf7cap-41",
+      "0x1.e894cf8fcf7cap-41"
+    ],
+    "mu_factor": [
+      "0x1.0000000000383p+0",
+      "0x1.0000000000384p+0",
+      "0x1.0000000000384p+0"
+    ],
+    "mu_prime": [
+      "0x1.0000000000544p+0",
+      "0x1.0000000000544p+0",
+      "0x1.0000000000450p+0"
+    ],
+    "noise_factor": [
+      "0x1.aaaba30b1bfa3p+0",
+      "0x1.ab0bb056e2dbcp+0",
+      "0x1.d090e1f092fb0p+0"
+    ],
+    "noise_figure_db": [
+      "0x1.1bf8a9900db0dp+1",
+      "0x1.1c75c02fdd955p+1",
+      "0x1.4b4602e9a1365p+1"
+    ],
+    "noise_parameters_valid": [
+      true,
+      true,
+      true
+    ],
+    "noise_resistance": [
+      "0x1.8ffffffffffffp+5",
+      "0x1.8ffffffffffffp+5",
+      "0x1.8ffffffffffffp+5"
+    ],
+    "noise_temperature": "0x1.2c26666666666p+8",
+    "num_points": 3,
+    "num_ports": 2,
+    "optimum_source_reflection": [
+      "0x1.fffa2dc5d13dcp-1|0x1.34d3031d6512fp-7",
+      "0x1.fdbb282aa961ep-1|0x1.812efcaffd0fep-4",
+      "0x1.45ecdaf4cbd2cp-1|0x1.8adceaa5a4b6ep-1"
+    ],
+    "port_names": [
+      "V1",
+      "V2"
+    ],
+    "reference_impedances": [
+      "0x1.2c00000000000p+6",
+      "0x1.9000000000000p+5"
+    ],
+    "reverse_isolation_db": [
+      "-0x1.8cc8dd1ceced8p+1",
+      "-0x1.8d2efc2ee54dep+1",
+      "-0x1.b3b1ede47fd54p+1"
+    ],
+    "transducer_gain_db": [
+      "-0x1.8cc8dd1cecedep+1",
+      "-0x1.8d2efc2ee54e2p+1",
+      "-0x1.b3b1ede47fd5ep+1"
+    ],
+    "unconditionally_stable": [
+      true,
+      true,
+      true
+    ]
+  }
+}

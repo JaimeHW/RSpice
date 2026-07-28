@@ -1,0 +1,5478 @@
+{
+  "__all__": [
+    "AcResult",
+    "AcSensitivity",
+    "AcSensitivityResult",
+    "AnalysisRecord",
+    "BypassConfig",
+    "CancelledError",
+    "ComplexValue",
+    "CompressedTransientResult",
+    "ConvergenceConfig",
+    "ConvergenceError",
+    "DampingStrategy",
+    "DcSweep",
+    "DcSweepResult",
+    "DeviceOperatingPoint",
+    "DistortionResult",
+    "Element",
+    "ElementSensitivity",
+    "Engine",
+    "FourierResult",
+    "Harmonic",
+    "HbEnvelopeState",
+    "HbResult",
+    "HealthReport",
+    "IntegrationMethod",
+    "Measurement",
+    "MeasurementError",
+    "MonteCarloResult",
+    "Netlist",
+    "NetlistSourceLocation",
+    "NoiseContribution",
+    "NoiseResult",
+    "OscillatorNoiseResult",
+    "PacResult",
+    "ParseDiagnostic",
+    "ParseError",
+    "PeriodicNoiseContribution",
+    "PeriodicNoiseResult",
+    "PoleZeroResult",
+    "PssContinuationState",
+    "PssOperatingPoint",
+    "PssResult",
+    "RSpiceError",
+    "RSpiceIndexError",
+    "RSpiceKeyError",
+    "RSpiceTypeError",
+    "RSpiceValueError",
+    "ResourceLimits",
+    "RunReport",
+    "SParameterResult",
+    "SensitivityResult",
+    "SimulationConfig",
+    "SimulationError",
+    "SimulationResult",
+    "StartupDiagnostic",
+    "StartupDirectiveScope",
+    "StbResult",
+    "TransferFunctionResult",
+    "TransientCheckpoint",
+    "TransientResult",
+    "UnresolvedOutputSymbol",
+    "VariableStatistics",
+    "__author__",
+    "__version__",
+    "ac_frequencies"
+  ],
+  "objects": {
+    "AcResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "branch_current_complex": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "branch_current_magnitude": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "branch_names": {
+          "kind": "getset_descriptor"
+        },
+        "export_columns": {
+          "kind": "getset_descriptor"
+        },
+        "frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, freq_index, node)"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "num_frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "phase_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, freq_index, node)"
+        },
+        "to_csv": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "to_raw": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, *, format='ascii', title=None, timestamp=None)"
+        },
+        "voltage_complex": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "voltage_db": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "voltage_magnitude": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "voltage_phase": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "voltage_phase_degrees": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "write_csv": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path)"
+        },
+        "write_raw": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path, *, format='ascii', title=None, timestamp=None)"
+        }
+      },
+      "mro": [
+        "AcResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "AcSensitivity": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__len__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "absolute": {
+          "kind": "getset_descriptor"
+        },
+        "db": {
+          "kind": "getset_descriptor"
+        },
+        "element": {
+          "kind": "getset_descriptor"
+        },
+        "element_type": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude": {
+          "kind": "getset_descriptor"
+        },
+        "nominal_value": {
+          "kind": "getset_descriptor"
+        },
+        "normalized": {
+          "kind": "getset_descriptor"
+        },
+        "parameter": {
+          "kind": "getset_descriptor"
+        },
+        "percent_per_percent": {
+          "kind": "getset_descriptor"
+        },
+        "phase": {
+          "kind": "getset_descriptor"
+        },
+        "phase_degrees": {
+          "kind": "getset_descriptor"
+        },
+        "vector_name": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "AcSensitivity",
+        "object"
+      ],
+      "type": "class"
+    },
+    "AcSensitivityResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__len__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "get": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, vector_name)"
+        },
+        "output": {
+          "kind": "getset_descriptor"
+        },
+        "output_complex": {
+          "kind": "getset_descriptor"
+        },
+        "output_magnitude": {
+          "kind": "getset_descriptor"
+        },
+        "output_phase": {
+          "kind": "getset_descriptor"
+        },
+        "output_phase_degrees": {
+          "kind": "getset_descriptor"
+        },
+        "sensitivities": {
+          "kind": "getset_descriptor"
+        },
+        "top": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, frequency_index, count=10)"
+        },
+        "vector_names": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "AcSensitivityResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "AnalysisRecord": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "detail": {
+          "kind": "getset_descriptor"
+        },
+        "kind": {
+          "kind": "getset_descriptor"
+        },
+        "reason": {
+          "kind": "getset_descriptor"
+        },
+        "skipped": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "AnalysisRecord",
+        "object"
+      ],
+      "type": "class"
+    },
+    "BypassConfig": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "NoneType",
+          "signature": null
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "abstol": {
+          "kind": "getset_descriptor"
+        },
+        "enabled": {
+          "kind": "getset_descriptor"
+        },
+        "reltol": {
+          "kind": "getset_descriptor"
+        },
+        "with_tolerances": {
+          "kind": "staticmethod",
+          "signature": "(reltol, abstol)"
+        }
+      },
+      "mro": [
+        "BypassConfig",
+        "object"
+      ],
+      "type": "class"
+    },
+    "CancelledError": {
+      "bases": [
+        "SimulationError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "CancelledError",
+        "SimulationError",
+        "RSpiceError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "ComplexValue": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "damping_factor": {
+          "kind": "getset_descriptor"
+        },
+        "frequency_hz": {
+          "kind": "getset_descriptor"
+        },
+        "imag": {
+          "kind": "getset_descriptor"
+        },
+        "is_real": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude": {
+          "kind": "getset_descriptor"
+        },
+        "phase": {
+          "kind": "getset_descriptor"
+        },
+        "phase_degrees": {
+          "kind": "getset_descriptor"
+        },
+        "real": {
+          "kind": "getset_descriptor"
+        },
+        "time_constant": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "ComplexValue",
+        "object"
+      ],
+      "type": "class"
+    },
+    "CompressedTransientResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "compression_ratio": {
+          "kind": "getset_descriptor"
+        },
+        "input_points": {
+          "kind": "getset_descriptor"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "num_nodes": {
+          "kind": "getset_descriptor"
+        },
+        "num_points": {
+          "kind": "getset_descriptor"
+        },
+        "resample": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node, num_points)"
+        },
+        "time": {
+          "kind": "getset_descriptor"
+        },
+        "voltage_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node, time)"
+        },
+        "voltage_waveform": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        }
+      },
+      "mro": [
+        "CompressedTransientResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "ConvergenceConfig": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "NoneType",
+          "signature": null
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "arc_length": {
+          "kind": "getset_descriptor"
+        },
+        "charge_abstol": {
+          "kind": "getset_descriptor"
+        },
+        "current_abstol": {
+          "kind": "getset_descriptor"
+        },
+        "damping_strategy": {
+          "kind": "getset_descriptor"
+        },
+        "fast": {
+          "kind": "staticmethod",
+          "signature": "()"
+        },
+        "gmin_initial": {
+          "kind": "getset_descriptor"
+        },
+        "gmin_stepping": {
+          "kind": "getset_descriptor"
+        },
+        "gmin_target": {
+          "kind": "getset_descriptor"
+        },
+        "pseudo_transient": {
+          "kind": "getset_descriptor"
+        },
+        "residual_reltol": {
+          "kind": "getset_descriptor"
+        },
+        "robust": {
+          "kind": "staticmethod",
+          "signature": "()"
+        },
+        "source_stepping": {
+          "kind": "getset_descriptor"
+        },
+        "verbose": {
+          "kind": "getset_descriptor"
+        },
+        "voltage_abstol": {
+          "kind": "getset_descriptor"
+        },
+        "voltage_reltol": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "ConvergenceConfig",
+        "object"
+      ],
+      "type": "class"
+    },
+    "ConvergenceError": {
+      "bases": [
+        "SimulationError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "ConvergenceError",
+        "SimulationError",
+        "RSpiceError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "DampingStrategy": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "BANK_ROSE": {
+          "kind": "DampingStrategy",
+          "signature": null
+        },
+        "COMBINED": {
+          "kind": "DampingStrategy",
+          "signature": null
+        },
+        "LINE_SEARCH": {
+          "kind": "DampingStrategy",
+          "signature": null
+        },
+        "NONE": {
+          "kind": "DampingStrategy",
+          "signature": null
+        },
+        "VOLTAGE_LIMITING": {
+          "kind": "DampingStrategy",
+          "signature": null
+        },
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "NoneType",
+          "signature": null
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        }
+      },
+      "mro": [
+        "DampingStrategy",
+        "object"
+      ],
+      "type": "class"
+    },
+    "DcSweep": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "mode": {
+          "kind": "getset_descriptor"
+        },
+        "num_points": {
+          "kind": "getset_descriptor"
+        },
+        "source": {
+          "kind": "getset_descriptor"
+        },
+        "values": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "DcSweep",
+        "object"
+      ],
+      "type": "class"
+    },
+    "DcSweepResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__getitem__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, key, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__iter__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__len__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "device_operating_points_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, index)"
+        },
+        "export_columns": {
+          "kind": "getset_descriptor"
+        },
+        "is_nested": {
+          "kind": "getset_descriptor"
+        },
+        "points": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "primary_source": {
+          "kind": "getset_descriptor"
+        },
+        "result_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, index)"
+        },
+        "secondary_source": {
+          "kind": "getset_descriptor"
+        },
+        "secondary_sweep_values": {
+          "kind": "getset_descriptor"
+        },
+        "secondary_value_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, index)"
+        },
+        "shape": {
+          "kind": "getset_descriptor"
+        },
+        "sweep_value_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, index)"
+        },
+        "sweep_values": {
+          "kind": "getset_descriptor"
+        },
+        "to_csv": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "to_raw": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, *, format='ascii', title=None, timestamp=None)"
+        },
+        "voltage": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, index, node)"
+        },
+        "voltage_array": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "write_csv": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path)"
+        },
+        "write_raw": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path, *, format='ascii', title=None, timestamp=None)"
+        }
+      },
+      "mro": [
+        "DcSweepResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "DeviceOperatingPoint": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__getitem__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, key, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "device_kind": {
+          "kind": "getset_descriptor"
+        },
+        "name": {
+          "kind": "getset_descriptor"
+        },
+        "param": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "param_names": {
+          "kind": "getset_descriptor"
+        },
+        "params": {
+          "kind": "getset_descriptor"
+        },
+        "region": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "DeviceOperatingPoint",
+        "object"
+      ],
+      "type": "class"
+    },
+    "DistortionResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "available_products": {
+          "kind": "getset_descriptor"
+        },
+        "branch_current_db_relative": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name, branch)"
+        },
+        "branch_current_ratio": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name, branch)"
+        },
+        "branch_names": {
+          "kind": "getset_descriptor"
+        },
+        "f1_frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "f2_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "f2_over_f1": {
+          "kind": "getset_descriptor"
+        },
+        "fundamental_f1": {
+          "kind": "getset_descriptor"
+        },
+        "fundamental_f2": {
+          "kind": "getset_descriptor"
+        },
+        "is_two_tone": {
+          "kind": "getset_descriptor"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "num_points": {
+          "kind": "getset_descriptor"
+        },
+        "product": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "voltage_db_relative": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name, node)"
+        },
+        "voltage_ratio": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name, node)"
+        }
+      },
+      "mro": [
+        "DistortionResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "Element": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "instance_params": {
+          "kind": "getset_descriptor"
+        },
+        "kind": {
+          "kind": "getset_descriptor"
+        },
+        "model": {
+          "kind": "getset_descriptor"
+        },
+        "name": {
+          "kind": "getset_descriptor"
+        },
+        "nodes": {
+          "kind": "getset_descriptor"
+        },
+        "value": {
+          "kind": "getset_descriptor"
+        },
+        "value_expr": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "Element",
+        "object"
+      ],
+      "type": "class"
+    },
+    "ElementSensitivity": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "absolute": {
+          "kind": "getset_descriptor"
+        },
+        "element": {
+          "kind": "getset_descriptor"
+        },
+        "element_type": {
+          "kind": "getset_descriptor"
+        },
+        "nominal_value": {
+          "kind": "getset_descriptor"
+        },
+        "normalized": {
+          "kind": "getset_descriptor"
+        },
+        "parameter": {
+          "kind": "getset_descriptor"
+        },
+        "percent_per_percent": {
+          "kind": "getset_descriptor"
+        },
+        "vector_name": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "ElementSensitivity",
+        "object"
+      ],
+      "type": "class"
+    },
+    "Engine": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "active_run_count": {
+          "kind": "getset_descriptor"
+        },
+        "cancel": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "config": {
+          "kind": "getset_descriptor"
+        },
+        "health_check": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "is_running": {
+          "kind": "getset_descriptor"
+        },
+        "measure": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, result)"
+        },
+        "progress": {
+          "kind": "getset_descriptor"
+        },
+        "resume_tran": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, checkpoint, stop_time, max_step=None)"
+        },
+        "run": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, *, continue_on_error=True)"
+        },
+        "run_ac": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, frequencies)"
+        },
+        "run_ac_data": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, table_name)"
+        },
+        "run_ac_sweep": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, variation, points, start_freq, stop_freq)"
+        },
+        "run_dc_op": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist)"
+        },
+        "run_dc_sweep": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, source_name, start, stop, step)"
+        },
+        "run_dc_sweep_spec": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, sweep, *, sweep2=None)"
+        },
+        "run_distortion": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, frequencies, f2_over_f1=None)"
+        },
+        "run_distortion_sweep": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, variation, points, start_freq, stop_freq, f2_over_f1=None)"
+        },
+        "run_hb": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, fundamental_frequency, *, harmonics=9, tolerance=1e-06, max_iterations=100, damping=1.0, oversample=2, use_krylov=False, source_stepping=False, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=True, source_name=None, verbose=False)"
+        },
+        "run_hb_envelope": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, fundamental_frequency, *, frozen_sources=None, harmonics=9, tolerance=1e-06, max_iterations=100, damping=1.0, oversample=2, use_krylov=False, source_stepping=False, abstol=1e-12, min_damping=0.1, collocation_points=None, max_mixing_order=5, gmres_restart=30, use_exact_jacobian=True, source_name=None, verbose=False)"
+        },
+        "run_hb_multitone": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, frequencies, *, harmonics=None, source_names=None, tolerance=1e-06, abstol=1e-12, max_iterations=100, damping=1.0, min_damping=0.1, oversample=2, collocation_points=None, max_mixing_order=5, use_krylov=False, gmres_restart=30, source_stepping=False, use_exact_jacobian=True, verbose=False)"
+        },
+        "run_monte_carlo": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, num_runs, seed=None, distribution='gaussian', spread=0.01, params=None)"
+        },
+        "run_noise": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, output_node, frequencies, temperature=None, input_source=None, reference_node=None)"
+        },
+        "run_oscillator_noise": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, offsets, *, period_guess, harmonics=9, tstab=0.0, tstab_periods=20, max_iterations=100, tolerance=1e-06, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, verbose=False)"
+        },
+        "run_pac": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, fundamental_frequency, start_frequency, stop_frequency, points, input_source, output_node, *, variation='dec', sideband_min=None, sideband_max=5, reference_node=None, reltol=0.001, abstol=1e-12, pss=None)"
+        },
+        "run_pnoise": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, fundamental_frequency, offsets, output_node, *, reference_node=None, input_source=None, max_sideband=6, pss=None)"
+        },
+        "run_pss": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, fundamental_frequency=None, *, harmonics=9, tstab=0.0, tstab_periods=None, max_iterations=100, tolerance=1e-06, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, autonomous=False, period_guess=None, verbose=False)"
+        },
+        "run_pss_continuation": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, fundamental_frequency=None, *, frozen_sources=None, harmonics=9, tstab=0.0, tstab_periods=None, max_iterations=100, tolerance=1e-06, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, autonomous=False, period_guess=None, verbose=False)"
+        },
+        "run_pss_operating_point": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, fundamental_frequency=None, *, harmonics=9, tstab=0.0, tstab_periods=None, max_iterations=100, tolerance=1e-06, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, autonomous=False, period_guess=None, verbose=False)"
+        },
+        "run_pz": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, input_node, output_node, *, input_negative=None, output_negative=None, input_type='current', analysis='pz')"
+        },
+        "run_s_parameters": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, frequencies, do_noise=False)"
+        },
+        "run_sensitivity": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, output_node, param_name, param_value, delta=None)"
+        },
+        "run_sensitivity_ac": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, output_node, param_name, param_value, frequencies, delta=None)"
+        },
+        "run_sensitivity_ac_complete": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, output, frequencies, reference=None, filters=None, output_is_current=False)"
+        },
+        "run_sensitivity_dc_complete": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, output, reference=None, filters=None, output_is_current=False)"
+        },
+        "run_sensitivity_linearized": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, output_node, reference_node=None)"
+        },
+        "run_stb": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, probe, variation='dec', points=50, start_freq=1.0, stop_freq=100000000.0)"
+        },
+        "run_step": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, param_name, values)"
+        },
+        "run_tran": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, stop_time, max_step=None, *, start_time=0.0)"
+        },
+        "run_tran_checkpointed": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, stop_time, max_step=None)"
+        },
+        "run_tran_compressed": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, stop_time, max_step=None, *, abs_tol=1e-06, rel_tol=0.001, max_interval=0.0)"
+        },
+        "run_tran_from_hb_envelope": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, state, duration, max_step=None)"
+        },
+        "run_tran_from_pss": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, state, duration, max_step=None)"
+        },
+        "run_transfer_function": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, netlist, output_node, input_source, output_is_current=False, reference_node=None)"
+        }
+      },
+      "mro": [
+        "Engine",
+        "object"
+      ],
+      "type": "class"
+    },
+    "FourierResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "dc_component": {
+          "kind": "getset_descriptor"
+        },
+        "fundamental_magnitude": {
+          "kind": "getset_descriptor"
+        },
+        "harmonics": {
+          "kind": "getset_descriptor"
+        },
+        "magnitudes": {
+          "kind": "getset_descriptor"
+        },
+        "thd": {
+          "kind": "getset_descriptor"
+        },
+        "thd_percent": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "FourierResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "Harmonic": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "frequency": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude": {
+          "kind": "getset_descriptor"
+        },
+        "n": {
+          "kind": "getset_descriptor"
+        },
+        "phase": {
+          "kind": "getset_descriptor"
+        },
+        "phase_degrees": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "Harmonic",
+        "object"
+      ],
+      "type": "class"
+    },
+    "HbEnvelopeState": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "frozen_sources": {
+          "kind": "getset_descriptor"
+        },
+        "fundamental_frequency": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "HbEnvelopeState",
+        "object"
+      ],
+      "type": "class"
+    },
+    "HbResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "coefficients": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "converged": {
+          "kind": "getset_descriptor"
+        },
+        "dc": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "fundamental_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "harmonic_frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "is_valid": {
+          "kind": "getset_descriptor"
+        },
+        "iterations": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "num_harmonics": {
+          "kind": "getset_descriptor"
+        },
+        "phase_degrees": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "residual_norm": {
+          "kind": "getset_descriptor"
+        },
+        "rms": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "solve_time_seconds": {
+          "kind": "getset_descriptor"
+        },
+        "thd_percent": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        }
+      },
+      "mro": [
+        "HbResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "HealthReport": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "branch_count": {
+          "kind": "getset_descriptor"
+        },
+        "duration_seconds": {
+          "kind": "getset_descriptor"
+        },
+        "element_count": {
+          "kind": "getset_descriptor"
+        },
+        "node_count": {
+          "kind": "getset_descriptor"
+        },
+        "output_voltage": {
+          "kind": "getset_descriptor"
+        },
+        "ready": {
+          "kind": "getset_descriptor"
+        },
+        "status": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "HealthReport",
+        "object"
+      ],
+      "type": "class"
+    },
+    "IntegrationMethod": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "BACKWARD_EULER": {
+          "kind": "IntegrationMethod",
+          "signature": null
+        },
+        "GEAR2": {
+          "kind": "IntegrationMethod",
+          "signature": null
+        },
+        "TRAPEZOIDAL": {
+          "kind": "IntegrationMethod",
+          "signature": null
+        },
+        "TRAP_GEAR": {
+          "kind": "IntegrationMethod",
+          "signature": null
+        },
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "NoneType",
+          "signature": null
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        }
+      },
+      "mro": [
+        "IntegrationMethod",
+        "object"
+      ],
+      "type": "class"
+    },
+    "Measurement": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "analysis": {
+          "kind": "getset_descriptor"
+        },
+        "error": {
+          "kind": "getset_descriptor"
+        },
+        "expected": {
+          "kind": "getset_descriptor"
+        },
+        "name": {
+          "kind": "getset_descriptor"
+        },
+        "passed": {
+          "kind": "getset_descriptor"
+        },
+        "tolerance": {
+          "kind": "getset_descriptor"
+        },
+        "value": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "Measurement",
+        "object"
+      ],
+      "type": "class"
+    },
+    "MeasurementError": {
+      "bases": [
+        "RSpiceError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "MeasurementError",
+        "RSpiceError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "MonteCarloResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__contains__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, key, /)"
+        },
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__getitem__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, key, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "all_converged": {
+          "kind": "getset_descriptor"
+        },
+        "get_variable": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "mean": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "num_failures": {
+          "kind": "getset_descriptor"
+        },
+        "num_runs": {
+          "kind": "getset_descriptor"
+        },
+        "range": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "std_dev": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "success_rate": {
+          "kind": "getset_descriptor"
+        },
+        "try_variable": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "variable_names": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "MonteCarloResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "Netlist": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "analyses": {
+          "kind": "getset_descriptor"
+        },
+        "diagnostics": {
+          "kind": "getset_descriptor"
+        },
+        "element": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "element_names": {
+          "kind": "getset_descriptor"
+        },
+        "elements": {
+          "kind": "getset_descriptor"
+        },
+        "is_global": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "measurement_names": {
+          "kind": "getset_descriptor"
+        },
+        "measurement_specs": {
+          "kind": "getset_descriptor"
+        },
+        "model_names": {
+          "kind": "getset_descriptor"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "num_analyses": {
+          "kind": "getset_descriptor"
+        },
+        "num_elements": {
+          "kind": "getset_descriptor"
+        },
+        "num_measurements": {
+          "kind": "getset_descriptor"
+        },
+        "num_models": {
+          "kind": "getset_descriptor"
+        },
+        "num_subcircuits": {
+          "kind": "getset_descriptor"
+        },
+        "parameter": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "parameters": {
+          "kind": "getset_descriptor"
+        },
+        "parse": {
+          "kind": "staticmethod",
+          "signature": "(content, *, resource_limits=None)"
+        },
+        "parse_file": {
+          "kind": "staticmethod",
+          "signature": "(path, *, resource_limits=None)"
+        },
+        "parse_spice": {
+          "kind": "staticmethod",
+          "signature": "(content, *, resource_limits=None)"
+        },
+        "parse_with_includes": {
+          "kind": "staticmethod",
+          "signature": "(content, base_path, *, resource_limits=None)"
+        },
+        "source": {
+          "kind": "getset_descriptor"
+        },
+        "source_path": {
+          "kind": "getset_descriptor"
+        },
+        "startup_diagnostics": {
+          "kind": "getset_descriptor"
+        },
+        "subcircuit_names": {
+          "kind": "getset_descriptor"
+        },
+        "title": {
+          "kind": "getset_descriptor"
+        },
+        "with_parameters": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, parameters)"
+        }
+      },
+      "mro": [
+        "Netlist",
+        "object"
+      ],
+      "type": "class"
+    },
+    "NetlistSourceLocation": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "line": {
+          "kind": "getset_descriptor"
+        },
+        "source": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "NetlistSourceLocation",
+        "object"
+      ],
+      "type": "class"
+    },
+    "NoiseContribution": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "device_name": {
+          "kind": "getset_descriptor"
+        },
+        "noise_type": {
+          "kind": "getset_descriptor"
+        },
+        "output_contribution": {
+          "kind": "getset_descriptor"
+        },
+        "percentage": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "NoiseContribution",
+        "object"
+      ],
+      "type": "class"
+    },
+    "NoiseResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "contributions": {
+          "kind": "getset_descriptor"
+        },
+        "dominant_source": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "frequency": {
+          "kind": "getset_descriptor"
+        },
+        "input_referred_density": {
+          "kind": "getset_descriptor"
+        },
+        "input_referred_rms": {
+          "kind": "getset_descriptor"
+        },
+        "output_noise_dbv": {
+          "kind": "getset_descriptor"
+        },
+        "output_noise_density": {
+          "kind": "getset_descriptor"
+        },
+        "output_noise_rms": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "NoiseResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "OscillatorNoiseResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "carrier_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "corner_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "diffusion_constant": {
+          "kind": "getset_descriptor"
+        },
+        "frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "period": {
+          "kind": "getset_descriptor"
+        },
+        "phase_noise_dbc": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "OscillatorNoiseResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "PacResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "converged": {
+          "kind": "getset_descriptor"
+        },
+        "conversion_gain": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, input_sideband, output_sideband)"
+        },
+        "conversion_gain_db": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, input_sideband, output_sideband)"
+        },
+        "frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "fundamental_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "input_source": {
+          "kind": "getset_descriptor"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "output_node": {
+          "kind": "getset_descriptor"
+        },
+        "sideband_max": {
+          "kind": "getset_descriptor"
+        },
+        "sideband_min": {
+          "kind": "getset_descriptor"
+        },
+        "sidebands": {
+          "kind": "getset_descriptor"
+        },
+        "voltage": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node, sideband)"
+        }
+      },
+      "mro": [
+        "PacResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "ParseDiagnostic": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "code": {
+          "kind": "getset_descriptor"
+        },
+        "line": {
+          "kind": "getset_descriptor"
+        },
+        "message": {
+          "kind": "getset_descriptor"
+        },
+        "severity": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "ParseDiagnostic",
+        "object"
+      ],
+      "type": "class"
+    },
+    "ParseError": {
+      "bases": [
+        "RSpiceError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "ParseError",
+        "RSpiceError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "PeriodicNoiseContribution": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "name": {
+          "kind": "getset_descriptor"
+        },
+        "power_spectral_density": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "PeriodicNoiseContribution",
+        "object"
+      ],
+      "type": "class"
+    },
+    "PeriodicNoiseResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "contribution": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "contributors": {
+          "kind": "getset_descriptor"
+        },
+        "converged": {
+          "kind": "getset_descriptor"
+        },
+        "frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "fundamental_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "input_noise": {
+          "kind": "getset_descriptor"
+        },
+        "output_noise": {
+          "kind": "getset_descriptor"
+        },
+        "output_noise_density": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "PeriodicNoiseResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "PoleZeroResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "bandwidth_hz": {
+          "kind": "getset_descriptor"
+        },
+        "complex_poles": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "dc_gain": {
+          "kind": "getset_descriptor"
+        },
+        "dominant_pole": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "dominant_pole_decay_hz": {
+          "kind": "getset_descriptor"
+        },
+        "hf_gain": {
+          "kind": "getset_descriptor"
+        },
+        "input": {
+          "kind": "getset_descriptor"
+        },
+        "is_stable": {
+          "kind": "getset_descriptor"
+        },
+        "num_poles": {
+          "kind": "getset_descriptor"
+        },
+        "num_zeros": {
+          "kind": "getset_descriptor"
+        },
+        "output": {
+          "kind": "getset_descriptor"
+        },
+        "poles": {
+          "kind": "getset_descriptor"
+        },
+        "poles_array": {
+          "kind": "getset_descriptor"
+        },
+        "real_poles": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "zeros": {
+          "kind": "getset_descriptor"
+        },
+        "zeros_array": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "PoleZeroResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "PssContinuationState": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "period": {
+          "kind": "getset_descriptor"
+        },
+        "time_origin": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "PssContinuationState",
+        "object"
+      ],
+      "type": "class"
+    },
+    "PssOperatingPoint": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "frequency": {
+          "kind": "getset_descriptor"
+        },
+        "iterations": {
+          "kind": "getset_descriptor"
+        },
+        "period": {
+          "kind": "getset_descriptor"
+        },
+        "period_detected": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "PssOperatingPoint",
+        "object"
+      ],
+      "type": "class"
+    },
+    "PssResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "dc": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "floquet_multipliers": {
+          "kind": "getset_descriptor"
+        },
+        "frequency": {
+          "kind": "getset_descriptor"
+        },
+        "harmonic_coefficients": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "harmonic_frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "harmonic_magnitude": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "harmonic_phase_degrees": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "harmonics": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "is_stable": {
+          "kind": "getset_descriptor"
+        },
+        "iterations": {
+          "kind": "getset_descriptor"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "num_harmonics": {
+          "kind": "getset_descriptor"
+        },
+        "num_nodes": {
+          "kind": "getset_descriptor"
+        },
+        "num_points": {
+          "kind": "getset_descriptor"
+        },
+        "peak_to_peak": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "period": {
+          "kind": "getset_descriptor"
+        },
+        "period_detected": {
+          "kind": "getset_descriptor"
+        },
+        "residual_norm": {
+          "kind": "getset_descriptor"
+        },
+        "thd_percent": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "time": {
+          "kind": "getset_descriptor"
+        },
+        "voltage_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node, time)"
+        },
+        "voltage_waveform": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        }
+      },
+      "mro": [
+        "PssResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "RSpiceError": {
+      "bases": [
+        "Exception"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "RSpiceError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "RSpiceIndexError": {
+      "bases": [
+        "RSpiceError",
+        "IndexError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "RSpiceIndexError",
+        "RSpiceError",
+        "IndexError",
+        "LookupError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "RSpiceKeyError": {
+      "bases": [
+        "RSpiceError",
+        "KeyError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "RSpiceKeyError",
+        "RSpiceError",
+        "KeyError",
+        "LookupError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "RSpiceTypeError": {
+      "bases": [
+        "RSpiceError",
+        "TypeError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "RSpiceTypeError",
+        "RSpiceError",
+        "TypeError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "RSpiceValueError": {
+      "bases": [
+        "RSpiceError",
+        "ValueError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "RSpiceValueError",
+        "RSpiceError",
+        "ValueError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "ResourceLimits": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "NoneType",
+          "signature": null
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "max_analysis_points": {
+          "kind": "getset_descriptor"
+        },
+        "max_batch_runs": {
+          "kind": "getset_descriptor"
+        },
+        "max_circuit_nodes": {
+          "kind": "getset_descriptor"
+        },
+        "max_dependency_source_bytes": {
+          "kind": "getset_descriptor"
+        },
+        "max_expanded_source_bytes": {
+          "kind": "getset_descriptor"
+        },
+        "max_external_data_bytes": {
+          "kind": "getset_descriptor"
+        },
+        "max_external_data_values": {
+          "kind": "getset_descriptor"
+        },
+        "max_flattened_elements": {
+          "kind": "getset_descriptor"
+        },
+        "max_hierarchy_depth": {
+          "kind": "getset_descriptor"
+        },
+        "max_include_depth": {
+          "kind": "getset_descriptor"
+        },
+        "max_matrix_unknowns": {
+          "kind": "getset_descriptor"
+        },
+        "max_netlist_bytes": {
+          "kind": "getset_descriptor"
+        },
+        "max_netlist_lines": {
+          "kind": "getset_descriptor"
+        },
+        "max_parallel_workers": {
+          "kind": "getset_descriptor"
+        },
+        "max_result_values": {
+          "kind": "getset_descriptor"
+        },
+        "max_shared_cache_bytes": {
+          "kind": "getset_descriptor"
+        },
+        "unlimited": {
+          "kind": "staticmethod",
+          "signature": "()"
+        }
+      },
+      "mro": [
+        "ResourceLimits",
+        "object"
+      ],
+      "type": "class"
+    },
+    "RunReport": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "ac": {
+          "kind": "getset_descriptor"
+        },
+        "all_ac": {
+          "kind": "getset_descriptor"
+        },
+        "all_dc": {
+          "kind": "getset_descriptor"
+        },
+        "all_noise": {
+          "kind": "getset_descriptor"
+        },
+        "all_op": {
+          "kind": "getset_descriptor"
+        },
+        "all_passed": {
+          "kind": "getset_descriptor"
+        },
+        "all_tran": {
+          "kind": "getset_descriptor"
+        },
+        "analyses_run": {
+          "kind": "getset_descriptor"
+        },
+        "assert_passed": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "dc": {
+          "kind": "getset_descriptor"
+        },
+        "distortion": {
+          "kind": "getset_descriptor"
+        },
+        "failures": {
+          "kind": "getset_descriptor"
+        },
+        "fourier": {
+          "kind": "getset_descriptor"
+        },
+        "hb": {
+          "kind": "getset_descriptor"
+        },
+        "measurement": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "measurements": {
+          "kind": "getset_descriptor"
+        },
+        "monte_carlo": {
+          "kind": "getset_descriptor"
+        },
+        "noise": {
+          "kind": "getset_descriptor"
+        },
+        "num_measurements": {
+          "kind": "getset_descriptor"
+        },
+        "op": {
+          "kind": "getset_descriptor"
+        },
+        "pz": {
+          "kind": "getset_descriptor"
+        },
+        "records": {
+          "kind": "getset_descriptor"
+        },
+        "s_parameters": {
+          "kind": "getset_descriptor"
+        },
+        "sensitivity": {
+          "kind": "getset_descriptor"
+        },
+        "sensitivity_ac": {
+          "kind": "getset_descriptor"
+        },
+        "skipped": {
+          "kind": "getset_descriptor"
+        },
+        "stb": {
+          "kind": "getset_descriptor"
+        },
+        "step": {
+          "kind": "getset_descriptor"
+        },
+        "temperature": {
+          "kind": "getset_descriptor"
+        },
+        "tf": {
+          "kind": "getset_descriptor"
+        },
+        "tran": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "RunReport",
+        "object"
+      ],
+      "type": "class"
+    },
+    "SParameterResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "cy": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, output_port, input_port)"
+        },
+        "delta": {
+          "kind": "getset_descriptor"
+        },
+        "frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "has_noise": {
+          "kind": "getset_descriptor"
+        },
+        "has_two_port_noise_parameters": {
+          "kind": "getset_descriptor"
+        },
+        "has_two_port_stability": {
+          "kind": "getset_descriptor"
+        },
+        "k_factor": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, output_port, input_port)"
+        },
+        "magnitude_db": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, output_port, input_port)"
+        },
+        "mason_unilateral_gain_db": {
+          "kind": "getset_descriptor"
+        },
+        "max_available_gain_db": {
+          "kind": "getset_descriptor"
+        },
+        "max_stable_gain_db": {
+          "kind": "getset_descriptor"
+        },
+        "minimum_noise_factor": {
+          "kind": "getset_descriptor"
+        },
+        "minimum_noise_figure_db": {
+          "kind": "getset_descriptor"
+        },
+        "mu_factor": {
+          "kind": "getset_descriptor"
+        },
+        "mu_prime": {
+          "kind": "getset_descriptor"
+        },
+        "nf": {
+          "kind": "getset_descriptor"
+        },
+        "nfmin": {
+          "kind": "getset_descriptor"
+        },
+        "noise_factor": {
+          "kind": "getset_descriptor"
+        },
+        "noise_figure_db": {
+          "kind": "getset_descriptor"
+        },
+        "noise_parameters_valid": {
+          "kind": "getset_descriptor"
+        },
+        "noise_resistance": {
+          "kind": "getset_descriptor"
+        },
+        "noise_temperature": {
+          "kind": "getset_descriptor"
+        },
+        "num_points": {
+          "kind": "getset_descriptor"
+        },
+        "num_ports": {
+          "kind": "getset_descriptor"
+        },
+        "optimum_source_reflection": {
+          "kind": "getset_descriptor"
+        },
+        "phase_degrees": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, output_port, input_port)"
+        },
+        "port_names": {
+          "kind": "getset_descriptor"
+        },
+        "reference_impedances": {
+          "kind": "getset_descriptor"
+        },
+        "reverse_isolation_db": {
+          "kind": "getset_descriptor"
+        },
+        "rn": {
+          "kind": "getset_descriptor"
+        },
+        "s": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, output_port, input_port)"
+        },
+        "sopt": {
+          "kind": "getset_descriptor"
+        },
+        "stability_circles": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, frequency_index)"
+        },
+        "to_touchstone": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, *, format='ri', frequency_unit='ghz', comments=None)"
+        },
+        "touchstone_extension": {
+          "kind": "getset_descriptor"
+        },
+        "transducer_gain_db": {
+          "kind": "getset_descriptor"
+        },
+        "unconditionally_stable": {
+          "kind": "getset_descriptor"
+        },
+        "write_touchstone": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path, *, format='ri', frequency_unit='ghz', comments=None)"
+        }
+      },
+      "mro": [
+        "SParameterResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "SensitivityResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__len__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "get": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, element, parameter=None)"
+        },
+        "output": {
+          "kind": "getset_descriptor"
+        },
+        "output_value": {
+          "kind": "getset_descriptor"
+        },
+        "sensitivities": {
+          "kind": "getset_descriptor"
+        },
+        "top": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, count=10)"
+        },
+        "vector_names": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "SensitivityResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "SimulationConfig": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "NoneType",
+          "signature": null
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "bypass": {
+          "kind": "getset_descriptor"
+        },
+        "convergence": {
+          "kind": "getset_descriptor"
+        },
+        "integration_method": {
+          "kind": "getset_descriptor"
+        },
+        "max_iterations": {
+          "kind": "getset_descriptor"
+        },
+        "max_timestep": {
+          "kind": "getset_descriptor"
+        },
+        "min_timestep": {
+          "kind": "getset_descriptor"
+        },
+        "resource_limits": {
+          "kind": "getset_descriptor"
+        },
+        "temperature": {
+          "kind": "getset_descriptor"
+        },
+        "tolerance": {
+          "kind": "getset_descriptor"
+        },
+        "transient_max_iterations": {
+          "kind": "getset_descriptor"
+        },
+        "transient_trtol": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "SimulationConfig",
+        "object"
+      ],
+      "type": "class"
+    },
+    "SimulationError": {
+      "bases": [
+        "RSpiceError"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "add_note": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        },
+        "args": {
+          "kind": "getset_descriptor"
+        },
+        "with_traceback": {
+          "kind": "method_descriptor",
+          "signature": "(self, object, /)"
+        }
+      },
+      "mro": [
+        "SimulationError",
+        "RSpiceError",
+        "Exception",
+        "BaseException",
+        "object"
+      ],
+      "type": "class"
+    },
+    "SimulationResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "branch_current": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "branch_currents": {
+          "kind": "getset_descriptor"
+        },
+        "branch_names": {
+          "kind": "getset_descriptor"
+        },
+        "device_operating_point": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "device_operating_points": {
+          "kind": "getset_descriptor"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "node_voltages": {
+          "kind": "getset_descriptor"
+        },
+        "num_nodes": {
+          "kind": "getset_descriptor"
+        },
+        "voltage": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        }
+      },
+      "mro": [
+        "SimulationResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "StartupDiagnostic": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "canonical_nodes": {
+          "kind": "getset_descriptor"
+        },
+        "code": {
+          "kind": "getset_descriptor"
+        },
+        "directive": {
+          "kind": "getset_descriptor"
+        },
+        "origins": {
+          "kind": "getset_descriptor"
+        },
+        "scopes": {
+          "kind": "getset_descriptor"
+        },
+        "stage": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "StartupDiagnostic",
+        "object"
+      ],
+      "type": "class"
+    },
+    "StartupDirectiveScope": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "kind": {
+          "kind": "getset_descriptor"
+        },
+        "qualified_definition": {
+          "kind": "getset_descriptor"
+        },
+        "qualified_instances": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "StartupDirectiveScope",
+        "object"
+      ],
+      "type": "class"
+    },
+    "StbResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "assessment": {
+          "kind": "getset_descriptor"
+        },
+        "conditionally_stable": {
+          "kind": "getset_descriptor"
+        },
+        "dc_gain_db": {
+          "kind": "getset_descriptor"
+        },
+        "frequencies": {
+          "kind": "getset_descriptor"
+        },
+        "gain_margin_db": {
+          "kind": "getset_descriptor"
+        },
+        "gain_margin_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "is_stable": {
+          "kind": "getset_descriptor"
+        },
+        "loop_gain": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude": {
+          "kind": "getset_descriptor"
+        },
+        "magnitude_db": {
+          "kind": "getset_descriptor"
+        },
+        "num_crossovers": {
+          "kind": "getset_descriptor"
+        },
+        "phase_degrees": {
+          "kind": "getset_descriptor"
+        },
+        "phase_margin_degrees": {
+          "kind": "getset_descriptor"
+        },
+        "phase_margin_frequency": {
+          "kind": "getset_descriptor"
+        },
+        "probe_name": {
+          "kind": "getset_descriptor"
+        },
+        "success": {
+          "kind": "getset_descriptor"
+        },
+        "unity_gain_bandwidth": {
+          "kind": "getset_descriptor"
+        },
+        "warnings": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "StbResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "TransferFunctionResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "gain": {
+          "kind": "getset_descriptor"
+        },
+        "gain_db": {
+          "kind": "getset_descriptor"
+        },
+        "input": {
+          "kind": "getset_descriptor"
+        },
+        "input_impedance": {
+          "kind": "getset_descriptor"
+        },
+        "output": {
+          "kind": "getset_descriptor"
+        },
+        "output_impedance": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "TransferFunctionResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "TransientCheckpoint": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "load": {
+          "kind": "staticmethod",
+          "signature": "(path)"
+        },
+        "netlist_fingerprint": {
+          "kind": "getset_descriptor"
+        },
+        "save": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path)"
+        },
+        "solution": {
+          "kind": "getset_descriptor"
+        },
+        "time": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "TransientCheckpoint",
+        "object"
+      ],
+      "type": "class"
+    },
+    "TransientResult": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "branch_current_waveform": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, name)"
+        },
+        "branch_names": {
+          "kind": "getset_descriptor"
+        },
+        "device_parameter_names": {
+          "kind": "getset_descriptor"
+        },
+        "device_parameter_waveform": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, device, parameter)"
+        },
+        "export_columns": {
+          "kind": "getset_descriptor"
+        },
+        "fourier": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node, fundamental, num_harmonics=9, *, reference=None)"
+        },
+        "fourier_current": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, element, fundamental, num_harmonics=9)"
+        },
+        "node_names": {
+          "kind": "getset_descriptor"
+        },
+        "num_nodes": {
+          "kind": "getset_descriptor"
+        },
+        "num_points": {
+          "kind": "getset_descriptor"
+        },
+        "signal": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, spec)"
+        },
+        "stop_time": {
+          "kind": "getset_descriptor"
+        },
+        "time": {
+          "kind": "getset_descriptor"
+        },
+        "to_csv": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "to_raw": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, *, format='ascii', title=None, timestamp=None)"
+        },
+        "voltage_at": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node, time_index)"
+        },
+        "voltage_waveform": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, node)"
+        },
+        "write_csv": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path)"
+        },
+        "write_raw": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, path, *, format='ascii', title=None, timestamp=None)"
+        }
+      },
+      "mro": [
+        "TransientResult",
+        "object"
+      ],
+      "type": "class"
+    },
+    "UnresolvedOutputSymbol": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "directive": {
+          "kind": "getset_descriptor"
+        },
+        "kind": {
+          "kind": "getset_descriptor"
+        },
+        "line": {
+          "kind": "getset_descriptor"
+        },
+        "operator": {
+          "kind": "getset_descriptor"
+        },
+        "source": {
+          "kind": "getset_descriptor"
+        },
+        "symbol": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "UnresolvedOutputSymbol",
+        "object"
+      ],
+      "type": "class"
+    },
+    "VariableStatistics": {
+      "bases": [
+        "object"
+      ],
+      "members": {
+        "__eq__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ge__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__gt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__hash__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__le__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__lt__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__ne__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, value, /)"
+        },
+        "__new__": {
+          "kind": "builtin_function_or_method",
+          "signature": "(*args, **kwargs)"
+        },
+        "__reduce__": {
+          "kind": "method_descriptor",
+          "signature": "(self, /)"
+        },
+        "__repr__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "__str__": {
+          "kind": "wrapper_descriptor",
+          "signature": "(self, /)"
+        },
+        "bin_edges": {
+          "kind": "getset_descriptor"
+        },
+        "cv_percent": {
+          "kind": "getset_descriptor"
+        },
+        "histogram": {
+          "kind": "getset_descriptor"
+        },
+        "max": {
+          "kind": "getset_descriptor"
+        },
+        "mean": {
+          "kind": "getset_descriptor"
+        },
+        "min": {
+          "kind": "getset_descriptor"
+        },
+        "name": {
+          "kind": "getset_descriptor"
+        },
+        "percentile": {
+          "kind": "method_descriptor",
+          "signature": "(self, /, pct)"
+        },
+        "samples": {
+          "kind": "getset_descriptor"
+        },
+        "std_dev": {
+          "kind": "getset_descriptor"
+        },
+        "three_sigma_range": {
+          "kind": "getset_descriptor"
+        }
+      },
+      "mro": [
+        "VariableStatistics",
+        "object"
+      ],
+      "type": "class"
+    },
+    "__author__": {
+      "type": "value",
+      "value_type": "str"
+    },
+    "__version__": {
+      "type": "value",
+      "value_type": "str"
+    },
+    "ac_frequencies": {
+      "signature": "(variation, points, start_freq, stop_freq)",
+      "type": "function"
+    }
+  }
+}

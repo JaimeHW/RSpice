@@ -395,6 +395,61 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("numpy==2.2.6", constraints)
         self.assertIn("numpy==2.5.0", constraints)
 
+    def test_python_binding_modules_stay_navigable(self) -> None:
+        """No binding source file may exceed the ceiling, and none may grow.
+
+        The binding layer had accumulated two monoliths (`results.rs` at 7363
+        lines carrying 32 pyclasses, `engine.rs` at 4231 with a 45-method
+        dispatch block). They are being split per analysis family. This ratchet
+        holds the result: a file over the ceiling must appear in the allowlist
+        with its current size, and a file may never exceed its allowlisted
+        size, so the only permitted direction is down. An allowlisted file that
+        has dropped under the ceiling must be removed from the allowlist, which
+        keeps the list from rotting into a permanent exemption.
+        """
+        ceiling = 900
+
+        # path -> current line count. Every entry is debt; the list must reach
+        # empty. Shrink an entry when a split lands; never raise one.
+        allowlist = {
+            "crates/rspice-python/src/config.rs": 1338,
+            "crates/rspice-python/src/engine.rs": 4231,
+            "crates/rspice-python/src/errors.rs": 1019,
+            "crates/rspice-python/src/netlist.rs": 1141,
+            "crates/rspice-python/src/results.rs": 7363,
+        }
+
+        source_root = ROOT / "crates" / "rspice-python" / "src"
+        over_ceiling = {}
+        for path in sorted(source_root.rglob("*.rs")):
+            relative = path.relative_to(ROOT).as_posix()
+            lines = len(path.read_text(encoding="utf-8").splitlines())
+            if lines > ceiling:
+                over_ceiling[relative] = lines
+
+        for relative, lines in sorted(over_ceiling.items()):
+            with self.subTest(module=relative):
+                self.assertIn(
+                    relative,
+                    allowlist,
+                    f"{relative} is {lines} lines, over the {ceiling}-line ceiling; "
+                    "split it per analysis family rather than adding it here",
+                )
+                self.assertLessEqual(
+                    lines,
+                    allowlist[relative],
+                    f"{relative} grew to {lines} lines from an allowlisted "
+                    f"{allowlist[relative]}; binding debt may only shrink",
+                )
+
+        stale = sorted(set(allowlist) - set(over_ceiling))
+        self.assertEqual(
+            [],
+            stale,
+            f"these modules are now under the {ceiling}-line ceiling and must be "
+            "dropped from the allowlist",
+        )
+
     def test_native_desktop_claim_has_macos_ui_cli_ci_coverage(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 
