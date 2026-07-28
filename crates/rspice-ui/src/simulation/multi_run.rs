@@ -10,12 +10,9 @@
 //! - Result aggregation across runs
 //! - Corner sweep automation
 
-mod plan;
-mod run_state;
 mod run_type;
 mod spec;
 
-pub use run_state::RunQueue;
 pub use run_type::{AnalysisRunType, FrequencySweep};
 pub use spec::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,

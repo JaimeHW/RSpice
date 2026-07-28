@@ -91,23 +91,22 @@ pub enum UuidIdParseError {
     Invalid(#[from] UuidIdError),
 }
 
+// The identities the product model actually mints. `DesignId`, `TestbenchId`,
+// `RunSetId`, `VerificationPlanId`, `AutomationPipelineId`, and
+// `ModelBindingId` were declared here too and never constructed anywhere —
+// vocabulary for object kinds that do not exist yet. Reintroducing one is a
+// single line whenever the object arrives.
 define_uuid_id!(ProjectId);
-define_uuid_id!(DesignId);
-define_uuid_id!(TestbenchId);
 define_uuid_id!(SimulationPlanId);
 define_uuid_id!(AnalysisInstanceId);
 define_uuid_id!(DesignVariableId);
 define_uuid_id!(SavedOutputId);
-define_uuid_id!(RunSetId);
 define_uuid_id!(JobId);
 define_uuid_id!(RunId);
 define_uuid_id!(DatasetId);
 define_uuid_id!(ResultDocumentId);
-define_uuid_id!(VerificationPlanId);
 define_uuid_id!(VerificationEvidenceId);
 define_uuid_id!(ReleaseCandidateId);
-define_uuid_id!(AutomationPipelineId);
-define_uuid_id!(ModelBindingId);
 define_uuid_id!(ModelSourceId);
 
 /// A type-erased reference used by receipts and cross-domain links. Domain

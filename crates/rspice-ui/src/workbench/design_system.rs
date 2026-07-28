@@ -11,13 +11,11 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-pub const TITLE_BAR_H: f32 = 35.0;
-pub const TOOL_BAR_H: f32 = 45.0;
-pub const DOCUMENT_BAR_H: f32 = 34.0;
-pub const STATUS_BAR_H: f32 = 25.0;
+// The chrome bars size themselves from their own content and tokens, so the
+// fixed heights that used to sit here (title 35, toolbar 45, document bar 34,
+// status 25, phone nav 54, touch target 44) had no reader — a second, silently
+// diverging copy of numbers `workbench::chrome` already owns.
 pub const ACTIVITY_RAIL_W: f32 = 51.0;
-pub const PHONE_NAV_H: f32 = 54.0;
-pub const TOUCH_TARGET: f32 = 44.0;
 pub const PANEL_HEADER_H: f32 = 39.0;
 /// Desktop panel tabs use the upgraded mockup's compact 25 px track.
 /// Coarse-pointer layouts still raise this to the shared touch target.
@@ -1424,15 +1422,6 @@ pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
     });
 }
 
-pub fn divider(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.center().y,
-        Stroke::new(1.0, t.color.border),
-    );
-}
 
 pub fn heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
     let t = Tokens::get(ui.ctx());

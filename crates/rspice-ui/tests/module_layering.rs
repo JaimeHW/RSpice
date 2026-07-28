@@ -1038,7 +1038,9 @@ fn source_files_have_no_byte_order_mark() {
 /// suppression buys back 26 warnings, and its removal condition is stated in
 /// the module header: it goes when plans persist an analysis kind instead of
 /// a tab index.
-const MAX_LINT_SUPPRESSIONS: usize = 77;
+/// Back to 76 when `simulation::multi_run::{plan, run_state}` went — a dead
+/// pair that kept each other reachable, and carried a suppression between them.
+const MAX_LINT_SUPPRESSIONS: usize = 76;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

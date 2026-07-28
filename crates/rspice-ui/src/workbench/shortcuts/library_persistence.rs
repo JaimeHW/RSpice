@@ -45,6 +45,9 @@ impl ShortcutLibraryPersistenceError {
         self.code
     }
 
+    /// The failure text. Read by the browser persistence path, which surfaces
+    /// it verbatim; the native path matches on the variant instead, so this
+    /// looks unused on a native-only build.
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
@@ -79,10 +82,6 @@ impl ShortcutLibraryPersistenceToken {
         self.generation
     }
 
-    #[must_use]
-    pub const fn file_digest(self) -> [u8; 32] {
-        self.file_digest
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,11 +103,6 @@ impl PersistedShortcutProfileLibrary {
 
     /// Consume the durable result when the caller is ready to replace its live
     /// copy. This is the only library returned by a successful publication.
-    #[must_use]
-    pub fn into_library(self) -> ShortcutProfileLibrary {
-        self.library
-    }
-
     #[cfg(test)]
     pub(crate) fn test_snapshot(library: ShortcutProfileLibrary, generation: u64) -> Self {
         let file_digest = serde_json::to_vec(&library)
@@ -141,11 +135,6 @@ impl RetainedShortcutLibraryBytes {
     #[must_use]
     pub const fn digest(&self) -> [u8; 32] {
         self.digest
-    }
-
-    #[must_use]
-    pub const fn generation(&self) -> Option<u64> {
-        self.generation
     }
 
     #[must_use]
@@ -712,25 +701,6 @@ impl ShortcutLibraryStore for NativeShortcutLibraryStore {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn native_shortcut_library_path() -> Result<std::path::PathBuf, ShortcutLibraryPersistenceError>
-{
-    NativeShortcutLibraryStore::production().map(|store| store.path)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn restore_shortcut_profile_library_native()
--> Result<ShortcutProfileLibraryRestore, ShortcutLibraryPersistenceError> {
-    restore_from_store(&NativeShortcutLibraryStore::production()?)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn create_shortcut_profile_library_native(
-    library: &ShortcutProfileLibrary,
-) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
-    create_in_store(&NativeShortcutLibraryStore::production()?, library)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 pub fn update_shortcut_profile_library_native(
     predecessor: &PersistedShortcutProfileLibrary,
     candidate: &ShortcutProfileLibrary,
@@ -739,18 +709,6 @@ pub fn update_shortcut_profile_library_native(
         &NativeShortcutLibraryStore::production()?,
         predecessor,
         candidate,
-    )
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn edit_shortcut_profile_library_native(
-    predecessor: &PersistedShortcutProfileLibrary,
-    edit: impl FnOnce(&mut ShortcutProfileLibrary) -> Result<(), String>,
-) -> Result<PersistedShortcutProfileLibrary, ShortcutLibraryPersistenceError> {
-    edit_in_store(
-        &NativeShortcutLibraryStore::production()?,
-        predecessor,
-        edit,
     )
 }
 
