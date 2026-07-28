@@ -104,25 +104,6 @@ pub enum WorkflowOwner {
     ModelsAndLibraries,
 }
 
-impl WorkflowOwner {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::ProjectLifecycle => "project lifecycle",
-            Self::DesignEntry => "design entry",
-            Self::SimulationSetup => "simulation setup",
-            Self::ExecutionManager => "execution manager",
-            Self::ResultsDataLifecycle => "results data lifecycle",
-            Self::ResultsWorkspace => "results workspace",
-            Self::VerificationPlanning => "verification planning",
-            Self::VerificationSourceDomain => "verification source domain",
-            Self::ReleaseClosure => "release closure",
-            Self::Automation => "automation",
-            Self::ModelsAndLibraries => "models and libraries",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Mutability {

@@ -92,10 +92,10 @@ pub enum UuidIdParseError {
 }
 
 // The identities the product model actually mints. `DesignId`, `TestbenchId`,
-// `RunSetId`, `VerificationPlanId`, `AutomationPipelineId`, and
-// `ModelBindingId` were declared here too and never constructed anywhere —
-// vocabulary for object kinds that do not exist yet. Reintroducing one is a
-// single line whenever the object arrives.
+// `RunSetId`, `VerificationPlanId`, `AutomationPipelineId`, `ModelBindingId`,
+// and `ReleaseCandidateId` were declared here too and never constructed
+// anywhere — vocabulary for object kinds that do not exist yet. Reintroducing
+// one is a single line whenever the object arrives.
 define_uuid_id!(ProjectId);
 define_uuid_id!(SimulationPlanId);
 define_uuid_id!(AnalysisInstanceId);
@@ -106,7 +106,6 @@ define_uuid_id!(RunId);
 define_uuid_id!(DatasetId);
 define_uuid_id!(ResultDocumentId);
 define_uuid_id!(VerificationEvidenceId);
-define_uuid_id!(ReleaseCandidateId);
 define_uuid_id!(ModelSourceId);
 
 /// A type-erased reference used by receipts and cross-domain links. Domain
@@ -287,6 +286,25 @@ pub enum DigestError {
     Length(usize),
     #[error("SHA-256 digest contains non-hexadecimal character {0:?}")]
     Character(char),
+}
+
+/// A dataset named together with the exact bytes it held when it was bound.
+/// Presentation that carries a binding rather than a bare `DatasetId` cannot
+/// silently follow a dataset that was rewritten underneath it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DatasetBinding {
+    pub dataset_id: DatasetId,
+    pub content_digest: ContentDigest,
+}
+
+impl DatasetBinding {
+    #[must_use]
+    pub const fn new(dataset_id: DatasetId, content_digest: ContentDigest) -> Self {
+        Self {
+            dataset_id,
+            content_digest,
+        }
+    }
 }
 
 #[cfg(test)]
