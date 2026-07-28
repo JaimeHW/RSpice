@@ -50307,7 +50307,23 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             None
         };
         let reference_limited_step = Self::feasible_reference_limited_step(tran, reference_step);
-        let mut max_step = [Some(solver_max_step), reference_limited_step, source_step]
+        // Xyce's solver ceiling remains authoritative, but a pointwise oracle
+        // still needs a bounded native sampling envelope when its first
+        // printed interval is too fine to replay directly.  This is a
+        // harness execution bound, not a reinterpretation of `.TRAN TSTEP` as
+        // DELMAX; an authored DTMAX and an affordable reference cadence both
+        // remain authoritative.
+        let fallback_limit = (include_harness_source_resolution
+            && tran.max_step.is_none()
+            && reference_limited_step.is_none())
+        .then(|| Self::transient_sampling_fallback_step(netlist, tran))
+        .flatten();
+        let mut max_step = [
+            Some(solver_max_step),
+            reference_limited_step,
+            source_step,
+            fallback_limit,
+        ]
             .into_iter()
             .flatten()
             .filter(|value| value.is_finite() && *value > 0.0)
@@ -50330,6 +50346,25 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         }
         Ok(max_step)
+    }
+
+    fn transient_sampling_fallback_step(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+    ) -> Option<Value> {
+        let linear_passive = netlist.subcircuits.is_empty()
+            && netlist.elements.iter().all(|element| match &element.kind {
+                ElementKind::Resistor { .. }
+                | ElementKind::Capacitor { .. }
+                | ElementKind::Inductor { .. }
+                | ElementKind::VoltageSource(_)
+                | ElementKind::CurrentSource(_) => true,
+                ElementKind::Coupling { model, .. } => model.is_none(),
+                _ => false,
+            });
+        linear_passive.then(|| {
+            ((tran.stop - tran.start.unwrap_or(0.0)) / 1000.0).max(f64::MIN_POSITIVE)
+        })
     }
 
     fn compact_device_work_limited_step(
