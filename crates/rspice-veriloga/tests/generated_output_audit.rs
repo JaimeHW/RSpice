@@ -53,56 +53,57 @@ fn generated_veriloga_devices_do_not_use_legacy_local_slot_abi() {
     );
 }
 
+/// Each device is self-contained, and nothing streams a shared scratch frame.
+///
+/// This replaces three tests that pinned the opposite: a `StampLocals` frame
+/// ABI, `KernelAdValue`/`KernelScratch` aliases over a partitioned
+/// `kernel_runtime`, and `stamp_blocks_*` files. Those were the tier machinery's
+/// shape, and asserting it now would assert that the rebuild has not happened —
+/// the memory-indexed interpreter they describe is the thing the whole program
+/// exists to remove. What is worth pinning is what replaced it: real control
+/// flow in one body per device, with the helpers it uses carried alongside.
 #[test]
-fn generated_veriloga_devices_include_compact_local_frame_helpers() {
+fn generated_veriloga_devices_carry_their_own_helpers() {
     let generated_root = generated_veriloga_root();
 
-    let mut saw_local_frame_type = false;
-    let mut saw_local_frame_initialization = false;
-    let mut saw_local_frame_field_access = false;
-    let mut saw_local_frame_argument = false;
-    scan_generated_rust(&generated_root, &mut |_path, source| {
-        saw_local_frame_type |= source.contains("pub(crate) struct StampLocals");
-        saw_local_frame_initialization |= source.contains("let mut l = StampLocals::default()");
-        saw_local_frame_field_access |= source.contains("l.f");
-        saw_local_frame_argument |= source.contains("&mut l");
-    });
-
-    assert!(
-        saw_local_frame_type
-            && saw_local_frame_initialization
-            && saw_local_frame_field_access
-            && saw_local_frame_argument,
-        "expected at least one generated Verilog-A device to use the compact StampLocals frame ABI"
-    );
-}
-
-#[test]
-fn generated_veriloga_devices_use_the_partitioned_kernel_runtime() {
-    let generated_root = generated_veriloga_root();
-
-    let mut saw_kernel_runtime = false;
-    let mut saw_kernel_alias = false;
-    let mut saw_partitioned_stamp = false;
+    let mut partitioned = Vec::new();
+    let mut streamed = Vec::new();
+    let mut runtime_is_empty = false;
+    let mut saw_packed_lane_type = false;
     scan_generated_rust(&generated_root, &mut |path, source| {
-        if path
-            .file_name()
-            .is_some_and(|name| name == "kernel_runtime.rs")
-        {
-            saw_kernel_runtime |= source.contains("pub(crate) struct AdValue")
-                && source.contains("pub(crate) struct Scratch")
-                && source.contains("pub(crate) struct ReactiveScratch");
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if name == "kernel_runtime.rs" {
+            // Empty is the whole point: every helper the packed form calls is
+            // emitted into the device that calls it.
+            runtime_is_empty = !source.contains("fn ");
+            return;
         }
-        saw_kernel_alias |= source.contains("KernelAdValue")
-            && (source.contains("KernelScratch") || source.contains("KernelReactiveScratch"));
-        saw_partitioned_stamp |= path
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().starts_with("stamp_blocks_"));
+        if name.starts_with("stamp_blocks_") {
+            partitioned.push(display_path(path));
+        }
+        if source.contains("KernelScratch") || source.contains("StampLocals") {
+            streamed.push(display_path(path));
+        }
+        saw_packed_lane_type |= source.contains("struct Lanes<const N: usize>");
     });
 
     assert!(
-        saw_kernel_runtime && saw_kernel_alias && saw_partitioned_stamp,
-        "expected generated Verilog-A output to use the current partitioned kernel runtime"
+        partitioned.is_empty(),
+        "a body is one function now, not a partition:\n{}",
+        partitioned.join("\n")
+    );
+    assert!(
+        streamed.is_empty(),
+        "no device streams a shared scratch frame any more:\n{}",
+        streamed.join("\n")
+    );
+    assert!(
+        runtime_is_empty,
+        "kernel_runtime.rs has no callers left and must not be regenerated with a body"
+    );
+    assert!(
+        saw_packed_lane_type,
+        "a differentiated device carries the packed-lane newtype it emits against"
     );
 }
 
@@ -148,49 +149,42 @@ fn generated_veriloga_noise_is_one_pass_and_allocation_free() {
     );
 }
 
+/// Noise is a slice of the body, not a re-derivation of it.
+///
+/// This replaces a test that required a fixed `w` workspace reset in one
+/// operation and a partition into bounded `noise_*` helpers. Both were
+/// properties of a generator that re-emitted the whole model per magnitude —
+/// which is why `noise.rs` was 55 MB, over half the checked-in tree, and why a
+/// two-terminal resistor carried 3,722 lines of it. There is no workspace and no
+/// partition now: the magnitudes are cut from the same CFG the stamp is, so what
+/// is worth pinning is that the size collapse held.
 #[test]
-fn generated_veriloga_noise_uses_bounded_helpers_and_a_compact_workspace() {
-    const MAX_ATOMIC_HELPER_LINES: usize = 2_500;
+fn generated_veriloga_noise_is_a_slice_rather_than_a_second_model() {
+    /// The whole corpus's noise, against 55,347,327 bytes before the slice.
+    const MAX_TOTAL_NOISE_BYTES: usize = 20_000_000;
 
     let generated_root = generated_veriloga_root();
-    let mut partitioned_noise_files = 0usize;
-    let mut failures = Vec::new();
+    let mut total = 0usize;
+    let mut workspaces = Vec::new();
 
     scan_generated_rust(&generated_root, &mut |path, source| {
-        if !path.file_name().is_some_and(|name| name == "noise.rs")
-            || !source.contains("let mut w = [0.0;")
-        {
+        if !path.file_name().is_some_and(|name| name == "noise.rs") {
             return;
         }
-        if !source.contains("w.fill(0.0);") {
-            failures.push(format!(
-                "{} does not reset its fixed noise workspace in one operation",
-                display_path(path)
-            ));
-        }
-
-        let helper_marker = "    #[inline(never)]\n    fn noise_";
-        for helper in source.split(helper_marker).skip(1) {
-            partitioned_noise_files += 1;
-            let lines = helper.lines().count();
-            if lines > MAX_ATOMIC_HELPER_LINES {
-                let name = helper.split_once('(').map_or("<unknown>", |(name, _)| name);
-                failures.push(format!(
-                    "{} helper `{name}` has {lines} lines (limit {MAX_ATOMIC_HELPER_LINES})",
-                    display_path(path)
-                ));
-            }
+        total += source.len();
+        if source.contains("let mut w = [0.0;") {
+            workspaces.push(display_path(path));
         }
     });
 
     assert!(
-        partitioned_noise_files > 0,
-        "expected generated noise schedules to use bounded helper methods"
+        workspaces.is_empty(),
+        "a noise body is a slice of the stamp's CFG and needs no scratch workspace:\n{}",
+        workspaces.join("\n")
     );
     assert!(
-        failures.is_empty(),
-        "generated Verilog-A noise helpers must remain bounded and use compact workspaces:\n{}",
-        failures.join("\n")
+        total > 0 && total <= MAX_TOTAL_NOISE_BYTES,
+        "generated noise is {total} bytes; the slice must keep it under {MAX_TOTAL_NOISE_BYTES}"
     );
 }
 

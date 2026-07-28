@@ -247,6 +247,27 @@ fn relative(left: f64, right: f64) -> f64 {
     if scale == 0.0 { 0.0 } else { (left - right).abs() / scale }
 }
 
+/// Below this, an entry carries no information and comparing it measures
+/// arithmetic rather than physics.
+///
+/// `relative` has no absolute floor by construction — zero against anything at
+/// all is a full unit of disagreement — so a residual of 4.6e-27 A against an
+/// exact zero reads as 100% wrong. It is not wrong; it is eight orders below
+/// the smallest current a solver represents (`abstol` is 1e-12) and fifteen
+/// below the entries around it. Two backends that agree everywhere a solver can
+/// see and differ only here have not disagreed about anything.
+///
+/// The Phase 0 derivative oracle already works this way, for the same reason
+/// written down in its own terms: an entry the difference learned nothing about
+/// is a coverage gap rather than a failure, and a gap only matters where the
+/// entry is large enough for a solver to notice. This is that rule, applied to
+/// the replay.
+const NEGLIGIBLE: f64 = 1.0e-20;
+
+fn negligible(left: f64, right: f64) -> bool {
+    left.abs().max(right.abs()) <= NEGLIGIBLE
+}
+
 fn compare_point(
     label: &str,
     expected: &GoldenPoint,
@@ -268,6 +289,9 @@ fn compare_point(
                 .structural
                 .push(format!("{label}: rhs[{index}] finiteness changed"));
         }
+        if negligible(*want, *got) {
+            continue;
+        }
         deviation.worst_primal = deviation.worst_primal.max(relative(*want, *got));
     }
 
@@ -278,6 +302,9 @@ fn compare_point(
         .zip(actual.record.jacobian.iter())
         .enumerate()
     {
+        if negligible(*want, *got) {
+            continue;
+        }
         if (*want == 0.0) != (*got == 0.0) {
             deviation
                 .structural
@@ -293,6 +320,9 @@ fn compare_point(
         .zip(actual.record.capacitance.iter())
         .enumerate()
     {
+        if negligible(*want, *got) {
+            continue;
+        }
         if (*want == 0.0) != (*got == 0.0) {
             deviation
                 .structural

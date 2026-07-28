@@ -157,6 +157,43 @@ endmodule
     );
 }
 
+/// Linear arithmetic around a `ddt` is pushed inside it.
+///
+/// `EKV` writes `I(db) <+ TYPE * ddt_QD` and `I(d,b) <+ ddt(qjd)*TYPE*M`;
+/// scaling a charge by a polarity or a multiplicity is idiomatic, and a rule
+/// that matched only a bare `ddt` dropped every one of them. `k * ddt(q)`
+/// stores `k * q` and `ddt(q1) + ddt(q2)` stores `q1 + q2`, so the operations
+/// that commute with `d/dt` are followed into the charge and the product exists
+/// nowhere until it is built.
+#[test]
+fn linear_arithmetic_around_a_ddt_still_stores_charge() {
+    let scaled = r#"
+module scaled_cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1.0e-12;
+    parameter real polarity = 1.0;
+    analog I(p, n) <+ polarity * ddt(c * V(p, n));
+endmodule
+"#;
+    let summed = r#"
+module summed_cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c1 = 1.0e-12;
+    parameter real c2 = 3.0e-12;
+    analog I(p, n) <+ ddt(c1 * V(p, n)) + ddt(c2 * V(p, n));
+endmodule
+"#;
+    for (source, module) in [(scaled, "scaled_cap"), (summed, "summed_cap")] {
+        let stamp = stamp_of(source, module);
+        assert!(
+            stamp.contains("stamp_current_reactive_indexed_dense_local"),
+            "{module} stores charge through linear arithmetic:\n{stamp}"
+        );
+    }
+}
+
 /// How far the canonical backend gets across the shipped models, and why it
 /// stops where it does.
 ///
