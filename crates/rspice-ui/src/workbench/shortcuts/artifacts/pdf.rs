@@ -36,11 +36,11 @@ const CELL_PADDING_Y: f32 = 5.5;
 const COLUMN_WIDTHS: [f32; 6] = [88.0, 60.0, 142.0, 92.0, 67.0, 74.28];
 
 const IBM_PLEX_SANS_REGULAR: &[u8] =
-    include_bytes!("../../../assets/fonts/IBMPlexSans-Regular.ttf");
+    include_bytes!("../../../../assets/fonts/IBMPlexSans-Regular.ttf");
 const IBM_PLEX_SANS_SEMIBOLD: &[u8] =
-    include_bytes!("../../../assets/fonts/IBMPlexSans-SemiBold.ttf");
+    include_bytes!("../../../../assets/fonts/IBMPlexSans-SemiBold.ttf");
 const IBM_PLEX_MONO_REGULAR: &[u8] =
-    include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf");
+    include_bytes!("../../../../assets/fonts/IBMPlexMono-Regular.ttf");
 
 /// PDF serialization failure with a stable, user-presentable description.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -777,7 +777,7 @@ mod tests {
     use super::*;
     use crate::workbench::ShortcutPreferences;
     use crate::workbench::commands::Command;
-    use crate::workbench::shortcut_artifacts::projection::{
+    use crate::workbench::shortcuts::artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };
 

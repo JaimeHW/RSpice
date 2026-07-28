@@ -6,7 +6,7 @@
 //! overwriting them. Browser initialization is asynchronous and remains
 //! mutation-blocked until its exact token completes.
 
-use crate::workbench::shortcut_library_persistence::{
+use crate::workbench::shortcuts::library_persistence::{
     PersistedShortcutProfileLibrary, RetainedShortcutLibraryBytes,
 };
 
@@ -25,11 +25,11 @@ pub(crate) enum ShortcutLibraryPersistenceRuntime {
         volatile_test: bool,
     },
     #[cfg(target_arch = "wasm32")]
-    Initializing(crate::workbench::shortcut_library_persistence::BrowserShortcutLibraryWriteToken),
+    Initializing(crate::workbench::shortcuts::library_persistence::BrowserShortcutLibraryWriteToken),
     #[cfg(target_arch = "wasm32")]
     Publishing {
         predecessor: Box<PersistedShortcutProfileLibrary>,
-        token: crate::workbench::shortcut_library_persistence::BrowserShortcutLibraryWriteToken,
+        token: crate::workbench::shortcuts::library_persistence::BrowserShortcutLibraryWriteToken,
     },
     Missing,
     Incompatible(RetainedShortcutLibraryBytes),
@@ -99,7 +99,7 @@ pub(crate) enum ShortcutLibraryPublication {
 pub(crate) enum ShortcutLibraryPublicationContinuation {
     Editor,
     Policy,
-    Import(Box<crate::workbench::shortcut_artifacts::ShortcutImportReceipt>),
+    Import(Box<crate::workbench::shortcuts::artifacts::ShortcutImportReceipt>),
     Rollback,
 }
 
@@ -112,14 +112,14 @@ impl AppState {
 
         #[cfg(not(target_arch = "wasm32"))]
         let startup =
-            crate::workbench::shortcut_library_persistence::startup_shortcut_profile_library_native(
+            crate::workbench::shortcuts::library_persistence::startup_shortcut_profile_library_native(
                 Some(&session_library),
             )
             .map(NativeOrBrowserStartup::Native);
 
         #[cfg(target_arch = "wasm32")]
         let startup =
-            crate::workbench::shortcut_library_persistence::startup_shortcut_profile_library_browser(
+            crate::workbench::shortcuts::library_persistence::startup_shortcut_profile_library_browser(
                 Some(&session_library),
                 ctx,
             )
@@ -206,7 +206,7 @@ impl AppState {
         {
             let _ = ctx;
             let persisted =
-                crate::workbench::shortcut_library_persistence::update_shortcut_profile_library_native(
+                crate::workbench::shortcuts::library_persistence::update_shortcut_profile_library_native(
                     &predecessor,
                     candidate,
                 )
@@ -217,7 +217,7 @@ impl AppState {
 
         #[cfg(target_arch = "wasm32")]
         {
-            let token = crate::workbench::shortcut_library_persistence::start_update_shortcut_profile_library_browser(
+            let token = crate::workbench::shortcuts::library_persistence::start_update_shortcut_profile_library_browser(
                 &predecessor,
                 candidate,
                 ctx,
@@ -274,7 +274,7 @@ impl AppState {
             }
             _ => return false,
         };
-        if !crate::workbench::shortcut_library_persistence::cancel_shortcut_profile_library_browser_write(
+        if !crate::workbench::shortcuts::library_persistence::cancel_shortcut_profile_library_browser_write(
             token,
         ) {
             return false;
@@ -298,7 +298,7 @@ impl AppState {
             _ => return,
         };
         let Some(result) =
-            crate::workbench::shortcut_library_persistence::poll_shortcut_profile_library_browser_write(
+            crate::workbench::shortcuts::library_persistence::poll_shortcut_profile_library_browser_write(
                 token,
             )
         else {
@@ -344,20 +344,20 @@ impl AppState {
         match startup {
             #[cfg(not(target_arch = "wasm32"))]
             NativeOrBrowserStartup::Native(startup) => match startup {
-                crate::workbench::shortcut_library_persistence::ShortcutProfileLibraryStartup::Ready {
+                crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Ready {
                     persisted,
                     ..
                 } => self.install_persisted_shortcut_library(*persisted, None),
-                crate::workbench::shortcut_library_persistence::ShortcutProfileLibraryStartup::Missing => {
+                crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Missing => {
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
-                crate::workbench::shortcut_library_persistence::ShortcutProfileLibraryStartup::Incompatible(raw) => {
+                crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Incompatible(raw) => {
                     log::error!("Canonical shortcut library is incompatible: {}", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
-                crate::workbench::shortcut_library_persistence::ShortcutProfileLibraryStartup::Corrupt(raw) => {
+                crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Corrupt(raw) => {
                     log::error!("Canonical shortcut library is corrupt: {}", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
@@ -365,23 +365,23 @@ impl AppState {
             },
             #[cfg(target_arch = "wasm32")]
             NativeOrBrowserStartup::Browser(startup) => match startup {
-                crate::workbench::shortcut_library_persistence::BrowserShortcutProfileLibraryStartup::Ready(persisted) => {
+                crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Ready(persisted) => {
                     self.install_persisted_shortcut_library(*persisted, None);
                 }
-                crate::workbench::shortcut_library_persistence::BrowserShortcutProfileLibraryStartup::InitializationStarted(token) => {
+                crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::InitializationStarted(token) => {
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Initializing(token);
                 }
-                crate::workbench::shortcut_library_persistence::BrowserShortcutProfileLibraryStartup::Missing => {
+                crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Missing => {
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Missing;
                 }
-                crate::workbench::shortcut_library_persistence::BrowserShortcutProfileLibraryStartup::Incompatible(raw) => {
+                crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Incompatible(raw) => {
                     log::error!("Canonical shortcut library is incompatible: {}", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Incompatible(raw);
                 }
-                crate::workbench::shortcut_library_persistence::BrowserShortcutProfileLibraryStartup::Corrupt(raw) => {
+                crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup::Corrupt(raw) => {
                     log::error!("Canonical shortcut library is corrupt: {}", raw.reason());
                     self.shortcut_library_persistence =
                         ShortcutLibraryPersistenceRuntime::Corrupt(raw);
@@ -417,9 +417,9 @@ impl AppState {
 
 enum NativeOrBrowserStartup {
     #[cfg(not(target_arch = "wasm32"))]
-    Native(crate::workbench::shortcut_library_persistence::ShortcutProfileLibraryStartup),
+    Native(crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup),
     #[cfg(target_arch = "wasm32")]
-    Browser(crate::workbench::shortcut_library_persistence::BrowserShortcutProfileLibraryStartup),
+    Browser(crate::workbench::shortcuts::library_persistence::BrowserShortcutProfileLibraryStartup),
 }
 
 fn digest_prefix(digest: [u8; 32]) -> String {

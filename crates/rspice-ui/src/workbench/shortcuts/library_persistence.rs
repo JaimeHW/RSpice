@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::workbench::shortcut_artifacts::{canonical_json_bytes, hex_digest, sha256};
+use crate::workbench::shortcuts::artifacts::{canonical_json_bytes, hex_digest, sha256};
 use crate::workbench::shortcuts::ShortcutProfileLibrary;
 
 pub const SHORTCUT_LIBRARY_STORE_FORMAT: &str = "rspice.shortcut-profile-library";

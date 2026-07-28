@@ -419,8 +419,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "lifecycle/project_checkpoint",
     "lifecycle/recovery",
     "lifecycle/recovery_checkpoint",
-    "shortcut_library_persistence",
-    "shortcut_artifacts",
+    "shortcuts/library_persistence",
+    "shortcuts/artifacts",
     // Hardcopy adapters: resolve sources, then render, then print.
     "hardcopy_adapters/sources",
     "hardcopy_adapters/render",
@@ -437,7 +437,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "workflows/project_workflow",
     "workflows/export_workflow",
     "workflows/netlist_workflow",
-    "shortcut_profile_workflow",
+    "shortcuts/profile_workflow",
     "workflows/file_actions",
     // Command dispatch.
     "commands",
@@ -509,12 +509,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("feature_availability", "app", 1),
     // `commands` is a dispatcher and a command vocabulary in one file.
     // Retired by dropping the vocabulary to `commands::registry` at rank 0.
-    ("shortcut_artifacts", "commands", 11),
+    ("shortcuts/artifacts", "commands", 11),
     ("preferences", "commands", 3),
     ("documents/result_document", "commands", 3),
-    ("shortcut_profile_workflow", "commands", 2),
+    ("shortcuts/profile_workflow", "commands", 2),
     ("shortcuts", "commands", 2),
-    ("shortcut_library_persistence", "commands", 1),
+    ("shortcuts/library_persistence", "commands", 1),
     // Dispatch and persistence reaching up into presentation.
     ("commands", "chrome", 10),
     ("commands", "menu_bar", 5),
@@ -524,15 +524,15 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/code_workspace", "browser/file_import", 7),
     ("workflows/export_workflow", "browser/download", 3),
     ("workflows/project_workflow", "browser/download", 1),
-    ("shortcut_artifacts", "browser/download", 1),
+    ("shortcuts/artifacts", "browser/download", 1),
     ("surfaces", "browser/download", 1),
     // Recovery and checkpointing reaching sideways into the workflows.
     ("lifecycle/recovery", "workflows/file_workflow", 6),
     ("lifecycle/recovery", "workflows/project_workflow", 2),
     ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
-    ("shortcut_artifacts", "shortcut_profile_workflow", 4),
-    ("browser/file_import", "shortcut_profile_workflow", 1),
-    ("shortcut_library_persistence", "shortcut_artifacts", 1),
+    ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
+    ("browser/file_import", "shortcuts/profile_workflow", 1),
+    ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
     ("documents/code_workspace", "workflows/export_workflow", 1),
     ("documents/netlist_document", "workflows/netlist_workflow", 1),
     // Calling the painter instead of setting state the painter reads. These
@@ -1043,7 +1043,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("io/project_execution.rs", 2709),
     ("simulation/controller/prepared_run.rs", 2679),
     ("state/schematic/state/editor_ops/movement_ops.rs", 2629),
-    ("workbench/shortcut_artifacts/merge.rs", 2597),
+    ("workbench/shortcuts/artifacts/merge.rs", 2597),
     ("state/netlist_document/document.rs", 2579),
     ("workbench/app/dialogs/hardcopy/publish.rs", 2565),
     (

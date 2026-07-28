@@ -145,7 +145,7 @@ mod tests {
 
     use super::*;
     use crate::workbench::ShortcutPreferences;
-    use crate::workbench::shortcut_artifacts::projection::{
+    use crate::workbench::shortcuts::artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };
 

@@ -35,7 +35,7 @@ impl BrowserTextImportKind {
     pub(crate) const fn max_bytes(self) -> u64 {
         match self {
             Self::ShortcutProfile => {
-                crate::workbench::shortcut_profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
+                crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES
             }
             Self::EngineeringTableView => 512 * 1024,
             Self::SymbolDefinition => crate::workbench::app::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,

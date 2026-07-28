@@ -1558,7 +1558,7 @@ pub fn rollback_shortcut_import(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::shortcut_artifacts::{
+    use crate::workbench::shortcuts::artifacts::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
         decode_shortcut_artifact_json, serialize_shortcut_reference_json,
     };

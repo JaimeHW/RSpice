@@ -15,7 +15,7 @@ use super::{DetectedShortcutArtifact, VscodeAdapterError, VscodeHostPlatform};
 
 /// Exact upper bound shared with the schema and VS Code adapter.
 pub const MAX_SHORTCUT_ARTIFACT_SOURCE_BYTES: u64 =
-    crate::workbench::shortcut_profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
+    crate::workbench::shortcuts::profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
 
 const SHORTCUT_SOURCE_FILTER_NAME: &str = "Shortcut keybindings";
 const SHORTCUT_SOURCE_FILTER_EXTENSIONS: &[&str] = &["json", "jsonc"];

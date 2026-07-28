@@ -11,7 +11,7 @@ use egui::{Context, Id};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::commands::ShortcutContext;
-use crate::workbench::shortcut_artifacts::{
+use crate::workbench::shortcuts::artifacts::{
     ShortcutArtifactExportOutcome, ShortcutArtifactImportOutcome, ShortcutImportReceipt,
     apply_shortcut_import, export_shortcut_artifact, rollback_shortcut_import,
 };
@@ -230,7 +230,7 @@ impl RSpiceApp {
             ShortcutPortabilityAction::None => {}
             ShortcutPortabilityAction::SelectImportSource => {
                 #[cfg(not(target_arch = "wasm32"))]
-                match crate::workbench::shortcut_artifacts::import_shortcut_artifact_source() {
+                match crate::workbench::shortcuts::artifacts::import_shortcut_artifact_source() {
                     Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
                         let library = self.state.ui.preferences.shortcut_profiles().clone();
                         self.state
@@ -251,7 +251,7 @@ impl RSpiceApp {
                 }
                 #[cfg(target_arch = "wasm32")]
                 if let Err(error) =
-                    crate::workbench::shortcut_artifacts::start_browser_shortcut_artifact_import()
+                    crate::workbench::shortcuts::artifacts::start_browser_shortcut_artifact_import()
                 {
                     self.state
                         .dialogs
@@ -268,17 +268,17 @@ impl RSpiceApp {
                 #[cfg(target_arch = "wasm32")]
                 {
                     let outcome =
-                        crate::workbench::shortcut_artifacts::cancel_browser_shortcut_artifact_import(
+                        crate::workbench::shortcuts::artifacts::cancel_browser_shortcut_artifact_import(
                         );
                     match outcome {
-                        crate::workbench::shortcut_artifacts::BrowserShortcutArtifactImportCancelOutcome::Cancelled
-                        | crate::workbench::shortcut_artifacts::BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased => {
+                        crate::workbench::shortcuts::artifacts::BrowserShortcutArtifactImportCancelOutcome::Cancelled
+                        | crate::workbench::shortcuts::artifacts::BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased => {
                             self.state
                                 .dialogs
                                 .shortcut_portability
                                 .import_source_cancelled();
                         }
-                        crate::workbench::shortcut_artifacts::BrowserShortcutArtifactImportCancelOutcome::StillOwned => {}
+                        crate::workbench::shortcuts::artifacts::BrowserShortcutArtifactImportCancelOutcome::StillOwned => {}
                     }
                 }
             }
@@ -398,7 +398,7 @@ impl RSpiceApp {
     fn poll_shortcut_portability_source(&mut self) {
         #[cfg(target_arch = "wasm32")]
         if let Some(result) =
-            crate::workbench::shortcut_artifacts::poll_browser_shortcut_artifact_import()
+            crate::workbench::shortcuts::artifacts::poll_browser_shortcut_artifact_import()
         {
             match result {
                 Ok(ShortcutArtifactImportOutcome::Ready(source)) => {
@@ -536,7 +536,7 @@ impl AppState {
 
 fn stage_shortcut_import(
     base: &crate::workbench::shortcuts::ShortcutProfileLibrary,
-    plan: &crate::workbench::shortcut_artifacts::ShortcutImportPlan,
+    plan: &crate::workbench::shortcuts::artifacts::ShortcutImportPlan,
 ) -> Result<
     (
         crate::workbench::shortcuts::ShortcutProfileLibrary,

@@ -12,7 +12,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
 use crate::workbench::ShortcutPreferences;
 use crate::workbench::commands::{Command, CommandPlatform, ShortcutContext};
-use crate::workbench::shortcut_artifacts::{
+use crate::workbench::shortcuts::artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,
     PreparedShortcutArtifact, ReadyShortcutArtifactSource, ShortcutArtifactExportOutcome,
     ShortcutArtifactFormat, ShortcutConflictPolicy, ShortcutExportRequest, ShortcutExportScope,
@@ -1451,7 +1451,7 @@ fn vscode_blocking_message(report: &VscodeImportReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::shortcut_artifacts::{
+    use crate::workbench::shortcuts::artifacts::{
         apply_shortcut_import, decode_shortcut_artifact_json, detect_shortcut_artifact,
         serialize_shortcut_reference_json,
     };
@@ -1491,7 +1491,7 @@ mod tests {
         detect_shortcut_artifact(
             "rspice-shortcuts.json",
             json.as_bytes(),
-            crate::workbench::shortcut_artifacts::VscodeHostPlatform::Windows,
+            crate::workbench::shortcuts::artifacts::VscodeHostPlatform::Windows,
         )
         .unwrap()
     }

@@ -1,4 +1,7 @@
+pub(crate) mod artifacts;
+pub(crate) mod library_persistence;
 mod library;
+pub(crate) mod profile_workflow;
 mod profile;
 mod types;
 
