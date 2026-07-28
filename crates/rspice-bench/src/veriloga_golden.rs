@@ -52,12 +52,16 @@ struct FixtureDeviation {
     /// Relative Jacobian disagreement to tolerate, rounded up from the measured
     /// value.
     jacobian: f64,
+    /// The same for the reactive block, which is a separate quantity with its
+    /// own floor and must not be excused by a conductance allowance.
+    capacitance: f64,
     why: &'static str,
 }
 
 const FIXTURE_DEVIATIONS: &[FixtureDeviation] = &[FixtureDeviation {
     model: "DIODE_CMC",
     jacobian: 5.0e-3,
+    capacitance: JACOBIAN_TOLERANCE,
     why: "the model writes `I(a, aik) <+ $simparam(\"gmin\", 0.0) * V(a, aik)`, and the backend \
           that captured this fixture folded that call to its literal fallback at generation time \
           — its generated source contains no `simparam` and no `gmin` anywhere, so the term was \
@@ -231,11 +235,44 @@ fn run_capture(args: &CaptureArgs) -> Result<ExitCode, BenchError> {
     })
 }
 
+/// The worst disagreement seen in one array, and which entry it was.
+///
+/// A bare maximum is not a diagnosis. "primal deviation 7.7e-10" says a number
+/// moved and nothing about whether it moved somewhere a solver looks, which is
+/// the only question worth asking of it — so the entry, both values, and the
+/// bias point that produced them travel with the number.
+#[derive(Debug, Default, Clone)]
+struct Worst {
+    relative: f64,
+    witness: String,
+}
+
+impl Worst {
+    fn observe(&mut self, label: &str, array: &str, index: usize, expected: f64, actual: f64) {
+        let relative = relative(expected, actual);
+        if relative <= self.relative {
+            return;
+        }
+        self.relative = relative;
+        self.witness = format!("{label}: {array}[{index}] {expected:e} -> {actual:e}");
+    }
+}
+
 #[derive(Debug, Default)]
 struct Deviation {
-    worst_primal: f64,
-    worst_jacobian: f64,
-    worst_noise: f64,
+    primal: Worst,
+    jacobian: Worst,
+    /// Kept apart from `jacobian`, which it used to be folded into.
+    ///
+    /// A conductance and a capacitance are different physical quantities that
+    /// happen to be stamped into matrices of the same shape, and merging their
+    /// maxima meant a capacitance disagreement was reported as "jacobian
+    /// deviation". That is not a cosmetic mislabel: it sent a diagnosis looking
+    /// for a conductance defect that was not there, and it hid the fact that the
+    /// two already have separate absolute floors here because their units
+    /// differ.
+    capacitance: Worst,
+    noise: Worst,
     structural: Vec<String>,
 }
 
@@ -333,7 +370,7 @@ fn compare_point(
         if negligible(*want, *got, rhs_scale, CURRENT_FLOOR) {
             continue;
         }
-        deviation.worst_primal = deviation.worst_primal.max(relative(*want, *got));
+        deviation.primal.observe(label, "rhs", index, *want, *got);
     }
 
     let jacobian_scale = record_scale(&expected.record.jacobian, &actual.record.jacobian);
@@ -352,7 +389,7 @@ fn compare_point(
                 .structural
                 .push(format!("{label}: jacobian[{index}] appeared or vanished"));
         }
-        deviation.worst_jacobian = deviation.worst_jacobian.max(relative(*want, *got));
+        deviation.jacobian.observe(label, "jacobian", index, *want, *got);
     }
 
     let capacitance_scale = record_scale(&expected.record.capacitance, &actual.record.capacitance);
@@ -371,7 +408,9 @@ fn compare_point(
                 .structural
                 .push(format!("{label}: capacitance[{index}] appeared or vanished"));
         }
-        deviation.worst_jacobian = deviation.worst_jacobian.max(relative(*want, *got));
+        deviation
+            .capacitance
+            .observe(label, "capacitance", index, *want, *got);
     }
 
     if expected.record.noise.len() != actual.record.noise.len() {
@@ -381,7 +420,13 @@ fn compare_point(
             actual.record.noise.len()
         ));
     }
-    for (want, got) in expected.record.noise.iter().zip(actual.record.noise.iter()) {
+    for (index, (want, got)) in expected
+        .record
+        .noise
+        .iter()
+        .zip(actual.record.noise.iter())
+        .enumerate()
+    {
         if want.mechanism != got.mechanism {
             deviation.structural.push(format!(
                 "{label}: noise mechanism '{}' -> '{}'",
@@ -394,7 +439,9 @@ fn compare_point(
                 want.mechanism, want.active, got.active
             ));
         }
-        deviation.worst_noise = deviation.worst_noise.max(relative(want.psd, got.psd));
+        deviation
+            .noise
+            .observe(label, "noise psd", index, want.psd, got.psd);
     }
 }
 
@@ -457,12 +504,13 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         }
 
         let known = fixture_deviation(model_name);
-        let (primal_limit, jacobian_limit, noise_limit) = if args.exact {
-            (0.0, 0.0, 0.0)
+        let (primal_limit, jacobian_limit, capacitance_limit, noise_limit) = if args.exact {
+            (0.0, 0.0, 0.0, 0.0)
         } else {
             (
                 PRIMAL_TOLERANCE,
                 known.map_or(JACOBIAN_TOLERANCE, |deviation| deviation.jacobian),
+                known.map_or(JACOBIAN_TOLERANCE, |deviation| deviation.capacitance),
                 NOISE_TOLERANCE,
             )
         };
@@ -473,30 +521,26 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
         // either way the entry is now describing nothing.
         if let Some(known) = known
             && !args.exact
-            && deviation.worst_jacobian <= JACOBIAN_TOLERANCE
+            && deviation.jacobian.relative <= JACOBIAN_TOLERANCE
+            && deviation.capacitance.relative <= JACOBIAN_TOLERANCE
         {
             model_failures.push(format!(
                 "listed as a fixture deviation but now agrees to {:.0e}; drop the entry ({})",
                 JACOBIAN_TOLERANCE, known.why
             ));
         }
-        if deviation.worst_primal > primal_limit {
-            model_failures.push(format!(
-                "primal deviation {:.3e} exceeds {primal_limit:.0e}",
-                deviation.worst_primal
-            ));
-        }
-        if deviation.worst_jacobian > jacobian_limit {
-            model_failures.push(format!(
-                "jacobian deviation {:.3e} exceeds {jacobian_limit:.0e}",
-                deviation.worst_jacobian
-            ));
-        }
-        if deviation.worst_noise > noise_limit {
-            model_failures.push(format!(
-                "noise deviation {:.3e} exceeds {noise_limit:.0e}",
-                deviation.worst_noise
-            ));
+        for (quantity, worst, limit) in [
+            ("primal", &deviation.primal, primal_limit),
+            ("jacobian", &deviation.jacobian, jacobian_limit),
+            ("capacitance", &deviation.capacitance, capacitance_limit),
+            ("noise", &deviation.noise, noise_limit),
+        ] {
+            if worst.relative > limit {
+                model_failures.push(format!(
+                    "{quantity} deviation {:.3e} exceeds {limit:.0e} at {}",
+                    worst.relative, worst.witness
+                ));
+            }
         }
 
         if model_failures.is_empty() {
