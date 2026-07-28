@@ -17,6 +17,20 @@ use crate::vm::terminal_pair_current_endpoints;
 
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
 type ValueEntry = unsafe extern "C" fn(*const EvalContext, *const f64) -> f64;
+type StampKernelEntry =
+    unsafe extern "C" fn(*const EvalContext, *mut f64, *const NativeStampKernelIo);
+
+/// Caller-owned buffers consumed by the whole-stamp native driver.
+///
+/// The active mask and Jacobian buffer are validated by the device before
+/// entering native code. Contribution values are written directly to the
+/// `EvalContext::currents` buffer so prior-contribution probes observe them
+/// without returning to Rust between expressions.
+#[repr(C)]
+pub(crate) struct NativeStampKernelIo {
+    pub program_active: *const u8,
+    pub jacobians: *mut f64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CodeOffset(usize);
@@ -48,6 +62,7 @@ impl NativeEntryStarts {
     #[cfg(test)]
     pub(crate) fn from_entries(entries: &NativeEntryOffsets) -> Self {
         let mut starts = vec![entries.assignment];
+        starts.extend(entries.stamp_kernel);
         starts.extend(entries.parameter_defaults.iter().flatten().copied());
         starts.extend(entries.static_conditions.iter().flatten().copied());
         starts.extend(entries.stamp_values.iter().copied());
@@ -70,6 +85,7 @@ impl NativeEntryStarts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeEntryOffsets {
     pub assignment: CodeOffset,
+    pub stamp_kernel: Option<CodeOffset>,
     pub parameter_defaults: Vec<Option<CodeOffset>>,
     pub static_conditions: Vec<Option<CodeOffset>>,
     pub stamp_values: Vec<CodeOffset>,
@@ -227,6 +243,7 @@ fn scan_assignment_steps(
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct PlanStats {
     pub assignment_entry_points: usize,
+    pub stamp_kernel_entry_points: usize,
     pub parameter_default_entry_points: usize,
     pub static_condition_entry_points: usize,
     pub stamp_value_entry_points: usize,
@@ -239,6 +256,7 @@ impl PlanStats {
     /// Total number of callable entry points in the executable image.
     pub const fn total_entry_points(self) -> usize {
         self.assignment_entry_points
+            + self.stamp_kernel_entry_points
             + self.parameter_default_entry_points
             + self.static_condition_entry_points
             + self.stamp_value_entry_points
@@ -331,6 +349,7 @@ impl NativeModel {
             entries.noise_psd.len() + entries.noise_exponents.iter().flatten().count();
         let stats = PlanStats {
             assignment_entry_points: 1,
+            stamp_kernel_entry_points: usize::from(entries.stamp_kernel.is_some()),
             parameter_default_entry_points,
             static_condition_entry_points,
             stamp_value_entry_points: entries.stamp_values.len(),
@@ -395,6 +414,7 @@ impl NativeModel {
         );
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            stamp_kernel: None,
             parameter_defaults: vec![],
             static_conditions: vec![Some(stamp_entry); stamp_value_entry_points],
             stamp_values: vec![stamp_entry; stamp_value_entry_points],
@@ -475,6 +495,9 @@ impl NativeModel {
         }
 
         Self::validate_entry_offset(entries.assignment, entry_starts, image_len)?;
+        if let Some(offset) = entries.stamp_kernel {
+            Self::validate_entry_offset(offset, entry_starts, image_len)?;
+        }
         for offset in entries.parameter_defaults.iter().flatten() {
             Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
@@ -916,6 +939,24 @@ impl NativeModel {
         unsafe { entry(ctx as *const EvalContext, vars) };
     }
 
+    /// Runs the fused assignment/value/Jacobian driver when this image has one.
+    pub(crate) fn run_stamp_kernel(
+        &self,
+        ctx: &EvalContext,
+        vars: *mut f64,
+        io: &NativeStampKernelIo,
+    ) -> bool {
+        let Some(offset) = self.entries.stamp_kernel else {
+            return false;
+        };
+        // Safety: construction validated that `offset` is a recorded function
+        // start in the executable image, emitted with StampKernelEntry's ABI.
+        let entry: StampKernelEntry = unsafe { std::mem::transmute(self.entry_ptr(offset)) };
+        // Safety: the device validates and pins every pointee for the call.
+        unsafe { entry(ctx as *const EvalContext, vars, io) };
+        true
+    }
+
     pub(crate) fn assignment_current_pairs(&self) -> &[usize] {
         &self.current_dependencies.assignment_current_pairs
     }
@@ -1251,6 +1292,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                stamp_kernel: None,
                 parameter_defaults: vec![],
                 static_conditions: vec![Some(stamp_entry)],
                 stamp_values: vec![stamp_entry],
@@ -1379,6 +1421,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(1),
+                stamp_kernel: None,
                 parameter_defaults: vec![],
                 static_conditions: vec![],
                 stamp_values: vec![],
@@ -1400,6 +1443,7 @@ mod tests {
             ExecutableMemory::allocate(&[0xC3, 0x90, 0xC3]).expect("allocate native test image");
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            stamp_kernel: None,
             parameter_defaults: vec![],
             static_conditions: vec![None],
             stamp_values: vec![CodeOffset::new(1)],
@@ -1441,6 +1485,7 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                stamp_kernel: None,
                 parameter_defaults: vec![],
                 static_conditions: vec![],
                 stamp_values: vec![],
@@ -1535,6 +1580,7 @@ mod tests {
     fn one_stamp_entries() -> NativeEntryOffsets {
         NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            stamp_kernel: None,
             parameter_defaults: vec![],
             static_conditions: vec![None],
             stamp_values: vec![CodeOffset::new(0)],

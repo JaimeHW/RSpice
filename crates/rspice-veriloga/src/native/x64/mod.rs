@@ -11,6 +11,7 @@
 //! for the `native-bytecode-contract-tests` feature.
 
 pub(crate) mod codegen;
+mod driver;
 pub mod encoder;
 
 use super::expr::{
@@ -325,8 +326,18 @@ fn compile_model_inner(
         noise_exponents.push(exponent_entry);
     }
 
+    let stamp_kernel = align_image_for_entry(&mut image, &mut entry_starts);
+    let stamp_kernel_bytes = driver::compile_stamp_kernel(
+        stamp_kernel.as_usize(),
+        assignment,
+        &stamp_values,
+        &jacobians,
+    )?;
+    image.extend_from_slice(&stamp_kernel_bytes);
+
     let entries = NativeEntryOffsets {
         assignment,
+        stamp_kernel: Some(stamp_kernel),
         parameter_defaults,
         static_conditions,
         stamp_values,
@@ -4586,7 +4597,9 @@ mod tests {
     use crate::native::expr::{
         EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
     };
-    use crate::native::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets};
+    use crate::native::model::{
+        CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeStampKernelIo,
+    };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
     use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
@@ -4702,6 +4715,33 @@ endmodule
                 .expect("stamp value entry"),
             (voltages[0] - voltages[1]) / params[0]
         );
+
+        let mut currents = vec![0.0; model.stamp_programs.len()];
+        let jacobian_count = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum();
+        let mut fused_jacobians = vec![0.0; jacobian_count];
+        let mut variables = vec![0.0; model.num_variables];
+        let mut fused_ctx = eval_context(&params, &voltages);
+        fused_ctx.currents = currents.as_mut_ptr();
+        fused_ctx.currents_len = currents.len();
+        let active = [1_u8];
+        let io = NativeStampKernelIo {
+            program_active: active.as_ptr(),
+            jacobians: fused_jacobians.as_mut_ptr(),
+        };
+        assert!(native.run_stamp_kernel(&fused_ctx, variables.as_mut_ptr(), &io));
+        assert_eq!(currents[0], (voltages[0] - voltages[1]) / params[0]);
+        let expected_jacobians = (0..model.stamp_programs[0].jacobian_programs.len())
+            .map(|entry| {
+                native
+                    .run_jacobian(0, entry, &fused_ctx, variables.as_ptr())
+                    .expect("Jacobian entry")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fused_jacobians, expected_jacobians);
     }
 
     #[test]
@@ -6782,6 +6822,7 @@ endmodule
         let offset = CodeOffset::new(0);
         let entries = NativeEntryOffsets {
             assignment: offset,
+            stamp_kernel: None,
             parameter_defaults: model
                 .parameters
                 .iter()
