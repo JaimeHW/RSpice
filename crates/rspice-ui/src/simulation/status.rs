@@ -71,40 +71,6 @@ pub enum SimulationStatus {
 }
 
 impl SimulationStatus {
-    /// Check if simulation is currently running
-    pub fn is_running(&self) -> bool {
-        matches!(
-            self,
-            SimulationStatus::Parsing
-                | SimulationStatus::Building
-                | SimulationStatus::DcOperatingPoint
-                | SimulationStatus::DcSweep { .. }
-                | SimulationStatus::Transient { .. }
-                | SimulationStatus::AcAnalysis { .. }
-                | SimulationStatus::NoiseAnalysis { .. }
-                | SimulationStatus::PoleZero
-                | SimulationStatus::Sensitivity
-                | SimulationStatus::PostProcessing
-        )
-    }
-
-    /// Check if simulation is in a terminal state
-    pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            SimulationStatus::Idle
-                | SimulationStatus::Completed { .. }
-                | SimulationStatus::Failed { .. }
-                | SimulationStatus::Aborted { .. }
-                | SimulationStatus::ConvergenceFailed { .. }
-        )
-    }
-
-    /// Check if simulation completed successfully
-    pub fn is_success(&self) -> bool {
-        matches!(self, SimulationStatus::Completed { .. })
-    }
-
     /// Get display name for the current status
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -180,18 +146,6 @@ pub struct SimulationProgress {
     /// Estimated time remaining (if calculable)
     pub estimated_remaining: Option<Duration>,
 
-    /// Number of Newton-Raphson iterations
-    pub nr_iterations: usize,
-
-    /// Number of timesteps (for transient)
-    pub timesteps: usize,
-
-    /// Number of frequency points (for AC/Noise)
-    pub freq_points: usize,
-
-    /// Current memory usage in bytes
-    pub memory_bytes: usize,
-
     /// Last message from the solver
     pub message: Option<String>,
 }
@@ -203,10 +157,6 @@ impl Default for SimulationProgress {
             start_time: None,
             elapsed: Duration::ZERO,
             estimated_remaining: None,
-            nr_iterations: 0,
-            timesteps: 0,
-            freq_points: 0,
-            memory_bytes: 0,
             message: None,
         }
     }
@@ -219,12 +169,6 @@ impl SimulationProgress {
             start_time: Some(Instant::now()),
             ..Default::default()
         }
-    }
-
-    /// Start the simulation
-    pub fn start(&mut self) {
-        self.start_time = Some(Instant::now());
-        self.status = SimulationStatus::Parsing;
     }
 
     /// Fold the engine's completed fraction into the live status line, so
@@ -282,54 +226,12 @@ impl SimulationProgress {
         self.estimated_remaining = Some(Duration::ZERO);
     }
 
-    /// Mark as failed
-    pub fn fail(&mut self, message: String) {
-        self.update_elapsed();
-        self.status = SimulationStatus::Failed {
-            message: message.clone(),
-            elapsed: self.elapsed,
-        };
-        self.message = Some(message);
-    }
-
     /// Mark as aborted
     pub fn abort(&mut self) {
         self.update_elapsed();
         self.status = SimulationStatus::Aborted {
             elapsed: self.elapsed,
         };
-    }
-
-    /// Get progress as percentage (0-100)
-    pub fn progress_percent(&self) -> Option<f32> {
-        self.status.progress().map(|p| p * 100.0)
-    }
-
-    /// Format elapsed time as string
-    pub fn elapsed_string(&self) -> String {
-        format_duration(self.elapsed)
-    }
-
-    /// Format ETA as string
-    pub fn eta_string(&self) -> Option<String> {
-        self.estimated_remaining.map(format_duration)
-    }
-}
-
-/// Format a duration as a human-readable string
-fn format_duration(d: Duration) -> String {
-    let secs = d.as_secs();
-    if secs < 60 {
-        format!("{:.1}s", d.as_secs_f64())
-    } else if secs < 3600 {
-        format!("{}m {:02}s", secs / 60, secs % 60)
-    } else {
-        format!(
-            "{}h {:02}m {:02}s",
-            secs / 3600,
-            (secs % 3600) / 60,
-            secs % 60
-        )
     }
 }
 
