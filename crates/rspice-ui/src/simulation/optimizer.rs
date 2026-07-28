@@ -21,7 +21,7 @@ mod lifecycle;
 mod types;
 
 pub use design_var::DesignVar;
-pub use goal::{GoalStrategy, OptimizationGoal};
+pub use goal::OptimizationGoal;
 pub use types::{OptimizationResult, OptimizerAlgo, OptimizerConfig, OptimizerState};
 /// Core engine for executing optimization runs
 ///

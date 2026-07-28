@@ -25,4 +25,4 @@ pub(crate) mod symbols;
 pub(crate) mod view;
 
 // Re-export main types
-pub use symbols::{SymbolLibrary, draw_symbol};
+pub use symbols::SymbolLibrary;

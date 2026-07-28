@@ -23,8 +23,8 @@ pub use hierarchy::*;
 pub use materialize::*;
 
 pub use saved_output::{
-    SavedOutput, SavedOutputCompatibility, SavedOutputCompatibilityKind, SavedOutputKind,
-    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming,
 };
 use saved_output::{
     deserialize_or_migrate_identity, missing_identity_sentinel, parse_design_quantity,
@@ -766,18 +766,15 @@ pub struct OwnedNetlistDescriptor {
     pub save_history: Vec<OwnedNetlistSaveRecord>,
 }
 
-// Re-export the source bundle API from its historical workspace path so
-// downstream integrations keep compiling while the implementation remains an
-// independently testable state subsystem.
+// The source bundle API, re-exported from its historical workspace path. This
+// block used to carry the whole `project_sources` surface "so downstream
+// integrations keep compiling" -- there are no downstream integrations; the
+// crate is the application. What is left is what `state::workspace` callers
+// actually name through this path.
 pub use super::project_sources::{
-    MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES,
-    MAX_PROJECT_SOURCE_DEPENDENCIES, MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH, MAX_PROJECT_SOURCE_FILES,
-    MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
-    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceDocument, ProjectSourceError,
-    ProjectSourceFile, ProjectSourceId, ProjectSourceIdError, ProjectSourceIdParseError,
-    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
-    ProjectSourceValidationIdentity, project_veriloga_bundle_alias,
-    project_veriloga_bundle_source_key,
+    MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle, ProjectSourceDocument, ProjectSourceError,
+    ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
+    ProjectSourceValidationIdentity,
 };
 
 /// Project-level workspace state.

@@ -13,7 +13,7 @@ pub use cache::EyePersistenceCache;
 pub use cursor::{EyeCursorState, EyeViewRange};
 pub use diagram::EyeDiagramState;
 pub use display::{ColorMap, EyeDisplayMode};
-pub use mask::{EyeMask, MaskPolygon};
+pub use mask::EyeMask;
 
 pub(super) const EYE_VIEW_TIME_DIVISIONS: f64 = 10.0;
 pub(super) const EYE_VIEW_VOLTAGE_DIVISIONS: f64 = 8.0;

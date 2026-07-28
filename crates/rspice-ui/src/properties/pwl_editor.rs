@@ -7,6 +7,5 @@ mod data;
 mod render;
 mod state;
 
-pub use data::{PwlData, PwlPoint, PwlValidationError};
 pub use render::{PwlEditorResult, render_pwl_editor};
 pub use state::PwlEditorState;

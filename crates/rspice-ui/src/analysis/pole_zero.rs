@@ -18,7 +18,7 @@
 pub(crate) mod data;
 pub(crate) mod state;
 
-pub use data::{ComplexRoot, PoleZeroData, RootType};
+pub use data::{ComplexRoot, PoleZeroData};
 pub use state::PoleZeroState;
 
 // =============================================================================

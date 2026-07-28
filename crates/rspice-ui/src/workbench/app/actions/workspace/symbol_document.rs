@@ -9,9 +9,7 @@
 //! schematic that instantiates it, since they read the same document.
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::services::drc::{
-    DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
-};
+use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use crate::state::{
     CellViewRef,
     MAX_SYMBOL_DOCUMENT_BYTES, PinFindingKind, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY,

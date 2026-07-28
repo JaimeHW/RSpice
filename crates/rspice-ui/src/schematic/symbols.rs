@@ -14,4 +14,4 @@ mod types;
 
 pub use self::library::SymbolLibrary;
 pub use self::render::{draw_baked, draw_symbol};
-pub use self::types::{PathCommand, Symbol};
+pub use self::types::PathCommand;

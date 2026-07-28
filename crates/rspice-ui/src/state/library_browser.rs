@@ -33,8 +33,6 @@ mod view;
 
 pub use cell::Cell;
 pub use library::Library;
-pub use manager::{LibraryManager, NavColumn};
-pub use placement::{
-    LibraryCellPlacementCandidate, LibraryCellPlacementParameter, library_cell_placement_candidates,
-};
+pub use manager::LibraryManager;
+pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
 pub use view::{View, ViewType};

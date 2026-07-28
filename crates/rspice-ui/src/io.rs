@@ -31,8 +31,8 @@ pub use project_io::{
     show_open_project_dialog, show_save_project_dialog,
 };
 pub use schematic_io::{
-    SchematicFile, SchematicIoError, SchematicVersion, load_schematic, save_schematic,
-    show_open_dialog, show_save_dialog,
+    SchematicFile, SchematicIoError, load_schematic, save_schematic, show_open_dialog,
+    show_save_dialog,
 };
 
 pub use waveform_io::{

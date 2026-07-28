@@ -26,7 +26,7 @@ use uuid::Uuid;
 use crate::io::ProjectSimulationResults;
 use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId};
 use crate::results::report_document::{
-    FigureSizing, FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportDocument, ReportPage,
+    FigureSizing, FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportDocument,
     ReportReferenceCurrentness, ReportReferenceInventory, ReportReferenceMode,
     ReportReferenceSnapshot,
 };
@@ -46,7 +46,7 @@ use crate::state::{
 use crate::workbench::AppState;
 
 use crate::hardcopy::{
-    ActiveHardcopySource, ContentExtent, HardcopyContentSection, HardcopyDocumentId,
+    ActiveHardcopySource, HardcopyDocumentId,
     HardcopyDocumentKind, HardcopyScope, Length, PrintColor, PrintMappingEntry,
     PrintMappingSaveScope, PrintMappingTable, PrintObjectIdentity, PrintObjectKind,
     PrintRedundancy,

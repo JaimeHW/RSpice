@@ -12,9 +12,9 @@ mod parse;
 mod preferences;
 
 pub use engineering::{format_engineering_value, parse_engineering_value};
-pub use layout::{LayoutDatabaseUnit, LayoutDatabaseUnitError};
+pub use layout::LayoutDatabaseUnit;
 pub use locale::platform_number_locale;
-pub use parse::{QuantityInputError, QuantityInputKind, UiNumberLocale, parse_ui_quantity};
+pub use parse::{QuantityInputKind, UiNumberLocale, parse_ui_quantity};
 pub use preferences::{
     AngleDisplay, CopiedValueFormat, DecimalSeparatorInput, EngineeringSuffixPolicy,
     FrequencyDisplay, LayoutCoordinateDisplay, QuantityPresentationPolicy, TemperatureDisplay,

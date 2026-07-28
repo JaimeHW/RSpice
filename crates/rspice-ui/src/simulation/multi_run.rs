@@ -15,8 +15,7 @@ mod run_state;
 mod run_type;
 mod spec;
 
-pub use plan::AnalysisPlan;
-pub use run_state::{AnalysisRun, RunQueue, RunStatus};
+pub use run_state::RunQueue;
 pub use run_type::{AnalysisRunType, FrequencySweep};
 pub use spec::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,

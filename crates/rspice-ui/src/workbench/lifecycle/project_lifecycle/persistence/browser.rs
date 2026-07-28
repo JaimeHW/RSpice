@@ -6,6 +6,9 @@
 //! Permission prompts and picker cancellation are distinguished from real
 //! failures, because a user declining is not an error to report as one.
 
+// Every item below is browser-only, so on native there is nothing here to
+// need the parent's names.
+#[cfg(target_arch = "wasm32")]
 use super::*;
 
 #[cfg(target_arch = "wasm32")]

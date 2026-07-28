@@ -12,7 +12,7 @@ use super::{
 };
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use std::fmt;
 use std::path::Path;

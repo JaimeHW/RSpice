@@ -14,12 +14,7 @@ pub(crate) mod functions;
 pub(crate) mod interpolation;
 pub(crate) mod parser;
 
-pub use ast::CalculatorExpr;
 pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};
-pub use interpolation::{
-    ExtrapolationMode, InterpolationError, InterpolationMethod, WaveformInterpolator,
-    align_waveforms, align_waveforms_union,
-};
 
 // =============================================================================
 // Simulation Context Adapter

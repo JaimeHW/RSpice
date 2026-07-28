@@ -9,4 +9,4 @@ mod format;
 mod state;
 
 pub use config::{SpConfig, SpPortConfig, SpSweepType};
-pub use state::{SpDialogState, SpPortDialogState};
+pub use state::SpDialogState;

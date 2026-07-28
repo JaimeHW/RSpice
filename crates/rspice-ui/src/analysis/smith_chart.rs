@@ -22,7 +22,7 @@ pub(crate) mod complex;
 pub(crate) mod impedance;
 pub(crate) mod state;
 
-pub use state::{SmithChartMode, SmithChartState};
+pub use state::SmithChartState;
 
 // =============================================================================
 // Tests

@@ -24,7 +24,6 @@ pub const MAX_RUN_HISTORY: usize = 20;
 
 pub use ac_bode::{
     AcBodeMetrics, AcBodeSummary, ac_bode_summary_for_run, ac_bode_summary_for_selection,
-    ac_bode_summary_for_source_instance,
 };
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
@@ -53,6 +52,5 @@ pub use run_receipt::{
 pub use saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{
-    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DisplayWaveformCache, SharedWaveformValues,
-    WaveformData,
+    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SharedWaveformValues, WaveformData,
 };

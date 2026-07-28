@@ -22,8 +22,7 @@ pub use editor::{CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity, s
 pub use page::{
     AutomationDispatchSnapshot, AutomationExecutionState, AutomationValidationReceipt,
     CodeWorkspacePage, CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
-    TargetQualification, VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileEditorKind,
-    VerilogAFileEditorState, VerilogAFileSelection, VerilogAImportTarget,
+    TargetQualification, VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection,
 };
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, compile_project_bundle_receipt,

@@ -19,7 +19,7 @@ pub(crate) mod data;
 pub(crate) mod state;
 pub(crate) mod statistics;
 
-pub use data::{Histogram, HistogramBuilder};
+pub use data::HistogramBuilder;
 pub use state::{HistogramDisplayMode, HistogramState};
 
 // =============================================================================

@@ -1,6 +1,10 @@
 //! Canonical project persistence identities and optimistic concurrency.
 mod browser;
 
+// `browser` is entirely `cfg(target_arch = "wasm32")`, so on native this glob
+// re-exports nothing and rustc reports it unused. Gating the `use` rather than
+// the `mod` keeps the module compiling (and type-checking) on both targets.
+#[cfg(target_arch = "wasm32")]
 pub(crate) use browser::*;
 
 #[cfg(not(target_arch = "wasm32"))]

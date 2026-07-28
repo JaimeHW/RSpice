@@ -32,8 +32,6 @@ use windows_sys::Win32::Storage::Xps::{
     EndDoc, EndPage, StartDocW, StartPage,
 };
 
-use super::*;
-
 const MAX_DEVMODE_BYTES: usize = 1_048_576;
 const CAPABILITY_TEXT_CAP: usize = 32_768;
 

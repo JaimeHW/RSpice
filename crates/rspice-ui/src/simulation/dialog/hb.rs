@@ -22,4 +22,4 @@ mod format;
 mod state;
 
 pub use config::{HbConfig, HbSolverType, HbToneConfig};
-pub use state::{HbDialogState, HbToneDialogState};
+pub use state::HbDialogState;

@@ -6,7 +6,6 @@
 //! chord can never silently shadow its desktop command.
 
 use egui::Key;
-use serde::{Deserialize, Serialize};
 
 use super::vocabulary::{Command, CommandPlatform};
 use crate::workbench::RSpiceApp;

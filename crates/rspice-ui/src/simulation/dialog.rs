@@ -89,7 +89,7 @@ pub use pz::PzDialogState;
 pub use xf::{XfAccuracy, XfDialogState, XfNormalization};
 
 // Re-exports - Stability/Sensitivity
-pub use sens::{SensDialogState, SensType};
+pub use sens::SensDialogState;
 pub use stb::StbDialogState;
 
 // Re-exports - Statistical/Parametric

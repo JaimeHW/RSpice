@@ -13,7 +13,6 @@
 //! this half is a value model and validates only itself.
 
 use serde::{Deserialize, Serialize};
-use sha2::Digest as _;
 
 use crate::hardcopy::sources::{
     DISPLAY_NAME_LIMIT, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, validate_label,

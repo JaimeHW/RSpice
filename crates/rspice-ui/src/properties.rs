@@ -20,6 +20,6 @@ pub(crate) mod tabbed_dialog;
 
 
 pub use tabbed_dialog::{
-    ComponentPropertySession, TabInfo, TabbedDialogResult, TabbedPropertyDialogState,
+    ComponentPropertySession, TabbedDialogResult, TabbedPropertyDialogState,
     render_tabbed_property_dialog,
 };

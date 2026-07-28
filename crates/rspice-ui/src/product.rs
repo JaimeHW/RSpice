@@ -13,10 +13,9 @@ mod lifecycle;
 pub use catalog::ProductObjectKind;
 pub use command::{CommandId, FieldId, ValidationCode};
 pub use identity::{
-    AnalysisInstanceId, AutomationPipelineId, ContentDigest, DatasetId, DesignId, DesignVariableId,
-    DigestError, JobId, ModelBindingId, ModelSourceId, ObjectRef, ObjectRevision, ProjectId,
-    ReleaseCandidateId, ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId,
-    VerificationEvidenceId,
+    AnalysisInstanceId, ContentDigest, DatasetId, DesignVariableId, JobId, ModelSourceId, ObjectRef,
+    ObjectRevision, ProjectId, ReleaseCandidateId, ResultDocumentId, RevisionError, RunId,
+    SavedOutputId, SimulationPlanId, VerificationEvidenceId,
 };
 pub use lifecycle::DatasetBinding;
 
