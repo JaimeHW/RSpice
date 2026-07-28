@@ -1109,7 +1109,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/hardcopy_adapters/render/publication.rs", 4123),
     ("state/workspace.rs", 6499),
     ("workbench/documents/visualization_studio.rs", 5434),
-    ("state/model_library/qualification.rs", 6916),
+    ("state/model_library/qualification.rs", 6004),
     ("workbench/surfaces/model_editor.rs", 6882),
     ("workbench/surfaces/verify.rs", 6792),
     ("workbench/surfaces/simulate.rs", 6404),
