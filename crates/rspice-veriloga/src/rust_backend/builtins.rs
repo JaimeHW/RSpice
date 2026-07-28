@@ -12,6 +12,10 @@
 //! not take the scalar backend surfaces a [`BuiltinBackendFallbackReason`],
 //! and `REQUIRE_SCALAR_BUILTINS_ENV` promotes those to errors so a silent
 //! regression off the fast tier cannot land.
+//!
+//! Both of those describe the tier cascade, and the corpus no longer goes
+//! through it: [`builtin_transpiler`] selects the canonical CFG emitter
+//! outright.
 
 use std::collections::VecDeque;
 use std::env;
@@ -944,13 +948,29 @@ fn dense_reactive_workspace_payload_bytes(
         + 32
 }
 
+/// The backend every shipped built-in is emitted through.
+///
+/// The canonical CFG emitter, selected outright rather than through `Auto`.
+/// It carries all 42 corpus models, so the tier cascade has nothing left to
+/// catch, and a cascade that can still catch something is a cascade that can
+/// silently downgrade a model back onto a tier this rebuild exists to remove.
+///
+/// `Auto` and the tiers behind it are left in place rather than rewired,
+/// because Phase 6 deletes them along with `RustBackendSelection` itself.
+/// Pointing them at the canonical emitter first would be work done only to be
+/// deleted; taking their last production caller away is what makes that
+/// deletion a removal rather than a migration.
+fn builtin_transpiler() -> RustTranspiler {
+    RustTranspiler::new_canonical(Default::default())
+}
+
 fn generate_devices_sequential(
     model_root: &Path,
     work_items: Vec<BuiltinModuleWorkItem>,
     progress: bool,
 ) -> BuiltinResult<Vec<GeneratedBuiltinModule>> {
     let total_modules = work_items.len();
-    let transpiler = RustTranspiler::new_auto(Default::default());
+    let transpiler = builtin_transpiler();
     let mut generated = Vec::with_capacity(total_modules);
     for (index, item) in work_items.into_iter().enumerate() {
         generated.push(generate_device_work_item(
@@ -990,7 +1010,7 @@ fn generate_devices_parallel(
             .name(format!("rspice-veriloga-builtin-generator-{worker}"))
             .stack_size(256 * 1024 * 1024)
             .spawn(move || -> Result<(), String> {
-                let transpiler = RustTranspiler::new_auto(Default::default());
+                let transpiler = builtin_transpiler();
 
                 loop {
                     if first_error
