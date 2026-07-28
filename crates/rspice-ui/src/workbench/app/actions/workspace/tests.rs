@@ -1,14 +1,75 @@
-//! Tests for workspace-view and symbol-document actions.
+//! Tests for workspace-level edit actions.
+//!
+//! These pin what each action does to the whole active document, and - just as
+//! importantly - what a read-only document refuses to let it do.
 
 use crate::diagnostics::{LogAnchor, LogSource};
-use crate::workbench::app_state::AppState;
 use crate::services::drc::{DrcLocation, DrcViolationType};
-use crate::workbench::state::Workspace;
 use crate::state::{
     Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
     PortDirection, PortSpec, ResolvedSymbolSource, Rotation, SYMBOL_DOCUMENT_METADATA_KEY,
-    SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View, ViewType, Wire,
+    SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolResolver, View,
+    ViewType, Wire,
 };
+use crate::workbench::ChoicePreference;
+use crate::workbench::app_state::AppState;
+use crate::workbench::state::Workspace;
+
+#[test]
+fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() {
+    let mut state = AppState::default();
+    state
+        .ui
+        .preferences
+        .set_choice(ChoicePreference::PropertyCommitPolicy, 1)
+        .unwrap();
+    let created = state.new_schematic_document();
+    assert_eq!(
+        created.document_policy.property_commit,
+        crate::state::PropertyCommitPolicy::ApplyValidFields
+    );
+
+    let reference = CellViewRef::new("work", "preserved", "schematic");
+    let mut library = Library::new("work");
+    let mut cell = Cell::new("preserved");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    library.add_cell(cell);
+    state.library_manager.add_library(library);
+    let mut existing = SchematicState::default();
+    existing.document_policy.property_commit = crate::state::PropertyCommitPolicy::Atomic;
+    state
+        .workspace
+        .schematic_buffers
+        .insert(reference.key(), existing);
+
+    state.open_workspace_view(reference);
+
+    assert_eq!(
+        state.schematic.document_policy.property_commit,
+        crate::state::PropertyCommitPolicy::Atomic
+    );
+}
+
+#[test]
+fn any_angle_document_policy_applies_to_wire_and_bus_authoring() {
+    let mut state = AppState::default();
+    state
+        .ui
+        .preferences
+        .set_choice(ChoicePreference::WireJunctionBehavior, 2)
+        .unwrap();
+
+    let created = state.new_schematic_document();
+
+    assert_eq!(
+        created.wire_drawing.routing_mode,
+        crate::state::WireRoutingMode::Diagonal
+    );
+    assert_eq!(
+        created.bus_drawing.routing_mode,
+        crate::state::WireRoutingMode::Diagonal
+    );
+}
 
 fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
     SymbolDocument {
@@ -49,6 +110,73 @@ fn state_with_amp_symbol(document: SymbolDocument) -> AppState {
 
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     state
+}
+
+fn state_with_work_cell(cell_name: &str) -> AppState {
+    let mut state = AppState::default();
+    let mut library = Library::new("work");
+    let mut cell = Cell::new(cell_name);
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    library.add_cell(cell);
+    state.library_manager.add_library(library);
+    state.open_workspace_view(CellViewRef::new("work", cell_name, "schematic"));
+    state
+}
+
+#[test]
+fn production_copy_uses_authored_symbol_terminal_geometry() {
+    let mut state = state_with_amp_symbol(symbol_document(&[
+        ("IN", PortDirection::In, Point::new(-50, 0)),
+        ("OUT", PortDirection::Out, Point::new(50, 0)),
+    ]));
+    state.schematic = SchematicState::default();
+    let left = Component::new(1, ComponentType::CellInstance, Point::new(0, 0)).with_library_cell(
+        amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
+    );
+    let right =
+        Component::new(2, ComponentType::CellInstance, Point::new(200, 0)).with_library_cell(
+            amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
+        );
+    state.schematic.components = vec![left, right];
+    state
+        .schematic
+        .wires
+        .push(Wire::segment(3, Point::new(50, 0), Point::new(150, 0)));
+    state.schematic.selection.select_component(1);
+    state.schematic.selection.select_component(2);
+
+    assert!(state.copy_active_schematic_selection());
+    assert_eq!(state.schematic.clipboard.components.len(), 2);
+    assert_eq!(
+        state.schematic.clipboard.wires.len(),
+        1,
+        "the conductor between authored pins must travel with both selected instances"
+    );
+}
+
+fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::ProjectSourceId {
+    state
+        .library_manager
+        .get_library_mut("work")
+        .and_then(|library| library.get_cell_mut(cell))
+        .expect("fixture cell")
+        .add_view(View::new("behavior", ViewType::VerilogA));
+    let bundle = crate::state::ProjectSourceBundle::try_new(
+        crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("work", cell, "behavior")),
+        crate::state::ProjectSourceLanguage::VerilogA,
+        "behavior.va",
+        "module behavior(p, n); inout p, n; endmodule",
+        std::iter::empty(),
+        std::iter::empty(),
+    )
+    .expect("valid source bundle");
+    let id = bundle.id();
+    state
+        .workspace
+        .project_sources
+        .insert_bundle(bundle)
+        .expect("unique source owner");
+    id
 }
 
 fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppState {
@@ -571,6 +699,53 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
 }
 
 #[test]
+fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
+    let before = SymbolDocument {
+        origin: Point::new(20, 0),
+        pins: vec![SymbolPin::new(
+            "IN",
+            PortDirection::In,
+            Some(Point::new(30, 0)),
+        )],
+        ..SymbolDocument::default()
+    };
+    let mut state = state_with_amp_symbol(before);
+
+    let mut parent = SchematicState::default();
+    parent.components.push(
+        Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+            .with_library_cell(amp_binding(&[("IN", PortDirection::In)])),
+    );
+    parent
+        .wires
+        .push(Wire::segment(7, Point::new(110, 50), Point::new(0, 50)));
+    state
+        .workspace
+        .schematic_buffers
+        .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+
+    state
+        .store_active_symbol_document(&SymbolDocument {
+            origin: Point::origin(),
+            pins: vec![SymbolPin::new(
+                "IN",
+                PortDirection::In,
+                Some(Point::new(30, 0)),
+            )],
+            ..SymbolDocument::default()
+        })
+        .expect("updated symbol stores");
+
+    let parent = state
+        .workspace
+        .schematic_buffers
+        .get("work/top/schematic")
+        .expect("parent schematic remains open");
+    assert_eq!(parent.wires[0].points[0], Point::new(130, 50));
+    assert_eq!(parent.wires[0].points[1], Point::new(0, 50));
+}
+
+#[test]
 fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
     let mut state = state_with_amp_symbol(symbol_document(&[
         ("IN", PortDirection::In, Point::new(-30, 10)),
@@ -761,6 +936,195 @@ fn symbol_pin_checks_cap_console_rows_and_keep_all_results() {
 }
 
 #[test]
+fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
+    let mut state = state_with_work_cell("amp");
+    let active_key = CellViewRef::new("work", "amp", "schematic").key();
+    state
+        .workspace
+        .schematic_buffers
+        .insert(active_key, SchematicState::default());
+    state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(20, 20));
+
+    let copied = state
+        .copy_cell("work", "amp", "work", "amp_copy")
+        .expect("copy succeeds");
+
+    let copy = state
+        .workspace
+        .schematic_buffers
+        .get("work/amp_copy/schematic")
+        .expect("copy buffer exists");
+    assert_eq!(copied, 1);
+    assert_eq!(copy.components.len(), 1);
+    assert_eq!(copy.components[0].kind, ComponentType::Resistor);
+}
+
+#[test]
+fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
+    let mut state = state_with_work_cell("amp");
+    let original_id = add_cell_veriloga_source(&mut state, "amp");
+    let configuration_id = state
+        .workspace
+        .configuration_sets
+        .create(crate::state::ConfigurationSetDefinition {
+            name: "Release".to_owned(),
+            root: CellViewRef::new("work", "amp", "schematic"),
+            dut_path: "/top".to_owned(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy:
+                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: Vec::new(),
+            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "Lifecycle test".to_owned(),
+        })
+        .expect("configuration root");
+    let inactive_configuration_id = state
+        .workspace
+        .configuration_sets
+        .clone_configuration(configuration_id, 1, "Characterization")
+        .expect("inactive configuration root");
+
+    state
+        .copy_cell("work", "amp", "work", "amp_copy")
+        .expect("copy succeeds");
+    let copied_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+        "work", "amp_copy", "behavior",
+    ));
+    let copied = state
+        .workspace
+        .project_sources
+        .bundle_for_owner(&copied_owner)
+        .expect("copied source exists");
+    assert_ne!(copied.id(), original_id);
+    assert_eq!(
+        copied.root().content(),
+        state
+            .workspace
+            .project_sources
+            .get_bundle(original_id)
+            .expect("original source")
+            .root()
+            .content()
+    );
+
+    let revision = state
+        .workspace
+        .project_sources
+        .get_bundle(original_id)
+        .expect("original source")
+        .revision();
+    state
+        .rename_cell("work", "amp", "amp_renamed")
+        .expect("rename succeeds");
+    let renamed_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+        "work",
+        "amp_renamed",
+        "behavior",
+    ));
+    let renamed = state
+        .workspace
+        .project_sources
+        .bundle_for_owner(&renamed_owner)
+        .expect("renamed source exists");
+    assert_eq!(renamed.id(), original_id);
+    assert!(renamed.revision() > revision);
+    assert!(
+        state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+                CellViewRef::new("work", "amp", "behavior")
+            ))
+            .is_none()
+    );
+    assert!(state.workspace.project_sources_dirty);
+    for id in [configuration_id, inactive_configuration_id] {
+        let configuration = state
+            .workspace
+            .configuration_sets
+            .find(id)
+            .expect("configuration remains");
+        assert_eq!(configuration.root().cell, "amp_renamed");
+        assert_eq!(configuration.revision(), 2);
+    }
+    assert!(state.workspace.project_metadata_dirty);
+}
+
+#[test]
+fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
+    let mut state = state_with_work_cell("\u{c9}tage");
+    let original_id = add_cell_veriloga_source(&mut state, "\u{c9}tage");
+    let persisted_key = CellViewRef::new("work", "\u{c9}tage", "schematic").key();
+    state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(20, 20));
+    let before_sources = state.workspace.project_sources.clone();
+
+    let copy_error = state
+        .copy_cell("work", "\u{c9}tage", "work", "\u{e9}TAGE")
+        .expect_err("accented case aliases cannot create a second cell identity");
+    assert!(copy_error.contains("canonical cell identity"));
+    assert_eq!(state.workspace.project_sources, before_sources);
+    assert_eq!(
+        state
+            .workspace
+            .schematic_buffers
+            .get(&persisted_key)
+            .expect("source buffer remains")
+            .components
+            .len(),
+        0,
+        "a rejected copy must not flush or partially copy live document state"
+    );
+    assert_eq!(
+        state
+            .library_manager
+            .get_library("work")
+            .expect("work library")
+            .cell_count(),
+        1
+    );
+
+    state
+        .library_manager
+        .get_library_mut("work")
+        .expect("work library")
+        .add_cell(Cell::new("Cible"));
+    let before_sources = state.workspace.project_sources.clone();
+    let before_revision = state
+        .workspace
+        .project_sources
+        .get_bundle(original_id)
+        .expect("owned source")
+        .revision();
+    let rename_error = state
+        .rename_cell("work", "\u{c9}tage", "cIBLE")
+        .expect_err("rename cannot alias an existing canonical identity");
+    assert!(rename_error.contains("canonical cell identity"));
+    assert_eq!(state.workspace.project_sources, before_sources);
+    assert_eq!(
+        state
+            .workspace
+            .project_sources
+            .get_bundle(original_id)
+            .expect("owned source remains")
+            .revision(),
+        before_revision
+    );
+    let library = state
+        .library_manager
+        .get_library("work")
+        .expect("work library");
+    assert!(library.get_cell("\u{c9}tage").is_some());
+    assert!(library.get_cell("Cible").is_some());
+    assert!(library.get_cell("cIBLE").is_none());
+}
+
+#[test]
 fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
     let mut state = state_with_amp_symbol_pin("IN", Some(Point::new(-30, 0)));
     let reference = CellViewRef::new("work", "amp", "symbol");
@@ -854,6 +1218,55 @@ fn symbol_undo_history_is_scoped_to_active_view() {
             .expect("amp_a symbol loads")
             .name_anchor,
         Point::new(-10, -10)
+    );
+}
+
+#[test]
+fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
+    let mut state = AppState::default();
+    let mut library = Library::new("work");
+    let mut cell = Cell::new("amp");
+    cell.add_view(View::new("symbol", ViewType::Symbol));
+    library.add_cell(cell);
+    state.library_manager.add_library(library);
+    state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+    let document = SymbolDocument::default();
+    let baseline = SymbolEditorMetadata::for_document(&document);
+    state
+        .store_active_symbol_editor_bundle(&document, &baseline)
+        .expect("baseline symbol bundle stores");
+    state.record_symbol_edit(&document);
+    let mut edited = baseline.clone();
+    edited.allocate_text("durable annotation", Point::new(10, 20));
+    state
+        .store_active_symbol_editor_bundle(&document, &edited)
+        .expect("edited symbol bundle stores");
+
+    assert!(
+        state
+            .undo_active_symbol_document()
+            .expect("symbol bundle undo succeeds")
+    );
+    assert!(
+        state
+            .load_active_symbol_editor_metadata(&document)
+            .expect("undone sidecar loads")
+            .texts
+            .is_empty()
+    );
+    assert!(
+        state
+            .redo_active_symbol_document()
+            .expect("symbol bundle redo succeeds")
+    );
+    assert_eq!(
+        state
+            .load_active_symbol_editor_metadata(&document)
+            .expect("redone sidecar loads")
+            .texts
+            .len(),
+        1
     );
 }
 
@@ -956,11 +1369,365 @@ fn opening_symbol_view_loads_the_paired_schematic_context() {
 }
 
 #[test]
-fn symbol_dirty_state_routes_ordinary_save_to_project() {
-    let mut state = AppState::default();
-    let reference = CellViewRef::new("user", "top", "symbol");
-    state.workspace.open_view(reference, ViewType::Symbol);
-    state.workspace.set_active_dirty(true);
+fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_variants() {
+    let mut state = state_with_work_cell("amp");
+    let main_component = state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(0, 0));
+    let boundary_component = state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(40, 0));
+    let moved_component = state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(80, 0));
+    let owner = CellViewRef::new("work", "amp", "schematic").key();
+    let main_sheet = state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(
+            &owner,
+            "Main",
+            [main_component, boundary_component, moved_component],
+        )
+        .expect("source sheet catalog");
+    let source_catalog = state
+        .workspace
+        .design_management
+        .sheet_catalog_mut(&owner)
+        .expect("source catalog");
+    let auxiliary_sheet = source_catalog
+        .create_sheet(
+            crate::state::SheetDefinition {
+                name: "Auxiliary".to_owned(),
+                template: crate::state::SheetTemplate::AnalogSchematic,
+                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(main_sheet),
+        )
+        .expect("auxiliary sheet");
+    source_catalog
+        .move_selection(crate::state::MoveSelectionRequest {
+            expected_catalog_revision: source_catalog.revision(),
+            object_ids: vec![moved_component],
+            destination_sheet_id: auxiliary_sheet,
+            boundary_resolution: crate::state::MoveBoundaryResolution::ExplicitPorts {
+                ports: vec![crate::state::CrossSheetPortDefinition {
+                    net_name: "BIAS".to_owned(),
+                    first: crate::state::CrossSheetPortEndpoint {
+                        sheet_id: main_sheet,
+                        anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                            component_id: boundary_component,
+                            terminal_name: "BIAS_OUT".to_owned(),
+                        },
+                    },
+                    second: crate::state::CrossSheetPortEndpoint {
+                        sheet_id: auxiliary_sheet,
+                        anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                            component_id: moved_component,
+                            terminal_name: "BIAS_IN".to_owned(),
+                        },
+                    },
+                    direction: crate::state::CrossSheetPortDirection::Output,
+                    signal_type: crate::state::CrossSheetSignalType::Analog,
+                    discipline: crate::state::CrossSheetDiscipline::Electrical,
+                }],
+            },
+        })
+        .expect("reviewed cross-sheet move");
+    let variant_id = state
+        .workspace
+        .design_management
+        .variants_mut()
+        .create(crate::state::AssemblyVariantDraft {
+            name: "Industrial".to_owned(),
+            parent_id: None,
+            inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+            overrides: std::collections::BTreeMap::from([(
+                crate::state::SchematicObjectKey::new(&owner, main_component)
+                    .expect("scoped source object"),
+                crate::state::VariantObjectOverride::DoNotPopulate {
+                    approval_reference: "ECO-42".to_owned(),
+                },
+            )]),
+        })
+        .expect("source variant");
 
-    assert!(state.should_save_project_for_active_document());
+    let source_sheet_ids = state
+        .workspace
+        .design_management
+        .sheet_catalog(&owner)
+        .expect("source catalog")
+        .sheets()
+        .iter()
+        .map(crate::state::DesignSheet::id)
+        .collect::<std::collections::BTreeSet<_>>();
+    let source_port_ids = state
+        .workspace
+        .design_management
+        .sheet_catalog(&owner)
+        .expect("source catalog")
+        .cross_sheet_ports()
+        .iter()
+        .map(crate::state::CrossSheetPortContract::id)
+        .collect::<std::collections::BTreeSet<_>>();
+
+    state
+        .copy_cell("work", "amp", "work", "amp_copy")
+        .expect("cell copy succeeds");
+
+    let copied_owner = CellViewRef::new("work", "amp_copy", "schematic").key();
+    let copied_catalog = state
+        .workspace
+        .design_management
+        .sheet_catalog(&copied_owner)
+        .expect("copied sheet catalog");
+    let copied_sheet_ids = copied_catalog
+        .sheets()
+        .iter()
+        .map(crate::state::DesignSheet::id)
+        .collect::<std::collections::BTreeSet<_>>();
+    let copied_port_ids = copied_catalog
+        .cross_sheet_ports()
+        .iter()
+        .map(crate::state::CrossSheetPortContract::id)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(copied_sheet_ids.len(), source_sheet_ids.len());
+    assert!(copied_sheet_ids.is_disjoint(&source_sheet_ids));
+    assert_eq!(copied_port_ids.len(), source_port_ids.len());
+    assert!(copied_port_ids.is_disjoint(&source_port_ids));
+
+    let resolved = state
+        .workspace
+        .design_management
+        .variants()
+        .resolve(variant_id)
+        .expect("source variant remains resolvable");
+    assert!(
+        resolved
+            .override_for(&owner, main_component)
+            .expect("source key is valid")
+            .is_some()
+    );
+    assert!(
+        resolved
+            .override_for(&copied_owner, main_component)
+            .expect("copied key is valid")
+            .is_none(),
+        "copying a cell must not silently clone project assembly-variant ownership"
+    );
+}
+
+#[test]
+fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership() {
+    let mut state = state_with_work_cell("amp");
+    let object_id = state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(20, 20));
+    let old_owner = CellViewRef::new("work", "amp", "schematic").key();
+    let sheet_id = state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&old_owner, "Main", [object_id])
+        .expect("source sheet catalog");
+    let old_object =
+        crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
+    let variant_id = state
+        .workspace
+        .design_management
+        .variants_mut()
+        .create(crate::state::AssemblyVariantDraft {
+            name: "Industrial".to_owned(),
+            parent_id: None,
+            inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+            overrides: std::collections::BTreeMap::from([(
+                old_object.clone(),
+                crate::state::VariantObjectOverride::DoNotPopulate {
+                    approval_reference: "ECO-17".to_owned(),
+                },
+            )]),
+        })
+        .expect("source variant");
+    let renumber_request = crate::state::RenumberRequest {
+        scope: crate::state::RenumberScope::WholeProject,
+        order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+        protected_references: crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+        protected_reviewed: false,
+        objects: vec![crate::state::AnnotationObject {
+            object: old_object.clone(),
+            current_reference: "R9".to_owned(),
+            device_family: "R".to_owned(),
+            sheet_id: Some(sheet_id),
+            hierarchy_path: "/top".to_owned(),
+            position: crate::state::AnnotationPosition::default(),
+            connectivity_order: Some(1),
+            locked: false,
+            external: false,
+            imported: false,
+        }],
+    };
+    let preview = state
+        .workspace
+        .design_management
+        .annotation()
+        .preview_renumbering(&renumber_request)
+        .expect("renumber preview");
+    state
+        .workspace
+        .design_management
+        .annotation_mut()
+        .commit_renumbering(&preview, &renumber_request)
+        .expect("reviewed annotation");
+
+    state
+        .rename_cell("work", "amp", "amp_rev_b")
+        .expect("cell rename succeeds");
+
+    let new_owner = CellViewRef::new("work", "amp_rev_b", "schematic").key();
+    assert!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&old_owner)
+            .is_none()
+    );
+    assert_eq!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&new_owner)
+            .expect("renamed sheet catalog")
+            .active_sheet_id(),
+        Some(sheet_id),
+        "renaming ownership must preserve stable sheet identity"
+    );
+    let resolved = state
+        .workspace
+        .design_management
+        .variants()
+        .resolve(variant_id)
+        .expect("renamed variant remains resolvable");
+    assert!(
+        resolved
+            .override_for(&old_owner, object_id)
+            .expect("old key is valid")
+            .is_none()
+    );
+    assert!(
+        resolved
+            .override_for(&new_owner, object_id)
+            .expect("new key is valid")
+            .is_some()
+    );
+    assert!(
+        state
+            .workspace
+            .design_management
+            .annotation()
+            .effective_mapping_for(&old_owner, object_id)
+            .expect("old annotation lookup")
+            .is_none()
+    );
+    assert!(
+        state
+            .workspace
+            .design_management
+            .annotation()
+            .effective_mapping_for(&new_owner, object_id)
+            .expect("renamed annotation lookup")
+            .is_some()
+    );
+}
+
+#[test]
+fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog() {
+    let mut state = state_with_work_cell("amp");
+    let object_id = state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(20, 20));
+    let old_owner = CellViewRef::new("work", "amp", "schematic").key();
+    let old_object =
+        crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
+    let variant_id = state
+        .workspace
+        .design_management
+        .variants_mut()
+        .create(crate::state::AssemblyVariantDraft {
+            name: "Industrial".to_owned(),
+            parent_id: None,
+            inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+            overrides: std::collections::BTreeMap::from([(
+                old_object.clone(),
+                crate::state::VariantObjectOverride::DoNotPopulate {
+                    approval_reference: "ECO-18".to_owned(),
+                },
+            )]),
+        })
+        .expect("source variant");
+    let renumber_request = crate::state::RenumberRequest {
+        scope: crate::state::RenumberScope::WholeProject,
+        order: crate::state::RenumberOrder::HierarchyThenCoordinates,
+        protected_references: crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+        protected_reviewed: false,
+        objects: vec![crate::state::AnnotationObject {
+            object: old_object,
+            current_reference: "R19".to_owned(),
+            device_family: "R".to_owned(),
+            sheet_id: None,
+            hierarchy_path: "/top".to_owned(),
+            position: crate::state::AnnotationPosition::default(),
+            connectivity_order: Some(1),
+            locked: false,
+            external: false,
+            imported: false,
+        }],
+    };
+    let preview = state
+        .workspace
+        .design_management
+        .annotation()
+        .preview_renumbering(&renumber_request)
+        .expect("renumber preview");
+    state
+        .workspace
+        .design_management
+        .annotation_mut()
+        .commit_renumbering(&preview, &renumber_request)
+        .expect("reviewed annotation");
+
+    state
+        .rename_cell("work", "amp", "amp_rev_c")
+        .expect("cell rename succeeds");
+
+    let new_owner = CellViewRef::new("work", "amp_rev_c", "schematic").key();
+    let resolved = state
+        .workspace
+        .design_management
+        .variants()
+        .resolve(variant_id)
+        .expect("renamed variant remains resolvable");
+    assert!(
+        resolved
+            .override_for(&old_owner, object_id)
+            .expect("old key is valid")
+            .is_none()
+    );
+    assert!(
+        resolved
+            .override_for(&new_owner, object_id)
+            .expect("new key is valid")
+            .is_some()
+    );
+    assert!(
+        state
+            .workspace
+            .design_management
+            .annotation()
+            .effective_mapping_for(&new_owner, object_id)
+            .expect("renamed annotation lookup")
+            .is_some()
+    );
 }
