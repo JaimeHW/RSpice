@@ -10,7 +10,7 @@ use crate::simulation::optimizer::{
     DesignVar, OptimizationGoal, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
 };
 use rspice_core::Value;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -198,82 +198,22 @@ pub struct OptimizationData {
     pub converged: bool,
 }
 
-/// Run optimization analysis with default configuration.
-pub fn run_optimization_analysis(netlist_text: &str) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
-}
-
-/// Run optimization analysis with cooperative cancellation.
+/// Run optimization analysis with default configuration and no source path.
+///
+/// Test-only. The shipping path is
+/// [`run_optimization_analysis_with_config_and_source_path_and_abort`], which
+/// the device spec calls with the configuration the user set.
+#[cfg(test)]
 pub fn run_optimization_analysis_with_abort(
     netlist_text: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<OptimizationData> {
-    run_optimization_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run optimization analysis with default configuration and a source path used
-/// to resolve relative includes and model file references.
-pub fn run_optimization_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run optimization analysis with source-path resolution and cooperative
-/// cancellation.
-pub fn run_optimization_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<OptimizationData> {
     run_optimization_analysis_with_config_and_source_path_and_abort(
         netlist_text,
         &OptimizationRunConfig::default(),
-        source_path,
-        abort,
-    )
-}
-
-/// Run optimization analysis with explicit configuration.
-pub fn run_optimization_analysis_with_config(
-    netlist_text: &str,
-    config: &OptimizationRunConfig,
-) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_config_and_abort(netlist_text, config, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
-/// Run explicitly configured optimization analysis with cooperative
-/// cancellation.
-pub fn run_optimization_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &OptimizationRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<OptimizationData> {
-    run_optimization_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
         None,
         abort,
     )
-}
-
-/// Run optimization analysis with explicit configuration and a source path used
-/// to resolve relative includes and model file references.
-pub fn run_optimization_analysis_with_config_and_source_path(
-    netlist_text: &str,
-    config: &OptimizationRunConfig,
-    source_path: Option<&Path>,
-) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        config,
-        source_path,
-        &NoAbort,
-    )
-    .map_err(|error| error.to_string())
 }
 
 /// Run explicitly configured optimization analysis with source-path

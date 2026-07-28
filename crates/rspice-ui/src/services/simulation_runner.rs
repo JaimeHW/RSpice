@@ -68,12 +68,7 @@ pub use noise::{
 };
 pub use optimization::{
     OptimizationAlgorithmMode, OptimizationData, OptimizationGoalMode, OptimizationRunConfig,
-    OptimizationVariable, run_optimization_analysis, run_optimization_analysis_with_abort,
-    run_optimization_analysis_with_config, run_optimization_analysis_with_config_and_abort,
-    run_optimization_analysis_with_config_and_source_path,
-    run_optimization_analysis_with_config_and_source_path_and_abort,
-    run_optimization_analysis_with_source_path,
-    run_optimization_analysis_with_source_path_and_abort,
+    OptimizationVariable, run_optimization_analysis_with_config_and_source_path_and_abort,
 };
 pub use pac_pxf::{
     PacData, PacFrequencySweep, PacRunConfig, PxfData, PxfFrequencySweep, PxfRunConfig,
