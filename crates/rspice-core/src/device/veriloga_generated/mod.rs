@@ -22,8 +22,6 @@ pub mod builtins {
 #[allow(clippy::all)]
 pub(crate) mod kernel_runtime;
 
-#[cfg(feature = "veriloga-builtins-base")]
-pub mod bench;
 
 #[derive(Debug, Clone, Copy)]
 pub struct GeneratedDdtCoefficients {
@@ -831,6 +829,57 @@ impl BuiltinVerilogAInstance {
         self.kind.restore_persistent_state(&checkpoint.state)
     }
 
+    /// Instantiate a built-in outside a netlist, against explicit unknown indices.
+    ///
+    /// [`instantiate_builtin`] is the netlist path and needs a `CircuitData` and
+    /// a `ParamContext` to resolve terminals and parameter expressions. Harnesses
+    /// that drive one device directly — throughput benchmarks, the numerical
+    /// oracle, model-authoring tools — already know their node and branch rows
+    /// and have plain numeric overrides, so they take this instead of
+    /// assembling a circuit to borrow from.
+    ///
+    /// `nodes` and `branches` are matrix row indices, in the generated device's
+    /// own order; row 0 is ground by the usual convention.
+    pub fn standalone(
+        model_name: &str,
+        instance_name: impl Into<String>,
+        nodes: Vec<usize>,
+        branches: Vec<usize>,
+        temperature: Value,
+        overrides: &[(String, Value)],
+    ) -> Result<Self, String> {
+        let model_name = builtins::builtin_names()
+            .iter()
+            .find(|name| name.eq_ignore_ascii_case(model_name))
+            .copied()
+            .ok_or_else(|| format!("'{model_name}' is not a compiled-in generated built-in"))?;
+        let kind = builtins::instantiate(model_name, &nodes, &branches, overrides)?
+            .ok_or_else(|| format!("'{model_name}' is not compiled into this binary"))?;
+        Ok(Self {
+            model_name,
+            instance_name: instance_name.into(),
+            nodes,
+            branches,
+            temperature,
+            analysis_initial_step: false,
+            analysis_final_step: false,
+            static_stamp_cache: Arc::new(GeneratedStaticStampCache::default()),
+            kind,
+        })
+    }
+
+    /// Noise mechanisms this model declares, in evaluation order.
+    #[inline]
+    pub fn noise_descriptors(&self) -> &'static [GeneratedNoiseDescriptor] {
+        self.kind.noise_descriptors()
+    }
+
+    /// CSC locations this instance writes through, after [`Self::link_static_stamps`].
+    #[inline]
+    pub fn linked_slot_count(&self) -> usize {
+        self.static_stamp_cache.linked_slot_count()
+    }
+
     #[inline]
     pub fn is_converged(&self) -> bool {
         self.kind.limiter_converged()
@@ -962,6 +1011,36 @@ impl BuiltinVerilogAInstance {
             analysis,
             simparams,
             GeneratedEvaluationMode::default_for_analysis(analysis),
+        )
+    }
+
+    /// Stamp with Newton limiting disabled.
+    ///
+    /// A limited stamp is a function of both the bias and the previous iterate,
+    /// which is correct inside Newton and useless to anything that needs the
+    /// device's own constitutive relation: a numerical derivative of a limited
+    /// stamp differentiates the limiter. Callers that must observe the model
+    /// itself — the derivative oracle in
+    /// [`crate::device::veriloga_harness::golden`], small-signal probes — take
+    /// this entry point instead.
+    #[inline]
+    pub fn stamp_probe(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
+    ) -> Result<(), GeneratedEvaluationError> {
+        self.stamp_with_mode(
+            matrix,
+            rhs,
+            voltages,
+            num_nodes,
+            analysis,
+            simparams,
+            GeneratedEvaluationMode::StaticProbe,
         )
     }
 
