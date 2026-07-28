@@ -1126,27 +1126,15 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 4022),
     ("workbench/docks/inspector/design.rs", 3985),
     ("workbench/surfaces/project.rs", 3988),
-    ("workbench/feature_availability_data.rs", 3864),
-    ("workbench/lifecycle/project_lifecycle.rs", 3734),
+    ("workbench/feature_availability_data.rs", 3864),
     ("workbench/surfaces/model_correlation.rs", 3624),
-    ("workbench/state.rs", 3501),
-    ("schematic/view/interaction.rs", 3491),
+    ("workbench/state.rs", 3501),
     ("workbench/hardcopy_adapters/print.rs", 3348),
-    ("workbench/app/dialogs/hardcopy/render.rs", 3338),
-    ("state/schematic/state/editor_ops/array_ops.rs", 3320),
-    ("simulation/execution/snapshot.rs", 3068),
+    ("workbench/app/dialogs/hardcopy/render.rs", 3338),
     ("workbench/lifecycle/project_lifecycle/persistence.rs", 3002),
     ("workbench/feature_availability.rs", 2981),
     ("workbench/tools/project_launcher.rs", 2925),
-    ("workbench/docks/navigator.rs", 2875),
-    ("workbench/chrome/title_bar.rs", 2773),
-    ("state/project_sources.rs", 2701),
-    ("io/project_execution.rs", 2702),
-    ("simulation/controller/prepared_run.rs", 2679),
-    ("state/schematic/state/editor_ops/movement_ops.rs", 2629),
-    ("workbench/shortcuts/artifacts/merge.rs", 2597),
-    ("state/netlist_document/document.rs", 2579),
-    ("workbench/app/dialogs/hardcopy/publish.rs", 2558),
+    ("workbench/docks/navigator.rs", 2875),
     (
         "workbench/app/dialogs/preferences/shortcut_preferences.rs",
         2530,
