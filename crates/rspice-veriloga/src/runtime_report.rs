@@ -350,11 +350,6 @@ fn qualify_runtime_targets(
 
 fn rust_backend_name(backend: RustBackendSelection) -> &'static str {
     match backend {
-        RustBackendSelection::ScalarOptIr => "scalar OptIR backend",
-        RustBackendSelection::SparseLocalKernel => "sparse local kernel backend",
-        RustBackendSelection::StructuredKernel => "structured kernel backend",
-        RustBackendSelection::ScalarHybrid => "scalar hybrid backend",
-        RustBackendSelection::LegacyDevice => "legacy device backend",
         RustBackendSelection::CanonicalCfg => "canonical CFG backend",
     }
 }

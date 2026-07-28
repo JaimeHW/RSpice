@@ -3885,11 +3885,11 @@ fn reactive_div(left: &ExprValue, right: &ExprValue) -> Result<ReactiveValue, Ru
     }
 }
 
-fn is_ddt_name(name: &str) -> bool {
+pub(super) fn is_ddt_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("ddt")
 }
 
-fn is_idt_name(name: &str) -> bool {
+pub(super) fn is_idt_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("idt")
 }
 

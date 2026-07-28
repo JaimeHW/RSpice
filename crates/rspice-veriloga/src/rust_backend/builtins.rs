@@ -94,22 +94,12 @@ pub struct BuiltinBackendFallbackReason {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BuiltinBackendSelectionCounts {
-    pub scalar: usize,
-    pub sparse_local: usize,
-    pub structured: usize,
-    pub hybrid: usize,
-    pub legacy_device: usize,
     pub canonical: usize,
 }
 
 impl BuiltinBackendSelectionCounts {
     fn record(&mut self, selection: RustBackendSelection) {
         match selection {
-            RustBackendSelection::ScalarOptIr => self.scalar += 1,
-            RustBackendSelection::SparseLocalKernel => self.sparse_local += 1,
-            RustBackendSelection::StructuredKernel => self.structured += 1,
-            RustBackendSelection::ScalarHybrid => self.hybrid += 1,
-            RustBackendSelection::LegacyDevice => self.legacy_device += 1,
             RustBackendSelection::CanonicalCfg => self.canonical += 1,
         }
     }
@@ -151,8 +141,6 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
     let generator_digest = generator_digest(generator_root, false)?;
     let (devices, backend_counts, fallback_reasons, manifest_devices) =
         generate_devices_with_stack(model_root.to_path_buf(), None, progress, jobs)?;
-    reject_legacy_backend_selections(&backend_counts, &fallback_reasons)?;
-    reject_non_scalar_backend_selections_if_requested(&backend_counts, &fallback_reasons)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any discovered modules",
@@ -211,8 +199,6 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
         progress,
         jobs,
     )?;
-    reject_legacy_backend_selections(&backend_counts, &fallback_reasons)?;
-    reject_non_scalar_backend_selections_if_requested(&backend_counts, &fallback_reasons)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any modules matching filter '{filter}'",
@@ -455,32 +441,17 @@ const EMPTY_KERNEL_RUNTIME: &str = "\
 fn write_kernel_runtime(generated_root: &Path) -> BuiltinResult<()> {
     let mut generated_files = Vec::new();
     collect_tree_files(generated_root, &mut generated_files)?;
-    let mut generated_sources = Vec::new();
-    for path in generated_files {
-        if path.extension().and_then(|extension| extension.to_str()) != Some("rs")
-            || path.parent() == Some(generated_root)
-        {
-            continue;
-        }
-        generated_sources.push(fs::read_to_string(path)?);
-    }
     // Nothing left to support. The canonical emitter's devices carry their own
-    // helpers, so no generated source names this module at all, and the pruner
-    // that trims it method by method cannot express "all of it": it leaves the
-    // `Index`/`IndexMut` impls of a scratch matrix whose accessors it has just
-    // removed, which does not compile. An empty module is the honest answer,
-    // and it is what Phase 6 deletes outright.
-    let referenced = generated_sources
-        .iter()
-        .any(|source| source.contains("kernel_runtime"));
-    let runtime = if referenced {
-        super::device::render_runtime_support_module_for_generated_sources(
-            generated_sources.iter().map(String::as_str),
-        )
-    } else {
-        EMPTY_KERNEL_RUNTIME.to_string()
-    };
-    write_text_file_if_changed(generated_root.join("kernel_runtime.rs"), &runtime)?;
+    // helpers, so no generated source names this module at all — the condition
+    // that used to guard this was already false for every model in the corpus.
+    // Phase 6 deleted the renderer and its method-by-method pruner along with
+    // the tiers that needed them; the file is still written, empty, because
+    // `veriloga_generated/mod.rs` declares the module and the output stays
+    // byte-identical to what the guard was already producing.
+    write_text_file_if_changed(
+        generated_root.join("kernel_runtime.rs"),
+        EMPTY_KERNEL_RUNTIME,
+    )?;
     let support = generated_root.join("support.rs");
     if support.is_file() {
         fs::remove_file(support)?;
@@ -820,7 +791,7 @@ fn generated_workspace_resources(
         .into_iter()
         .chain(reactive_packed)
         .try_fold(0u128, |total, bytes| total.checked_add(bytes))
-        .and_then(|bytes| bytes.checked_mul(super::device::MAX_CACHED_SCRATCH_WORKSPACES as u128))
+        .and_then(|bytes| bytes.checked_mul(super::state_file::MAX_CACHED_SCRATCH_WORKSPACES as u128))
         .ok_or("generated packed workspace resource estimate overflowed u128")?;
     let stamp_state_payload = stamp_state_payload_bytes(ddt_state_count, idt_state_count);
     let stamp_state_heap_allocations = u64::from(stamp_state_payload != 0);
@@ -1242,120 +1213,6 @@ fn validate_requested_generator_jobs(requested: Option<usize>) -> BuiltinResult<
     Ok(())
 }
 
-fn reject_legacy_backend_selections(
-    counts: &BuiltinBackendSelectionCounts,
-    fallback_reasons: &[BuiltinBackendFallbackReason],
-) -> BuiltinResult<()> {
-    if counts.legacy_device == 0 {
-        return Ok(());
-    }
-
-    let mut details = fallback_reasons
-        .iter()
-        .filter(|reason| reason.backend == RustBackendSelection::LegacyDevice)
-        .map(|reason| {
-            format!(
-                "{} :: {} ({})",
-                reason.source.display(),
-                reason.module,
-                reason.reason
-            )
-        })
-        .collect::<Vec<_>>();
-    if details.is_empty() {
-        details.push(format!(
-            "{} generated module{} selected the legacy device backend",
-            counts.legacy_device,
-            if counts.legacy_device == 1 { "" } else { "s" }
-        ));
-    }
-
-    Err(format!(
-        "Verilog-A built-ins must use optimized Rust backends; legacy selections:\n{}",
-        details.join("\n")
-    )
-    .into())
-}
-
-fn reject_non_scalar_backend_selections_if_requested(
-    counts: &BuiltinBackendSelectionCounts,
-    fallback_reasons: &[BuiltinBackendFallbackReason],
-) -> BuiltinResult<()> {
-    if env::var_os(REQUIRE_SCALAR_BUILTINS_ENV).is_none() {
-        return Ok(());
-    }
-
-    reject_non_scalar_backend_selections(counts, fallback_reasons)
-}
-
-fn reject_non_scalar_backend_selections(
-    counts: &BuiltinBackendSelectionCounts,
-    fallback_reasons: &[BuiltinBackendFallbackReason],
-) -> BuiltinResult<()> {
-    if counts.sparse_local == 0 && counts.structured == 0 && counts.hybrid == 0 {
-        return Ok(());
-    }
-
-    let mut details = fallback_reasons
-        .iter()
-        .filter(|reason| {
-            matches!(
-                reason.backend,
-                RustBackendSelection::SparseLocalKernel
-                    | RustBackendSelection::StructuredKernel
-                    | RustBackendSelection::ScalarHybrid
-            )
-        })
-        .map(|reason| {
-            format!(
-                "{} :: {} ({})",
-                reason.source.display(),
-                reason.module,
-                reason.reason
-            )
-        })
-        .collect::<Vec<_>>();
-    if counts.sparse_local != 0
-        && !fallback_reasons
-            .iter()
-            .any(|reason| reason.backend == RustBackendSelection::SparseLocalKernel)
-    {
-        details.push(format!(
-            "{} generated module{} selected the sparse-local-kernel backend",
-            counts.sparse_local,
-            if counts.sparse_local == 1 { "" } else { "s" }
-        ));
-    }
-    if counts.structured != 0
-        && !fallback_reasons
-            .iter()
-            .any(|reason| reason.backend == RustBackendSelection::StructuredKernel)
-    {
-        details.push(format!(
-            "{} generated module{} selected the structured-kernel backend",
-            counts.structured,
-            if counts.structured == 1 { "" } else { "s" }
-        ));
-    }
-    if counts.hybrid != 0
-        && !fallback_reasons
-            .iter()
-            .any(|reason| reason.backend == RustBackendSelection::ScalarHybrid)
-    {
-        details.push(format!(
-            "{} generated module{} selected the scalar-hybrid backend",
-            counts.hybrid,
-            if counts.hybrid == 1 { "" } else { "s" }
-        ));
-    }
-
-    Err(format!(
-        "Verilog-A built-ins must use the direct scalar optimized Rust backend when {REQUIRE_SCALAR_BUILTINS_ENV}=1; non-scalar selections:\n{}",
-        details.join("\n")
-    )
-    .into())
-}
-
 #[derive(Debug)]
 struct GeneratedBuiltinModule {
     index: usize,
@@ -1541,7 +1398,7 @@ mod tests {
                 module_name: "fixture".to_string(),
                 public_model_name: "fixture".to_string(),
                 folder_name: "fixture__fixture__12345678".to_string(),
-                backend: RustBackendSelection::ScalarOptIr,
+                backend: RustBackendSelection::CanonicalCfg,
                 fallback_reason: None,
                 file_count: 1,
                 source_bytes: 3,
@@ -1572,65 +1429,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_generation_rejects_legacy_backend_selections() {
-        let counts = BuiltinBackendSelectionCounts {
-            scalar: 1,
-            sparse_local: 0,
-            structured: 0,
-            hybrid: 0,
-            legacy_device: 1,
-            canonical: 0,
-        };
-        let reasons = vec![BuiltinBackendFallbackReason {
-            source: PathBuf::from("cmc/model.va"),
-            module: "legacy_model".to_string(),
-            backend: RustBackendSelection::LegacyDevice,
-            reason: "scalar path: unsupported; hybrid scalar path: unsupported".to_string(),
-        }];
-
-        let error = reject_legacy_backend_selections(&counts, &reasons)
-            .expect_err("legacy built-in selections must fail generation");
-
-        let message = error.to_string();
-        assert!(
-            message.contains("must use optimized Rust backends"),
-            "{message}"
-        );
-        assert!(
-            message.contains("cmc/model.va :: legacy_model"),
-            "{message}"
-        );
-    }
-
-    #[test]
-    fn builtin_generation_can_reject_non_scalar_backend_selections() {
-        let counts = BuiltinBackendSelectionCounts {
-            scalar: 1,
-            sparse_local: 1,
-            structured: 1,
-            hybrid: 1,
-            legacy_device: 0,
-            canonical: 0,
-        };
-        let reasons = vec![BuiltinBackendFallbackReason {
-            source: PathBuf::from("cmc/hisim.va"),
-            module: "hisim".to_string(),
-            backend: RustBackendSelection::ScalarHybrid,
-            reason: "scalar path: source has 400000 emitted values over budget".to_string(),
-        }];
-
-        let error = reject_non_scalar_backend_selections(&counts, &reasons)
-            .expect_err("strict scalar built-in generation must reject non-scalar selections");
-
-        let message = error.to_string();
-        assert!(message.contains(REQUIRE_SCALAR_BUILTINS_ENV), "{message}");
-        assert!(message.contains("sparse-local-kernel backend"), "{message}");
-        assert!(message.contains("structured-kernel backend"), "{message}");
-        assert!(message.contains("cmc/hisim.va :: hisim"), "{message}");
-    }
-
-    #[test]
-    fn builtin_generation_writes_kernel_runtime_and_removes_legacy_support() {
+    fn builtin_generation_writes_an_empty_kernel_runtime_and_removes_legacy_support() {
         let root = std::env::temp_dir().join(format!(
             "rspice-veriloga-kernel-runtime-{}",
             std::process::id()
@@ -1640,62 +1439,25 @@ mod tests {
         fs::write(root.join("support.rs"), "legacy support").expect("write legacy support fixture");
         let device = root.join("fixture");
         fs::create_dir_all(&device).expect("create generated device fixture");
-        // The import line matters as much as the calls: a device that names no
-        // part of this module gets an empty one, so a fixture without it would
-        // be testing the wrong branch.
-        fs::write(
-            device.join("stamp.rs"),
-            "use crate::device::veriloga_generated::kernel_runtime::{Scratch};\n\
-             fn stamp(s: &mut Scratch) { s.store_scalar(0, 1.0); }",
-        )
-        .expect("write generated stamp fixture");
-        fs::write(
-            device.join("state.rs"),
-            "use crate::device::veriloga_generated::kernel_runtime::KernelScratch;\n\
-             fn allocate() { KernelScratch::new_box(); }",
-        )
-        .expect("write generated state fixture");
+        fs::write(device.join("stamp.rs"), "fn stamp() {}").expect("write stamp fixture");
+        fs::write(device.join("state.rs"), "fn allocate() {}").expect("write state fixture");
 
         write_kernel_runtime(&root).expect("write kernel runtime");
 
-        assert!(!root.join("support.rs").exists());
-        let runtime = fs::read_to_string(root.join("kernel_runtime.rs"))
-            .expect("read generated kernel runtime");
-        assert!(runtime.contains("pub(crate) struct Scratch<"), "{runtime}");
-        assert!(
-            runtime.contains("pub(crate) struct DerivativeMatrix<"),
-            "{runtime}"
-        );
-        assert!(
-            runtime.contains("pub(crate) dn: DerivativeMatrix<"),
-            "{runtime}"
-        );
-        assert!(runtime.contains("#[inline(never)]"), "{runtime}");
-        assert!(runtime.contains("pub(crate) fn new_box()"), "{runtime}");
-        assert!(runtime.contains("pub(crate) fn store_scalar("), "{runtime}");
-        assert!(
-            runtime.contains("pub(crate) fn clear_derivatives_if_dirty("),
-            "{runtime}"
-        );
-        assert!(
-            !runtime
-                .contains("pub(crate) fn store_div_scaled_product_sqrt_square_sum_denominator("),
-            "{runtime}"
-        );
-        reject_legacy_ad_runtime_files(&root).expect("validate generated kernel runtime");
-
-        // And the other branch, which is the one the shipped corpus takes: a
-        // device that names nothing here gets an empty module rather than a
-        // pruned skeleton. Pruning is per method, so it cannot express "all of
-        // it" — it removes the scratch matrix's accessors and leaves the
-        // `Index` impls that call them, which does not compile.
-        fs::write(device.join("stamp.rs"), "fn stamp() {}").expect("rewrite stamp fixture");
-        fs::write(device.join("state.rs"), "fn allocate() {}").expect("rewrite state fixture");
-        write_kernel_runtime(&root).expect("write kernel runtime");
+        // Two contracts, and the module is still written because
+        // `veriloga_generated/mod.rs` declares it.
+        assert!(!root.join("support.rs").exists(), "legacy support must go");
         let runtime = fs::read_to_string(root.join("kernel_runtime.rs"))
             .expect("read generated kernel runtime");
         assert!(!runtime.contains("struct Scratch<"), "{runtime}");
         assert!(!runtime.contains("fn "), "{runtime}");
+        reject_legacy_ad_runtime_files(&root).expect("validate generated kernel runtime");
+
+        // This used to assert the other branch too: a device *naming*
+        // `kernel_runtime` got a pruned scratch interpreter rendered into it.
+        // That branch was already dead for every model in the corpus, and Phase
+        // 6 deleted the renderer with the tiers that needed it, so there is one
+        // outcome now and no condition to test.
         fs::remove_dir_all(root).expect("remove generated root");
     }
 

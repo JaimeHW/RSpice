@@ -1199,3 +1199,42 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod liveness_tests {
+    use crate::canonical_ir::CanonicalIrArtifact;
+
+    fn artifact(source: &str) -> CanonicalIrArtifact {
+        crate::VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .expect("module must compile")
+    }
+
+    /// The liveness cache must not re-walk an expression it has already seen.
+    ///
+    /// This assertion lived in the scalar tier's ABI test, which Phase 6 deleted
+    /// along with the tier. It is about `noise.rs`, which the canonical emitter
+    /// still delegates to, and it cannot be an integration test because the
+    /// counter it reads is crate-private — so it moved here rather than being
+    /// dropped with the file it happened to be sitting in.
+    #[test]
+    fn cached_liveness_walks_each_expression_root_at_most_once() {
+        let artifact = artifact(
+            r#"
+module noisy(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real density = 2.0 from [0:inf);
+    analog begin
+        I(p, n) <+ white_noise(density, "flat");
+    end
+endmodule
+"#,
+        );
+
+        assert!(
+            super::noise_liveness_expression_walks(&artifact) <= artifact.hir.expressions.len(),
+            "cached liveness must walk each expression root at most once"
+        );
+    }
+}

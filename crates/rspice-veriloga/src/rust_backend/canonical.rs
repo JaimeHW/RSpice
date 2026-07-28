@@ -72,7 +72,7 @@ use super::emit::{EmitBindings, RUNTIME_PRELUDE, emit_body};
 use super::expr::parameter_field_names;
 use super::stamp_plan::{StampPlan, StampRow, split_row};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
-use super::{RustTranspileOptions, device};
+use super::{RustTranspileOptions, state_file};
 
 pub fn generate_device(
     artifact: &CanonicalIrArtifact,
@@ -88,7 +88,7 @@ pub fn generate_device(
     let parameter_fields = parameter_field_names(artifact);
 
     let stamp = plan.stamp_file(artifact, options)?;
-    let state = device::generate_state_file_with_extensions(
+    let state = state_file::generate_state_file_with_extensions(
         artifact,
         options,
         &parameter_fields,
@@ -101,7 +101,7 @@ pub fn generate_device(
     let files = vec![
         GeneratedRustFile {
             relative_path: "mod.rs".to_string(),
-            contents: device::generate_mod_file(),
+            contents: state_file::generate_mod_file(),
         },
         GeneratedRustFile {
             relative_path: "state.rs".to_string(),
@@ -197,7 +197,7 @@ struct ModelPlan {
     noise: Option<NoisePlan>,
     /// One history slot per `ddt` in the body, allocated from the CFG.
     ///
-    /// Not from `device::collect_ddt_slots`, and the reason is worth stating.
+    /// Not from `state_file::collect_ddt_slots`, and the reason is worth stating.
     /// That walks `mir.equations` and `hir.statements`; the CFG is lowered from
     /// `hir.body`, the structured region tree. The front end builds those from
     /// *separate copies* of the same expression tree — a two-terminal capacitor
@@ -1580,8 +1580,8 @@ impl ModelPlan {
         })
     }
 
-    fn state_extensions(&self) -> device::StateFileExtensions {
-        let mut extensions = device::StateFileExtensions::default();
+    fn state_extensions(&self) -> state_file::StateFileExtensions {
+        let mut extensions = state_file::StateFileExtensions::default();
         self.push_limit_state_fields(&mut extensions);
         if self.slots > 0 || self.reactive.width() > 0 {
             extensions.support_types.push_str(
@@ -1650,7 +1650,7 @@ impl ModelPlan {
     /// damped" — so the rollback and checkpoint wiring around it matches the
     /// tier being replaced field for field. Getting that wrong does not fail to
     /// compile; it converges early.
-    fn push_limit_state_fields(&self, extensions: &mut device::StateFileExtensions) {
+    fn push_limit_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
         let count = self.limit_slots.len();
         if count == 0 {
             return;
