@@ -7,33 +7,80 @@ ROOT = Path(__file__).resolve().parents[2]
 IDE_DIRS = [
     ROOT / "crates" / "rspice-ui" / "web",
 ]
-RUNNER = ROOT / "crates" / "rspice-ui" / "src" / "simulation" / "runner" / "mod.rs"
-WASM_WORKER = (
-    ROOT / "crates" / "rspice-ui" / "src" / "simulation" / "runner" / "wasm_worker.rs"
-)
-WORKER_CONTRACT = (
-    ROOT / "crates" / "rspice-ui" / "src" / "simulation" / "runner" / "worker_contract.rs"
-)
-MAIN = ROOT / "crates" / "rspice-ui" / "src" / "main.rs"
-APP = ROOT / "crates" / "rspice-ui" / "src" / "common" / "app" / "mod.rs"
-HARDCOPY_WORKER = (
-    ROOT
-    / "crates"
-    / "rspice-ui"
-    / "src"
-    / "common"
-    / "app"
-    / "app_hardcopy_dialog"
-    / "worker.rs"
-)
-BROWSER_ACCESSIBILITY = (
-    ROOT
-    / "crates"
-    / "rspice-ui"
-    / "src"
-    / "common"
-    / "browser_accessibility.rs"
-)
+UI_SRC = ROOT / "crates" / "rspice-ui" / "src"
+RUNNER = UI_SRC / "simulation" / "runner.rs"
+WASM_WORKER = UI_SRC / "simulation" / "runner" / "wasm_worker.rs"
+WORKER_CONTRACT = UI_SRC / "simulation" / "runner" / "worker_contract.rs"
+MAIN = UI_SRC / "main.rs"
+APP = UI_SRC / "workbench" / "app.rs"
+HARDCOPY_WORKER = UI_SRC / "workbench" / "app" / "dialogs" / "hardcopy" / "worker.rs"
+BROWSER_ACCESSIBILITY = UI_SRC / "workbench" / "browser" / "accessibility.rs"
+
+# These tests assert architectural properties that live in specific files, so
+# the paths above are part of the contract rather than an implementation
+# detail. When rspice-ui moves one, the failure should say so plainly instead
+# of surfacing as a FileNotFoundError traceback from whichever test read it
+# first.
+_SOURCES = {
+    "RUNNER": RUNNER,
+    "WASM_WORKER": WASM_WORKER,
+    "WORKER_CONTRACT": WORKER_CONTRACT,
+    "MAIN": MAIN,
+    "APP": APP,
+    "HARDCOPY_WORKER": HARDCOPY_WORKER,
+    "BROWSER_ACCESSIBILITY": BROWSER_ACCESSIBILITY,
+}
+
+
+def read_module(module_file: Path) -> str:
+    """Read a Rust module together with its submodules, as one unit.
+
+    `worker_contract` began as a single file and has since split into
+    `analysis`, `conversions`, and `transport`. The assertions below are about
+    what the contract provides, not about which file inside it happens to hold
+    a given symbol, so an internal reorganization must not break them.
+
+    Test modules are excluded on purpose: a symbol that appears only in a test
+    does not satisfy a claim that the contract provides it.
+    """
+    parts = [module_file.read_text(encoding="utf-8")]
+    submodules = module_file.with_suffix("")
+    if submodules.is_dir():
+        for child in sorted(submodules.rglob("*.rs")):
+            if child.stem == "tests" or child.stem.startswith("test_"):
+                continue
+            parts.append(child.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
+def setUpModule() -> None:
+    """Fail once, clearly, when a pinned source moves.
+
+    Deliberately an error rather than a skip: skipping would let CI stay green
+    while these checks quietly stopped running, which is the failure mode they
+    exist to prevent.
+    """
+    def describe(path: Path) -> str:
+        try:
+            return path.relative_to(ROOT).as_posix()
+        except ValueError:
+            # A path pointing outside the repo is itself the bug; say so
+            # rather than dying in the formatting of the error message.
+            return f"{path} (outside the repository)"
+
+    missing = [
+        f"  {name} -> {describe(path)}"
+        for name, path in _SOURCES.items()
+        if not path.is_file()
+    ]
+    if missing:
+        raise RuntimeError(
+            "rspice-ui sources these checks pin no longer exist:\n"
+            + "\n".join(missing)
+            + "\nThey were moved, not deleted, the last few times this fired. "
+            "Find their new homes and update the paths at the top of this file "
+            "— do not delete the assertions."
+        )
 
 
 class IdeWorkerRoutingTests(unittest.TestCase):
@@ -275,7 +322,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         )
 
     def test_worker_progress_messages_cross_to_ui_progress_state(self) -> None:
-        contract = WORKER_CONTRACT.read_text(encoding="utf-8")
+        contract = read_module(WORKER_CONTRACT)
         wasm_worker = WASM_WORKER.read_text(encoding="utf-8")
 
         self.assertIn("WorkerProgressSnapshot", contract)
