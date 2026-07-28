@@ -641,8 +641,16 @@ maturin develop --release --locked
 python -m pytest tests/ -v
 ```
 
-`cargo test -p rspice-python --lib` is not the recommended binding test: it
-does not replace importing the built extension from pytest.
+There are also Rust-side unit tests covering the interpreter-free logic
+(signal-spec parsing, the export formats, error mapping). A bare
+`cargo test -p rspice-python` runs nothing, because a cdylib cannot link into
+a test harness; they need the lib target named explicitly:
+
+```bash
+cargo test -p rspice-python --lib
+```
+
+That is a complement to the pytest suite, not a substitute for it.
 
 ## License
 

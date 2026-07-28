@@ -5,7 +5,7 @@
 
 use super::*;
 
-pub(super) fn describe_dc_sweep_spec(
+fn describe_dc_sweep_spec(
     source: &str,
     start: Value,
     stop: Value,
@@ -31,7 +31,7 @@ pub(super) fn describe_dc_sweep_spec(
     }
 }
 
-pub(super) fn describe_dc_analysis(
+fn describe_dc_analysis(
     source: &str,
     start: Value,
     stop: Value,

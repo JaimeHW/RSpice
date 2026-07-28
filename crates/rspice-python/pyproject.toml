@@ -33,7 +33,6 @@ dynamic = ["version"]
 
 [project.urls]
 Repository = "https://github.com/JaimeHW/RSpice"
-Changelog = "https://github.com/JaimeHW/RSpice/blob/main/crates/rspice-python/CHANGELOG.md"
 
 [tool.maturin]
 # Build the PyO3 extension with the abi3 wheel for broad version support.

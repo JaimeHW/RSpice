@@ -65,7 +65,7 @@ impl From<&rspice_core::netlist::UnresolvedOutputSymbol> for PyUnresolvedOutputS
 }
 
 #[derive(Default)]
-pub(super) struct ParseErrorAttributes {
+struct ParseErrorAttributes {
     kind: &'static str,
     category: Option<&'static str>,
     line: Option<usize>,
@@ -137,7 +137,7 @@ impl ParseErrorAttributes {
     }
 }
 
-pub(super) fn duplicate_subcircuit_binding_attributes(
+fn duplicate_subcircuit_binding_attributes(
     error: &rspice_core::netlist::DuplicateSubcircuitPortBindingError,
 ) -> ParseErrorAttributes {
     let mut attributes = ParseErrorAttributes::new("duplicate_subcircuit_port_binding");
@@ -159,7 +159,7 @@ pub(super) fn duplicate_subcircuit_binding_attributes(
     attributes
 }
 
-pub(super) fn global_subcircuit_binding_attributes(
+fn global_subcircuit_binding_attributes(
     error: &rspice_core::netlist::GlobalSubcircuitPortBindingError,
 ) -> ParseErrorAttributes {
     let mut attributes = ParseErrorAttributes::new("global_subcircuit_port_binding");
@@ -179,7 +179,7 @@ pub(super) fn global_subcircuit_binding_attributes(
     attributes
 }
 
-pub(super) fn undefined_mutual_inductor_reference_attributes(
+fn undefined_mutual_inductor_reference_attributes(
     error: &rspice_core::netlist::UndefinedMutualInductorReferenceError,
 ) -> ParseErrorAttributes {
     let mut attributes = ParseErrorAttributes::new("undefined_mutual_inductor_reference");
@@ -200,7 +200,7 @@ pub(super) fn undefined_mutual_inductor_reference_attributes(
     attributes
 }
 
-pub(super) fn output_symbol_validation_attributes(
+fn output_symbol_validation_attributes(
     error: &rspice_core::netlist::OutputSymbolValidationError,
 ) -> ParseErrorAttributes {
     let mut attributes = ParseErrorAttributes::new("undefined_output_symbols");
@@ -217,7 +217,7 @@ pub(super) fn output_symbol_validation_attributes(
     attributes
 }
 
-pub(super) fn startup_directive_kind_name(
+fn startup_directive_kind_name(
     kind: rspice_core::netlist::StartupDirectiveKind,
 ) -> &'static str {
     match kind {
@@ -226,7 +226,7 @@ pub(super) fn startup_directive_kind_name(
     }
 }
 
-pub(super) fn startup_directive_conflict_attributes(
+fn startup_directive_conflict_attributes(
     error: &rspice_core::netlist::StartupDirectiveConflictError,
 ) -> ParseErrorAttributes {
     let mut attributes = ParseErrorAttributes::new("conflicting_startup_directives");

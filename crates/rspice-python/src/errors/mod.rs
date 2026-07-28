@@ -124,7 +124,7 @@ create_exception!(
 /// already catch for that failure mode, so neither contract has to be
 /// traded away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HybridError {
+enum HybridError {
     /// Unknown node, branch, device, or vector name.
     Key,
     /// Out-of-range node, time, sweep, or frequency index.

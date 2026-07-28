@@ -61,7 +61,7 @@ impl PyElement {
 /// variant set is core's public device vocabulary and grows with every new
 /// device, and a mapping here would silently fall out of date or force this
 /// crate to be edited for every core addition.
-pub(super) fn element_kind_name(kind: &rspice_core::netlist::ElementKind) -> String {
+fn element_kind_name(kind: &rspice_core::netlist::ElementKind) -> String {
     let rendered = format!("{kind:?}");
     rendered
         .split(|character: char| !character.is_ascii_alphanumeric())

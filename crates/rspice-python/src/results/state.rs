@@ -146,7 +146,7 @@ pub(super) fn rebuild_hb_reactive(
     })
 }
 
-pub(super) fn hb_reactive_kind_from_label(label: &str) -> PyResult<HbReactiveKind> {
+fn hb_reactive_kind_from_label(label: &str) -> PyResult<HbReactiveKind> {
     match label {
         "capacitor" => Ok(HbReactiveKind::Capacitor),
         "inductor" => Ok(HbReactiveKind::Inductor),
