@@ -4573,6 +4573,7 @@ mod tests {
         lower_assignment_step, lower_static_condition_program, native_assignment_roots,
         validate_compiled_entry_shape,
     };
+    use crate::canonical_ir::hir::HirRegion;
     use crate::canonical_ir::{
         BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
         MirEquationKind, NodeId, OptModel,
@@ -4784,6 +4785,11 @@ endmodule
 
         artifact.hir.contributions[0].branch = "n,p".into();
         artifact.hir.contributions[0].declared_branch = None;
+        let HirRegion::Contribution(region) = &mut artifact.hir.body[0] else {
+            panic!("fixture root must remain a contribution");
+        };
+        region.branch = "n,p".into();
+        region.declared_branch = None;
         artifact.mir.equations[0].branch.label = "n,p".into();
         artifact.mir.equations[0].branch.declared_name = None;
         artifact.mir.equations[0].branch.pos_node = Some(NodeId::new(1));
@@ -4819,6 +4825,10 @@ endmodule
             .expect("compile canonical IR");
 
         artifact.hir.contributions[0].kind = HirContributionKind::Potential;
+        let HirRegion::Contribution(region) = &mut artifact.hir.body[0] else {
+            panic!("fixture root must remain a contribution");
+        };
+        region.kind = HirContributionKind::Potential;
         artifact.mir.equations[0].kind = MirEquationKind::Potential;
         let equation = artifact.mir.equations[0].clone();
         artifact.mir.branch_unknowns = vec![MirBranchUnknown {

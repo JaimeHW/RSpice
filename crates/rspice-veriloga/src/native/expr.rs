@@ -9000,7 +9000,9 @@ mod tests {
         NumberLit, PortDirection,
     };
     use crate::canonical_ir::{CanonicalMetadata, HirExprKind, HirModel, MirModel};
-    use crate::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
+    use crate::semantic::{
+        AnalyzedContribution, AnalyzedModule, AnalyzedPort, AnalyzedRegion, SymbolTable,
+    };
     use crate::source::Span;
     use crate::types::ValueType;
     use crate::{CompilerOptions, VerilogACompiler};
@@ -9108,6 +9110,15 @@ mod tests {
 
     fn analyzed_two_terminal_hir(module_name: &str, expression: Expression) -> HirModel {
         let span = Span::dummy();
+        let contribution = AnalyzedContribution {
+            branch: "p,n".into(),
+            declared_branch: None,
+            is_current: true,
+            indirect: false,
+            expression,
+            expr_type: ValueType::Real,
+            span,
+        };
         let analyzed = AnalyzedModule {
             name: module_name.into(),
             ports: vec![
@@ -9130,16 +9141,9 @@ mod tests {
             param_aliases: Vec::new(),
             variables: Vec::new(),
             branches: Vec::new(),
-            contributions: vec![AnalyzedContribution {
-                branch: "p,n".into(),
-                declared_branch: None,
-                is_current: true,
-                indirect: false,
-                expression,
-                expr_type: ValueType::Real,
-                span,
-            }],
+            contributions: vec![contribution.clone()],
             statements: Vec::new(),
+            body: vec![AnalyzedRegion::Contribution(contribution)],
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
             arrays: HashMap::new(),
@@ -10330,7 +10334,7 @@ endmodule
             &[NativeOp::LoadPriorCurrent(0), NativeOp::MulConst(2.0)]
         );
         assert_eq!(program.max_stack_depth(), 1);
-        assert_eq!(program.current_pair_dependencies(), &[]);
+        assert!(program.current_pair_dependencies().is_empty());
         assert_eq!(program.prior_current_dependencies(), &[0]);
     }
 
@@ -14312,7 +14316,7 @@ endmodule
 
         assert_eq!(lowered.ops(), &[NativeOp::LoadPriorCurrent(7)]);
         assert_eq!(lowered.max_stack_depth(), 1);
-        assert_eq!(lowered.current_pair_dependencies(), &[]);
+        assert!(lowered.current_pair_dependencies().is_empty());
         assert_eq!(lowered.prior_current_dependencies(), &[7]);
     }
 
