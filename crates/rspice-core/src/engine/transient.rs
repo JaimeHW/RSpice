@@ -1534,10 +1534,11 @@ impl Engine {
                 }
             };
         let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
-        let nonlinear_source_ramp_cap_enabled = Self::should_enable_nonlinear_source_ramp_cap(
-            &circuit,
-            requires_conservative_nonlinear_limiting,
-        );
+        let nonlinear_source_ramp_cap_enabled = self.config.spice_dialect != SpiceDialect::Xyce
+            && Self::should_enable_nonlinear_source_ramp_cap(
+                &circuit,
+                requires_conservative_nonlinear_limiting,
+            );
         let enforce_device_convergence = self.transient_enforce_device_convergence();
         // MutIndNonLin's hidden M/R equations are part of the physical DAE,
         // not an optional convergence hint.  A failed constitutive trial must
