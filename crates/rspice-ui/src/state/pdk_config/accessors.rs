@@ -1,3 +1,5 @@
+//! Reading and mutating PDK configuration fields.
+
 use std::collections::HashMap;
 
 use super::*;

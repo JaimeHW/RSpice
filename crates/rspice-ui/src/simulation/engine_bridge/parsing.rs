@@ -1,3 +1,5 @@
+//! Parsing a deck through the engine.
+
 use std::path::{Path, PathBuf};
 
 use rspice_core::abort_signal::AbortSignal;

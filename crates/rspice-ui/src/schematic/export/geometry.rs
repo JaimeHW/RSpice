@@ -1,3 +1,7 @@
+//! SVG path geometry.
+//!
+//! Emits the path and shape primitives the symbol writers below build on.
+
 use std::fmt::Write;
 
 use crate::state::{

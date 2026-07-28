@@ -1,3 +1,5 @@
+//! The analysis kinds, and their SPICE spellings.
+
 /// Analysis type identifier for viewer selection and result organization.
 ///
 /// Each analysis type maps to a specialized viewer:

@@ -1,3 +1,7 @@
+//! SVG export configuration.
+//!
+//! Colors, stroke widths, and page setup for schematic SVG output.
+
 use std::{error::Error, fmt};
 
 /// A validated sRGB color that can be serialized into an SVG attribute

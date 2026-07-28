@@ -1,3 +1,9 @@
+//! Drawing a resolved symbol.
+//!
+//! Paints a symbol document once its shapes, pins, and text have been
+//! resolved against the instance that uses it, to either the canvas or an
+//! SVG export. Both paths share this so a printed sheet matches the screen.
+
 use std::fmt::Write;
 
 use egui::{Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};

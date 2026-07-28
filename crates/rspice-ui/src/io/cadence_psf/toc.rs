@@ -1,3 +1,8 @@
+//! The PSF table of contents.
+//!
+//! Locates each section by kind and byte offset, which is what makes a
+//! large PSF file readable without scanning it front to back.
+
 use super::CadencePsfError;
 use super::binary_io::peek_u32;
 use std::collections::{HashMap, HashSet};

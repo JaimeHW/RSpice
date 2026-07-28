@@ -1,3 +1,5 @@
+//! SVG bodies for hierarchical blocks and ports.
+
 use std::fmt::Write;
 
 use crate::state::{ComponentType, PortDirection};

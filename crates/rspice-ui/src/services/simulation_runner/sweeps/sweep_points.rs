@@ -1,3 +1,8 @@
+//! Expanding a step declaration into values.
+//!
+//! Linear, decade, octave, and explicit list forms, with the error naming
+//! which part of the declaration could not be expanded.
+
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{AnalysisCommand, StepSweep};
 use rspice_core::{ResourceKind, ResourceLimits, Value};

@@ -1,3 +1,7 @@
+//! The canvas viewport.
+//!
+//! Pan offset, zoom factor, and the visible world rectangle they imply.
+
 use egui::{Pos2, Rect};
 
 use crate::state::Point;

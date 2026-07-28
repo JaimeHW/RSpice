@@ -1,3 +1,8 @@
+//! The parameter form a symbol exposes.
+//!
+//! Each field the instance dialog offers: its type, units, default, and
+//! whether the netlist requires it.
+
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

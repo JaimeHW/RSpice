@@ -1,3 +1,9 @@
+//! Building a model-bound symbol.
+//!
+//! Assembles a symbol definition from a model and a body, including the
+//! test-fixture contract that lets a definition be exercised without a
+//! project around it.
+
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

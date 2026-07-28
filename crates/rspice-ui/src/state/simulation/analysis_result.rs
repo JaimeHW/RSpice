@@ -1,3 +1,10 @@
+//! Analysis result provenance.
+//!
+//! Records where a result came from — which deck, which engine, which
+//! analysis — so a plot can always name its source. A result whose
+//! provenance does not match the current design is stale, not wrong, and the
+//! distinction is what lets the UI say so.
+
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::{BTreeMap, HashSet};

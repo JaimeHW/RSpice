@@ -1,3 +1,8 @@
+//! Model and subcircuit cards.
+//!
+//! Emits the model definitions the instance cards reference, and the
+//! subcircuit bodies for hierarchical blocks.
+
 use super::*;
 
 impl<'a> NetlistGenerator<'a> {

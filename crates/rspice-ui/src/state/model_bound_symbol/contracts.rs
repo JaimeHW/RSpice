@@ -1,3 +1,9 @@
+//! Symbol identity.
+//!
+//! What makes two symbol definitions the same definition. Identity is by
+//! declared name and parameter contract, not by drawing, so restyling a body
+//! does not orphan the instances that use it.
+
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

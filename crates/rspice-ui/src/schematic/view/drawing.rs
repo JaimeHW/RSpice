@@ -1,3 +1,8 @@
+//! Canvas painting.
+//!
+//! Draws the schematic itself: the grid, wires, junctions, labels, and
+//! placed instances, in the order that puts selection and highlight on top.
+
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::workbench::app_state::AppState;

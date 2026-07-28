@@ -1,3 +1,5 @@
+//! Symbol geometry types.
+
 /// A single path command for rendering symbol graphics.
 /// These are pre-parsed from SVG paths for efficient runtime rendering.
 #[derive(Debug, Clone, PartialEq)]

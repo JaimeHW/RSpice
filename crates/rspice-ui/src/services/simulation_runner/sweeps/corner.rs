@@ -1,3 +1,8 @@
+//! Corner analysis.
+//!
+//! Runs the design at each declared process/voltage/temperature corner and
+//! collects the results per corner.
+
 use super::super::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };

@@ -953,7 +953,7 @@ fn source_files_have_no_byte_order_mark() {
 /// Files with no `//!` module doc, frozen at the current count.
 ///
 /// Lower it as modules gain documentation. Never raise it.
-const MAX_UNDOCUMENTED_MODULES: usize = 275;
+const MAX_UNDOCUMENTED_MODULES: usize = 197;
 
 /// Every module that owns a directory explains itself, and the rest are a
 /// shrinking number.

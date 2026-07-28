@@ -1,3 +1,5 @@
+//! Primitive readers for the PSF binary encoding.
+
 use super::CadencePsfError;
 
 pub(super) fn skip_opaque_scalar(cursor: &mut &[u8]) -> Result<(), CadencePsfError> {

@@ -1,3 +1,9 @@
+//! Canvas scene assembly.
+//!
+//! Builds the frame's scene: what is visible in the viewport, what is
+//! selected or highlighted, and the labels that need to be drawn, so the
+//! painter walks a prepared list rather than the whole design.
+
 use egui::{Painter, Rect, Stroke};
 
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};

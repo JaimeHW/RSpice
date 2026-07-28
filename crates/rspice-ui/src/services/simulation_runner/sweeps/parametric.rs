@@ -1,3 +1,7 @@
+//! Parametric sweep.
+//!
+//! Sweeps one or more design parameters and returns a result set per point.
+
 use super::super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
 use super::execution::run_temperature_sweep;
 use super::mapping::{

@@ -1,3 +1,8 @@
+//! SPICE value and card formatting.
+//!
+//! Writes numbers in the engineering form a SPICE parser expects, and lays
+//! out cards with continuations where a line would otherwise be too long.
+
 use super::*;
 
 impl<'a> NetlistGenerator<'a> {

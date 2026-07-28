@@ -1,3 +1,9 @@
+//! Mapping sweep results back to their points.
+//!
+//! Each run returns results for one point; this labels them with the
+//! parameter values that produced them so a plot can be swept by parameter
+//! rather than by run index.
+
 use super::super::error::{ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::types::{CornerMetricLabel, CornerPoint, SweepPointResult};
 use rspice_core::Value;

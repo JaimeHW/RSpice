@@ -1,3 +1,8 @@
+//! The built-in symbol library.
+//!
+//! Resolves a component type to its symbol, loading the built-in SVG bodies
+//! on first use.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;

@@ -1,3 +1,8 @@
+//! Symbol shape primitives.
+//!
+//! The line, arc, polygon, and text primitives a symbol body is drawn from,
+//! and their transforms under rotation and mirroring.
+
 use egui::{Painter, Pos2, Stroke};
 
 use crate::state::Rotation;

@@ -1,3 +1,5 @@
+//! Symbol library errors.
+
 use crate::state::ComponentType;
 
 /// Errors that can occur during symbol loading or parsing

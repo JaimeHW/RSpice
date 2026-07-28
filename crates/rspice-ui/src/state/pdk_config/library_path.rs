@@ -1,3 +1,5 @@
+//! One entry in the library search path.
+
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

@@ -1,3 +1,9 @@
+//! Touch controls over the canvas.
+//!
+//! The on-canvas affordances a touch device needs and a mouse does not:
+//! pan/zoom handles and the tool switch, positioned so a thumb can reach
+//! them in landscape.
+
 use egui::{Align2, Color32, Context, FontId, Id, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;

@@ -1,3 +1,9 @@
+//! Expanding and executing a sweep.
+//!
+//! Turns a corner or parametric declaration into its concrete points and
+//! runs each, polling the abort signal between points so a long sweep stays
+//! cancellable.
+
 use super::super::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };

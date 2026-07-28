@@ -1,3 +1,9 @@
+//! Baking a symbol for drawing.
+//!
+//! Flattens a parsed symbol into the primitives the painter draws, with the
+//! instance transform already applied, so the canvas does not re-resolve
+//! geometry every frame.
+
 use egui::{Painter, Pos2, Shape, Stroke, Vec2};
 use std::f32::consts::PI;
 

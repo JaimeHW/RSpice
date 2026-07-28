@@ -1,3 +1,8 @@
+//! Importing a symbol definition.
+//!
+//! The formats a definition can arrive in, and the parse into the internal
+//! model.
+
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

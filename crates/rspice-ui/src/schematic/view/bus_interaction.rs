@@ -1,3 +1,9 @@
+//! Bus interaction on the canvas.
+//!
+//! Drawing a bus, and placing a tap on one. A tap is only offered where the
+//! pointer is actually on a bus and the ripped signal is in its range, so
+//! the candidate is validated before the affordance appears.
+
 use crate::workbench::app_state::AppState;
 use crate::state::{Bus, BusDeclaration, BusTapOrientation, BusTargetKind, Point, SchematicState};
 

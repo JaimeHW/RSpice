@@ -1,3 +1,5 @@
+//! Loading and saving PDK configuration.
+
 use std::path::{Path, PathBuf};
 
 use super::*;

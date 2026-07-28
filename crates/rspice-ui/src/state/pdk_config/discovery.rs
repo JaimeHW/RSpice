@@ -1,3 +1,8 @@
+//! Scanning library paths for model files.
+//!
+//! Walks the configured paths, records what was found, and indexes the
+//! result by extension so a lookup does not rescan the filesystem.
+
 use std::path::{Path, PathBuf};
 
 use super::*;

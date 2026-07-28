@@ -1,3 +1,9 @@
+//! A simulation run.
+//!
+//! Where a run executes, and the lifecycle it moves through from queued to
+//! finished. The lifecycle is explicit because a queued re-run, a cancelled
+//! run, and a failed run are all different things to the UI.
+
 use super::*;
 use crate::product::{AnalysisInstanceId, DatasetId, JobId, RunId};
 

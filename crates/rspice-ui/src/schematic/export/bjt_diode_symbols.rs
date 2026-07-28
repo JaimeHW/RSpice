@@ -1,3 +1,5 @@
+//! SVG bodies for diodes and bipolar transistors.
+
 use std::fmt::Write;
 
 use super::SvgExportConfig;

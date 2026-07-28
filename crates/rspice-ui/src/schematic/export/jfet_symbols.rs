@@ -1,3 +1,5 @@
+//! SVG bodies for JFETs and MESFETs.
+
 use std::fmt::Write;
 
 use super::SvgExportConfig;

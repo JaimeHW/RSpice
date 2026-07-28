@@ -1,3 +1,8 @@
+//! Net naming for the generated deck.
+//!
+//! Assigns a name to every net the schematic implies: the label a designer
+//! wrote where there is one, and a stable generated name where there is not.
+
 use super::*;
 
 impl<'a> NetlistGenerator<'a> {

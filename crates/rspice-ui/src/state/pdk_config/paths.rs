@@ -1,3 +1,8 @@
+//! Managing the library search path.
+//!
+//! Order matters: the first path holding a model wins, so adding, removing,
+//! and reordering entries changes which model a design resolves to.
+
 use std::path::PathBuf;
 
 use super::*;

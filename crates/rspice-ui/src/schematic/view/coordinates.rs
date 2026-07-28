@@ -1,3 +1,8 @@
+//! Screen/world coordinate conversion.
+//!
+//! Maps between egui screen points and schematic grid coordinates for the
+//! current pan and zoom, and snaps a world point to the grid.
+
 use egui::{Pos2, Rect};
 
 use crate::workbench::app_state::AppState;

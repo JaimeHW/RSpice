@@ -1,3 +1,8 @@
+//! Decoding individual PSF values.
+//!
+//! Turns a typed byte run into samples, resolving the type through the
+//! metadata cache rather than re-reading its declaration.
+
 #![allow(clippy::too_many_arguments)]
 
 use super::{

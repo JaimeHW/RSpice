@@ -1,3 +1,8 @@
+//! Waveform data.
+//!
+//! The sampled traces a run produces, their complex form for AC-domain
+//! results, and the display cache that keeps redraw off the raw arrays.
+
 use super::*;
 use std::sync::Arc;
 

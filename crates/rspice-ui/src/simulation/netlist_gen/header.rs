@@ -1,3 +1,9 @@
+//! The deck header.
+//!
+//! The title line and the analysis, option, and include directives that
+//! precede the instance cards. The first line of a SPICE deck is the title,
+//! never a comment, and this is where that is guaranteed.
+
 use super::*;
 
 impl<'a> NetlistGenerator<'a> {

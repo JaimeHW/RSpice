@@ -1,3 +1,8 @@
+//! Coupled inductor cards.
+//!
+//! Writes the mutual-inductance cards implied by coupling between placed
+//! inductors, which have no schematic instance of their own.
+
 use super::*;
 
 impl<'a> NetlistGenerator<'a> {

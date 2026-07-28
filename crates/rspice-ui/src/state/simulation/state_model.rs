@@ -1,3 +1,9 @@
+//! The simulation state model.
+//!
+//! Everything a session holds about simulation: the active run, its
+//! intent (generated schematic or manual deck), the results retained per
+//! dataset, and the run history.
+
 use super::*;
 use crate::product::DatasetId;
 

@@ -1,3 +1,9 @@
+//! Binding a symbol to a netlist device.
+//!
+//! Maps the symbol's pins onto the device's terminals in the order the
+//! netlist line requires. The order is explicit because a SPICE card is
+//! positional and a mismatched pin order is silently wrong.
+
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

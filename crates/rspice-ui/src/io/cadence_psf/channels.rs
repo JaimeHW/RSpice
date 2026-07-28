@@ -1,3 +1,9 @@
+//! Signal channels.
+//!
+//! Establishes the named signals a PSF trace section carries, including the
+//! qualified names that multi-component values (real/imaginary, per-port)
+//! expand into.
+
 use std::collections::HashMap;
 
 use super::types::{

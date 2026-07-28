@@ -1,3 +1,8 @@
+//! Default pin placement.
+//!
+//! The conventional terminal positions for each component type, used when a
+//! symbol body does not declare its own.
+
 use crate::state::ComponentType;
 
 use super::types::{PinDirection, Symbol, SymbolPin};

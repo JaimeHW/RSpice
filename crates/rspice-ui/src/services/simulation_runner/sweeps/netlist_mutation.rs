@@ -1,3 +1,9 @@
+//! Applying a sweep point to the deck.
+//!
+//! Rewrites the netlist for one corner: supply voltages, temperature, and
+//! model section selection. Supply inference is explicit rather than
+//! guessed from the largest source.
+
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{ElementKind, SourceSpec};

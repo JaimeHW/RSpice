@@ -1,3 +1,5 @@
+//! SVG bodies for passive devices.
+
 use std::fmt::Write;
 
 use super::SvgExportConfig;

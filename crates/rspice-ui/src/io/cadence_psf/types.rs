@@ -1,3 +1,5 @@
+//! The PSF value model.
+
 use std::collections::HashMap;
 use std::fmt;
 

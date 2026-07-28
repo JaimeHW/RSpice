@@ -1,3 +1,5 @@
+//! Recently used model files.
+
 use std::path::PathBuf;
 
 use super::*;

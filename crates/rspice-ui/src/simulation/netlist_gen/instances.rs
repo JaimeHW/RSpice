@@ -1,3 +1,8 @@
+//! Instance cards.
+//!
+//! Writes one card per placed component, with its terminals in the order
+//! its device type requires and its parameter overrides appended.
+
 use super::*;
 
 impl<'a> NetlistGenerator<'a> {

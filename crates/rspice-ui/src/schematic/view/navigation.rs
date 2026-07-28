@@ -1,3 +1,8 @@
+//! Pan and zoom.
+//!
+//! Viewport movement: wheel and pinch zoom about the pointer, drag panning,
+//! and the fit/zoom-to-selection commands.
+
 use egui::{Pos2, Rect, Response, Ui, Vec2};
 
 use crate::workbench::app_state::AppState;

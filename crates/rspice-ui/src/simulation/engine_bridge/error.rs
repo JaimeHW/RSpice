@@ -1,3 +1,8 @@
+//! Translating engine errors into user-facing ones.
+//!
+//! Engine diagnostics name internal nodes and matrix rows. This maps them
+//! back onto the design objects a user can act on.
+
 use super::EngineBridge;
 use crate::simulation::runner::SimulationError;
 

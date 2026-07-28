@@ -1,3 +1,5 @@
+//! Operations over [`SimulationState`].
+
 use super::*;
 use crate::product::{DatasetId, RunId};
 

@@ -1,3 +1,5 @@
+//! SVG bodies for the four controlled sources.
+
 use std::fmt::Write;
 
 use super::SvgExportConfig;

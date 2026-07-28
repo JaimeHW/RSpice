@@ -1,3 +1,8 @@
+//! Parsing a symbol from SVG.
+//!
+//! Reads the subset of SVG a symbol body uses — paths, lines, circles, and
+//! text — and rejects anything else rather than dropping it silently.
+
 use super::error::SymbolError;
 use super::types::{PathCommand, Symbol, SymbolPath};
 

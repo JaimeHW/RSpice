@@ -1,3 +1,8 @@
+//! Cross-probe mapping.
+//!
+//! Ties a waveform back to the schematic object that produced it, so
+//! selecting a trace highlights its net and probing a net finds its trace.
+
 use super::*;
 
 /// Bidirectional mapping between schematic grid points and SPICE net names.

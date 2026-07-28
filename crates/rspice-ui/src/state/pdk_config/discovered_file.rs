@@ -1,3 +1,8 @@
+//! A model file found under a configured library path.
+//!
+//! Keeps both the resolved path and the library entry it came from, so a
+//! duplicate model can name which library shadowed which.
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

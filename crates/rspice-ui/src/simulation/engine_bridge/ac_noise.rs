@@ -1,3 +1,5 @@
+//! AC and noise analysis over the engine bridge.
+
 use std::collections::HashMap;
 
 use rspice_core::abort_signal::AbortSignal;

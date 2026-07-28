@@ -1,3 +1,9 @@
+//! What a run was actually executed against.
+//!
+//! Identifies the exact model sources a run consumed, by digest rather than
+//! by path. Re-running a design whose libraries changed underneath is a
+//! different run, and the receipt is what makes that detectable.
+
 use std::collections::HashSet;
 
 use crate::product::{

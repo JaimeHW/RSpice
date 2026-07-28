@@ -1,3 +1,5 @@
+//! Transient analysis over the engine bridge.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 

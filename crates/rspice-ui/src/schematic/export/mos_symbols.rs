@@ -1,3 +1,5 @@
+//! SVG bodies for MOSFETs.
+
 use std::fmt::Write;
 
 use super::SvgExportConfig;

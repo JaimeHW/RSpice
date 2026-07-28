@@ -1,3 +1,5 @@
+//! SVG bodies for independent sources and ground.
+
 use std::fmt::Write;
 
 use super::SvgExportConfig;

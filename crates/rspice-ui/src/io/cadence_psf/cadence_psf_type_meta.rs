@@ -1,3 +1,8 @@
+//! Cached PSF type metadata.
+//!
+//! A PSF file declares its types once and refers to them by id thereafter,
+//! so the declarations are resolved into a cache the value readers index.
+
 use std::collections::{HashMap, HashSet};
 
 use super::{CadencePsfError, DataType, TypeDecl, TypeKind};

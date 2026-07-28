@@ -1,3 +1,5 @@
+//! Sensitivity analysis over the engine bridge.
+
 use std::collections::HashMap;
 
 use num_complex::Complex64;

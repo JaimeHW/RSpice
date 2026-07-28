@@ -1,3 +1,10 @@
+//! Canvas pointer and keyboard interaction.
+//!
+//! Resolves what is under the pointer, then dispatches to the operation the
+//! armed tool implies. Hit resolution is ordered — a terminal beats a wire
+//! vertex, which beats the wire body — so a click near a junction does what
+//! the designer meant.
+
 use egui::{Response, Ui};
 
 use crate::diagnostics::ConsoleMessage;

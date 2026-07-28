@@ -1,3 +1,5 @@
+//! Model-bound symbol tests.
+
 use super::*;
 
 fn definition(revision: u64) -> ModelBoundSymbolDefinition {

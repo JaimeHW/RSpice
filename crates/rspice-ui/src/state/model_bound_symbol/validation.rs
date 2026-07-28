@@ -1,3 +1,9 @@
+//! Symbol definition validation.
+//!
+//! Rejects a definition the netlist writer could not use — an unbound
+//! terminal, a duplicate pin, a parameter with no type — with the specific
+//! reason rather than a generic failure.
+
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

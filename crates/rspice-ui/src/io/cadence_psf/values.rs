@@ -1,3 +1,8 @@
+//! PSF value sections.
+//!
+//! Reads the sample data, handling both the windowed layout used for large
+//! transient sweeps and the plain non-windowed form.
+
 use std::collections::HashMap;
 
 use super::binary_io::{peek_u32, read_f64, read_u32};

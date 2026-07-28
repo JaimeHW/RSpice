@@ -1,3 +1,8 @@
+//! PSF file sections.
+//!
+//! Parses the header, type, sweep, trace, and value sections in the order
+//! the table of contents declares them.
+
 use std::collections::HashMap;
 
 use super::binary_io::{parse_string, peek_u32, read_f64, read_i32, read_u32};

@@ -1,3 +1,9 @@
+//! Saved outputs.
+//!
+//! The outputs a plan asked to keep, and whether each was actually
+//! materialized by the run. An output that was requested but not produced is
+//! reported rather than silently missing.
+
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId};
 use crate::state::{
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,

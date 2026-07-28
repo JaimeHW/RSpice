@@ -1,3 +1,8 @@
+//! Placement preview.
+//!
+//! Draws the ghost of an object being placed, following the cursor at the
+//! current grid snap and orientation, before the placement is committed.
+
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::workbench::app_state::AppState;

@@ -1,3 +1,5 @@
+//! Sweep result and configuration types.
+
 use rspice_core::Value;
 
 pub(crate) const REFERENCE_MODEL_BINDING_BEGIN: &str = "* RSPICE REFERENCE MODEL BINDING BEGIN";

@@ -1,3 +1,5 @@
+//! Pole-zero analysis over the engine bridge.
+
 use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
