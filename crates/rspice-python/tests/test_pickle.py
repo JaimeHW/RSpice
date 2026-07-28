@@ -8,6 +8,7 @@ have to survive a process boundary intact.
 import copy
 import pickle
 
+import numpy as np
 import pytest
 
 import rspice
@@ -151,3 +152,190 @@ class TestNetlist:
     def test_deepcopy(self):
         original = rspice.Netlist.parse(DECK)
         assert copy.deepcopy(original).element_names == original.element_names
+
+
+ANALYSIS_DECK = """* Every result kind from one deck
+.param rval=1k
+V1 in 0 AC 1 SIN(0 1 1k)
+R1 in out {rval}
+C1 out 0 1u
+.end
+"""
+
+
+@pytest.fixture(scope="module")
+def analysis_netlist():
+    return rspice.Netlist.parse(ANALYSIS_DECK)
+
+
+class TestResults:
+    """Every result a worker can return survives a process boundary."""
+
+    def test_simulation_result(self, engine, analysis_netlist):
+        original = engine.run_dc_op(analysis_netlist)
+        restored = round_trip(original)
+
+        assert restored.voltage("out") == original.voltage("out")
+        assert restored.node_names == original.node_names
+        assert restored.branch_names == original.branch_names
+        assert restored.branch_current("V1") == original.branch_current("V1")
+
+    def test_transient_result_including_derived_analyses(self, engine, analysis_netlist):
+        original = engine.run_tran(analysis_netlist, stop_time=2e-3, max_step=2e-5)
+        restored = round_trip(original)
+
+        assert restored.num_points == original.num_points
+        np.testing.assert_allclose(restored.time, original.time)
+        np.testing.assert_allclose(
+            restored.voltage_waveform("out"), original.voltage_waveform("out")
+        )
+        np.testing.assert_allclose(
+            restored.branch_current_waveform("V1"),
+            original.branch_current_waveform("V1"),
+        )
+        # Derived analyses must still work off the rebuilt result.
+        assert (
+            restored.fourier("out", 1e3).thd_percent
+            == original.fourier("out", 1e3).thd_percent
+        )
+        assert restored.to_csv() == original.to_csv()
+
+    def test_ac_result(self, engine, analysis_netlist):
+        original = engine.run_ac_sweep(analysis_netlist, "dec", 5, 10.0, 1e4)
+        restored = round_trip(original)
+
+        np.testing.assert_allclose(restored.frequencies, original.frequencies)
+        np.testing.assert_allclose(
+            restored.voltage_complex("out"), original.voltage_complex("out")
+        )
+        np.testing.assert_allclose(
+            restored.branch_current_complex("V1"),
+            original.branch_current_complex("V1"),
+        )
+        assert restored.to_csv() == original.to_csv()
+
+    def test_dc_sweep_result(self, engine, analysis_netlist):
+        original = engine.run_dc_sweep(analysis_netlist, "V1", 0, 5, 1)
+        restored = round_trip(original)
+
+        assert len(restored) == len(original)
+        np.testing.assert_allclose(restored.sweep_values, original.sweep_values)
+        np.testing.assert_allclose(
+            restored.voltage_array("out"), original.voltage_array("out")
+        )
+        assert restored.export_columns == original.export_columns
+
+    def test_noise_results_keep_their_contributors(self, engine, analysis_netlist):
+        original = engine.run_noise(analysis_netlist, "out", [1e3, 1e4])
+        restored = round_trip(original)
+
+        assert len(restored) == len(original)
+        for left, right in zip(restored, original):
+            assert left.frequency == right.frequency
+            assert left.output_noise_density == right.output_noise_density
+            assert [c.device_name for c in left.contributions] == [
+                c.device_name for c in right.contributions
+            ]
+
+    def test_transfer_function_result(self, engine, analysis_netlist):
+        original = engine.run_transfer_function(analysis_netlist, "out", "V1")
+        restored = round_trip(original)
+        assert restored.gain == original.gain
+        assert restored.input_impedance == original.input_impedance
+
+    def test_pole_zero_result(self, engine, analysis_netlist):
+        original = engine.run_pz(analysis_netlist, "in", "out")
+        restored = round_trip(original)
+
+        assert restored.num_poles == original.num_poles
+        assert restored.dc_gain == original.dc_gain
+        np.testing.assert_allclose(restored.poles_array, original.poles_array)
+
+    def test_fourier_result(self, engine, analysis_netlist):
+        tran = engine.run_tran(analysis_netlist, stop_time=2e-3, max_step=2e-5)
+        original = tran.fourier("out", 1e3)
+        restored = round_trip(original)
+
+        assert restored.thd_percent == original.thd_percent
+        assert restored.dc_component == original.dc_component
+        assert [h.magnitude for h in restored.harmonics] == [
+            h.magnitude for h in original.harmonics
+        ]
+
+    def test_monte_carlo_result(self, engine, analysis_netlist):
+        original = engine.run_monte_carlo(analysis_netlist, 24, seed=3)
+        restored = round_trip(original)
+
+        assert restored.variable_names == original.variable_names
+        assert restored.num_runs == original.num_runs
+        np.testing.assert_allclose(
+            restored["V(OUT)"].samples, original["V(OUT)"].samples
+        )
+        assert restored["V(OUT)"].histogram == original["V(OUT)"].histogram
+
+    def test_monte_carlo_payload_is_deterministic(self, engine, analysis_netlist):
+        original = engine.run_monte_carlo(analysis_netlist, 16, seed=5)
+        assert pickle.dumps(original) == pickle.dumps(original)
+
+    def test_dc_sensitivity_result(self, engine, analysis_netlist):
+        original = engine.run_sensitivity_dc_complete(analysis_netlist, "out")
+        restored = round_trip(original)
+
+        assert restored.vector_names == original.vector_names
+        assert restored.output_value == original.output_value
+
+    def test_ac_sensitivity_result(self, engine, analysis_netlist):
+        original = engine.run_sensitivity_ac_complete(analysis_netlist, "out", [1e3])
+        restored = round_trip(original)
+
+        assert restored.vector_names == original.vector_names
+        np.testing.assert_allclose(restored.output_complex, original.output_complex)
+        left = restored.get(restored.vector_names[0])
+        right = original.get(original.vector_names[0])
+        np.testing.assert_allclose(left.absolute, right.absolute)
+        np.testing.assert_allclose(left.db, right.db)
+
+    def test_measurements_and_records(self, engine):
+        deck = ANALYSIS_DECK.replace(
+            ".end", ".tran 2u 2m\n.meas tran vmax MAX V(out)\n.end"
+        )
+        report = engine.run(rspice.Netlist.parse(deck))
+
+        measurement = report.measurement("vmax")
+        restored = round_trip(measurement)
+        assert restored.value == measurement.value
+        assert restored.passed == measurement.passed
+        assert restored.analysis == measurement.analysis
+
+        record = round_trip(report.records[0])
+        assert record.kind == report.records[0].kind
+        assert record.skipped == report.records[0].skipped
+
+
+def _simulate_in_worker(payload):
+    """Run one operating point in a spawned process.
+
+    Defined at module scope because Windows spawns rather than forks, so the
+    worker has to be importable by name.
+    """
+    netlist, config = payload
+    return rspice.Engine(config).run_dc_op(netlist)
+
+
+class TestProcessPool:
+    """The reason pickling matters: parallelising across processes."""
+
+    def test_netlist_and_result_cross_a_process_boundary(self):
+        import multiprocessing
+
+        netlist = rspice.Netlist.parse(DECK)
+        config = rspice.SimulationConfig(tolerance=1e-10)
+
+        context = multiprocessing.get_context("spawn")
+        with context.Pool(1) as pool:
+            result = pool.apply_async(
+                _simulate_in_worker, ((netlist, config),)
+            ).get(timeout=300)
+
+        assert result.voltage("out") == pytest.approx(5.0)
+        assert result.node_names == rspice.Engine().run_dc_op(netlist).node_names

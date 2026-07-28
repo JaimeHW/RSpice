@@ -26,11 +26,106 @@ use rspice_core::analysis::{
     AcResult, AcSensitivityResult, DistortionAnalysisResult, DistortionProduct,
 };
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
+use rspice_core::Complex64;
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
 
 use crate::signal::SignalSpec;
 use std::path::PathBuf;
+
+/// Rebuild a core `SimulationResult` from its Python-visible state.
+///
+/// `SimulationResult::new` leaves its private observable index empty, and
+/// core's observable lookup falls back to a linear scan in exactly that
+/// case, so DC observables still resolve after a round-trip.
+fn rebuild_simulation_result(state: SimulationResultState) -> SimulationResult {
+    let (node_voltages, node_names, branch_currents, branch_names, dc_observables) = state;
+    let mut result =
+        SimulationResult::new(node_voltages.len().saturating_sub(1), branch_currents.len());
+    result.node_voltages = node_voltages;
+    result.node_names = node_names;
+    result.branch_currents = branch_currents;
+    result.branch_names = branch_names;
+    result.dc_observables = dc_observables;
+    result
+}
+
+/// Complete Python-visible state of a core `SimulationResult`.
+type SimulationResultState = (
+    Vec<f64>,
+    Vec<String>,
+    Vec<f64>,
+    Vec<String>,
+    Vec<(String, f64)>,
+);
+
+fn simulation_result_state(result: &SimulationResult) -> SimulationResultState {
+    (
+        result.node_voltages.clone(),
+        result.node_names.clone(),
+        result.branch_currents.clone(),
+        result.branch_names.clone(),
+        result.dc_observables.clone(),
+    )
+}
+
+/// Complex values in pickled state travel as `(real, imaginary)` pairs.
+///
+/// `num_complex::Complex64` has no PyO3 scalar conversion, and a pair is the
+/// lossless encoding NumPy-free consumers can read too.
+fn complex_state(values: &[Complex64]) -> Vec<(f64, f64)> {
+    values.iter().map(|value| (value.re, value.im)).collect()
+}
+
+fn complex_from_state(values: Vec<(f64, f64)>) -> Vec<Complex64> {
+    values
+        .into_iter()
+        .map(|(re, im)| Complex64::new(re, im))
+        .collect()
+}
+
+/// The `(absolute, normalized)` complex derivative pair of an AC sensitivity
+/// trace, in pickled `(real, imaginary)` form.
+type ComplexSeriesPair = (Vec<(f64, f64)>, Vec<(f64, f64)>);
+
+/// Complete Python-visible state of one core `AcResult` row.
+type AcRowState = (
+    f64,
+    Vec<String>,
+    Vec<String>,
+    Vec<(f64, f64)>,
+    Vec<(f64, f64)>,
+);
+
+fn ac_row_state(row: &AcResult) -> AcRowState {
+    (
+        row.frequency,
+        row.node_names.clone(),
+        row.branch_names.clone(),
+        complex_state(&row.voltages),
+        complex_state(&row.currents),
+    )
+}
+
+fn rebuild_ac_row(state: AcRowState) -> AcResult {
+    let (frequency, node_names, branch_names, voltages, currents) = state;
+    AcResult {
+        frequency,
+        node_names,
+        branch_names,
+        voltages: complex_from_state(voltages),
+        currents: complex_from_state(currents),
+    }
+}
+
+/// The `_unpickle` callable bound to a pyclass, referenced by `__reduce__`.
+///
+/// Pickling a bound staticmethod resolves by qualified name, which keeps each
+/// helper namespaced on its own class instead of adding private names to the
+/// module surface.
+fn unpickler<'py, T: pyo3::PyTypeInfo>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    py.get_type::<T>().getattr("_unpickle")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ResultAccessError {
@@ -312,6 +407,35 @@ impl PySimulationResult {
             self.inner.branch_currents.len()
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        state: SimulationResultState,
+        device_operating_points: Vec<PyDeviceOperatingPoint>,
+    ) -> Self {
+        Self::new_with_device_operating_points(
+            rebuild_simulation_result(state),
+            device_operating_points,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (SimulationResultState, Vec<PyDeviceOperatingPoint>),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                simulation_result_state(&self.inner),
+                self.device_operating_points.clone(),
+            ),
+        ))
+    }
 }
 
 /// Spectre-style operating-point information for one device instance.
@@ -385,6 +509,41 @@ impl PyDeviceOperatingPoint {
             self.region,
             self.params.len()
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        name: String,
+        device_kind: String,
+        region: Option<String>,
+        params: Vec<(String, f64)>,
+    ) -> Self {
+        Self {
+            name,
+            device_kind,
+            region,
+            params,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (String, String, Option<String>, Vec<(String, f64)>),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.name.clone(),
+                self.device_kind.clone(),
+                self.region.clone(),
+                self.params.clone(),
+            ),
+        ))
     }
 }
 
@@ -1241,6 +1400,100 @@ impl PyTransientResult {
             self.inner.num_points(),
             self.stop_time()
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// XSPICE digital and real event traces are not part of this type's
+    /// Python surface and are therefore not carried; every quantity a caller
+    /// can read back is.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(
+        time: Vec<f64>,
+        step_sizes: Vec<f64>,
+        voltages: Vec<Vec<f64>>,
+        branch_currents: Vec<Vec<f64>>,
+        num_nodes: usize,
+        names: (Vec<String>, Vec<String>),
+        device_op_traces: Vec<(String, String, Vec<f64>)>,
+        store_traces: Vec<(String, Vec<f64>)>,
+    ) -> Self {
+        let (node_names, branch_names) = names;
+        Self::new(TransientResult {
+            time,
+            step_sizes,
+            voltages,
+            branch_currents,
+            num_nodes,
+            node_names,
+            branch_names,
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: device_op_traces
+                .into_iter()
+                .map(|(device_name, parameter, values)| {
+                    rspice_core::engine::TransientDeviceOpTrace {
+                        device_name,
+                        parameter,
+                        values,
+                    }
+                })
+                .collect(),
+            store_traces: store_traces
+                .into_iter()
+                .map(|(name, values)| rspice_core::engine::TransientStoreTrace { name, values })
+                .collect(),
+        })
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            Vec<f64>,
+            Vec<f64>,
+            Vec<Vec<f64>>,
+            Vec<Vec<f64>>,
+            usize,
+            (Vec<String>, Vec<String>),
+            Vec<(String, String, Vec<f64>)>,
+            Vec<(String, Vec<f64>)>,
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.inner.time.clone(),
+                self.inner.step_sizes.clone(),
+                self.inner.voltages.clone(),
+                self.inner.branch_currents.clone(),
+                self.inner.num_nodes,
+                (
+                    self.inner.node_names.clone(),
+                    self.inner.branch_names.clone(),
+                ),
+                self.inner
+                    .device_op_traces
+                    .iter()
+                    .map(|trace| {
+                        (
+                            trace.device_name.clone(),
+                            trace.parameter.clone(),
+                            trace.values.clone(),
+                        )
+                    })
+                    .collect(),
+                self.inner
+                    .store_traces
+                    .iter()
+                    .map(|trace| (trace.name.clone(), trace.values.clone()))
+                    .collect(),
+            ),
+        ))
     }
 }
 
@@ -2173,6 +2426,26 @@ impl PyAcResult {
             self.node_count()
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(frequencies: Vec<f64>, rows: Vec<AcRowState>) -> Self {
+        Self::new(frequencies, rows.into_iter().map(rebuild_ac_row).collect())
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Vec<f64>, Vec<AcRowState>))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.frequencies.clone(),
+                self.results.iter().map(ac_row_state).collect(),
+            ),
+        ))
+    }
 }
 
 /// DC sweep analysis result
@@ -2566,6 +2839,61 @@ impl PyDcSweepResult {
             self.shape()
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(
+        points: Vec<(f64, SimulationResultState)>,
+        device_operating_points: Vec<Vec<PyDeviceOperatingPoint>>,
+        primary_source: Option<String>,
+        secondary_source: Option<String>,
+        secondary_sweep_values: Option<Vec<f64>>,
+        inner_points: usize,
+    ) -> Self {
+        Self {
+            results: points
+                .into_iter()
+                .map(|(value, state)| (value, rebuild_simulation_result(state)))
+                .collect(),
+            device_operating_points,
+            primary_source,
+            secondary_source,
+            secondary_sweep_values,
+            inner_points,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            Vec<(f64, SimulationResultState)>,
+            Vec<Vec<PyDeviceOperatingPoint>>,
+            Option<String>,
+            Option<String>,
+            Option<Vec<f64>>,
+            usize,
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.results
+                    .iter()
+                    .map(|(value, result)| (*value, simulation_result_state(result)))
+                    .collect(),
+                self.device_operating_points.clone(),
+                self.primary_source.clone(),
+                self.secondary_source.clone(),
+                self.secondary_sweep_values.clone(),
+                self.inner_points,
+            ),
+        ))
+    }
 }
 
 impl PyDcSweepResult {
@@ -2696,6 +3024,38 @@ impl PyNoiseContribution {
             self.device_name, self.percentage, self.noise_type
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        device_name: String,
+        noise_type: String,
+        output_contribution: f64,
+        percentage: f64,
+    ) -> Self {
+        Self {
+            device_name,
+            noise_type,
+            output_contribution,
+            percentage,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, String, f64, f64))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.device_name.clone(),
+                self.noise_type.clone(),
+                self.output_contribution,
+                self.percentage,
+            ),
+        ))
+    }
 }
 
 /// Noise analysis result at a single frequency
@@ -2795,6 +3155,38 @@ impl PyNoiseResult {
             self.output_noise_rms()
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        frequency: f64,
+        output_noise_density: f64,
+        input_referred_density: f64,
+        contributions: Vec<PyNoiseContribution>,
+    ) -> Self {
+        Self {
+            frequency,
+            output_noise_density,
+            input_referred_density,
+            contributions,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (f64, f64, f64, Vec<PyNoiseContribution>))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.frequency,
+                self.output_noise_density,
+                self.input_referred_density,
+                self.contributions.clone(),
+            ),
+        ))
+    }
 }
 
 //=============================================================================
@@ -2885,6 +3277,68 @@ impl PyAcSensitivity {
             self.parameter,
             self.absolute.len()
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        names: (String, String, String, String),
+        nominal_value: f64,
+        complex_series: ComplexSeriesPair,
+        real_series: (Vec<f64>, Vec<f64>, Vec<f64>),
+    ) -> Self {
+        let (vector_name, element, element_type, parameter) = names;
+        let (absolute, normalized) = complex_series;
+        let (absolute, normalized) = (
+            complex_from_state(absolute),
+            complex_from_state(normalized),
+        );
+        let (magnitude, phase, db) = real_series;
+        Self {
+            vector_name,
+            element,
+            element_type,
+            parameter,
+            nominal_value,
+            absolute,
+            normalized,
+            magnitude,
+            phase,
+            db,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            (String, String, String, String),
+            f64,
+            ComplexSeriesPair,
+            (Vec<f64>, Vec<f64>, Vec<f64>),
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                (
+                    self.vector_name.clone(),
+                    self.element.clone(),
+                    self.element_type.clone(),
+                    self.parameter.clone(),
+                ),
+                self.nominal_value,
+                (complex_state(&self.absolute), complex_state(&self.normalized)),
+                (
+                    self.magnitude.clone(),
+                    self.phase.clone(),
+                    self.db.clone(),
+                ),
+            ),
+        ))
     }
 }
 
@@ -3042,6 +3496,41 @@ impl PyAcSensitivityResult {
             self.sensitivities.len()
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        output: String,
+        frequencies: Vec<f64>,
+        output_values: Vec<(f64, f64)>,
+        sensitivities: Vec<PyAcSensitivity>,
+    ) -> Self {
+        Self {
+            output,
+            frequencies,
+            output_values: complex_from_state(output_values),
+            sensitivities,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (String, Vec<f64>, Vec<(f64, f64)>, Vec<PyAcSensitivity>),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.output.clone(),
+                self.frequencies.clone(),
+                complex_state(&self.output_values),
+                self.sensitivities.clone(),
+            ),
+        ))
+    }
 }
 
 /// Sensitivity of one output to one device/source parameter.
@@ -3090,6 +3579,50 @@ impl PyElementSensitivity {
             "ElementSensitivity(vector_name='{}', element='{}', parameter='{}', absolute={:.6e}, normalized={:.6e})",
             self.vector_name, self.element, self.parameter, self.absolute, self.normalized
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        names: (String, String, String, String),
+        nominal_value: f64,
+        absolute: f64,
+        normalized: f64,
+    ) -> Self {
+        let (vector_name, element, element_type, parameter) = names;
+        Self {
+            vector_name,
+            element,
+            element_type,
+            parameter,
+            nominal_value,
+            absolute,
+            normalized,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        ((String, String, String, String), f64, f64, f64),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                (
+                    self.vector_name.clone(),
+                    self.element.clone(),
+                    self.element_type.clone(),
+                    self.parameter.clone(),
+                ),
+                self.nominal_value,
+                self.absolute,
+                self.normalized,
+            ),
+        ))
     }
 }
 
@@ -3176,6 +3709,35 @@ impl PySensitivityResult {
             self.output_value,
             self.sensitivities.len()
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        output: String,
+        output_value: f64,
+        sensitivities: Vec<PyElementSensitivity>,
+    ) -> Self {
+        Self {
+            output,
+            output_value,
+            sensitivities,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, f64, Vec<PyElementSensitivity>))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.output.clone(),
+                self.output_value,
+                self.sensitivities.clone(),
+            ),
+        ))
     }
 }
 
@@ -3311,6 +3873,47 @@ impl PyVariableStatistics {
             self.name, self.mean, self.std_dev, self.min, self.max
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        name: String,
+        moments: [f64; 4],
+        samples: Vec<f64>,
+        histogram: Vec<usize>,
+        bin_edges: Vec<f64>,
+    ) -> Self {
+        Self {
+            name,
+            mean: moments[0],
+            std_dev: moments[1],
+            min: moments[2],
+            max: moments[3],
+            samples,
+            histogram,
+            bin_edges,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (String, [f64; 4], Vec<f64>, Vec<usize>, Vec<f64>),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.name.clone(),
+                [self.mean, self.std_dev, self.min, self.max],
+                self.samples.clone(),
+                self.histogram.clone(),
+                self.bin_edges.clone(),
+            ),
+        ))
+    }
 }
 
 /// Monte Carlo analysis results
@@ -3445,6 +4048,49 @@ impl PyMonteCarloResult {
             self.variables.len()
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        num_runs: usize,
+        all_converged: bool,
+        num_failures: usize,
+        variables: Vec<(String, PyVariableStatistics)>,
+    ) -> Self {
+        Self {
+            num_runs,
+            all_converged,
+            num_failures,
+            variables: variables.into_iter().collect(),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (usize, bool, usize, Vec<(String, PyVariableStatistics)>),
+    )> {
+        // Sorted so the payload is byte-stable between runs, which a HashMap
+        // iteration order would not be.
+        let mut variables: Vec<(String, PyVariableStatistics)> = self
+            .variables
+            .iter()
+            .map(|(name, stats)| (name.clone(), stats.clone()))
+            .collect();
+        variables.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.num_runs,
+                self.all_converged,
+                self.num_failures,
+                variables,
+            ),
+        ))
+    }
 }
 
 //=============================================================================
@@ -3542,6 +4188,17 @@ impl PyComplexValue {
         } else {
             format!("{:.6e}{:.6e}j", self.real, self.imag)
         }
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(real: f64, imag: f64) -> Self {
+        Self { real, imag }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (f64, f64))> {
+        Ok((unpickler::<Self>(py)?, (self.real, self.imag)))
     }
 }
 
@@ -3707,6 +4364,50 @@ impl PyPoleZeroResult {
             self.is_stable()
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        poles: Vec<PyComplexValue>,
+        zeros: Vec<PyComplexValue>,
+        gains: (f64, Option<f64>),
+        ports: (String, String),
+    ) -> Self {
+        let (dc_gain, hf_gain) = gains;
+        let (input, output) = ports;
+        Self {
+            poles,
+            zeros,
+            dc_gain,
+            hf_gain,
+            input,
+            output,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            Vec<PyComplexValue>,
+            Vec<PyComplexValue>,
+            (f64, Option<f64>),
+            (String, String),
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.poles.clone(),
+                self.zeros.clone(),
+                (self.dc_gain, self.hf_gain),
+                (self.input.clone(), self.output.clone()),
+            ),
+        ))
+    }
 }
 
 //=============================================================================
@@ -3747,6 +4448,28 @@ impl PyHarmonic {
             self.magnitude,
             self.phase.to_degrees()
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(n: usize, frequency: f64, magnitude: f64, phase: f64) -> Self {
+        Self {
+            n,
+            frequency,
+            magnitude,
+            phase,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (usize, f64, f64, f64))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (self.n, self.frequency, self.magnitude, self.phase),
+        ))
     }
 }
 
@@ -3829,6 +4552,27 @@ impl PyFourierResult {
             self.dc_component,
             self.thd * 100.0
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(dc_component: f64, thd: f64, harmonics: Vec<PyHarmonic>) -> Self {
+        Self {
+            dc_component,
+            thd,
+            harmonics,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (f64, f64, Vec<PyHarmonic>))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (self.dc_component, self.thd, self.harmonics.clone()),
+        ))
     }
 }
 
@@ -4746,6 +5490,23 @@ impl PyPeriodicNoiseContribution {
     fn power_spectral_density<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.values.to_pyarray(py)
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(name: String, values: Vec<f64>) -> Self {
+        Self { name, values }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, Vec<f64>))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (self.name.clone(), self.values.clone()),
+        ))
+    }
 }
 
 /// Periodic-noise result, in power spectral density units (V^2/Hz).
@@ -4812,6 +5573,41 @@ impl PyOscillatorNoiseResult {
             self.frequencies.len(),
             self.corner_frequency
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        frequencies: Vec<f64>,
+        phase_noise_dbc: Vec<f64>,
+        diffusion_constant: f64,
+        period: f64,
+        corner_frequency: f64,
+    ) -> Self {
+        Self {
+            frequencies,
+            phase_noise_dbc,
+            diffusion_constant,
+            period,
+            corner_frequency,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Vec<f64>, Vec<f64>, f64, f64, f64))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.frequencies.clone(),
+                self.phase_noise_dbc.clone(),
+                self.diffusion_constant,
+                self.period,
+                self.corner_frequency,
+            ),
+        ))
     }
 }
 
@@ -4884,6 +5680,55 @@ impl PyPeriodicNoiseResult {
             self.contributors.len(),
             self.converged
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(
+        frequencies: Vec<f64>,
+        output_noise: Vec<f64>,
+        input_noise: Option<Vec<f64>>,
+        contributors: Vec<PyPeriodicNoiseContribution>,
+        fundamental_frequency: f64,
+        converged: bool,
+    ) -> Self {
+        Self {
+            frequencies,
+            output_noise,
+            input_noise,
+            contributors,
+            fundamental_frequency,
+            converged,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            Vec<f64>,
+            Vec<f64>,
+            Option<Vec<f64>>,
+            Vec<PyPeriodicNoiseContribution>,
+            f64,
+            bool,
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.frequencies.clone(),
+                self.output_noise.clone(),
+                self.input_noise.clone(),
+                self.contributors.clone(),
+                self.fundamental_frequency,
+                self.converged,
+            ),
+        ))
     }
 }
 
@@ -5003,6 +5848,78 @@ impl PyStbResult {
             self.assessment
         )
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(
+        frequencies: Vec<f64>,
+        loop_gains: Vec<(f64, f64)>,
+        probe_name: String,
+        margins: [f64; 6],
+        flags: (bool, usize, bool),
+        warnings: Vec<String>,
+        assessment: String,
+    ) -> Self {
+        let (conditionally_stable, num_crossovers, success) = flags;
+        Self {
+            frequencies,
+            loop_gains: complex_from_state(loop_gains),
+            probe_name,
+            gain_margin_db: margins[0],
+            gain_margin_frequency: margins[1],
+            phase_margin_degrees: margins[2],
+            phase_margin_frequency: margins[3],
+            dc_gain_db: margins[4],
+            unity_gain_bandwidth: margins[5],
+            conditionally_stable,
+            num_crossovers,
+            success,
+            warnings,
+            assessment,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            Vec<f64>,
+            Vec<(f64, f64)>,
+            String,
+            [f64; 6],
+            (bool, usize, bool),
+            Vec<String>,
+            String,
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.frequencies.clone(),
+                complex_state(&self.loop_gains),
+                self.probe_name.clone(),
+                [
+                    self.gain_margin_db,
+                    self.gain_margin_frequency,
+                    self.phase_margin_degrees,
+                    self.phase_margin_frequency,
+                    self.dc_gain_db,
+                    self.unity_gain_bandwidth,
+                ],
+                (
+                    self.conditionally_stable,
+                    self.num_crossovers,
+                    self.success,
+                ),
+                self.warnings.clone(),
+                self.assessment.clone(),
+            ),
+        ))
+    }
 }
 
 //=============================================================================
@@ -5059,6 +5976,41 @@ impl PyTransferFunctionResult {
             "TransferFunctionResult({}/{}: gain={:.4e}, Zin={:.4e}, Zout={:.4e})",
             self.output, self.input, self.gain, self.input_impedance, self.output_impedance
         )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        output: String,
+        input: String,
+        gain: f64,
+        input_impedance: f64,
+        output_impedance: f64,
+    ) -> Self {
+        Self {
+            output,
+            input,
+            gain,
+            input_impedance,
+            output_impedance,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, String, f64, f64, f64))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.output.clone(),
+                self.input.clone(),
+                self.gain,
+                self.input_impedance,
+                self.output_impedance,
+            ),
+        ))
     }
 }
 
@@ -5181,6 +6133,57 @@ impl PyMeasurement {
             )
         }
     }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
+    fn _unpickle(
+        name: String,
+        analysis: String,
+        value: Option<f64>,
+        error: Option<String>,
+        goal: (Option<f64>, Option<f64>),
+        ok: bool,
+    ) -> Self {
+        let (expected, tolerance) = goal;
+        Self {
+            name,
+            analysis,
+            value,
+            error,
+            expected,
+            tolerance,
+            ok,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (
+            String,
+            String,
+            Option<f64>,
+            Option<String>,
+            (Option<f64>, Option<f64>),
+            bool,
+        ),
+    )> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.name.clone(),
+                self.analysis.clone(),
+                self.value,
+                self.error.clone(),
+                (self.expected, self.tolerance),
+                self.ok,
+            ),
+        ))
+    }
 }
 
 /// Record of one analysis directive handled by `Engine.run`
@@ -5233,6 +6236,33 @@ impl PyAnalysisRecord {
         } else {
             format!("AnalysisRecord({})", self.detail)
         }
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(kind: String, detail: String, skipped: bool, reason: Option<String>) -> Self {
+        Self {
+            kind,
+            detail,
+            skipped,
+            reason,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (String, String, bool, Option<String>))> {
+        Ok((
+            unpickler::<Self>(py)?,
+            (
+                self.kind.clone(),
+                self.detail.clone(),
+                self.skipped,
+                self.reason.clone(),
+            ),
+        ))
     }
 }
 

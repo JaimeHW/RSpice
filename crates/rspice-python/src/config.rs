@@ -213,6 +213,7 @@ impl PyDampingStrategy {
 
     /// Pickle as a reference to the class attribute, so an unpickled member
     /// is the same singleton the module exposes.
+    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str))> {
         enum_reduce(py, py.get_type::<Self>(), self.variant_name())
     }
@@ -230,6 +231,10 @@ impl PyDampingStrategy {
     }
 }
 
+/// A `__reduce__` payload for an enum member: the `getattr` builtin plus the
+/// class and member name it should look up.
+type EnumReduction<'py> = (Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str));
+
 /// Shared `__reduce__` body for the module's simple enums.
 ///
 /// `getattr(EnumClass, "MEMBER")` is picklable by reference and always
@@ -239,7 +244,7 @@ fn enum_reduce<'py>(
     py: Python<'py>,
     class: Bound<'py, pyo3::types::PyType>,
     member: &'static str,
-) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str))> {
+) -> PyResult<EnumReduction<'py>> {
     let getattr = py.import("builtins")?.getattr("getattr")?;
     Ok((getattr, (class.into_any(), member)))
 }
@@ -304,6 +309,7 @@ impl PyIntegrationMethod {
     }
 
     /// Pickle as a reference to the class attribute.
+    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyAny>, &'static str))> {
         enum_reduce(py, py.get_type::<Self>(), self.variant_name())
     }
@@ -417,6 +423,7 @@ impl PyBypassConfig {
         Self::new(Some(enabled), Some(reltol), Some(abstol))
     }
 
+    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
@@ -979,6 +986,7 @@ impl PyResourceLimits {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
