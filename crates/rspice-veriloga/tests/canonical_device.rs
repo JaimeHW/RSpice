@@ -34,8 +34,9 @@ fn a_generated_device_compiles_against_the_runtime_contract() {
             .collect();
         let state = find(&files, "state.rs", name);
         let stamp = find(&files, "stamp.rs", name);
+        let noise = find(&files, "noise.rs", name);
 
-        if let Err(report) = compile(name, state, stamp) {
+        if let Err(report) = compile(name, state, stamp, noise) {
             panic!("{name}: the generated device does not compile:\n{report}");
         }
     }
@@ -138,6 +139,9 @@ fn the_whole_corpus_reports_what_the_canonical_backend_carries() {
     let mut carried = 0usize;
     let mut refused = 0usize;
     let mut bytes = 0usize;
+    let mut stamp_bytes = 0usize;
+    let mut noise_bytes = 0usize;
+    let mut noise_fallbacks = 0usize;
 
     for candidate in &candidates {
         for module in &candidate.modules {
@@ -165,13 +169,34 @@ fn the_whole_corpus_reports_what_the_canonical_backend_carries() {
                         .iter()
                         .map(|file| file.contents.len())
                         .sum::<usize>();
-                    let stamp = device
+                    let sized = |name: &str| {
+                        device
+                            .files
+                            .iter()
+                            .find(|file| file.relative_path == name)
+                            .map_or(0, |file| file.contents.len())
+                    };
+                    let (stamp, noise) = (sized("stamp.rs"), sized("noise.rs"));
+                    // The replaced generator replays statements through a
+                    // workspace array; the canonical one emits a body. Which
+                    // wrote this file is the difference between a model whose
+                    // noise the CFG carries and one that fell back to keep its
+                    // device, and a byte count alone does not say which.
+                    let fell_back = device
                         .files
                         .iter()
-                        .find(|file| file.relative_path == "stamp.rs")
-                        .map_or(0, |file| file.contents.len());
+                        .find(|file| file.relative_path == "noise.rs")
+                        .is_some_and(|file| file.contents.contains("let mut w = [0.0;"));
+                    if fell_back {
+                        noise_fallbacks += 1;
+                    }
                     bytes += total;
-                    eprintln!("{module:>24}  {total:>10} bytes  ({stamp} of them stamp)");
+                    stamp_bytes += stamp;
+                    noise_bytes += noise;
+                    eprintln!(
+                        "{module:>24}  {total:>10} bytes  ({stamp} stamp, {noise} noise{})",
+                        if fell_back { ", fell back" } else { "" }
+                    );
                 }
                 Ok(Err(error)) => {
                     refused += 1;
@@ -184,7 +209,11 @@ fn the_whole_corpus_reports_what_the_canonical_backend_carries() {
             }
         }
     }
-    eprintln!("\n{carried} carried in {bytes} bytes, {refused} not");
+    eprintln!(
+        "\n{carried} carried in {bytes} bytes, {refused} not \
+         ({stamp_bytes} stamp, {noise_bytes} noise, \
+         {noise_fallbacks} of them from the replaced generator)"
+    );
 }
 
 fn panic_reason(payload: &Box<dyn std::any::Any + Send>) -> String {
@@ -234,15 +263,21 @@ fn find<'a>(files: &[(&'a str, &'a str)], name: &str, model: &str) -> &'a str {
         .unwrap_or_else(|| panic!("{model}: no {name} was generated"))
 }
 
-fn compile(name: &str, state: &str, stamp: &str) -> Result<(), String> {
+fn compile(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), String> {
     let root = scratch().join(name.replace(' ', "_"));
     std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     let lib = root.join("lib.rs");
     std::fs::write(
         &lib,
-        format!("{RUNTIME_STUB}\npub mod device {{\n{}\n{}\n}}\n",
-            indent(&state.replace("#![allow(", "#![cfg_attr(any(), allow(")),
-            indent(stamp)),
+        format!(
+            "{RUNTIME_STUB}\npub mod device {{\n\
+             pub mod state {{\n{}\n}}\n\
+             pub mod stamp {{\n{}\n}}\n\
+             pub mod noise {{\n{}\n}}\n}}\n",
+            indent(state),
+            indent(stamp),
+            indent(noise)
+        ),
     )
     .map_err(|error| error.to_string())?;
 
@@ -262,15 +297,20 @@ fn compile(name: &str, state: &str, stamp: &str) -> Result<(), String> {
     Err(String::from_utf8_lossy(&output.stderr).into_owned())
 }
 
-/// Inner attributes are only legal at the top of a file or module, and both
-/// generated files open with one. Rewriting them out is simpler than nesting
-/// them in their own files and keeps the whole device in one compilation unit,
-/// which is what makes `state.rs` and `stamp.rs` check against each other.
+/// One generated file, as a module beside its siblings.
+///
+/// The three become sibling modules of one crate rather than one flat module,
+/// which is the shape the real tree has: `stamp.rs` and `noise.rs` both reach
+/// `Instance` through `super::state`, and both import from the runtime under
+/// their own names. Flattening them makes those imports collide over nothing.
+///
+/// Only the inner attributes come out, because a `#![..]` is legal at the top of
+/// a module but not after the module's first item, and the generated file writes
+/// one that the surrounding stub already covers.
 fn indent(source: &str) -> String {
     source
         .lines()
         .filter(|line| !line.starts_with("#!["))
-        .map(|line| line.replace("use super::state::Instance;", ""))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -393,6 +433,48 @@ module vsrc(p, n);
     parameter real dc = 1.0;
     parameter real rs = 1.0e-3;
     analog V(p, n) <+ dc + rs * I(p, n);
+endmodule
+"#,
+        ),
+        // Noise, in the three shapes the descriptors distinguish. The table one
+        // is here because its operands are the only magnitudes that reach the
+        // visitor as a slice, and the guarded flicker because an inactive source
+        // still has to be visited with the index its descriptor sits at.
+        (
+            "noisy resistor",
+            r#"
+module noisy_resistor(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0;
+    analog begin
+        I(p, n) <+ V(p, n) / r;
+        I(p, n) <+ white_noise(4.0 * 1.380649e-23 * $temperature / r, "thermal");
+    end
+endmodule
+"#,
+        ),
+        (
+            "guarded flicker and table noise",
+            r#"
+module noisy_transistor(d, g, s);
+    inout d, g, s;
+    electrical d, g, s;
+    parameter real kf = 1.0e-25;
+    parameter real af = 1.2;
+    parameter real beta = 1.0e-3;
+    parameter real vth = 0.4;
+    real ids;
+    analog begin
+        ids = 0.0;
+        if (V(g, s) > vth) begin
+            ids = beta * (V(g, s) - vth) * (V(g, s) - vth);
+            I(d, s) <+ flicker_noise(kf * ids, af, "flicker");
+        end
+        I(d, s) <+ ids;
+        I(d, s) <+ white_noise(2.0 * 1.602176634e-19 * ids, "shot");
+        I(g, s) <+ noise_table({1.0, 1.0e-20, 1.0e6, 1.0e-22}, "gate");
+    end
 endmodule
 "#,
         ),
@@ -538,6 +620,62 @@ pub mod runtime {
             _branch_derivatives: &[Value],
         ) {
         }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum GeneratedNoiseKind {
+        White,
+        Flicker,
+        Table,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct GeneratedNoiseEndpoint {
+        pub local_node: Option<usize>,
+        pub name: &'static str,
+        pub is_internal: bool,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct GeneratedNoiseDescriptor {
+        pub mechanism: &'static str,
+        pub label: Option<&'static str>,
+        pub kind: GeneratedNoiseKind,
+        pub equation: usize,
+        pub is_current: bool,
+        pub branch_ordinal: Option<usize>,
+        pub pos: GeneratedNoiseEndpoint,
+        pub neg: GeneratedNoiseEndpoint,
+        pub table_len: usize,
+        pub table_log_interp: bool,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct GeneratedNoiseEvaluation {
+        pub active: bool,
+        pub psd: Value,
+        pub exponent: Option<Value>,
+        pub table_operands: Vec<Value>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct GeneratedNoiseEvaluationRef<'a> {
+        pub active: bool,
+        pub psd: Value,
+        pub exponent: Option<Value>,
+        pub table_operands: &'a [Value],
+    }
+
+    pub trait GeneratedNoiseVisitor {
+        fn visit(&mut self, index: usize, evaluation: GeneratedNoiseEvaluationRef<'_>) -> bool;
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum GeneratedNoiseEvaluationError {
+        SourceIndexOutOfRange { index: usize, count: usize },
+        NonFinite { index: usize, quantity: &'static str, value: Value },
+        NegativePower { index: usize, value: Value },
+        InvalidMultiplicity { value: Value },
     }
 }
 "#;

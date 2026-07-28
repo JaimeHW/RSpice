@@ -129,31 +129,8 @@ pub(super) fn generate_noise_file(
     out.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n");
     out.push_str("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;\n\n");
 
-    writeln!(
-        out,
-        "pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; {}] = [",
-        artifact.noise_sources.sources.len()
-    )
-    .expect("write noise descriptor header");
-    for source in &artifact.noise_sources.sources {
-        let table = source.table.as_ref();
-        writeln!(
-            out,
-            "    GeneratedNoiseDescriptor {{ mechanism: {:?}, label: {}, kind: GeneratedNoiseKind::{}, equation: {}, is_current: {}, branch_ordinal: {}, pos: {}, neg: {}, table_len: {}, table_log_interp: {} }},",
-            source.mechanism.as_str(),
-            option_str(source.label.as_deref()),
-            noise_kind(source.kind),
-            source.equation.index(),
-            source.is_current,
-            option_usize(source.branch_ordinal.map(|ordinal| ordinal.index())),
-            endpoint_literal(source.pos.node, &source.pos.name, source.pos.is_internal),
-            endpoint_literal(source.neg.node, &source.neg.name, source.neg.is_internal),
-            table.map_or(0, |table| table.operands.len()),
-            table.is_some_and(|table| table.log_interp),
-        )
-        .expect("write noise descriptor");
-    }
-    out.push_str("];\n\nimpl Instance {\n");
+    out.push_str(&descriptor_table(artifact));
+    out.push_str("\nimpl Instance {\n");
     if artifact.noise_sources.sources.is_empty() {
         out.push_str(
             "    pub fn evaluate_noise_sources(&self, _ctx: &GeneratedEvalContext<'_>, _visitor: &mut dyn GeneratedNoiseVisitor) -> Result<(), GeneratedNoiseEvaluationError> {\n\
@@ -372,6 +349,42 @@ pub(super) fn generate_noise_file(
         relative_path: "noise.rs".to_string(),
         contents: out,
     })
+}
+
+/// The static descriptor per noise source: where it injects, and how the
+/// analysis is to read the magnitudes that come back with it.
+///
+/// Metadata only — nothing here is evaluated — which is why it is shared with
+/// the canonical emitter rather than written twice. Where the magnitudes come
+/// from is exactly what the two disagree about.
+pub(super) fn descriptor_table(artifact: &CanonicalIrArtifact) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; {}] = [",
+        artifact.noise_sources.sources.len()
+    )
+    .expect("write noise descriptor header");
+    for source in &artifact.noise_sources.sources {
+        let table = source.table.as_ref();
+        writeln!(
+            out,
+            "    GeneratedNoiseDescriptor {{ mechanism: {:?}, label: {}, kind: GeneratedNoiseKind::{}, equation: {}, is_current: {}, branch_ordinal: {}, pos: {}, neg: {}, table_len: {}, table_log_interp: {} }},",
+            source.mechanism.as_str(),
+            option_str(source.label.as_deref()),
+            noise_kind(source.kind),
+            source.equation.index(),
+            source.is_current,
+            option_usize(source.branch_ordinal.map(|ordinal| ordinal.index())),
+            endpoint_literal(source.pos.node, &source.pos.name, source.pos.is_internal),
+            endpoint_literal(source.neg.node, &source.neg.name, source.neg.is_internal),
+            table.map_or(0, |table| table.operands.len()),
+            table.is_some_and(|table| table.log_interp),
+        )
+        .expect("write noise descriptor");
+    }
+    out.push_str("];\n");
+    out
 }
 
 #[allow(clippy::too_many_arguments)]

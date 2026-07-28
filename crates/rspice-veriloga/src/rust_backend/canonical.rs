@@ -3,8 +3,11 @@
 //! This is the emitter the rebuild exists to produce, wired to the device
 //! contract the tiers already satisfy: `state.rs` holds the parameters and the
 //! per-instance state, `stamp.rs` evaluates the body and writes the matrix, and
-//! `noise.rs` is unchanged. Only the middle file changes, and it is now the
-//! output of [`super::emit`] over a differentiated, simplified, scheduled CFG.
+//! `noise.rs` evaluates the small-signal powers. The last two are both the
+//! output of [`super::emit`] over a simplified CFG — `stamp.rs` over a
+//! differentiated and scheduled one, `noise.rs` over the primal body with no
+//! derivative lanes at all, because a noise power is a magnitude and nothing
+//! asks for its slope.
 //!
 //! ## What the tiers did that this does not
 //!
@@ -54,7 +57,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use crate::canonical_ir::cfg::{CfgBinaryOp, CfgFunction, CfgValueKind};
+use crate::canonical_ir::cfg::{CfgBinaryOp, CfgFunction, CfgTerminator, CfgValueKind};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::schedule::{InvalidationClass, Stage, schedule, split, worth_splitting};
 use crate::canonical_ir::{
@@ -104,7 +107,7 @@ pub fn generate_device(
             relative_path: "stamp.rs".to_string(),
             contents: stamp,
         },
-        super::noise::generate_noise_file(artifact, options)?,
+        plan.noise_file(artifact, options)?,
     ];
 
     Ok(GeneratedRustDevice {
@@ -114,6 +117,37 @@ pub fn generate_device(
         source_digest: artifact.metadata.source_digest.to_string(),
         files,
     })
+}
+
+/// Every noise magnitude the model declares, as one body.
+///
+/// Emitted from the *primal* CFG rather than the differentiated one: a noise
+/// power is a magnitude, and nothing asks for its derivative. That is the whole
+/// saving. The generator this replaces re-derived each magnitude from HIR
+/// through a hand-written liveness index and emitted a schedule per source,
+/// which is why `r3_cmc` — a resistor — carries 3,722 lines of it for six
+/// magnitudes, and why `noise.rs` was 50.8% of the whole generated tree.
+///
+/// Not folded into the stamp's body and cached, the way the reactive matrix is.
+/// `evaluate_noise_sources` is handed the DC solution as an argument and builds
+/// its own context from it, so it does not run after a `stamp` at that solution
+/// and has no cache to read. Reading one anyway would make the answer depend on
+/// a call order the device contract does not promise.
+struct NoisePlan {
+    function: CfgFunction,
+    outputs: Vec<ValueId>,
+    sources: Vec<NoiseSourceValues>,
+}
+
+/// Where one source's magnitudes sit in [`NoisePlan::outputs`].
+struct NoiseSourceValues {
+    active: usize,
+    psd: usize,
+    exponent: Option<usize>,
+    table: Vec<usize>,
+    /// Multiplicity multiplies a current source's power and divides a
+    /// potential source's, matching the contribution it was lifted from.
+    is_current: bool,
 }
 
 /// One matrix's worth of stamps: the rows to write, and where each row's values
@@ -147,6 +181,13 @@ struct ModelPlan {
     node_count: usize,
     /// Branch-unknown ordinal per equation, for the potential stamps.
     branch_of_equation: Vec<Option<usize>>,
+    /// The noise magnitudes, as their own body.
+    ///
+    /// `None` where the canonical level cannot express them and the generator
+    /// being replaced can — which today is exactly a magnitude that reads `ddx`.
+    /// Refusing the whole device over it would trade a working noise file for no
+    /// device at all, so this one file falls back and the rest does not.
+    noise: Option<NoisePlan>,
     /// One history slot per `ddt` in the body, allocated from the CFG.
     ///
     /// Not from `device::collect_ddt_slots`, and the reason is worth stating.
@@ -176,6 +217,13 @@ impl ModelPlan {
             )
         })?;
         reject_unsupported_kinds(artifact, &cfg.function)?;
+
+        // From the primal body, before a single derivative exists. Cutting the
+        // noise slice out of the differentiated function instead would work and
+        // would be wrong: the AD pass leaves a packed lane at every merge, the
+        // optimizer's dead-code pass keeps every block parameter, and the
+        // magnitudes would arrive carrying rows nothing asked for.
+        let noise = plan_noise(artifact, &cfg);
 
         // In value order, which is the lowering's order, so the numbering is a
         // property of the model rather than of a hash map's iteration.
@@ -296,9 +344,158 @@ impl ModelPlan {
             slots,
             node_count: artifact.mir.nodes.len(),
             branch_of_equation,
+            noise,
             ddt_slots,
         })
     }
+}
+
+/// Match the lowered noise sources to the plan the descriptors come from, and
+/// reduce the body to just the magnitudes.
+///
+/// The correspondence is checked rather than assumed. A source is named by the
+/// contribution it was written in and its position among that contribution's
+/// sources, because the plan is extracted from a second lowering of the same
+/// expressions and shares no expression ids with the body. Where the two
+/// disagree this returns `None` rather than guessing: a noise source silently
+/// given another source's power would be reported under the wrong mechanism at
+/// the wrong branch, which reads as a physics result rather than as a compiler
+/// fault. `None` costs the model nothing but the smaller file.
+fn plan_noise(artifact: &CanonicalIrArtifact, cfg: &CfgModel) -> Option<NoisePlan> {
+    let planned = &artifact.noise_sources.sources;
+    // A silent model falls back too: the generator being replaced already emits
+    // the empty evaluator for one, and this emitter has no reason to.
+    if planned.is_empty() || cfg.noise.len() != planned.len() {
+        return None;
+    }
+
+    let mut wanted = Vec::new();
+    let mut sources = Vec::with_capacity(planned.len());
+    for (index, source) in planned.iter().enumerate() {
+        let contribution = artifact
+            .mir
+            .equations
+            .get(usize::from(source.equation))
+            .map(|equation| equation.contribution)?;
+        let ordinal = planned[..index]
+            .iter()
+            .filter(|earlier| earlier.equation == source.equation)
+            .count();
+        let lowered = cfg
+            .noise
+            .iter()
+            .find(|lowered| lowered.contribution == contribution && lowered.ordinal == ordinal)?;
+
+        let table_width = source.table.as_ref().map_or(0, |table| table.operands.len());
+        if lowered.kind != source.kind
+            || lowered.exponent.is_some() != source.exponent.is_some()
+            || lowered.table.len() != table_width
+        {
+            return None;
+        }
+
+        let mut place = |value: ValueId| {
+            wanted.push(value);
+            wanted.len() - 1
+        };
+        sources.push(NoiseSourceValues {
+            active: place(lowered.active),
+            psd: place(lowered.psd),
+            exponent: lowered.exponent.map(&mut place),
+            table: lowered.table.iter().copied().map(place).collect(),
+            is_current: source.is_current,
+        });
+    }
+
+    let (mut function, outputs) = optimize_cfg(&cfg.function, &wanted);
+
+    // Two kinds cannot appear in this body. `ddt` reads and writes per-instance
+    // history, and `evaluate_noise_sources` takes `&self` — a magnitude that
+    // depended on one would advance the transient state while the noise
+    // analysis merely read it. `ddx` is a symbolic derivative that only the AD
+    // pass resolves, and this slice is deliberately cut before any of that runs.
+    //
+    // *Which* such values are left is not the question. A charge storing `ddt`
+    // is the residual of its own contribution, and the optimizer's dead-code
+    // pass marks every block parameter live, so a guarded contribution carries
+    // its `ddt` into every slice cut from the function whether or not a
+    // magnitude mentions it. The question is whether a magnitude *reads* one,
+    // and only reachability answers it.
+    let live = reachable(&function, &outputs);
+    for (index, value) in function.values.iter_mut().enumerate() {
+        if !matches!(
+            value.kind,
+            CfgValueKind::Ddt { .. } | CfgValueKind::Ddx { .. }
+        ) {
+            continue;
+        }
+        if live[index] {
+            return None;
+        }
+        // Nothing the magnitudes read can observe this, by the walk just done,
+        // so it becomes a constant rather than a call: left as it was, the body
+        // would still advance the history of a charge no noise source mentions.
+        value.kind = CfgValueKind::RealConstant(0.0);
+    }
+    Some(NoisePlan {
+        function,
+        outputs,
+        sources,
+    })
+}
+
+/// Every value `roots` can read, following a block parameter back through the
+/// terminators that supply it.
+fn reachable(function: &CfgFunction, roots: &[ValueId]) -> Vec<bool> {
+    let mut declared: HashMap<ValueId, (usize, usize)> = HashMap::new();
+    for (block, data) in function.blocks.iter().enumerate() {
+        for (index, parameter) in data.params.iter().enumerate() {
+            declared.insert(*parameter, (block, index));
+        }
+    }
+
+    let mut live = vec![false; function.values.len()];
+    let mut work: Vec<ValueId> = roots.to_vec();
+    while let Some(value) = work.pop() {
+        if std::mem::replace(&mut live[usize::from(value)], true) {
+            continue;
+        }
+        work.extend(function.value(value).kind.operands());
+        let Some((block, index)) = declared.get(&value).copied() else {
+            continue;
+        };
+        // A merge reads whatever each edge into it carries, and — because which
+        // edge was taken decides the answer — the condition that chose.
+        for source in &function.blocks {
+            match &source.terminator {
+                CfgTerminator::Jump { target, args } if usize::from(*target) == block => {
+                    work.extend(args.get(index).copied());
+                }
+                CfgTerminator::Branch {
+                    condition,
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                } => {
+                    let mut taken = false;
+                    if usize::from(*then_target) == block {
+                        work.extend(then_args.get(index).copied());
+                        taken = true;
+                    }
+                    if usize::from(*else_target) == block {
+                        work.extend(else_args.get(index).copied());
+                        taken = true;
+                    }
+                    if taken {
+                        work.push(*condition);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    live
 }
 
 /// The rows one matrix writes, before simplification has run.
@@ -576,6 +773,198 @@ impl ModelPlan {
         }
         out.push_str("    }\n\n");
         Ok(())
+    }
+
+    /// `noise.rs`: the descriptor table, then one body for every magnitude.
+    fn noise_file(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        options: &RustTranspileOptions,
+    ) -> Result<GeneratedRustFile, RustBackendError> {
+        let Some(noise) = &self.noise else {
+            return super::noise::generate_noise_file(artifact, options);
+        };
+        let function = &noise.function;
+        let mut out = String::new();
+        out.push_str(
+            "#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n\
+             use super::state::Instance;\n",
+        );
+        let _ = writeln!(
+            out,
+            "use {}::GeneratedEvalContext;\npub use {}::{{GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseKind, GeneratedNoiseVisitor}};\n",
+            options.runtime_path, options.runtime_path
+        );
+        out.push_str(&super::noise::descriptor_table(artifact));
+        out.push_str("\nimpl Instance {\n");
+        out.push_str(
+            "    pub fn evaluate_noise_sources(&self, ctx: &GeneratedEvalContext<'_>, visitor: &mut dyn GeneratedNoiseVisitor) -> Result<(), GeneratedNoiseEvaluationError> {\n\
+             \x20       if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {\n\
+             \x20           return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });\n\
+             \x20       }\n",
+        );
+        let (body, values) = emit_body(function, &noise.outputs, &bindings())
+            .map_err(|error| unsupported(artifact, format!("noise body: {error}")))?;
+        self.emit_noise_prologue(artifact, function, &mut out);
+        out.push_str(&indent(&body, 2));
+
+        for (index, source) in noise.sources.iter().enumerate() {
+            // The guard is the control flow the source was written in, already
+            // merged into one value by the lowering. An inactive source still
+            // has to be visited: the analysis pairs visits with descriptors by
+            // index, so skipping one would shift every source after it.
+            //
+            // A source that no control flow guards merges to a constant, and
+            // most do. Emitting the branch anyway would put an arm that cannot
+            // run into every device that declares noise at all.
+            let always = match function.value(noise.outputs[source.active]).kind {
+                CfgValueKind::RealConstant(active) => Some(active != 0.0),
+                _ => None,
+            };
+            if always == Some(false) {
+                let _ = writeln!(
+                    out,
+                    "        if !visitor.visit({index}, GeneratedNoiseEvaluationRef {{ active: false, psd: 0.0, exponent: None, table_operands: &[] }}) {{ return Ok(()); }}"
+                );
+                continue;
+            }
+            if always.is_none() {
+                let _ = writeln!(
+                    out,
+                    "        if {} == 0.0 {{\n\
+                     \x20           if !visitor.visit({index}, GeneratedNoiseEvaluationRef {{ active: false, psd: 0.0, exponent: None, table_operands: &[] }}) {{ return Ok(()); }}\n\
+                     \x20       }} else {{",
+                    values[source.active]
+                );
+            } else {
+                out.push_str("        {\n");
+            }
+            // The order of the checks, and the scaling written as one operation,
+            // are the generator this replaces: same rejections, and a power that
+            // is bit-identical rather than merely close.
+            let _ = writeln!(out, "            let psd = {};", values[source.psd]);
+            emit_noise_check(&mut out, index, "psd", "psd");
+            let _ = writeln!(
+                out,
+                "            if psd < 0.0 {{ return Err(GeneratedNoiseEvaluationError::NegativePower {{ index: {index}, value: psd }}); }}"
+            );
+            match source.exponent {
+                Some(at) => {
+                    let _ = writeln!(
+                        out,
+                        "            let exponent: Option<f64> = Some({});",
+                        values[at]
+                    );
+                    let _ = writeln!(
+                        out,
+                        "            if let Some(value) = exponent {{ if !value.is_finite() {{ return Err(GeneratedNoiseEvaluationError::NonFinite {{ index: {index}, quantity: \"exponent\", value }}); }} }}"
+                    );
+                }
+                None => out.push_str("            let exponent: Option<f64> = None;\n"),
+            }
+            for (operand, at) in source.table.iter().enumerate() {
+                let _ = writeln!(
+                    out,
+                    "            let noise_table_operand_{operand} = {};",
+                    values[*at]
+                );
+                emit_noise_check(
+                    &mut out,
+                    index,
+                    &format!("table operand {operand}"),
+                    &format!("noise_table_operand_{operand}"),
+                );
+            }
+            let _ = writeln!(
+                out,
+                "            let table_operands = [{}];",
+                (0..source.table.len())
+                    .map(|operand| format!("noise_table_operand_{operand}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let scaled = if source.is_current {
+                "psd * self.multiplicity"
+            } else {
+                "psd / self.multiplicity"
+            };
+            let _ = writeln!(out, "            let psd = {scaled};");
+            emit_noise_check(&mut out, index, "scaled psd", "psd");
+            let _ = writeln!(
+                out,
+                "            if !visitor.visit({index}, GeneratedNoiseEvaluationRef {{ active: true, psd, exponent, table_operands: &table_operands }}) {{ return Ok(()); }}\n\
+                 \x20       }}"
+            );
+        }
+        out.push_str("        Ok(())\n    }\n}\n");
+
+        Ok(GeneratedRustFile {
+            relative_path: "noise.rs".to_string(),
+            contents: out,
+        })
+    }
+
+    /// The noise body's bindings.
+    ///
+    /// Not [`Self::emit_prologue`]: that one forces `multiplicity` in because
+    /// every stamper call scales by it, and binds the slot array because a
+    /// stamp can read a slot the body never touches. Neither is true here —
+    /// this body stamps nothing and runs unstaged — and an unused binding of
+    /// `self.canonical_staged` would not even compile on a model that has none.
+    fn emit_noise_prologue(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        function: &CfgFunction,
+        out: &mut String,
+    ) {
+        let mut wants = Wants::default();
+        for value in &function.values {
+            wants.observe(&value.kind);
+        }
+        if wants.parameters {
+            out.push_str("        let parameters = &self.params.values;\n");
+        }
+        if wants.parameter_given {
+            out.push_str("        let parameter_given = &*self.param_given;\n");
+        }
+        if wants.multiplicity {
+            out.push_str("        let multiplicity = self.multiplicity;\n");
+        }
+        if wants.time {
+            out.push_str("        let time = self.time;\n");
+        }
+        if wants.temperature {
+            out.push_str("        let temperature = ctx.temperature();\n");
+        }
+        if wants.thermal_voltage {
+            out.push_str("        let thermal_voltage = ctx.thermal_voltage();\n");
+        }
+        if wants.node_potentials {
+            let _ = writeln!(
+                out,
+                "        let node_potentials = [{}];",
+                (0..self.node_count)
+                    .map(|index| format!("ctx.node_voltage(self.nodes[{index}])"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if wants.branch_unknown_flows {
+            let _ = writeln!(
+                out,
+                "        let branch_unknown_flows = [{}];",
+                (0..artifact.mir.branch_unknowns.len())
+                    .map(|index| format!("ctx.branch_current(self.branches[{index}])"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if wants.ddt_scale {
+            out.push_str(
+                "        let ddt_scale_value = self.ddt_coefficients.derivative_scale;\n\
+                 \x20       let ddt_scale = move || ddt_scale_value;\n",
+            );
+        }
     }
 
     /// Where equation `index`'s reactive values start in the cache.
@@ -1071,6 +1460,14 @@ fn stage_fn_name(class: InvalidationClass) -> &'static str {
 fn optional_node(node: Option<crate::canonical_ir::NodeId>) -> String {
     node.map(|node| format!("Some({})", usize::from(node)))
         .unwrap_or_else(|| "None".to_string())
+}
+
+/// Reject a magnitude that is not a number before the analysis integrates it.
+fn emit_noise_check(out: &mut String, index: usize, quantity: &str, value: &str) {
+    let _ = writeln!(
+        out,
+        "            if !({value}).is_finite() {{ return Err(GeneratedNoiseEvaluationError::NonFinite {{ index: {index}, quantity: {quantity:?}, value: {value} }}); }}"
+    );
 }
 
 fn bindings() -> EmitBindings {
