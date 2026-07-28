@@ -35,6 +35,45 @@ const NOISE_TOLERANCE: f64 = 1.0e-10;
 /// difference converged.
 const AUDIT_BASE_TOLERANCE: f64 = 1.0e-5;
 
+/// A fixture that records the capturing backend's defect rather than the model.
+///
+/// Listing one is a claim that the *replay* is right and the *baseline* is
+/// wrong, which is the opposite of what this command is for, so each entry has
+/// to say how that was established by something other than the replay itself.
+/// The alternative — re-capturing the fixture — would make `verify` compare a
+/// backend against itself for that model, and silently retire the only
+/// cross-backend check there is.
+///
+/// Checked in both directions. A model that starts deviating is a failure, and
+/// so is a listed model that stops: an allowlist nobody prunes stops describing
+/// anything.
+struct FixtureDeviation {
+    model: &'static str,
+    /// Relative Jacobian disagreement to tolerate, rounded up from the measured
+    /// value.
+    jacobian: f64,
+    why: &'static str,
+}
+
+const FIXTURE_DEVIATIONS: &[FixtureDeviation] = &[FixtureDeviation {
+    model: "DIODE_CMC",
+    jacobian: 5.0e-3,
+    why: "the model writes `I(a, aik) <+ $simparam(\"gmin\", 0.0) * V(a, aik)`, and the backend \
+          that captured this fixture folded that call to its literal fallback at generation time \
+          — its generated source contains no `simparam` and no `gmin` anywhere, so the term was \
+          dropped. The canonical backend emits `ctx.simparam_or(\"gmin\", ..)` and reads the \
+          simulator's value, which is `constants::GMIN` = 1e-12; four entries of the (a, aik) \
+          block therefore differ by exactly 1e-12, with the signs of a parallel conductance. The \
+          independent derivative oracle confirms the canonical Jacobian against the model's own \
+          currents at 8.5e-7, so the replay is the correct side",
+}];
+
+fn fixture_deviation(model: &str) -> Option<&'static FixtureDeviation> {
+    FIXTURE_DEVIATIONS
+        .iter()
+        .find(|deviation| deviation.model == model)
+}
+
 #[derive(Args, Debug)]
 pub struct VerilogAGoldenArgs {
     #[command(subcommand)]
@@ -344,13 +383,30 @@ fn run_verify(args: &VerifyArgs) -> Result<ExitCode, BenchError> {
             }
         }
 
+        let known = fixture_deviation(model_name);
         let (primal_limit, jacobian_limit, noise_limit) = if args.exact {
             (0.0, 0.0, 0.0)
         } else {
-            (PRIMAL_TOLERANCE, JACOBIAN_TOLERANCE, NOISE_TOLERANCE)
+            (
+                PRIMAL_TOLERANCE,
+                known.map_or(JACOBIAN_TOLERANCE, |deviation| deviation.jacobian),
+                NOISE_TOLERANCE,
+            )
         };
 
         let mut model_failures = deviation.structural.clone();
+        // The other direction: a fixture that stops recording its defect means
+        // it has been re-captured, or the backend has changed under it, and
+        // either way the entry is now describing nothing.
+        if let Some(known) = known
+            && !args.exact
+            && deviation.worst_jacobian <= JACOBIAN_TOLERANCE
+        {
+            model_failures.push(format!(
+                "listed as a fixture deviation but now agrees to {:.0e}; drop the entry ({})",
+                JACOBIAN_TOLERANCE, known.why
+            ));
+        }
         if deviation.worst_primal > primal_limit {
             model_failures.push(format!(
                 "primal deviation {:.3e} exceeds {primal_limit:.0e}",

@@ -58,12 +58,13 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use crate::canonical_ir::cfg::{
-    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind,
+    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValue, CfgValueKind, CfgValueType,
 };
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::schedule::{InvalidationClass, Stage, schedule, split, worth_splitting};
 use crate::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, differentiate, optimize_cfg,
+    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, differentiate,
+    optimize_cfg,
 };
 
 use super::emit::{EmitBindings, RUNTIME_PRELUDE, emit_body};
@@ -214,7 +215,7 @@ struct ModelPlan {
 
 impl ModelPlan {
     fn build(artifact: &CanonicalIrArtifact) -> Result<Self, RustBackendError> {
-        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
+        let mut cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
             let mut reasons: Vec<String> = diagnostics
                 .iter()
                 .map(|diagnostic| diagnostic.message.to_string())
@@ -273,25 +274,34 @@ impl ModelPlan {
             .chain(limits.then_some(AdSeed::LimiterCorrection))
             .collect();
         let correction_lane = limits.then(|| seeds.len() - 1);
-        let mut differentiated = differentiate(&cfg.function, &seeds)
-            .map_err(|error| unsupported(artifact, format!("differentiation: {error}")))?;
 
-        // Every read-out first, and both bodies' worth of them: taking a lane
-        // appends an instruction, so a row taken after a simplification would
-        // name values the simplified function does not have.
         let residuals: Vec<ValueId> = artifact
             .mir
             .equations
             .iter()
             .map(|equation| cfg.residuals[usize::from(equation.contribution)])
             .collect();
+        // Before differentiation, because a guarded charge is recovered by
+        // *adding* a merge to the graph and a value added afterwards would have
+        // no derivative. Differentiating a block parameter is the ordinary case,
+        // so nothing else has to know this happened.
+        let charges: Vec<Option<ValueId>> = residuals
+            .iter()
+            .map(|residual| stored_charge(&mut cfg.function, *residual))
+            .collect();
+        cfg.function
+            .validate()
+            .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
+
+        let mut differentiated = differentiate(&cfg.function, &seeds)
+            .map_err(|error| unsupported(artifact, format!("differentiation: {error}")))?;
+
+        // Every read-out first, and both bodies' worth of them: taking a lane
+        // appends an instruction, so a row taken after a simplification would
+        // name values the simplified function does not have.
         let conduction_rows: Vec<Vec<Option<ValueId>>> = residuals
             .iter()
             .map(|residual| differentiated.derivative_row(*residual))
-            .collect();
-        let charges: Vec<Option<ValueId>> = residuals
-            .iter()
-            .map(|residual| stored_charge(&differentiated.function, *residual))
             .collect();
         let reactive_rows: Vec<Vec<Option<ValueId>>> = charges
             .iter()
@@ -1761,31 +1771,205 @@ impl Wants {
 /// charge with conduction in one statement: separating those needs the reactive
 /// part tracked through the arithmetic, and calling the whole expression a
 /// charge would put conduction into the reactive matrix.
-fn stored_charge(function: &CfgFunction, residual: ValueId) -> Option<ValueId> {
-    let mut value = residual;
-    loop {
-        match &function.value(value).kind {
-            CfgValueKind::Ddt { input, .. } => return Some(*input),
-            CfgValueKind::Binary {
-                op: CfgBinaryOp::Add,
-                left,
-                right,
-            } => {
-                let zero = |value: ValueId| {
-                    matches!(
-                        function.value(value).kind,
-                        CfgValueKind::RealConstant(constant) if constant == 0.0
-                    )
-                };
-                value = match (zero(*left), zero(*right)) {
-                    (true, false) => *right,
-                    (false, true) => *left,
-                    _ => return None,
-                };
+fn stored_charge(function: &mut CfgFunction, residual: ValueId) -> Option<ValueId> {
+    let charge = resolve_charge(function, residual, 0)?;
+    materialise_charge(function, &charge)
+}
+
+/// How deep a chain of merges to follow before giving up.
+///
+/// A charge behind more than a handful of nested guards is not a shape any
+/// released model has, and a bound is what keeps a loop-carried residual — where
+/// a block parameter can reach itself — from recursing forever.
+const MAX_CHARGE_MERGE_DEPTH: usize = 8;
+
+/// What a residual stores, worked out before any of it is built.
+///
+/// Resolution is separated from construction because a merge has to be created
+/// bottom-up: the parameter that carries a guarded charge can only be added once
+/// every arm's charge exists to be passed on the edges.
+enum Charge {
+    /// The operand of a `ddt`.
+    Value(ValueId),
+    /// This path stores nothing. At the top that means the contribution is not
+    /// reactive at all; inside a merge it is the arm that was not taken.
+    Nothing,
+    /// One charge per edge into `block`, in the order [`edges_into`] gives them.
+    Merge { block: BlockId, arms: Vec<Charge> },
+}
+
+fn resolve_charge(function: &CfgFunction, residual: ValueId, depth: usize) -> Option<Charge> {
+    if depth > MAX_CHARGE_MERGE_DEPTH {
+        return None;
+    }
+    match &function.value(residual).kind {
+        CfgValueKind::Ddt { input, .. } => Some(Charge::Value(*input)),
+        CfgValueKind::RealConstant(constant) if *constant == 0.0 => Some(Charge::Nothing),
+        CfgValueKind::Binary {
+            op: CfgBinaryOp::Add,
+            left,
+            right,
+        } => {
+            let zero = |value: ValueId| {
+                matches!(
+                    function.value(value).kind,
+                    CfgValueKind::RealConstant(constant) if constant == 0.0
+                )
+            };
+            match (zero(*left), zero(*right)) {
+                (true, false) => resolve_charge(function, *right, depth + 1),
+                (false, true) => resolve_charge(function, *left, depth + 1),
+                _ => None,
             }
-            _ => return None,
+        }
+        // A guarded contribution. `I(a, b) <+ ddt(q)` inside an `if` reaches its
+        // equation as a merge of the `ddt` from the arm that ran and zero from
+        // the arm that did not, so matching the residual against `Ddt` alone
+        // finds nothing and the whole reactive contribution disappears — silent
+        // in DC, wrong in AC and transient. Self-heating blocks are guarded as a
+        // matter of course, so this is the common case rather than an edge one.
+        CfgValueKind::BlockParameter => {
+            let block = owning_block(function, residual)?;
+            let position = function
+                .block(block)
+                .params
+                .iter()
+                .position(|param| *param == residual)?;
+            let mut arms = Vec::new();
+            let mut stores = false;
+            for (source, slot) in edges_into(function, block) {
+                let argument = *edge_arguments(function, source, slot).get(position)?;
+                let arm = resolve_charge(function, argument, depth + 1)?;
+                stores |= !matches!(arm, Charge::Nothing);
+                arms.push(arm);
+            }
+            // Every arm storing nothing is a merge worth building only if some
+            // arm stores something; otherwise the contribution is conduction and
+            // adding a parameter for it would be noise in the graph.
+            stores.then_some(Charge::Merge { block, arms })
+        }
+        _ => None,
+    }
+}
+
+fn materialise_charge(function: &mut CfgFunction, charge: &Charge) -> Option<ValueId> {
+    match charge {
+        Charge::Value(value) => Some(*value),
+        Charge::Nothing => None,
+        Charge::Merge { block, arms } => {
+            // Depth first: an arm that is itself a merge has to own a parameter
+            // before this one can name it on an edge.
+            let mut arguments = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let value = match materialise_charge(function, arm) {
+                    Some(value) => value,
+                    None => zero_constant(function),
+                };
+                arguments.push(value);
+            }
+            let parameter = push_value(function, CfgValueType::Real, CfgValueKind::BlockParameter);
+            function.blocks[usize::from(*block)].params.push(parameter);
+            for ((source, slot), argument) in edges_into(function, *block).into_iter().zip(arguments)
+            {
+                edge_arguments_mut(function, source, slot).push(argument);
+            }
+            Some(parameter)
         }
     }
+}
+
+/// Which arm of a terminator an edge leaves by.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EdgeSlot {
+    Jump,
+    Then,
+    Else,
+}
+
+/// Every edge into `block`, in a deterministic order: by source block id, then
+/// then-arm before else-arm. Parameters and arguments are index-aligned, so this
+/// order is the contract between resolution and construction.
+fn edges_into(function: &CfgFunction, block: BlockId) -> Vec<(BlockId, EdgeSlot)> {
+    let mut edges = Vec::new();
+    for source in &function.blocks {
+        match &source.terminator {
+            CfgTerminator::Jump { target, .. } if *target == block => {
+                edges.push((source.id, EdgeSlot::Jump));
+            }
+            CfgTerminator::Branch {
+                then_target,
+                else_target,
+                ..
+            } => {
+                if *then_target == block {
+                    edges.push((source.id, EdgeSlot::Then));
+                }
+                if *else_target == block {
+                    edges.push((source.id, EdgeSlot::Else));
+                }
+            }
+            _ => {}
+        }
+    }
+    edges
+}
+
+fn edge_arguments(function: &CfgFunction, source: BlockId, slot: EdgeSlot) -> &[ValueId] {
+    match (&function.block(source).terminator, slot) {
+        (CfgTerminator::Jump { args, .. }, EdgeSlot::Jump) => args,
+        (CfgTerminator::Branch { then_args, .. }, EdgeSlot::Then) => then_args,
+        (CfgTerminator::Branch { else_args, .. }, EdgeSlot::Else) => else_args,
+        _ => &[],
+    }
+}
+
+fn edge_arguments_mut(
+    function: &mut CfgFunction,
+    source: BlockId,
+    slot: EdgeSlot,
+) -> &mut Vec<ValueId> {
+    match (
+        &mut function.blocks[usize::from(source)].terminator,
+        slot,
+    ) {
+        (CfgTerminator::Jump { args, .. }, EdgeSlot::Jump) => args,
+        (CfgTerminator::Branch { then_args, .. }, EdgeSlot::Then) => then_args,
+        (CfgTerminator::Branch { else_args, .. }, EdgeSlot::Else) => else_args,
+        _ => unreachable!("edges_into only reports slots the terminator has"),
+    }
+}
+
+fn owning_block(function: &CfgFunction, parameter: ValueId) -> Option<BlockId> {
+    function
+        .blocks
+        .iter()
+        .find(|block| block.params.contains(&parameter))
+        .map(|block| block.id)
+}
+
+fn zero_constant(function: &mut CfgFunction) -> ValueId {
+    if let Some(existing) = function
+        .values
+        .iter()
+        .find(|value| matches!(value.kind, CfgValueKind::RealConstant(constant) if constant == 0.0))
+    {
+        return existing.id;
+    }
+    push_value(function, CfgValueType::Real, CfgValueKind::RealConstant(0.0))
+}
+
+fn push_value(
+    function: &mut CfgFunction,
+    value_type: CfgValueType,
+    kind: CfgValueKind,
+) -> ValueId {
+    let id = ValueId::from(function.values.len());
+    function.values.push(CfgValue {
+        id,
+        value_type,
+        kind,
+    });
+    id
 }
 
 fn reject_unsupported_kinds(
