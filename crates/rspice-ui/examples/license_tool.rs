@@ -13,7 +13,7 @@
 //! ```
 
 use ed25519_dalek::{Signer, SigningKey};
-use rspice_ui::services::license::{
+use rspice_ui::{
     LicensePayload, SIGNING_DOMAIN, crockford_encode, date_from_unix_days, group5, parse_and_verify,
 };
 

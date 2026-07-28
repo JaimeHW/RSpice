@@ -922,7 +922,7 @@ fn workbench_references_respect_the_layer_order() {
 ///
 /// The count is a ceiling: it may fall, never rise. Prefer `pub(crate)`, and
 /// prefer a re-export at the crate root over widening a module.
-const MAX_PUBLIC_MODULES: usize = 132;
+const MAX_PUBLIC_MODULES: usize = 124;
 
 #[test]
 fn the_public_module_surface_does_not_grow() {

@@ -91,20 +91,20 @@
 // =============================================================================
 
 /// Analysis viewers - Bode, FFT, histogram, Nyquist, pole-zero, Smith chart, eye diagram
-pub mod analysis;
+pub(crate) mod analysis;
 
 /// Schematic editor - Canvas, export, toolbar, symbol library
 pub(crate) mod schematic;
 
 /// Simulation management - Controller, dialogs, netlist generation
-pub mod simulation;
+pub(crate) mod simulation;
 
 
 /// Property editing - Component properties and design variables
 pub(crate) mod properties;
 
 /// The RSpice design system - tokens, palettes, fonts, icons, widgets
-pub mod ui;
+pub(crate) mod ui;
 
 /// Persisted page-setup contracts and deterministic pagination. Document
 /// adapters, scene rendering, the platform print boundary, and the dialogs
@@ -117,11 +117,11 @@ pub(crate) mod workbench;
 
 /// Versioned visualization documents, immutable dataset bindings, exact-data
 /// queries, viewer compatibility, and progressive result operations.
-pub mod results;
+pub(crate) mod results;
 
 /// Canonical commercial product model, typed identities, command outcomes,
 /// and fail-closed object lifecycles. This layer is UI-framework independent.
-pub mod product;
+pub(crate) mod product;
 
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
@@ -132,13 +132,13 @@ pub(crate) mod automation_workflow;
 // =============================================================================
 
 /// Backend services (file I/O, simulation runner)
-pub mod services;
+pub(crate) mod services;
 
 /// File I/O (library parser, session, netlist, waveform)
-pub mod io;
+pub(crate) mod io;
 
 /// Application state management
-pub mod state;
+pub(crate) mod state;
 
 /// Unit-safe user presentation and UI quantity-input policy. Values entering
 /// or leaving this module are always expressed in their documented SI base
@@ -157,15 +157,49 @@ pub(crate) mod time_compat;
 pub(crate) mod output_spec;
 
 // =============================================================================
-// Re-exports
+// The crate's entire external surface
 // =============================================================================
+//
+// `rspice-ui` is an application, not a library. Its only consumers are the
+// desktop and browser binary in `main.rs`, the `license_tool` example, and
+// the integration tests -- nothing in the workspace depends on it. Every
+// module above is therefore `pub(crate)`, and everything reachable from
+// outside is named here.
+//
+// That is not tidiness. A `pub` module is one the compiler must assume some
+// unseen caller uses, so it cannot report an unreachable item inside it. The
+// eight modules that used to be `pub` covered 262k lines -- 45% of the crate
+// -- in which dead code could not be detected at all. Adding a `pub mod` to
+// reach something from a test re-opens that hole; add a re-export here
+// instead.
 
-/// Re-export the main application type
+/// The application root, constructed by both the desktop and browser entry
+/// points.
 pub use workbench::RSpiceApp;
 
 /// Native logging environment for the desktop binary.
 #[cfg(not(target_arch = "wasm32"))]
 pub use workbench::logging::native_log_env;
+
+/// Typed identities, for `tests/simulation_configuration_contract.rs`.
+pub use product::{AnalysisInstanceId, SimulationPlanId};
+
+/// License-key verification, shared with the `license_tool` example that
+/// issues the keys this parses.
+pub use services::license::{
+    LicensePayload, SIGNING_DOMAIN, crockford_encode, date_from_unix_days, group5, parse_and_verify,
+};
+
+/// Design-variable netlist emission, pinned by the configuration contract.
+pub use simulation::netlist_gen::{DesignVariableNetlistContext, design_variable_parameter_lines};
+
+/// The persisted project model the configuration contract exercises.
+pub use state::{
+    CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
+    DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, ProjectWorkspace,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord,
+};
 
 #[cfg(target_arch = "wasm32")]
 pub fn run_rspice_ui_worker_request(
