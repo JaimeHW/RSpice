@@ -75,7 +75,7 @@ reconcile maturin's pruned workspace with the repository lockfile:
 
 ```bash
 maturin sdist --out dist
-python scripts/repair_sdist_lock.py dist/rspice-*.tar.gz
+python ../../tools/release/repair_sdist_lock.py dist/rspice-*.tar.gz
 ```
 
 The repair runs offline by default, rejects any new or changed external Cargo
