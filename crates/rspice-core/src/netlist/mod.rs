@@ -5493,6 +5493,44 @@ mod tests {
     }
 
     #[test]
+    fn pem_table_model_params_keep_directory_names_that_look_like_signed_numbers() {
+        // A checkout under a directory such as `worktrees\cool-kilby-4be5a2`
+        // puts `-4be5a2` inside the absolute table path a test writes onto the
+        // model card. The tokenizer used to stall on that fragment and grow
+        // its token vector until the process died, so the whole deck — not
+        // just this parameter — depended on where the repository lived.
+        let netlist = Netlist::parse_validated(
+            "PEM table path with a signed-number directory\n\
+             .model mrm1 memristor level=4\n\
+             + fxpdata=C:\\models\\pem-4be5a2\\fxp_table.csv\n\
+             + fxmdata=C:\\models\\pem-7268ec\\fxm_table.csv\n\
+             V1 in 0 DC 0.2\n\
+             .end\n",
+        )
+        .expect("signed-number path components parse");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("mrm1"))
+            .expect("memristor model exists");
+        for (name, expected) in [
+            ("fxpdata", "C:\\models\\pem-4be5a2\\fxp_table.csv"),
+            ("fxmdata", "C:\\models\\pem-7268ec\\fxm_table.csv"),
+        ] {
+            assert_eq!(
+                model
+                    .string_params
+                    .iter()
+                    .find(|(param, _)| param.eq_ignore_ascii_case(name))
+                    .map(|(_, value)| value.as_str()),
+                Some(expected),
+                "unexpected value for {name}"
+            );
+        }
+    }
+
+    #[test]
     fn pem_table_model_params_resolve_relative_to_their_source_file() {
         let base = Path::new("models/memristor");
         assert_eq!(
