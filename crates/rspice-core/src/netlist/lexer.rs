@@ -138,6 +138,17 @@ impl<'a> Lexer<'a> {
             // Try to match a token
             let (kind, consumed) = self.next_token(remaining)?;
 
+            // Every token must advance the cursor. A zero-width match would
+            // otherwise push tokens forever and exhaust memory rather than
+            // reporting the offending character, so fail closed here instead
+            // of trusting each `next_token` branch to make progress.
+            if consumed == 0 {
+                return Err(LexError::UnexpectedChar(
+                    remaining.chars().next().unwrap_or('\0'),
+                    self.line,
+                ));
+            }
+
             let span = Span {
                 start: start_pos,
                 end: start_pos + consumed,
@@ -373,7 +384,16 @@ impl<'a> Lexer<'a> {
                     };
 
                     if !could_be_suffix {
-                        // It's a model name - parse as identifier
+                        // It's a model name - parse as identifier.
+                        // A leading sign is never part of that name: `-1N4148`
+                        // is the operator applied to the identifier `1N4148`,
+                        // matching how the unsigned form lexes. `parse_ident`
+                        // starts at the first character, so handing it the
+                        // signed text would stop on the sign and consume
+                        // nothing.
+                        if had_sign {
+                            return Ok((sign_token(chars[0]), chars[0].len_utf8()));
+                        }
                         return self.parse_ident(input);
                     }
                 }
@@ -536,6 +556,15 @@ impl<'a> Lexer<'a> {
 //=============================================================================
 // Helper Functions
 //=============================================================================
+
+/// Token for a numeric sign that turned out to be a standalone operator.
+fn sign_token(sign: char) -> TokenKind {
+    if sign == '+' {
+        TokenKind::Plus
+    } else {
+        TokenKind::Minus
+    }
+}
 
 /// Check if character can start an identifier
 fn is_ident_start(c: char) -> bool {
@@ -1008,6 +1037,35 @@ mod tests {
         assert_eq!(tokens[2].kind, TokenKind::Ident("1A".to_string()));
         assert_eq!(tokens[3].kind, TokenKind::Ident("0V".to_string()));
         assert_eq!(parse_spice_value("0V").expect("0V parses"), 0.0);
+    }
+
+    #[test]
+    fn signed_digit_leading_model_names_emit_the_sign_separately() {
+        // `4BE5A2` is a digit-leading name, not a number with a scale suffix.
+        // Handing the signed text to the identifier scanner consumed nothing,
+        // so the tokenizer looped forever appending zero-width tokens until
+        // it exhausted memory. The sign is its own operator token.
+        let tokens = tokenize("R1 a-4be5a2 b -1N4148\n").expect("tokenize signed model names");
+        let kinds: Vec<_> = tokens.iter().map(|token| token.kind.clone()).collect();
+
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("R1".to_string()),
+                TokenKind::Ident("A".to_string()),
+                TokenKind::Minus,
+                TokenKind::Ident("4BE5A2".to_string()),
+                TokenKind::Ident("B".to_string()),
+                TokenKind::Minus,
+                TokenKind::Ident("1N4148".to_string()),
+                TokenKind::Newline,
+                TokenKind::Eof,
+            ]
+        );
+        // Adjacent spans let value parsers rejoin the pieces verbatim, which
+        // is how a path like `C:\models\a-4be5a2\table.csv` survives lexing.
+        assert_eq!(tokens[2].lexeme, "-");
+        assert_eq!(tokens[2].span.end, tokens[3].span.start);
     }
 
     #[test]
