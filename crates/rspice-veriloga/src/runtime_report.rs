@@ -355,6 +355,7 @@ fn rust_backend_name(backend: RustBackendSelection) -> &'static str {
         RustBackendSelection::StructuredKernel => "structured kernel backend",
         RustBackendSelection::ScalarHybrid => "scalar hybrid backend",
         RustBackendSelection::LegacyDevice => "legacy device backend",
+        RustBackendSelection::CanonicalCfg => "canonical CFG backend",
     }
 }
 

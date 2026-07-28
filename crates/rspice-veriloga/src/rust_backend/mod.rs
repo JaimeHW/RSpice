@@ -96,6 +96,11 @@ pub enum RustBackendSelection {
     StructuredKernel,
     ScalarHybrid,
     LegacyDevice,
+    /// The canonical CFG emitter — control flow, packed derivatives, and only
+    /// the stamp entries that exist. Explicit for now: it is the backend that
+    /// replaces the four above, and it takes over `Auto` once the corpus has
+    /// been regenerated through it and compared.
+    CanonicalCfg,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -165,6 +170,7 @@ enum RustBackendKind {
     ScalarOptIr,
     SparseLocalKernel,
     StructuredKernel,
+    CanonicalCfg,
 }
 
 impl RustTranspiler {
@@ -204,6 +210,18 @@ impl RustTranspiler {
         Self {
             options,
             backend: RustBackendKind::SparseLocalKernel,
+        }
+    }
+
+    /// The canonical CFG emitter, without a tier to fall back to.
+    ///
+    /// Selected explicitly rather than from `Auto`, because a fallback would
+    /// hide exactly what needs measuring: which models it does not yet carry,
+    /// and why.
+    pub fn new_canonical(options: RustTranspileOptions) -> Self {
+        Self {
+            options,
+            backend: RustBackendKind::CanonicalCfg,
         }
     }
 
@@ -247,6 +265,11 @@ impl RustTranspiler {
             RustBackendKind::StructuredKernel => Ok(GeneratedRustDeviceReport {
                 device: device::generate_structured_kernel_device(artifact, &self.options)?,
                 backend: RustBackendSelection::StructuredKernel,
+                fallback_reason: None,
+            }),
+            RustBackendKind::CanonicalCfg => Ok(GeneratedRustDeviceReport {
+                device: canonical::generate_device(artifact, &self.options)?,
+                backend: RustBackendSelection::CanonicalCfg,
                 fallback_reason: None,
             }),
         }?;

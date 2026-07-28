@@ -95,6 +95,7 @@ pub struct BuiltinBackendSelectionCounts {
     pub structured: usize,
     pub hybrid: usize,
     pub legacy_device: usize,
+    pub canonical: usize,
 }
 
 impl BuiltinBackendSelectionCounts {
@@ -105,6 +106,7 @@ impl BuiltinBackendSelectionCounts {
             RustBackendSelection::StructuredKernel => self.structured += 1,
             RustBackendSelection::ScalarHybrid => self.hybrid += 1,
             RustBackendSelection::LegacyDevice => self.legacy_device += 1,
+            RustBackendSelection::CanonicalCfg => self.canonical += 1,
         }
     }
 }

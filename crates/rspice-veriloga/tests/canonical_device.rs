@@ -123,6 +123,89 @@ endmodule
     );
 }
 
+/// How far the canonical backend gets across the shipped models, and why it
+/// stops where it does.
+///
+/// Numbers and reasons, not assertions. What it answers is the only question
+/// that decides when this backend takes over from the tiers: which models it
+/// carries end to end, and what each of the rest is waiting on.
+#[test]
+#[ignore = "generates every shipped model through the canonical backend; run with --ignored"]
+fn the_whole_corpus_reports_what_the_canonical_backend_carries() {
+    let root = model_root();
+    let candidates =
+        rspice_veriloga::rust_backend::discover_veriloga_sources(&root).expect("model tree");
+    let mut carried = 0usize;
+    let mut refused = 0usize;
+    let mut bytes = 0usize;
+
+    for candidate in &candidates {
+        for module in &candidate.modules {
+            let mut options = rspice_veriloga::CompilerOptions::default();
+            options.include_paths.push(root.clone());
+            options.defines = candidate.compile_profile.defines.clone();
+            options.undefines = candidate.compile_profile.undefines.clone();
+            let compiled = match VerilogACompiler::new(options)
+                .compile_file_canonical_ir_with_metadata(&candidate.path, Some(module))
+            {
+                Ok(compiled) => compiled,
+                Err(error) => {
+                    refused += 1;
+                    eprintln!("{module:>24}  front end: {error}");
+                    continue;
+                }
+            };
+            match std::panic::catch_unwind(|| {
+                canonical::generate_device(&compiled.artifact, &RustTranspileOptions::default())
+            }) {
+                Ok(Ok(device)) => {
+                    carried += 1;
+                    let total: usize = device
+                        .files
+                        .iter()
+                        .map(|file| file.contents.len())
+                        .sum::<usize>();
+                    let stamp = device
+                        .files
+                        .iter()
+                        .find(|file| file.relative_path == "stamp.rs")
+                        .map_or(0, |file| file.contents.len());
+                    bytes += total;
+                    eprintln!("{module:>24}  {total:>10} bytes  ({stamp} of them stamp)");
+                }
+                Ok(Err(error)) => {
+                    refused += 1;
+                    eprintln!("{module:>24}  refused: {error}");
+                }
+                Err(payload) => {
+                    refused += 1;
+                    eprintln!("{module:>24}  panicked: {}", panic_reason(&payload));
+                }
+            }
+        }
+    }
+    eprintln!("\n{carried} carried in {bytes} bytes, {refused} not");
+}
+
+fn panic_reason(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    payload
+        .downcast_ref::<&str>()
+        .map_or_else(|| "no known payload".to_string(), |message| (*message).to_string())
+}
+
+fn model_root() -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("models")
+        .join("veriloga");
+    assert!(root.exists(), "model tree missing: {}", root.display());
+    root
+}
+
 fn stamp_of(source: &str, name: &str) -> String {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(source)
