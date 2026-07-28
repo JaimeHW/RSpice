@@ -573,18 +573,6 @@ impl StaticMatrix {
         }
     }
 
-    /// Get the number of values in the matrix (for parallel matrix sizing)
-    #[inline]
-    pub fn values_len(&self) -> usize {
-        self.values.len()
-    }
-
-    /// Copy values from an atomic matrix (after parallel stamping)
-    #[cfg(feature = "parallel")]
-    pub fn copy_values_from_atomic(&mut self, atomic: &super::parallel::AtomicMatrix) {
-        atomic.copy_to(&mut self.values);
-    }
-
     /// Get mutable access to values slice (for advanced use)
     #[inline]
     pub fn values_mut(&mut self) -> &mut [Value] {

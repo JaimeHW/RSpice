@@ -8,9 +8,6 @@ mod newton;
 mod sparse;
 pub(crate) use sparse::klu_backend_enabled;
 
-#[cfg(feature = "parallel")]
-pub mod parallel;
-
 pub use arc_length::{ArcLengthConfig, ArcLengthContinuation, ArcLengthResult, ArcLengthState};
 pub use convergence::{PseudoTransient, SourceStepper};
 pub use damping::{DampingController, DampingStatistics, DampingStrategy};

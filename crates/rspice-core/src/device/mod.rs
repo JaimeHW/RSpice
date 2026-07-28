@@ -38,10 +38,6 @@ pub mod veriloga;
 // Generated Verilog-A runtime ABI; the built-in registry remains feature-gated inside the module.
 pub mod veriloga_generated;
 
-// Batch device storage for SIMD acceleration (feature-gated)
-#[cfg(feature = "simd")]
-pub mod batch;
-
 // Re-export from subdirectories for backwards compatibility
 pub use mosfet::{
     B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode, Bsim3v3,
