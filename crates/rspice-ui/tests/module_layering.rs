@@ -1102,8 +1102,7 @@ fn budgeted_lines(source: &str) -> usize {
 }
 
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("io/project_io/tests.rs", 4156),
-    ("workbench/documents/visualization_studio.rs", 3035),
+    ("io/project_io/tests.rs", 4156),
     ("io/durable_file.rs", 4682),
     (
         "workbench/app/dialogs/preferences/shortcut_preferences.rs",
