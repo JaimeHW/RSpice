@@ -251,7 +251,7 @@ enum PreparedHistogramMode {
 /// FFT caches and every other viewer/runtime field are deliberately absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PreparedResultsPresentation {
+pub(super) struct PreparedResultsPresentation {
     viewer: ResultViewer,
     fft_selected_source: Option<String>,
     fft_normalization: PreparedFftNormalization,

@@ -772,7 +772,7 @@ pub(super) fn finish_workflow_choice<D>(
     }
 }
 
-trait WorkflowDraft {
+pub(super) trait WorkflowDraft {
     fn set_error(&mut self, error: String);
 }
 
