@@ -236,10 +236,18 @@ fn compile_model_inner(
             Vec::with_capacity(stamp.reactive_jacobians.len());
         let mut stamp_reactive_jacobian_branch_unknown_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
+        let canonical_reactive_mir = match canonical_mir {
+            Some(mir) if !stamp.reactive_jacobians.is_empty() => Some(canonical_reactive_mir(
+                model,
+                mir,
+                canonical_equation_id(model, stamp_index)?,
+            )?),
+            _ => None,
+        };
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = lower_reactive_jacobian_program(
                 model,
-                canonical_mir,
+                canonical_reactive_mir.as_ref(),
                 stamp_index,
                 reactive_jacobian,
                 base_limits,
@@ -491,25 +499,25 @@ fn lower_jacobian_program(
 
 fn lower_reactive_jacobian_program(
     model: &CompiledModel,
-    canonical_mir: Option<&MirModel>,
+    canonical_reactive_mir: Option<&MirModel>,
     stamp_index: usize,
     reactive_jacobian: &JacobianEntry,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<NativeProgram> {
-    if let Some(mir) = canonical_mir {
+    if let Some(reactive_mir) = canonical_reactive_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
-        let axis = canonical_derivative_axis_for_column(model, mir, &reactive_jacobian.col_axis)?;
-        let reactive_mir = canonical_reactive_mir(model, mir, equation_id)?;
+        let axis =
+            canonical_derivative_axis_for_column(model, reactive_mir, &reactive_jacobian.col_axis)?;
         let table_lookup_slots = canonical_table_lookup_slots_for_equation(
             model.name.clone(),
-            &reactive_mir,
+            reactive_mir,
             equation_id,
             &reactive_jacobian.program,
         )?;
         return NativeProgram::from_mir_derivative(
             model.name.clone(),
             EntryKind::ReactiveJacobian,
-            &reactive_mir,
+            reactive_mir,
             equation_id,
             axis,
             limits.with_canonical_table_lookup_slots(&table_lookup_slots),
@@ -4161,10 +4169,13 @@ fn mark_canonical_entry_variable_roots(
             mark_native_program_variable_reads(&program, live);
         }
 
+        let reactive_mir = (!stamp.reactive_jacobians.is_empty())
+            .then(|| canonical_reactive_mir(model, mir, canonical_equation_id(model, stamp_index)?))
+            .transpose()?;
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = lower_reactive_jacobian_program(
                 model,
-                Some(mir),
+                reactive_mir.as_ref(),
                 stamp_index,
                 reactive_jacobian,
                 limits,
