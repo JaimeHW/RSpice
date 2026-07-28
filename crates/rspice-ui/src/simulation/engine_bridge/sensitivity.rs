@@ -256,5 +256,54 @@ where
             "Sensitivity finite-difference derivative is non-finite".to_string(),
         ));
     }
+    // Matches the duplicate of this function in
+    // `services::simulation_runner::sensitivity`, which has always polled here.
+    // The window this closes is small -- the poll after `minus` already
+    // rejects any cancellation raised during either perturbation -- so this is
+    // for keeping the two copies byte-identical until one of them is deleted,
+    // not for a behaviour a caller can observe on its own.
+    ensure_not_aborted(abort)?;
     Ok(derivative)
+}
+
+#[cfg(test)]
+mod tests {
+    use rspice_core::abort_signal::{AtomicAbort, ImmediateAbort, NoAbort};
+
+    use super::*;
+
+    #[test]
+    fn finite_difference_polls_between_parameter_perturbations() {
+        let abort = AtomicAbort::new();
+        let mut evaluations = 0;
+        let result = finite_difference_derivative_with_abort(1.0, &abort, |_| {
+            evaluations += 1;
+            if evaluations == 1 {
+                abort.set();
+            }
+            Ok(2.0)
+        });
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+        assert_eq!(evaluations, 1);
+    }
+
+    #[test]
+    fn finite_difference_rejects_a_non_finite_parameter() {
+        let result =
+            finite_difference_derivative_with_abort(Value::NAN, &NoAbort, |value| Ok(value));
+        assert!(matches!(result, Err(SimulationError::InvalidConfig(_))));
+    }
+
+    #[test]
+    fn finite_difference_preserves_a_typed_abort_before_any_evaluation() {
+        let mut evaluations = 0;
+        let result = finite_difference_derivative_with_abort(1.0, &ImmediateAbort, |value| {
+            evaluations += 1;
+            Ok(value)
+        });
+
+        assert!(matches!(result, Err(SimulationError::Aborted)));
+        assert_eq!(evaluations, 0, "an aborted run must not touch the engine");
+    }
 }
