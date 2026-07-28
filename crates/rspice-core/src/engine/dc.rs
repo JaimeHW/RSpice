@@ -516,6 +516,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
 
         // Build circuit from netlist

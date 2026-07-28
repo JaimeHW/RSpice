@@ -12,6 +12,7 @@ pub(in crate::engine) enum DcOpStartup<'a> {
     PreviousSolution(&'a [Value]),
     Zero,
 }
+use crate::diagnostics::ConvergenceQuality;
 use crate::netlist::{ElementKind, SubcircuitDef};
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{Netlist, Value};
@@ -26,6 +27,15 @@ pub struct Engine {
     config_is_resolved: bool,
     #[cfg(feature = "parallel")]
     parallel_pool: std::sync::OnceLock<Result<rayon::ThreadPool, String>>,
+    /// Convergence-quality metrics for the most recent analysis.
+    ///
+    /// Behind a lock rather than threaded through the solve chain because the
+    /// analysis entry points take `&self` and `&Engine` is shared across rayon
+    /// workers during parallel sweeps. Every recording site is a *fallback* —
+    /// gmin stepping, source stepping, a force-accepted point, a rejected
+    /// step — or once-per-solve. None is in the Newton inner loop, so the lock
+    /// is uncontended in the hot path.
+    convergence: std::sync::Arc<std::sync::Mutex<ConvergenceQuality>>,
 }
 
 impl Engine {
@@ -58,6 +68,7 @@ impl Engine {
             config_is_resolved: false,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         }
     }
 
@@ -75,6 +86,7 @@ impl Engine {
             config_is_resolved: false,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         })
     }
 
@@ -92,6 +104,7 @@ impl Engine {
             config_is_resolved: true,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         }
     }
 
@@ -106,7 +119,51 @@ impl Engine {
             config_is_resolved: true,
             #[cfg(feature = "parallel")]
             parallel_pool: std::sync::OnceLock::new(),
+            convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
         })
+    }
+
+    /// Convergence-quality metrics for the most recently completed analysis.
+    ///
+    /// Reports what the solver had to do to get an answer, as distinct from
+    /// whether it got one: how often it fell back to gmin or source stepping,
+    /// how many transient points were force-accepted without converging, and
+    /// how many steps were rejected and retried. A run that returns clean
+    /// numbers while reporting force-accepted points is telling you the
+    /// waveform is not trustworthy at those points.
+    ///
+    /// Each analysis entry point clears this first, so the value describes one
+    /// run. Read it before starting the next.
+    ///
+    /// This is orthogonal to [`Self::health_check`], which exercises a fixed
+    /// three-line probe deck to answer whether the engine works at all.
+    pub fn convergence_quality(&self) -> ConvergenceQuality {
+        self.convergence
+            .lock()
+            .map(|quality| quality.clone())
+            .unwrap_or_default()
+    }
+
+    /// Clear the metrics at the start of an analysis.
+    pub(crate) fn reset_convergence_quality(&self) {
+        if let Ok(mut quality) = self.convergence.lock() {
+            *quality = ConvergenceQuality::new();
+        }
+    }
+
+    /// Run `record` against the metrics, ignoring a poisoned lock.
+    ///
+    /// Diagnostics must never be the reason a simulation fails: a panic on
+    /// another thread has already lost the run, and turning that into a second
+    /// panic here would replace the real error with this one.
+    #[inline]
+    pub(crate) fn record_convergence<F>(&self, record: F)
+    where
+        F: FnOnce(&mut ConvergenceQuality),
+    {
+        if let Ok(mut quality) = self.convergence.lock() {
+            record(&mut quality);
+        }
     }
 
     /// Return the construction-time configuration error, if any.
@@ -255,15 +312,22 @@ impl Engine {
     ///
     /// Applies `.OPTIONS` on top of the engine's base configuration.
     pub(crate) fn resolved_for_netlist(&self, netlist: &Netlist) -> Self {
-        if self.config_is_resolved {
-            return Self::new_with_resolved_config(self.config.clone());
-        }
-        let resolved = resolve_simulation_config(
-            &self.config,
-            Some(&netlist.options),
-            &SimulationConfigOverrides::default(),
-        );
-        Self::new_with_resolved_config(resolved)
+        let mut resolved_engine = if self.config_is_resolved {
+            Self::new_with_resolved_config(self.config.clone())
+        } else {
+            let resolved = resolve_simulation_config(
+                &self.config,
+                Some(&netlist.options),
+                &SimulationConfigOverrides::default(),
+            );
+            Self::new_with_resolved_config(resolved)
+        };
+        // The analyses run on this engine, not on `self`, so it has to record
+        // into the same metrics. Without sharing the handle every measurement
+        // would be dropped with the temporary and `convergence_quality` would
+        // report a clean run no matter what the solver actually did.
+        resolved_engine.convergence = std::sync::Arc::clone(&self.convergence);
+        resolved_engine
     }
 
     /// Refuse analyses that require native BSIM4 charge equations when a
@@ -616,6 +680,81 @@ impl Engine {
         } else {
             format!("{prefix}.{node}")
         }
+    }
+}
+
+#[cfg(test)]
+mod convergence_quality_tests {
+    use super::*;
+
+    const DIVIDER: &str = "divider\nV1 1 0 10\nR1 1 0 1k\n.OP\n.end\n";
+
+    #[test]
+    fn a_well_behaved_deck_reports_clean_convergence() {
+        let netlist = Netlist::parse(DIVIDER).expect("deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        engine.run_dc_op(&netlist).expect("divider solves");
+
+        let quality = engine.convergence_quality();
+        assert!(
+            !quality.has_issues(),
+            "a linear divider needs no convergence aids: {}",
+            quality.summary()
+        );
+        assert_eq!(quality.summary(), "Clean convergence");
+    }
+
+    /// The analyses do not run on the engine the caller holds — every entry
+    /// point rebuilds a resolved engine from the deck's `.OPTIONS`. If that
+    /// engine does not share the metrics handle, everything it records is
+    /// dropped with the temporary and this feature reports a clean run no
+    /// matter what the solver did.
+    #[test]
+    fn the_resolved_engine_records_into_the_callers_metrics() {
+        let netlist = Netlist::parse(DIVIDER).expect("deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let resolved = engine.resolved_for_netlist(&netlist);
+
+        resolved.record_convergence(|quality| quality.record_force_accept(7));
+
+        let quality = engine.convergence_quality();
+        assert_eq!(
+            quality.force_accepted_points, 1,
+            "the resolved engine must record into the caller's metrics"
+        );
+        assert_eq!(quality.force_accepted_indices, vec![7]);
+    }
+
+    #[test]
+    fn each_analysis_starts_from_a_clean_slate() {
+        let netlist = Netlist::parse(DIVIDER).expect("deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+
+        engine.record_convergence(|quality| quality.record_gmin_stepping());
+        assert!(engine.convergence_quality().has_issues());
+
+        engine.run_dc_op(&netlist).expect("divider solves");
+        assert!(
+            !engine.convergence_quality().has_issues(),
+            "metrics describe one run, so an analysis must clear the previous one"
+        );
+    }
+
+    #[test]
+    fn recorded_aids_are_summarised_for_the_caller() {
+        let engine = Engine::new(SimulationConfig::default());
+        engine.record_convergence(|quality| {
+            quality.record_gmin_stepping();
+            quality.record_force_accept(3);
+            quality.record_timestep_reduction();
+        });
+
+        let quality = engine.convergence_quality();
+        assert!(quality.has_issues());
+        assert_eq!(quality.timestep_reductions, 1);
+        let summary = quality.summary();
+        assert!(summary.contains("force-accepted"), "{summary}");
+        assert!(summary.contains("GMIN"), "{summary}");
     }
 }
 

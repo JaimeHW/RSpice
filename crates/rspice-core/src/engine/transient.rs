@@ -1158,6 +1158,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
         validate_transient_window(tstop, max_step)?;
+        self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
         // TRNOISE sources expand into seeded, deterministic PWL sample
@@ -3382,6 +3383,7 @@ impl Engine {
             let postloop_phase_start = crate::time_compat::Instant::now();
             if !converged {
                 retry_count += 1;
+                self.record_convergence(|quality| quality.record_timestep_reduction());
                 trap_order = native_order_after_restart(current_method);
 
                 // Diagnostic logging for debugging convergence issues
@@ -4016,6 +4018,14 @@ impl Engine {
                         force_accept_device_truncation_limit,
                     );
                     retry_count = 0; // Reset for next timepoint
+                    self.record_convergence(|quality| {
+                        if quality.force_accepted_points == 0 {
+                            log::warn!(
+                                "transient point at t={t:e} accepted without converging;                                  waveforms are not trustworthy at force-accepted points"
+                            );
+                        }
+                        quality.record_force_accept(result.time.len().saturating_sub(1))
+                    });
                     // Keep the accepted dt and only defer shrink for a couple of retries.
                     // Large cooldowns plus immediate dt growth can trap stiff switching decks
                     // in repeated force-accept loops instead of letting the controller retreat.
@@ -4337,6 +4347,7 @@ impl Engine {
                         );
                     }
                     retry_count += 1;
+                self.record_convergence(|quality| quality.record_timestep_reduction());
                     // Match ngspice truncation retries: keep the current integration
                     // order and only reduce the timestep.
                     trap_order =
@@ -4462,6 +4473,7 @@ impl Engine {
             };
             if !accept {
                 retry_count += 1;
+                self.record_convergence(|quality| quality.record_timestep_reduction());
                 trap_order = if lte_estimator.uses_accepted_solution_reference() {
                     xyce_rejected_order
                 } else {
@@ -4946,6 +4958,14 @@ impl Engine {
                         force_accept_device_truncation_limit,
                     );
                     retry_count = 0; // Reset for next timepoint
+                    self.record_convergence(|quality| {
+                        if quality.force_accepted_points == 0 {
+                            log::warn!(
+                                "transient point at t={t:e} accepted without converging;                                  waveforms are not trustworthy at force-accepted points"
+                            );
+                        }
+                        quality.record_force_accept(result.time.len().saturating_sub(1))
+                    });
                     force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
                     timestep.force_step(next_force_dt);
                     if matches!(

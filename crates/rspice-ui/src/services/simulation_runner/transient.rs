@@ -9,6 +9,7 @@ use super::{
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
+use rspice_core::diagnostics::ConvergenceQuality;
 use rspice_core::engine::{Engine, TransientResult};
 use std::path::Path;
 
@@ -56,6 +57,13 @@ pub struct TransientData {
 
     /// Node voltages: (node_name, values)
     pub voltages: Vec<(String, Vec<Value>)>,
+
+    /// What the solver had to do to produce these waveforms.
+    ///
+    /// Carried alongside the data because it qualifies it: force-accepted
+    /// points are samples the solver could not converge and kept anyway, so a
+    /// run that looks smooth can still be untrustworthy at those times.
+    pub convergence: ConvergenceQuality,
 }
 
 impl TransientData {
@@ -90,6 +98,9 @@ impl TransientData {
         Ok(Self {
             time: result.time,
             voltages,
+            // The engine is not in scope here; callers that have it overwrite
+            // this from `Engine::convergence_quality`.
+            convergence: ConvergenceQuality::default(),
         })
     }
 }
@@ -298,7 +309,9 @@ pub fn run_transient_analysis_with_source_path_and_abort(
         .map_err(|error| ServiceRunError::from_core("Transient analysis error", error))?;
 
     let node_names = result.node_names.clone();
-    TransientData::from_result_with_abort(result, &node_names, abort)
+    let mut data = TransientData::from_result_with_abort(result, &node_names, abort)?;
+    data.convergence = engine.convergence_quality();
+    Ok(data)
 }
 
 fn validate_transient_parameters(stop_time: Value, step_time: Value) -> Result<(), String> {

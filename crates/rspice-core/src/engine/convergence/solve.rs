@@ -75,6 +75,14 @@ impl Engine {
         let conv_cfg = &self.config.convergence_config;
 
         if conv_cfg.gmin_stepping {
+            self.record_convergence(|quality| {
+                if quality.gmin_stepping_count == 0 {
+                    log::warn!(
+                        "direct DC solve failed; falling back to gmin stepping.                          The operating point is reached by relaxing device                          conductances, so check it against expectations."
+                    );
+                }
+                quality.record_gmin_stepping();
+            });
             match self.gmin_stepping(circuit, matrix) {
                 Ok(sol) => return Ok(sol),
                 Err(e) => {
@@ -84,6 +92,14 @@ impl Engine {
         }
 
         if conv_cfg.source_stepping {
+            self.record_convergence(|quality| {
+                if quality.source_stepping_count == 0 {
+                    log::warn!(
+                        "gmin stepping did not converge; falling back to source stepping."
+                    );
+                }
+                quality.record_source_stepping();
+            });
             return self.source_stepping(circuit, matrix).map_err(|err| {
                 if matches!(err, crate::solver::SolverError::SingularMatrix) {
                     SimulationError::Circuit(singular_system_message(circuit, matrix))
