@@ -350,8 +350,23 @@ fn record_scale(expected: &[f64], actual: &[f64]) -> f64 {
         .fold(0.0f64, |scale, value| scale.max(value.abs()))
 }
 
+/// Relative slack on the floor comparison.
+///
+/// A floor written as the tolerance it means would exclude the very value it
+/// exists to excuse. `GMIN` reaches a stamp as a *computed* quantity, not as the
+/// literal: hicumL2va's conductance arrives as `1.0000000000000002e-12`, one ulp
+/// above `1e-12`, so `<= 1e-12` rejects it and the gate fails a model for
+/// supplying exactly the gmin it was asked for. Raising the floor to the
+/// tolerance was necessary and, on its own, not sufficient.
+///
+/// A relative 1e-9 is four thousand ulps of room at this magnitude and still
+/// 1e-21 in absolute terms, which is twenty-one orders below anything a solve
+/// can act on. It buys the comparison out of exact-representation arguments
+/// without widening it in any sense a simulator would notice.
+const FLOOR_SLACK: f64 = 1.0 + 1.0e-9;
+
 fn negligible(left: f64, right: f64, scale: f64, floor: f64) -> bool {
-    left.abs().max(right.abs()) <= (scale * SIGNIFICANCE).max(floor)
+    left.abs().max(right.abs()) <= (scale * SIGNIFICANCE).max(floor) * FLOOR_SLACK
 }
 
 fn compare_point(
