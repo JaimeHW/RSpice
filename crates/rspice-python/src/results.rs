@@ -1065,6 +1065,7 @@ impl PyTransientResult {
             variables,
             series,
             complex: false,
+            timestamp: None,
         }
     }
 
@@ -1334,14 +1335,16 @@ impl PyTransientResult {
     ///
     /// Returns:
     ///     bytes: The complete raw file
-    #[pyo3(signature = (*, format="ascii", title=None))]
+    #[pyo3(signature = (*, format="ascii", title=None, timestamp=None))]
     fn to_raw<'py>(
         &self,
         py: Python<'py>,
         format: &str,
         title: Option<&str>,
+        timestamp: Option<&str>,
     ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
-        let plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
+        let mut plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
+        plot.timestamp = timestamp.map(str::to_string);
         let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
         Ok(pyo3::types::PyBytes::new(py, &bytes))
     }
@@ -1350,9 +1353,16 @@ impl PyTransientResult {
     ///
     /// Example:
     ///     >>> tran.write_raw("run.raw", format="binary")
-    #[pyo3(signature = (path, *, format="ascii", title=None))]
-    fn write_raw(&self, path: PathBuf, format: &str, title: Option<&str>) -> PyResult<()> {
-        let plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
+    #[pyo3(signature = (path, *, format="ascii", title=None, timestamp=None))]
+    fn write_raw(
+        &self,
+        path: PathBuf,
+        format: &str,
+        title: Option<&str>,
+        timestamp: Option<&str>,
+    ) -> PyResult<()> {
+        let mut plot = self.raw_plot(title.unwrap_or("RSpice transient analysis"));
+        plot.timestamp = timestamp.map(str::to_string);
         let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
         write_export_file(&path, &bytes)
     }
@@ -1632,6 +1642,7 @@ impl PyAcResult {
             variables,
             series,
             complex: true,
+            timestamp: None,
         }
     }
 
@@ -2394,22 +2405,31 @@ impl PyAcResult {
     /// Args:
     ///     format: "ascii" (default) or "binary"
     ///     title: Header title; defaults to "RSpice AC analysis"
-    #[pyo3(signature = (*, format="ascii", title=None))]
+    #[pyo3(signature = (*, format="ascii", title=None, timestamp=None))]
     fn to_raw<'py>(
         &self,
         py: Python<'py>,
         format: &str,
         title: Option<&str>,
+        timestamp: Option<&str>,
     ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
-        let plot = self.raw_plot(title.unwrap_or("RSpice AC analysis"));
+        let mut plot = self.raw_plot(title.unwrap_or("RSpice AC analysis"));
+        plot.timestamp = timestamp.map(str::to_string);
         let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
         Ok(pyo3::types::PyBytes::new(py, &bytes))
     }
 
     /// Write a SPICE raw file. Same options as `to_raw`.
-    #[pyo3(signature = (path, *, format="ascii", title=None))]
-    fn write_raw(&self, path: PathBuf, format: &str, title: Option<&str>) -> PyResult<()> {
-        let plot = self.raw_plot(title.unwrap_or("RSpice AC analysis"));
+    #[pyo3(signature = (path, *, format="ascii", title=None, timestamp=None))]
+    fn write_raw(
+        &self,
+        path: PathBuf,
+        format: &str,
+        title: Option<&str>,
+        timestamp: Option<&str>,
+    ) -> PyResult<()> {
+        let mut plot = self.raw_plot(title.unwrap_or("RSpice AC analysis"));
+        plot.timestamp = timestamp.map(str::to_string);
         let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
         write_export_file(&path, &bytes)
     }
@@ -2807,22 +2827,31 @@ impl PyDcSweepResult {
     /// Args:
     ///     format: "ascii" (default) or "binary"
     ///     title: Header title; defaults to "RSpice DC sweep"
-    #[pyo3(signature = (*, format="ascii", title=None))]
+    #[pyo3(signature = (*, format="ascii", title=None, timestamp=None))]
     fn to_raw<'py>(
         &self,
         py: Python<'py>,
         format: &str,
         title: Option<&str>,
+        timestamp: Option<&str>,
     ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
-        let plot = self.raw_plot(title.unwrap_or("RSpice DC sweep"));
+        let mut plot = self.raw_plot(title.unwrap_or("RSpice DC sweep"));
+        plot.timestamp = timestamp.map(str::to_string);
         let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
         Ok(pyo3::types::PyBytes::new(py, &bytes))
     }
 
     /// Write a SPICE raw file. Same options as `to_raw`.
-    #[pyo3(signature = (path, *, format="ascii", title=None))]
-    fn write_raw(&self, path: PathBuf, format: &str, title: Option<&str>) -> PyResult<()> {
-        let plot = self.raw_plot(title.unwrap_or("RSpice DC sweep"));
+    #[pyo3(signature = (path, *, format="ascii", title=None, timestamp=None))]
+    fn write_raw(
+        &self,
+        path: PathBuf,
+        format: &str,
+        title: Option<&str>,
+        timestamp: Option<&str>,
+    ) -> PyResult<()> {
+        let mut plot = self.raw_plot(title.unwrap_or("RSpice DC sweep"));
+        plot.timestamp = timestamp.map(str::to_string);
         let bytes = raw_export_bytes(&plot, crate::export::RawFormat::parse(format).map_err(crate::errors::value_error)?)?;
         write_export_file(&path, &bytes)
     }
@@ -2984,6 +3013,7 @@ impl PyDcSweepResult {
             variables,
             series,
             complex: false,
+            timestamp: None,
         }
     }
 }

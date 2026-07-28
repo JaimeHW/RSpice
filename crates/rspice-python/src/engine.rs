@@ -17,6 +17,7 @@
 //! All simulation calls release the GIL. Long iterative and swept analyses
 //! additionally poll Python signals so KeyboardInterrupt cancels them.
 
+use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
@@ -25,8 +26,8 @@ use rspice_core::analysis::advanced::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::advanced::stb::{StbConfig, StbSweepType};
 use rspice_core::analysis::{AcSensitivityOutput, Distribution};
 use rspice_core::netlist::{
-    AnalysisCommand, DcSweepSpec, FreqVariation, PoleZeroAnalysisType, PoleZeroTransferType,
-    StepCommand, StepSweep, StepTarget,
+    AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation, PoleZeroAnalysisType,
+    PoleZeroTransferType, StepCommand, StepSweep, StepTarget,
 };
 use rspice_core::{
     AbortSignal, Engine, SimulationConfig, SimulationConfigOverrides, resolve_simulation_config,
@@ -665,6 +666,246 @@ fn configure_hb_numerics(
     config.use_exact_jacobian = use_exact_jacobian;
     config.verbose = verbose;
     Ok(())
+}
+
+/// One `.DC` sweep axis
+///
+/// Describes a single swept source in any of the forms `.DC` accepts:
+/// linear, an explicit value list, or a logarithmic decade/octave sweep.
+/// Pass one to `Engine.run_dc_sweep_spec` as the inner axis, and optionally
+/// a second as the outer axis of a nested sweep.
+///
+/// Example:
+///     >>> DcSweep("V1", start=0, stop=5, step=0.1)
+///     >>> DcSweep("V1", values=[0, 1.8, 3.3, 5.0])
+///     >>> DcSweep("V1", start=1, stop=1e6, mode="dec", points=10)
+#[pyclass(name = "DcSweep", module = "rspice", frozen, from_py_object)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PyDcSweep {
+    /// Name of the swept source or parameter.
+    #[pyo3(get)]
+    pub source: String,
+    spec: DcSweepSpec,
+}
+
+#[pymethods]
+impl PyDcSweep {
+    /// Describe one swept axis
+    ///
+    /// Args:
+    ///     source: Source name to sweep (e.g. "V1")
+    ///     start: First value; required for every mode except "list"
+    ///     stop: Last value; required for every mode except "list"
+    ///     step: Increment; required and non-zero for "linear"
+    ///     mode: "linear", "list", "dec", or "oct". Inferred from the other
+    ///           arguments when omitted: "list" if `values` is given,
+    ///           otherwise "linear".
+    ///     values: Explicit values; implies and is exclusive to "list"
+    ///     points: Points per decade/octave; required for "dec" and "oct"
+    ///
+    /// Raises:
+    ///     ValueError: If the arguments do not describe a usable sweep
+    #[new]
+    #[pyo3(signature = (source, start=None, stop=None, step=None, *, mode=None, values=None, points=None))]
+    fn new(
+        source: &str,
+        start: Option<f64>,
+        stop: Option<f64>,
+        step: Option<f64>,
+        mode: Option<&str>,
+        values: Option<Vec<f64>>,
+        points: Option<usize>,
+    ) -> PyResult<Self> {
+        if source.trim().is_empty() {
+            return Err(crate::errors::value_error("source must not be empty"));
+        }
+        // A value list is self-describing, so `mode` is only needed to pick
+        // between linear and the logarithmic axes.
+        let normalized = match mode {
+            Some(mode) => mode.to_ascii_lowercase(),
+            None if values.is_some() => "list".to_string(),
+            None => "linear".to_string(),
+        };
+
+        // Reject contradictory arguments rather than silently dropping one:
+        // an ignored bound or value list is a wrong sweep, not a warning.
+        if values.is_some() {
+            if normalized != "list" {
+                return Err(crate::errors::value_error(format!(
+                    "values describes a list sweep and cannot be combined with mode='{normalized}'"
+                )));
+            }
+            if start.is_some() || stop.is_some() || step.is_some() {
+                return Err(crate::errors::value_error(
+                    "values cannot be combined with start, stop, or step",
+                ));
+            }
+        }
+        if points.is_some() && !matches!(normalized.as_str(), "dec" | "decade" | "oct" | "octave") {
+            return Err(crate::errors::value_error(
+                "points is only valid with mode='dec' or mode='oct'",
+            ));
+        }
+
+        let spec = match normalized.as_str() {
+            "linear" | "lin" => {
+                let (start, stop, step) = require_linear_bounds(start, stop, step)?;
+                DcSweepSpec {
+                    start,
+                    stop,
+                    step,
+                    mode: DcSweepMode::Linear,
+                }
+            }
+            "list" => {
+                let values = values.ok_or_else(|| {
+                    crate::errors::value_error("mode='list' requires values")
+                })?;
+                if values.is_empty() {
+                    return Err(crate::errors::value_error("values must not be empty"));
+                }
+                if let Some((index, value)) = values
+                    .iter()
+                    .enumerate()
+                    .find(|(_, value)| !value.is_finite())
+                {
+                    return Err(crate::errors::value_error(format!(
+                        "sweep value at index {index} must be finite, got {value}"
+                    )));
+                }
+                DcSweepSpec {
+                    start: values[0],
+                    stop: *values.last().expect("values is non-empty"),
+                    step: 0.0,
+                    mode: DcSweepMode::List(values),
+                }
+            }
+            "dec" | "decade" | "oct" | "octave" => {
+                let (start, stop) = require_log_bounds(start, stop)?;
+                let points = points.ok_or_else(|| {
+                    crate::errors::value_error("mode='dec' and mode='oct' require points")
+                })?;
+                if points == 0 {
+                    return Err(crate::errors::value_error("points must be at least 1"));
+                }
+                let mode = if normalized.starts_with("dec") {
+                    DcSweepMode::Decade {
+                        points_per_decade: points,
+                    }
+                } else {
+                    DcSweepMode::Octave {
+                        points_per_octave: points,
+                    }
+                };
+                DcSweepSpec {
+                    start,
+                    stop,
+                    step: 0.0,
+                    mode,
+                }
+            }
+            other => {
+                return Err(crate::errors::value_error(format!(
+                    "mode must be 'linear', 'list', 'dec', or 'oct', got '{other}'"
+                )));
+            }
+        };
+
+        if spec.points().is_empty() {
+            return Err(crate::errors::value_error(format!(
+                "sweep of '{source}' produces no points"
+            )));
+        }
+        Ok(Self {
+            source: source.to_string(),
+            spec,
+        })
+    }
+
+    /// The values this axis will visit.
+    #[getter]
+    fn values<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.spec.points().to_pyarray(py)
+    }
+
+    /// Number of points on this axis.
+    #[getter]
+    fn num_points(&self) -> usize {
+        self.spec.points().len()
+    }
+
+    /// Sweep mode: "linear", "list", "dec", or "oct".
+    #[getter]
+    fn mode(&self) -> &'static str {
+        match self.spec.mode {
+            DcSweepMode::Linear => "linear",
+            DcSweepMode::List(_) => "list",
+            DcSweepMode::Decade { .. } => "dec",
+            DcSweepMode::Octave { .. } => "oct",
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DcSweep(source='{}', mode='{}', points={})",
+            self.source,
+            self.mode(),
+            self.num_points()
+        )
+    }
+}
+
+/// Validate the bounds a linear `.DC` sweep needs.
+fn require_linear_bounds(
+    start: Option<f64>,
+    stop: Option<f64>,
+    step: Option<f64>,
+) -> PyResult<(f64, f64, f64)> {
+    let (start, stop, step) = match (start, stop, step) {
+        (Some(start), Some(stop), Some(step)) => (start, stop, step),
+        _ => {
+            return Err(crate::errors::value_error(
+                "mode='linear' requires start, stop, and step",
+            ));
+        }
+    };
+    if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
+        return Err(crate::errors::value_error(format!(
+            "sweep bounds must be finite, got start={start}, stop={stop}, step={step}"
+        )));
+    }
+    if step == 0.0 {
+        return Err(crate::errors::value_error("sweep step must be non-zero"));
+    }
+    if (stop > start && step < 0.0) || (stop < start && step > 0.0) {
+        return Err(crate::errors::value_error(format!(
+            "sweep step sign must move from start toward stop, got start={start}, stop={stop}, step={step}"
+        )));
+    }
+    Ok((start, stop, step))
+}
+
+/// Validate the bounds a logarithmic `.DC` sweep needs.
+fn require_log_bounds(start: Option<f64>, stop: Option<f64>) -> PyResult<(f64, f64)> {
+    let (start, stop) = match (start, stop) {
+        (Some(start), Some(stop)) => (start, stop),
+        _ => {
+            return Err(crate::errors::value_error(
+                "logarithmic sweeps require start and stop",
+            ));
+        }
+    };
+    if !start.is_finite() || !stop.is_finite() {
+        return Err(crate::errors::value_error(format!(
+            "sweep bounds must be finite, got start={start}, stop={stop}"
+        )));
+    }
+    if start <= 0.0 || stop <= 0.0 {
+        return Err(crate::errors::value_error(format!(
+            "logarithmic sweep bounds must be positive, got start={start}, stop={stop}"
+        )));
+    }
+    Ok((start, stop))
 }
 
 /// Outcome of `Engine.health_check()`
@@ -2118,6 +2359,79 @@ impl PyEngine {
             results,
             source_name,
         ))
+    }
+
+    /// Run a DC sweep described by one or two `DcSweep` axes
+    ///
+    /// The general form of `.DC`: linear, explicit-list, and logarithmic
+    /// decade/octave sweeps, optionally nested inside a second swept source.
+    /// `run_dc_sweep` remains the shorthand for the linear single-source case.
+    ///
+    /// A nested result is flattened in the same order `.DC` produces: the
+    /// inner axis varies fastest. Use `shape`, `is_nested`, and
+    /// `secondary_value_at` on the result to address the grid.
+    ///
+    /// Args:
+    ///     netlist: Parsed netlist to simulate
+    ///     sweep: Inner (fastest-varying) sweep axis
+    ///     sweep2: Optional outer sweep axis
+    ///
+    /// Returns:
+    ///     DcSweepResult: One solution per grid point
+    ///
+    /// Example:
+    ///     >>> vgs = rspice.DcSweep("VG", start=0, stop=1.8, step=0.05)
+    ///     >>> vds = rspice.DcSweep("VD", values=[0.5, 1.0, 1.8])
+    ///     >>> curves = engine.run_dc_sweep_spec(netlist, vgs, sweep2=vds)
+    ///     >>> curves.shape
+    ///     (3, 37)
+    #[pyo3(signature = (netlist, sweep, *, sweep2=None))]
+    fn run_dc_sweep_spec(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        sweep: &PyDcSweep,
+        sweep2: Option<&PyDcSweep>,
+    ) -> PyResult<PyDcSweepResult> {
+        if let Some(outer) = sweep2
+            && outer.source.eq_ignore_ascii_case(&sweep.source)
+        {
+            return Err(crate::errors::value_error(format!(
+                "a nested sweep must vary two different sources, but both axes sweep '{}'",
+                sweep.source
+            )));
+        }
+
+        let second = sweep2.map(|outer| DcSecondSweep {
+            source: outer.source.clone(),
+            start: outer.spec.start,
+            stop: outer.spec.stop,
+            step: outer.spec.step,
+            mode: outer.spec.mode.clone(),
+        });
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let results = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_dc_sweep2_spec_with_report_and_abort(
+                &netlist.inner,
+                &sweep.source,
+                &sweep.spec,
+                second.as_ref(),
+                abort,
+            )
+        })?;
+
+        match sweep2 {
+            Some(outer) => PyDcSweepResult::new_nested_with_reports(
+                results,
+                &sweep.source,
+                &outer.source,
+                outer.spec.points(),
+            ),
+            None => Ok(PyDcSweepResult::new_named_with_reports(
+                results,
+                &sweep.source,
+            )),
+        }
     }
 
     /// Run AC small-signal analysis at explicit frequencies

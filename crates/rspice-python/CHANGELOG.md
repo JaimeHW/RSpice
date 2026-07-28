@@ -8,6 +8,60 @@ Release numbers remain tied to the workspace version.
 
 ### Added
 
+- Result export: Touchstone v1 (`SParameterResult.to_touchstone` /
+  `write_touchstone`, with `ri`/`ma`/`db` formats and Hz–GHz axes),
+  ngspice-compatible SPICE raw files in ASCII and binary for transient, AC,
+  and DC-sweep results (AC written with `Flags: complex`), and RFC 4180 CSV.
+  A Touchstone export whose ports do not share one reference impedance is
+  refused rather than written with a silently wrong `R`.
+- Pickle and `copy.deepcopy` support for `Netlist`, every configuration class
+  and enum, and twenty result types, so netlists and results can cross a
+  process boundary with `multiprocessing`. A `Netlist` pickles by replaying
+  its parse from the retained source text under the same `ResourceLimits`.
+- Netlist introspection: an `Element` projection (name, kind, nodes, value,
+  value expression, model, instance parameters) behind `Netlist.elements` and
+  `Netlist.element()`, plus `Netlist.node_names`, `Netlist.parameters`,
+  `Netlist.parameter()`, `Netlist.source`, and `Netlist.source_path`.
+- `Netlist.with_parameters()` derives a new netlist with different `.PARAM`
+  values by rewriting top-level assignments in place and re-parsing.
+  Subcircuit-scoped definitions are deliberately left alone.
+- `DcSweep` and `Engine.run_dc_sweep_spec()`: the general `.DC` form with
+  linear, explicit-list, and logarithmic decade/octave axes, and nested
+  two-source sweeps. `run_dc_sweep` remains the linear single-source
+  shorthand.
+- `.FOUR` and `TransientResult` now resolve branch currents and differential
+  node pairs, matching the probe grammar the GUI already accepted. Adds
+  `TransientResult.fourier_current()`, `TransientResult.signal()`, and a
+  `reference=` argument to `fourier()`.
+- `RSpiceKeyError`, `RSpiceIndexError`, `RSpiceValueError`, and
+  `RSpiceTypeError`, each deriving from both `RSpiceError` and the builtin
+  exception a caller already expects.
+- `RunReport.all_op`, `all_dc`, `all_tran`, `all_ac`, and `all_noise` retain
+  every result when a deck carries more than one directive of a kind.
+- `MonteCarloResult.try_variable()`, `__getitem__`, and `__contains__`.
+
+### Changed
+
+- `Engine.run()` records a directive that fails as `skipped=True` with its
+  error text and continues with the remaining directives, which is what the
+  documentation already described. `continue_on_error=False` restores the
+  previous abort-and-raise behaviour.
+- Lookup and argument failures now derive from `RSpiceError` in addition to
+  their builtin base, so `except rspice.RSpiceError` covers every failure the
+  library raises. `except KeyError` and friends keep working unchanged.
+- `MonteCarloResult.get_variable()`, `mean()`, `std_dev()`, and `range()`
+  raise `KeyError` for an unknown variable instead of returning `None`.
+- `SimulationConfig`, `ConvergenceConfig`, `BypassConfig`, and
+  `ResourceLimits` compare by value.
+
+### Fixed
+
+- `DcSweepResult.result_at()` carries the per-device operating points that
+  `sweep[i]` and `points()` already provided.
+- `.four 1k I(V1)` and `.four 1k V(a,b)` are evaluated instead of failing
+  with "unknown node", which previously made `assert_passed()` fail on decks
+  those directives are valid in.
+
 - `Engine.health_check()` and a typed `HealthReport`: a readiness probe that
   exercises the configured parser-to-solver path against a fixed in-memory
   circuit, with no filesystem or network I/O.

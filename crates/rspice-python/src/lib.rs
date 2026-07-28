@@ -116,6 +116,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<errors::PyUnresolvedOutputSymbol>()?;
     m.add_class::<engine::PyHealthReport>()?;
     m.add_class::<engine::PyEngine>()?;
+    m.add_class::<engine::PyDcSweep>()?;
 
     // Configuration classes
     m.add_class::<config::PySimulationConfig>()?;
@@ -201,6 +202,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "UnresolvedOutputSymbol",
             "HealthReport",
             "Engine",
+            "DcSweep",
             "SimulationConfig",
             "ResourceLimits",
             "ConvergenceConfig",

@@ -18,6 +18,12 @@ regression tests in CI the same way you run unit tests.
   `report.assert_passed()` turns them into a CI gate
 - **NumPy integration** — waveforms, spectra, and complex AC phasors as
   ndarrays
+- **Result export** — Touchstone v1, ngspice-compatible SPICE raw (ASCII and
+  binary, real and complex), and RFC 4180 CSV
+- **Netlist introspection** — walk elements, nodes, and `.PARAM` values, and
+  derive parameter variants without string-editing the deck
+- **Process-parallel** — netlists, configurations, and results pickle, so
+  `multiprocessing` works on every supported interpreter
 - **Releases the GIL** — long simulations run with the GIL released; other
   Python threads stay live, and engines can simulate in parallel threads
 - **Ctrl-C works** — long-running DC, AC/RF, transient, noise, statistical,
@@ -134,6 +140,9 @@ def test_rc_step_response():
 `.step`, `.temp`, DC and AC `.sens`, and `.four` directives in deck order and
 returns a `RunReport`:
 
+- `report.all_op` / `report.all_dc` / `report.all_tran` / `report.all_ac` /
+  `report.all_noise` — every result when a deck repeats a directive kind;
+  the singular accessors below are the last of each
 - `report.op` / `report.dc` / `report.tran` / `report.ac` /
   `report.distortion` / `report.hb` / `report.s_parameters` / `report.noise` /
   `report.tf` / `report.stb` / `report.pz` / `report.monte_carlo` /
@@ -151,6 +160,16 @@ returns a `RunReport`:
   ran, at least one measurement was evaluated, and all of them passed, so
   neither a skipped analysis nor a skipped measurement can green-wash a
   pipeline
+
+A directive that fails is recorded and the rest of the deck still runs, so
+one unconverged sweep does not cost you the results and `.MEAS` outcomes of
+everything else. Pass `continue_on_error=False` to abort on the first failure
+and raise it instead:
+
+```python
+report = engine.run(netlist)                       # record failures, keep going
+report = engine.run(netlist, continue_on_error=False)   # raise the first one
+```
 
 Measurements can also run against transient and DC-sweep results you already
 have:
@@ -217,6 +236,28 @@ netlist.analyses, netlist.measurement_names, netlist.measurement_specs
 netlist.title, netlist.is_global("vdd")
 netlist.num_elements, netlist.num_models, netlist.num_subcircuits
 netlist.num_analyses, netlist.num_measurements
+
+# Structure: every instance, the authored node set, and .PARAM values
+for element in netlist.elements:
+    print(element.name, element.kind, element.nodes, element.value, element.model)
+m1 = netlist.element("M1")                     # case-insensitive; KeyError if absent
+m1.instance_params["W"]                        # resolved instance parameters
+netlist.node_names                             # authored nodes, ground excluded
+netlist.parameters                             # {'RVAL': 1000.0} - canonical names
+netlist.parameter("rval")                      # case-insensitive lookup
+netlist.source, netlist.source_path            # the deck this was parsed from
+```
+
+`Netlist.with_parameters` derives an independent netlist with different
+`.PARAM` values. Top-level assignments are rewritten in place and the deck is
+re-parsed, so the result does not depend on the redefinition policy in force.
+Definitions inside a `.SUBCKT` are left alone, because those are scoped to the
+subcircuit and share only a name:
+
+```python
+for rval in (1e3, 2e3, 5e3):
+    corner = netlist.with_parameters({"rval": rval})
+    print(rval, engine.run_dc_op(corner).voltage("out"))
 ```
 
 `Netlist.parse` treats its input as statements: if the first non-blank line
@@ -275,6 +316,15 @@ for v_in, sol in sweep:
     print(f"{v_in:.1f} V -> {sol.voltage('out'):.3f} V")
 v_curve = sweep.voltage_array("out")           # NumPy array across the sweep
 
+# The general .DC form: linear, list, decade/octave, and nested sweeps
+vgs = rspice.DcSweep("VG", start=0, stop=1.8, step=0.05)
+vds = rspice.DcSweep("VD", values=[0.5, 1.0, 1.8])
+curves = engine.run_dc_sweep_spec(netlist, vgs, sweep2=vds)
+curves.shape                                   # (outer_points, inner_points)
+decade = engine.run_dc_sweep_spec(
+    netlist, rspice.DcSweep("V1", 1, 1e3, mode="dec", points=10)
+)
+
 # AC analysis — explicit frequencies or dec/oct/lin sweeps
 ac = engine.run_ac(netlist, np.logspace(0, 6, 121))
 ac = engine.run_ac_sweep(netlist, "dec", 20, 1.0, 1e6)
@@ -306,6 +356,11 @@ im3 = imd.product("2f1-f2").voltage_complex("out")
 tran = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
 four = tran.fourier("out", fundamental=1e3)    # harmonics + THD
 print(f"THD = {four.thd_percent:.2f}%")
+
+# Probes address node voltages, differential pairs, and branch currents
+tran.signal("V(out)"), tran.signal("V(outp,outn)"), tran.signal("I(V1)")
+tran.fourier("outp", 1e3, reference="outn")    # differential .FOUR
+tran.fourier_current("V1", 1e3)                # branch-current .FOUR
 
 # Long-run transient storage and continuation
 compressed = engine.run_tran_compressed(netlist, stop_time=1.0,
@@ -398,6 +453,53 @@ stationary noise analysis, including resistor noise switches and temperature
 offsets, semiconductor thermal/shot/flicker noise, tabulated and Verilog-A
 sources, and correlated BSIM4 thermal noise.
 
+## Exporting Results
+
+Every result serializes to the formats the rest of an EDA flow reads, either
+as an in-memory string for a CI job or straight to disk:
+
+```python
+# Touchstone v1 for scikit-rf, ADS, or a datasheet plot
+sparams.write_touchstone(f"dut.{sparams.touchstone_extension}", format="ma")
+text = sparams.to_touchstone(frequency_unit="ghz", comments=["nominal corner"])
+
+# ngspice-compatible raw files; AC is written with Flags: complex
+tran.write_raw("run.raw", format="binary")
+ac.write_raw("ac.raw")                          # or ac.to_raw() -> bytes
+
+# RFC 4180 CSV; AC splits each phasor into <name>_real / <name>_imag
+tran.write_csv("run.csv")
+print(sweep.to_csv())
+tran.export_columns                             # column order, in advance
+```
+
+Touchstone v1 carries a single reference impedance. A sweep whose ports do not
+all share one is refused rather than written with an `R` that misdescribes it;
+renormalize the ports first.
+
+## Parallelism
+
+Simulation calls release the GIL, so threads work directly. For process-based
+parallelism, netlists, configurations, and results all pickle:
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+
+def corner(rval):
+    netlist = BASE.with_parameters({"rval": rval})
+    return rval, rspice.Engine().run_dc_op(netlist).voltage("out")
+
+with ProcessPoolExecutor() as pool:
+    for rval, v_out in pool.map(corner, [1e3, 2e3, 5e3, 10e3]):
+        print(rval, v_out)
+```
+
+A `Netlist` pickles by replaying its parse from the deck text it retains, so
+the payload stays the size of the source rather than the whole AST, and the
+`ResourceLimits` it was parsed under are reapplied. `PssResult`, `HbResult`,
+`PacResult`, `CompressedTransientResult`, and `DistortionResult` are not yet
+picklable.
+
 ## Error Handling
 
 All errors derive from `rspice.RSpiceError`:
@@ -408,8 +510,16 @@ RSpiceError
 ├── SimulationError      # circuit or solver failure
 │   ├── ConvergenceError # Newton-Raphson failed to converge
 │   └── CancelledError   # Engine.cancel() stopped the active call
-└── MeasurementError     # RunReport.assert_passed() failures
+├── MeasurementError     # RunReport.assert_passed() failures
+├── RSpiceKeyError       # also a KeyError   - unknown node/branch/device
+├── RSpiceIndexError     # also an IndexError - out-of-range result index
+├── RSpiceValueError     # also a ValueError  - invalid argument value
+└── RSpiceTypeError      # also a TypeError   - invalid argument type
 ```
+
+The last four derive from both `RSpiceError` and the builtin exception a
+caller already expects, so `except rspice.RSpiceError` catches everything the
+library raises while `except KeyError` keeps working unchanged.
 
 ```python
 try:

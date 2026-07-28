@@ -157,10 +157,23 @@ class TestTransientExport:
 
     def test_write_helpers_match_their_in_memory_form(self, tran, tmp_path):
         raw, csv = tmp_path / "run.raw", tmp_path / "run.csv"
-        tran.write_raw(raw, format="binary")
+        stamp = "Thu Jan 1 00:00:00 1970"
+        tran.write_raw(raw, format="binary", timestamp=stamp)
         tran.write_csv(csv)
-        assert raw.read_bytes() == tran.to_raw(format="binary")
+        assert raw.read_bytes() == tran.to_raw(format="binary", timestamp=stamp)
         assert csv.read_text() == tran.to_csv()
+
+    def test_a_pinned_timestamp_makes_raw_output_reproducible(self, tran):
+        stamp = "Thu Jan 1 00:00:00 1970"
+        first = tran.to_raw(timestamp=stamp)
+        assert first == tran.to_raw(timestamp=stamp)
+        assert parse_raw_header(first.decode())["Date"] == stamp
+
+    def test_the_default_timestamp_is_the_current_time(self, tran):
+        # Without a pin the header carries a real date, which is what an
+        # ngspice reader expects; only the Date line may differ between runs.
+        header = parse_raw_header(tran.to_raw().decode())
+        assert header["Date"] and header["Date"] != ""
 
     def test_unknown_raw_format_is_rejected(self, tran):
         with pytest.raises(ValueError, match="raw format"):
@@ -195,9 +208,10 @@ class TestAcExport:
 
     def test_write_helpers_match_their_in_memory_form(self, ac, tmp_path):
         raw, csv = tmp_path / "ac.raw", tmp_path / "ac.csv"
-        ac.write_raw(raw)
+        stamp = "Thu Jan 1 00:00:00 1970"
+        ac.write_raw(raw, timestamp=stamp)
         ac.write_csv(csv)
-        assert raw.read_bytes() == ac.to_raw()
+        assert raw.read_bytes() == ac.to_raw(timestamp=stamp)
         assert csv.read_text() == ac.to_csv()
 
 

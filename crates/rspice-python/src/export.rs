@@ -1,7 +1,9 @@
 //! Result serialization: Touchstone, SPICE raw, and CSV.
 //!
-//! Every writer here produces a byte-for-byte deterministic artifact from a
-//! finished result, so exported files can be diffed in regression suites.
+//! Touchstone and CSV output is a pure function of the result, so those
+//! artifacts can be diffed in a regression suite directly. A raw file carries
+//! an ngspice-style `Date:` header, so callers who need byte-reproducible raw
+//! output pin it through the `timestamp` argument.
 //! Each format is offered both as an in-memory string (or byte vector) and as
 //! a file write, because CI jobs frequently need the text without touching a
 //! filesystem.
@@ -365,6 +367,9 @@ pub(crate) struct RawPlot {
     pub series: Vec<Vec<Complex64>>,
     /// False writes `Flags: real` and one number per value.
     pub complex: bool,
+    /// `Date:` header text. `None` stamps the current UTC time; a fixed value
+    /// makes the whole artifact a pure function of the result.
+    pub timestamp: Option<String>,
 }
 
 impl RawPlot {
@@ -395,7 +400,13 @@ impl RawPlot {
     fn header(&self, points: usize) -> String {
         let mut header = String::new();
         let _ = writeln!(header, "Title: {}", self.title);
-        let _ = writeln!(header, "Date: {}", asctime_utc_now());
+        let _ = writeln!(
+            header,
+            "Date: {}",
+            self.timestamp
+                .clone()
+                .unwrap_or_else(asctime_utc_now)
+        );
         let _ = writeln!(header, "Plotname: {}", self.plot_name);
         let _ = writeln!(
             header,
@@ -658,6 +669,7 @@ mod tests {
             ],
             series: vec![series(&[(0.0, 0.0), (1e-6, 0.0)]), series(&[(0.0, 0.0), (2.5, 0.0)])],
             complex: false,
+            timestamp: None,
         };
 
         let ascii = plot.to_ascii().expect("ascii raw");
@@ -689,6 +701,7 @@ mod tests {
             }],
             series: vec![series(&[(1e3, 0.0)])],
             complex: true,
+            timestamp: Some("Thu Jan 1 00:00:00 1970".to_string()),
         };
         let ascii = plot.to_ascii().expect("ascii raw");
         assert!(ascii.contains("Flags: complex"));
@@ -723,6 +736,7 @@ mod tests {
             ],
             series: vec![series(&[(0.0, 0.0), (1.0, 0.0)]), series(&[(0.0, 0.0)])],
             complex: false,
+            timestamp: None,
         };
         assert!(plot.to_ascii().is_err());
     }

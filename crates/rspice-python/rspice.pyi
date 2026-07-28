@@ -20,6 +20,7 @@ __all__ = [
     "UnresolvedOutputSymbol",
     "HealthReport",
     "Engine",
+    "DcSweep",
     "SimulationConfig",
     "ResourceLimits",
     "ConvergenceConfig",
@@ -210,6 +211,30 @@ class RSpiceTypeError(RSpiceError, TypeError):
 def ac_frequencies(
     variation: str, points: int, start_freq: float, stop_freq: float
 ) -> npt.NDArray[np.float64]: ...
+
+@final
+class DcSweep:
+    """One `.DC` sweep axis: linear, explicit list, or decade/octave."""
+
+    def __new__(
+        cls,
+        source: str,
+        start: float | None = None,
+        stop: float | None = None,
+        step: float | None = None,
+        *,
+        mode: str | None = None,
+        values: Sequence[float] | None = None,
+        points: int | None = None,
+    ) -> DcSweep: ...
+    @property
+    def source(self) -> str: ...
+    @property
+    def values(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def num_points(self) -> int: ...
+    @property
+    def mode(self) -> str: ...
 
 @final
 class Element:
@@ -656,13 +681,20 @@ class TransientResult:
     def export_columns(self) -> list[str]: ...
     def to_csv(self) -> str: ...
     def write_csv(self, path: str | os.PathLike[str]) -> None: ...
-    def to_raw(self, *, format: str = "ascii", title: str | None = None) -> bytes: ...
+    def to_raw(
+        self,
+        *,
+        format: str = "ascii",
+        title: str | None = None,
+        timestamp: str | None = None,
+    ) -> bytes: ...
     def write_raw(
         self,
         path: str | os.PathLike[str],
         *,
         format: str = "ascii",
         title: str | None = None,
+        timestamp: str | None = None,
     ) -> None: ...
     @property
     def num_points(self) -> int: ...
@@ -699,13 +731,20 @@ class AcResult:
     def export_columns(self) -> list[str]: ...
     def to_csv(self) -> str: ...
     def write_csv(self, path: str | os.PathLike[str]) -> None: ...
-    def to_raw(self, *, format: str = "ascii", title: str | None = None) -> bytes: ...
+    def to_raw(
+        self,
+        *,
+        format: str = "ascii",
+        title: str | None = None,
+        timestamp: str | None = None,
+    ) -> bytes: ...
     def write_raw(
         self,
         path: str | os.PathLike[str],
         *,
         format: str = "ascii",
         title: str | None = None,
+        timestamp: str | None = None,
     ) -> None: ...
     def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
@@ -775,13 +814,20 @@ class DcSweepResult:
     def export_columns(self) -> list[str]: ...
     def to_csv(self) -> str: ...
     def write_csv(self, path: str | os.PathLike[str]) -> None: ...
-    def to_raw(self, *, format: str = "ascii", title: str | None = None) -> bytes: ...
+    def to_raw(
+        self,
+        *,
+        format: str = "ascii",
+        title: str | None = None,
+        timestamp: str | None = None,
+    ) -> bytes: ...
     def write_raw(
         self,
         path: str | os.PathLike[str],
         *,
         format: str = "ascii",
         title: str | None = None,
+        timestamp: str | None = None,
     ) -> None: ...
     def __reduce__(self) -> tuple[Any, tuple[Any, ...]]: ...
 
@@ -1410,6 +1456,9 @@ class Engine:
         start: float,
         stop: float,
         step: float,
+    ) -> DcSweepResult: ...
+    def run_dc_sweep_spec(
+        self, netlist: Netlist, sweep: DcSweep, *, sweep2: DcSweep | None = None
     ) -> DcSweepResult: ...
     def run_ac(self, netlist: Netlist, frequencies: Sequence[float]) -> AcResult: ...
     def run_ac_data(self, netlist: Netlist, table_name: str) -> AcResult: ...
