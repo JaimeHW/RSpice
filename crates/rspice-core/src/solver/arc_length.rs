@@ -48,21 +48,21 @@ use crate::Value;
 //=============================================================================
 
 /// Initial arc-length step size
-pub(crate) const ARC_STEP_INITIAL: Value = 0.1;
+pub const ARC_STEP_INITIAL: Value = 0.1;
 /// Minimum arc-length step size
-pub(crate) const ARC_STEP_MIN: Value = 1e-6;
+pub const ARC_STEP_MIN: Value = 1e-6;
 /// Maximum arc-length step size
-pub(crate) const ARC_STEP_MAX: Value = 0.5;
+pub const ARC_STEP_MAX: Value = 0.5;
 /// Arc step growth factor on success
-pub(crate) const ARC_STEP_GROW: Value = 1.5;
+pub const ARC_STEP_GROW: Value = 1.5;
 /// Arc step shrink factor on failure
-pub(crate) const ARC_STEP_SHRINK: Value = 0.5;
+pub const ARC_STEP_SHRINK: Value = 0.5;
 /// Maximum continuation iterations
-pub(crate) const ARC_MAX_ITERATIONS: usize = 500;
+pub const ARC_MAX_ITERATIONS: usize = 500;
 /// Target Newton iterations per continuation step
-pub(crate) const ARC_TARGET_NEWTON_ITERS: usize = 4;
+pub const ARC_TARGET_NEWTON_ITERS: usize = 4;
 /// Maximum Newton iterations per corrector
-pub(crate) const ARC_MAX_NEWTON_ITERS: usize = 15;
+pub const ARC_MAX_NEWTON_ITERS: usize = 15;
 
 //=============================================================================
 // Arc-Length State
@@ -70,7 +70,7 @@ pub(crate) const ARC_MAX_NEWTON_ITERS: usize = 15;
 
 /// State of the arc-length continuation solver
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ArcLengthState {
+pub enum ArcLengthState {
     /// Ready to start (λ = 0)
     #[default]
     Ready,
@@ -91,7 +91,7 @@ pub(crate) enum ArcLengthState {
 /// Implements pseudo-arc-length continuation for robust DC convergence.
 /// This handles circuits with multiple solutions and near-singular Jacobians.
 #[derive(Debug, Clone)]
-pub(crate) struct ArcLengthContinuation {
+pub struct ArcLengthContinuation {
     /// Current continuation parameter (0 to 1)
     lambda: Value,
 
@@ -123,7 +123,7 @@ pub(crate) struct ArcLengthContinuation {
 
 /// Configuration for arc-length continuation
 #[derive(Debug, Clone)]
-pub(crate) struct ArcLengthConfig {
+pub struct ArcLengthConfig {
     /// Initial step size
     pub initial_step: Value,
     /// Minimum step size (give up below this)
@@ -190,7 +190,7 @@ impl ArcLengthContinuation {
 
     /// Get current arc-length step size
     #[inline]
-    pub(crate) fn arc_step(&self) -> Value {
+    pub fn arc_step(&self) -> Value {
         self.arc_step
     }
 
@@ -208,7 +208,7 @@ impl ArcLengthContinuation {
 
     /// Get total Newton iterations
     #[inline]
-    pub(crate) fn total_newton_iters(&self) -> usize {
+    pub fn total_newton_iters(&self) -> usize {
         self.total_newton_iters
     }
 
@@ -220,7 +220,7 @@ impl ArcLengthContinuation {
 
     /// Check if continuation failed
     #[inline]
-    pub(crate) fn is_failed(&self) -> bool {
+    pub fn is_failed(&self) -> bool {
         self.state == ArcLengthState::Failed
     }
 
@@ -250,7 +250,7 @@ impl ArcLengthContinuation {
     ///
     /// # Returns
     /// * `(x_predicted, lambda_predicted)` - Predicted next point
-    pub(crate) fn predict(&mut self, x_current: &[Value]) -> (Vec<Value>, Value) {
+    pub fn predict(&mut self, x_current: &[Value]) -> (Vec<Value>, Value) {
         // Save current as previous
         self.x_prev.clear();
         self.x_prev.extend_from_slice(x_current);
@@ -287,7 +287,7 @@ impl ArcLengthContinuation {
     /// The constraint is: ||x - x_prev||² + (λ - λ_prev)² - Δs² = 0
     ///
     /// Using a normalized form orthogonal to the tangent for better conditioning.
-    pub(crate) fn constraint_residual(&self, x: &[Value], lambda: Value) -> Value {
+    pub fn constraint_residual(&self, x: &[Value], lambda: Value) -> Value {
         // Arc-length constraint using tangent projection
         // N = (x - x_prev) · tangent_x + (λ - λ_prev) · tangent_λ - Δs = 0
         let mut proj = 0.0;
@@ -303,7 +303,7 @@ impl ArcLengthContinuation {
     /// Compute constraint Jacobian entries
     ///
     /// Returns (dN/dx, dN/dλ) for use in augmented Newton system
-    pub(crate) fn constraint_jacobian(&self) -> (&[Value], Value) {
+    pub fn constraint_jacobian(&self) -> (&[Value], Value) {
         // dN/dx_i = tangent_x_i
         // dN/dλ = tangent_λ
         (&self.tangent_x, self.tangent_lambda)
@@ -317,7 +317,7 @@ impl ArcLengthContinuation {
     /// # Arguments
     /// * `x` - Converged solution vector
     /// * `lambda` - Converged λ value
-    pub(crate) fn update_tangent(&mut self, x: &[Value], lambda: Value) {
+    pub fn update_tangent(&mut self, x: &[Value], lambda: Value) {
         // Compute secant direction
         for (i, (&xi, &xi_prev)) in x.iter().zip(self.x_prev.iter()).enumerate() {
             if i < self.tangent_x.len() {
@@ -348,7 +348,7 @@ impl ArcLengthContinuation {
     /// * `x` - Converged solution
     /// * `lambda` - Converged continuation parameter
     /// * `newton_iters` - Number of Newton iterations used
-    pub(crate) fn accept_step(&mut self, x: &[Value], lambda: Value, newton_iters: usize) {
+    pub fn accept_step(&mut self, x: &[Value], lambda: Value, newton_iters: usize) {
         // Update tangent
         self.update_tangent(x, lambda);
 
@@ -387,7 +387,7 @@ impl ArcLengthContinuation {
     /// Called when corrector failed to converge
     ///
     /// Reduces step size and allows retry. Returns false if step is too small.
-    pub(crate) fn reject_step(&mut self) -> bool {
+    pub fn reject_step(&mut self) -> bool {
         self.arc_step *= self.config.shrink_factor;
 
         if self.arc_step < self.config.min_step {
@@ -424,7 +424,7 @@ impl ArcLengthContinuation {
 
     /// Scale a source value by current continuation parameter
     #[inline]
-    pub(crate) fn scale_source(&self, value: Value) -> Value {
+    pub fn scale_source(&self, value: Value) -> Value {
         value * self.lambda
     }
 }
@@ -435,7 +435,7 @@ impl ArcLengthContinuation {
 
 /// Result of arc-length continuation
 #[derive(Debug, Clone)]
-pub(crate) struct ArcLengthResult {
+pub struct ArcLengthResult {
     /// Final continuation parameter (should be 1.0 for success)
     pub final_lambda: Value,
     /// Number of continuation steps

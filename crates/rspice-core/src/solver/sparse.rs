@@ -304,7 +304,7 @@ impl StaticMatrix {
     ///
     /// This is used for residual probes that must stamp into an independent
     /// numeric workspace while preserving O(1) matrix-entry lookup.
-    pub(crate) fn clone_structure(&self) -> Self {
+    pub fn clone_structure(&self) -> Self {
         Self {
             nrows: self.nrows,
             ncols: self.ncols,
@@ -475,7 +475,7 @@ impl StaticMatrix {
 
     /// Checked add for callers that want an immediate structural error.
     #[inline]
-    pub(crate) fn try_add(&mut self, row: usize, col: usize, value: Value) -> Result<(), SolverError> {
+    pub fn try_add(&mut self, row: usize, col: usize, value: Value) -> Result<(), SolverError> {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
             None => {
@@ -587,7 +587,7 @@ impl StaticMatrix {
     ///
     /// Takes `&mut self` to reuse the internal A*x scratch buffer; this is
     /// evaluated once or twice per Newton iteration (merit + convergence).
-    pub(crate) fn scaled_residual_inf_norm(
+    pub fn scaled_residual_inf_norm(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -1323,7 +1323,7 @@ impl ComplexMatrix {
 
     /// Checked real add for callers that want an immediate structural error.
     #[inline]
-    pub(crate) fn try_add_real(
+    pub fn try_add_real(
         &mut self,
         row: usize,
         col: usize,
@@ -1344,7 +1344,7 @@ impl ComplexMatrix {
 
     /// Checked complex add for callers that want an immediate structural error.
     #[inline]
-    pub(crate) fn try_add(&mut self, row: usize, col: usize, value: Complex64) -> Result<(), SolverError> {
+    pub fn try_add(&mut self, row: usize, col: usize, value: Complex64) -> Result<(), SolverError> {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
             None => {
@@ -1360,7 +1360,7 @@ impl ComplexMatrix {
 
     /// Checked imaginary add for callers that want an immediate structural error.
     #[inline]
-    pub(crate) fn try_add_imag(
+    pub fn try_add_imag(
         &mut self,
         row: usize,
         col: usize,
@@ -1562,12 +1562,12 @@ impl TripletMatrix {
     }
 
     /// Number of entries
-    pub(crate) fn nnz(&self) -> usize {
+    pub fn nnz(&self) -> usize {
         self.values.len()
     }
 
     /// Convert to StaticMatrix (freezes structure)
-    pub(crate) fn to_static(&self) -> Result<StaticMatrix, SolverError> {
+    pub fn to_static(&self) -> Result<StaticMatrix, SolverError> {
         let triplets: Vec<_> = self
             .row_indices
             .iter()
@@ -1580,7 +1580,7 @@ impl TripletMatrix {
     }
 
     /// Convert to faer sparse column matrix (legacy path)
-    pub(crate) fn to_sparse_col_mat(&self) -> Result<SparseColMat<usize, Value>, SolverError> {
+    pub fn to_sparse_col_mat(&self) -> Result<SparseColMat<usize, Value>, SolverError> {
         self.to_static().map(|s| s.to_sparse_col_mat())
     }
 }
@@ -1649,7 +1649,7 @@ impl SparseLuSolver {
     }
 
     /// Clear cached symbolic factorization (call when matrix structure changes)
-    pub(crate) fn clear_cache(&mut self) {
+    pub fn clear_cache(&mut self) {
         self.symbolic_lu = None;
     }
 }
@@ -1661,7 +1661,7 @@ impl Default for SparseLuSolver {
 }
 
 /// Solve a sparse system Ax = b (convenience function)
-pub(crate) fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+pub fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
     let sparse_mat = triplets.to_sparse_col_mat()?;
     let mut solver = SparseLuSolver::new();
     solver.solve(&sparse_mat, rhs)

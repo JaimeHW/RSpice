@@ -8,9 +8,10 @@ mod newton;
 mod sparse;
 pub(crate) use sparse::klu_backend_enabled;
 
-pub(crate) use arc_length::{ArcLengthConfig, ArcLengthContinuation};
+pub use arc_length::{ArcLengthConfig, ArcLengthContinuation, ArcLengthResult, ArcLengthState};
+pub use damping::{DampingController, DampingStatistics, DampingStrategy};
 pub use convergence::{PseudoTransient, SourceStepper};
-pub(crate) use newton::*;
+pub use newton::*;
 pub use sparse::*;
 
 use crate::Value;
@@ -155,13 +156,13 @@ impl SimulationResult {
     }
 
     /// Initialize waveform storage for transient analysis
-    pub(crate) fn init_waveforms(&mut self, num_nodes: usize, estimated_points: usize) {
+    pub fn init_waveforms(&mut self, num_nodes: usize, estimated_points: usize) {
         self.voltage_waveforms = vec![Vec::with_capacity(estimated_points); num_nodes + 1];
         self.time_points = Vec::with_capacity(estimated_points);
     }
 
     /// Record a time point
-    pub(crate) fn record_point(&mut self, time: Value, voltages: &[Value]) {
+    pub fn record_point(&mut self, time: Value, voltages: &[Value]) {
         self.time_points.push(time);
         for (i, &v) in voltages.iter().enumerate() {
             if i < self.voltage_waveforms.len() {
