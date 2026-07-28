@@ -208,6 +208,10 @@ fn ranked_integrated_contributions(
 }
 
 /// Run noise analysis.
+///
+/// Test-only. The shipping path is
+/// [`run_noise_analysis_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_noise_analysis(
     netlist_text: &str,
     output_node: &str,
@@ -230,39 +234,15 @@ pub fn run_noise_analysis(
     run_noise_analysis_with_abort(netlist_text, spec, &NoAbort).map_err(|error| error.to_string())
 }
 
-/// Run noise analysis with cooperative cancellation.
+/// Run noise analysis with cooperative cancellation. Test-only; see
+/// [`run_noise_analysis`].
+#[cfg(test)]
 pub fn run_noise_analysis_with_abort(
     netlist_text: &str,
     spec: NoiseRunSpec<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<NoiseData> {
     run_noise_analysis_with_source_path_and_abort(netlist_text, spec, None, abort)
-}
-
-/// Run noise analysis with a source path used to resolve relative includes and
-/// model file references.
-pub fn run_noise_analysis_with_source_path(
-    netlist_text: &str,
-    output_node: &str,
-    output_reference: Option<&str>,
-    input_source: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    points_per_decade: usize,
-    temperature: Value,
-    source_path: Option<&Path>,
-) -> Result<NoiseData, String> {
-    let spec = NoiseRunSpec::new(
-        output_node,
-        output_reference,
-        input_source,
-        start_freq,
-        stop_freq,
-        points_per_decade,
-        temperature,
-    );
-    run_noise_analysis_with_source_path_and_abort(netlist_text, spec, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
 }
 
 /// Run noise analysis with source-path resolution and cooperative cancellation

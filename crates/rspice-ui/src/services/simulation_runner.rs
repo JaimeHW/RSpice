@@ -61,13 +61,10 @@ use helpers::{
     parse_runner_netlist_with_abort,
 };
 pub use monte_carlo::{
-    MonteCarloData, MonteCarloVariableData, run_monte_carlo_analysis,
-    run_monte_carlo_analysis_with_abort, run_monte_carlo_analysis_with_source_path,
-    run_monte_carlo_analysis_with_source_path_and_abort,
+    MonteCarloData, MonteCarloVariableData, run_monte_carlo_analysis_with_source_path_and_abort,
 };
 pub use noise::{
-    NoiseData, NoiseRunSpec, run_noise_analysis, run_noise_analysis_with_abort,
-    run_noise_analysis_with_source_path, run_noise_analysis_with_source_path_and_abort,
+    NoiseData, NoiseRunSpec, run_noise_analysis_with_source_path_and_abort,
 };
 pub use optimization::{
     OptimizationAlgorithmMode, OptimizationData, OptimizationGoalMode, OptimizationRunConfig,
@@ -101,8 +98,7 @@ pub use pnoise::{
     run_pnoise_analysis_with_source_path, run_pnoise_analysis_with_source_path_and_abort,
 };
 pub use pole_zero::{
-    PoleZeroData, PoleZeroRunSpec, run_pole_zero_analysis, run_pole_zero_analysis_with_abort,
-    run_pole_zero_analysis_with_source_path, run_pole_zero_analysis_with_source_path_and_abort,
+    PoleZeroData, PoleZeroRunSpec, run_pole_zero_analysis_with_source_path_and_abort,
 };
 pub use pss::{
     PssData, PssRunConfig, run_pss_analysis, run_pss_analysis_with_abort,

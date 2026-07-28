@@ -36,27 +36,24 @@ pub struct MonteCarloData {
     pub variables: Vec<MonteCarloVariableData>,
 }
 
-/// Run Monte Carlo analysis by executing the first `.MC` command in the netlist.
+/// Run Monte Carlo analysis by executing the first `.MC` command in the
+/// netlist.
+///
+/// Test-only. The shipping path is
+/// [`run_monte_carlo_analysis_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, String> {
     run_monte_carlo_analysis_with_abort(netlist_text, &NoAbort).map_err(|error| error.to_string())
 }
 
-/// Run Monte Carlo analysis with cooperative cancellation.
+/// Run Monte Carlo analysis with cooperative cancellation. Test-only; see
+/// [`run_monte_carlo_analysis`].
+#[cfg(test)]
 pub fn run_monte_carlo_analysis_with_abort(
     netlist_text: &str,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<MonteCarloData> {
     run_monte_carlo_analysis_with_source_path_and_abort(netlist_text, None, abort)
-}
-
-/// Run Monte Carlo analysis with a source path used to resolve relative
-/// includes and model file references.
-pub fn run_monte_carlo_analysis_with_source_path(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-) -> Result<MonteCarloData, String> {
-    run_monte_carlo_analysis_with_source_path_and_abort(netlist_text, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
 }
 
 /// Run Monte Carlo analysis with source-path resolution and cooperative

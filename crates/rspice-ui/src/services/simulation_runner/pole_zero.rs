@@ -139,33 +139,17 @@ struct ValidatedPoleZeroRunSpec<'a> {
     analysis_type: PoleZeroAnalysisType,
 }
 
-/// Run pole-zero analysis.
-pub fn run_pole_zero_analysis(
-    netlist_text: &str,
-    spec: PoleZeroRunSpec<'_>,
-) -> Result<PoleZeroData, String> {
-    run_pole_zero_analysis_with_abort(netlist_text, spec, &NoAbort)
-        .map_err(|error| error.to_string())
-}
-
 /// Run pole-zero analysis with cooperative cancellation.
+///
+/// Test-only. The shipping path is
+/// [`run_pole_zero_analysis_with_source_path_and_abort`].
+#[cfg(test)]
 pub fn run_pole_zero_analysis_with_abort(
     netlist_text: &str,
     spec: PoleZeroRunSpec<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PoleZeroData> {
     run_pole_zero_analysis_with_source_path_and_abort(netlist_text, spec, None, abort)
-}
-
-/// Run pole-zero analysis with a source path used to resolve relative includes
-/// and model file references.
-pub fn run_pole_zero_analysis_with_source_path(
-    netlist_text: &str,
-    spec: PoleZeroRunSpec<'_>,
-    source_path: Option<&Path>,
-) -> Result<PoleZeroData, String> {
-    run_pole_zero_analysis_with_source_path_and_abort(netlist_text, spec, source_path, &NoAbort)
-        .map_err(|error| error.to_string())
 }
 
 /// Run pole-zero analysis with source-path resolution and cooperative
