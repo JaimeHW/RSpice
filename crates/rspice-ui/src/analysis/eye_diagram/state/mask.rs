@@ -63,14 +63,6 @@ impl Default for EyeMask {
 }
 
 impl EyeMask {
-    /// Create new mask
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            ..Default::default()
-        }
-    }
-
     /// One unit interval in seconds at the authoring rate (guarded against
     /// degenerate stored rates).
     fn reference_ui_seconds(&self) -> f64 {
@@ -126,10 +118,6 @@ impl EyeMask {
         1.0 - (self.violation_count as f64 / self.total_samples as f64)
     }
 
-    /// Is mask passing (no violations)?
-    pub fn is_passing(&self) -> bool {
-        self.violation_count == 0
-    }
 }
 
 /// Migration shim: legacy masks stored polygons normalized to the eye

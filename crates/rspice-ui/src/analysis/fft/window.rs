@@ -59,48 +59,6 @@ impl WindowFunction {
             Self::Gaussian,
         ]
     }
-
-    /// Coherent gain (DC response)
-    pub fn coherent_gain(&self) -> f64 {
-        match self {
-            Self::Rectangular => 1.0,
-            Self::Hanning => 0.5,
-            Self::Hamming => 0.54,
-            Self::Blackman => 0.42,
-            Self::BlackmanHarris => 0.35875,
-            Self::FlatTop => 0.21557895,
-            Self::Kaiser => 0.5,   // Approximate for beta=5
-            Self::Gaussian => 0.5, // Approximate
-        }
-    }
-
-    /// Noise bandwidth factor
-    pub fn noise_bandwidth(&self) -> f64 {
-        match self {
-            Self::Rectangular => 1.0,
-            Self::Hanning => 1.5,
-            Self::Hamming => 1.36,
-            Self::Blackman => 1.73,
-            Self::BlackmanHarris => 2.0,
-            Self::FlatTop => 3.77,
-            Self::Kaiser => 1.5, // Approximate
-            Self::Gaussian => 1.57,
-        }
-    }
-
-    /// Highest sidelobe level in dB (negative)
-    pub fn sidelobe_level(&self) -> f64 {
-        match self {
-            Self::Rectangular => -13.0,
-            Self::Hanning => -32.0,
-            Self::Hamming => -43.0,
-            Self::Blackman => -58.0,
-            Self::BlackmanHarris => -92.0,
-            Self::FlatTop => -93.0,
-            Self::Kaiser => -60.0, // For beta=5
-            Self::Gaussian => -55.0,
-        }
-    }
 }
 
 // =============================================================================
@@ -119,33 +77,6 @@ pub fn generate_window(window_type: WindowFunction, length: usize) -> Vec<f64> {
         WindowFunction::Kaiser => kaiser_window(length, 5.0),
         WindowFunction::Gaussian => gaussian_window(length, 2.5),
     }
-}
-
-/// Generate window with custom parameters
-pub fn generate_window_with_param(
-    window_type: WindowFunction,
-    length: usize,
-    param: f64,
-) -> Vec<f64> {
-    match window_type {
-        WindowFunction::Kaiser => kaiser_window(length, param),
-        WindowFunction::Gaussian => gaussian_window(length, param),
-        _ => generate_window(window_type, length),
-    }
-}
-
-/// Apply window to data in-place
-pub fn apply_window(data: &mut [f64], window: &[f64]) {
-    let n = data.len().min(window.len());
-    for i in 0..n {
-        data[i] *= window[i];
-    }
-}
-
-/// Apply window and return new vector
-pub fn apply_window_copy(data: &[f64], window: &[f64]) -> Vec<f64> {
-    let n = data.len().min(window.len());
-    (0..n).map(|i| data[i] * window[i]).collect()
 }
 
 // =============================================================================

@@ -7,8 +7,6 @@ use super::window::WindowFunction;
 use std::sync::Arc;
 
 mod data_ops;
-mod markers;
-mod metrics;
 mod modes;
 mod view;
 

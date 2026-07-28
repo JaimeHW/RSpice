@@ -185,7 +185,7 @@ impl FftState {
         self.data = None;
         self.analysis = None;
         self.source_cache = None;
-        self.clear_markers();
+        self.marker_frequencies.clear();
         self.mark_spectrum_changed();
     }
 

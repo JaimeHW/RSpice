@@ -81,60 +81,6 @@ impl FftState {
         self.recompute_from_source();
     }
 
-    /// Set magnitude scale
-    pub fn set_mag_scale(&mut self, scale: MagnitudeScale) {
-        if self.mag_scale == scale {
-            return;
-        }
-        self.mag_scale = scale;
-        if self.mag_auto {
-            self.update_auto_scale();
-        }
-    }
-
-    /// Set frequency scale
-    pub fn set_freq_scale(&mut self, scale: FrequencyScale) {
-        if self.freq_scale == scale {
-            return;
-        }
-        self.freq_scale = scale;
-        if self.freq_auto {
-            self.update_auto_scale();
-        } else if self.freq_scale == FrequencyScale::Log {
-            self.freq_min = self.freq_min.max(1e-12);
-            if self.freq_max <= self.freq_min {
-                self.freq_max = self.freq_min * 1.01;
-            }
-        }
-    }
-
-    /// Set number of harmonics for distortion analysis.
-    pub fn set_num_harmonics(&mut self, num_harmonics: usize) {
-        self.num_harmonics = num_harmonics.max(1);
-        self.recompute_analysis();
-    }
-
-    pub fn ensure_peak_cache(&mut self) {
-        let Some(data) = self.data.as_ref() else {
-            self.peak_cache = PeakCache::default();
-            return;
-        };
-        let threshold_bits = self.peak_threshold_db.to_bits();
-        if self.peak_cache.spectrum_revision == self.spectrum_revision
-            && self.peak_cache.threshold_bits == threshold_bits
-        {
-            return;
-        }
-
-        self.peak_cache.spectrum_revision = self.spectrum_revision;
-        self.peak_cache.threshold_bits = threshold_bits;
-        self.peak_cache.peak_indices = data.find_peak_indices(self.peak_threshold_db);
-    }
-
-    pub fn cached_peak_indices(&self) -> &[usize] {
-        &self.peak_cache.peak_indices
-    }
-
     /// Monotonic revision of the displayed spectrum; bumped on every
     /// recompute. Display caches key on this rather than data identity.
     pub fn spectrum_revision(&self) -> u64 {

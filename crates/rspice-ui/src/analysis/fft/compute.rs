@@ -21,33 +21,6 @@ pub struct FftResult {
     pub window: WindowFunction,
 }
 
-impl FftResult {
-    /// Get magnitude in dB (20 * log10(magnitude))
-    pub fn magnitude_db(&self) -> Vec<f64> {
-        self.magnitudes
-            .iter()
-            .map(|m| {
-                if *m > 1e-15 {
-                    20.0 * m.log10()
-                } else {
-                    -300.0 // Floor at -300 dB
-                }
-            })
-            .collect()
-    }
-
-    /// Find peak frequency
-    pub fn peak_frequency(&self) -> Option<(f64, f64)> {
-        let (idx, max_mag) = self
-            .magnitudes
-            .iter()
-            .enumerate()
-            .filter(|(_, mag)| mag.is_finite())
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))?;
-        Some((*self.frequencies.get(idx)?, *max_mag))
-    }
-}
-
 /// Compute FFT of time-domain data
 ///
 /// # Arguments
@@ -95,13 +68,4 @@ pub fn compute_fft(time: &[f64], values: &[f64], window: WindowFunction) -> Opti
     })
 }
 
-/// Compute power spectral density (magnitude squared)
-pub fn compute_psd(time: &[f64], values: &[f64], window: WindowFunction) -> Option<FftResult> {
-    let mut result = compute_fft(time, values, window)?;
-
-    // Convert to power (magnitude squared)
-    result.magnitudes = result.magnitudes.iter().map(|m| m * m).collect();
-
-    Some(result)
-}
 

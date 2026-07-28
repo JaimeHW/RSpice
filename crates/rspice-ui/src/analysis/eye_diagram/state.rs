@@ -1,20 +1,15 @@
-//! Eye Diagram State Management
+//! Eye diagram viewer state: the loaded eye, its measurements, and the mask.
 //!
-//! Viewer state for eye diagram display including mode selection,
-//! persistence settings, and mask configuration.
+//! `result_document::eye` owns the drawing — it rasterises the density map,
+//! derives its axes from `data.ui_count`, and caches the texture on
+//! `data_revision`. So there is no display policy here.
+//!
+//! The persistence cache, the cursor model with its single/delta modes, the
+//! pan-zoom view range, and the colour-map and display-mode enums were removed
+//! with the controls that would have driven them; none had a caller.
 
-mod cache;
-mod cursor;
 mod diagram;
-mod display;
 mod mask;
 
-pub use cache::EyePersistenceCache;
-pub use cursor::{EyeCursorState, EyeViewRange};
 pub use diagram::EyeDiagramState;
-pub use display::{ColorMap, EyeDisplayMode};
 pub use mask::EyeMask;
-
-pub(super) const EYE_VIEW_TIME_DIVISIONS: f64 = 10.0;
-pub(super) const EYE_VIEW_VOLTAGE_DIVISIONS: f64 = 8.0;
-pub(super) const EYE_MAX_MARKERS: usize = 16;
