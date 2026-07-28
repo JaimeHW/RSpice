@@ -1028,15 +1028,29 @@ impl CircuitData {
         one_step_order2: bool,
     ) {
         let num_nodes = self.num_nodes;
+        let hidden_base = self.num_nodes + self.num_branches;
         for binding in &mut self.jiles_atherton_inductors {
             if !binding.device.is_xyce_core() {
                 continue;
             }
             let branch_matrix_index = num_nodes + binding.branch_ordinal;
             binding.device.set_branch_index(branch_matrix_index);
+            let hidden_state = binding.hidden_m_slot.map(|slot| {
+                let magnetization = solution
+                    .get(hidden_base + slot)
+                    .copied()
+                    .unwrap_or(0.0)
+                    * XYCE_CORE_M_VAR_SCALING;
+                let rate = binding
+                    .hidden_r_slot
+                    .and_then(|rate_slot| solution.get(hidden_base + rate_slot).copied())
+                    .unwrap_or(0.0)
+                    * XYCE_CORE_R_VAR_SCALING;
+                (magnetization, rate)
+            });
             binding
                 .device
-                .commit_xyce_core_solution(solution, dt, one_step_order2);
+                .commit_xyce_core_solution(solution, hidden_state, dt, one_step_order2);
         }
         for group in &mut self.xyce_core_groups {
             if !group.device.is_xyce_core() || group.windings.len() < 2 {
@@ -1067,10 +1081,24 @@ impl CircuitData {
                 self.inductors.node_pos[first.inductor_index],
                 self.inductors.node_neg[first.inductor_index],
             );
+            let hidden_state = group.hidden_m_slot.map(|slot| {
+                let magnetization = solution
+                    .get(hidden_base + slot)
+                    .copied()
+                    .unwrap_or(0.0)
+                    * XYCE_CORE_M_VAR_SCALING;
+                let rate = group
+                    .hidden_r_slot
+                    .and_then(|rate_slot| solution.get(hidden_base + rate_slot).copied())
+                    .unwrap_or(0.0)
+                    * XYCE_CORE_R_VAR_SCALING;
+                (magnetization, rate)
+            });
             group.device.commit_xyce_core_group_solution(
                 happ,
                 happ - previous_happ,
                 first_voltage,
+                hidden_state,
                 dt,
                 one_step_order2,
             );

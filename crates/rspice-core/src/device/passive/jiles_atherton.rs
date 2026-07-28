@@ -358,6 +358,11 @@ pub struct JilesAthertonInductor {
     /// this history is retained on the constitutive device instead of in an
     /// extra MNA unknown.
     xyce_level1_rate: Value,
+    /// Accepted derivative of the LEVEL=1 magnetization state.  Xyce's
+    /// secondary-state output path consumes the integrator derivative rather
+    /// than the accepted-point secant when deciding whether to retain the
+    /// stored H path at a nonphysical turning point.
+    xyce_level1_dmdt: Value,
     /// Accepted LEVEL=1 constitutive P used by the previous hidden M equation.
     xyce_level1_p: Value,
 }
@@ -402,6 +407,7 @@ impl JilesAthertonInductor {
             xyce_dmdt_history_len: 0,
             xyce_dmdt_history_cursor: 0,
             xyce_level1_rate: 0.0,
+            xyce_level1_dmdt: 0.0,
             xyce_level1_p: 0.0,
         }
     }
@@ -1408,7 +1414,15 @@ impl JilesAthertonInductor {
         let old_current = self.current;
         let delta_happ = (current - old_current) * self.params.n_turns / self.params.length;
         let happ = current * self.params.n_turns / self.params.length;
-        self.integrate_xyce_core_from_happ(current, happ, delta_happ, voltage, dt, one_step_order2);
+        self.integrate_xyce_core_from_happ(
+            current,
+            happ,
+            delta_happ,
+            voltage,
+            dt,
+            one_step_order2,
+            None,
+        );
     }
 
     /// Commit an accepted Core endpoint expressed in aggregate magnetic-field
@@ -1423,6 +1437,7 @@ impl JilesAthertonInductor {
         voltage: Value,
         dt: Value,
         one_step_order2: bool,
+        accepted_hidden_state: Option<(Value, Value)>,
     ) {
         if voltage.abs() > self.state.max_voltage_drop {
             self.state.max_voltage_drop = voltage.abs();
@@ -1441,28 +1456,60 @@ impl JilesAthertonInductor {
                 if Self::xyce_endpoint_matches(trial_current, current)
                     && Self::xyce_endpoint_matches(trial_voltage, voltage) =>
             {
-                // MutIndNonLin2 retains the MagVarUpdate produced by the
-                // accepted updateIntermediateVars call.  The cached trial is
-                // that exact endpoint, so carry its predictor across the
-                // accepted-step boundary instead of leaving the previous
-                // Newton iterate installed.
-                if self.params.xyce_core_level2 {
-                    self.xyce_mag_update = trial.magnetization_update;
+                if !self.params.xyce_core_level2 {
+                    if let Some((accepted_m, accepted_rate)) = accepted_hidden_state {
+                        if !Self::xyce_endpoint_matches(trial.magnetization, accepted_m)
+                            || !Self::xyce_endpoint_matches(trial.level1_rate, accepted_rate)
+                        {
+                            let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
+                                happ,
+                                delta_happ,
+                                voltage,
+                                dt,
+                                one_step_order2,
+                                accepted_m,
+                                accepted_rate,
+                            ) else {
+                                return;
+                            };
+                            trial
+                        } else {
+                            trial
+                        }
+                    } else {
+                        trial
+                    }
+                } else {
+                    trial
                 }
-                trial
             }
             Some((_, _, _)) => {
                 let trial = if !self.params.xyce_core_level2 {
-                    let Some(trial) = self.xyce_core_level1_trial_from_happ(
-                        happ,
-                        delta_happ,
-                        voltage,
-                        dt,
-                        one_step_order2,
-                    ) else {
-                        return;
-                    };
-                    trial
+                    if let Some((accepted_m, accepted_rate)) = accepted_hidden_state {
+                        let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
+                            happ,
+                            delta_happ,
+                            voltage,
+                            dt,
+                            one_step_order2,
+                            accepted_m,
+                            accepted_rate,
+                        ) else {
+                            return;
+                        };
+                        trial
+                    } else {
+                        let Some(trial) = self.xyce_core_level1_trial_from_happ(
+                            happ,
+                            delta_happ,
+                            voltage,
+                            dt,
+                            one_step_order2,
+                        ) else {
+                            return;
+                        };
+                        trial
+                    }
                 } else {
                     let Some(trial) = self.xyce_core_trial_from_happ_with_update(
                         happ,
@@ -1481,16 +1528,31 @@ impl JilesAthertonInductor {
             }
             None => {
                 let trial = if !self.params.xyce_core_level2 {
-                    let Some(trial) = self.xyce_core_level1_trial_from_happ(
-                        happ,
-                        delta_happ,
-                        voltage,
-                        dt,
-                        one_step_order2,
-                    ) else {
-                        return;
-                    };
-                    trial
+                    if let Some((accepted_m, accepted_rate)) = accepted_hidden_state {
+                        let Some(trial) = self.xyce_core_level1_trial_at_magnetization_and_rate(
+                            happ,
+                            delta_happ,
+                            voltage,
+                            dt,
+                            one_step_order2,
+                            accepted_m,
+                            accepted_rate,
+                        ) else {
+                            return;
+                        };
+                        trial
+                    } else {
+                        let Some(trial) = self.xyce_core_level1_trial_from_happ(
+                            happ,
+                            delta_happ,
+                            voltage,
+                            dt,
+                            one_step_order2,
+                        ) else {
+                            return;
+                        };
+                        trial
+                    }
                 } else {
                     let Some(trial) = self.xyce_core_trial_from_happ_with_update(
                         happ,
@@ -1543,11 +1605,22 @@ impl JilesAthertonInductor {
         // MutIndNonLin's reported H/B stores deliberately retain an
         // artificial hysteresis path at nonphysical turning points.  This is
         // an output-only filter; the constitutive H used by P and the branch
-        // equation remains the gap-corrected value above.
+        // equation remains the gap-corrected value above.  LEVEL=1 and
+        // LEVEL=2 use different Xyce output contracts: only MutIndNonLin2
+        // owns the ten-entry dM/dt queue.  MutIndNonLin compares the current
+        // secondary H/B pair against the immediately preceding stored pair
+        // and uses the accepted integrator derivative and R state.
         let gap_factor = -(self.params.gap / self.params.length) * self.state.m;
         let calculated_h = happ + gap_factor;
         let dmdt = if dt.is_finite() && dt > 0.0 {
-            (self.state.m - old_m) / dt
+            if self.params.xyce_core_level2 || !one_step_order2 {
+                (self.state.m - old_m) / dt
+            } else {
+                // OneStep order 2 is trapezoidal.  Its accepted derivative is
+                // 2*delta(M)/dt minus the previous accepted derivative, just
+                // as Xyce's staDerivVec is formed for the hidden M state.
+                2.0 * (self.state.m - old_m) / dt - self.xyce_level1_dmdt
+            }
         } else {
             0.0
         };
@@ -1556,44 +1629,83 @@ impl JilesAthertonInductor {
         } else {
             0.0
         };
-        let d_h_dt = d_happ_dt - (self.params.gap / self.params.length) * dmdt;
-        let hold_h = if self.params.gap <= 0.0 {
-            (self.xyce_dmdt_average < 0.0 && d_h_dt > 0.0)
-                || (self.xyce_dmdt_average > 0.0 && d_h_dt < 0.0)
-                || (self.xyce_dmdt_average < 0.0 && self.state.reported_h < calculated_h)
-                || (self.xyce_dmdt_average > 0.0 && self.state.reported_h > calculated_h)
+        let selected_reported_h = if self.params.xyce_core_level2 {
+            let d_h_dt = d_happ_dt - (self.params.gap / self.params.length) * dmdt;
+            let hold_h = if self.params.gap <= 0.0 {
+                (self.xyce_dmdt_average < 0.0 && d_h_dt > 0.0)
+                    || (self.xyce_dmdt_average > 0.0 && d_h_dt < 0.0)
+                    || (self.xyce_dmdt_average < 0.0 && self.state.reported_h < calculated_h)
+                    || (self.xyce_dmdt_average > 0.0 && self.state.reported_h > calculated_h)
+            } else {
+                false
+            };
+            if hold_h {
+                self.state.reported_h
+            } else if self.params.gap > 0.0
+                && gap_factor.abs() < happ.abs()
+                && gap_factor.signum() == happ.signum()
+            {
+                calculated_h
+            } else {
+                happ
+            }
         } else {
-            false
+            const H_CGS_FACTOR: Value = 4.0 * PI / 1.0e3;
+            const B_CGS_FACTOR: Value = 1.0e4;
+            let previous_h_cgs = H_CGS_FACTOR * self.state.reported_h;
+            let previous_b_cgs = B_CGS_FACTOR
+                * Self::mu_0()
+                * (previous_h_cgs + old_m);
+            let calculated_h_cgs = H_CGS_FACTOR * calculated_h;
+            let calculated_b_cgs =
+                B_CGS_FACTOR * Self::mu_0() * (calculated_h_cgs + self.state.m);
+            let delta_h_cgs = calculated_h_cgs - previous_h_cgs;
+            let delta_b_cgs = calculated_b_cgs - previous_b_cgs;
+            let d_bd_h = if delta_h_cgs != 0.0 {
+                delta_b_cgs / delta_h_cgs
+            } else {
+                0.0
+            };
+            if self.params.gap <= 0.0 && d_bd_h < 0.0 {
+                // Xyce stores H in Oersted for the default output path.  The
+                // constitutive branch remains gap-corrected; only the
+                // reported secondary state is projected back to the prior
+                // stored H value at a negative dB/dH turning point.
+                self.state.reported_h
+            } else {
+                let d_h_dt = self.xyce_level1_rate
+                    - (self.params.gap / self.params.length) * dmdt;
+                if (dmdt > 0.0 && d_h_dt < 0.0) || (dmdt < 0.0 && d_h_dt > 0.0) {
+                    happ
+                } else {
+                    calculated_h
+                }
+            }
         };
-        self.state.reported_h = if hold_h {
-            self.state.reported_h
-        } else if self.params.gap > 0.0
-            && gap_factor.abs() < happ.abs()
-            && gap_factor.signum() == happ.signum()
-        {
-            calculated_h
-        } else {
-            happ
-        };
+        self.state.reported_h = selected_reported_h;
         self.state.b_prev = self.state.b;
         self.state.b = Self::mu_0() * (self.state.reported_h + self.state.m);
 
         // Xyce updates the ten-entry derivative average in acceptStep, after
         // computing this timepoint's secondary output state.  Preserve that
         // ordering so a rejected Newton attempt cannot perturb the filter.
-        let cursor = self.xyce_dmdt_history_cursor;
-        if self.xyce_dmdt_history_len < self.xyce_dmdt_history.len() {
-            self.xyce_dmdt_history[cursor] = dmdt;
-            self.xyce_dmdt_history_len += 1;
-            self.xyce_dmdt_history_cursor = (cursor + 1) % self.xyce_dmdt_history.len();
+        if self.params.xyce_core_level2 {
+            let cursor = self.xyce_dmdt_history_cursor;
+            if self.xyce_dmdt_history_len < self.xyce_dmdt_history.len() {
+                self.xyce_dmdt_history[cursor] = dmdt;
+                self.xyce_dmdt_history_len += 1;
+                self.xyce_dmdt_history_cursor = (cursor + 1) % self.xyce_dmdt_history.len();
+            } else {
+                self.xyce_dmdt_history[cursor] = dmdt;
+                self.xyce_dmdt_history_cursor = (cursor + 1) % self.xyce_dmdt_history.len();
+            }
+            let history_sum: Value = self.xyce_dmdt_history.iter().sum();
+            // The Xyce FixedQueue is initialized with ten zeros and always
+            // averages all ten slots, including those initial zeros.
+            self.xyce_dmdt_average = history_sum / self.xyce_dmdt_history.len() as Value;
         } else {
-            self.xyce_dmdt_history[cursor] = dmdt;
-            self.xyce_dmdt_history_cursor = (cursor + 1) % self.xyce_dmdt_history.len();
+            self.xyce_level1_dmdt = dmdt;
         }
-        let history_sum: Value = self.xyce_dmdt_history.iter().sum();
-        // The Xyce FixedQueue is initialized with ten zeros and always
-        // averages all ten slots, including those initial zeros.
-        self.xyce_dmdt_average = history_sum / self.xyce_dmdt_history.len() as Value;
         self.current_prev = old_current;
         self.current = current;
         self.voltage_prev = voltage;
@@ -1786,6 +1898,7 @@ impl JilesAthertonInductor {
     pub(crate) fn commit_xyce_core_solution(
         &mut self,
         voltages: &[Value],
+        hidden_state: Option<(Value, Value)>,
         dt: Value,
         one_step_order2: bool,
     ) {
@@ -1807,7 +1920,18 @@ impl JilesAthertonInductor {
         } else {
             voltages.get(self.node_neg - 1).copied().unwrap_or(0.0)
         };
-        self.integrate_xyce_core(current, v_pos - v_neg, dt, one_step_order2);
+        let old_current = self.current;
+        let delta_happ = (current - old_current) * self.params.n_turns / self.params.length;
+        let happ = current * self.params.n_turns / self.params.length;
+        self.integrate_xyce_core_from_happ(
+            current,
+            happ,
+            delta_happ,
+            v_pos - v_neg,
+            dt,
+            one_step_order2,
+            hidden_state,
+        );
     }
 
     /// Commit an accepted solution for a shared multi-winding Xyce Core.
@@ -1822,6 +1946,7 @@ impl JilesAthertonInductor {
         happ: Value,
         delta_happ: Value,
         voltage: Value,
+        hidden_state: Option<(Value, Value)>,
         dt: Value,
         one_step_order2: bool,
     ) {
@@ -1836,7 +1961,15 @@ impl JilesAthertonInductor {
         } else {
             self.current
         };
-        self.integrate_xyce_core_from_happ(current, happ, delta_happ, voltage, dt, one_step_order2);
+        self.integrate_xyce_core_from_happ(
+            current,
+            happ,
+            delta_happ,
+            voltage,
+            dt,
+            one_step_order2,
+            hidden_state,
+        );
     }
 
     /// Get hysteresis loop area (approximates core loss per cycle)
@@ -1867,6 +2000,7 @@ impl JilesAthertonInductor {
         self.xyce_dmdt_history_len = 0;
         self.xyce_dmdt_history_cursor = 0;
         self.xyce_level1_rate = 0.0;
+        self.xyce_level1_dmdt = 0.0;
         self.xyce_level1_p = 0.0;
     }
 
