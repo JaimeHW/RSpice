@@ -964,12 +964,12 @@ impl Instance {
             let v3955 = Lanes([0e0f64; 5]);
             let v3962 = staged[87];
             let v3963 = parameters[107];
-            let v3970 = staged[88];
-            let v3990 = staged[22];
-            let v3992 = branch_unknown_flows[2];
-            let v4108 = 0e0f64;
-            let v4109 = 0e0f64;
-            let v4110 = 0e0f64;
+            let v3972 = staged[88];
+            let v3994 = staged[22];
+            let v3996 = branch_unknown_flows[2];
+            let v4113 = 0e0f64;
+            let v4114 = 0e0f64;
+            let v4115 = 0e0f64;
             let v9 = v8 * (v0 - v1);
             let v10 = ((Lanes([v3[0], 0.0])) - (Lanes([0.0, v5[0]]))) * v8;
             let v12 = v11 - v1;
@@ -3418,155 +3418,170 @@ impl Instance {
             let v3960 = ddt(12337, v3902);
             let v3961 = v3903 * v3920;
             let v3968: f64;
-            let v3969: Lanes<1>;
+            let v3969: f64;
+            let v3970: Lanes<1>;
+            let v3971: Lanes<1>;
             if v3962 != 0.0 {
                 v3968 = v817;
-                v3969 = v110;
+                v3969 = v817;
+                v3970 = v110;
+                v3971 = v110;
             } else {
-                let v3966 = ddt(12350, (v3963 * v67));
-                let v3967 = (v494 * v3963) * v3920;
+                let v3964 = v3963 * v67;
+                let v3965 = v494 * v3963;
+                let v3966 = ddt(12350, v3964);
+                let v3967 = v3965 * v3920;
                 v3968 = v3966;
-                v3969 = v3967;
+                v3969 = v3964;
+                v3970 = v3967;
+                v3971 = v3965;
             }
-            let v3978: f64;
-            let v3979: f64;
-            let v3980: Lanes<4>;
-            let v3981: Lanes<1>;
-            if v3970 != 0.0 {
-                v3978 = v817;
-                v3979 = v817;
-                v3980 = v2544;
-                v3981 = v110;
+            let v3980: f64;
+            let v3981: f64;
+            let v3982: f64;
+            let v3983: Lanes<4>;
+            let v3984: Lanes<1>;
+            let v3985: Lanes<1>;
+            if v3972 != 0.0 {
+                v3980 = v817;
+                v3981 = v817;
+                v3982 = v817;
+                v3983 = v2544;
+                v3984 = v110;
+                v3985 = v110;
             } else {
-                let v3971 = v67 / v149;
-                let v3974 = (v494 - (v188 * v3971)) / v149;
-                let v3975 = v3971 - v3829;
-                let v3977 = (Lanes([v3974[0], 0.0, 0.0, 0.0])) - v3830;
-                v3978 = v3975;
-                v3979 = v3968;
+                let v3973 = v67 / v149;
+                let v3976 = (v494 - (v188 * v3973)) / v149;
+                let v3977 = v3973 - v3829;
+                let v3979 = (Lanes([v3976[0], 0.0, 0.0, 0.0])) - v3830;
                 v3980 = v3977;
-                v3981 = v3969;
+                v3981 = v3968;
+                v3982 = v3969;
+                v3983 = v3979;
+                v3984 = v3970;
+                v3985 = v3971;
             }
-            let v3982 = ddt(12367, v3863);
-            let v3983 = v3869 * v3920;
-            let v3984 = ddt(12370, v3865);
-            let v3985 = v3871 * v3920;
-            let v3994 = if ((((((v3917 + v3922) + v3924) + v3926) + v3956) + v3990) + v3992) != v817 { 1.0 } else { 0.0 };
-            let v3995 = v3901[2];
-            let v3999 = (-v3995) - (-(v3910[3]));
-            let v4002 = if (v3999.abs()) > (ctx.simparam_or("gmin", v817)) { 1.0 } else { 0.0 };
-            if v4002 != 0.0 {
+            let v3986 = ddt(12367, v3863);
+            let v3987 = v3869 * v3920;
+            let v3988 = ddt(12370, v3865);
+            let v3989 = v3871 * v3920;
+            let v3998 = if ((((((v3917 + v3922) + v3924) + v3926) + v3956) + v3994) + v3996) != v817 { 1.0 } else { 0.0 };
+            let v3999 = v3901[2];
+            let v4003 = (-v3999) - (-(v3910[3]));
+            let v4006 = if (v4003.abs()) > (ctx.simparam_or("gmin", v817)) { 1.0 } else { 0.0 };
+            if v4006 != 0.0 {
             } else {
-                let v4003 = if v3999 >= v817 { 1.0 } else { 0.0 };
+                let v4007 = if v4003 >= v817 { 1.0 } else { 0.0 };
             }
-            let v4008 = (-(v3062[1])) - (-(v3910[1]));
-            let v4011 = if (v4008.abs()) > (ctx.simparam_or("gmin", v817)) { 1.0 } else { 0.0 };
-            if v4011 != 0.0 {
+            let v4012 = (-(v3062[1])) - (-(v3910[1]));
+            let v4015 = if (v4012.abs()) > (ctx.simparam_or("gmin", v817)) { 1.0 } else { 0.0 };
+            if v4015 != 0.0 {
             } else {
-                let v4012 = if v4008 >= v817 { 1.0 } else { 0.0 };
+                let v4016 = if v4012 >= v817 { 1.0 } else { 0.0 };
             }
-            let v4013 = v3904[1];
-            let v4016 = if (v4013.abs()) > (ctx.simparam_or("gmin", v817)) { 1.0 } else { 0.0 };
-            if v4016 != 0.0 {
+            let v4017 = v3904[1];
+            let v4020 = if (v4017.abs()) > (ctx.simparam_or("gmin", v817)) { 1.0 } else { 0.0 };
+            if v4020 != 0.0 {
             } else {
-                let v4017 = if v4013 >= v817 { 1.0 } else { 0.0 };
+                let v4021 = if v4017 >= v817 { 1.0 } else { 0.0 };
             }
-            let v4018 = v3913[0];
-            let v4019 = v3913[1];
-            let v4020 = v3916[0];
-            let v4021 = v3916[1];
-            let v4022 = v3918[0];
-            let v4023 = v3918[1];
-            let v4024 = v3918[2];
-            let v4025 = v3918[3];
-            let v4026 = v3887[0];
-            let v4027 = v3887[1];
-            let v4028 = v3887[2];
-            let v4029 = v3921[0];
-            let v4030 = v3921[1];
-            let v4031 = v3921[2];
-            let v4032 = v3923[0];
-            let v4033 = v3923[1];
-            let v4034 = v3923[2];
-            let v4035 = v3925[0];
-            let v4036 = v3925[1];
-            let v4037 = v3927[0];
-            let v4038 = v3927[1];
-            let v4039 = v3937[0];
-            let v4040 = v3937[1];
-            let v4041 = v3937[2];
-            let v4042 = v3947[0];
-            let v4043 = v3947[1];
-            let v4044 = v3947[2];
-            let v4045 = v3957[0];
-            let v4046 = v3957[1];
-            let v4047 = v3957[2];
-            let v4048 = v3957[3];
-            let v4049 = v3957[4];
-            let v4050 = v3897[0];
-            let v4051 = v3897[1];
-            let v4052 = v3897[2];
-            let v4053 = v3897[3];
-            let v4054 = v3959[0];
-            let v4055 = v3959[1];
-            let v4056 = v3959[2];
-            let v4057 = v3959[3];
-            let v4058 = v3901[0];
-            let v4059 = v3901[1];
-            let v4060 = v3961[0];
-            let v4061 = v3961[1];
-            let v4062 = v3961[2];
-            let v4063 = v3961[3];
-            let v4064 = v3961[4];
-            let v4065 = v3909[0];
-            let v4066 = v3909[1];
-            let v4067 = v3909[2];
-            let v4068 = v3909[3];
-            let v4069 = v3909[4];
-            let v4070 = v3980[0];
-            let v4071 = v3980[1];
-            let v4072 = v3980[2];
-            let v4073 = v3980[3];
-            let v4074 = v3981[0];
-            let v4075 = v3868[0];
-            let v4076 = v3868[1];
-            let v4077 = v3868[2];
-            let v4078 = v3868[3];
-            let v4079 = v3868[4];
-            let v4080 = v3983[0];
-            let v4081 = v3870[0];
-            let v4082 = v3870[1];
-            let v4083 = v3870[2];
-            let v4084 = v3870[3];
-            let v4085 = v3870[4];
-            let v4086 = v3985[0];
-            let v4087 = v3889[0];
-            let v4088 = v3889[1];
-            let v4089 = v3889[2];
-            let v4090 = v3891[0];
-            let v4091 = v3891[1];
-            let v4092 = v3891[2];
-            let v4093 = v3893[0];
-            let v4094 = v3893[1];
-            let v4095 = v3895[0];
-            let v4096 = v3895[1];
-            let v4097 = v3899[0];
-            let v4098 = v3899[1];
-            let v4099 = v3899[2];
-            let v4100 = v3899[3];
-            let v4101 = v3903[0];
-            let v4102 = v3903[1];
-            let v4103 = v3903[2];
-            let v4104 = v3903[3];
-            let v4105 = v3903[4];
-            let v4106 = v3869[0];
-            let v4107 = v3871[0];
+            let v4022 = v3913[0];
+            let v4023 = v3913[1];
+            let v4024 = v3916[0];
+            let v4025 = v3916[1];
+            let v4026 = v3918[0];
+            let v4027 = v3918[1];
+            let v4028 = v3918[2];
+            let v4029 = v3918[3];
+            let v4030 = v3887[0];
+            let v4031 = v3887[1];
+            let v4032 = v3887[2];
+            let v4033 = v3921[0];
+            let v4034 = v3921[1];
+            let v4035 = v3921[2];
+            let v4036 = v3923[0];
+            let v4037 = v3923[1];
+            let v4038 = v3923[2];
+            let v4039 = v3925[0];
+            let v4040 = v3925[1];
+            let v4041 = v3927[0];
+            let v4042 = v3927[1];
+            let v4043 = v3937[0];
+            let v4044 = v3937[1];
+            let v4045 = v3937[2];
+            let v4046 = v3947[0];
+            let v4047 = v3947[1];
+            let v4048 = v3947[2];
+            let v4049 = v3957[0];
+            let v4050 = v3957[1];
+            let v4051 = v3957[2];
+            let v4052 = v3957[3];
+            let v4053 = v3957[4];
+            let v4054 = v3897[0];
+            let v4055 = v3897[1];
+            let v4056 = v3897[2];
+            let v4057 = v3897[3];
+            let v4058 = v3959[0];
+            let v4059 = v3959[1];
+            let v4060 = v3959[2];
+            let v4061 = v3959[3];
+            let v4062 = v3901[0];
+            let v4063 = v3901[1];
+            let v4064 = v3961[0];
+            let v4065 = v3961[1];
+            let v4066 = v3961[2];
+            let v4067 = v3961[3];
+            let v4068 = v3961[4];
+            let v4069 = v3909[0];
+            let v4070 = v3909[1];
+            let v4071 = v3909[2];
+            let v4072 = v3909[3];
+            let v4073 = v3909[4];
+            let v4074 = v3983[0];
+            let v4075 = v3983[1];
+            let v4076 = v3983[2];
+            let v4077 = v3983[3];
+            let v4078 = v3984[0];
+            let v4079 = v3868[0];
+            let v4080 = v3868[1];
+            let v4081 = v3868[2];
+            let v4082 = v3868[3];
+            let v4083 = v3868[4];
+            let v4084 = v3987[0];
+            let v4085 = v3870[0];
+            let v4086 = v3870[1];
+            let v4087 = v3870[2];
+            let v4088 = v3870[3];
+            let v4089 = v3870[4];
+            let v4090 = v3989[0];
+            let v4091 = v3889[0];
+            let v4092 = v3889[1];
+            let v4093 = v3889[2];
+            let v4094 = v3891[0];
+            let v4095 = v3891[1];
+            let v4096 = v3891[2];
+            let v4097 = v3893[0];
+            let v4098 = v3893[1];
+            let v4099 = v3895[0];
+            let v4100 = v3895[1];
+            let v4101 = v3899[0];
+            let v4102 = v3899[1];
+            let v4103 = v3899[2];
+            let v4104 = v3899[3];
+            let v4105 = v3903[0];
+            let v4106 = v3903[1];
+            let v4107 = v3903[2];
+            let v4108 = v3903[3];
+            let v4109 = v3903[4];
+            let v4110 = v3985[0];
+            let v4111 = v3869[0];
+            let v4112 = v3871[0];
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(6),
             Some(7),
             multiplicity * (v3912),
             [6, 7],
-            [v4018, v4019],
+            [v4022, v4023],
             [],
             [],
             multiplicity,
@@ -3576,7 +3591,7 @@ impl Instance {
             Some(5),
             multiplicity * (v3915),
             [5, 6],
-            [v4020, v4021],
+            [v4024, v4025],
             [],
             [],
             multiplicity,
@@ -3586,7 +3601,7 @@ impl Instance {
             Some(3),
             multiplicity * (v3917),
             [1, 3, 4, 5],
-            [v4022, v4023, v4024, v4025],
+            [v4026, v4027, v4028, v4029],
             [],
             [],
             multiplicity,
@@ -3596,7 +3611,7 @@ impl Instance {
             Some(5),
             multiplicity * (v3886),
             [3, 4, 5],
-            [v4026, v4027, v4028],
+            [v4030, v4031, v4032],
             [],
             [],
             multiplicity,
@@ -3606,7 +3621,7 @@ impl Instance {
             Some(5),
             multiplicity * (v3919),
             [3, 4, 5],
-            [v4029, v4030, v4031],
+            [v4033, v4034, v4035],
             [],
             [],
             multiplicity,
@@ -3616,7 +3631,7 @@ impl Instance {
             Some(5),
             multiplicity * (v3922),
             [1, 4, 5],
-            [v4032, v4033, v4034],
+            [v4036, v4037, v4038],
             [],
             [],
             multiplicity,
@@ -3626,7 +3641,7 @@ impl Instance {
             Some(5),
             multiplicity * (v3924),
             [1, 5],
-            [v4035, v4036],
+            [v4039, v4040],
             [],
             [],
             multiplicity,
@@ -3636,7 +3651,7 @@ impl Instance {
             Some(2),
             multiplicity * (v3926),
             [1, 2],
-            [v4037, v4038],
+            [v4041, v4042],
             [],
             [],
             multiplicity,
@@ -3646,7 +3661,7 @@ impl Instance {
             Some(2),
             multiplicity * (v3936),
             [2, 4, 7],
-            [v4039, v4040, v4041],
+            [v4043, v4044, v4045],
             [],
             [],
             multiplicity,
@@ -3665,7 +3680,7 @@ impl Instance {
             Some(0),
             multiplicity * (v3946),
             [0, 4, 5],
-            [v4042, v4043, v4044],
+            [v4046, v4047, v4048],
             [],
             [],
             multiplicity,
@@ -3684,7 +3699,7 @@ impl Instance {
             Some(6),
             multiplicity * (v3956),
             [1, 4, 5, 6, 7],
-            [v4045, v4046, v4047, v4048, v4049],
+            [v4049, v4050, v4051, v4052, v4053],
             [],
             [],
             multiplicity,
@@ -3703,7 +3718,7 @@ impl Instance {
             Some(5),
             multiplicity * (v3896),
             [4, 5, 6, 7],
-            [v4050, v4051, v4052, v4053],
+            [v4054, v4055, v4056, v4057],
             [],
             [],
             multiplicity,
@@ -3713,7 +3728,7 @@ impl Instance {
             Some(5),
             multiplicity * (v3958),
             [4, 5, 6, 7],
-            [v4054, v4055, v4056, v4057],
+            [v4058, v4059, v4060, v4061],
             [],
             [],
             multiplicity,
@@ -3723,7 +3738,7 @@ impl Instance {
             Some(7),
             multiplicity * (v3900),
             [4, 6, 7],
-            [v4058, v4059, v3995],
+            [v4062, v4063, v3999],
             [],
             [],
             multiplicity,
@@ -3733,7 +3748,7 @@ impl Instance {
             Some(7),
             multiplicity * (v3960),
             [4, 5, 6, 7, 8],
-            [v4060, v4061, v4062, v4063, v4064],
+            [v4064, v4065, v4066, v4067, v4068],
             [],
             [],
             multiplicity,
@@ -3743,7 +3758,7 @@ impl Instance {
             Some(7),
             multiplicity * (v3908),
             [4, 5, 6, 7, 9],
-            [v4065, v4066, v4067, v4068, v4069],
+            [v4069, v4070, v4071, v4072, v4073],
             [],
             [],
             multiplicity,
@@ -3760,9 +3775,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(4),
             None,
-            multiplicity * (v3978),
+            multiplicity * (v3980),
             [4, 5, 6, 7],
-            [v4070, v4071, v4072, v4073],
+            [v4074, v4075, v4076, v4077],
             [],
             [],
             multiplicity,
@@ -3770,9 +3785,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(4),
             None,
-            multiplicity * (v3979),
+            multiplicity * (v3981),
             [4],
-            [v4074],
+            [v4078],
             [],
             [],
             multiplicity,
@@ -3782,7 +3797,7 @@ impl Instance {
             None,
             multiplicity * (v3862),
             [4, 5, 6, 7, 8],
-            [v4075, v4076, v4077, v4078, v4079],
+            [v4079, v4080, v4081, v4082, v4083],
             [],
             [],
             multiplicity,
@@ -3790,9 +3805,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(8),
             None,
-            multiplicity * (v3982),
+            multiplicity * (v3986),
             [8],
-            [v4080],
+            [v4084],
             [],
             [],
             multiplicity,
@@ -3802,7 +3817,7 @@ impl Instance {
             None,
             multiplicity * (v3864),
             [4, 5, 6, 7, 9],
-            [v4081, v4082, v4083, v4084, v4085],
+            [v4085, v4086, v4087, v4088, v4089],
             [],
             [],
             multiplicity,
@@ -3810,9 +3825,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(9),
             None,
-            multiplicity * (v3984),
+            multiplicity * (v3988),
             [9],
-            [v4086],
+            [v4090],
             [],
             [],
             multiplicity,
@@ -3850,7 +3865,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(7),
-            multiplicity * (v4108),
+            multiplicity * (v4113),
             [],
             [],
             [],
@@ -3860,7 +3875,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
             Some(7),
-            multiplicity * (v4109),
+            multiplicity * (v4114),
             [],
             [],
             [],
@@ -3870,7 +3885,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(7),
-            multiplicity * (v4110),
+            multiplicity * (v4115),
             [],
             [],
             [],
@@ -3882,19 +3897,19 @@ impl Instance {
         self.canonical_reactive[2] = v3917;
         self.canonical_reactive[3] = v3886;
         self.canonical_reactive[4] = v3888;
-        self.canonical_reactive[5] = v4087;
-        self.canonical_reactive[6] = v4088;
-        self.canonical_reactive[7] = v4089;
+        self.canonical_reactive[5] = v4091;
+        self.canonical_reactive[6] = v4092;
+        self.canonical_reactive[7] = v4093;
         self.canonical_reactive[8] = v3890;
-        self.canonical_reactive[9] = v4090;
-        self.canonical_reactive[10] = v4091;
-        self.canonical_reactive[11] = v4092;
+        self.canonical_reactive[9] = v4094;
+        self.canonical_reactive[10] = v4095;
+        self.canonical_reactive[11] = v4096;
         self.canonical_reactive[12] = v3892;
-        self.canonical_reactive[13] = v4093;
-        self.canonical_reactive[14] = v4094;
+        self.canonical_reactive[13] = v4097;
+        self.canonical_reactive[14] = v4098;
         self.canonical_reactive[15] = v3894;
-        self.canonical_reactive[16] = v4095;
-        self.canonical_reactive[17] = v4096;
+        self.canonical_reactive[16] = v4099;
+        self.canonical_reactive[17] = v4100;
         self.canonical_reactive[18] = v3936;
         self.canonical_reactive[19] = staged[89];
         self.canonical_reactive[20] = v3946;
@@ -3903,33 +3918,34 @@ impl Instance {
         self.canonical_reactive[23] = staged[91];
         self.canonical_reactive[24] = v3896;
         self.canonical_reactive[25] = v3898;
-        self.canonical_reactive[26] = v4097;
-        self.canonical_reactive[27] = v4098;
-        self.canonical_reactive[28] = v4099;
-        self.canonical_reactive[29] = v4100;
+        self.canonical_reactive[26] = v4101;
+        self.canonical_reactive[27] = v4102;
+        self.canonical_reactive[28] = v4103;
+        self.canonical_reactive[29] = v4104;
         self.canonical_reactive[30] = v3900;
         self.canonical_reactive[31] = v3902;
-        self.canonical_reactive[32] = v4101;
-        self.canonical_reactive[33] = v4102;
-        self.canonical_reactive[34] = v4103;
-        self.canonical_reactive[35] = v4104;
-        self.canonical_reactive[36] = v4105;
+        self.canonical_reactive[32] = v4105;
+        self.canonical_reactive[33] = v4106;
+        self.canonical_reactive[34] = v4107;
+        self.canonical_reactive[35] = v4108;
+        self.canonical_reactive[36] = v4109;
         self.canonical_reactive[37] = v3908;
         self.canonical_reactive[38] = staged[92];
-        self.canonical_reactive[39] = v3978;
-        self.canonical_reactive[40] = v3979;
-        self.canonical_reactive[41] = v3862;
-        self.canonical_reactive[42] = v3863;
-        self.canonical_reactive[43] = v4106;
-        self.canonical_reactive[44] = v3864;
-        self.canonical_reactive[45] = v3865;
-        self.canonical_reactive[46] = v4107;
-        self.canonical_reactive[47] = staged[22];
-        self.canonical_reactive[48] = staged[93];
-        self.canonical_reactive[49] = staged[94];
-        self.canonical_reactive[50] = v4108;
-        self.canonical_reactive[51] = v4109;
-        self.canonical_reactive[52] = v4110;
+        self.canonical_reactive[39] = v3980;
+        self.canonical_reactive[40] = v3982;
+        self.canonical_reactive[41] = v4110;
+        self.canonical_reactive[42] = v3862;
+        self.canonical_reactive[43] = v3863;
+        self.canonical_reactive[44] = v4111;
+        self.canonical_reactive[45] = v3864;
+        self.canonical_reactive[46] = v3865;
+        self.canonical_reactive[47] = v4112;
+        self.canonical_reactive[48] = staged[22];
+        self.canonical_reactive[49] = staged[93];
+        self.canonical_reactive[50] = staged[94];
+        self.canonical_reactive[51] = v4113;
+        self.canonical_reactive[52] = v4114;
+        self.canonical_reactive[53] = v4115;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -3990,10 +4006,19 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_reactive_indexed_dense_local(
+            Some(4),
+            None,
+            &[4],
+            &[cached[41]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
             Some(8),
             None,
             &[8],
-            &[cached[43]],
+            &[cached[44]],
             &[],
             &[],
             multiplicity,
@@ -4002,7 +4027,7 @@ impl Instance {
             Some(9),
             None,
             &[9],
-            &[cached[46]],
+            &[cached[47]],
             &[],
             &[],
             multiplicity,
