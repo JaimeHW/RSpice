@@ -1,3 +1,9 @@
+//! Routing an analysis specification to its runner.
+//!
+//! Dispatches a validated [`AnalysisSpec`] to the service that executes it,
+//! and wraps every call so an abort signal is observed between stages rather
+//! than only at the end of a long run.
+
 use std::path::Path;
 
 use rspice_core::abort_signal::AbortSignal;

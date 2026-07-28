@@ -1,3 +1,8 @@
+//! Periodic AC and periodic transfer function analyses.
+//!
+//! Both linearize about a periodic steady state and share that setup, so the
+//! shared half lives here alongside the two runners.
+
 #![allow(clippy::type_complexity)]
 
 mod pac;

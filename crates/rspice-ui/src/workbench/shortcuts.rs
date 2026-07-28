@@ -1,3 +1,10 @@
+//! Keyboard shortcut profiles.
+//!
+//! A profile binds commands to chords per platform. This module owns the
+//! profile model and its validation, the named-preset library a user can
+//! switch between, the portable artifacts that carry a profile between
+//! installations, and the device-local persistence behind both.
+
 pub(crate) mod artifacts;
 pub(crate) mod library_persistence;
 mod library;

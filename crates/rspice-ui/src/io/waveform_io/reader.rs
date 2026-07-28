@@ -1,3 +1,9 @@
+//! Waveform readers.
+//!
+//! Dispatches a waveform file to the reader for its format — Nutmeg raw,
+//! Cadence PSF, Touchstone, and delimited text — and normalizes the result
+//! into the crate's own waveform model.
+
 use super::types::{TouchstoneDataFormat, TouchstoneMatrixFormat, TouchstoneOptions};
 use super::*;
 

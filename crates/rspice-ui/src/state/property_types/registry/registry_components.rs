@@ -1,3 +1,5 @@
+//! Per-component property sheet definitions, grouped by device family.
+
 use super::*;
 
 mod controlled_sources;

@@ -1,3 +1,6 @@
+//! Property sheets for semiconductor devices: diodes, BJTs, JFETs, MOSFETs,
+//! and MESFETs.
+
 use super::*;
 
 mod bjt;

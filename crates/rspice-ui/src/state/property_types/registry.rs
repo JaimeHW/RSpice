@@ -1,3 +1,9 @@
+//! Default property sheets.
+//!
+//! Builds the [`PropertyRegistry`] every project starts from: for each
+//! component type, the parameters it exposes, their units, and their
+//! defaults.
+
 use super::*;
 
 mod registry_components;

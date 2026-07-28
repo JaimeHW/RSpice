@@ -1,3 +1,6 @@
+//! Property sheets for passive devices: R, L, C, coupled inductors,
+//! transmission lines, and memristors.
+
 use super::*;
 
 mod capacitor;

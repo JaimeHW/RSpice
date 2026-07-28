@@ -1,3 +1,11 @@
+//! Chord resolution.
+//!
+//! Turns a frame of raw keyboard input into at most one command: it tracks
+//! partial chord prefixes across frames, scopes candidate bindings to the
+//! active workspace and focus, and refuses to fire a command the current
+//! context does not offer. Runtime-only — a partial sequence is never
+//! persisted across sessions.
+
 use egui::{InputState, Key, Modifiers};
 
 use crate::workbench::ShortcutPreferences;

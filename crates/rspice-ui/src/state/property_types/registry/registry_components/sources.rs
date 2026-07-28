@@ -1,3 +1,5 @@
+//! Property sheets for independent and controlled sources, and for ground.
+
 use super::*;
 
 mod current_bias;

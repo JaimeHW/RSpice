@@ -1,3 +1,11 @@
+//! Keyboard shortcut dispatch, and the edit actions it resolves to.
+//!
+//! [`RSpiceApp::handle_shortcuts`] is the one place a key press becomes a
+//! command: it resolves the chord against the active profile, checks the
+//! command is available in this workspace, and dispatches. The submodules
+//! hold the actions themselves — file operations, workspace navigation,
+//! property edits, and image export.
+
 pub(in crate::workbench) mod export_image;
 pub(in crate::workbench) mod file;
 pub(in crate::workbench) mod property_edit;
