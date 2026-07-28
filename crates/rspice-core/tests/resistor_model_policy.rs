@@ -232,26 +232,33 @@ fn resistor_level1_geometry_still_uses_plain_rsh_path() {
     op_voltage(deck, "out").expect("R LEVEL=1 RSH geometry remains a plain resistor");
 }
 
-// Superseded by `be8f87fc6` ("feat(transient): implement Xyce thermal
-// resistor state"), which made the state this guard was waiting for native.
-// The deck now resolves instead of failing closed, so the guard fails.
-//
-// It is ignored rather than rewritten because the replacement assertion is
-// not yet known to be correct. The deck returns V(out) = 0.999000999000998,
-// which is exactly the *isothermal* divider for R = RESISTIVITY*L/A = 1 ohm
-// against RLOAD = 1k. That is the right answer only if Xyce leaves LEVEL=2
-// self-heating unsolved at the DC operating point; if Xyce instead solves for
-// a steady-state temperature, the resistance — and this voltage — should
-// differ. `be8f87fc6` implemented the *transient* thermal state and says
-// nothing about `.op`.
-//
-// Resolving this needs a Xyce oracle run on this deck, not a value copied
-// from what RSpice currently prints. Pinning the current number would convert
-// an honest red into a false green.
-#[ignore = "superseded by be8f87fc6; replacement needs a Xyce oracle run for DC self-heating"]
+/// `R LEVEL=2` self-heating does not act on the operating point.
+///
+/// This used to be a fail-closed guard, on the theory that a resistor with a
+/// `HEATCAPACITY` might need a self-consistent steady-state temperature before
+/// `.op` could be answered. `be8f87fc6` made the transient thermal state
+/// native, so the deck resolves; the open question was whether the value it
+/// resolves to is right.
+///
+/// Xyce's own `THERMAL_RESISTOR` suite settles it. `linear.cir` drives copper
+/// whose resistivity is a `table(temp+273.15, ...)`, so its resistance moves
+/// with device temperature and the operating point cannot hide a temperature
+/// error. At `t = 0` its reference output prints
+///
+/// ```text
+/// R1:R = 1.70105000e-04    R1:TEMP = 2.70000037e+01
+/// ```
+///
+/// and `1.70105e-4` is `table(300.15) * L/A` to every printed digit — the
+/// resistivity at TNOM = 27 C exactly, not at the 27.0000037 C the same row
+/// reports for the device. Xyce enters the operating point at nominal
+/// temperature and lets the thermal state evolve only through the transient.
+///
+/// So the isothermal divider is the correct `.op` answer here: R =
+/// RESISTIVITY*L/A = 1 ohm against RLOAD = 1k.
 #[test]
-fn xyce_resistor_level2_self_heating_form_fails_closed_until_state_is_native() {
-    let deck = "* Xyce R LEVEL=2 self-consistent thermal form needs a state variable\n\
+fn xyce_resistor_level2_self_heating_does_not_move_the_operating_point() {
+    let deck = "* Xyce R LEVEL=2 thermal form resolves isothermally at .op\n\
                 v1 in 0 dc 1\n\
                 r1 in out rmod l=1u a=1u\n\
                 rload out 0 1k\n\
@@ -259,13 +266,44 @@ fn xyce_resistor_level2_self_heating_form_fails_closed_until_state_is_native() {
                 .op\n\
                 .end\n";
 
-    let message = op_voltage(deck, "out")
-        .expect_err("self-consistent thermal LEVEL=2 form must fail until state is native");
+    let vout = op_voltage(deck, "out").expect("LEVEL=2 thermal resistor resolves at .op");
+    let expected = 1000.0 / 1001.0;
     assert!(
-        message.contains("LEVEL=2")
-            && message.contains("self")
-            && message.contains("thermal")
-            && message.contains("native"),
-        "error should identify unsupported stateful thermal LEVEL=2 form: {message}"
+        (vout - expected).abs() < 1e-12,
+        "LEVEL=2 self-heating must not perturb the operating point: \
+         got V(out)={vout}, isothermal divider is {expected}"
+    );
+}
+
+/// The same rule against Xyce's own numbers rather than against reasoning.
+///
+/// R1 of `tests/xyce/Netlists/THERMAL_RESISTOR/linear.cir`, reduced to the one
+/// branch that carries it. Its resistivity is temperature-dependent, so if the
+/// operating point applied self-heating the current would move. Xyce's
+/// `linear.cir.prn` row 0 gives `I(R1) = 2.93936098e+04`.
+#[test]
+fn xyce_thermal_resistor_operating_point_matches_the_linear_oracle() {
+    let deck = "* Xyce THERMAL_RESISTOR linear.cir, R1 branch only\n\
+                v1 1 0 5\n\
+                r1 1 0 copper l=0.1 a=1e-5\n\
+                .model copper r (level=2\n\
+                + resistivity={table(temp+273.15, 0, 0.5e-9, 100, 3e-9, 1000, 6.6e-8)}\n\
+                + heatcapacity={8.92e+3*table(temp+273.15, 0, 1, 1000, 1500)})\n\
+                .op\n\
+                .end\n";
+
+    let netlist = Netlist::parse(deck).expect("table-valued LEVEL=2 model parses");
+    let op = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("table-valued LEVEL=2 resistor resolves at .op");
+
+    // Xyce prints the source current with the opposite sign convention.
+    let got = branch_current(&op, "v1").abs();
+    let expected = 2.93936098e4;
+    let relative = (got - expected).abs() / expected;
+    assert!(
+        relative <= 1.0e-5,
+        "I(R1) at the operating point must match Xyce's linear.cir row 0: \
+         got {got:.8e}, expected {expected:.8e}, relative {relative:.2e}"
     );
 }
