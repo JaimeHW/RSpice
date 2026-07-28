@@ -38,6 +38,22 @@ use super::cfg::{
 use super::cfg_eval::{apply_binary, apply_unary};
 use super::{BlockId, ShapeId, ValueId};
 
+/// Keep the entries `kept` marks, positionally.
+///
+/// A position past the end of the mask is kept. The two are parallel by
+/// construction — an edge carries one argument per parameter of the block it
+/// enters — and `CfgFunction::validate` rejects a function where they are not,
+/// so silently dropping a trailing argument here would turn a violation of that
+/// invariant into a differently-shaped one.
+fn retain_by<T>(kept: &[bool], entries: &mut Vec<T>) {
+    let mut position = 0;
+    entries.retain(|_| {
+        let keep = kept.get(position).copied().unwrap_or(true);
+        position += 1;
+        keep
+    });
+}
+
 /// How many times the passes are re-run before giving up on further gains.
 ///
 /// Each pass exposes work for the others — folding creates constants that
@@ -473,7 +489,7 @@ impl Optimizer {
         current
     }
 
-    /// Drop values nothing reads, then renumber what is left.
+    /// Drop values nothing reads — merges included — then renumber what is left.
     fn eliminate_dead_code(&mut self) {
         let mut live = vec![false; self.values.len()];
         let mut worklist: Vec<ValueId> = Vec::new();
@@ -487,35 +503,93 @@ impl Optimizer {
         for output in &self.outputs {
             mark(*output, &mut live, &mut worklist);
         }
+        // A branch condition decides which edge is taken, so it is read whether
+        // or not any value downstream of it is. Nothing else is live by being
+        // written: a merge is live only when something reads it, and the
+        // arguments on the edges into it are live only then too.
         for block in &self.blocks {
-            // Parameters stay: dropping one means rewriting every edge into the
-            // block, and the SSA builder already removed the trivial ones.
-            for param in &block.params {
-                mark(*param, &mut live, &mut worklist);
-            }
-            match &block.terminator {
-                CfgTerminator::Jump { args, .. } => {
-                    for arg in args {
-                        mark(*arg, &mut live, &mut worklist);
-                    }
-                }
-                CfgTerminator::Branch {
-                    condition,
-                    then_args,
-                    else_args,
-                    ..
-                } => {
-                    mark(*condition, &mut live, &mut worklist);
-                    for arg in then_args.iter().chain(else_args) {
-                        mark(*arg, &mut live, &mut worklist);
-                    }
-                }
-                CfgTerminator::Return | CfgTerminator::Unset => {}
+            if let CfgTerminator::Branch { condition, .. } = &block.terminator {
+                mark(*condition, &mut live, &mut worklist);
             }
         }
+
+        // Which merge a value is, so that reaching one can reach back through
+        // the edges that supply it.
+        let mut merges: HashMap<ValueId, (usize, usize)> = HashMap::new();
+        for (block, data) in self.blocks.iter().enumerate() {
+            for (position, param) in data.params.iter().enumerate() {
+                merges.insert(*param, (block, position));
+            }
+        }
+
+        let mut incoming = Vec::new();
         while let Some(id) = worklist.pop() {
             for operand in self.values[usize::from(id)].kind.operands() {
                 mark(operand, &mut live, &mut worklist);
+            }
+            let Some((block, position)) = merges.get(&id).copied() else {
+                continue;
+            };
+            incoming.clear();
+            for source in &self.blocks {
+                match &source.terminator {
+                    CfgTerminator::Jump { target, args } if usize::from(*target) == block => {
+                        incoming.extend(args.get(position).copied());
+                    }
+                    CfgTerminator::Branch {
+                        then_target,
+                        then_args,
+                        else_target,
+                        else_args,
+                        ..
+                    } => {
+                        if usize::from(*then_target) == block {
+                            incoming.extend(then_args.get(position).copied());
+                        }
+                        if usize::from(*else_target) == block {
+                            incoming.extend(else_args.get(position).copied());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for argument in incoming.drain(..) {
+                mark(argument, &mut live, &mut worklist);
+            }
+        }
+
+        // A merge and the edges into it are one thing: dropping the parameter
+        // means dropping the argument at the same position on every edge, and
+        // they are dropped together or not at all. Keeping them instead — which
+        // is what this pass used to do, to avoid exactly this rewrite — holds a
+        // residual alive in every slice cut from the function, along with
+        // everything that feeds it.
+        let kept: Vec<Vec<bool>> = self
+            .blocks
+            .iter()
+            .map(|block| {
+                block
+                    .params
+                    .iter()
+                    .map(|param| live[usize::from(*param)])
+                    .collect()
+            })
+            .collect();
+        for (index, block) in self.blocks.iter_mut().enumerate() {
+            retain_by(&kept[index], &mut block.params);
+            match &mut block.terminator {
+                CfgTerminator::Jump { target, args } => retain_by(&kept[usize::from(*target)], args),
+                CfgTerminator::Branch {
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                    ..
+                } => {
+                    retain_by(&kept[usize::from(*then_target)], then_args);
+                    retain_by(&kept[usize::from(*else_target)], else_args);
+                }
+                CfgTerminator::Return | CfgTerminator::Unset => {}
             }
         }
 

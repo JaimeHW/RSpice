@@ -44,6 +44,57 @@ fn simplification_preserves_every_residual() {
     }
 }
 
+/// A merge nothing reads goes, and takes the edges into it with it.
+///
+/// Keeping it is what this pass used to do, because dropping one means
+/// rewriting every edge into the block. The cost of not doing that is paid by
+/// every slice: a guarded contribution's residual merges at the join, so asking
+/// for anything else in the same function still dragged the residual — and
+/// everything feeding it — along. Here that is a `ddt`, which is the case that
+/// made it matter: a slice that keeps one has to call it.
+#[test]
+fn a_merge_nothing_reads_is_dropped_along_with_its_edges() {
+    let artifact = artifact(
+        r#"
+module guarded_charge(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1.0e-12;
+    parameter real g = 1.0e-3;
+    parameter real store = 1.0;
+    analog begin
+        if (store > 0.5) begin
+            I(p, n) <+ ddt(c * V(p, n));
+        end
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+
+    // The conduction residual only. The charge is the other contribution's, and
+    // it is the one that merges at the join.
+    let conduction = *cfg.residuals.last().expect("two contributions");
+    let (optimized, _) = optimize_cfg(&cfg.function, &[conduction]);
+    optimized
+        .validate()
+        .unwrap_or_else(|error| panic!("simplification produced {error}"));
+
+    assert!(
+        !optimized
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::Ddt { .. })),
+        "the charge is read by nothing that was asked for, so its ddt must not survive"
+    );
+    let merges: usize = optimized.blocks.iter().map(|block| block.params.len()).sum();
+    assert_eq!(
+        merges, 0,
+        "no value asked for is defined on only one arm, so no merge is needed"
+    );
+}
+
 /// Simplifying after differentiating must not disturb the Jacobian either.
 ///
 /// This is where a wrong dominance test shows up: merging two expressions from
