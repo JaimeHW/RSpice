@@ -40,16 +40,8 @@ impl BasicStats {
         (stats.count > 0).then_some(stats)
     }
 
-    pub(super) fn pk_pk(self) -> f64 {
-        self.max - self.min
-    }
-
     pub(super) fn rms(self) -> f64 {
         (self.sum_squares / self.count as f64).sqrt()
-    }
-
-    pub(super) fn std_dev(self) -> Option<f64> {
-        (self.count > 1).then(|| (self.m2 / (self.count - 1) as f64).sqrt())
     }
 }
 

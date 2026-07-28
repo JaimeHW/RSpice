@@ -40,11 +40,6 @@ impl HistogramBin {
         self.upper - self.lower
     }
 
-    /// Check if value is in bin [lower, upper)
-    pub fn contains(&self, value: f64) -> bool {
-        value >= self.lower && value < self.upper
-    }
-
     /// Add a sample to this bin
     pub fn add(&mut self, weight: f64) {
         self.count += 1;
@@ -120,11 +115,6 @@ impl Histogram {
         }
     }
 
-    /// Number of bins
-    pub fn bin_count(&self) -> usize {
-        self.bins.len()
-    }
-
     /// Histogram range (min, max)
     pub fn range(&self) -> (f64, f64) {
         if self.bins.is_empty() {
@@ -142,11 +132,6 @@ impl Histogram {
             return 0.0;
         }
         self.bins[0].width()
-    }
-
-    /// Maximum bin count
-    pub fn max_count(&self) -> usize {
-        self.bins.iter().map(|b| b.count).max().unwrap_or(0)
     }
 
     /// Add a sample value
@@ -196,20 +181,6 @@ impl Histogram {
         }
     }
 
-    /// Clear all data
-    pub fn clear(&mut self) {
-        for bin in &mut self.bins {
-            bin.count = 0;
-            bin.weight = 0.0;
-        }
-        self.total_count = 0;
-        self.total_weight = 0.0;
-        self.underflow = 0;
-        self.overflow = 0;
-        self.data_min = f64::MAX;
-        self.data_max = f64::MIN;
-    }
-
     /// Get normalized (PDF) values
     pub fn pdf(&self) -> Vec<f64> {
         self.bins
@@ -234,11 +205,6 @@ impl Histogram {
                 cumulative
             })
             .collect()
-    }
-
-    /// Get bin centers
-    pub fn bin_centers(&self) -> Vec<f64> {
-        self.bins.iter().map(|b| b.center()).collect()
     }
 
     /// Get percentile value (0.0 to 1.0)
@@ -319,12 +285,6 @@ impl HistogramBuilder {
     /// Set explicit range
     pub fn range(mut self, min: f64, max: f64) -> Self {
         self.range = Some((min, max));
-        self
-    }
-
-    /// Set margin factor
-    pub fn margin(mut self, margin: f64) -> Self {
-        self.margin = margin.clamp(0.0, 0.5);
         self
     }
 
