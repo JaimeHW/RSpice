@@ -15,16 +15,16 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use sha2::{Digest as _, Sha256};
 
+use crate::hardcopy::{
+    CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
+    HardcopyPlan, OutputFormat, RenderTarget,
+};
+use crate::product::ContentDigest;
 use crate::workbench::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
 };
 use crate::workbench::hardcopy_print::{
     HardcopyCancellationToken, HardcopyPrintError, discover_native_printers, spool_native_hardcopy,
-};
-use crate::product::ContentDigest;
-use crate::hardcopy::{
-    CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
-    HardcopyPlan, OutputFormat, RenderTarget,
 };
 use crate::workbench::hardcopy_render::{RenderedHardcopyPublication, RenderedPrinterPages};
 
@@ -838,11 +838,11 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::AtomicU64;
 
-    use crate::product::ObjectRevision;
     use crate::hardcopy::{
         ActiveHardcopySource, ContentExtent, HardcopyDocumentId, HardcopyDocumentKind,
         HardcopyScope, HardcopySetup, Length,
     };
+    use crate::product::ObjectRevision;
 
     use super::*;
 

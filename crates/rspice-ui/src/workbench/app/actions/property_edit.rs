@@ -1,10 +1,10 @@
 //! Opening the property editor for a schematic component.
 
-use crate::workbench::app::AppState;
 use crate::state::{
     Component, ComponentType, MODEL_BOUND_SYMBOL_METADATA_KEY, ModelBoundSymbolDefinition,
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue, SymbolSourceContract,
 };
+use crate::workbench::app::AppState;
 
 /// Resolve the exact persistent parameter contract owned by a placed cell's
 /// library master. Returning `None` is intentional for legacy and explicitly

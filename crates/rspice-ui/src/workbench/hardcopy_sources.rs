@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::workbench::AppState;
 use crate::io::ProjectSimulationResults;
 use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId};
 use crate::results::report_document::{
@@ -32,6 +31,7 @@ use crate::state::{
     SheetId, SimulationRun, SimulationState, SymbolDocument, SymbolResolver, SymbolShape, ViewType,
     WaveformData, Wire,
 };
+use crate::workbench::AppState;
 
 use super::SurfaceId;
 use crate::hardcopy::{
@@ -42,17 +42,17 @@ use crate::hardcopy::{
 };
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
-use crate::hardcopy::sources::{
-    DISPLAY_NAME_LIMIT, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
-    HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, canonical_digest,
-    validate_label,
-};
 use super::result_document::ResultViewer;
 use super::session::SymbolSelection;
 use super::state::{Workspace, WorkspaceDocumentId};
 use super::visualization_studio::{
     VisualizationAnnotation as StudioAnnotation, VisualizationAutoscale,
     VisualizationMarker as StudioMarker, VisualizationPane as StudioPane, VisualizationStudioState,
+};
+use crate::hardcopy::sources::{
+    DISPLAY_NAME_LIMIT, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
+    HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, canonical_digest,
+    validate_label,
 };
 
 /// Natural physical scale for schematic coordinates: ten editor units are
@@ -6406,8 +6406,6 @@ fn clip_line_to_axis_rect(
         (start.0 + upper * dx, start.1 + upper * dy),
     ))
 }
-
-
 
 /// Pin a resolved live document into a persistable source-set member.
 ///

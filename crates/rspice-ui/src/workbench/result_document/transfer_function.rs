@@ -2,7 +2,6 @@
 
 use egui::Ui;
 
-use crate::workbench::AppState;
 use crate::state::{
     AnalysisResultPayload, TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
@@ -10,6 +9,7 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
+use crate::workbench::AppState;
 
 use super::strip::StripHeader;
 use super::{panel_note, well_hint};

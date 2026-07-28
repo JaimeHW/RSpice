@@ -20,7 +20,9 @@ use crate::workbench::app::dialogs::operation_primitives::{
     BODY_HEIGHT, CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, impact_preview,
     operation_steps, paint_body_dividers,
 };
-use crate::workbench::app::dialogs::review_primitives::{input_field, purpose_line, read_only_field};
+use crate::workbench::app::dialogs::review_primitives::{
+    input_field, purpose_line, read_only_field,
+};
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::schematic::instance_catalog::{
     InstanceCatalogEntry, instance_catalog, resolve_instance_catalog_entry,

@@ -4,15 +4,16 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{
     CompileDiagnosticPhase, CompilerOptions, RuntimeCompileReport, RuntimeTarget,
-    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler, VirtualSourceBundle, VirtualSourceFile,
+    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler,
+    VirtualSourceBundle, VirtualSourceFile,
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
 use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ViewType,
 };
+use crate::workbench::RSpiceApp;
 
 use crate::simulation::veriloga::VerilogASourceOperationToken;
 
@@ -788,7 +789,11 @@ mod tests {
         )
         .expect("valid virtual diagnostic fixture");
         let failure = VerilogACompiler::default()
-            .compile_virtual_runtime_diagnosed(&bundle, "selected", rspice_veriloga::VirtualCompileLimits::default())
+            .compile_virtual_runtime_diagnosed(
+                &bundle,
+                "selected",
+                rspice_veriloga::VirtualCompileLimits::default(),
+            )
             .expect_err("included syntax error must fail");
 
         let VerilogACompileOutcome::Failure(diagnostics) = virtual_compile_error_outcome(failure)

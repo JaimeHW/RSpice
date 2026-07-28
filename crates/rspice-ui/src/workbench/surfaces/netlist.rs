@@ -7,17 +7,17 @@
 use egui::{Align, Layout, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::{AppState, RSpiceApp};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::{AppState, RSpiceApp};
 
+use super::super::design_system::{WorkbenchIcon, empty_state, icon_button};
+use super::super::netlist_document::{ActiveNetlistDocument, source_content_digest};
 use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
 };
-use super::super::design_system::{WorkbenchIcon, empty_state, icon_button};
-use super::super::netlist_document::{ActiveNetlistDocument, source_content_digest};
 
 const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
@@ -417,11 +417,8 @@ fn project_bundle_locator(
     source_key: &str,
     logical_path: &str,
 ) -> Result<crate::state::SourceLocator, String> {
-    crate::state::SourceLocator::try_new(
-        format!("{source_key}#/{logical_path}"),
-        logical_path,
-    )
-    .map_err(|error| error.to_string())
+    crate::state::SourceLocator::try_new(format!("{source_key}#/{logical_path}"), logical_path)
+        .map_err(|error| error.to_string())
 }
 
 fn compiler_dependency_locator(
@@ -1697,10 +1694,10 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
+    use super::super::netlist_document::NetlistFindScope;
     use crate::state::{
         FindDirection, FindOptions, ReplaceScope, find_all_in_source, replace_in_source,
     };
-    use super::super::netlist_document::NetlistFindScope;
 
     let owned = app.state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource;
     let mut find = app.state.ui.netlist.find.clone();
@@ -1711,24 +1708,24 @@ fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         regular_expression: find.regular_expression,
     };
     let documents = netlist_search_documents(&app.state, find.scope);
-    let matches: Result<Vec<NetlistSearchMatch>, crate::state::FindError> =
-        if find.find.is_empty() {
-            Ok(Vec::new())
-        } else {
-            documents
-                .iter()
-                .try_fold(Vec::<NetlistSearchMatch>::new(), |mut all, document| {
-                    all.extend(
-                        find_all_in_source(&document.source, &find.find, options)?
-                            .into_iter()
-                            .map(|found| NetlistSearchMatch {
-                                document: document.clone(),
-                                found,
-                            }),
-                    );
-                    Ok(all)
-                })
-        };
+    let matches: Result<Vec<NetlistSearchMatch>, crate::state::FindError> = if find.find.is_empty()
+    {
+        Ok(Vec::new())
+    } else {
+        documents
+            .iter()
+            .try_fold(Vec::<NetlistSearchMatch>::new(), |mut all, document| {
+                all.extend(
+                    find_all_in_source(&document.source, &find.find, options)?
+                        .into_iter()
+                        .map(|found| NetlistSearchMatch {
+                            document: document.clone(),
+                            found,
+                        }),
+                );
+                Ok(all)
+            })
+    };
     find.error = matches.as_ref().err().map(ToString::to_string);
     let matches = matches.unwrap_or_default();
     if matches.is_empty() {
@@ -2092,15 +2089,12 @@ fn open_owned_source(state: &mut AppState) -> bool {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            crate::state::SourceLocator::try_new(
-                path.display().to_string(),
-                display_name,
-            )
-            .and_then(|locator| locator.with_native_origin(path.display().to_string()))
-            .and_then(|locator| {
-                owned.import_source(owned.content_digest(), locator, source.as_bytes().to_vec())
-            })
-            .and_then(|_| owned.make_editable(owned.content_digest()))
+            crate::state::SourceLocator::try_new(path.display().to_string(), display_name)
+                .and_then(|locator| locator.with_native_origin(path.display().to_string()))
+                .and_then(|locator| {
+                    owned.import_source(owned.content_digest(), locator, source.as_bytes().to_vec())
+                })
+                .and_then(|_| owned.make_editable(owned.content_digest()))
         } else {
             owned.replace_editable_source(owned.content_digest(), source.as_bytes().to_vec())
         };

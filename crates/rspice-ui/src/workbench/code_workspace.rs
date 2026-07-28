@@ -27,7 +27,6 @@ pub use page::{
 };
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, compile_project_bundle_receipt,
-    project_bundle_as_virtual, replace_selected_veriloga_file,
-    selected_veriloga_source,
+    project_bundle_as_virtual, replace_selected_veriloga_file, selected_veriloga_source,
 };
 pub use veriloga::{poll_veriloga_compile, poll_veriloga_import, start_veriloga_compile};

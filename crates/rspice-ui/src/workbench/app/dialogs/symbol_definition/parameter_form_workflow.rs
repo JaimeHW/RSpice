@@ -3,7 +3,6 @@ use egui::{
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, ParameterInheritance, PropertyType,
     SymbolParameterConstraints, SymbolParameterDefault, SymbolParameterField, SymbolParameterForm,
@@ -14,6 +13,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
+use crate::workbench::RSpiceApp;
 
 use super::import_workflow::{setting_row, table_header};
 use super::state::ParameterFormPhase;

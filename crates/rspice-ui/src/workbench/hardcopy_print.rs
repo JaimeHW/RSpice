@@ -19,12 +19,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::product::ContentDigest;
 use crate::hardcopy::{
     CancellationPhase, DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan,
     OutputFormat, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry, RenderTarget,
     ResolvedOrientation,
 };
+use crate::product::ContentDigest;
 use crate::workbench::hardcopy_render::{RenderedHardcopyPublication, RenderedPrinterPages};
 
 const CAPABILITY_SCHEMA_VERSION: u32 = 1;
@@ -2761,7 +2761,6 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::product::ObjectRevision;
     use crate::hardcopy::{
         ActiveHardcopySource, BackgroundMode, Bleed, ColorMapping, ContentExtent, DecorationSetup,
         FontPolicy, HardcopyDocumentId, HardcopyDocumentKind, HardcopyPlanId, HardcopyScope,
@@ -2769,6 +2768,7 @@ mod tests {
         PrintMappingTable, PrinterRasterGeometry, RenderSetup, ScaleMode, StandardPaper,
         TilingMode, TilingSetup, Watermark,
     };
+    use crate::product::ObjectRevision;
     use crate::workbench::hardcopy_render::{
         HardcopyRenderer, HardcopyScene, HardcopySceneMetadata,
     };

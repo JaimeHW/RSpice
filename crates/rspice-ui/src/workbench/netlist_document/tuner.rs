@@ -10,12 +10,12 @@ use std::collections::HashMap;
 
 use egui::{Color32, Ui};
 
-use crate::workbench::AppState;
 use crate::quantity::engineering::{format_engineering_value, parse_engineering_value};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
+use crate::workbench::AppState;
 
 const MINI_BODE_GAIN_CACHE_KEY: u64 = 0x4E45_544C_0001;
 const MINI_BODE_PHASE_CACHE_KEY: u64 = 0x4E45_544C_0002;

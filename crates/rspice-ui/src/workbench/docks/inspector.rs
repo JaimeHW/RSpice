@@ -5,10 +5,10 @@ mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::state::{Component, ComponentType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::Command;
 use super::super::design_system::{
@@ -878,7 +878,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             message.clone(),
                         );
                         app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                                message,
+                            ));
                     }
                 }
             }

@@ -861,8 +861,8 @@ fn format_length(value: Length, unit: LengthUnit) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::{ContentDigest, ObjectRevision};
     use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+    use crate::product::{ContentDigest, ObjectRevision};
 
     fn source() -> ActiveHardcopySource {
         ActiveHardcopySource::try_new(

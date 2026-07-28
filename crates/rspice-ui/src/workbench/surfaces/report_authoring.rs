@@ -8,7 +8,6 @@ use std::borrow::Cow;
 
 use egui::{Align2, Color32, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::results::report_document::{
     ReportBlockKind, ReportDocument, ReportEdit, ReportEntityRef, ReportPageId,
     ReportPageUpdatePolicy, ReportReferenceMode, ReportSourceId, ReportTemplate, TableCell,
@@ -16,6 +15,7 @@ use crate::results::report_document::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, input_row, select};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::Command;
 use super::super::design_system::{

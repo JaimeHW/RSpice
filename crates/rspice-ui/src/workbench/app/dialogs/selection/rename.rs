@@ -510,12 +510,12 @@ fn validate_draft(
             }))
         }
         RenameSelectionTarget::NamedNet(expected) => {
-            let candidate =
-                match crate::workbench::app::validate_named_net_rename(schematic, expected, candidate)
-                {
-                    Ok(candidate) => candidate,
-                    Err(message) => return RenameValidation::Invalid(message),
-                };
+            let candidate = match crate::workbench::app::validate_named_net_rename(
+                schematic, expected, candidate,
+            ) {
+                Ok(candidate) => candidate,
+                Err(message) => return RenameValidation::Invalid(message),
+            };
             if candidate == expected.name {
                 return RenameValidation::Unchanged;
             }

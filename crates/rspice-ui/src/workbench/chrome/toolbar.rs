@@ -4,10 +4,10 @@
 use egui::containers::menu::MenuButton;
 use egui::{Align, Context, Frame, Layout, TopBottomPanel, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::state::{SchematicGridPitch, Tool, ViewType, WireRoutingMode};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 
 use super::super::RouteTransitionSource;
 use super::super::commands::{Command, CommandAvailability};

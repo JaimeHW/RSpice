@@ -2,9 +2,9 @@
 //! `crate::workbench::chrome::title_bar`.
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::workbench::app::AppState;
 use crate::services::drc::{DrcConfig, DrcSeverity};
 use crate::state::CellViewRef;
+use crate::workbench::app::AppState;
 
 /// Per-run cap on per-finding console rows; the rest stay reachable via
 /// the canvas badges and typed finding-navigation commands.

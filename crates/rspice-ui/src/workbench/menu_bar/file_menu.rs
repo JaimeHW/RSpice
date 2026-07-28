@@ -68,8 +68,10 @@ pub(crate) fn dispatch_file_menu_action(
             if state.project_lifecycle.project_open {
                 let _ = crate::workbench::project_workflow::save_project(state);
             } else {
-                let _ =
-                    crate::workbench::file_actions::action_file_save_with_io(state, file_workflow_io);
+                let _ = crate::workbench::file_actions::action_file_save_with_io(
+                    state,
+                    file_workflow_io,
+                );
             }
         }
         FileMenuAction::ImportNetlist => {

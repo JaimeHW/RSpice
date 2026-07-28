@@ -2,12 +2,12 @@
 
 use egui::{Align2, Context, Id, Order, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::commands::Command;
 use crate::workbench::state::Workspace;
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::{WorkbenchIcon, empty_state};
 
@@ -487,7 +487,6 @@ fn historical_annotation_run(state: &AppState) -> Option<u64> {
     );
     (solved && !annotates_this_drawing).then_some(run.id)
 }
-
 
 fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
     let t = Tokens::get(ui.ctx());

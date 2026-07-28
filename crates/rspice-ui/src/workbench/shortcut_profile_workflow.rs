@@ -12,7 +12,9 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::workbench::export_workflow::{ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::export_workflow::{
+    ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
+};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{ShortcutPreferences, ShortcutProfileAudit};
 

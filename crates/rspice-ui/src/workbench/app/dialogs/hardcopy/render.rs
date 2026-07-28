@@ -9,18 +9,18 @@ use egui::{
     TextureOptions, Ui, vec2,
 };
 
-use crate::workbench::app::RSpiceApp;
-use crate::ui::icons::Icon;
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton,
-};
-use crate::workbench::design_system::section_header;
 use crate::hardcopy::{
     BackgroundMode, ColorMapping, Length, LengthUnit, Orientation, OutputFormat, PaperSize,
     PrintColor, PrintMappingEntry, PrintMappingTable, PrintRedundancy, ScaleMode, StandardPaper,
     TilingMode, Watermark,
 };
+use crate::ui::icons::Icon;
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton,
+};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::design_system::section_header;
 use crate::workbench::hardcopy_render::HardcopyPreviewPage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::hardcopy_render::HardcopyRenderer;
@@ -988,30 +988,30 @@ fn content_pagination(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Option<Bo
                                 .width(ui.available_width())
                                 .show_ui(ui, |ui| {
                                     let choices = [
-                                (
-                                    active_scope.map_or("Active document", scope_label),
-                                    source_choice_for_active_extent(
-                                        &draft.source_candidates,
-                                        active_candidate,
-                                    ),
-                                ),
-                                (
-                                    "Selection",
-                                    source_choice_for_scope(
-                                        &draft.source_candidates,
-                                        active_candidate,
-                                        crate::hardcopy::HardcopyScope::Selection,
-                                    ),
-                                ),
-                                (
-                                    "All sheets / panes",
-                                    source_choice_for_scope(
-                                        &draft.source_candidates,
-                                        active_candidate,
-                                        crate::hardcopy::HardcopyScope::AllSheetsOrPanes,
-                                    ),
-                                ),
-                            ];
+                                        (
+                                            active_scope.map_or("Active document", scope_label),
+                                            source_choice_for_active_extent(
+                                                &draft.source_candidates,
+                                                active_candidate,
+                                            ),
+                                        ),
+                                        (
+                                            "Selection",
+                                            source_choice_for_scope(
+                                                &draft.source_candidates,
+                                                active_candidate,
+                                                crate::hardcopy::HardcopyScope::Selection,
+                                            ),
+                                        ),
+                                        (
+                                            "All sheets / panes",
+                                            source_choice_for_scope(
+                                                &draft.source_candidates,
+                                                active_candidate,
+                                                crate::hardcopy::HardcopyScope::AllSheetsOrPanes,
+                                            ),
+                                        ),
+                                    ];
                                     for (label, choice) in choices {
                                         let active = choice.as_ref().is_some_and(|(key, scope)| {
                                             active_key.as_deref() == Some(key.as_str())
@@ -2717,14 +2717,10 @@ fn standard_paper_label(paper: StandardPaper) -> &'static str {
 fn document_kind_label(kind: crate::hardcopy::HardcopyDocumentKind) -> &'static str {
     match kind {
         crate::hardcopy::HardcopyDocumentKind::SchematicOrSymbol => "Schematic / symbol",
-        crate::hardcopy::HardcopyDocumentKind::LayoutWithLayerLegend => {
-            "Layout + layer legend"
-        }
+        crate::hardcopy::HardcopyDocumentKind::LayoutWithLayerLegend => "Layout + layer legend",
         crate::hardcopy::HardcopyDocumentKind::PlotOrWorksheet => "Plot / worksheet",
         crate::hardcopy::HardcopyDocumentKind::Report => "Report",
-        crate::hardcopy::HardcopyDocumentKind::EngineeringDocument => {
-            "Engineering document"
-        }
+        crate::hardcopy::HardcopyDocumentKind::EngineeringDocument => "Engineering document",
     }
 }
 

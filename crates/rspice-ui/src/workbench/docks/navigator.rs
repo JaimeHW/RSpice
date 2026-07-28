@@ -5,12 +5,12 @@ mod symbol;
 
 use egui::{Align, Layout, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::state::{CellViewRef, ViewType};
+use crate::state::{NetlistOutline, OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::state::{NetlistOutline, OutlineEntry, OutlineEntryKind};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::Command;
 use super::super::design_system::{
@@ -2564,12 +2564,12 @@ mod tests {
         responsive_result_control_height, verification_coverage, verification_flow_label,
         verification_navigator_requires_scroll,
     };
-    use crate::workbench::RSpiceApp;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::services::{
         DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
     };
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
+    use crate::workbench::RSpiceApp;
     use crate::workbench::state::{VerificationPage, Workspace};
 
     fn result(trail: Vec<bool>) -> YieldResult {

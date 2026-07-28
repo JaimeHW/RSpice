@@ -413,13 +413,13 @@ fn write_canonical_json(value: &serde_json::Value, out: &mut Vec<u8>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app::AppState;
     use crate::state::{
         BusDeclaration, BusSlice, BusTapOrientation, ComponentType, DesignNote, DesignNoteKind,
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
         DesignVariableSweepEligibility, DocumentationShape, DocumentationShapeGeometry, Point,
         SimulationPlanPayloadRecord,
     };
+    use crate::workbench::app::AppState;
 
     #[test]
     fn canonical_digest_is_independent_of_map_insertion_order() {

@@ -531,11 +531,11 @@ mod tests {
     use egui::os::OperatingSystem;
 
     use super::*;
+    use crate::workbench::ShortcutPreferences;
+    use crate::workbench::commands::{CommandPlatform, ShortcutContext};
     use crate::workbench::shortcut_artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };
-    use crate::workbench::ShortcutPreferences;
-    use crate::workbench::commands::{CommandPlatform, ShortcutContext};
 
     fn reference_model() -> ShortcutReferenceModel {
         build_shortcut_reference_model(

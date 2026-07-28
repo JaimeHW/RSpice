@@ -9,15 +9,15 @@ use egui::{Context, Frame, Margin, Stroke, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::WireRoutingMode;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
-};
 use crate::state::{
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
     SchematicNetHighlighting, SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
     SchematicVisibilityPolicy, SchematicWireRoutingStyle,
+};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{
+    Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
 };
 
 use crate::workbench::app::{AppState, RSpiceApp};

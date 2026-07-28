@@ -13,7 +13,6 @@ use egui::{
     WidgetType,
 };
 
-use crate::workbench::RSpiceApp;
 use crate::product::{ObjectRevision, ProjectId};
 use crate::state::model_library::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
@@ -24,6 +23,7 @@ use crate::state::model_library::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone};
+use crate::workbench::RSpiceApp;
 
 use super::super::design_system;
 use super::super::model_correlation::{

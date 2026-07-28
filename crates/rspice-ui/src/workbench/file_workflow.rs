@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::AppState;
 use crate::io::SchematicIoError;
 use crate::state::{SchematicState, ViewType};
+use crate::workbench::app::AppState;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SchematicLoadOrigin<'a> {

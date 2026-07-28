@@ -15,12 +15,12 @@ use crate::results::plot_export_preset::{
     PlotExportPresetMutationReceipt, PlotExportPresetScope,
 };
 
+use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary, ShortcutProfileLibraryError};
 use crate::hardcopy::PrintMappingTable;
 use crate::hardcopy::mappings::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
     PrintMappingSaveReceipt,
 };
-use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary, ShortcutProfileLibraryError};
 
 /// Mockup-defined workspace composition applied by the workbench owner.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

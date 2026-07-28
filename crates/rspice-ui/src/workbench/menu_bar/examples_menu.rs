@@ -45,8 +45,8 @@ pub(crate) fn load_named_example(state: &mut AppState, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app::ConfirmationAction;
     use crate::state::{Component, ComponentType, Point, SimulationRun};
+    use crate::workbench::app::ConfirmationAction;
     use std::path::PathBuf;
 
     #[test]

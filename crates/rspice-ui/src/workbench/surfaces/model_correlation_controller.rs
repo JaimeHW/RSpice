@@ -8,7 +8,6 @@
 use csv::{Terminator, WriterBuilder};
 use sha2::{Digest as _, Sha256};
 
-use crate::workbench::RSpiceApp;
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision, RunId};
 use crate::state::model_library::{
     CorrelationAggregation, CorrelationAlignmentPolicy, CorrelationCalculation,
@@ -20,6 +19,7 @@ use crate::state::model_library::{
     ModelCorrelationState, ModelSourceEvidenceBinding, NonNegativeFinite,
 };
 use crate::state::{AnalysisType, SimulationRunLifecycle, WaveformData};
+use crate::workbench::RSpiceApp;
 
 use super::super::model_correlation::{
     CorrelationAggregationDraft, CorrelationAlignmentDraft, CorrelationCalculationDraft,

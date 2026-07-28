@@ -77,7 +77,9 @@ impl RSpiceApp {
                 let outcome = if project_action {
                     crate::workbench::project_workflow::save_all_for_continuation(&mut self.state)
                 } else if self.state.project_lifecycle.project_open {
-                    crate::workbench::project_workflow::save_active_for_continuation(&mut self.state)
+                    crate::workbench::project_workflow::save_active_for_continuation(
+                        &mut self.state,
+                    )
                 } else if self.action_file_save() {
                     if self.state.schematic.is_dirty {
                         crate::workbench::project_workflow::SaveRequestOutcome::CopyOnly
@@ -189,7 +191,9 @@ impl RSpiceApp {
                 self.state.dialogs.project_review_dialog.close();
                 crate::workbench::project_workflow::close_project_discard(&mut self.state);
             }
-            crate::workbench::project_workflow::SaveRequestOutcome::CanonicalPending(transaction) => {
+            crate::workbench::project_workflow::SaveRequestOutcome::CanonicalPending(
+                transaction,
+            ) => {
                 self.state.dialogs.project_review_dialog.close();
                 self.state.dialogs.confirmation_dialog.await_canonical_save(
                     transaction,
@@ -295,7 +299,11 @@ impl RSpiceApp {
     /// Internal: actually open a recent file (after any confirmation).
     /// Entries whose file vanished are dropped from the list with a console
     /// note instead of failing silently.
-    fn do_open_recent(&mut self, path: std::path::PathBuf, kind: crate::workbench::app::RecentKind) {
+    fn do_open_recent(
+        &mut self,
+        path: std::path::PathBuf,
+        kind: crate::workbench::app::RecentKind,
+    ) {
         use crate::workbench::app::RecentKind;
 
         if !path.exists() {
@@ -354,11 +362,11 @@ impl RSpiceApp {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-    use crate::workbench::file_workflow::FileWorkflowIo;
     use crate::io::{SchematicIoError, WaveformDataset};
     use crate::simulation::plan::AnalysisKind;
     use crate::state::{Component, ComponentType, Point, SchematicState};
+    use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+    use crate::workbench::file_workflow::FileWorkflowIo;
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
@@ -729,8 +737,10 @@ mod tests {
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(8, 4));
         let schematic_ac_id = insert_ac_analysis(&mut schematic_source);
-        schematic_source
-            .remember_recent_file(crate::workbench::app::RecentKind::Schematic, &target_schematic);
+        schematic_source.remember_recent_file(
+            crate::workbench::app::RecentKind::Schematic,
+            &target_schematic,
+        );
         let schematic_recent = schematic_source
             .recent_files
             .iter()

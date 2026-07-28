@@ -10,11 +10,11 @@ pub(crate) mod workspace_layout_manager;
 use egui::{Context, Id};
 
 use crate::diagnostics::ConsoleMessage;
+use crate::workbench::commands::ShortcutContext;
 use crate::workbench::shortcut_artifacts::{
     ShortcutArtifactExportOutcome, ShortcutArtifactImportOutcome, ShortcutImportReceipt,
     apply_shortcut_import, export_shortcut_artifact, rollback_shortcut_import,
 };
-use crate::workbench::commands::ShortcutContext;
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 use self::preferences_shell::PreferenceCategory;

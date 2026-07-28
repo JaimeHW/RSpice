@@ -26,11 +26,11 @@ pub(crate) use registry::ProjectDocumentId;
 pub(crate) use transaction::TransactionId;
 use transaction::{LifecycleTransaction, TransactionKind};
 
-use crate::workbench::app::AppState;
 use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
 use crate::state::{CellViewRef, ViewType};
+use crate::workbench::app::AppState;
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {

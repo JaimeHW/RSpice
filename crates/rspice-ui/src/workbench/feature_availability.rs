@@ -11,12 +11,12 @@ use egui::{
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, select},
 };
+use crate::workbench::RSpiceApp;
 
 use super::{
     CapabilityWorkflowId, RouteTransitionSource, SurfaceId, SurfaceRoute,

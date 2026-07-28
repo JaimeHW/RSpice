@@ -12,8 +12,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
-use crate::product::ContentDigest;
 use crate::hardcopy::{HardcopyPlan, OutputFormat};
+use crate::product::ContentDigest;
 use crate::workbench::hardcopy_render::{
     HardcopyRenderer, HardcopySceneMetadata, RenderedHardcopyPublication, RenderedPrinterPages,
 };

@@ -3,11 +3,11 @@
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::automation_workflow::ArtifactKind;
-use crate::workbench::RSpiceApp;
 use crate::state::ProjectSourceLanguage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::RSpiceApp;
 use crate::workbench::ScalarPreference;
 
 use super::super::code_workspace::{
@@ -324,12 +324,13 @@ fn code_pane(
                     runtime.last_error = None;
                 }
                 Ok(false) => {}
-                Err(error) => app
-                    .state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "Could not update {}: {error}",
-                        document.file_name()
-                    ))),
+                Err(error) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                            "Could not update {}: {error}",
+                            document.file_name()
+                        )))
+                }
             }
         }
     });

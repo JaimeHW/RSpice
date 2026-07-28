@@ -171,8 +171,8 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
-        let entries = fs::read_dir(&dir)
-            .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()));
+        let entries =
+            fs::read_dir(&dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()));
         for entry in entries {
             let path = entry.expect("directory entry").path();
             if path.is_dir() {
@@ -390,6 +390,7 @@ fn module_references_respect_the_layer_order() {
 const WORKBENCH_LAYERS: &[&str] = &[
     // Contracts, routes, and policy. These describe the shell without
     // operating it.
+    "platform",
     "state",
     "surface_route",
     "surface_catalog",
@@ -459,6 +460,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "browser_navigation",
     "browser_download",
     "browser_accessibility",
+    // The frame is painted last and may reach anything below it.
+    "frame",
 ];
 
 /// Order violations inside `workbench` today, with exact counts.
@@ -532,6 +535,14 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("shortcut_library_persistence", "shortcut_artifacts", 1),
     ("code_workspace", "export_workflow", 1),
     ("netlist_document", "netlist_workflow", 1),
+    // Calling the painter instead of setting state the painter reads. These
+    // were invisible until the frame renderer moved out of `workbench.rs`:
+    // as free functions on the module root they belonged to no submodule, so
+    // nothing scored them. Retired by having the full-screen and secondary
+    // -window transitions write `WorkbenchState` and letting `frame` observe
+    // it, which is what every other chrome transition already does.
+    ("app", "frame", 5),
+    ("commands", "frame", 1),
     // Contracts naming things above them.
     ("state", "capability_workflow", 1),
     ("state", "simulation_analysis_tabs", 1),
@@ -869,7 +880,9 @@ fn whole_application_mutable_access_does_not_grow() {
     for file in rust_sources(&root) {
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        count += strip_line_comments(&source).matches("&mut RSpiceApp").count();
+        count += strip_line_comments(&source)
+            .matches("&mut RSpiceApp")
+            .count();
     }
     assert!(
         count <= MAX_WHOLE_APP_MUTABLE_PARAMS,
@@ -942,7 +955,10 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/shortcut_artifacts/merge.rs", 2597),
     ("state/netlist_document/document.rs", 2579),
     ("workbench/app/dialogs/hardcopy/publish.rs", 2565),
-    ("workbench/app/dialogs/preferences/shortcut_preferences.rs", 2530),
+    (
+        "workbench/app/dialogs/preferences/shortcut_preferences.rs",
+        2530,
+    ),
 ];
 
 #[test]

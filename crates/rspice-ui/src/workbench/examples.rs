@@ -987,9 +987,9 @@ fn add_label(state: &mut SchematicState, pos: Point, name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app::AppState;
     use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
     use crate::state::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument};
+    use crate::workbench::app::AppState;
     use std::collections::HashSet;
 
     /// Every wire endpoint must coincide with a component terminal or lie on

@@ -35,8 +35,6 @@ use std::collections::HashSet;
 use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
 
-use crate::workbench::app::ActiveViewer;
-use crate::workbench::{AppState, RSpiceApp};
 use crate::product::DatasetId;
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
@@ -45,7 +43,9 @@ use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, docbar_at_height};
+use crate::workbench::app::ActiveViewer;
 use crate::workbench::visualization_family::SourceSampleSelection;
+use crate::workbench::{AppState, RSpiceApp};
 
 pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
 pub type WaveformSeriesResult = Result<WaveformSeries, String>;

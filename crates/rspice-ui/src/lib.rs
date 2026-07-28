@@ -48,6 +48,20 @@
 // warnings are left visible on purpose: the migration is an egui API change
 // with layout consequences that needs its own visual verification pass, and a
 // silent allow is how it stayed invisible in the first place.
+// NOTE: closing the public surface (see the visibility note below) turned 192
+// items into `dead_code` warnings. They were never reachable — the compiler
+// simply could not say so while their modules were `pub`. All 192 are dead on
+// native, on wasm32, and with tests compiled; `--lib` alone is not enough,
+// because it hides anything only a `#[cfg(test)]` block or a browser-only
+// path calls.
+//
+// They are deliberately not swept. `workbench::simulation_analysis_tabs` is
+// the reason: 26 of its items are unreachable, but it is one coherent catalog
+// of 25 analysis tabs whose two index tables happen to have no reader.
+// Deleting the unreferenced half would leave a catalog that no longer
+// describes the product. Retire these per module — decide whether each thing
+// is finished-but-unwired or genuinely abandoned — not with a bulk delete.
+//
 // The desktop build detaches from its console on Windows and the browser
 // build has no stderr at all, so anything printed is a diagnostic nobody
 // will ever read. Route it through `log` and the application log buffer.

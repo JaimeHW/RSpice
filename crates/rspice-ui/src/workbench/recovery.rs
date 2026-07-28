@@ -17,14 +17,14 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::app::{AppState, RSpiceApp, RecentKind};
-use crate::workbench::file_workflow::FileWorkflowIo;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
     Cell, CellViewRef, Library, LibraryManager, OpenCellView, ProjectWorkspace, SchematicState,
     View, ViewType,
 };
+use crate::workbench::app::{AppState, RSpiceApp, RecentKind};
+use crate::workbench::file_workflow::FileWorkflowIo;
 
 use super::state::{LocalSafeModeOptions, Workspace};
 
@@ -449,7 +449,8 @@ fn checkpoint_age(modified: std::time::SystemTime) -> String {
 fn validate_candidate_path(candidate: &RecoveryCandidate) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let expected = crate::workbench::file_workflow::autosave_checkpoint_path(&candidate.original);
+        let expected =
+            crate::workbench::file_workflow::autosave_checkpoint_path(&candidate.original);
         if expected != candidate.checkpoint {
             return Err(
                 "Recovery checkpoint identity no longer matches its saved source".to_owned(),

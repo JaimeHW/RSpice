@@ -5,12 +5,12 @@
 use egui::{Align, Frame, Margin, Sense, Stroke, Ui, Vec2, pos2, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::{AppState, RSpiceApp};
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, NotificationCategory, NotificationRecord, ToastKind,
 };
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::design_system::{WorkbenchIcon, elide_text};
 use super::state::NotificationFilter;

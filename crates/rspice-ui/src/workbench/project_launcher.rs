@@ -13,12 +13,12 @@ use egui::{
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
-use crate::workbench::app::{RecentFile, RecentKind};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, IconButton, select};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::{RecentFile, RecentKind};
 
 use super::commands::Command;
 use super::design_system::WorkbenchIcon;

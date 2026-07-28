@@ -775,11 +775,11 @@ mod tests {
     use lopdf::{Document as ParsedPdf, Object};
 
     use super::*;
+    use crate::workbench::ShortcutPreferences;
+    use crate::workbench::commands::Command;
     use crate::workbench::shortcut_artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };
-    use crate::workbench::ShortcutPreferences;
-    use crate::workbench::commands::Command;
 
     fn complete_model() -> ShortcutReferenceModel {
         build_shortcut_reference_model(

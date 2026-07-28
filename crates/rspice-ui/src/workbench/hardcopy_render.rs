@@ -25,16 +25,16 @@ use sha2::{Digest as _, Sha256};
 use tiff::encoder::{Compression, DeflateLevel, Rational, TiffEncoder, colortype};
 use tiff::tags::ResolutionUnit;
 
+use super::hardcopy_sources::{
+    HardcopySemanticDocument, ResolvedHardcopyDocument, SCHEMATIC_UNIT_UM, SemanticAggregate,
+    SemanticBounds, SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure,
+    SemanticResultSummary, SemanticSchematic, SemanticTable,
+};
 use crate::hardcopy::{
     BackgroundMode, Bleed, ColorMapping, ContentExtent, HardcopyArtifactIdentity,
     HardcopyDocumentId, HardcopyPlan, HardcopyPlanId, Length, OutputFormat, PageRect, PreviewPage,
     PrintColor, PrintMappingTable, PrintObjectKind, PrintRedundancy, RenderTarget,
     ResolvedOrientation, ScaleRatio, Watermark,
-};
-use super::hardcopy_sources::{
-    HardcopySemanticDocument, ResolvedHardcopyDocument, SCHEMATIC_UNIT_UM, SemanticAggregate,
-    SemanticBounds, SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure,
-    SemanticResultSummary, SemanticSchematic, SemanticTable,
 };
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::results::report_document::{FigureSizing, ReportBlockId, ReportBlockKind, TableCell};
@@ -6707,6 +6707,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::hardcopy::sources::HardcopySourceIdentity;
     use crate::hardcopy::{
         ActiveHardcopySource, DecorationSetup, DuplexMode, FontPolicy, HardcopyContentSection,
         HardcopyDocumentKind, HardcopyScope, HardcopySetup, Orientation, PageMargins, PaperSize,
@@ -6714,7 +6715,6 @@ mod tests {
         PrintObjectIdentity, PrinterJobSettings, PrinterMediaSource, RenderSetup, ScaleMode,
         StandardPaper, TilingMode, TilingSetup,
     };
-    use crate::hardcopy::sources::HardcopySourceIdentity;
     use crate::workbench::hardcopy_sources::{SymbolHardcopySource, resolve_symbol_source};
 
     fn digest(byte: u8) -> ContentDigest {
@@ -6786,10 +6786,8 @@ mod tests {
                 job: PrinterJobSettings::try_new(
                     digest(0x44),
                     "paper-letter",
-                    crate::hardcopy::PrinterRasterGeometry::try_new(
-                        792, 612, 0, 0, 792, 612,
-                    )
-                    .unwrap(),
+                    crate::hardcopy::PrinterRasterGeometry::try_new(792, 612, 0, 0, 792, 612)
+                        .unwrap(),
                     PrinterMediaSource::AutomaticCompatibleTray,
                     72,
                     DuplexMode::Off,
@@ -6868,10 +6866,8 @@ mod tests {
                 job: PrinterJobSettings::try_new(
                     digest(0x44),
                     "paper-letter",
-                    crate::hardcopy::PrinterRasterGeometry::try_new(
-                        792, 612, 0, 0, 792, 612,
-                    )
-                    .unwrap(),
+                    crate::hardcopy::PrinterRasterGeometry::try_new(792, 612, 0, 0, 792, 612)
+                        .unwrap(),
                     PrinterMediaSource::AutomaticCompatibleTray,
                     72,
                     DuplexMode::Off,

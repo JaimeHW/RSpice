@@ -3,7 +3,6 @@
 use egui::{Align, Align2, Context, Frame, Layout, Margin, Sense, Stroke, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
 use crate::state::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionJournal,
     ValidatedRevisionRequest, ValidatedSchematicRevisionId,
@@ -13,13 +12,16 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
+use crate::workbench::project_workflow::{SaveRequestOutcome, save_active_for_continuation};
 
 use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::dialogs::operation_primitives::{
     CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, ellipsized_text, operation_steps,
     paint_body_dividers,
 };
-use crate::workbench::app::dialogs::review_primitives::{input_field, purpose_line, read_only_field};
+use crate::workbench::app::dialogs::review_primitives::{
+    input_field, purpose_line, read_only_field,
+};
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::{AppState, RSpiceApp};
 

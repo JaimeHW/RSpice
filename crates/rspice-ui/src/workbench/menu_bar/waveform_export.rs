@@ -1,6 +1,6 @@
+use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app::AppState;
 use crate::workbench::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use crate::workbench::EngineeringExportFormat;
 
 const NO_RESULTS_MESSAGE: &str = "No simulation results to export. Run a simulation first.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";

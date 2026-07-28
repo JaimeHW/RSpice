@@ -8,7 +8,6 @@
 
 use egui::Ui;
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::state::{
     PinSummary, Point, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
     SymbolPinElectricalKind, SymbolPinSide, SymbolShape,
@@ -20,6 +19,7 @@ use crate::workbench::design_system::{
     StatusMark, WorkbenchIcon, labeled_icon_button, property_row, property_row_combo,
     property_row_input, property_row_status,
 };
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::{muted_inspector_copy, section_header};
 

@@ -16,8 +16,8 @@ use super::schema::{
     ShortcutArtifactSchemaError, decode_shortcut_artifact_json_with_provenance,
 };
 use super::{canonical_json_bytes, sha256};
-use crate::workbench::shortcut_profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
 use crate::workbench::commands::{Command, CommandPlatform};
+use crate::workbench::shortcut_profile_workflow::MAX_SHORTCUT_PROFILE_BYTES;
 use crate::workbench::shortcuts::{
     CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding, ShortcutBindingSlot,
     ShortcutSequence, ShortcutStroke, shortcut_context_precedence_rank, shortcut_contexts_overlap,

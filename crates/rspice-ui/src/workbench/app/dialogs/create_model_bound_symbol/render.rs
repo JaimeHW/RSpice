@@ -12,8 +12,8 @@ use super::controller::{
     commit_create_model_bound_symbol, target_syntax_error, validate_create_symbol_draft,
 };
 use super::state::*;
-use crate::workbench::app::dialogs::review_primitives::{configure_field_validation, field_label};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::dialogs::review_primitives::{configure_field_validation, field_label};
 
 impl RSpiceApp {
     pub(in crate::workbench::app) fn render_create_model_bound_symbol_dialog(

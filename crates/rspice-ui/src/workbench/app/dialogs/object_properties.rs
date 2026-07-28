@@ -22,7 +22,11 @@ use crate::ui::widgets::{
     select_with_response, selection_command_workflow, workflow_preview_status,
 };
 
-use crate::workbench::app::{BusObjectPropertiesDraft, BusTapObjectPropertiesDraft, DesignNoteObjectPropertiesDraft, DocumentationShapeObjectPropertiesDraft, NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, RSpiceApp};
+use crate::workbench::app::{
+    BusObjectPropertiesDraft, BusTapObjectPropertiesDraft, DesignNoteObjectPropertiesDraft,
+    DocumentationShapeObjectPropertiesDraft, NamedNetObjectPropertiesDraft,
+    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft, RSpiceApp,
+};
 
 const EYEBROW: &str = "EDIT \u{00b7} TYPED PARAMETERS";
 const TITLE: &str = "Object properties";
@@ -1658,7 +1662,6 @@ fn field_note(ui: &mut Ui, note: &str) {
             .color(t.color.text_dim),
     );
 }
-
 
 // =============================================================================
 // Design-system preview adapters

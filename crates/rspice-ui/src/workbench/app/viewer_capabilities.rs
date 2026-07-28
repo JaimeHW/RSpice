@@ -25,7 +25,6 @@ impl ViewerCapability {
     }
 }
 
-
 impl AppState {
     /// Clear execution and viewer state tied to the previous design document.
     ///
@@ -45,7 +44,8 @@ impl AppState {
         self.ui.results.clear_project_scoped_state();
         self.dialogs.drc_results = None;
         self.dialogs.drc_cycle = None;
-        self.log_buffer.clear_source(crate::diagnostics::LogSource::Drc);
+        self.log_buffer
+            .clear_source(crate::diagnostics::LogSource::Drc);
         self.clear_specialized_viewer_data();
     }
 
@@ -197,11 +197,11 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostics::{LogSeverity, LogSource};
     use crate::analysis::{
         BodeData, EyeData, EyeTrace, FftData, FrequencyResponse, HistogramBuilder, NyquistData,
         PoleZeroData, WindowFunction,
     };
+    use crate::diagnostics::{LogSeverity, LogSource};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     fn seed_result_viewers(state: &mut AppState) {

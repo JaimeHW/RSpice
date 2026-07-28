@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{canonical_json_bytes, canonicalize_value, sha256};
+use crate::workbench::ShortcutPreferences;
+use crate::workbench::commands::CommandPlatform;
 use crate::workbench::shortcut_profile_workflow::{
     MAX_SHORTCUT_PROFILE_BYTES, SHORTCUT_PROFILE_FORMAT, stage_shortcut_profile_json,
 };
-use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::CommandPlatform;
 
 pub const SHORTCUT_ARTIFACT_FORMAT: &str = SHORTCUT_PROFILE_FORMAT;
 pub const SHORTCUT_ARTIFACT_SCHEMA_VERSION: u16 = 1;

@@ -12,13 +12,13 @@ use std::collections::BTreeMap;
 
 use egui::Ui;
 
-use crate::workbench::AppState;
 use crate::quantity::engineering::parse_engineering_value;
 use crate::state::{SimulationRun, SpecEntry};
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
+use crate::workbench::AppState;
 use crate::workbench::design_system::{StatusMark, WorkbenchIcon, icon_button, paint_status_mark};
 
 use super::well_hint;

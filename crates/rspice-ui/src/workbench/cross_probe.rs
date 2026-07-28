@@ -8,11 +8,11 @@
 
 use std::collections::HashSet;
 
-use crate::workbench::AppState;
 use crate::product::ContentDigest;
 use crate::simulation::netlist_gen::{DesignNet, HierarchySource, design_nets_with_hierarchy};
-use crate::workbench::TogglePreference;
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
+use crate::workbench::AppState;
+use crate::workbench::TogglePreference;
 use crate::workbench::result_document::SelectedResultTrace;
 
 /// Stable logical subject selected in the active schematic document.

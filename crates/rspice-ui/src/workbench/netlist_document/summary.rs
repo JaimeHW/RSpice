@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::workbench::AppState;
 #[cfg(test)]
 use crate::state::SpecEntry;
 use crate::state::{AcBodeMetrics, AcBodeSummary, SimulationRun, ac_bode_summary_for_run};
+use crate::workbench::AppState;
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]

@@ -7,7 +7,6 @@
 
 use egui::{ScrollArea, Ui};
 
-use crate::workbench::RSpiceApp;
 use crate::state::{
     PortDirection, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
     SymbolElectricalType, SymbolPin, SymbolPinSide, SymbolShape,
@@ -15,6 +14,7 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::TreeRow;
+use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::{WorkbenchIcon, property_row, section_header};
 

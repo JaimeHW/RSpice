@@ -161,7 +161,6 @@ pub(crate) use dialogs::view_operations::{
 };
 pub(crate) use dialogs::window_session::open_window_workflow;
 
-
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
 
@@ -1385,7 +1384,8 @@ impl eframe::App for RSpiceApp {
         crate::ui::viewport::capture_root_viewport(&ctx, ui.max_rect());
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(enabled) = crate::workbench::browser_accessibility::spoken_feedback_override()
+            if let Some(enabled) =
+                crate::workbench::browser_accessibility::spoken_feedback_override()
             {
                 self.state.ui.browser_spoken_feedback = enabled;
             }

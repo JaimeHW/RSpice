@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::state::model_library::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
@@ -26,6 +25,7 @@ use crate::state::model_library::{
     QualificationVectorDisposition, QualificationVectorDispositionCause,
     QualificationVectorRequiredAction, ReleaseCandidateIdentity, RequiredDocumentation,
 };
+use crate::workbench::RSpiceApp;
 use sha2::{Digest as _, Sha256};
 
 use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};

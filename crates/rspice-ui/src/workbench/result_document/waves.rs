@@ -12,7 +12,6 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::analysis::calculator;
-use crate::workbench::AppState;
 use crate::results::visualization_document::AccessibleColorPalette;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
@@ -24,6 +23,7 @@ use crate::ui::plot::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
+use crate::workbench::AppState;
 use crate::workbench::visualization_family::{
     FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
 };

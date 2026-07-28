@@ -7,11 +7,11 @@
 
 use egui::Ui;
 
-use crate::workbench::AppState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::measurement_table;
+use crate::workbench::AppState;
 
 use super::well_hint;
 
@@ -459,7 +459,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         state.ui.results.op_sort = next;
     }
 }
-
 
 /// Right panel: report summary (counts by family and region, extremes).
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {

@@ -7,10 +7,10 @@
 
 use egui::{Context, Ui};
 
-use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::RSpiceApp;
 
 /// Default size of the floating tool.
 const TOOL_WIDTH: f32 = 420.0;

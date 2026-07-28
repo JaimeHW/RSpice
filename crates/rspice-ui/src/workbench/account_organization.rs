@@ -10,13 +10,13 @@
 use egui::{Align, Color32, Frame, Layout, Margin, RichText, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::{AppState, RSpiceApp};
 use crate::services::license::LicenseInfo;
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Button, Dialog, DialogChoice, DialogSize},
 };
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 

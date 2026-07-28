@@ -13,10 +13,10 @@
 
 use egui::Ui;
 
-use crate::workbench::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, measurement_table, section_header};
+use crate::workbench::AppState;
 
 use super::waves::{StripModel, cached_models};
 use super::well_hint;

@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use egui::Ui;
 
-use crate::workbench::AppState;
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
+use crate::workbench::AppState;
 
 use super::strip::{self, LegendChip};
 use super::well_hint;

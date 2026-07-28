@@ -144,10 +144,10 @@ mod tests {
     use egui::os::OperatingSystem;
 
     use super::*;
+    use crate::workbench::ShortcutPreferences;
     use crate::workbench::shortcut_artifacts::projection::{
         ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     };
-    use crate::workbench::ShortcutPreferences;
 
     #[test]
     fn markdown_is_deterministic_and_uses_the_shared_reference_rows() {

@@ -8,12 +8,12 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::workbench::export_workflow::deterministic_stored_zip;
-use crate::product::ContentDigest;
 use crate::hardcopy::{
     HardcopyArtifactIdentity, HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup,
     MAX_PREVIEW_PAGES, OutputFormat,
 };
+use crate::product::ContentDigest;
+use crate::workbench::export_workflow::deterministic_stored_zip;
 use crate::workbench::hardcopy_render::{
     HardcopyRenderer, HardcopySceneMetadata, MAX_ARTIFACT_BYTES, MAX_PREVIEW_WORKER_MANIFEST_BYTES,
     MAX_PREVIEW_WORKER_RGBA_BYTES, MAX_PUBLICATION_BYTES, MAX_PUBLICATION_WORKER_MANIFEST_BYTES,
@@ -1166,11 +1166,11 @@ pub(crate) use browser::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::AppState;
-    use crate::state::{Point, Wire};
     use crate::hardcopy::{
         BackgroundMode, ColorMapping, FontPolicy, RenderSetup, RenderTarget, ScaleMode,
     };
+    use crate::state::{Point, Wire};
+    use crate::workbench::AppState;
     use crate::workbench::hardcopy_render::{HardcopyPreviewPage, RenderedHardcopyPublication};
     use crate::workbench::hardcopy_sources::{
         PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,

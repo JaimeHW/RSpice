@@ -7,11 +7,11 @@
 use egui::{Align2, Color32, Context, Frame, Margin, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
-use crate::workbench::app::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::AppState;
 
 use super::commands::Command;
 use super::design_system::property_row;

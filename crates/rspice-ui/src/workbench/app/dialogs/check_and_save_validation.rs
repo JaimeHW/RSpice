@@ -10,14 +10,14 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
-use crate::workbench::project_lifecycle::{
-    SaveScope, accepted_generation, effective_save_scope, snapshot,
-};
 use crate::product::ContentDigest;
 use crate::services::drc::{DrcConfig, DrcSeverity, run_drc_check_with_hierarchy_and_config};
 use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
 use crate::state::{
     CellViewRef, SymbolResolver, ValidatedRevisionDependency, ValidationFindingCounts,
+};
+use crate::workbench::project_lifecycle::{
+    SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
 
 use crate::workbench::app::AppState;

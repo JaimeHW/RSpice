@@ -2,9 +2,9 @@
 
 use egui::{Context, Frame, Sense, SidePanel, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::Command;
 use super::super::design_system::{ACTIVITY_RAIL_W, WorkbenchIcon};

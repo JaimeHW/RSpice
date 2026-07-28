@@ -10,12 +10,12 @@ use egui::{
 };
 
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::RSpiceApp;
 use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::Command;
 use super::super::design_system::{WorkbenchIcon, card, property_card, property_row, status_dot};
@@ -3461,7 +3461,8 @@ fn export_project_checkpoint_copy(
         else {
             return;
         };
-        match crate::workbench::project_checkpoint::publish_recovery_copy(&checkpoint, &destination) {
+        match crate::workbench::project_checkpoint::publish_recovery_copy(&checkpoint, &destination)
+        {
             Ok(()) => {
                 let receipt = format!("Saved independent recovery copy: {}", destination.display());
                 app.state

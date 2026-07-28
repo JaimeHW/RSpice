@@ -8,12 +8,12 @@
 
 use egui::Ui;
 
-use crate::workbench::AppState;
 use crate::state::NoiseSummary;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
+use crate::workbench::AppState;
 
 use super::well_hint;
 
@@ -258,7 +258,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             }
         });
 }
-
 
 /// Right panel: band, total, dominant contributor.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {

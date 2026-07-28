@@ -24,7 +24,9 @@ use crate::workbench::app::dialogs::review_primitives::{
     resolved_context,
 };
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
-use crate::workbench::app::{AppState, ArraySelectionDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{
+    AppState, ArraySelectionDialogState, RSpiceApp, SchematicEditAuthority,
+};
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} REPEATED STRUCTURE";
 const TITLE: &str = "Create object array";

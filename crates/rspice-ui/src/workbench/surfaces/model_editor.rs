@@ -9,7 +9,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align, Align2, Color32, Id, Layout, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::state::model_library::{
     ApprovalDecision, CompatibilityDisposition, ConsumerChange, LicenseScope, LookupInterpolation,
     ModelDefinitionMetadata, ModelQualificationState, ModelReleaseCandidate,
@@ -23,6 +22,7 @@ use crate::state::model_library::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
+use crate::workbench::RSpiceApp;
 
 use super::super::commands::{
     Command, CommandAvailability, ModelEditorWorkflow, active_model_editor_workflow,

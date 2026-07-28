@@ -5,10 +5,10 @@
 use super::shared::validate_lcv_name;
 use super::{Context, RSpiceApp};
 use crate::diagnostics::ConsoleMessage;
-use crate::workbench::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
+use crate::workbench::AppState;
 
 impl AppState {
     /// Open Copy Cell pre-filled from a source cell, targeting the first
@@ -43,7 +43,6 @@ impl AppState {
         self.dialogs.rename_cell_error = None;
     }
 }
-
 
 impl RSpiceApp {
     pub(in crate::workbench::app) fn process_copy_cell_dialog(&mut self, ctx: &Context) {

@@ -8,7 +8,6 @@ use crate::simulation::veriloga::{PreparedVerilogARuntime, VerilogASourceOperati
 
 use std::sync::{Arc, Mutex, mpsc};
 
-
 /// Mockup-defined page set. Reports are intentionally not a visible fourth tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodeWorkspacePage {

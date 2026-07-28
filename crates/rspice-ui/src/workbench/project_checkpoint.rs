@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::workbench::app::AppState;
 use crate::io::ProjectFile;
 use crate::product::ContentDigest;
+use crate::workbench::app::AppState;
 
 const MANIFEST_SCHEMA_VERSION: u16 = 1;
 #[cfg(not(target_arch = "wasm32"))]

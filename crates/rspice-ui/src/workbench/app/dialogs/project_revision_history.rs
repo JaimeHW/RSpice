@@ -237,7 +237,10 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
 }
 
 impl RSpiceApp {
-    pub(in crate::workbench::app) fn render_project_revision_history_dialog(&mut self, ctx: &Context) {
+    pub(in crate::workbench::app) fn render_project_revision_history_dialog(
+        &mut self,
+        ctx: &Context,
+    ) {
         if !self.state.dialogs.project_revision_history.open {
             return;
         }

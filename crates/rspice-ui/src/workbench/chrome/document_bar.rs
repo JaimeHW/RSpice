@@ -4,10 +4,10 @@
 use egui::containers::menu::MenuButton;
 use egui::{Context, Frame, Layout, Sense, TopBottomPanel, Vec2};
 
-use crate::workbench::{AppState, RSpiceApp};
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;

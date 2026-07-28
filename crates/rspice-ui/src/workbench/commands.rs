@@ -1448,11 +1448,10 @@ impl Command {
                 } else {
                     let anchor = app.state.schematic_paste_anchor();
                     if !app.state.schematic.paste_at(anchor) {
-                        app.state.push_user_message(
-                            crate::diagnostics::ConsoleMessage::warning(
+                        app.state
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                                 "Paste could not be completed at the current canvas target",
-                            ),
-                        );
+                            ));
                     }
                 }
             }
@@ -1916,18 +1915,17 @@ impl Command {
                 ) {
                     Ok(true) => {
                         app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::info(
-                                format!(
-                                    "{} completed as one undoable transaction.",
-                                    command.label()
-                                ),
-                            ))
+                            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                                "{} completed as one undoable transaction.",
+                                command.label()
+                            )))
                     }
                     Ok(false) => {
                         app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::info(
-                                format!("{} produced no geometry change.", command.label()),
-                            ))
+                            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
+                                "{} produced no geometry change.",
+                                command.label()
+                            )))
                     }
                     Err(error) => {
                         app.state
@@ -1997,9 +1995,7 @@ impl Command {
                 if stop_simulation_enabled(app.state.simulation.is_running) {
                     if let Err(error) = app.state.simulation.request_abort_active_run() {
                         app.state
-                            .push_sim_message(crate::diagnostics::ConsoleMessage::warning(
-                                error,
-                            ));
+                            .push_sim_message(crate::diagnostics::ConsoleMessage::warning(error));
                     }
                 } else if app.state.simulation.is_running {
                     app.state.push_sim_message(
@@ -2062,9 +2058,10 @@ impl Command {
                         super::result_document::viewer_unavailability_reason(&app.state, viewer)
                             .unwrap_or("the active dataset is incompatible with this viewer");
                     app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                            format!("{} cannot be opened: {reason}.", viewer.label()),
-                        ));
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                            "{} cannot be opened: {reason}.",
+                            viewer.label()
+                        )));
                 }
             }
             Self::EditSpecifications => {
@@ -2099,11 +2096,10 @@ impl Command {
                     if let Err(error) =
                         super::model_editor::open_project_model(app, &library_name, &model_name)
                     {
-                        app.state.push_user_message(
-                            crate::diagnostics::ConsoleMessage::warning(format!(
-                                "Cannot open device model editor: {error}"
-                            )),
-                        );
+                        app.state
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                                format!("Cannot open device model editor: {error}"),
+                            ));
                     }
                 }
                 Err(reason) => {
@@ -2119,11 +2115,10 @@ impl Command {
                         super::SurfaceRoute::surface(super::SurfaceId::ModelCorrelation),
                         super::RouteTransitionSource::User,
                     ) {
-                        app.state.push_user_message(
-                            crate::diagnostics::ConsoleMessage::warning(format!(
-                                "Cannot open measurement correlation: {error}"
-                            )),
-                        );
+                        app.state
+                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
+                                format!("Cannot open measurement correlation: {error}"),
+                            ));
                     }
                 }
                 Err(reason) => {

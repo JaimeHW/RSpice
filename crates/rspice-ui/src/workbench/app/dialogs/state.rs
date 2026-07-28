@@ -227,11 +227,7 @@ pub(crate) struct EngineeringTableDialogState {
 }
 
 impl EngineeringTableDialogState {
-    pub(crate) fn open(
-        &mut self,
-        view: crate::state::EngineeringTableView,
-        source_revision: u64,
-    ) {
+    pub(crate) fn open(&mut self, view: crate::state::EngineeringTableView, source_revision: u64) {
         *self = Self {
             open: true,
             draft: Some(view),

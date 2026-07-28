@@ -7,8 +7,8 @@ mod navigator;
 
 use egui::{Context, Frame, Id, Key, Response, SidePanel, TopBottomPanel, containers::PanelState};
 
-use crate::workbench::RSpiceApp;
 use crate::ui::tokens::Tokens;
+use crate::workbench::RSpiceApp;
 
 use super::layout::LayoutSpec;
 

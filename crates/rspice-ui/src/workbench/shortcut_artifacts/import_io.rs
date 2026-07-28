@@ -790,9 +790,7 @@ mod tests {
             Ok(ShortcutArtifactImportOutcome::Cancelled)
         ));
         assert!(poll_browser_shortcut_artifact_import().is_none());
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            current
-        ));
+        assert!(crate::workbench::browser_file_import::text_import_is_current(current));
 
         assert!(complete_browser_shortcut_artifact_import(
             current,
@@ -825,16 +823,12 @@ mod tests {
         ));
 
         let replacement = begin_browser_shortcut_artifact_import().expect("replacement starts");
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            replacement
-        ));
+        assert!(crate::workbench::browser_file_import::text_import_is_current(replacement));
         assert!(!complete_browser_shortcut_artifact_import(
             cancelled,
             Ok(ShortcutArtifactImportOutcome::Cancelled)
         ));
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            replacement
-        ));
+        assert!(crate::workbench::browser_file_import::text_import_is_current(replacement));
         assert_eq!(
             cancel_browser_shortcut_artifact_import(),
             BrowserShortcutArtifactImportCancelOutcome::Cancelled
@@ -854,9 +848,7 @@ mod tests {
             cancel_browser_shortcut_artifact_import(),
             BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased
         );
-        assert!(crate::workbench::browser_file_import::text_import_is_current(
-            other
-        ));
+        assert!(crate::workbench::browser_file_import::text_import_is_current(other));
         assert!(crate::workbench::browser_file_import::finish_text_import(
             other
         ));
@@ -900,10 +892,12 @@ mod tests {
 
         let detection = browser_picker_result(
             VscodeHostPlatform::Linux,
-            Ok(Some(crate::workbench::browser_file_import::PickedTextFile {
-                name: "keybindings.jsonc".to_owned(),
-                contents: "[invalid]".to_owned(),
-            })),
+            Ok(Some(
+                crate::workbench::browser_file_import::PickedTextFile {
+                    name: "keybindings.jsonc".to_owned(),
+                    contents: "[invalid]".to_owned(),
+                },
+            )),
         )
         .unwrap_err();
         assert_eq!(detection.kind(), ShortcutArtifactImportErrorKind::Detection);

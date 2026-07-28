@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use crate::diagnostics::ConsoleMessage;
+use crate::io::ProjectFile;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::io::ProjectIoError;
 use crate::workbench::app::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::project_lifecycle::DestinationAuthority;
 use crate::workbench::project_lifecycle::{PersistenceBinding, ProjectLifecycleError, SaveScope};
-use crate::io::ProjectFile;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::io::ProjectIoError;
 use crate::workbench::state::ProjectCloseDestination;
 
 #[derive(Debug, Clone, Copy)]
@@ -436,7 +436,9 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             }
         };
         match &completion.result {
-            crate::workbench::project_lifecycle::BrowserWriteResult::Saved { handle_id, .. }
+            crate::workbench::project_lifecycle::BrowserWriteResult::Saved {
+                handle_id, ..
+            }
             | crate::workbench::project_lifecycle::BrowserWriteResult::SavedSessionOnly {
                 handle_id,
                 ..
@@ -1118,7 +1120,8 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
             ) {
                 if let BrowserProjectImportPayload::Canonical(
                     crate::workbench::project_lifecycle::BrowserOpenResult::Opened {
-                        handle_id, ..
+                        handle_id,
+                        ..
                     },
                 ) = &completion.payload
                 {
@@ -1286,8 +1289,8 @@ mod tests {
     use crate::analysis::histogram::HistogramBuilder;
     use crate::analysis::nyquist::NyquistData;
     use crate::analysis::pole_zero::PoleZeroData;
-    use crate::workbench::app::ActiveViewer;
     use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
+    use crate::workbench::app::ActiveViewer;
 
     fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
         run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)

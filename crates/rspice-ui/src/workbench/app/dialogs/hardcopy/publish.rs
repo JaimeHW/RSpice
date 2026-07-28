@@ -35,6 +35,13 @@ fn repaint_context() -> egui::Context {
         .unwrap_or_default()
 }
 #[cfg(target_arch = "wasm32")]
+use crate::hardcopy::HardcopyArtifactIdentity;
+use crate::hardcopy::{
+    DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan, HardcopyReceipt, Orientation,
+    OutputFormat, PrinterJobSettings, PrinterMediaSource, ResolvedOrientation,
+};
+use crate::product::ContentDigest;
+#[cfg(target_arch = "wasm32")]
 use crate::workbench::export_workflow::deterministic_stored_zip;
 use crate::workbench::export_workflow::{
     ObservedExportDestination, SaveDialogConfig, export_completion_message,
@@ -46,13 +53,6 @@ use crate::workbench::hardcopy_print::{
     BrowserPrintReservation, finalize_browser_print, reserve_browser_print_window,
 };
 use crate::workbench::hardcopy_print::{HardcopyCancellationToken, PrinterCapabilitySnapshot};
-use crate::product::ContentDigest;
-#[cfg(target_arch = "wasm32")]
-use crate::hardcopy::HardcopyArtifactIdentity;
-use crate::hardcopy::{
-    DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan, HardcopyReceipt, Orientation,
-    OutputFormat, PrinterJobSettings, PrinterMediaSource, ResolvedOrientation,
-};
 #[cfg(test)]
 use crate::workbench::hardcopy_render::HardcopyRenderer;
 #[cfg(target_arch = "wasm32")]
@@ -691,8 +691,8 @@ fn apply_selected_resolved(
 fn active_retained_source_selection(
     app: &RSpiceApp,
 ) -> Result<(String, crate::hardcopy::HardcopyScope), String> {
-    use crate::workbench::SurfaceId;
     use crate::hardcopy::HardcopyScope;
+    use crate::workbench::SurfaceId;
 
     let candidates =
         crate::workbench::hardcopy_sources::enumerate_retained_hardcopy_sources(&app.state);
@@ -2405,8 +2405,8 @@ mod tests {
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
-        use crate::state::{Point, Wire};
         use crate::hardcopy::{HardcopyOutcome, PrinterRasterGeometry};
+        use crate::state::{Point, Wire};
         use crate::workbench::state::WorkspaceDocumentId;
 
         let mut app = RSpiceApp::test_instance();

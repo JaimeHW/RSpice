@@ -6,7 +6,6 @@ use std::collections::HashSet;
 
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::product::{AnalysisInstanceId, ContentDigest};
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
@@ -20,6 +19,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, IconButton, mono_input, select,
 };
+use crate::workbench::RSpiceApp;
 use crate::workbench::state::{
     ClonePlanDraft, DesignVariableDraft, SavedOutputDraft, SimulationWorkflowDialog,
 };

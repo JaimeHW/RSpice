@@ -62,7 +62,9 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            crate::workbench::project_workflow::cancel_pending_browser_file_operation(&mut self.state);
+            crate::workbench::project_workflow::cancel_pending_browser_file_operation(
+                &mut self.state,
+            );
         }
     }
 

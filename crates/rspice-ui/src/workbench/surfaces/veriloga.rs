@@ -2,10 +2,10 @@
 
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
-use crate::workbench::RSpiceApp;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::RSpiceApp;
 
 use super::super::code_workspace::{
     CodeEditorLanguage, CodeEditorSeverity, CodeWorkspacePage, TargetQualification,
@@ -334,12 +334,13 @@ fn source_editor(
             ) {
                 Ok(true) => {}
                 Ok(false) => {}
-                Err(error) => app
-                    .state
-                    .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                        "Could not update {}: {error}",
-                        active_path
-                    ))),
+                Err(error) => {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                            "Could not update {}: {error}",
+                            active_path
+                        )))
+                }
             }
         }
     });

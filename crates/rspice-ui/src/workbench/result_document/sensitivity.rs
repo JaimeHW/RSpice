@@ -8,12 +8,12 @@ use std::cmp::Ordering;
 
 use egui::{Sense, Ui};
 
-use crate::workbench::AppState;
 use crate::state::{AnalysisResultPayload, SensitivityResultMode, SensitivityResultRow};
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
+use crate::workbench::AppState;
 
 use super::strip::StripHeader;
 use super::{panel_note, well_hint};

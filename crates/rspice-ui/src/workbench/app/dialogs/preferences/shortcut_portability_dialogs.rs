@@ -7,6 +7,11 @@
 
 use egui::{Context, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
+use crate::workbench::ShortcutPreferences;
+use crate::workbench::commands::{Command, CommandPlatform, ShortcutContext};
 use crate::workbench::shortcut_artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,
     PreparedShortcutArtifact, ReadyShortcutArtifactSource, ShortcutArtifactExportOutcome,
@@ -15,11 +20,6 @@ use crate::workbench::shortcut_artifacts::{
     VscodeImportReport, build_shortcut_reference_model, plan_shortcut_import,
     prepare_shortcut_artifact, shortcut_library_digest,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
-use crate::workbench::ShortcutPreferences;
-use crate::workbench::commands::{Command, CommandPlatform, ShortcutContext};
 use crate::workbench::shortcuts::ShortcutProfileLibrary;
 
 use super::preferences_shell::{preference_switch, right_aligned};

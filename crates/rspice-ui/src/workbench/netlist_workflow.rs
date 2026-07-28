@@ -182,14 +182,13 @@ fn acknowledge_canonical_dependencies(
             if !edges.insert((None, index)) {
                 continue;
             }
-            let record =
-                crate::state::DependencyMetadata::unresolved_direct_to(
-                    index,
-                    dependency.requested_path(),
-                    locator,
-                )
-                .and_then(|record| record.resolve_utf8(source))
-                .map_err(|error| error.to_string())?;
+            let record = crate::state::DependencyMetadata::unresolved_direct_to(
+                index,
+                dependency.requested_path(),
+                locator,
+            )
+            .and_then(|record| record.resolve_utf8(source))
+            .map_err(|error| error.to_string())?;
             dependencies.push(record);
         } else {
             let parent_source = sealed
@@ -209,15 +208,14 @@ fn acknowledge_canonical_dependencies(
             if !edges.insert((Some(parent_key), index)) {
                 continue;
             }
-            let record =
-                crate::state::DependencyMetadata::unresolved_transitive_to(
-                    parent,
-                    index,
-                    dependency.requested_path(),
-                    locator,
-                )
-                .and_then(|record| record.resolve_utf8(source))
-                .map_err(|error| error.to_string())?;
+            let record = crate::state::DependencyMetadata::unresolved_transitive_to(
+                parent,
+                index,
+                dependency.requested_path(),
+                locator,
+            )
+            .and_then(|record| record.resolve_utf8(source))
+            .map_err(|error| error.to_string())?;
             dependencies.push(record);
         }
     }
@@ -316,8 +314,7 @@ fn dependency_locator(
         .find(|segment| !segment.is_empty())
         .unwrap_or("dependency.sp")
         .to_owned();
-    crate::state::SourceLocator::try_new(identity, display)
-        .map_err(|error| error.to_string())
+    crate::state::SourceLocator::try_new(identity, display).map_err(|error| error.to_string())
 }
 
 fn external_dependency_index_at_line(source: &str, line: usize) -> Result<usize, String> {
@@ -694,17 +691,15 @@ pub(crate) fn save_owned_netlist_source(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
-        let locator = crate::state::SourceLocator::try_new(
-            path.display().to_string(),
-            display_name,
-        )
-        .and_then(|locator| {
-            if io.saved_paths_are_reopenable() {
-                locator.with_native_origin(path.display().to_string())
-            } else {
-                Ok(locator)
-            }
-        });
+        let locator =
+            crate::state::SourceLocator::try_new(path.display().to_string(), display_name)
+                .and_then(|locator| {
+                    if io.saved_paths_are_reopenable() {
+                        locator.with_native_origin(path.display().to_string())
+                    } else {
+                        Ok(locator)
+                    }
+                });
         let mut next = document.clone();
         match locator.and_then(|locator| next.acknowledge_save(next.content_digest(), locator)) {
             Ok(_) => Some(next),
