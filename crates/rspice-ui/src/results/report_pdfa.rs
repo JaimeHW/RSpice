@@ -6,6 +6,23 @@
 //! is active during serialization, so invalid archival output is never
 //! returned as a publication artifact.
 
+//!
+//! # Status: complete, and connected to nothing
+//!
+//! Nothing outside the `report_package` / `report_pdfa` /
+//! `report_publication` cluster references it. `git log -S` over the whole
+//! history shows the only external reference ever added was the `pub mod`
+//! line in `results.rs`, so this pipeline has never had a caller.
+//!
+//! The report *editor* does ship: `workbench::surfaces::report_authoring`
+//! works on `results::report_document`. What is unwired is the packaging,
+//! PDF/A rendering, and publication-gate layer beneath it.
+//!
+//! The scoped `allow` keeps 168 known-status items out of the crate-wide
+//! dead-code signal so the rest of it stays usable. Remove it when the
+//! cluster is wired up, or delete the cluster.
+#![allow(dead_code)]
+
 use krilla::color::rgb;
 use krilla::configure::{Archival, ConfigurationBuilder};
 use krilla::geom::{Point, Size, Transform};

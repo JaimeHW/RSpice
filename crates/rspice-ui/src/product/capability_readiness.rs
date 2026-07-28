@@ -8,6 +8,24 @@
 //!
 //! The mockup capability fixture is consumed only by this module's tests. The
 //! production resolver defaults to no evidence and therefore no allowed claims.
+//!
+//! # Status: complete, and connected to nothing
+//!
+//! No code outside this module references any of its types. That is not decay:
+//! `git log -S` over the whole history shows the only external reference ever
+//! added was the `pub mod` line in `product.rs`, so this subsystem has never
+//! had a caller. It was built ahead of the surface that would use it, and that
+//! surface has not been written.
+//!
+//! The `allow` below is deliberate and scoped. Closing the crate's public
+//! module surface made 1531 items report as dead, and 124 of them are here --
+//! enough to bury the dead code that is genuinely worth acting on. Silencing a
+//! subsystem whose status is *known and recorded* is what makes the rest of
+//! that signal usable.
+//!
+//! Remove this attribute when the module is wired up, or delete the module.
+//! Do not let it sit here as a third option.
+#![allow(dead_code)]
 
 mod resolution;
 mod validation;

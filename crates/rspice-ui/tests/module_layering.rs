@@ -997,7 +997,22 @@ fn source_files_have_no_byte_order_mark() {
 ///
 /// The 77 that remain are load-bearing: removing one produces the warning it
 /// claims to be silencing.
-const MAX_LINT_SUPPRESSIONS: usize = 77;
+///
+/// Raised 77 -> 81 on 2026-07-28 for four module-scoped `#![allow(dead_code)]`
+/// attributes, on `product::capability_readiness` and the
+/// `results::report_{package,pdfa,publication}` cluster. They meet the test
+/// above emphatically -- removing them produces 287 warnings -- and they are
+/// the opposite of the stale 32: each covers a subsystem that `git log -S`
+/// confirms has *never* had a caller in the crate's history, so its status is
+/// known rather than merely unexamined. Closing the public module surface took
+/// reported dead code to 1531, and burying the 1244 worth acting on under 287
+/// with a settled answer is what makes the rest of the signal usable.
+///
+/// Each attribute carries the evidence and its own removal condition: wire the
+/// module up, or delete it. If one of those modules is ever wired up, drop its
+/// attribute rather than leaving it to absorb the next real warning -- that is
+/// exactly how the previous 32 became worthless.
+const MAX_LINT_SUPPRESSIONS: usize = 81;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
