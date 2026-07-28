@@ -35,7 +35,7 @@
 //! simultaneously free of truncation and round-off error. Rather than assert a
 //! tolerance and hope, the audit evaluates each entry at two step sizes and
 //! reports an entry as checked only where the two agree
-//! ([`JacobianAuditEntry::converged`]). Entries where the difference itself has
+//! ([`StampAuditEntry::converged`]). Entries where the difference itself has
 //! not converged are reported as unchecked rather than silently passed, and the
 //! checked fraction is part of the audit result — a model whose Jacobian cannot
 //! be verified is a finding, not a blank.
@@ -48,8 +48,8 @@
 
 use crate::Value;
 use crate::device::veriloga_generated::{
-    BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedEvaluationError,
-    GeneratedSimulationParameters, builtins,
+    BuiltinVerilogAInstance, GeneratedAnalysisKind, GeneratedDdtCoefficients,
+    GeneratedEvaluationError, GeneratedSimulationParameters, builtins,
 };
 use crate::solver::{ComplexMatrix, StaticMatrix};
 
@@ -119,6 +119,24 @@ const AUDIT_BLOCK_RELATIVE_FLOOR: Value = 1.0e-9;
 /// Absolute floor, for the case where the entire block is zero.
 const AUDIT_ABSOLUTE_FLOOR: Value = 1.0e-30;
 
+/// Companion scales the charge oracle drives `ddt` with, in inverse seconds.
+///
+/// A charge has to be recovered by subtracting two current vectors, and the
+/// charge term is `scale * q` while the conduction term is whatever the device
+/// conducts. Too small a scale and the subtraction is pure cancellation: a
+/// picocoulomb against a milliamp at `scale = 1` leaves four significant digits.
+/// These correspond to timesteps of 100 ps and 1 ps, which put `scale * q` on
+/// the same order as the conduction current for a typical compact model and
+/// recover the charge to nearly full precision.
+///
+/// Two of them, two orders apart, because agreement between them is the test
+/// that `ddt` enters the residual linearly — see [`GoldenHarness::charge_audit`].
+const CHARGE_RECOVERY_SCALES: [Value; 2] = [1.0e10, 1.0e12];
+
+/// Disagreement between the two recovery scales, relative to the recovered
+/// charge, above which that row's charge is treated as unrecoverable.
+const CHARGE_LINEARITY_TOLERANCE: Value = 1.0e-7;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GoldenError {
     UnknownModel(String),
@@ -173,9 +191,13 @@ pub struct GoldenNoiseSample {
     pub exponent: Option<Value>,
 }
 
-/// One entry of a Jacobian audit.
+/// One entry of a stamped-versus-differenced comparison.
+///
+/// The same shape serves the conduction Jacobian and the reactive block: both
+/// are a matrix the device stamped, held against a numerical derivative of a
+/// quantity recovered from the device's own residual.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct JacobianAuditEntry {
+pub struct StampAuditEntry {
     pub row: u32,
     pub col: u32,
     /// What the device stamped.
@@ -193,7 +215,7 @@ pub struct JacobianAuditEntry {
     pub relative_error: Value,
 }
 
-impl JacobianAuditEntry {
+impl StampAuditEntry {
     /// Whether the difference is precise enough to judge the stamp tightly.
     pub fn converged(&self) -> bool {
         self.uncertainty <= AUDIT_CONVERGENCE_TOLERANCE
@@ -216,9 +238,9 @@ impl JacobianAuditEntry {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct JacobianAudit {
+pub struct StampAudit {
     pub model_name: &'static str,
-    pub entries: Vec<JacobianAuditEntry>,
+    pub entries: Vec<StampAuditEntry>,
     /// Magnitude below which an entry cannot influence a solve of this block.
     ///
     /// Derived from the largest entry the device stamped, so it scales with the
@@ -227,14 +249,14 @@ pub struct JacobianAudit {
     pub significance_floor: Value,
 }
 
-impl JacobianAudit {
+impl StampAudit {
     /// Entries the difference resolved tightly.
-    pub fn checked(&self) -> impl Iterator<Item = &JacobianAuditEntry> {
+    pub fn checked(&self) -> impl Iterator<Item = &StampAuditEntry> {
         self.entries.iter().filter(|entry| entry.converged())
     }
 
     /// Entries carrying enough information to be compared at all.
-    pub fn comparable(&self) -> impl Iterator<Item = &JacobianAuditEntry> {
+    pub fn comparable(&self) -> impl Iterator<Item = &StampAuditEntry> {
         self.entries.iter().filter(|entry| !entry.unverifiable())
     }
 
@@ -257,8 +279,8 @@ impl JacobianAudit {
     /// imprecise on some entries of a compact model; what matters is whether it
     /// was so imprecise on an entry the solver would notice that the stamp went
     /// entirely unexamined.
-    pub fn unverified_significant(&self) -> Vec<JacobianAuditEntry> {
-        let mut significant: Vec<JacobianAuditEntry> = self
+    pub fn unverified_significant(&self) -> Vec<StampAuditEntry> {
+        let mut significant: Vec<StampAuditEntry> = self
             .entries
             .iter()
             .filter(|entry| {
@@ -284,8 +306,8 @@ impl JacobianAudit {
     /// `base` is the tolerance demanded where the difference converged; entries
     /// the difference resolved less well are held to their own error bar
     /// instead, so a stiff junction cannot manufacture a failure.
-    pub fn failures(&self, base: Value) -> Vec<JacobianAuditEntry> {
-        let mut failures: Vec<JacobianAuditEntry> = self
+    pub fn failures(&self, base: Value) -> Vec<StampAuditEntry> {
+        let mut failures: Vec<StampAuditEntry> = self
             .comparable()
             .copied()
             .filter(|entry| entry.relative_error > entry.required_tolerance(base))
@@ -456,8 +478,7 @@ impl GoldenHarness {
 
     /// Compare the stamped Jacobian against a numerical derivative of the
     /// current vector, at two step sizes.
-    pub fn jacobian_audit(&mut self, unknowns: &[Value]) -> Result<JacobianAudit, GoldenError> {
-        let size = self.size();
+    pub fn jacobian_audit(&mut self, unknowns: &[Value]) -> Result<StampAudit, GoldenError> {
         let (stamped, _) = self.stamp_dense(unknowns)?;
 
         let mut ladder = Vec::with_capacity(AUDIT_STEP_LADDER.len());
@@ -465,63 +486,138 @@ impl GoldenHarness {
             ladder.push(self.difference_jacobian(unknowns, step)?);
         }
 
-        // Everything is judged relative to the largest entry the device
-        // actually stamped, so "verified" means "verified to a precision the
-        // solver could act on" rather than "resolved to six figures in
-        // isolation".
-        let block_scale = stamped
+        Ok(audit_against_ladder(
+            self.model_name,
+            self.size(),
+            &stamped,
+            &ladder,
+        ))
+    }
+
+    /// Compare the stamped reactive block against a numerical derivative of the
+    /// charge vector, recovered from the residual.
+    ///
+    /// The reactive stamp is produced by the same chain rule as the conduction
+    /// stamp and shares the whole differentiated body with it, so comparing the
+    /// two says nothing. What does not share code with either is the *residual*:
+    /// a `ddt` reaches it through a companion form that this harness controls
+    /// the coefficients of. Drive the device once with `ddt` inert and once with
+    /// its derivative scale set to `k` and every history weight at zero, and the
+    /// operator returns exactly `k * q`, so
+    ///
+    /// ```text
+    /// q(V) = (I_active(V) - I_inert(V)) / k
+    /// ```
+    ///
+    /// is an ordinary function of the unknowns recovered through
+    /// [`Self::device_currents`] — the primal path — with no derivative
+    /// information involved. Differencing it gives `dq/dV` to hold the reactive
+    /// stamp against.
+    ///
+    /// The recovery assumes the operator's result enters the residual linearly,
+    /// which is how a compact model contributes a charge and is not something
+    /// the language guarantees: a body is free to compute `f(ddt(q))`. Rather
+    /// than assume it, the charge is recovered at two scales two orders apart
+    /// and rows where the two disagree are reported as coverage gaps — the same
+    /// discipline the step ladder applies to the difference itself.
+    pub fn charge_audit(&mut self, unknowns: &[Value]) -> Result<StampAudit, GoldenError> {
+        let size = self.size();
+        let stamped = self.stamp_capacitance_dense(unknowns)?;
+
+        let [coarse_scale, fine_scale] = CHARGE_RECOVERY_SCALES;
+        let coarse = self.device_charges(unknowns, coarse_scale)?;
+        let fine = self.device_charges(unknowns, fine_scale)?;
+
+        let charge_floor = fine
             .iter()
-            .chain(ladder.iter().flatten())
+            .chain(coarse.iter())
             .filter(|value| value.is_finite())
-            .fold(0.0, |worst: Value, value| worst.max(value.abs()));
-        let floor = (block_scale * AUDIT_BLOCK_RELATIVE_FLOOR).max(AUDIT_ABSOLUTE_FLOOR);
+            .fold(0.0, |worst: Value, value| worst.max(value.abs()))
+            * AUDIT_BLOCK_RELATIVE_FLOOR;
+        let linear: Vec<bool> = (0..size)
+            .map(|row| {
+                let (left, right) = (coarse[row], fine[row]);
+                left.is_finite()
+                    && right.is_finite()
+                    && (left - right).abs()
+                        / magnitude_scale(left, right, charge_floor.max(AUDIT_ABSOLUTE_FLOOR))
+                        <= CHARGE_LINEARITY_TOLERANCE
+            })
+            .collect();
 
-        let mut entries = Vec::with_capacity(size * size);
-        for row in 0..size {
-            for col in 0..size {
-                let index = row * size + col;
-                let stamped_value = stamped[index];
-
-                // Best-agreeing adjacent pair on the ladder. The finer member
-                // is the estimate, because within a converged pair it carries
-                // the smaller truncation error.
-                let mut best: Option<(Value, Value)> = None;
-                for window in ladder.windows(2) {
-                    let (coarser, finer) = (window[0][index], window[1][index]);
-                    if !coarser.is_finite() || !finer.is_finite() {
-                        continue;
-                    }
-                    let disagreement =
-                        (coarser - finer).abs() / magnitude_scale(coarser, finer, floor);
-                    if best.is_none_or(|(worst, _)| disagreement < worst) {
-                        best = Some((disagreement, finer));
-                    }
-                }
-
-                let (uncertainty, numeric) = best.unwrap_or((Value::INFINITY, Value::NAN));
-                let relative_error = if numeric.is_finite() {
-                    (stamped_value - numeric).abs()
-                        / magnitude_scale(stamped_value, numeric, floor)
-                } else {
-                    0.0
-                };
-
-                entries.push(JacobianAuditEntry {
-                    row: row as u32,
-                    col: col as u32,
-                    stamped: stamped_value,
-                    numeric,
-                    uncertainty,
-                    relative_error,
-                });
-            }
+        let mut ladder = Vec::with_capacity(AUDIT_STEP_LADDER.len());
+        for step in AUDIT_STEP_LADDER {
+            ladder.push(self.difference_charges(unknowns, step, fine_scale)?);
         }
 
-        Ok(JacobianAudit {
-            model_name: self.model_name,
-            entries,
-            significance_floor: floor,
-        })
+        let mut audit = audit_against_ladder(self.model_name, size, &stamped, &ladder);
+
+        // A row whose charge could not be recovered has no oracle at all. Its
+        // entries are blanked rather than compared, which reports them through
+        // `unverified_significant` as the coverage gaps they are instead of
+        // manufacturing failures against a meaningless number.
+        for entry in &mut audit.entries {
+            if !linear[entry.row as usize] {
+                entry.numeric = Value::NAN;
+                entry.uncertainty = Value::INFINITY;
+                entry.relative_error = 0.0;
+            }
+        }
+        Ok(audit)
+    }
+
+    /// The charge the device stores at `unknowns`, at the oracle's own scale.
+    ///
+    /// The quantity the reactive stamp claims to be the derivative of, obtained
+    /// without consulting the reactive stamp.
+    pub fn stored_charges(&mut self, unknowns: &[Value]) -> Result<Vec<Value>, GoldenError> {
+        self.device_charges(unknowns, CHARGE_RECOVERY_SCALES[1])
+    }
+
+    /// The charge the device stores at `unknowns`, recovered from its residual.
+    ///
+    /// `scale` is the companion derivative weight `ddt` is driven with; see
+    /// [`Self::charge_audit`] for why the answer should not depend on it.
+    pub fn device_charges(
+        &mut self,
+        unknowns: &[Value],
+        scale: Value,
+    ) -> Result<Vec<Value>, GoldenError> {
+        // Inert first. `rspice_eval_ddt` latches its history on the inert path,
+        // so running it first leaves every slot initialised and makes the active
+        // pass depend on nothing but the value it is handed.
+        self.set_ddt_scale(None);
+        let inert = self.device_currents(unknowns)?;
+        self.set_ddt_scale(Some(scale));
+        let active = self.device_currents(unknowns)?;
+        self.set_ddt_scale(None);
+
+        Ok(inert
+            .iter()
+            .zip(active.iter())
+            .map(|(inert, active)| (active - inert) / scale)
+            .collect())
+    }
+
+    /// Drive `ddt` with a bare derivative weight, or make it inert.
+    ///
+    /// Every history weight is zero, so the operator reduces to `scale * value`
+    /// with no dependence on what a previous timestep left behind. The timestep
+    /// is zero for the same reason: it is what `idt` integrates over, and a zero
+    /// step holds an integral at its accepted value across both passes so it
+    /// subtracts out instead of appearing as charge.
+    fn set_ddt_scale(&mut self, scale: Option<Value>) {
+        let coefficients = match scale {
+            Some(derivative_scale) => GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale,
+                previous_value_scale: 0.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+            None => GeneratedDdtCoefficients::inactive(),
+        };
+        self.instance.set_timepoint(0.0, 0.0, coefficients);
     }
 
     /// Fourth-order central difference of the current vector, dense row-major.
@@ -564,6 +660,43 @@ impl GoldenHarness {
         Ok(jacobian)
     }
 
+    /// The same fourth-order rule applied to the recovered charge vector.
+    fn difference_charges(
+        &mut self,
+        unknowns: &[Value],
+        relative_step: Value,
+        scale: Value,
+    ) -> Result<Vec<Value>, GoldenError> {
+        let size = self.size();
+        let mut derivatives = vec![0.0; size * size];
+        let mut perturbed = unknowns.to_vec();
+
+        for col in 0..size {
+            let operand_scale = if col < self.node_count {
+                unknowns[col].abs().max(1.0)
+            } else {
+                unknowns[col].abs().max(PROBE_BRANCH_SCALE)
+            };
+            let step = relative_step * operand_scale;
+
+            let mut sampled = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+            for (slot, multiple) in [-2.0, -1.0, 1.0, 2.0].into_iter().enumerate() {
+                perturbed[col] = unknowns[col] + multiple * step;
+                sampled[slot] = self.device_charges(&perturbed, scale)?;
+            }
+            perturbed[col] = unknowns[col];
+
+            for row in 0..size {
+                derivatives[row * size + col] = (-sampled[3][row] + 8.0 * sampled[2][row]
+                    - 8.0 * sampled[1][row]
+                    + sampled[0][row])
+                    / (12.0 * step);
+            }
+        }
+
+        Ok(derivatives)
+    }
+
     fn stamp_dense(&mut self, unknowns: &[Value]) -> Result<(Vec<Value>, Vec<Value>), GoldenError> {
         self.matrix.clear_values();
         self.rhs.fill(0.0);
@@ -581,8 +714,15 @@ impl GoldenHarness {
     }
 
     /// Reactive stamp at `omega = 1`, so the imaginary block is `dQ/dV` itself.
+    ///
+    /// A generated `stamp_reactive` writes cached charge derivatives that the
+    /// conduction stamp computed; it does not re-evaluate the body. So the
+    /// conduction stamp is run here at the same bias rather than left to the
+    /// caller — otherwise the block returned is the reactive stamp of whatever
+    /// bias happened to be evaluated last, which is a silent wrong answer.
     fn stamp_capacitance_dense(&mut self, unknowns: &[Value]) -> Result<Vec<Value>, GoldenError> {
         let size = self.size();
+        self.stamp_dense(unknowns)?;
         let mut complex = ComplexMatrix::from_real_structure(&self.matrix);
         complex.clear_values();
         self.instance
@@ -654,6 +794,73 @@ impl GoldenHarness {
 }
 
 /// Larger of two magnitudes, floored at the block-derived significance level.
+/// Hold a stamped block against a ladder of numerical estimates of it.
+///
+/// Shared by both oracles because the judgement is the same one in both cases:
+/// what varies between them is only which quantity was differenced to build the
+/// ladder.
+fn audit_against_ladder(
+    model_name: &'static str,
+    size: usize,
+    stamped: &[Value],
+    ladder: &[Vec<Value>],
+) -> StampAudit {
+    // Everything is judged relative to the largest entry the device actually
+    // stamped, so "verified" means "verified to a precision the solver could act
+    // on" rather than "resolved to six figures in isolation".
+    let block_scale = stamped
+        .iter()
+        .chain(ladder.iter().flatten())
+        .filter(|value| value.is_finite())
+        .fold(0.0, |worst: Value, value| worst.max(value.abs()));
+    let floor = (block_scale * AUDIT_BLOCK_RELATIVE_FLOOR).max(AUDIT_ABSOLUTE_FLOOR);
+
+    let mut entries = Vec::with_capacity(size * size);
+    for row in 0..size {
+        for col in 0..size {
+            let index = row * size + col;
+            let stamped_value = stamped[index];
+
+            // Best-agreeing adjacent pair on the ladder. The finer member is the
+            // estimate, because within a converged pair it carries the smaller
+            // truncation error.
+            let mut best: Option<(Value, Value)> = None;
+            for window in ladder.windows(2) {
+                let (coarser, finer) = (window[0][index], window[1][index]);
+                if !coarser.is_finite() || !finer.is_finite() {
+                    continue;
+                }
+                let disagreement = (coarser - finer).abs() / magnitude_scale(coarser, finer, floor);
+                if best.is_none_or(|(worst, _)| disagreement < worst) {
+                    best = Some((disagreement, finer));
+                }
+            }
+
+            let (uncertainty, numeric) = best.unwrap_or((Value::INFINITY, Value::NAN));
+            let relative_error = if numeric.is_finite() {
+                (stamped_value - numeric).abs() / magnitude_scale(stamped_value, numeric, floor)
+            } else {
+                0.0
+            };
+
+            entries.push(StampAuditEntry {
+                row: row as u32,
+                col: col as u32,
+                stamped: stamped_value,
+                numeric,
+                uncertainty,
+                relative_error,
+            });
+        }
+    }
+
+    StampAudit {
+        model_name,
+        entries,
+        significance_floor: floor,
+    }
+}
+
 fn magnitude_scale(left: Value, right: Value, floor: Value) -> Value {
     left.abs().max(right.abs()).max(floor)
 }
@@ -723,8 +930,8 @@ mod tests {
         assert_eq!(magnitude_scale(1.0e-20, 0.0, 1.0e-12), 1.0e-12);
     }
 
-    fn entry(stamped: Value, numeric: Value, uncertainty: Value) -> JacobianAuditEntry {
-        JacobianAuditEntry {
+    fn entry(stamped: Value, numeric: Value, uncertainty: Value) -> StampAuditEntry {
+        StampAuditEntry {
             row: 0,
             col: 0,
             stamped,
@@ -736,7 +943,7 @@ mod tests {
 
     #[test]
     fn a_difference_that_learned_nothing_is_a_gap_not_a_pass() {
-        let audit = JacobianAudit {
+        let audit = StampAudit {
             model_name: "fixture",
             significance_floor: 1.0e-9,
             entries: vec![
@@ -754,7 +961,7 @@ mod tests {
 
     #[test]
     fn negligible_entries_do_not_count_as_coverage_gaps() {
-        let audit = JacobianAudit {
+        let audit = StampAudit {
             model_name: "fixture",
             significance_floor: 1.0e-9,
             entries: vec![entry(1.0e-18, Value::NAN, Value::INFINITY)],
