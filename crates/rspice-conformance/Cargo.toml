@@ -1,0 +1,22 @@
+[package]
+name = "rspice-conformance"
+description = "Process-isolated ngspice and Xyce conformance suites"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+log.workspace = true
+num-complex.workspace = true
+rspice-core.workspace = true
+
+[features]
+default = []
+veriloga-builtins-base = ["rspice-core/veriloga-builtins-base"]
+
+[lints]
+workspace = true
