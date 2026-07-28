@@ -216,6 +216,48 @@ fn a_value_is_at_least_as_volatile_as_everything_it_reads() {
     }
 }
 
+/// Every output has to survive to the caller, and a stage's locals do not.
+///
+/// The interpreter hides this: it keeps each stage's whole snapshot, so an
+/// output owned by the instance stage can simply be read out of it afterwards.
+/// The emitter cannot — a stage is a Rust function and its bindings are gone
+/// when it returns — so an output a coarse stage owns has to reach the caller
+/// through the slot cache like anything else that crosses a boundary. Nothing
+/// demanded it before, because a slot was only assigned when a *later stage*
+/// read the value, and the caller is not a stage.
+///
+/// The failure this prevents is a silent zero rather than a crash, which is why
+/// it is worth a test of its own.
+#[test]
+fn every_output_is_readable_once_the_stages_have_run() {
+    for (name, source) in fixtures() {
+        let (function, wanted) = pipeline(source, name);
+        let schedule = schedule_cfg(&function);
+        let stages = split(&function, &schedule, &wanted)
+            .unwrap_or_else(|error| panic!("{name}: split: {error}"));
+        let Some(last) = stages.last().map(|stage| stage.class) else {
+            continue;
+        };
+
+        for (index, output) in wanted.iter().enumerate() {
+            let owner = stages
+                .iter()
+                .find(|stage| stage.outputs[index].is_some())
+                .unwrap_or_else(|| panic!("{name}: output {index} ({output}) is owned by no stage"));
+            if owner.class == last {
+                continue;
+            }
+            let held = owner.outputs[index].expect("just matched");
+            assert!(
+                owner.slot_of(held).is_some(),
+                "{name}: output {index} ({output}) is owned by the {} stage, which returns before \
+                 the caller reads it, and no slot carries it",
+                owner.class.name(),
+            );
+        }
+    }
+}
+
 /// Everything the emitter would be handed: differentiated, simplified, and with
 /// the Jacobian read-outs already taken.
 fn pipeline(source: &str, name: &str) -> (rspice_veriloga::canonical_ir::CfgFunction, Vec<ValueId>) {
@@ -303,6 +345,28 @@ module staged(g, d, s);
             ids = 0.0;
         end
         I(d, s) <+ 1.0e-6 * ids;
+    end
+endmodule
+"#,
+        ),
+        // Contributions that read no unknown at all, alongside one that does.
+        // Their residuals are instance-class, so the first stage computes them
+        // and the caller reads them after the last — the only shape in which an
+        // *output* crosses a stage boundary. Both forms are here on purpose:
+        // `bias` simplifies to a bare leaf, which every stage rebuilds and none
+        // computes, and `bias * bias` is an instruction that needs a slot.
+        (
+            "constant contribution",
+            r#"
+module leak(a, c);
+    inout a, c;
+    electrical a, c;
+    parameter real g = 1.0e-3;
+    parameter real bias = 5.0e-6;
+    analog begin
+        I(a, c) <+ g * V(a, c);
+        I(a, c) <+ bias;
+        I(a, c) <+ bias * bias;
     end
 endmodule
 "#,

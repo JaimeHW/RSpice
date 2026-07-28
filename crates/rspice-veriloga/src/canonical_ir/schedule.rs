@@ -480,6 +480,20 @@ pub struct Stage {
     pub outputs: Vec<Option<ValueId>>,
 }
 
+impl Stage {
+    /// The slot this stage writes `value` to, if anything reads it from the
+    /// cache rather than from this stage's own locals.
+    ///
+    /// An output the last stage computes has no slot and needs none — the
+    /// caller reads it where it is produced.
+    pub fn slot_of(&self, value: ValueId) -> Option<u32> {
+        self.exports
+            .iter()
+            .find(|(_, exported)| *exported == value)
+            .map(|(slot, _)| *slot)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SplitError {
     /// A packed derivative would have had to cross a stage boundary. It cannot
@@ -632,6 +646,17 @@ pub fn split(
             CfgTerminator::Return | CfgTerminator::Unset => {}
         }
     }
+    // An output is read by whoever called `split`, and that read happens after
+    // the last stage has run — so it is demanded at the deepest class in use,
+    // exactly as a replicated branch condition is. Without this, an output a
+    // coarse stage owns is computed into a local that stage drops on return and
+    // the caller has nowhere to read it from: `Stage::outputs` would name it and
+    // no slot would carry it. An output the deepest stage computes still costs
+    // nothing, because `demand` stops as soon as the holder is no coarser than
+    // the reader.
+    for output in outputs {
+        demand(*output, deepest, &mut slots, &mut next_slot)?;
+    }
 
     let mut stages = Vec::new();
     for class in InvalidationClass::ALL {
@@ -639,7 +664,7 @@ pub fn split(
             continue;
         }
         stages.push(build_stage(
-            function, schedule, outputs, &block_of, &slots, class,
+            function, schedule, outputs, &block_of, &slots, class, deepest,
         )?);
     }
     Ok(stages)
@@ -653,12 +678,28 @@ fn build_stage(
     block_of: &[Option<BlockId>],
     slots: &[Option<u32>],
     class: InvalidationClass,
+    deepest: InvalidationClass,
 ) -> Result<Stage, SplitError> {
     let kept_block = |block: BlockId| schedule.blocks[usize::from(block)] <= class;
     let held = |value: ValueId| schedule.values[usize::from(value)];
     // Whether this stage computes the value itself, rather than reading what a
     // coarser one cached.
     let defined_here = |value: ValueId| held(value) == class;
+    // Which stage reports a requested output as its own.
+    //
+    // For anything with an instruction, the stage that computes it. A leaf has
+    // no instruction and is rebuilt wherever it is read, so no stage computes it
+    // in that sense and every stage could claim it; the last one does, because
+    // that is where the caller reads. `I(a,c) <+ bias` is the shape that gets
+    // here — a contribution reading no unknown, whose whole residual simplifies
+    // to a parameter.
+    let owns_output = |output: ValueId| {
+        if super::cfg::is_leaf_kind(&function.value(output).kind) {
+            class == deepest
+        } else {
+            held(output) == class
+        }
+    };
 
     // Values are renumbered per stage, so a stage is a function in its own
     // right rather than a view onto a bigger one.
@@ -736,12 +777,7 @@ fn build_stage(
             CfgTerminator::Return | CfgTerminator::Unset => {}
         }
     }
-    roots.extend(
-        outputs
-            .iter()
-            .copied()
-            .filter(|output| held(*output) == class),
-    );
+    roots.extend(outputs.iter().copied().filter(|output| owns_output(*output)));
     let mut seen: HashSet<ValueId> = HashSet::new();
     let mut stack: Vec<(ValueId, usize)> = Vec::new();
     for root in roots {
@@ -928,7 +964,14 @@ fn build_stage(
 
     let entry = block_map[usize::from(function.entry)].unwrap_or(BlockId::from(0usize));
     let (mut blocks, entry) = prune_blocks(blocks, entry);
-    let values = compact_values(&mut blocks, values, &mut mapped);
+    // The outputs are read by the caller, not by a block, so compaction has to
+    // be told about them or a leaf output nothing else reads is swept.
+    let produced: Vec<ValueId> = outputs
+        .iter()
+        .filter(|output| owns_output(**output))
+        .filter_map(|output| mapped[usize::from(*output)])
+        .collect();
+    let values = compact_values(&mut blocks, values, &mut mapped, &produced);
     let stage = CfgFunction {
         entry,
         blocks,
@@ -1011,7 +1054,7 @@ fn build_stage(
     let outputs = outputs
         .iter()
         .map(|output| {
-            (schedule.values[usize::from(*output)] == class)
+            owns_output(*output)
                 .then(|| mapped[usize::from(*output)])
                 .flatten()
         })
@@ -1112,6 +1155,7 @@ fn compact_values(
     blocks: &mut [CfgBlock],
     values: Vec<CfgValue>,
     mapped: &mut [Option<ValueId>],
+    produced: &[ValueId],
 ) -> Vec<CfgValue> {
     let mut keep = vec![false; values.len()];
     let mut stack: Vec<ValueId> = Vec::new();
@@ -1121,6 +1165,9 @@ fn compact_values(
             stack.push(value);
         }
     };
+    for value in produced {
+        demand(*value, &mut keep, &mut stack);
+    }
     for block in blocks.iter() {
         for param in &block.params {
             demand(*param, &mut keep, &mut stack);
