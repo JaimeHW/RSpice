@@ -281,6 +281,7 @@ pub(super) fn process_line(
     if state.subckt_stack.last().is_some() {
         if upper.starts_with(".MODEL") {
             let models = &mut state.models;
+            let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
             let frame = state
                 .subckt_stack
                 .last_mut()
@@ -289,7 +290,14 @@ pub(super) fn process_line(
             let mut stream = TokenStream::new(tokens);
             stream.advance(); // skip .MODEL
             let mut model =
-                parse_model_definition(&mut stream, line_num, &frame.local_params, models, true)?;
+                parse_model_definition(
+                    &mut stream,
+                    line_num,
+                    &frame.local_params,
+                    models,
+                    true,
+                    model_bare_ident_deferrals,
+                )?;
             let local_name = model.name.clone();
             let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
             frame
@@ -314,6 +322,7 @@ pub(super) fn process_line(
             let options = &mut state.options;
             let diagnostics = &mut state.diagnostics;
             let spef_includes = &mut state.spef_includes;
+            let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
             let frame = state
                 .subckt_stack
                 .last_mut()
@@ -336,6 +345,7 @@ pub(super) fn process_line(
                     fft_analyses,
                     unknown_warned,
                     models,
+                    model_bare_ident_deferrals,
                     initial_conditions: &mut subckt_initial_conditions,
                     device_initial_conditions,
                     node_sets: &mut subckt_node_sets,
@@ -394,6 +404,7 @@ pub(super) fn process_line(
             fft_analyses: &mut state.fft_analyses,
             unknown_warned: &mut state.unknown_warned,
             models: &mut state.models,
+            model_bare_ident_deferrals: &mut state.model_bare_ident_deferrals,
             initial_conditions: &mut state.initial_conditions,
             device_initial_conditions: &mut state.device_initial_conditions,
             node_sets: &mut state.node_sets,
@@ -453,6 +464,7 @@ pub(super) fn parse_line(
         spef_includes,
         origin,
         deferred_body_params,
+        model_bare_ident_deferrals,
     } = context;
 
     // Tokenize the line
@@ -488,6 +500,7 @@ pub(super) fn parse_line(
                 fft_analyses,
                 unknown_warned,
                 models,
+                model_bare_ident_deferrals,
                 params,
                 initial_conditions,
                 device_initial_conditions,

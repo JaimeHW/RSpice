@@ -2850,6 +2850,11 @@ pub struct SimulationOptions {
     pub temp: Option<Value>,
     /// Nominal temperature in Celsius (default: 27)
     pub tnom: Option<Value>,
+    /// Element geometry scale factor (`.options scale`, default 1).
+    ///
+    /// Multiplies drawn device dimensions before they become areas and
+    /// perimeters, so it enters squared wherever an area is derived.
+    pub scale: Option<Value>,
     /// Seed for the statistical expression functions
     /// (`gauss`/`agauss`/`unif`/`aunif`/2-arg `limit`). Applied netlist-wide
     /// before parameter evaluation regardless of where the `.options` line

@@ -73,6 +73,9 @@ pub(super) struct ParseState {
     pub(super) fft_analyses: Vec<FftAnalysis>,
     pub(super) data_tables: Vec<DataTable>,
     pub(super) models: Vec<ModelDef>,
+    ///  parameters written as an unresolvable bare identifier, with
+    /// the parameter name, the reference, and the line that wrote it.
+    pub(super) model_bare_ident_deferrals: Vec<(String, String, usize)>,
     pub(super) subcircuits: Vec<SubcircuitDef>,
     pub(super) params: ParamContext,
     pub(super) initial_conditions: Vec<InitialCondition>,
@@ -112,6 +115,7 @@ impl ParseState {
             fft_analyses: Vec::new(),
             data_tables: Vec::new(),
             models: Vec::new(),
+            model_bare_ident_deferrals: Vec::new(),
             subcircuits: Vec::new(),
             params: ParamContext::new(),
             initial_conditions: Vec::new(),
@@ -256,6 +260,9 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) spef_includes: &'a mut Vec<String>,
     pub(super) origin: &'a NetlistSourceLocation,
     pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
+    /// Sink for  parameters written as an unresolvable bare
+    /// identifier, carrying the parameter name, the reference, and the line.
+    pub(super) model_bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
 }
 
 pub(super) struct ParseCommandContext<'a> {
@@ -280,6 +287,13 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) origin: &'a NetlistSourceLocation,
     pub(super) defer_scoped_values: bool,
     pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
+    /// Sink for `.model` parameters written as an unresolvable bare
+    /// identifier, carrying the parameter name, the reference, and the line.
+    ///
+    /// A bare identifier is a forward reference until the deck ends and a
+    /// typo afterwards; only end-of-parse validation can tell which, and it
+    /// needs the line to report the second case the way the parser used to.
+    pub(super) model_bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
 }
 
 #[cfg(test)]

@@ -13,12 +13,20 @@ pub(super) fn qualify_local_model_name(scope: &str, local_name: &str) -> String 
     format!("{scope}::{local_name}")
 }
 
+/// Parse a `.model` card.
+///
+/// `bare_ident_deferrals` collects parameters whose value was an unresolvable
+/// bare identifier, with the line that wrote them. Those are forward
+/// references until the deck ends and typos afterwards, and only end-of-parse
+/// validation can tell which — see
+/// `resolve_static_model_expression_params_with_abort`.
 pub(super) fn parse_model_definition(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
     known_models: &[ModelDef],
     defer_expression_params: bool,
+    bare_ident_deferrals: &mut Vec<(String, String, usize)>,
 ) -> Result<ModelDef, ParseError> {
     let name = expect_model_name(stream, line_num)?;
     let second = expect_ident(stream, line_num)?;
@@ -86,13 +94,14 @@ pub(super) fn parse_model_definition(
     let model_type_hint = model_type
         .as_deref()
         .or_else(|| ako_base_model.map(|base| base.model_type.as_str()));
-    let model_params = parse_model_params(
+    let mut model_params = parse_model_params(
         stream,
         line_num,
         params,
         defer_expression_params,
         model_type_hint,
     )?;
+    bare_ident_deferrals.append(&mut model_params.bare_ident_deferrals);
 
     let Some(base_name) = ako_base else {
         return Ok(ModelDef {

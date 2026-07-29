@@ -70,6 +70,76 @@ pub(super) fn split_spice_fields(line: &str) -> Vec<String> {
     fields
 }
 
+/// Rejoin `name = value` assignments that whitespace split across fields.
+///
+/// Every SPICE dialect accepts spaces around `=` in an instance parameter
+/// list, and foundry PDKs use the spaced form freely — GF180MCU's device
+/// netlists are written `xmn1 d g 0 0 nmos_3p3 W = 10u L = 0.28u`. A parser
+/// that scans fields for one containing `=` sees `W`, `=`, `10u` as three
+/// fields, finds its first `=` one field too late, and concludes the
+/// subcircuit is named `W`.
+///
+/// Operates on already-split fields rather than raw text so quoting and
+/// brace nesting have already been honoured: `{a = b}` arrives as one field
+/// and is left alone, where a character-level rewrite would reach inside it.
+///
+/// Applied by callers that want it rather than folded into
+/// [`split_spice_fields`], because a bare `=` is meaningful to some callers
+/// and silently absorbing it everywhere would trade this bug for a subtler
+/// one.
+pub(super) fn coalesce_assignment_fields(fields: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(fields.len());
+    let mut pending_value = false;
+
+    for field in fields {
+        // `name =` waiting for its value, or a lone `=` already joined onto
+        // the name: the next field completes the assignment.
+        if pending_value {
+            if let Some(last) = out.last_mut() {
+                last.push_str(&field);
+            }
+            pending_value = false;
+            continue;
+        }
+
+        if field == "=" {
+            // A lone `=` with no name before it is not an assignment; leave
+            // it for the caller to reject with its own diagnostic.
+            if out.is_empty() {
+                out.push(field);
+                continue;
+            }
+            if let Some(last) = out.last_mut() {
+                last.push('=');
+            }
+            pending_value = true;
+            continue;
+        }
+
+        if let Some(rest) = field.strip_prefix('=')
+            && !out.is_empty()
+        {
+            if let Some(last) = out.last_mut() {
+                last.push('=');
+                last.push_str(rest);
+            }
+            // `=value` completes the assignment unless it was a bare `=`,
+            // which the branch above already handled.
+            continue;
+        }
+
+        if field.ends_with('=') && field.len() > 1 {
+            out.push(field);
+            pending_value = true;
+            continue;
+        }
+
+        out.push(field);
+    }
+
+    out
+}
+
 pub(super) fn strip_wrapping_expression_delimiters(raw: &str) -> &str {
     let trimmed = raw.trim();
     if trimmed.len() >= 2 {
@@ -160,6 +230,18 @@ pub(super) fn looks_like_expression(expr: &str) -> bool {
 pub(super) struct ParsedModelParams {
     pub(super) numeric: Vec<(String, Value)>,
     pub(super) expr: Vec<(String, String)>,
+    /// Parameters whose value was a bare identifier this pass could not
+    /// resolve, with the line that wrote them.
+    ///
+    /// Tracked separately from [`expr`](Self::expr) because the two carry
+    /// different guarantees. A braced `{missing}` is an explicit expression
+    /// whose resolution is somebody else's job — the XSPICE resolver rejects
+    /// its own. A bare `noia = nmos_3p3_noia` used to be a parse error, and
+    /// still has to become one if nothing in the finished deck defines the
+    /// name; otherwise the model quietly takes its default. Keeping the list
+    /// means end-of-parse validation can restore that error, with its line,
+    /// without guessing from expression text which deferrals were which.
+    pub(super) bare_ident_deferrals: Vec<(String, String, usize)>,
     pub(super) string: Vec<(String, String)>,
     pub(super) string_vector: Vec<(String, Vec<String>)>,
     pub(super) real_vector: Vec<(String, Vec<Value>)>,
@@ -193,6 +275,7 @@ pub(super) fn parse_model_params(
     let mut real_vector_params = Vec::new();
     let mut real_vector_expr_params = Vec::new();
     let integer_vector_params = Vec::new();
+    let mut bare_ident_deferrals: Vec<(String, String, usize)> = Vec::new();
 
     let opened_paren = stream.consume(&TokenKind::LParen);
     let allow_missing_close = opened_paren
@@ -214,6 +297,7 @@ pub(super) fn parse_model_params(
                     real_vector: real_vector_params,
                     real_vector_expr: real_vector_expr_params,
                     integer_vector: integer_vector_params,
+                    bare_ident_deferrals,
                 });
             }
             TokenKind::RParen => {
@@ -236,6 +320,7 @@ pub(super) fn parse_model_params(
                             real_vector: real_vector_params,
                             real_vector_expr: real_vector_expr_params,
                             integer_vector: integer_vector_params,
+                    bare_ident_deferrals,
                         });
                     }
                 }
@@ -261,6 +346,7 @@ pub(super) fn parse_model_params(
                         real_vector: real_vector_params,
                         real_vector_expr: real_vector_expr_params,
                         integer_vector: integer_vector_params,
+                    bare_ident_deferrals,
                     });
                 }
                 return Err(ParseError::Syntax {
@@ -378,14 +464,34 @@ pub(super) fn parse_model_params(
                         } else if let Some(value) = try_signed_model_value(stream, params) {
                             numeric_params.push((name, value));
                         } else {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: format!(
-                                    "Expected value for model parameter '{}', found {}",
-                                    name,
-                                    stream.peek().kind
-                                ),
-                            });
+                            // A bare identifier that does not resolve *here*
+                            // is a forward parameter reference. It gets the
+                            // same deferral a compound expression already
+                            // receives one branch below — `noia = 'k*1'`
+                            // deferring while `noia = k` hard-errored was an
+                            // inconsistency, not a safety property.
+                            //
+                            // Forward references are ordinary in foundry
+                            // corner libraries: GF180MCU's `.LIB typical`
+                            // pulls in the MOS model cards before the
+                            // `.LIB noise_corner` section defining the
+                            // flicker-noise parameters they cite, so a
+                            // single forward pass cannot have seen them yet.
+                            //
+                            // `resolve_static_model_expression_params` folds
+                            // these back into numeric parameters once the
+                            // whole deck has been read; anything still
+                            // unresolved then is either genuinely
+                            // temperature-dependent (correctly deferred to
+                            // the builder) or a real typo, which the builder
+                            // reports naming the model and parameter.
+                            let TokenKind::Ident(reference) = &stream.peek().kind else {
+                                unreachable!("ident branch matched before fallback")
+                            };
+                            let reference = reference.clone();
+                            stream.advance();
+                            bare_ident_deferrals.push((name.clone(), reference.clone(), line_num));
+                            expr_params.push((name, reference));
                         }
                     }
                     TokenKind::Expression(_) => {
@@ -577,6 +683,7 @@ pub(super) fn parse_model_params(
         real_vector: real_vector_params,
         real_vector_expr: real_vector_expr_params,
         integer_vector: integer_vector_params,
+                    bare_ident_deferrals,
     })
 }
 
@@ -2085,6 +2192,85 @@ pub(super) fn lex_to_parse_error(e: LexError, line_num: usize) -> ParseError {
 #[cfg(test)]
 mod tests {
     use crate::Netlist;
+
+    fn coalesce(line: &str) -> Vec<String> {
+        super::coalesce_assignment_fields(super::split_spice_fields(line))
+    }
+
+    #[test]
+    fn assignment_fields_rejoin_across_every_spacing_of_equals() {
+        for line in [
+            "xmn1 d g 0 0 nmos_3p3 W = 10u L = 0.28u",
+            "xmn1 d g 0 0 nmos_3p3 W= 10u L= 0.28u",
+            "xmn1 d g 0 0 nmos_3p3 W =10u L =0.28u",
+            "xmn1 d g 0 0 nmos_3p3 W=10u L=0.28u",
+        ] {
+            assert_eq!(
+                coalesce(line),
+                vec!["xmn1", "d", "g", "0", "0", "nmos_3p3", "W=10u", "L=0.28u"],
+                "{line}"
+            );
+        }
+    }
+
+    /// The node list must survive: a rejoin that swallowed a field would move
+    /// the subcircuit name and silently reconnect the instance.
+    #[test]
+    fn assignment_coalescing_leaves_positional_fields_alone() {
+        assert_eq!(
+            coalesce("x1 a b c sub"),
+            vec!["x1", "a", "b", "c", "sub"]
+        );
+    }
+
+    /// Braced and quoted values arrive pre-grouped from `split_spice_fields`,
+    /// so an `=` inside one is not an assignment separator.
+    #[test]
+    fn assignment_coalescing_does_not_reach_inside_grouped_values() {
+        assert_eq!(
+            coalesce("x1 a b sub W = {wn = 2} L = 'lmin'"),
+            vec!["x1", "a", "b", "sub", "W={wn = 2}", "L='lmin'"]
+        );
+    }
+
+    /// A leading `=` has no name to attach to; leave it for the caller to
+    /// reject rather than inventing an assignment.
+    #[test]
+    fn leading_equals_is_left_for_the_caller_to_diagnose() {
+        assert_eq!(coalesce("= 5"), vec!["=", "5"]);
+    }
+
+    #[test]
+    fn subcircuit_instance_reads_the_subckt_name_past_spaced_parameters() {
+        let netlist = Netlist::parse(
+            "spaced instance parameters\n\
+             .subckt myamp d g s b\n\
+             R1 d s 1k\n\
+             .ends\n\
+             X1 nd ng 0 0 myamp W = 10u L = 0.28u\n\
+             .end\n",
+        )
+        .expect("spaced instance parameters parse");
+
+        let instance = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("X1"))
+            .expect("X1 was parsed");
+        let crate::netlist::ElementKind::Subcircuit {
+            subckt_name,
+            params,
+        } = &instance.kind
+        else {
+            panic!("X1 is a subcircuit instance, got {:?}", instance.kind);
+        };
+
+        assert!(subckt_name.eq_ignore_ascii_case("myamp"), "{subckt_name}");
+        assert_eq!(instance.nodes, vec!["ND", "NG", "0", "0"]);
+        assert_eq!(params.len(), 2, "{params:?}");
+        assert!(params.iter().any(|(name, _)| name.eq_ignore_ascii_case("W")));
+        assert!(params.iter().any(|(name, _)| name.eq_ignore_ascii_case("L")));
+    }
 
     #[test]
     fn model_accepts_positional_numeric_parameters_and_bare_flags() {
