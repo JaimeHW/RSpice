@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/rspice-matrix",
     "crates/rspice-core",
     "crates/rspice-cli",
     "crates/rspice-ui",
@@ -50,6 +51,7 @@ unicode-normalization = "0.1"
 
 
 # Internal crates
+rspice-matrix = { path = "crates/rspice-matrix", version = "0.1.0" }
 rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
 
 # One lint policy for the whole workspace. Crates opt in with

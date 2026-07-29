@@ -7,8 +7,7 @@
 //! and allows updates to values only, avoiding O(N log N) rebuild.
 
 #![allow(clippy::needless_range_loop)]
-use super::SolverError;
-use crate::Value;
+use crate::{SolverError, Value};
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::lu as sparse_lu;
@@ -93,7 +92,7 @@ pub struct StaticMatrix {
     /// Default KLU-class real backend: refactors the frozen pattern with a
     /// stored pivot sequence instead of fully re-pivoting every Newton
     /// iteration. Lazily initialized; any failure falls back to the faer path.
-    klu: Option<crate::solver::klu::KluSolver>,
+    klu: Option<crate::KluSolver>,
     /// Scratch values + RHS retained between residual probes (see
     /// [`StaticMatrix::with_probe_values`]).
     probe_values: Option<Vec<Value>>,
@@ -332,7 +331,7 @@ impl StaticMatrix {
     /// position-map rehash, and probe solves reuse the cached symbolic
     /// analysis and numeric workspace. (A subsequent live solve refactorizes
     /// from the restored values, so workspace sharing is safe.)
-    pub(crate) fn with_probe_values<R>(&mut self, f: impl FnOnce(&mut Self, &mut [Value]) -> R) -> R {
+    pub fn with_probe_values<R>(&mut self, f: impl FnOnce(&mut Self, &mut [Value]) -> R) -> R {
         let mut scratch = self.probe_values.take().unwrap_or_default();
         scratch.resize(self.values.len(), 0.0);
         scratch.fill(0.0);
@@ -446,18 +445,11 @@ impl StaticMatrix {
 
     /// Zero all values (call before each Newton iteration)
     ///
-    /// When compiled with the `simd` feature, uses SIMD instructions
-    /// for 2-4x faster clearing on large matrices.
+    /// Slice fill lowers to an optimized bulk clear without coupling this
+    /// dependency-neutral matrix crate to the simulator's optional SIMD layer.
     #[inline]
     pub fn clear_values(&mut self) {
-        #[cfg(feature = "simd")]
-        {
-            crate::simd::fill_zero(&mut self.values);
-        }
-        #[cfg(not(feature = "simd"))]
-        {
-            self.values.fill(0.0);
-        }
+        self.values.fill(0.0);
     }
 
     /// Add value at (row, col) - O(1) using position map
@@ -504,7 +496,7 @@ impl StaticMatrix {
 
     /// Rows whose entries are all exactly zero (or absent): the immediate
     /// structural suspects when factorization reports a singular system.
-    pub(crate) fn deficient_rows(&self) -> Vec<usize> {
+    pub fn deficient_rows(&self) -> Vec<usize> {
         let mut row_max = vec![0.0f64; self.nrows];
         for (&(row, _col), &idx) in &self.position_map {
             let magnitude = self.values[idx].abs();
@@ -536,7 +528,7 @@ impl StaticMatrix {
     ///
     /// The sparsity pattern remains frozen; callers use this for temporary
     /// operating-point constraints such as `.NODESET` startup solves.
-    pub(crate) fn force_identity_row(&mut self, row: usize) -> Result<(), SolverError> {
+    pub fn force_identity_row(&mut self, row: usize) -> Result<(), SolverError> {
         if row >= self.nrows || row >= self.ncols {
             return Err(SolverError::InvalidCircuit(format!(
                 "identity row {} outside {}x{} matrix",
@@ -599,7 +591,7 @@ impl StaticMatrix {
 
     /// Compute infinity norm of the scaled residual `A*x-b` with row-specific
     /// absolute tolerances.
-    pub(crate) fn scaled_residual_inf_norm_by_row<F>(
+    pub fn scaled_residual_inf_norm_by_row<F>(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -689,7 +681,7 @@ impl StaticMatrix {
     }
 
     /// Compute the unscaled infinity norm of `A*x-b` without allocating.
-    pub(crate) fn raw_residual_inf_norm(
+    pub fn raw_residual_inf_norm(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -705,7 +697,7 @@ impl StaticMatrix {
     /// large and small residual components cannot overflow or underflow an
     /// otherwise finite norm. Xyce's transient NOX status tests use both norms
     /// at every nonlinear iterate.
-    pub(crate) fn raw_residual_norms(
+    pub fn raw_residual_norms(
         &mut self,
         solution: &[Value],
         rhs: &[Value],
@@ -768,7 +760,7 @@ impl StaticMatrix {
     }
 
     /// Compute raw residual vector `A*x - b`.
-    pub(crate) fn residual_vector(
+    pub fn residual_vector(
         &self,
         solution: &[Value],
         rhs: &[Value],
@@ -871,7 +863,7 @@ impl StaticMatrix {
     /// Dynamic-device callers may subsequently replace their own rows with a
     /// constitutive residual evaluated from state differences, avoiding loss
     /// that already occurred while forming a large absolute history source.
-    pub(crate) fn correction_rhs(
+    pub fn correction_rhs(
         &self,
         rhs: &[Value],
         iterate: &[Value],
@@ -1084,7 +1076,7 @@ impl StaticMatrix {
         let col_ptr = csc.col_ptr();
         let row_idx = csc.row_idx();
 
-        let backend = klu.get_or_insert_with(crate::solver::klu::KluSolver::new);
+        let backend = klu.get_or_insert_with(crate::KluSolver::new);
         if !backend.is_analyzed_for(n) {
             backend.analyze(n, col_ptr, row_idx);
         }
@@ -1309,14 +1301,14 @@ impl ComplexMatrix {
 
     /// Direct real add using a precomputed CSC index.
     #[inline]
-    pub(crate) fn stamp_direct_real(&mut self, idx: CscIndex, value: Value) {
+    pub fn stamp_direct_real(&mut self, idx: CscIndex, value: Value) {
         self.values[idx.0] += Complex64::new(value, 0.0);
         self.factorization_valid = false;
     }
 
     /// Direct imaginary add using a precomputed CSC index.
     #[inline]
-    pub(crate) fn stamp_direct_imag(&mut self, idx: CscIndex, value: Value) {
+    pub fn stamp_direct_imag(&mut self, idx: CscIndex, value: Value) {
         self.values[idx.0] += Complex64::new(0.0, value);
         self.factorization_valid = false;
     }
@@ -1427,7 +1419,7 @@ impl ComplexMatrix {
     /// Distortion and sensitivity analyses use this to contract directional
     /// derivatives of the small-signal MNA operator while retaining the
     /// circuit's sparse structure.
-    pub(crate) fn multiply_vector(
+    pub fn multiply_vector(
         &self,
         vector: &[Complex64],
     ) -> Result<Vec<Complex64>, SolverError> {

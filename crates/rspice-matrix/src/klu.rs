@@ -29,8 +29,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use super::SolverError;
-use crate::Value;
+use crate::{SolverError, Value};
 
 /// KLU's default partial-pivoting tolerance: the diagonal entry is kept
 /// as the pivot when `|diag| >= PIVOT_TOL * colmax`.
