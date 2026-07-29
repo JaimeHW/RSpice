@@ -150,9 +150,8 @@ fn generated_builtins_are_materialized_in_source_tree() {
 
 #[test]
 fn generated_dense_stamper_abi_is_slice_based() {
-    let generated_root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/device/veriloga_generated");
-    let runtime_path = generated_root.join("mod.rs");
+    let runtime_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rspice-veriloga-runtime/src/lib.rs");
     let runtime = std::fs::read_to_string(&runtime_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
 
@@ -198,8 +197,7 @@ fn generated_dense_stamper_abi_is_slice_based() {
 #[test]
 fn generated_stamper_uses_linked_static_stamp_slots() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let generated_root = manifest_root.join("src/device/veriloga_generated");
-    let runtime_path = generated_root.join("mod.rs");
+    let runtime_path = manifest_root.join("../rspice-veriloga-runtime/src/lib.rs");
     let introspection_path = manifest_root.join("src/circuit/introspection.rs");
 
     let runtime = std::fs::read_to_string(&runtime_path)

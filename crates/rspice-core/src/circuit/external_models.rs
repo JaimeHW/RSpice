@@ -1756,8 +1756,12 @@ impl CircuitData {
         final_step: bool,
     ) {
         let ddt_coefficients =
-            crate::device::veriloga_generated::GeneratedDdtCoefficients::from_companion(
-                coefficients,
+            crate::device::veriloga_generated::GeneratedDdtCoefficients::from_companion_values(
+                coefficients.coeff_g,
+                coefficients.coeff_v_n,
+                coefficients.coeff_v_n_minus_1,
+                coefficients.needs_two_history,
+                coefficients.needs_current_history,
                 dt,
             );
         self.generated_veriloga_devices
