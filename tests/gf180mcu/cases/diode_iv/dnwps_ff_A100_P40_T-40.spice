@@ -1,0 +1,14 @@
+GF180MCU dnwps diode I-V, area=100um2 perim=40um, ff corner, -40C
+* Rendered from models/ngspice/testing/regression/diode/device_netlists/iv.spice
+* (GlobalFoundries PDK, Apache-2.0). Two deliberate departures from upstream:
+* the `.control` block is replaced by an equivalent `.dc` card so the deck
+* states its own analysis, and the sweep is taken from this device's measured
+* bias points rather than the template's hardcoded np_3p3 range.
+Vn n 0 dc 1
+.temp -40
+.options tnom=-40
+dn1 n 0 dnwps AREA = 100p PJ = 40u
+.dc Vn -40.41 1.41 0.41
+.include "../../models/design.ngspice"
+.lib "../../models/sm141064.ngspice" diode_ff
+.end

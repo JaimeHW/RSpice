@@ -1,0 +1,59 @@
+# ISCAS85 execution contracts.
+#
+#   <corpus-relative path>\t<contract>[\t<note>]
+#
+# Contracts: executes | expected_unsupported | expected_refusal | library_fragment
+# A note ending in `!extended` marks a deck too expensive for a routine run.
+#
+# ── Why every deck here is `!extended` ───────────────────────────────────────
+#
+# This whole corpus is nightly-tier, and that is a property of the corpus
+# rather than a concession. The *smallest* circuit, c432, is 160 gates over a
+# 45nm BSIM4 card and takes ~10 s for its 1 ns transient; c7552_ann is 3512
+# gates with extracted parasitics on every net across ~89k netlist lines.
+# There is no subset of this corpus that belongs in a per-commit gate, so
+# rather than pretend otherwise the routine run covers discovery and manifest
+# integrity only, and `RSPICE_EXECUTION_EXTENDED=1` runs the simulations.
+#
+# Raise `RSPICE_EXECUTION_DECK_TIMEOUT_MS` alongside it: the 120 s default is
+# sized for the paranoia corpus, and the annotated circuits here need more.
+#
+# ── Contract status ──────────────────────────────────────────────────────────
+#
+# Every deck is required to execute. That is the requirement rather than an
+# observation: at the time of vendoring only c432_ann_oc had been run to
+# completion inside a bounded budget, and the rest are unmeasured. A nightly
+# run is what settles them, and any that turn out to refuse or hit a gap get
+# their row corrected here with the specific reason — which is the suite
+# working, not the suite failing.
+#
+# The `_ann` variants carry extracted parasitic capacitance on every net; the
+# `_oc` variants open-circuit the outputs. Gate counts are the published
+# ISCAS85 figures.
+85/c432/c432.net	executes	160 gates, 27-channel interrupt controller !extended
+85/c432/c432_ann.net	executes	160 gates, parasitic-annotated !extended
+85/c432/c432_ann_oc.net	executes	160 gates, annotated, open outputs !extended
+85/c499/c499.net	executes	202 gates, 32-bit SEC circuit !extended
+85/c499/c499_ann.net	executes	202 gates, parasitic-annotated !extended
+85/c880/c880.net	executes	383 gates, 8-bit ALU !extended
+85/c880/c880_ann.net	executes	383 gates, parasitic-annotated !extended
+85/c1355/c1355.net	executes	546 gates, 32-bit SEC circuit !extended
+85/c1355/c1355_ann.net	executes	546 gates, parasitic-annotated !extended
+85/c1908/c1908.net	executes	880 gates, 16-bit SEC/DED circuit !extended
+85/c1908/c1908_ann.net	executes	880 gates, parasitic-annotated !extended
+85/c2670/c2670.net	executes	1193 gates, 12-bit ALU and controller !extended
+85/c2670/c2670_ann.net	executes	1193 gates, parasitic-annotated !extended
+85/c3540/c3540.net	executes	1669 gates, 8-bit ALU !extended
+85/c3540/c3540_ann.net	executes	1669 gates, parasitic-annotated !extended
+85/c5315/c5315.net	executes	2307 gates, 9-bit ALU !extended
+85/c5315/c5315_ann.net	executes	2307 gates, parasitic-annotated !extended
+85/c6288/c6288.net	executes	2416 gates, 16x16 multiplier !extended
+85/c6288/c6288_ann.net	executes	2416 gates, parasitic-annotated !extended
+85/c7552/c7552.net	executes	3512 gates, 32-bit adder/comparator !extended
+85/c7552/c7552_ann.net	executes	3512 gates, parasitic-annotated, ~89k lines !extended
+85/c7552/c7552_ann_oc.net	executes	3512 gates, annotated, open outputs !extended
+# c7552p differs from c7552 in .OPTIONS (tighter GMIN/ABSTOL, noopiter) and
+# adds .param drive levels. Not a duplicate; the other `p` directories were
+# byte-identical and were dropped at vendoring.
+85/c7552p/c7552.net	executes	3512 gates, tightened .OPTIONS variant !extended
+85/c7552p/c7552_ann.net	executes	3512 gates, annotated, parameterised drive !extended

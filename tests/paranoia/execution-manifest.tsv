@@ -1,0 +1,114 @@
+# ngspice example-deck execution contracts.
+#
+#   <corpus-relative path>\t<contract>[\t<note>]
+#
+# Contracts: executes | expected_unsupported | expected_refusal | library_fragment
+# A note ending in `!extended` marks a deck too expensive for a routine run.
+#
+# Decks absent from this file must execute. Only exceptions are listed, so
+# this file reads as the current gap list rather than an inventory — and a
+# deck that outperforms its row here fails the suite, which is what stops the
+# list becoming permanent.
+#
+# ── Include fragments ────────────────────────────────────────────────────────
+# Subcircuit libraries carrying a deck extension. They must parse and build;
+# they simulate nothing themselves.
+Monte_Carlo/names-test.sp	library_fragment	.subckt library exercised by names-test2.sp
+Monte_Carlo/names-test3.sp	library_fragment	.subckt library
+control_structs/repeat3.sp	library_fragment	control-script driver, no analysis card
+control_structs/repeat_no_one_goto.sp	library_fragment	control-script driver
+control_structs/repeat_one_goto.sp	library_fragment	control-script driver
+control_structs/repeat_s.sp	library_fragment	control-script driver
+delta-sigma/mod1-ct.cir	library_fragment	modulator subcircuit
+pll/f-p-det-d-sub.cir	library_fragment	phase-frequency detector subcircuit
+pll/loop-filter-2.cir	library_fragment	loop-filter subcircuit
+pll/vco_sub_new.cir	library_fragment	VCO subcircuit
+various/FFT_tests.cir	library_fragment	control-script driver
+various/agauss_reduced.cir	library_fragment	statistical-parameter fragment
+various/agauss_test.cir	library_fragment	statistical-parameter fragment
+various/def_red_2.cir	library_fragment	.model redefinition fragment
+various/echo_test.cir	library_fragment	control-script driver
+various/model-name-check.cir	library_fragment	.model name-collision fragment
+xspice/delta-sigma/count-latch-dac.cir	library_fragment	DAC subcircuit
+xspice/delta-sigma/mod1-ct.cir	library_fragment	modulator subcircuit
+xspice/pll/f-p-det-d-sub.cir	library_fragment	phase-frequency detector subcircuit
+xspice/pll/loop-filter-2.cir	library_fragment	loop-filter subcircuit
+xspice/pll/loop-filter.cir	library_fragment	loop-filter subcircuit
+xspice/pll/vco_sub.cir	library_fragment	VCO subcircuit
+xspice/pll/vco_sub_new.cir	library_fragment	VCO subcircuit
+#
+# ── Ingestion gaps ───────────────────────────────────────────────────────────
+# Each row names a dialect feature RSpice does not parse. These are the
+# corpus's main product: none of them appear in tests/ngspice/, because a
+# regression suite only contains decks its author could already run.
+cider/cmosinv.cir	expected_unsupported	CIDER numerical device: .model CONCMOD=SG
+cider/diode.cir	expected_unsupported	CIDER numerical device: parenthesised card syntax
+cider/pullup.cir	expected_unsupported	CIDER numerical device: signed .model list entry
+cider/recovery.cir	expected_unsupported	CIDER numerical device: parenthesised card syntax
+cider/rtlinv.cir	expected_unsupported	CIDER numerical device: .model CONCMOD=SG
+measure/func_cap.sp	expected_unsupported	.measure: MAX with a multi-argument form
+measure/inv-meas-tran.sp	expected_unsupported	.measure: MIN_AT
+measure/inv-meas-tran-control.sp	expected_unsupported	.measure: DELTA
+measure/simple-meas-tran.sp	expected_unsupported	.measure: MAX_AT
+memristor/memristor.sp	expected_unsupported	DELTIME transient option
+memristor/memristor_x.sp	expected_unsupported	DELTIME transient option
+Monte_Carlo/MC_2_circ.sp	expected_unsupported	agauss() in a .model parameter position
+Monte_Carlo/MC_ring_ts.sp	expected_unsupported	.control block spanning an .include boundary
+Monte_Carlo/MC_ring_ts_short.sp	expected_unsupported	.control block spanning an .include boundary
+Monte_Carlo/MC_ring_ts_test.sp	expected_unsupported	.control block spanning an .include boundary
+Monte_Carlo/OpWien.sp	expected_unsupported	trrandom() source function
+Monte_Carlo/OpWien_s.sp	expected_unsupported	trrandom() source function
+transient-noise/rts-1.cir	expected_unsupported	TRNOISE random-telegraph (RTS) parameters
+transient-noise/simple-noise.cir	expected_unsupported	TRNOISE random-telegraph (RTS) parameters
+various/Tschebyschef-LP.cir	expected_unsupported	.sp S-parameter analysis not executed by this runner
+xspice/bug-378-test-sequence.cir	expected_unsupported	typed XSPICE port %V without a closing bracket
+# `.ENDS <name>` and duplicate-instance tolerance. ngspice ignores the label
+# on .ENDS and lets a later instance replace an earlier one; RSpice enforces
+# both. Same class as the `.ENDL` label mismatch already relaxed in
+# rspice-core for GF180MCU, and worth resolving together.
+TransmissionLines/cpl4_txl_2_line.sp	expected_unsupported	.ENDS `lump` closing .SUBCKT `rlclump`
+TransmissionLines/ltra6_2_line.sp	expected_unsupported	.ENDS `lump` closing .SUBCKT `rlclump`
+TransmissionLines/ltra5_1_line.sp	expected_unsupported	duplicate instance name `xrcv` redefinition
+TransmissionLines/txl4_1_line.sp	expected_unsupported	duplicate instance name `xrcv` redefinition
+inductive-systems/positive-definite-1.cir	expected_unsupported	division by zero during .param resolution
+inductive-systems/positive-definite-3.cir	expected_unsupported	division by zero during .param resolution
+#
+# ── Output-request and model-resolution refusals ─────────────────────────────
+various/i(xxx)_tests.cir	expected_refusal	B-source references branch current of a MOSFET
+various/probe-i-dev.cir	expected_refusal	.probe device-current form
+measure/inv-meas-tran-auto.sp	expected_refusal	model `PCH` not defined by the deck
+measure/mos-meas-dc.sp	expected_refusal	.print references numeric node `1` not in the deck
+transient-noise/noi-ring51-demo.cir	expected_refusal	.save references node `t1` not in the deck
+transient-noise/noi-ring51-demo_s.cir	expected_refusal	.save references node `t1` not in the deck
+xspice/table/combi_script.cir	expected_refusal	second DC sweep source supplied by a control script
+xspice/table/table-generator-q-2d.sp	expected_refusal	generator deck; DC sweep does not converge
+# ngspice's electrothermal VDMOS instance form is `M... <model> thermal`,
+# where the trailing `thermal` is a keyword selecting the 5-terminal
+# self-heating device. RSpice reads it as a second model name and fails
+# resolving `THERMAL`. Worth noting that the `vdmos/` decks that would also
+# have covered this were dropped at vendoring for carrying Vishay and Linear
+# Technology model libraries, so these two are the only witnesses left.
+optran/F5TurboV2thermal-ic-out.cir	expected_refusal	VDMOS `thermal` instance keyword parsed as a model name
+optran/F5TurboV2thermal-optran.cir	expected_refusal	VDMOS `thermal` instance keyword parsed as a model name
+# The `bad_*` decks are upstream's negative tests: XSPICE connection and model
+# errors that a simulator is *supposed* to reject. A clean refusal is the pass.
+xspice/original-examples/bad_io.deck	expected_refusal	upstream negative test: port-count mismatch
+xspice/original-examples/bad_io_type.deck	expected_refusal	upstream negative test: port-type mismatch
+xspice/original-examples/bad_name.deck	expected_refusal	upstream negative test: unknown code model
+#
+# ── Convergence ──────────────────────────────────────────────────────────────
+TransmissionLines/cpl_ibm3.sp	expected_refusal	coupled-line transient does not converge
+control_structs/foreach_bjt_ft.sp	expected_refusal	AC operating point does not converge
+#
+# ── Cost ─────────────────────────────────────────────────────────────────────
+# Long transients over large XSPICE/behavioural systems. Correct as far as the
+# budget takes them, but not per-commit work.
+TransmissionLines/cpl_ibm1.sp	executes	coupled-line transient !extended
+digital/adder_bip.cir	executes	bipolar adder transient !extended
+digital_devices/behav-568.cir	executes	behavioural 568 transient !extended
+various/nic_soa.cir	executes	SOA-checked negative-impedance transient !extended
+xspice/delta-sigma/counter-test.cir	executes	delta-sigma counter transient !extended
+xspice/delta-sigma/delta-sigma-1.cir	executes	delta-sigma modulator transient !extended
+xspice/delta-sigma/mod1-ct-test.cir	executes	continuous-time modulator transient !extended
+xspice/pll/pll-xspice.cir	executes	PLL lock transient !extended
+xspice/pll/pll-xspice-fstep.cir	executes	PLL frequency-step transient !extended

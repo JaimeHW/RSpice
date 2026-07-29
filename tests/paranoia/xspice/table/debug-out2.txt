@@ -1,0 +1,40 @@
+**************** uncommented deck **************
+
+./table-model-bip-2d-1-oc.sp       1       0  ** npn bipolar: table 2d (vce, ib) compared to q model
+./table-model-bip-2d-1-oc.sp       7       2  q3 2 1 3 qinn
+./table-model-bip-2d-1-oc.sp       8       3  ib 0 1 2u
+./table-model-bip-2d-1-oc.sp       9       4  vce 2 0 5
+./table-model-bip-2d-1-oc.sp      10       5  vee 3 0 0
+./table-model-bip-2d-1-oc.sp      27      12  a.xbip.abip1 %vd cc ee %id xbip.bint ee %id cc ee xbip:biptable1
+./table-model-bip-2d-1-oc.sp      28      13  .model xbip:biptable1 table2d (offset=0.0 gain=( 1.0000000000e+00 + ( temper / 2.7000000000e+01 - 1.0000000000e+00 ) * (    5.000000000000000e-02    ) ) order=2 file="qinn-clc409-2d-1.table")
+./table-model-bip-2d-1-oc.sp      30      14  c.xbip.cje bb ee 1.632e-13 
+./table-model-bip-2d-1-oc.sp      32      15  c.xbip.cjc bb cc 1.720e-13 
+./table-model-bip-2d-1-oc.sp      34      16  d.xbip.dbe bb xbip.bint xbip:dmod 
+./table-model-bip-2d-1-oc.sp      35      17  .model xbip:dmod d (bv=5 is=1e-17 n=1.1)
+./table-model-bip-2d-1-oc.sp      13       7  ib2 0 bb 2u
+./table-model-bip-2d-1-oc.sp      14       8  vce2 cc 0 1
+./table-model-bip-2d-1-oc.sp      15       9  vee2 ee 0 0
+./table-model-bip-2d-1-oc.sp      39      19  .model qinn npn is=0.166f bf=3.239e+02 nf=1.000e+00 vaf=8.457e+01 ikf=2.462e-02 ise=2.956e-17 ne=1.197e+00 br=3.719e+01 nr=1.000e+00 var=1.696e+00 ikr=3.964e-02 isc=1.835e-19 nc=1.700e+00 rb=118 irb=0.000e+00 rbm=65.1 rc=2.645e+01 cje=1.632e-13 vje=7.973e-01 mje=4.950e-01 tf=1.948e-11 xtf=1.873e+01 vtf=2.825e+00 itf=5.955e-02 ptf=0.000e+00 cjc=1.720e-13 vjc=8.046e-01 mjc=4.931e-01 xcjc=589m tr=4.212e-10 cjs=629f mjs=0 kf=2.000e-12 af=1.000e+00 fc=9.765e-01
+./table-model-bip-2d-1-oc.sp      52      20  .end
+
+****************** complete deck ***************
+
+./table-model-bip-2d-1-oc.sp       1       0  ** npn bipolar: table 2d (vce, ib) compared to q model
+internal       0       1  *global gnd
+./table-model-bip-2d-1-oc.sp       7       2  q3 2 1 3 qinn
+./table-model-bip-2d-1-oc.sp       8       3  ib 0 1 2u
+./table-model-bip-2d-1-oc.sp       9       4  vce 2 0 5
+./table-model-bip-2d-1-oc.sp      10       5  vee 3 0 0
+./table-model-bip-2d-1-oc.sp      12       6  *bip cc bb ee tbqnpn
+./table-model-bip-2d-1-oc.sp      27      12  a.xbip.abip1 %vd cc ee %id xbip.bint ee %id cc ee xbip:biptable1
+./table-model-bip-2d-1-oc.sp      28      13  .model xbip:biptable1 table2d (offset=0.0 gain=( 1.0000000000e+00 + ( temper / 2.7000000000e+01 - 1.0000000000e+00 ) * (    5.000000000000000e-02    ) ) order=2 file="qinn-clc409-2d-1.table")
+./table-model-bip-2d-1-oc.sp      30      14  c.xbip.cje bb ee 1.632e-13 
+./table-model-bip-2d-1-oc.sp      32      15  c.xbip.cjc bb cc 1.720e-13 
+./table-model-bip-2d-1-oc.sp      34      16  d.xbip.dbe bb xbip.bint xbip:dmod 
+./table-model-bip-2d-1-oc.sp      35      17  .model xbip:dmod d (bv=5 is=1e-17 n=1.1)
+./table-model-bip-2d-1-oc.sp      36      18  *ends
+./table-model-bip-2d-1-oc.sp      13       7  ib2 0 bb 2u
+./table-model-bip-2d-1-oc.sp      14       8  vce2 cc 0 1
+./table-model-bip-2d-1-oc.sp      15       9  vee2 ee 0 0
+./table-model-bip-2d-1-oc.sp      39      19  .model qinn npn is=0.166f bf=3.239e+02 nf=1.000e+00 vaf=8.457e+01 ikf=2.462e-02 ise=2.956e-17 ne=1.197e+00 br=3.719e+01 nr=1.000e+00 var=1.696e+00 ikr=3.964e-02 isc=1.835e-19 nc=1.700e+00 rb=118 irb=0.000e+00 rbm=65.1 rc=2.645e+01 cje=1.632e-13 vje=7.973e-01 mje=4.950e-01 tf=1.948e-11 xtf=1.873e+01 vtf=2.825e+00 itf=5.955e-02 ptf=0.000e+00 cjc=1.720e-13 vjc=8.046e-01 mjc=4.931e-01 xcjc=589m tr=4.212e-10 cjs=629f mjs=0 kf=2.000e-12 af=1.000e+00 fc=9.765e-01
+./table-model-bip-2d-1-oc.sp      52      20  .end

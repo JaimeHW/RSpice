@@ -1,0 +1,15 @@
+# GF180MCU device-case contracts.
+#
+#   <case>	<contract>	<reference-disagreement-pct>	<note>
+#
+# Contracts: ngspice | reference_only | expected_unsupported
+#
+# Cases absent from this file default to `ngspice`: they must reproduce the
+# reference curve beside them. Only exceptions are listed, so this file reads
+# as the gap list rather than an inventory — and a case that outperforms its
+# row fails the suite, which is what stops the list becoming permanent.
+#
+# The list is empty. Both groups are held to the vendored ngspice-46 curve
+# beside them: 612 BSIM4 (LEVEL=54) MOSFET I-V cases through the PDK's
+# subcircuit wrappers, and 216 diode I-V cases across the PDK's nine LEVEL=3
+# junction diodes.
