@@ -68,11 +68,13 @@ endmodule
 pub struct NativeBenchConfig {
     pub iterations: usize,
     pub samples: usize,
+    pub min_dense_speedup: f64,
     pub min_speedup: f64,
     pub min_full_stamp_speedup: f64,
     pub max_native_setup_ms: Option<f64>,
     pub max_native_p95_ns_per_sweep: Option<f64>,
     pub max_relative_stddev: Option<f64>,
+    pub max_native_code_bytes: Option<usize>,
 }
 
 impl Default for NativeBenchConfig {
@@ -80,11 +82,13 @@ impl Default for NativeBenchConfig {
         Self {
             iterations: DEFAULT_ITERATIONS,
             samples: DEFAULT_SAMPLES,
+            min_dense_speedup: 2.0,
             min_speedup: 1.10,
-            min_full_stamp_speedup: 1.50,
+            min_full_stamp_speedup: 2.0,
             max_native_setup_ms: None,
             max_native_p95_ns_per_sweep: None,
             max_relative_stddev: None,
+            max_native_code_bytes: None,
         }
     }
 }
@@ -96,11 +100,13 @@ pub struct NativeBenchReport {
     pub target: String,
     pub iterations: usize,
     pub samples: usize,
+    pub min_dense_speedup: f64,
     pub min_speedup: f64,
     pub min_full_stamp_speedup: f64,
     pub max_native_setup_ms: Option<f64>,
     pub max_native_p95_ns_per_sweep: Option<f64>,
     pub max_relative_stddev: Option<f64>,
+    pub max_native_code_bytes: Option<usize>,
     pub cases: Vec<NativeBenchCaseReport>,
     pub passed: bool,
 }
@@ -153,6 +159,9 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
     if !config.min_speedup.is_finite() || config.min_speedup < 0.0 {
         return Err("native JIT minimum speedup must be finite and non-negative".into());
     }
+    if !config.min_dense_speedup.is_finite() || config.min_dense_speedup < 0.0 {
+        return Err("native JIT dense minimum speedup must be finite and non-negative".into());
+    }
     if !config.min_full_stamp_speedup.is_finite() || config.min_full_stamp_speedup < 0.0 {
         return Err("native JIT full-stamp minimum speedup must be finite and non-negative".into());
     }
@@ -176,6 +185,9 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
             "native JIT relative standard-deviation budget must be finite and non-negative".into(),
         );
     }
+    if config.max_native_code_bytes == Some(0) {
+        return Err("native JIT code-size budget must be greater than zero".into());
+    }
 
     let target = super::TargetSpec::host()
         .map(|target| target.display_name())
@@ -195,11 +207,13 @@ pub fn run_native_x64_benchmarks(config: NativeBenchConfig) -> Result<NativeBenc
         target,
         iterations: config.iterations,
         samples: config.samples,
+        min_dense_speedup: config.min_dense_speedup,
         min_speedup: config.min_speedup,
         min_full_stamp_speedup: config.min_full_stamp_speedup,
         max_native_setup_ms: config.max_native_setup_ms,
         max_native_p95_ns_per_sweep: config.max_native_p95_ns_per_sweep,
         max_relative_stddev: config.max_relative_stddev,
+        max_native_code_bytes: config.max_native_code_bytes,
         cases,
         passed,
     })
@@ -278,10 +292,12 @@ fn run_dense_entrypoint_case(config: NativeBenchConfig) -> Result<NativeBenchCas
     let native_stats = timing_stats(native_samples);
     let bytecode_stats = timing_stats(bytecode_samples);
     let speedup_median = bytecode_stats.median / native_stats.median.max(f64::MIN_POSITIVE);
+    let native_code_bytes = native.code_size_bytes();
     let failures = benchmark_failures(
         config,
-        config.min_speedup,
+        config.min_dense_speedup,
         native_setup_ns,
+        native_code_bytes,
         native_stats,
         speedup_median,
         native_checksum,
@@ -293,11 +309,11 @@ fn run_dense_entrypoint_case(config: NativeBenchConfig) -> Result<NativeBenchCas
         plan_stats: native.plan_stats(),
         model_shape: shape,
         native_setup_ns,
-        native_code_bytes: native.code_size_bytes(),
+        native_code_bytes,
         native_ns_per_sweep: native_stats,
         bytecode_ns_per_sweep: bytecode_stats,
         speedup_median,
-        required_speedup: config.min_speedup,
+        required_speedup: config.min_dense_speedup,
         checksum_native: std::hint::black_box(native_checksum),
         checksum_bytecode: std::hint::black_box(bytecode_checksum),
         passed: failures.is_empty(),
@@ -381,10 +397,12 @@ fn run_device_evaluate_case(config: NativeBenchConfig) -> Result<NativeBenchCase
     let native_stats = timing_stats(native_samples);
     let bytecode_stats = timing_stats(bytecode_samples);
     let speedup_median = bytecode_stats.median / native_stats.median.max(f64::MIN_POSITIVE);
+    let native_code_bytes = native_device.native_code_size_bytes();
     let failures = benchmark_failures(
         config,
         config.min_speedup,
         native_setup_ns,
+        native_code_bytes,
         native_stats,
         speedup_median,
         native_checksum,
@@ -396,7 +414,7 @@ fn run_device_evaluate_case(config: NativeBenchConfig) -> Result<NativeBenchCase
         plan_stats,
         model_shape: shape,
         native_setup_ns,
-        native_code_bytes: native_device.native_code_size_bytes(),
+        native_code_bytes,
         native_ns_per_sweep: native_stats,
         bytecode_ns_per_sweep: bytecode_stats,
         speedup_median,
@@ -480,10 +498,12 @@ fn run_device_stamp_case(config: NativeBenchConfig) -> Result<NativeBenchCaseRep
     let native_stats = timing_stats(native_samples);
     let bytecode_stats = timing_stats(bytecode_samples);
     let speedup_median = bytecode_stats.median / native_stats.median.max(f64::MIN_POSITIVE);
+    let native_code_bytes = native_device.native_code_size_bytes();
     let failures = benchmark_failures(
         config,
         config.min_full_stamp_speedup,
         native_setup_ns,
+        native_code_bytes,
         native_stats,
         speedup_median,
         native_checksum,
@@ -495,7 +515,7 @@ fn run_device_stamp_case(config: NativeBenchConfig) -> Result<NativeBenchCaseRep
         plan_stats,
         model_shape: shape,
         native_setup_ns,
-        native_code_bytes: native_device.native_code_size_bytes(),
+        native_code_bytes,
         native_ns_per_sweep: native_stats,
         bytecode_ns_per_sweep: bytecode_stats,
         speedup_median,
@@ -525,6 +545,7 @@ fn validate_shape(shape: &NativeBenchModelShape, stats: &PlanStats) -> Result<()
     if stats.stamp_value_entry_points != shape.stamps
         || stats.jacobian_entry_points != shape.jacobians
         || stats.noise_source_entry_points != shape.noise_entries
+        || stats.stamp_kernel_entry_points != 1
     {
         return Err("native plan stats do not match dense benchmark model shape".into());
     }
@@ -1317,6 +1338,7 @@ fn benchmark_failures(
     config: NativeBenchConfig,
     required_speedup: f64,
     native_setup_ns: f64,
+    native_code_bytes: usize,
     native_stats: TimingStats,
     speedup_median: f64,
     native_checksum: f64,
@@ -1336,6 +1358,13 @@ fn benchmark_failures(
             "native setup {:.3} ms exceeds {:.3} ms",
             native_setup_ns / 1_000_000.0,
             max_native_setup_ms
+        ));
+    }
+    if let Some(max_native_code_bytes) = config.max_native_code_bytes
+        && native_code_bytes > max_native_code_bytes
+    {
+        failures.push(format!(
+            "native code size {native_code_bytes} bytes exceeds {max_native_code_bytes} bytes"
         ));
     }
     if let Some(max_native_p95) = config.max_native_p95_ns_per_sweep
@@ -1424,11 +1453,13 @@ mod tests {
         NativeBenchConfig {
             iterations: 1,
             samples: 1,
+            min_dense_speedup: 0.0,
             min_speedup: 0.0,
             min_full_stamp_speedup: 0.0,
             max_native_setup_ms: None,
             max_native_p95_ns_per_sweep: None,
             max_relative_stddev: None,
+            max_native_code_bytes: None,
         }
     }
 
@@ -1480,6 +1511,7 @@ mod tests {
             config,
             0.0,
             2_000_000.0,
+            1,
             timing_stats(vec![1.0]),
             1.0,
             0.0,
@@ -1489,6 +1521,27 @@ mod tests {
         assert_eq!(
             failures,
             ["native setup 2.000 ms exceeds 1.000 ms".to_string()]
+        );
+    }
+
+    #[test]
+    fn benchmark_gate_rejects_native_code_size_regression() {
+        let mut config = smoke_config();
+        config.max_native_code_bytes = Some(8_000);
+        let failures = benchmark_failures(
+            config,
+            0.0,
+            1.0,
+            8_001,
+            timing_stats(vec![1.0]),
+            1.0,
+            0.0,
+            0.0,
+        );
+
+        assert_eq!(
+            failures,
+            ["native code size 8001 bytes exceeds 8000 bytes".to_string()]
         );
     }
 }

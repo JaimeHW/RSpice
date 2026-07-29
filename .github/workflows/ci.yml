@@ -170,11 +170,13 @@ jobs:
           cargo run --locked -p rspice-bench --release -- native-jit
           --iterations 100000
           --samples 9
+          --min-dense-speedup 2.00
           --min-speedup 1.10
-          --min-full-stamp-speedup 1.50
-          --max-native-setup-ms 50
-          --max-native-p95-ns-per-sweep 25000
+          --min-full-stamp-speedup 2.00
+          --max-native-setup-ms 10
+          --max-native-p95-ns-per-sweep 5000
           --max-relative-stddev 0.25
+          --max-native-code-bytes 16384
       - name: Clear non-UI test artifacts
         run: cargo clean
       - name: Test UI library (Linux)
@@ -216,11 +218,13 @@ jobs:
           cargo run --locked -p rspice-bench --release -- native-jit
           --iterations 100000
           --samples 9
+          --min-dense-speedup 2.00
           --min-speedup 1.10
-          --min-full-stamp-speedup 1.50
-          --max-native-setup-ms 50
-          --max-native-p95-ns-per-sweep 25000
+          --min-full-stamp-speedup 2.00
+          --max-native-setup-ms 10
+          --max-native-p95-ns-per-sweep 5000
           --max-relative-stddev 0.25
+          --max-native-code-bytes 16384
 
   check-macos-desktop:
     name: Check & test desktop UI/CLI (macOS)
