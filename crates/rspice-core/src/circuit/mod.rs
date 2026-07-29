@@ -525,11 +525,3 @@ impl Default for CircuitData {
     }
 }
 
-/// Shorter spelling of [`CircuitData`], on its way out.
-///
-/// Two names for one type means a search for `Circuit` returns both, and
-/// neither spelling tells you which the surrounding code prefers. Every
-/// remaining user is `engine::hb::state`, four signatures; when they change,
-/// delete this and the `Circuit` arm of the re-export in `lib.rs`. Nothing
-/// new should name it.
-pub type Circuit = CircuitData;

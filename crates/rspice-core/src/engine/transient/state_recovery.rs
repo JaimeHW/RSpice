@@ -177,7 +177,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn bounded_force_accept_candidate(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         previous_solution: &[Value],
         candidate_solution: &[Value],
         accepted_time: Value,
@@ -219,7 +219,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn restore_algebraic_branch_currents(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         previous_solution: &[Value],
         candidate_solution: &mut [Value],
         num_nodes: usize,

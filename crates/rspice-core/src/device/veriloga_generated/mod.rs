@@ -46,7 +46,7 @@ impl GeneratedDdtCoefficients {
 
     #[inline]
     pub fn from_companion(
-        coefficients: &crate::analysis::CompanionCoefficients,
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
         timestep: Value,
     ) -> Self {
         const DDT_EPSILON: Value = 1.0e-20;

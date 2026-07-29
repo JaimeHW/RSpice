@@ -50,7 +50,7 @@ pub(crate) use flattener::{
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
 pub use include::{
-    DEFAULT_MAX_INCLUDE_DEPTH, IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle,
+    IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle,
     SealedSourceEdge, normalize_source_path_literal, parse_include_directive, parse_lib_directive,
 };
 pub use initcond::{

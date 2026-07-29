@@ -85,11 +85,6 @@ impl ExpandedSource {
     }
 }
 
-/// Production include-depth limit shared by library discovery and executable
-/// netlist expansion. Foundry PDKs commonly have substantially deeper include
-/// trees than small hand-written decks.
-pub const DEFAULT_MAX_INCLUDE_DEPTH: usize = 64;
-
 /// An immutable, in-memory set of canonical source files.
 ///
 /// A sealed bundle is deliberately content-only: resolving an include checks
@@ -2179,13 +2174,13 @@ R1 1 0 {selected}
 
     #[test]
     fn sealed_include_depth_accepts_64_frames_and_rejects_65() {
-        let (accepted_root, accepted_bundle) = sealed_depth_bundle(DEFAULT_MAX_INCLUDE_DEPTH);
+        let (accepted_root, accepted_bundle) = sealed_depth_bundle(crate::resource::DEFAULT_MAX_INCLUDE_DEPTH);
         let accepted = IncludeProcessor::new_sealed(&accepted_root, accepted_bundle)
             .process_sealed_root(&accepted_root, None)
             .expect("the production include-depth boundary is accepted");
         assert!(accepted.contains("Rlast"));
 
-        let (rejected_root, rejected_bundle) = sealed_depth_bundle(DEFAULT_MAX_INCLUDE_DEPTH + 1);
+        let (rejected_root, rejected_bundle) = sealed_depth_bundle(crate::resource::DEFAULT_MAX_INCLUDE_DEPTH + 1);
         let rejected = IncludeProcessor::new_sealed(&rejected_root, rejected_bundle)
             .process_sealed_root(&rejected_root, None)
             .expect_err("one frame beyond the production boundary must fail");
@@ -2194,7 +2189,7 @@ R1 1 0 {selected}
             ParseError::ResourceLimit(ResourceLimitError {
                 resource: ResourceKind::IncludeDepth,
                 requested: 65,
-                limit: DEFAULT_MAX_INCLUDE_DEPTH,
+                limit: crate::resource::DEFAULT_MAX_INCLUDE_DEPTH,
             })
         ));
     }

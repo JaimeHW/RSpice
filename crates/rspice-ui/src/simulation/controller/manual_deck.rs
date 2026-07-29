@@ -5,7 +5,7 @@
 //! workspace configured.
 
 use super::*;
-use rspice_core::analysis::advanced::s_param;
+use rspice_core::analysis::s_param;
 use rspice_core::netlist::{
     AnalysisCommand, ElementKind, FreqVariation, Netlist, PoleZeroAnalysisType,
     PoleZeroTransferType, StepCommand, StepTarget,

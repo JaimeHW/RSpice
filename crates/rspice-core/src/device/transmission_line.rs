@@ -217,7 +217,7 @@ VS 168  0  PULSE (0 5 15.9NS 0.2NS 0.2NS 15.8NS 32NS )
 "#;
         let netlist = crate::Netlist::parse(deck).expect("deck parses");
         let config = crate::engine::SimulationConfig {
-            integration_method: crate::analysis::IntegrationMethod::Trapezoidal,
+            integration_method: crate::numerics::integration::IntegrationMethod::Trapezoidal,
             temperature: 300.15,
             min_timestep: 1e-12,
             locked_time_grid: Some(std::sync::Arc::new(

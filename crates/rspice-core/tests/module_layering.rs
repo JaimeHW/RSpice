@@ -139,11 +139,11 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // which now live in `constants` beside the physical constants they are
     // arithmetic on.
     //
-    // `resource -> netlist` is a single reference to the default include
-    // depth, a limit that belongs in `resource` with the other limits. Left
-    // for now because `netlist/include.rs`, where the constant is defined, is
-    // being edited concurrently.
-    ("resource", "netlist", 1),
+    // `resource -> netlist` is retired too: it was the default include depth,
+    // which `resource` had to reach up into `netlist` to read even though it
+    // is a resource limit and sits beside the other fifteen now. Phase 2 has
+    // no remaining edges.
+
     // ---------------------------------------------------------------------
     // Phase 3 — extract `config`.
     //

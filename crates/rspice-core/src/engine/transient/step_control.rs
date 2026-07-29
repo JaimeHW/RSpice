@@ -32,7 +32,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn is_stagnant_force_candidate(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         previous_solution: &[Value],
         candidate_solution: &[Value],
         num_nodes: usize,

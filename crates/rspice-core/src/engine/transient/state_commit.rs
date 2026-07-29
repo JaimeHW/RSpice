@@ -5,7 +5,7 @@ use super::*;
 impl Engine {
     #[inline]
     pub(super) fn update_reactive_history(
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         accepted_solution: &[Value],
         accepted_time: Value,
         dt: Value,

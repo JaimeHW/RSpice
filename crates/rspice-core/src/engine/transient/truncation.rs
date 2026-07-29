@@ -105,7 +105,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn capacitor_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -190,7 +190,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn vbic_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -266,7 +266,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn legacy_bjt_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -381,7 +381,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn bjt_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -436,7 +436,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn jfet_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -591,7 +591,7 @@ impl Engine {
     /// same divided-difference truncation law as the other junction devices.
     #[inline]
     pub(super) fn diode_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -664,7 +664,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn mosfet_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -800,7 +800,7 @@ impl Engine {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn vdmos_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -1005,7 +1005,7 @@ impl Engine {
     /// the accepted timestep. Returns the tightest per-charge step bound, or
     /// `None` when no SOI charge is active.
     pub(super) fn b3soi_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -1126,7 +1126,7 @@ impl Engine {
     /// is active.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn bsim3_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -1213,7 +1213,7 @@ impl Engine {
     /// `None` when no charge is active.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn bsim4_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -1356,7 +1356,7 @@ impl Engine {
     /// LTE truncation limit for native EKV 2.6 intrinsic terminal charges.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn ekv26_ngspice_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -1432,7 +1432,7 @@ impl Engine {
     /// proportionally reduced step when the bound is exceeded, `None` when
     /// the candidate respects it.
     pub(super) fn nonlinear_terminal_activity_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         accepted_solution: &[Value],
         candidate_solution: &[Value],
         dt: Value,
@@ -1502,7 +1502,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn ltra_candidate_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         candidate_time: Value,
     ) -> Option<Value> {
@@ -1535,7 +1535,7 @@ impl Engine {
     #[inline]
     #[allow(clippy::too_many_arguments)]
     pub(super) fn ngspice_device_truncation_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -1725,7 +1725,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn bjt_charge_truncation_covers_transient_lte(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         bjt_truncation_limit: Option<Value>,
     ) -> bool {
         bjt_truncation_limit.is_some()
@@ -1747,7 +1747,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn jfet_charge_truncation_covers_transient_lte(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         jfet_truncation_limit: Option<Value>,
     ) -> bool {
         jfet_truncation_limit.is_some()
@@ -1769,7 +1769,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn mosfet_charge_truncation_covers_transient_lte(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         mosfet_truncation_limit: Option<Value>,
     ) -> bool {
         mosfet_truncation_limit.is_some()
@@ -1791,7 +1791,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn ngspice_device_truncation_covers_transient_lte(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         capacitor_truncation_limit: Option<Value>,
         bjt_truncation_limit: Option<Value>,
         jfet_truncation_limit: Option<Value>,
@@ -1829,7 +1829,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn estimate_transient_lte(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
         predicted_solution: Option<&[Value]>,
         dt: Value,
@@ -1880,7 +1880,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn trapezoidal_order_trial_timestep_limit(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         accepted_solution: &[Value],
         method: IntegrationMethod,
         dt: Value,
@@ -2087,7 +2087,7 @@ mod tests {
         assert!(Engine::uses_ngspice_charge_truncation(&native));
     }
 
-    fn build_truncation_circuit(deck: &str) -> crate::circuit::Circuit {
+    fn build_truncation_circuit(deck: &str) -> crate::circuit::CircuitData {
         let netlist = Netlist::parse(deck).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
         engine.build_circuit(&netlist).expect("circuit builds")

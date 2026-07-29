@@ -406,7 +406,7 @@ impl CircuitData {
             solution,
             analysis,
             phase,
-            crate::analysis::CompanionCoefficients::backward_euler(),
+            crate::numerics::integration::CompanionCoefficients::backward_euler(),
             false,
         )
     }
@@ -418,7 +418,7 @@ impl CircuitData {
         solution: &[Value],
         analysis: crate::xspice::AnalysisType,
         phase: crate::xspice::EvaluationPhase,
-        companion_coefficients: crate::analysis::CompanionCoefficients,
+        companion_coefficients: crate::numerics::integration::CompanionCoefficients,
         xyce_one_step_order2: bool,
     ) -> crate::xspice::CmResult<()> {
         let current_source_values = self.current_sources.values_at_time(time);
@@ -633,7 +633,7 @@ impl CircuitData {
             time,
             timestep,
             voltages,
-            &crate::analysis::CompanionCoefficients::backward_euler(),
+            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
             false,
         );
     }
@@ -647,7 +647,7 @@ impl CircuitData {
         time: Value,
         timestep: Value,
         voltages: &[Value],
-        coefficients: &crate::analysis::CompanionCoefficients,
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
         xyce_one_step_order2: bool,
     ) {
         let snapshot = self.nonlinear_state_snapshot();
@@ -679,7 +679,7 @@ impl CircuitData {
             time,
             timestep,
             voltages,
-            &crate::analysis::CompanionCoefficients::backward_euler(),
+            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
             false,
         );
     }
@@ -691,7 +691,7 @@ impl CircuitData {
         time: Value,
         timestep: Value,
         voltages: &[Value],
-        coefficients: &crate::analysis::CompanionCoefficients,
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
         xyce_one_step_order2: bool,
     ) {
         if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
@@ -1762,7 +1762,7 @@ impl CircuitData {
         &mut self,
         time: Value,
         dt: Value,
-        coefficients: &crate::analysis::CompanionCoefficients,
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
         initial_step: bool,
         final_step: bool,
     ) {
@@ -1861,7 +1861,7 @@ impl CircuitData {
         &mut self,
         time: Value,
         dt: Value,
-        coefficients: &crate::analysis::CompanionCoefficients,
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), String> {

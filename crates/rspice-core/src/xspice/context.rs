@@ -4,7 +4,7 @@
 //! Handles port value access, parameter lookup, and state management.
 
 use super::{CmError, CmResult, DigitalValue, PortType};
-use crate::analysis::CompanionCoefficients;
+use crate::numerics::integration::CompanionCoefficients;
 use crate::{Complex64, Value};
 use std::any::Any;
 use std::borrow::Cow;
@@ -2380,9 +2380,8 @@ impl CmContext {
 
     /// Get thermal voltage (kT/q)
     pub fn thermal_voltage(&self) -> Value {
-        const BOLTZMANN: Value = 1.380649e-23;
-        const CHARGE: Value = 1.602176634e-19;
-        BOLTZMANN * self.temperature / CHARGE
+        use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
+        K_BOLTZMANN * self.temperature / Q_ELECTRON
     }
 
     /// Check if this is the first call (initialization)

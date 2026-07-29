@@ -1396,7 +1396,7 @@ impl XspiceInstance {
     /// Set the transient companion coefficients supplied by the owning engine.
     pub(crate) fn set_transient_companion_coefficients(
         &mut self,
-        coefficients: crate::analysis::CompanionCoefficients,
+        coefficients: crate::numerics::integration::CompanionCoefficients,
     ) {
         self.context
             .set_transient_companion_coefficients(coefficients);

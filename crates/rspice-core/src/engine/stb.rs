@@ -29,7 +29,7 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::advanced::stb::{StbAnalyzer, StbConfig, StbResult};
+use crate::analysis::stb::{StbAnalyzer, StbConfig, StbResult};
 use crate::{Complex64, Netlist, Value};
 use std::f64::consts::PI;
 
@@ -227,7 +227,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::advanced::stb::StbSweepType;
+    use crate::analysis::stb::StbSweepType;
 
     #[test]
     fn stb_refreshes_frequency_dependent_behavioral_conductance() {

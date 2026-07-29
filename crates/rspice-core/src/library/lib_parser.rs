@@ -318,7 +318,7 @@ impl LibParser {
             base_dir,
             current_file: None,
             include_depth: 0,
-            max_include_depth: crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH,
+            max_include_depth: crate::resource::DEFAULT_MAX_INCLUDE_DEPTH,
             include_stack: Vec::new(),
             resolved_sources: Vec::new(),
             resolved_source_paths: HashSet::new(),
@@ -1384,7 +1384,7 @@ mod tests {
     fn dependency_capture_matches_the_64_frame_execution_boundary() {
         let accepted_dir = unique_lib_parser_temp_dir("depth-accepted");
         let accepted_root =
-            write_depth_fixture(&accepted_dir, crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH);
+            write_depth_fixture(&accepted_dir, crate::resource::DEFAULT_MAX_INCLUDE_DEPTH);
         let mut accepted_parser = LibParser::new(&accepted_dir);
         let accepted = accepted_parser
             .parse_file(&accepted_root)
@@ -1392,16 +1392,16 @@ mod tests {
         assert!(accepted.is_ok(), "{:?}", accepted.errors);
         assert_eq!(
             accepted.resolved_sources.len(),
-            crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH
+            crate::resource::DEFAULT_MAX_INCLUDE_DEPTH
         );
         assert_eq!(
             accepted.resolved_dependencies.len(),
-            crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH - 1
+            crate::resource::DEFAULT_MAX_INCLUDE_DEPTH - 1
         );
 
         let rejected_dir = unique_lib_parser_temp_dir("depth-rejected");
         let rejected_root =
-            write_depth_fixture(&rejected_dir, crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH + 1);
+            write_depth_fixture(&rejected_dir, crate::resource::DEFAULT_MAX_INCLUDE_DEPTH + 1);
         let mut rejected_parser = LibParser::new(&rejected_dir);
         let rejected = rejected_parser
             .parse_file(&rejected_root)
