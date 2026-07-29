@@ -52,8 +52,6 @@ const STATE_VALUES_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values)
 const STATE_INITIALIZED_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_initialized) as i32;
 const STATE_INITIALIZED_LEN_OFFSET: i32 =
     std::mem::offset_of!(EvalContext, state_initialized_len) as i32;
-const LOOKUP_TABLES_OFFSET: i32 = std::mem::offset_of!(EvalContext, lookup_tables) as i32;
-const LOOKUP_TABLES_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, lookup_tables_len) as i32;
 const PARAM_GIVEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given) as i32;
 const PARAM_GIVEN_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given_len) as i32;
 const BRANCH_UNKNOWNS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_unknowns) as i32;
@@ -1634,25 +1632,9 @@ impl FunctionCompiler {
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
         }
-        let ctx = self.ctx_arg_reg();
-        if table_ptr_arg_reg() == ctx {
-            self.encoder.mov_r64_m64_base_disp32(
-                table_len_arg_reg(),
-                ctx,
-                LOOKUP_TABLES_LEN_OFFSET,
-            );
-            self.encoder
-                .mov_r64_m64_base_disp32(table_ptr_arg_reg(), ctx, LOOKUP_TABLES_OFFSET);
-        } else {
-            self.encoder
-                .mov_r64_m64_base_disp32(table_ptr_arg_reg(), ctx, LOOKUP_TABLES_OFFSET);
-            self.encoder.mov_r64_m64_base_disp32(
-                table_len_arg_reg(),
-                ctx,
-                LOOKUP_TABLES_LEN_OFFSET,
-            );
-        }
-        self.emit_usize_arg(table_id_arg_reg(), table_id);
+        self.encoder
+            .mov_r64_r64(context_filter_ctx_arg_reg(), self.ctx_arg_reg());
+        self.emit_usize_arg(context_filter_id_arg_reg(), table_id);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -3016,8 +2998,7 @@ enum RoundDirection {
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
 type VoidHelper = extern "C" fn(*const crate::native::EvalContext);
-type TableHelper =
-    unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
+type TableHelper = unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 type OperandContextFilterHelper =
@@ -3397,36 +3378,6 @@ fn entry_ctx_arg_reg() -> Gpr {
 #[cfg(not(windows))]
 fn entry_vars_arg_reg() -> Gpr {
     Gpr::Rsi
-}
-
-#[cfg(windows)]
-fn table_ptr_arg_reg() -> Gpr {
-    Gpr::Rdx
-}
-
-#[cfg(windows)]
-fn table_len_arg_reg() -> Gpr {
-    Gpr::R8
-}
-
-#[cfg(windows)]
-fn table_id_arg_reg() -> Gpr {
-    Gpr::R9
-}
-
-#[cfg(not(windows))]
-fn table_ptr_arg_reg() -> Gpr {
-    Gpr::Rdi
-}
-
-#[cfg(not(windows))]
-fn table_len_arg_reg() -> Gpr {
-    Gpr::Rsi
-}
-
-#[cfg(not(windows))]
-fn table_id_arg_reg() -> Gpr {
-    Gpr::Rdx
 }
 
 #[cfg(windows)]
@@ -4279,7 +4230,6 @@ mod tests {
             LookupTable::from_data(vec![0.0, 1.0], vec![2.0, 3.0]),
             LookupTable::from_data(vec![0.0, 1.0], vec![4.0, 5.0]),
         ];
-        ABI_EXPECTED_TABLE_PTR.store(table.as_ptr() as usize, std::sync::atomic::Ordering::SeqCst);
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.lookup_tables = table.as_ptr();
         ctx.lookup_tables_len = table.len();
@@ -9454,11 +9404,17 @@ mod tests {
             let bytes = compile_value_function(&program).expect("compile table helper leaf");
             if name.ends_with("second-table") {
                 assert!(
-                    contains_bytes(&bytes, &mov_r32_imm32_bytes(super::table_id_arg_reg(), 1)),
+                    contains_bytes(
+                        &bytes,
+                        &mov_r32_imm32_bytes(super::context_filter_id_arg_reg(), 1)
+                    ),
                     "table helper should materialize small table IDs with a compact imm32 move"
                 );
                 assert!(
-                    !contains_bytes(&bytes, &movabs_imm64_bytes(super::table_id_arg_reg(), 1)),
+                    !contains_bytes(
+                        &bytes,
+                        &movabs_imm64_bytes(super::context_filter_id_arg_reg(), 1)
+                    ),
                     "table helper should not use movabs for small table IDs"
                 );
             }
@@ -11111,9 +11067,6 @@ mod tests {
         XMM_STACK.len().max(8) + 1
     }
 
-    static ABI_EXPECTED_TABLE_PTR: std::sync::atomic::AtomicUsize =
-        std::sync::atomic::AtomicUsize::new(0);
-
     fn run_table_helper_sentinel(helper: TableHelper, ctx: &EvalContext) -> f64 {
         let mut compiler = abi_sentinel_compiler();
         push_abi_sentinel_const(&mut compiler, 3.25);
@@ -11179,22 +11132,23 @@ mod tests {
 
     unsafe extern "C" fn abi_sentinel_table_helper(
         input: f64,
-        tables: *const LookupTable,
-        table_count: usize,
+        ctx: *const EvalContext,
         table_id: usize,
     ) -> f64 {
         if input.to_bits() != 3.25_f64.to_bits() {
             return -1.0;
         }
-        let expected = ABI_EXPECTED_TABLE_PTR.load(std::sync::atomic::Ordering::SeqCst);
-        if tables as usize != expected {
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
             return -2.0;
-        }
-        if table_count != 2 {
+        };
+        if ctx.lookup_tables.is_null() {
             return -3.0;
         }
-        if table_id != 7 {
+        if ctx.lookup_tables_len != 2 {
             return -4.0;
+        }
+        if table_id != 7 {
+            return -5.0;
         }
         101.0
     }

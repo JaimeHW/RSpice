@@ -507,31 +507,44 @@ pub unsafe extern "C" fn rspice_table_lookup(
 /// External helper function for native x64 table lookup interpolation.
 ///
 /// Argument order is chosen for x64 helper-call codegen: scalar input in XMM0,
-/// followed by table metadata in integer argument registers.
+/// followed by the dispatch context and table ID in integer argument registers.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers.
 #[unsafe(export_name = "rspice_table_lookup_native")]
 pub unsafe extern "C" fn rspice_table_lookup_native(
     input: f64,
-    tables_ptr: *const crate::codegen::LookupTable,
-    tables_len: usize,
+    ctx: *const EvalContext,
     table_id: usize,
 ) -> f64 {
-    if tables_ptr.is_null() {
+    if ctx.is_null() {
         set_native_runtime_error(format!(
-            "native table lookup helper missing table storage for table {table_id}; no interpreter fallback"
+            "native table lookup helper missing EvalContext for table {table_id}; no interpreter fallback"
         ));
         return 0.0;
     }
-    if table_id >= tables_len {
-        set_native_runtime_error(format!(
-            "native table lookup helper table {table_id} outside table length {tables_len}; no interpreter fallback"
-        ));
+    let ctx = unsafe { &*ctx };
+    if ctx.lookup_tables.is_null() {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table lookup helper missing table storage for table {table_id}; no interpreter fallback"
+            ),
+        );
+        return 0.0;
+    }
+    if table_id >= ctx.lookup_tables_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table lookup helper table {table_id} outside table length {}; no interpreter fallback",
+                ctx.lookup_tables_len
+            ),
+        );
         return 0.0;
     }
 
-    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
+    let tables = unsafe { std::slice::from_raw_parts(ctx.lookup_tables, ctx.lookup_tables_len) };
     tables[table_id].interpolate(input)
 }
 
@@ -542,24 +555,37 @@ pub unsafe extern "C" fn rspice_table_lookup_native(
 #[unsafe(export_name = "rspice_table_derivative_native")]
 pub unsafe extern "C" fn rspice_table_derivative_native(
     input: f64,
-    tables_ptr: *const crate::codegen::LookupTable,
-    tables_len: usize,
+    ctx: *const EvalContext,
     table_id: usize,
 ) -> f64 {
-    if tables_ptr.is_null() {
+    if ctx.is_null() {
         set_native_runtime_error(format!(
-            "native table derivative helper missing table storage for table {table_id}; no interpreter fallback"
+            "native table derivative helper missing EvalContext for table {table_id}; no interpreter fallback"
         ));
         return 0.0;
     }
-    if table_id >= tables_len {
-        set_native_runtime_error(format!(
-            "native table derivative helper table {table_id} outside table length {tables_len}; no interpreter fallback"
-        ));
+    let ctx = unsafe { &*ctx };
+    if ctx.lookup_tables.is_null() {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table derivative helper missing table storage for table {table_id}; no interpreter fallback"
+            ),
+        );
+        return 0.0;
+    }
+    if table_id >= ctx.lookup_tables_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table derivative helper table {table_id} outside table length {}; no interpreter fallback",
+                ctx.lookup_tables_len
+            ),
+        );
         return 0.0;
     }
 
-    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
+    let tables = unsafe { std::slice::from_raw_parts(ctx.lookup_tables, ctx.lookup_tables_len) };
     tables[table_id].derivative(input)
 }
 
@@ -2017,15 +2043,19 @@ mod tests {
             (
                 "lookup",
                 rspice_table_lookup_native
-                    as unsafe extern "C" fn(f64, *const LookupTable, usize, usize) -> f64,
+                    as unsafe extern "C" fn(f64, *const EvalContext, usize) -> f64,
             ),
             ("derivative", rspice_table_derivative_native),
         ] {
+            let mut ctx = empty_eval_context();
             clear_native_runtime_error();
-            let value = unsafe { helper(1.0, std::ptr::null(), 0, 0) };
+            ctx.clear_runtime_error();
+            let value = unsafe { helper(1.0, &ctx, 0) };
             assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error()
+            let error = ctx
+                .take_runtime_error()
                 .unwrap_or_else(|| panic!("{name} missing table storage must hard-fail"));
+            let _ = take_native_runtime_error();
             assert!(error.contains("table"), "{name}: {error}");
             assert!(error.contains("table storage"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
@@ -2092,15 +2122,21 @@ mod tests {
             (
                 "lookup",
                 rspice_table_lookup_native
-                    as unsafe extern "C" fn(f64, *const LookupTable, usize, usize) -> f64,
+                    as unsafe extern "C" fn(f64, *const EvalContext, usize) -> f64,
             ),
             ("derivative", rspice_table_derivative_native),
         ] {
+            let mut ctx = empty_eval_context();
+            ctx.lookup_tables = table.as_ptr();
+            ctx.lookup_tables_len = table.len();
             clear_native_runtime_error();
-            let value = unsafe { helper(1.0, table.as_ptr(), table.len(), 1) };
+            ctx.clear_runtime_error();
+            let value = unsafe { helper(1.0, &ctx, 1) };
             assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error()
+            let error = ctx
+                .take_runtime_error()
                 .unwrap_or_else(|| panic!("{name} out-of-range table id must hard-fail"));
+            let _ = take_native_runtime_error();
             assert!(error.contains("table"), "{name}: {error}");
             assert!(error.contains("outside table length"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
