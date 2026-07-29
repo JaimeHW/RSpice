@@ -1,0 +1,23 @@
+[package]
+name = "rspice-veriloga-model-hisimhv-n5-va"
+description = "Precompiled RSpice Verilog-A model artifact"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+veriloga-builtins-noise = []
+
+[dependencies]
+rspice-veriloga-runtime.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

@@ -28,13 +28,6 @@ pub enum JitError {
 }
 
 impl JitError {
-    pub fn unsupported_current_optir(model: impl Into<SmolStr>) -> Self {
-        Self::UnsupportedCanonicalOp {
-            model: model.into(),
-            op: SmolStr::new("EvaluateEquation"),
-        }
-    }
-
     pub fn unsupported_program_op(model: impl Into<SmolStr>, op: impl Into<SmolStr>) -> Self {
         Self::UnsupportedCanonicalOp {
             model: model.into(),
@@ -122,7 +115,7 @@ mod tests {
 
     #[test]
     fn unsupported_op_error_names_hard_fail_contract() {
-        let msg = JitError::unsupported_current_optir("rjit").to_string();
+        let msg = JitError::unsupported_program_op("rjit", "EvaluateEquation").to_string();
         assert!(msg.contains("EvaluateEquation"));
         assert!(msg.contains("no interpreter fallback"));
     }

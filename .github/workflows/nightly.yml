@@ -152,8 +152,21 @@ jobs:
         env:
           RUST_MIN_STACK: "67108864"
         run: >-
-          cargo test --locked -p rspice-conformance --features veriloga-builtins
+          cargo test --locked --release -p rspice-conformance --features veriloga-builtins
           --test veriloga_golden -- --test-threads=1
+      - name: Gate 42-model stamp performance against hand-written reference
+        # These are no-regression ratchets around the 2026-07-28 canonical
+        # backend baseline. Tighten them toward the release target (1.00x
+        # corpus median, 1.50x worst model); never present the ratchets
+        # themselves as target attainment.
+        run: >-
+          cargo run --locked --release -p rspice-bench
+          --features generated-stamp -- generated-stamp
+          --iterations 2000
+          --samples 7
+          --max-corpus-median-reference-ratio 5.75
+          --max-model-reference-ratio 16.50
+          --out target/veriloga-stamp-qualification.json
       - name: Every model's Jacobian against complex step
         # Phase 7's property gate. `#[ignore]` by default because it compiles
         # the whole model tree through the front end; this is the run that makes
@@ -181,6 +194,13 @@ jobs:
           cargo test --locked --release -p rspice-veriloga --features native --lib
           native_x64_shipped_model_finite_entries_match_bytecode_reference
           -- --ignored --nocapture --test-threads=1
+      - name: Upload Verilog-A stamp qualification
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: veriloga-stamp-qualification
+          path: target/veriloga-stamp-qualification.json
+          if-no-files-found: error
 
   release-build:
     name: Release build (${{ matrix.os }})

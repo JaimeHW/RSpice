@@ -1,0 +1,7 @@
+//! Precompiled generated Verilog-A model. Do not edit.
+
+#![allow(clippy::all, unused_assignments)]
+
+#[allow(non_snake_case)]
+#[path = "ekv26_sdext_verilog_a__ekv_va__0adf5df4/mod.rs"]
+pub mod ekv26_sdext_verilog_a__ekv_va__0adf5df4;

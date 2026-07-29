@@ -1211,6 +1211,28 @@ endmodule
 }
 
 #[test]
+fn model_parameter_ranges_may_reference_instance_geometry() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module scoped_range(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "instance" *) parameter real length = 1.0e-6;
+    parameter real lateral_offset = 0.0 from [-inf:length);
+    analog I(p, n) <+ lateral_offset * V(p, n);
+endmodule
+"#,
+        )
+        .expect("instance-dependent validation bounds preserve model scope");
+
+    assert_eq!(
+        artifact.mir.parameters[1].scope,
+        ParameterScope::Model
+    );
+}
+
+#[test]
 fn parameter_scope_rejects_unknown_type_attributes() {
     let error = VerilogACompiler::default()
         .compile_canonical_ir(

@@ -20,7 +20,7 @@ numbers, use rspice-core's
 
 | File | Contents |
 | :--- | :--- |
-| `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `native-jit`, and `run` subcommands |
+| `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `generated-stamp`, `native-jit`, and `run` subcommands |
 | `src/runner.rs` | The `run` subcommand: locates executables, runs warmup + timed repeats per deck/simulator, computes min/median/mean and the median speedup, writes the scoreboard, prints the table |
 | `src/generate.rs` | The `gen` subcommand: deterministically regenerates the generated decks (RC ladders, MOS array) with byte-stable output — fixed formatting, no timestamps |
 | `src/generated_rust.rs` | Authenticated source-resource report and budget gate for checked-in Verilog-A Rust kernels |
@@ -52,6 +52,10 @@ target/release/rspice-bench native-jit
 target/release/rspice-bench generated-rust \
   --out benchmarks/scoreboards/generated-rust.json
 
+# Measure five representative generated models against hand-written BSIM4
+cargo run -p rspice-bench --release --features generated-stamp-subset -- \
+  generated-stamp --max-corpus-median-reference-ratio 1.25
+
 # Regenerate the generated decks (verify with git diff afterwards)
 target/release/rspice-bench gen
 ```
@@ -65,7 +69,7 @@ metric into a non-zero-exit release budget.
 
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
-| `--generated-root <DIR>` | `crates/rspice-core/src/device/veriloga_generated` | Generated bundle to authenticate and measure |
+| `--generated-root <DIR>` | `crates/rspice-veriloga-models` | Generated bundle to authenticate and measure |
 | `--max-source-bytes <N>` | unset | Maximum total generated-source bytes |
 | `--max-noise-source-bytes <N>` | unset | Maximum source bytes attributable to noise kernels |
 | `--max-model-source-bytes <N>` | unset | Maximum source bytes for any one generated model |
@@ -74,6 +78,25 @@ metric into a non-zero-exit release budget.
 | `--max-stamp-state-payload-bytes <N>` | unset | Maximum persistent DDT/IDT stamp-state payload for any model instance |
 | `--top <N>` | 20 | Largest files and models retained in output |
 | `--out <PATH>` | unset | Optional deterministic JSON report |
+
+### `rspice-bench generated-stamp`
+
+This in-process gate measures generated model evaluation and matrix/RHS
+stamping in one call, then measures the hand-written BSIM4 implementation in
+the same process. Same-run ratios are the portable release signal; absolute
+nanosecond limits are available for controlled hardware only. Use
+`--features generated-stamp-subset` for the five-model routine tier or
+`--features generated-stamp` for the complete 42-model corpus.
+
+| Flag | Default | Meaning |
+| :--- | :--- | :--- |
+| `--iterations <N>` | 2000 | Stamp calls per timed sample |
+| `--samples <N>` | 7 | Independent timed samples |
+| `--model <NAME>` | all compiled-in models | Repeatable model filter |
+| `--max-median-ns-per-stamp <NS>` | unset | Controlled-host absolute median limit for every model |
+| `--max-corpus-median-reference-ratio <X>` | unset | Maximum corpus median divided by the same-run hand-written reference |
+| `--max-model-reference-ratio <X>` | unset | Maximum per-model median divided by the same-run hand-written reference |
+| `--out <PATH>` | unset | JSON evidence including every ratio, configured budget, failure, and verdict |
 
 ### `rspice-bench run`
 
