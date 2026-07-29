@@ -336,7 +336,6 @@ fn run_pnoise_analysis_impl(
     }
 
     let sideband_stride = resolve_pnoise_sideband_stride_with_abort(config.max_sideband, abort)?;
-    let sideband_factor = sideband_stride;
     let translated_frequencies = build_pnoise_sideband_translated_frequencies_with_abort(
         &frequencies,
         pss_data.frequency,
@@ -431,15 +430,6 @@ fn run_pnoise_analysis_impl(
         );
     }
     let mut input_noise = None;
-    let total_output_noise = if config.integrated_noise {
-        Some(integrate_noise_rms_with_abort(
-            &frequencies,
-            &output_noise,
-            abort,
-        )?)
-    } else {
-        None
-    };
 
     match config.noise_ref {
         PnoiseReference::Output => {}
@@ -666,7 +656,9 @@ fn run_pnoise_from_retained_state(
     operating_point: &rspice_core::engine::PssOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
-    let sideband_factor = resolve_pnoise_sideband_stride_with_abort(config.max_sideband, abort)?;
+    // Validates `max_sideband` before the exact solve; the stride itself is
+    // applied inside the engine call below.
+    resolve_pnoise_sideband_stride_with_abort(config.max_sideband, abort)?;
     let output_ref = config
         .output_ref
         .as_deref()
@@ -717,15 +709,6 @@ fn run_pnoise_from_retained_state(
         })?),
         PnoiseReference::Output => None,
         PnoiseReference::Phase => unreachable!("phase reference returned through the PPV path"),
-    };
-    let total_output_noise = if config.integrated_noise {
-        Some(integrate_noise_rms_with_abort(
-            &frequencies,
-            &exact.output_noise,
-            abort,
-        )?)
-    } else {
-        None
     };
     let contributors = if config.noise_summary {
         contributor_percentages_with_abort(
