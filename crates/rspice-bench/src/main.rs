@@ -19,11 +19,11 @@
 mod error;
 mod generate;
 mod generated_rust;
-#[cfg(feature = "generated-stamp")]
+#[cfg(feature = "generated-stamp-base")]
 mod generated_stamp;
 mod native_jit;
 mod runner;
-#[cfg(feature = "generated-stamp")]
+#[cfg(feature = "generated-stamp-base")]
 mod veriloga_golden;
 
 use clap::{Parser, Subcommand};
@@ -46,14 +46,14 @@ enum BenchCommand {
     /// Authenticate and gate generated Verilog-A Rust source resources.
     GeneratedRust(generated_rust::GeneratedRustArgs),
     /// Measure and gate generated Verilog-A built-in stamp throughput.
-    #[cfg(feature = "generated-stamp")]
+    #[cfg(feature = "generated-stamp-base")]
     GeneratedStamp(generated_stamp::GeneratedStampArgs),
     /// Run the in-process native Verilog-A JIT benchmark gate.
     NativeJit(native_jit::NativeJitArgs),
     /// Run the benchmark suite and emit a JSON scoreboard.
     Run(runner::RunArgs),
     /// Capture, verify, and independently audit generated Verilog-A numerics.
-    #[cfg(feature = "generated-stamp")]
+    #[cfg(feature = "generated-stamp-base")]
     VerilogAGolden(veriloga_golden::VerilogAGoldenArgs),
 }
 
@@ -62,11 +62,11 @@ fn main() -> ExitCode {
     let outcome = match cli.command {
         BenchCommand::Gen(args) => generate::generate(&args).map(|()| ExitCode::SUCCESS),
         BenchCommand::GeneratedRust(args) => generated_rust::run(&args),
-        #[cfg(feature = "generated-stamp")]
+        #[cfg(feature = "generated-stamp-base")]
         BenchCommand::GeneratedStamp(args) => generated_stamp::run(&args),
         BenchCommand::NativeJit(args) => native_jit::run(&args),
         BenchCommand::Run(args) => runner::run(&args),
-        #[cfg(feature = "generated-stamp")]
+        #[cfg(feature = "generated-stamp-base")]
         BenchCommand::VerilogAGolden(args) => veriloga_golden::run(&args),
     };
     match outcome {
