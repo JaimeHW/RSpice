@@ -13,7 +13,7 @@
 use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::schedule::{
-    InvalidationClass, schedule_with_parameter_scopes, split, worth_splitting,
+    InvalidationClass, schedule_with_parameter_scopes, split, structural_guards, worth_splitting,
 };
 use rspice_veriloga::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CfgEvalInputs, ValueId, differentiate, evaluate_cfg, optimize_cfg,
@@ -156,6 +156,95 @@ endmodule
     assert_eq!(schedule.class(wanted[0]), InvalidationClass::Model);
     assert_eq!(schedule.class(wanted[1]), InvalidationClass::Instance);
     assert_eq!(schedule.class(wanted[2]), InvalidationClass::Newton);
+}
+
+#[test]
+fn structural_guards_report_exact_static_inputs_and_hot_path_impact() {
+    let source = r#"
+module structured(d, s);
+    inout d, s;
+    electrical d, s;
+    parameter real mode = 1.0;
+    parameter real unused = 7.0;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    real ids;
+    analog begin
+        ids = 0.0;
+        if ($param_given(mode) && mode > 0.0) begin
+            if (width > 0.5e-6) begin
+                ids = width * V(d, s) * V(d, s);
+            end
+        end
+        if (V(d, s) > 0.0) begin
+            ids = ids + V(d, s);
+        end
+        I(d, s) <+ ids;
+    end
+endmodule
+"#;
+    let artifact = artifact(source);
+    let (function, _) = pipeline_artifact(&artifact, "structured");
+    let scopes: Vec<_> = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| parameter.scope)
+        .collect();
+    let schedule = schedule_with_parameter_scopes(&function, &scopes);
+    let guards = structural_guards(&function, &schedule, &scopes);
+
+    assert_eq!(
+        guards
+            .iter()
+            .filter(|guard| guard.class == InvalidationClass::Model)
+            .count(),
+        1,
+        "the model option should be reported once: {guards:#?}"
+    );
+    assert_eq!(
+        guards
+            .iter()
+            .filter(|guard| guard.class == InvalidationClass::Instance)
+            .count(),
+        1,
+        "the geometry option should be reported once: {guards:#?}"
+    );
+    assert!(
+        guards.iter().all(|guard| guard.newton_values > 0),
+        "both static choices guard bias-dependent arithmetic: {guards:#?}"
+    );
+
+    let model = guards
+        .iter()
+        .find(|guard| guard.class == InvalidationClass::Model)
+        .expect("model guard");
+    assert_eq!(model.dependencies.parameters.len(), 1);
+    assert_eq!(usize::from(model.dependencies.parameters[0].parameter), 0);
+    assert!(model.dependencies.parameters[0].reads_value);
+    assert!(model.dependencies.parameters[0].reads_given);
+
+    let instance = guards
+        .iter()
+        .find(|guard| guard.class == InvalidationClass::Instance)
+        .expect("instance guard");
+    assert_eq!(
+        instance
+            .dependencies
+            .parameters
+            .iter()
+            .map(|dependency| usize::from(dependency.parameter))
+            .collect::<Vec<_>>(),
+        vec![0, 2],
+        "the nested instance guard also depends on the outer model choice"
+    );
+    assert!(
+        !guards.iter().any(|guard| guard
+            .dependencies
+            .parameters
+            .iter()
+            .any(|dependency| usize::from(dependency.parameter) == 1)),
+        "an unused parameter must not enter a specialization key"
+    );
 }
 
 /// Splitting is a caching decision, and it has to be declined when there is

@@ -65,7 +65,8 @@ use crate::canonical_ir::cfg::{
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_opt::optimize_with_control;
 use crate::canonical_ir::schedule::{
-    InvalidationClass, Stage, schedule_with_parameter_scopes, split, worth_splitting,
+    InvalidationClass, Stage, schedule_with_parameter_scopes, split, structural_guards,
+    worth_splitting,
 };
 use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
@@ -521,6 +522,23 @@ impl ModelPlan {
             .map(|parameter| parameter.scope)
             .collect();
         let schedule = schedule_with_parameter_scopes(&function, &parameter_scopes);
+        let structural_guards = structural_guards(&function, &schedule, &parameter_scopes);
+        measurements.metrics_mut().model_structural_guard_count = crate::metrics::usize_to_u64(
+            structural_guards
+                .iter()
+                .filter(|guard| guard.class == InvalidationClass::Model)
+                .count(),
+        );
+        measurements.metrics_mut().instance_structural_guard_count = crate::metrics::usize_to_u64(
+            structural_guards
+                .iter()
+                .filter(|guard| guard.class == InvalidationClass::Instance)
+                .count(),
+        );
+        measurements.metrics_mut().structural_guard_newton_values =
+            structural_guards.iter().fold(0_u64, |total, guard| {
+                total.saturating_add(crate::metrics::usize_to_u64(guard.newton_values))
+            });
         let stages = split(&function, &schedule, &outputs)
             .map_err(|error| unsupported(artifact, format!("invalidation split: {error}")))?;
         let (stages, slots) = if worth_splitting(&function, &stages) {

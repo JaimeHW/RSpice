@@ -27,7 +27,7 @@
 //! Warren's construction — and the two halves are solved together as a fixed
 //! point, because a branch's condition is itself a value with a class.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::semantic::ParameterScope;
 
@@ -35,7 +35,7 @@ use super::cfg::{
     CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgValidationError, CfgValue,
     CfgValueKind,
 };
-use super::{BlockId, ValueId};
+use super::{BlockId, ParamId, ValueId};
 
 /// How often a value has to be recomputed, coarsest first.
 ///
@@ -110,6 +110,216 @@ impl Schedule {
     }
 }
 
+/// One parameter read by a model/instance-static branch condition.
+///
+/// Value and `$param_given` reads stay distinct. They invalidate together, but
+/// preserving the distinction lets a later specializer construct the smallest
+/// possible key without guessing which half of the parameter state mattered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParameterDependency {
+    pub parameter: ParamId,
+    pub scope: ParameterScope,
+    pub reads_value: bool,
+    pub reads_given: bool,
+}
+
+/// Static inputs that decide one model-structure branch.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StaticDependencies {
+    /// Sorted by parameter id for deterministic reports and specialization
+    /// keys.
+    pub parameters: Vec<ParameterDependency>,
+    /// Whether the per-instance `m` multiplier participates in the condition.
+    pub multiplicity: bool,
+}
+
+/// A model/instance-static branch that remains around work evaluated more
+/// frequently.
+///
+/// This is deliberately an analysis result, not an instruction to duplicate
+/// code. A backend can rank these by `newton_values`, group repeated
+/// conditions, and reject any candidate whose emitted variants exceed its
+/// source-size budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralGuard {
+    pub branch: BlockId,
+    pub condition: ValueId,
+    pub class: InvalidationClass,
+    pub dependencies: StaticDependencies,
+    /// Blocks control-dependent on this branch.
+    pub controlled_blocks: usize,
+    /// Instructions in those blocks, independent of invalidation class.
+    pub controlled_values: usize,
+    /// Instructions in those blocks that execute in the Newton stage.
+    pub newton_values: usize,
+}
+
+/// Find parameter-controlled branches that can shape a generated hot path.
+///
+/// Bias-, time-, and temperature-dependent branches are intentionally absent:
+/// their outcome is part of the numerical evaluation, not model structure.
+/// Constant branches are absent too; CFG optimization is responsible for
+/// deleting those instead of asking runtime specialization to carry a key bit.
+pub fn structural_guards(
+    function: &CfgFunction,
+    schedule: &Schedule,
+    parameter_scopes: &[ParameterScope],
+) -> Vec<StructuralGuard> {
+    let control = transitive_control_dependence(&control_dependence(function));
+    let block_of = block_of_value(function);
+    let incoming = incoming_values(function);
+    let mut guards = Vec::new();
+
+    for block in &function.blocks {
+        let CfgTerminator::Branch { condition, .. } = block.terminator else {
+            continue;
+        };
+        let class = schedule.class(condition);
+        if class > InvalidationClass::Instance {
+            continue;
+        }
+
+        let dependencies = static_dependencies(
+            function,
+            condition,
+            parameter_scopes,
+            &control,
+            &block_of,
+            &incoming,
+        );
+        if dependencies.parameters.is_empty() && !dependencies.multiplicity {
+            continue;
+        }
+
+        let mut controlled_blocks = 0usize;
+        let mut controlled_values = 0usize;
+        let mut newton_values = 0usize;
+        for (candidate, sources) in function.blocks.iter().zip(&control) {
+            if !sources.contains(&block.id) {
+                continue;
+            }
+            controlled_blocks += 1;
+            controlled_values = controlled_values.saturating_add(candidate.instructions.len());
+            newton_values = newton_values.saturating_add(
+                candidate
+                    .instructions
+                    .iter()
+                    .filter(|instruction| {
+                        schedule.class(instruction.result) == InvalidationClass::Newton
+                    })
+                    .count(),
+            );
+        }
+        if newton_values == 0 {
+            continue;
+        }
+
+        guards.push(StructuralGuard {
+            branch: block.id,
+            condition,
+            class,
+            dependencies,
+            controlled_blocks,
+            controlled_values,
+            newton_values,
+        });
+    }
+
+    guards.sort_unstable_by(|left, right| {
+        right
+            .newton_values
+            .cmp(&left.newton_values)
+            .then_with(|| right.controlled_values.cmp(&left.controlled_values))
+            .then_with(|| usize::from(left.branch).cmp(&usize::from(right.branch)))
+    });
+    guards
+}
+
+fn transitive_control_dependence(direct: &[Vec<BlockId>]) -> Vec<Vec<BlockId>> {
+    direct
+        .iter()
+        .map(|sources| {
+            let mut seen: HashSet<BlockId> = HashSet::new();
+            let mut pending = sources.clone();
+            while let Some(source) = pending.pop() {
+                if !seen.insert(source) {
+                    continue;
+                }
+                pending.extend(direct[usize::from(source)].iter().copied());
+            }
+            let mut sources: Vec<_> = seen.into_iter().collect();
+            sources.sort_unstable_by_key(|source| usize::from(*source));
+            sources
+        })
+        .collect()
+}
+
+fn static_dependencies(
+    function: &CfgFunction,
+    root: ValueId,
+    parameter_scopes: &[ParameterScope],
+    control: &[Vec<BlockId>],
+    block_of: &[Option<BlockId>],
+    incoming: &[Vec<(BlockId, ValueId)>],
+) -> StaticDependencies {
+    let mut reads: BTreeMap<ParamId, (bool, bool)> = BTreeMap::new();
+    let mut multiplicity = false;
+    let mut seen: HashSet<ValueId> = HashSet::new();
+    let mut pending = vec![root];
+
+    while let Some(value) = pending.pop() {
+        if !seen.insert(value) {
+            continue;
+        }
+        match &function.value(value).kind {
+            CfgValueKind::Parameter(parameter) => {
+                reads.entry(*parameter).or_default().0 = true;
+            }
+            CfgValueKind::ParameterGiven(parameter) => {
+                reads.entry(*parameter).or_default().1 = true;
+            }
+            CfgValueKind::Multiplicity => multiplicity = true,
+            CfgValueKind::BlockParameter => {
+                pending.extend(
+                    incoming[usize::from(value)]
+                        .iter()
+                        .map(|(_, argument)| *argument),
+                );
+            }
+            kind => pending.extend(kind.operands()),
+        }
+
+        // A condition computed under another static condition depends on that
+        // outer choice even when its arithmetic operands do not name it.
+        if let Some(block) = block_of[usize::from(value)] {
+            for source in &control[usize::from(block)] {
+                if let CfgTerminator::Branch { condition, .. } = function.block(*source).terminator
+                {
+                    pending.push(condition);
+                }
+            }
+        }
+    }
+
+    StaticDependencies {
+        parameters: reads
+            .into_iter()
+            .map(
+                |(parameter, (reads_value, reads_given))| ParameterDependency {
+                    parameter,
+                    scope: parameter_scopes
+                        .get(usize::from(parameter))
+                        .copied()
+                        .unwrap_or(ParameterScope::Instance),
+                    reads_value,
+                    reads_given,
+                },
+            )
+            .collect(),
+        multiplicity,
+    }
+}
+
 /// Classify every value in `function`.
 ///
 /// The two halves alternate to a fixed point rather than running once each,
@@ -134,7 +344,15 @@ pub fn schedule_with_parameter_scopes(
     function: &CfgFunction,
     parameter_scopes: &[ParameterScope],
 ) -> Schedule {
-    let mut schedule = classify(function, parameter_scopes);
+    // These are graph properties, not fixed-point state. Computing either in
+    // `propagate` repeats a whole-graph analysis every time loop/projection
+    // raising asks for another propagation pass. Indexing incoming values is
+    // more important still: looking them up by rescanning every CFG edge for
+    // every block parameter is quadratic on large compact models.
+    let control = control_dependence(function);
+    let block_of = block_of_value(function);
+    let incoming = incoming_values(function);
+    let mut schedule = classify(function, parameter_scopes, &control, &block_of, &incoming);
     loop {
         let before = schedule.clone();
         raise_loops(function, &mut schedule);
@@ -142,7 +360,7 @@ pub fn schedule_with_parameter_scopes(
         if schedule == before {
             return schedule;
         }
-        propagate(function, &mut schedule);
+        propagate(function, &mut schedule, &control, &block_of, &incoming);
     }
 }
 
@@ -363,7 +581,13 @@ fn back_edges(function: &CfgFunction) -> Vec<(BlockId, BlockId)> {
     edges
 }
 
-fn classify(function: &CfgFunction, parameter_scopes: &[ParameterScope]) -> Schedule {
+fn classify(
+    function: &CfgFunction,
+    parameter_scopes: &[ParameterScope],
+    control: &[Vec<BlockId>],
+    block_of: &[Option<BlockId>],
+    incoming: &[Vec<(BlockId, ValueId)>],
+) -> Schedule {
     let values: Vec<InvalidationClass> = function
         .values
         .iter()
@@ -383,7 +607,7 @@ fn classify(function: &CfgFunction, parameter_scopes: &[ParameterScope]) -> Sche
         .collect();
     let blocks = vec![InvalidationClass::Model; function.blocks.len()];
     let mut schedule = Schedule { values, blocks };
-    propagate(function, &mut schedule);
+    propagate(function, &mut schedule, control, block_of, incoming);
     schedule
 }
 
@@ -392,9 +616,13 @@ fn classify(function: &CfgFunction, parameter_scopes: &[ParameterScope]) -> Sche
 ///
 /// Only ever raises, and starts from whatever `schedule` already holds, so it
 /// can be re-run after something else has raised part of it.
-fn propagate(function: &CfgFunction, schedule: &mut Schedule) {
-    let control = control_dependence(function);
-    let block_of = block_of_value(function);
+fn propagate(
+    function: &CfgFunction,
+    schedule: &mut Schedule,
+    control: &[Vec<BlockId>],
+    block_of: &[Option<BlockId>],
+    incoming: &[Vec<(BlockId, ValueId)>],
+) {
     let Schedule { values, blocks } = schedule;
 
     // A branch's condition is a value with a class of its own, so the two
@@ -430,10 +658,10 @@ fn propagate(function: &CfgFunction, schedule: &mut Schedule) {
             if matches!(value.kind, CfgValueKind::BlockParameter) {
                 // A merge is as volatile as the most volatile thing merged into
                 // it, and as the branch that chose between them.
-                for (source, argument) in incoming(function, value.id) {
+                for (source, argument) in &incoming[index] {
                     class = class
-                        .join(values[usize::from(argument)])
-                        .join(blocks[usize::from(source)]);
+                        .join(values[usize::from(*argument)])
+                        .join(blocks[usize::from(*source)]);
                 }
             }
             if let Some(block) = block_of[index] {
@@ -1594,35 +1822,29 @@ fn block_of_value(function: &CfgFunction) -> Vec<Option<BlockId>> {
     block_of
 }
 
-/// Every `(predecessor, argument)` feeding a block parameter.
-fn incoming(function: &CfgFunction, param: ValueId) -> Vec<(BlockId, ValueId)> {
-    let mut incoming = Vec::new();
+/// Every `(predecessor, argument)` feeding each block parameter, indexed by
+/// value id.
+fn incoming_values(function: &CfgFunction) -> Vec<Vec<(BlockId, ValueId)>> {
+    let mut incoming = vec![Vec::new(); function.values.len()];
     for block in &function.blocks {
-        let edges: Vec<(BlockId, &[ValueId])> = match &block.terminator {
-            CfgTerminator::Jump { target, args } => vec![(*target, args.as_slice())],
+        let mut record = |target: BlockId, args: &[ValueId]| {
+            for (param, argument) in function.block(target).params.iter().zip(args) {
+                incoming[usize::from(*param)].push((block.id, *argument));
+            }
+        };
+        match &block.terminator {
+            CfgTerminator::Jump { target, args } => record(*target, args),
             CfgTerminator::Branch {
                 then_target,
                 then_args,
                 else_target,
                 else_args,
                 ..
-            } => vec![
-                (*then_target, then_args.as_slice()),
-                (*else_target, else_args.as_slice()),
-            ],
-            CfgTerminator::Return | CfgTerminator::Unset => Vec::new(),
-        };
-        for (target, args) in edges {
-            let position = function
-                .block(target)
-                .params
-                .iter()
-                .position(|candidate| *candidate == param);
-            if let Some(position) = position
-                && let Some(argument) = args.get(position)
-            {
-                incoming.push((block.id, *argument));
+            } => {
+                record(*then_target, then_args);
+                record(*else_target, else_args);
             }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
         }
     }
     incoming

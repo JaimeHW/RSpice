@@ -120,6 +120,17 @@ pub struct PipelineMetrics {
     pub top_level_item_count: u64,
     pub module_count: u64,
     pub dependency_count: u64,
+    /// Model-card-controlled branches that shape Newton-stage work.
+    #[serde(default)]
+    pub model_structural_guard_count: u64,
+    /// Per-instance-controlled branches that shape Newton-stage work.
+    #[serde(default)]
+    pub instance_structural_guard_count: u64,
+    /// Newton-class CFG instructions control-dependent on static guards. A
+    /// value guarded more than once is counted once per controlling guard,
+    /// matching the repeated branch work a specializer can remove.
+    #[serde(default)]
+    pub structural_guard_newton_values: u64,
     pub generated_rust_bytes: u64,
     pub generated_rust_lines: u64,
 }
@@ -383,5 +394,21 @@ mod tests {
         assert_eq!(error.phase, None);
         assert_eq!(error.elapsed_nanos, 8);
         assert_eq!(error.limit_nanos, 7);
+    }
+
+    #[test]
+    fn older_metrics_payloads_default_structural_guard_counts() {
+        let mut encoded =
+            serde_json::to_value(PipelineMetrics::default()).expect("serialize metrics");
+        let object = encoded.as_object_mut().expect("metrics serialize as an object");
+        object.remove("model_structural_guard_count");
+        object.remove("instance_structural_guard_count");
+        object.remove("structural_guard_newton_values");
+
+        let decoded: PipelineMetrics =
+            serde_json::from_value(encoded).expect("deserialize an older metrics payload");
+        assert_eq!(decoded.model_structural_guard_count, 0);
+        assert_eq!(decoded.instance_structural_guard_count, 0);
+        assert_eq!(decoded.structural_guard_newton_values, 0);
     }
 }

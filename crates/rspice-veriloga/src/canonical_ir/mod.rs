@@ -67,6 +67,7 @@ pub use noise::{
     CanonicalNoiseSourcePlan, CanonicalNoiseTable,
 };
 pub use schedule::{
-    InvalidationClass as CfgInvalidationClass, Schedule as CfgSchedule, schedule as schedule_cfg,
-    schedule_with_parameter_scopes as schedule_cfg_with_parameter_scopes,
+    InvalidationClass as CfgInvalidationClass, ParameterDependency, Schedule as CfgSchedule,
+    StaticDependencies, StructuralGuard, schedule as schedule_cfg,
+    schedule_with_parameter_scopes as schedule_cfg_with_parameter_scopes, structural_guards,
 };
