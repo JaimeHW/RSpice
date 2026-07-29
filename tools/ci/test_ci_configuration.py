@@ -250,11 +250,11 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         for budget in [
-            "--max-source-bytes 113000000",
-            "--max-noise-source-bytes 59000000",
-            "--max-model-source-bytes 8800000",
-            "--max-file-count 650",
-            "--max-pooled-workspace-payload-bytes 650000",
+            "--max-source-bytes 56000000",
+            "--max-noise-source-bytes 17000000",
+            "--max-model-source-bytes 4700000",
+            "--max-file-count 240",
+            "--max-pooled-workspace-payload-bytes 0",
             "--max-stamp-state-payload-bytes 6200",
         ]:
             self.assertIn(budget, workflow)
@@ -297,11 +297,13 @@ class CiConfigurationTests(unittest.TestCase):
             r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
             r"--iterations 100000\s+"
             r"--samples 9\s+"
+            r"--min-dense-speedup 2\.00\s+"
             r"--min-speedup 1\.10\s+"
-            r"--min-full-stamp-speedup 1\.50\s+"
-            r"--max-native-setup-ms 50\s+"
-            r"--max-native-p95-ns-per-sweep 25000\s+"
-            r"--max-relative-stddev 0\.25",
+            r"--min-full-stamp-speedup 2\.00\s+"
+            r"--max-native-setup-ms 10\s+"
+            r"--max-native-p95-ns-per-sweep 5000\s+"
+            r"--max-relative-stddev 0\.25\s+"
+            r"--max-native-code-bytes 16384",
         )
         self.assertIn("Test UI library (Linux)", workflow)
         self.assertIn("cargo test --locked -p rspice-ui --lib", workflow)
@@ -360,11 +362,13 @@ class CiConfigurationTests(unittest.TestCase):
             r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
             r"--iterations 100000\s+"
             r"--samples 9\s+"
+            r"--min-dense-speedup 2\.00\s+"
             r"--min-speedup 1\.10\s+"
-            r"--min-full-stamp-speedup 1\.50\s+"
-            r"--max-native-setup-ms 50\s+"
-            r"--max-native-p95-ns-per-sweep 25000\s+"
-            r"--max-relative-stddev 0\.25",
+            r"--min-full-stamp-speedup 2\.00\s+"
+            r"--max-native-setup-ms 10\s+"
+            r"--max-native-p95-ns-per-sweep 5000\s+"
+            r"--max-relative-stddev 0\.25\s+"
+            r"--max-native-code-bytes 16384",
         )
 
     def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:
