@@ -222,6 +222,15 @@ device folder per module into
 `registry.rs` and a `manifest.txt`. That generated Rust — not this
 compiler — is what `rspice-core`'s `veriloga-builtins` feature builds.
 
+The generated backend preserves the compact-model parameter convention in
+the source: unmarked parameters are model-card parameters, while
+`(* type="instance" *)` marks per-device geometry and switches. Canonical
+dependency analysis separates model, instance, temperature, timestep, and
+Newton work. Model-stage outputs are interned by the final model-parameter
+values and `$param_given` bits, so devices bound to the same card reuse one
+Verilog-derived preprocessing result; instance geometry and solver state are
+never shared.
+
 ```bash
 # Full regeneration; must rewrite every device, registry.rs and manifest.txt
 cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- \

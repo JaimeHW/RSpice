@@ -869,7 +869,7 @@ fn emit_parameter_metadata(
     out.push_str("];\n\n");
 
     out.push_str(&format!(
-        "const PARAMETER_MODEL_FLAGS: [bool; {parameter_count}] = [\n"
+        "pub(crate) const PARAMETER_MODEL_FLAGS: [bool; {parameter_count}] = [\n"
     ));
     emit_chunked_parameter_metadata_array(
         &parameters_by_index,

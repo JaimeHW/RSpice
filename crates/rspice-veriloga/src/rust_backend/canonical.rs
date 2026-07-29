@@ -805,20 +805,38 @@ impl ModelPlan {
         out.push_str(
             "#![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]\n\n",
         );
+        if self.model_stage().is_some() {
+            out.push_str(
+                "use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};\n",
+            );
+        } else {
+            out.push_str("use super::state::Instance;\n");
+        }
         let _ = writeln!(
             out,
-            "use super::state::Instance;\nuse {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};",
+            "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};",
             options.runtime_path
         );
+        if self.model_stage().is_some() {
+            out.push_str(
+                "use std::collections::HashMap;\n\
+                 use std::sync::{Arc, Mutex, OnceLock, Weak};\n",
+            );
+        }
         out.push_str(RUNTIME_PRELUDE);
         out.push_str(EVAL_DDT);
         if !self.idt_slots.is_empty() {
             out.push_str(EVAL_IDT);
         }
+        if self.model_stage().is_some() {
+            self.emit_model_cache_support(&mut out);
+        }
         out.push_str("impl Instance {\n");
 
         for stage in &self.stages {
-            if stage.class == InvalidationClass::Newton {
+            if stage.class == InvalidationClass::Newton
+                || (stage.class == InvalidationClass::Model && stage.exports.is_empty())
+            {
                 continue;
             }
             self.emit_cached_stage(artifact, stage, &mut out)?;
@@ -839,6 +857,9 @@ impl ModelPlan {
 
         out: &mut String,
     ) -> Result<(), RustBackendError> {
+        if stage.class == InvalidationClass::Model {
+            return self.emit_model_stage(artifact, stage, out);
+        }
         let name = stage_fn_name(stage.class);
         let produced: Vec<ValueId> = stage.exports.iter().map(|(_, value)| *value).collect();
         let (body, names) = emit_body(&stage.function, &produced, &bindings())
@@ -849,9 +870,6 @@ impl ModelPlan {
             "    fn {name}(&mut self, ctx: &GeneratedEvalContext<'_>) {{"
         );
         match stage.class {
-            InvalidationClass::Model => out.push_str(
-                "        if self.canonical_model_valid {\n            return;\n        }\n",
-            ),
             InvalidationClass::Temperature => out.push_str(
                 "        let temperature = ctx.temperature();\n\
                  \x20       let thermal_voltage = ctx.thermal_voltage();\n\
@@ -890,9 +908,6 @@ impl ModelPlan {
             );
         }
         match stage.class {
-            InvalidationClass::Model => {
-                out.push_str("        self.canonical_model_valid = true;\n")
-            }
             InvalidationClass::Temperature => out.push_str(
                 "        self.canonical_temperature = temperature;\n\
                  \x20       self.canonical_thermal_voltage = thermal_voltage;\n\
@@ -904,6 +919,117 @@ impl ModelPlan {
             _ => {}
         }
         out.push_str("    }\n\n");
+        Ok(())
+    }
+
+    fn model_stage(&self) -> Option<&Stage> {
+        self.stages
+            .iter()
+            .find(|stage| stage.class == InvalidationClass::Model && !stage.exports.is_empty())
+    }
+
+    fn emit_model_cache_support(&self, out: &mut String) {
+        out.push_str(
+            "\nstatic CANONICAL_MODEL_CACHE: OnceLock<Mutex<HashMap<Box<[u64]>, \
+             Weak<CanonicalModelValues>>>> = OnceLock::new();\n\n\
+             fn canonical_model_cache() -> &'static Mutex<HashMap<Box<[u64]>, \
+             Weak<CanonicalModelValues>>> {\n\
+             \x20   CANONICAL_MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))\n\
+             }\n\n\
+             fn canonical_model_cache_lookup(key: &[u64]) -> Option<Arc<CanonicalModelValues>> {\n\
+             \x20   let mut cache = canonical_model_cache()\n\
+             \x20       .lock()\n\
+             \x20       .unwrap_or_else(|poisoned| poisoned.into_inner());\n\
+             \x20   let found = cache.get(key).and_then(Weak::upgrade);\n\
+             \x20   if found.is_none() {\n\
+             \x20       cache.remove(key);\n\
+             \x20   }\n\
+             \x20   found\n\
+             }\n\n\
+             fn canonical_model_cache_intern(\n\
+             \x20   key: Box<[u64]>,\n\
+             \x20   candidate: Arc<CanonicalModelValues>,\n\
+             ) -> Arc<CanonicalModelValues> {\n\
+             \x20   let mut cache = canonical_model_cache()\n\
+             \x20       .lock()\n\
+             \x20       .unwrap_or_else(|poisoned| poisoned.into_inner());\n\
+             \x20   if let Some(existing) = cache.get(key.as_ref()).and_then(Weak::upgrade) {\n\
+             \x20       return existing;\n\
+             \x20   }\n\
+             \x20   cache.retain(|_, values| values.strong_count() > 0);\n\
+             \x20   cache.insert(key, Arc::downgrade(&candidate));\n\
+             \x20   candidate\n\
+             }\n\n",
+        );
+    }
+
+    fn emit_model_stage(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        stage: &Stage,
+        out: &mut String,
+    ) -> Result<(), RustBackendError> {
+        let produced: Vec<ValueId> = stage.exports.iter().map(|(_, value)| *value).collect();
+        let (body, names) = emit_body(&stage.function, &produced, &bindings())
+            .map_err(|error| unsupported(artifact, format!("canonical_model_stage: {error}")))?;
+
+        let model_key_words = artifact
+            .mir
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.scope == crate::semantic::ParameterScope::Model)
+            .count()
+            .saturating_mul(2);
+        let _ = writeln!(
+            out,
+            "    fn canonical_model_key(&self) -> Box<[u64]> {{\n\
+             \x20       let mut key = Vec::with_capacity({model_key_words});"
+        );
+        out.push_str(
+            "        for index in 0..Self::PARAMETER_COUNT {\n\
+             \x20           if PARAMETER_MODEL_FLAGS[index] {\n\
+             \x20               key.push(self.params.values[index].to_bits());\n\
+             \x20               key.push(u64::from(self.param_given[index]));\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       key.into_boxed_slice()\n\
+             \x20   }\n\n\
+             \x20   fn canonical_install_model_values(&mut self, values: \
+             Arc<CanonicalModelValues>) {\n",
+        );
+        for (index, (slot, _)) in stage.exports.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "        self.canonical_staged[{slot}] = values[{index}];"
+            );
+        }
+        out.push_str(
+            "        self.canonical_model_values = Some(values);\n\
+             \x20   }\n\n\
+             \x20   fn canonical_model_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {\n\
+             \x20       if self.canonical_model_values.is_some() {\n\
+             \x20           return;\n\
+             \x20       }\n\
+             \x20       let key = self.canonical_model_key();\n\
+             \x20       if let Some(values) = canonical_model_cache_lookup(key.as_ref()) {\n\
+             \x20           self.canonical_install_model_values(values);\n\
+             \x20           return;\n\
+             \x20       }\n\
+             \x20       let produced: CanonicalModelValues = {\n",
+        );
+        self.emit_prologue(artifact, &stage.function, 3, out)?;
+        out.push_str(&indent(&body, 3));
+        if produced.is_empty() {
+            out.push_str("            [0.0]\n");
+        } else {
+            let _ = writeln!(out, "            [{}]", names.join(", "));
+        }
+        out.push_str(
+            "        };\n\
+             \x20       let values = canonical_model_cache_intern(key, Arc::new(produced));\n\
+             \x20       self.canonical_install_model_values(values);\n\
+             \x20   }\n\n",
+        );
         Ok(())
     }
 
@@ -926,7 +1052,9 @@ impl ModelPlan {
             );
         }
         for stage in &self.stages {
-            if stage.class == InvalidationClass::Newton {
+            if stage.class == InvalidationClass::Newton
+                || (stage.class == InvalidationClass::Model && stage.exports.is_empty())
+            {
                 continue;
             }
             let _ = writeln!(out, "        self.{}(ctx);", stage_fn_name(stage.class));
@@ -1776,10 +1904,26 @@ impl ModelPlan {
             return extensions;
         }
         let slots = self.slots;
+        let shared_model_stage = self.model_stage();
+        if let Some(model) = shared_model_stage {
+            let width = model.exports.len().max(1);
+            let _ = writeln!(
+                extensions.support_types,
+                "pub(crate) type CanonicalModelValues = [f64; {width}];"
+            );
+            extensions
+                .instance_fields
+                .push_str("    pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,\n");
+            extensions
+                .clone_fields
+                .push_str("            canonical_model_values: self.canonical_model_values.clone(),\n");
+            extensions
+                .new_initializers
+                .push_str("            canonical_model_values: None,\n");
+        }
         let _ = write!(
             extensions.instance_fields,
             "    pub(crate) canonical_staged: Box<[f64; {slots}]>,\n\
-             \x20   pub(crate) canonical_model_valid: bool,\n\
              \x20   pub(crate) canonical_instance_valid: bool,\n\
              \x20   pub(crate) canonical_temperature_valid: bool,\n\
              \x20   pub(crate) canonical_temperature: f64,\n\
@@ -1787,7 +1931,6 @@ impl ModelPlan {
         );
         extensions.clone_fields.push_str(
             "            canonical_staged: self.canonical_staged.clone(),\n\
-             \x20           canonical_model_valid: self.canonical_model_valid,\n\
              \x20           canonical_instance_valid: self.canonical_instance_valid,\n\
              \x20           canonical_temperature_valid: self.canonical_temperature_valid,\n\
              \x20           canonical_temperature: self.canonical_temperature,\n\
@@ -1795,7 +1938,6 @@ impl ModelPlan {
         );
         extensions.new_initializers.push_str(
             "            canonical_staged: canonical_boxed_zero_f64(),\n\
-             \x20           canonical_model_valid: false,\n\
              \x20           canonical_instance_valid: false,\n\
              \x20           canonical_temperature_valid: false,\n\
              \x20           canonical_temperature: 0.0,\n\
@@ -1804,9 +1946,13 @@ impl ModelPlan {
         // Model-card writes invalidate every coarser stage. Per-device geometry
         // cannot affect the model stage, because the schedule proves that
         // boundary from the source parameter attributes.
+        if shared_model_stage.is_some() {
+            extensions.set_parameter_hook.push_str(
+                "if PARAMETER_MODEL_FLAGS[index] {\n    self.canonical_model_values = None;\n}\n",
+            );
+        }
         extensions.set_parameter_hook.push_str(
-            "if PARAMETER_MODEL_FLAGS[index] {\n    self.canonical_model_valid = false;\n}\n\
-             self.canonical_instance_valid = false;\n\
+            "self.canonical_instance_valid = false;\n\
              self.canonical_temperature_valid = false;\n",
         );
         if artifact.mir.parameters.is_empty() {

@@ -124,14 +124,23 @@ endmodule
     assert!(stamp.contains("fn canonical_instance_stage"));
     assert!(stamp.contains("self.canonical_model_stage(ctx);"));
     assert!(stamp.contains("self.canonical_instance_stage(ctx);"));
-    assert!(state.contains("const PARAMETER_MODEL_FLAGS: [bool; 2]"));
+    assert!(stamp.contains("static CANONICAL_MODEL_CACHE"));
+    assert!(stamp.contains("canonical_model_cache_lookup"));
+    assert!(stamp.contains("canonical_model_cache_intern"));
+    assert!(state.contains("pub(crate) type CanonicalModelValues"));
+    assert!(state.contains("Option<std::sync::Arc<CanonicalModelValues>>"));
+    assert!(state.contains("pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 2]"));
     assert!(state.contains("true, false"));
     assert!(state.contains("if PARAMETER_MODEL_FLAGS[index]"));
+    assert!(state.contains("self.canonical_model_values = None;"));
     assert!(state.contains("let changed = self.multiplicity.to_bits()"));
     assert!(state.contains("self.canonical_instance_valid = false;"));
 
     if let Err(report) = compile("scoped stage", state, stamp, noise) {
         panic!("scoped stage: generated device does not compile:\n{report}");
+    }
+    if let Err(report) = run_shared_model_cache("scoped stage cache", state, stamp, noise) {
+        panic!("scoped stage: shared model cache failed:\n{report}");
     }
 }
 
@@ -512,6 +521,73 @@ fn compile(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), Stri
         return Ok(());
     }
     Err(String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
+fn run_shared_model_cache(
+    name: &str,
+    state: &str,
+    stamp: &str,
+    noise: &str,
+) -> Result<(), String> {
+    let root = scratch().join(name.replace(' ', "_"));
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let main = root.join("main.rs");
+    std::fs::write(
+        &main,
+        format!(
+            "{RUNTIME_STUB}\npub mod device {{\n\
+             pub mod state {{\n{}\n}}\n\
+             pub mod stamp {{\n{}\n}}\n\
+             pub mod noise {{\n{}\n}}\n}}\n\
+             fn main() {{\n\
+             \x20   let mut first = device::state::Instance::new(&[0, 1]);\n\
+             \x20   let mut second = device::state::Instance::new(&[0, 1]);\n\
+             \x20   first.set_parameter(\"width\", 1.0e-6).unwrap();\n\
+             \x20   second.set_parameter(\"width\", 2.0e-6).unwrap();\n\
+             \x20   let voltages = [0.25, 0.0];\n\
+             \x20   let ctx = runtime::GeneratedEvalContext {{ voltages: &voltages, temperature: 300.15 }};\n\
+             \x20   let mut stamper = runtime::GeneratedStamper::default();\n\
+             \x20   first.stamp(&ctx, &mut stamper);\n\
+             \x20   second.stamp(&ctx, &mut stamper);\n\
+             \x20   let first_card = first.canonical_model_values.as_ref().unwrap();\n\
+             \x20   let second_card = second.canonical_model_values.as_ref().unwrap();\n\
+             \x20   assert!(std::sync::Arc::ptr_eq(first_card, second_card));\n\
+             \x20   first.set_parameter(\"model_gain\", 4.0).unwrap();\n\
+             \x20   first.stamp(&ctx, &mut stamper);\n\
+             \x20   let changed_card = first.canonical_model_values.as_ref().unwrap();\n\
+             \x20   assert!(!std::sync::Arc::ptr_eq(changed_card, second_card));\n\
+             }}\n",
+            indent(state),
+            indent(stamp),
+            indent(noise)
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+
+    let binary = root.join(format!(
+        "shared_model_cache{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    let output = Command::new("rustc")
+        .arg("--edition=2024")
+        .arg("-A")
+        .arg("warnings")
+        .arg("-o")
+        .arg(&binary)
+        .arg(&main)
+        .output()
+        .map_err(|error| format!("could not run rustc: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let output = Command::new(&binary)
+        .output()
+        .map_err(|error| format!("could not run generated cache probe: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
 }
 
 /// One generated file, as a module beside its siblings.
