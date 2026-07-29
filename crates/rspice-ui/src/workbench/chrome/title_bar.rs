@@ -9,10 +9,10 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
-use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{ModelsPage, VerificationPage, Workspace};
+use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
 const DESCEND_MENU_LABEL: &str = "Descend into selected instance…";
 #[cfg(test)]
@@ -1383,7 +1383,9 @@ fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
     (viewport_height - 64.0).clamp(MENU_ROW_HEIGHT * 3.0, 560.0)
 }
 
-const fn file_menu_shows_exit(platform: crate::workbench::commands::vocabulary::CommandPlatform) -> bool {
+const fn file_menu_shows_exit(
+    platform: crate::workbench::commands::vocabulary::CommandPlatform,
+) -> bool {
     matches!(
         platform,
         crate::workbench::commands::vocabulary::CommandPlatform::Desktop
@@ -2151,7 +2153,6 @@ fn notification_action(ui: &mut Ui, unread_count: usize, large_target: bool) -> 
     theme::paint_focus_ring_outset(ui, &response, rect);
     response.on_hover_text(accessible_label).clicked()
 }
-
 
 #[cfg(test)]
 mod tests;

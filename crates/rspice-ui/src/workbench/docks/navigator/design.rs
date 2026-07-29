@@ -1272,9 +1272,7 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn component_shelf_editable(app: &RSpiceApp) -> bool {
-    !app.state.schematic.read_only
-        && !app.state.active_view_read_only()
-        && !app.state.workbench.safe_mode.project_read_only()
+    !app.state.schematic_edit_read_only()
 }
 
 fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
@@ -2063,7 +2061,7 @@ mod tests {
     }
 
     #[test]
-    fn component_shelf_uses_every_schematic_edit_authority() {
+    fn component_shelf_uses_the_central_schematic_edit_authority() {
         let mut app = RSpiceApp::test_instance();
         assert!(component_shelf_editable(&app));
 

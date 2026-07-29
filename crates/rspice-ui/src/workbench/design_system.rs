@@ -1368,19 +1368,20 @@ fn property_row_with_tone(
     let value_font = theme::mono(value_size, FontWeight::Regular);
     let width = ui.available_width().max(1.0);
     let (label_column, gap, value_column) = property_row_columns(width);
-    let label_galley =
-        ui.painter()
-            .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
+    let display_label = elide_text(ui, label, &label_font, label_column);
+    let label_galley = ui
+        .painter()
+        .layout_no_wrap(display_label, label_font, t.color.text_dim);
     let status_prefix = if mark.is_some() { 17.0 } else { 0.0 };
     let value_width = (value_column - status_prefix).max(1.0);
     let display_value = elide_text(ui, value, &value_font, value_width);
-    let value_galley =
-        ui.painter()
-            .layout_no_wrap(display_value, value_font, value_tone);
-    // The mockup's read-only values are single-line, ellipsized cells. A long
-    // engineering value must never reflow the rows below it when selection
-    // changes; only an intentionally wrapping label may grow the row.
-    let height = (label_galley.size().y + 12.0).max(PROPERTY_ROW_MIN_H);
+    let value_galley = ui
+        .painter()
+        .layout_no_wrap(display_value, value_font, value_tone);
+    // Read-only property cells share the editable row's invariant geometry.
+    // Both columns are one line and ellipsized so changing the selected object
+    // can never move the rows below it.
+    let height = t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
@@ -1859,20 +1860,28 @@ mod tests {
     }
 
     #[test]
-    fn long_read_only_values_do_not_reflow_property_rows() {
+    fn long_read_only_cells_do_not_reflow_property_rows() {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut short_height = 0.0;
-        let mut long_height = 0.0;
+        let mut long_value_height = 0.0;
+        let mut long_label_height = 0.0;
 
         let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.set_width(180.0);
                 short_height = property_row(ui, "View", "schematic").rect.height();
-                long_height = property_row(
+                long_value_height = property_row(
                     ui,
                     "Library cell",
                     "vendor_analog/OPA189/precision_zero_drift/amplifier_symbol",
+                )
+                .rect
+                .height();
+                long_label_height = property_row(
+                    ui,
+                    "Inherited technology and model binding authority",
+                    "project",
                 )
                 .rect
                 .height();
@@ -1880,7 +1889,8 @@ mod tests {
         });
 
         assert_eq!(short_height, PROPERTY_ROW_MIN_H);
-        assert_eq!(long_height, short_height);
+        assert_eq!(long_value_height, short_height);
+        assert_eq!(long_label_height, short_height);
     }
 
     #[test]
