@@ -14,6 +14,7 @@ use thiserror::Error;
 use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType};
 use crate::codegen::CompiledModel;
 use crate::error::CompileError;
+use crate::metrics::PipelineMetrics;
 use crate::rust_backend::{GeneratedRustDevice, RustTranspileOptions, RustTranspiler};
 use crate::source::Span;
 
@@ -30,6 +31,10 @@ pub struct RuntimeCompileReport {
     pub targets: RuntimeTargetQualifications,
     /// Generated Rust source, present only when in-memory transpilation passed.
     pub generated_rust: Option<GeneratedRustDevice>,
+    /// Operational timings and work-size counters. These are not artifact
+    /// identity and are excluded from runtime-contract digests.
+    #[serde(default)]
+    pub metrics: PipelineMetrics,
 }
 
 /// Expensive backend qualifications to perform while constructing a runtime
@@ -77,6 +82,7 @@ impl RuntimeCompileReport {
             abi,
             targets,
             generated_rust,
+            metrics: PipelineMetrics::default(),
         }
     }
 
@@ -181,6 +187,7 @@ impl RuntimeAbiSummary {
                 .iter()
                 .map(|parameter| RuntimeAbiParameter {
                     name: parameter.name.clone(),
+                    scope: parameter.scope,
                     value_type: parameter.value_type,
                     default: parameter.default,
                     aliases: parameter.aliases.clone(),
@@ -217,6 +224,7 @@ pub struct RuntimeAbiPort {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeAbiParameter {
     pub name: SmolStr,
+    pub scope: crate::semantic::ParameterScope,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
     pub aliases: Vec<SmolStr>,
@@ -547,6 +555,7 @@ pub enum CompileDiagnosticPhase {
     Parser,
     Semantic,
     CodeGeneration,
+    PerformanceBudget,
     ModuleSelection,
 }
 
@@ -626,6 +635,18 @@ fn collect_compile_diagnostics(
             CompileDiagnosticPhase::CodeGeneration,
             error.to_string(),
             error.span,
+        )),
+        CompileError::PerformanceBudget(_) => diagnostics.push(diagnostic(
+            source,
+            CompileDiagnosticPhase::PerformanceBudget,
+            error.to_string(),
+            None,
+        )),
+        CompileError::Cancelled(_) => diagnostics.push(diagnostic(
+            source,
+            CompileDiagnosticPhase::Input,
+            error.to_string(),
+            None,
         )),
         CompileError::ModuleSelection(_) => diagnostics.push(diagnostic(
             source,

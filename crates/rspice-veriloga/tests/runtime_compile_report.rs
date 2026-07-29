@@ -1,9 +1,11 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rspice_veriloga::{
-    CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions,
-    RuntimeArtifactIntegrityError, RuntimeQualificationOptions, RuntimeTarget,
-    RuntimeTargetMaturity, RuntimeTargetReadiness, VerilogACompiler, compile_diagnostics,
+    CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions, PhaseTiming,
+    PipelineControl, PipelineMetrics, PipelinePhase, RuntimeArtifactIntegrityError,
+    RuntimeQualificationOptions, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetReadiness,
+    VerilogACompiler, compile_diagnostics,
 };
 
 const SENSOR_BRIDGE_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
@@ -130,6 +132,80 @@ fn optional_backend_qualification_is_explicit() {
     report
         .validate_integrity()
         .expect("explicit qualification remains coherent");
+}
+
+#[test]
+fn runtime_compile_reports_ordered_frontend_phase_metrics() {
+    let report = compiler()
+        .compile_runtime(SENSOR_BRIDGE_SOURCE, Some("sensor_bridge"))
+        .expect("compile measured workbench source");
+
+    for phase in [
+        PipelinePhase::Preprocess,
+        PipelinePhase::Lex,
+        PipelinePhase::Parse,
+        PipelinePhase::Semantic,
+        PipelinePhase::BytecodeGeneration,
+        PipelinePhase::HirLowering,
+        PipelinePhase::MirLowering,
+        PipelinePhase::CanonicalNoisePlanning,
+        PipelinePhase::RuntimeQualification,
+        PipelinePhase::IntegrityValidation,
+    ] {
+        assert!(
+            report.metrics.has_phase(phase),
+            "missing structured metric for {phase}"
+        );
+    }
+    assert!(report.metrics.preprocessed_bytes > 0);
+    assert!(report.metrics.token_count > 0);
+    assert_eq!(report.metrics.module_count, 1);
+    assert_eq!(
+        report.metrics.total_elapsed_nanos,
+        report
+            .metrics
+            .phases
+            .iter()
+            .map(|timing| timing.elapsed_nanos)
+            .sum::<u64>()
+    );
+}
+
+struct CancelAfterSemantic {
+    cancelled: AtomicBool,
+}
+
+impl PipelineControl for CancelAfterSemantic {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
+    fn phase_completed(&self, timing: PhaseTiming, _metrics: &PipelineMetrics) {
+        if timing.phase == PipelinePhase::Semantic {
+            self.cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+#[test]
+fn runtime_compile_honors_phase_observer_cancellation() {
+    let control = CancelAfterSemantic {
+        cancelled: AtomicBool::new(false),
+    };
+    let error = compiler()
+        .compile_runtime_with_qualifications_and_control(
+            SENSOR_BRIDGE_SOURCE,
+            Some("sensor_bridge"),
+            RuntimeQualificationOptions::NONE,
+            &control,
+        )
+        .expect_err("observer cancellation must stop before bytecode generation");
+
+    assert!(matches!(
+        error,
+        CompileError::Cancelled(cancelled)
+            if cancelled.phase == PipelinePhase::BytecodeGeneration
+    ));
 }
 
 #[test]

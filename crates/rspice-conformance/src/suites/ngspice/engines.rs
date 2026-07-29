@@ -35,12 +35,30 @@ impl TestRunner {
     ) -> Engine {
         // Dynamic regression runs should track production transient behavior,
         // while keeping default ambient aligned with ngspice references.
+        // ngspice transient reference decks default to trapezoidal integration,
+        // and pinning it for free-running comparisons avoids TrapGear switching
+        // artifacts while preserving production defaults elsewhere.
+        //
+        // Locked replay is the exception, because ngspice's `trap` is *variable
+        // order* -- it carries order 1 and 2 and drops to 1 under its own error
+        // control -- while `Trapezoidal` here is fixed order 2. That difference
+        // is invisible while RSpice picks its own steps and decisive when it
+        // replays someone else's: a reference axis is coarse wherever the
+        // producing run judged the waveform slow, and fixed-order trapezoidal
+        // carries its full truncation error across those steps. On
+        // `general/mosamp.cir` the reference leaves a 65 ns step through an
+        // amplifier slew, where the trapezoidal rule's own error is 4.5% -- the
+        // method reproducing the analytic RC step response exactly as
+        // Pade(1,1), not a defect in it. The hybrid damps where ngspice's order
+        // control damps, and tracks the same reference to 0.4%.
+        let integration_method = if locked_time_grid.is_some() {
+            rspice_core::numerics::integration::IntegrationMethod::TrapGear
+        } else {
+            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal
+        };
         let config = SimulationConfig {
             locked_time_grid,
-            // ngspice transient reference decks default to trapezoidal integration.
-            // Fixing method here avoids TrapGear switching artifacts in waveform
-            // comparisons while preserving production defaults elsewhere.
-            integration_method: rspice_core::numerics::integration::IntegrationMethod::Trapezoidal,
+            integration_method,
             // ngspice regression references run at 27C -> 300.15 K by default.
             temperature: 300.15,
             // Sub-ps floor improves waveform alignment around steep HFET/MESA edges.

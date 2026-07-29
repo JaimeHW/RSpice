@@ -41,6 +41,14 @@ pub enum CompileError {
     #[error("Virtual source error: {0}")]
     VirtualSource(#[from] crate::virtual_source::VirtualSourceError),
 
+    /// An explicitly configured compiler performance budget was exceeded.
+    #[error(transparent)]
+    PerformanceBudget(#[from] crate::metrics::PerformanceBudgetExceeded),
+
+    /// Compilation was stopped at a cooperative cancellation checkpoint.
+    #[error(transparent)]
+    Cancelled(#[from] crate::metrics::PipelineCancelled),
+
     /// Multiple errors collected during compilation
     #[error("Compilation failed with {} error(s)", .0.len())]
     Multiple(Vec<CompileError>),

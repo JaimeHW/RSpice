@@ -37,6 +37,101 @@ pub struct VerilogACacheStats {
     pub max_bytes: u64,
 }
 
+/// Process-lifetime telemetry for runtime Verilog-A cache lookups and compiles.
+///
+/// Counters are monotonic and lock-free. Take two snapshots to measure an
+/// interval without globally resetting data used by another simulation.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VerilogACacheTelemetry {
+    /// All attempted runtime lookups, including cancelled and invalid requests.
+    pub lookups: u64,
+    /// Fresh entries served from the bounded in-memory cache.
+    pub memory_hits: u64,
+    /// In-memory entries rejected after dependency fingerprint validation.
+    pub stale_memory_entries: u64,
+    /// Fresh, integrity-checked records restored from disk.
+    pub disk_hits: u64,
+    /// Lookups for which neither cache tier supplied an entry.
+    pub misses: u64,
+    /// Compiler invocations entered after a cache miss.
+    pub compilations_started: u64,
+    /// Compiler invocations that produced both runtime artifacts.
+    pub compilations_succeeded: u64,
+    /// Compiler invocations that returned a non-cancellation error.
+    pub compilations_failed: u64,
+    /// Compiler invocations stopped through cooperative cancellation.
+    pub compilations_cancelled: u64,
+    /// Saturating sum of compiler wall time across all completed invocations.
+    pub total_compilation_nanos: u64,
+    /// Compiled entries retained in memory but not persisted successfully.
+    pub persistence_failures: u64,
+}
+
+#[cfg(feature = "veriloga")]
+struct VerilogACacheTelemetryCounters {
+    lookups: std::sync::atomic::AtomicU64,
+    memory_hits: std::sync::atomic::AtomicU64,
+    stale_memory_entries: std::sync::atomic::AtomicU64,
+    disk_hits: std::sync::atomic::AtomicU64,
+    misses: std::sync::atomic::AtomicU64,
+    compilations_started: std::sync::atomic::AtomicU64,
+    compilations_succeeded: std::sync::atomic::AtomicU64,
+    compilations_failed: std::sync::atomic::AtomicU64,
+    compilations_cancelled: std::sync::atomic::AtomicU64,
+    total_compilation_nanos: std::sync::atomic::AtomicU64,
+    persistence_failures: std::sync::atomic::AtomicU64,
+}
+
+#[cfg(feature = "veriloga")]
+impl VerilogACacheTelemetryCounters {
+    const fn new() -> Self {
+        Self {
+            lookups: std::sync::atomic::AtomicU64::new(0),
+            memory_hits: std::sync::atomic::AtomicU64::new(0),
+            stale_memory_entries: std::sync::atomic::AtomicU64::new(0),
+            disk_hits: std::sync::atomic::AtomicU64::new(0),
+            misses: std::sync::atomic::AtomicU64::new(0),
+            compilations_started: std::sync::atomic::AtomicU64::new(0),
+            compilations_succeeded: std::sync::atomic::AtomicU64::new(0),
+            compilations_failed: std::sync::atomic::AtomicU64::new(0),
+            compilations_cancelled: std::sync::atomic::AtomicU64::new(0),
+            total_compilation_nanos: std::sync::atomic::AtomicU64::new(0),
+            persistence_failures: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+#[cfg(feature = "veriloga")]
+static VERILOGA_CACHE_TELEMETRY: VerilogACacheTelemetryCounters =
+    VerilogACacheTelemetryCounters::new();
+
+/// Snapshot process-lifetime cache and compiler telemetry.
+#[cfg(feature = "veriloga")]
+pub fn veriloga_cache_telemetry() -> VerilogACacheTelemetry {
+    use std::sync::atomic::Ordering::Relaxed;
+
+    VerilogACacheTelemetry {
+        lookups: VERILOGA_CACHE_TELEMETRY.lookups.load(Relaxed),
+        memory_hits: VERILOGA_CACHE_TELEMETRY.memory_hits.load(Relaxed),
+        stale_memory_entries: VERILOGA_CACHE_TELEMETRY.stale_memory_entries.load(Relaxed),
+        disk_hits: VERILOGA_CACHE_TELEMETRY.disk_hits.load(Relaxed),
+        misses: VERILOGA_CACHE_TELEMETRY.misses.load(Relaxed),
+        compilations_started: VERILOGA_CACHE_TELEMETRY.compilations_started.load(Relaxed),
+        compilations_succeeded: VERILOGA_CACHE_TELEMETRY
+            .compilations_succeeded
+            .load(Relaxed),
+        compilations_failed: VERILOGA_CACHE_TELEMETRY.compilations_failed.load(Relaxed),
+        compilations_cancelled: VERILOGA_CACHE_TELEMETRY
+            .compilations_cancelled
+            .load(Relaxed),
+        total_compilation_nanos: VERILOGA_CACHE_TELEMETRY
+            .total_compilation_nanos
+            .load(Relaxed),
+        persistence_failures: VERILOGA_CACHE_TELEMETRY.persistence_failures.load(Relaxed),
+    }
+}
+
 /// A single Verilog-A cache entry from disk.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,6 +385,7 @@ pub(super) fn metadata_modified_ns(metadata: &std::fs::Metadata) -> Option<u128>
 enum VerilogADependencyReadError {
     Io(std::io::Error),
     ResourceLimit(ResourceLimitError),
+    Cancelled,
 }
 
 #[cfg(feature = "veriloga")]
@@ -297,7 +393,11 @@ fn hash_dependency_file_with_limits(
     path: &Path,
     bytes_already_read: usize,
     limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> Result<([u8; 32], std::fs::Metadata, usize), VerilogADependencyReadError> {
+    if abort.is_aborted() {
+        return Err(VerilogADependencyReadError::Cancelled);
+    }
     let mut file = std::fs::File::open(path)?;
     let metadata = file.metadata()?;
     let metadata_bytes = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
@@ -311,6 +411,9 @@ fn hash_dependency_file_with_limits(
     let mut bytes_read = 0_usize;
 
     loop {
+        if abort.is_aborted() {
+            return Err(VerilogADependencyReadError::Cancelled);
+        }
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
@@ -342,9 +445,19 @@ impl From<ResourceLimitError> for VerilogADependencyReadError {
 }
 
 #[cfg(feature = "veriloga")]
+#[allow(dead_code)]
 fn fingerprint_paths_with_limits(
     paths: &[PathBuf],
     limits: ResourceLimits,
+) -> Result<Vec<VerilogADependencyFingerprint>, SimulationError> {
+    fingerprint_paths_with_limits_and_abort(paths, limits, &NoAbort)
+}
+
+#[cfg(feature = "veriloga")]
+fn fingerprint_paths_with_limits_and_abort(
+    paths: &[PathBuf],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> Result<Vec<VerilogADependencyFingerprint>, SimulationError> {
     let mut canonical_paths: Vec<PathBuf> =
         paths.iter().map(|p| canonicalize_for_cache(p)).collect();
@@ -354,7 +467,7 @@ fn fingerprint_paths_with_limits(
     let mut fingerprints = Vec::with_capacity(canonical_paths.len());
     let mut dependency_bytes = 0_usize;
     for canonical_path in canonical_paths {
-        match hash_dependency_file_with_limits(&canonical_path, dependency_bytes, limits) {
+        match hash_dependency_file_with_limits(&canonical_path, dependency_bytes, limits, abort) {
             Ok((content_hash, metadata, bytes_read)) => {
                 dependency_bytes = dependency_bytes.saturating_add(bytes_read);
                 fingerprints.push(VerilogADependencyFingerprint {
@@ -365,6 +478,9 @@ fn fingerprint_paths_with_limits(
                 });
             }
             Err(VerilogADependencyReadError::ResourceLimit(error)) => return Err(error.into()),
+            Err(VerilogADependencyReadError::Cancelled) => {
+                return Err(SimulationError::Aborted);
+            }
             Err(VerilogADependencyReadError::Io(error)) => {
                 return Err(SimulationError::Netlist(format!(
                     "Verilog-A dependency '{}' does not exist or is unreadable: {}",
@@ -386,14 +502,19 @@ pub(super) fn fingerprint_paths(
 }
 
 #[cfg(feature = "veriloga")]
-fn dependencies_are_fresh_with_limits(
+fn dependencies_are_fresh_with_limits_and_abort(
     dependencies: &[VerilogADependencyFingerprint],
     limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> Result<bool, SimulationError> {
     let mut dependency_bytes = 0_usize;
     for dependency in dependencies {
-        match hash_dependency_file_with_limits(&dependency.canonical_path, dependency_bytes, limits)
-        {
+        match hash_dependency_file_with_limits(
+            &dependency.canonical_path,
+            dependency_bytes,
+            limits,
+            abort,
+        ) {
             Ok((content_hash, _, bytes_read)) => {
                 dependency_bytes = dependency_bytes.saturating_add(bytes_read);
                 if content_hash != dependency.content_hash {
@@ -401,6 +522,9 @@ fn dependencies_are_fresh_with_limits(
                 }
             }
             Err(VerilogADependencyReadError::ResourceLimit(error)) => return Err(error.into()),
+            Err(VerilogADependencyReadError::Cancelled) => {
+                return Err(SimulationError::Aborted);
+            }
             Err(VerilogADependencyReadError::Io(_)) => return Ok(false),
         }
     }
@@ -480,19 +604,43 @@ pub(super) struct VerilogACacheDiskLock {
 }
 
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+enum VerilogACacheLockError {
+    Cancelled,
+    Other(String),
+}
+
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 impl VerilogACacheDiskLock {
     fn acquire(root: &Path) -> Result<Self, String> {
+        match Self::acquire_with_abort(root, &NoAbort) {
+            Ok(lock) => Ok(lock),
+            Err(VerilogACacheLockError::Other(error)) => Err(error),
+            Err(VerilogACacheLockError::Cancelled) => {
+                unreachable!("the no-op abort signal cannot cancel")
+            }
+        }
+    }
+
+    fn acquire_with_abort(
+        root: &Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, VerilogACacheLockError> {
         std::fs::create_dir_all(root).map_err(|e| {
-            format!(
-                "failed to create cache directory '{}': {}",
-                root.display(),
-                e
-            )
+            VerilogACacheLockError::Other({
+                format!(
+                    "failed to create cache directory '{}': {}",
+                    root.display(),
+                    e
+                )
+            })
         })?;
         let lock_path = root.join(VERILOGA_CACHE_LOCK_FILE);
         let start = Instant::now();
 
         loop {
+            if abort.is_aborted() {
+                return Err(VerilogACacheLockError::Cancelled);
+            }
             match std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -519,20 +667,20 @@ impl VerilogACacheDiskLock {
                     }
 
                     if start.elapsed() >= VERILOGA_CACHE_LOCK_WAIT_TIMEOUT {
-                        return Err(format!(
+                        return Err(VerilogACacheLockError::Other(format!(
                             "timed out waiting for Verilog-A cache lock '{}'",
                             lock_path.display()
-                        ));
+                        )));
                     }
 
                     std::thread::sleep(VERILOGA_CACHE_LOCK_POLL_INTERVAL);
                 }
                 Err(err) => {
-                    return Err(format!(
+                    return Err(VerilogACacheLockError::Other(format!(
                         "failed to acquire Verilog-A cache lock '{}': {}",
                         lock_path.display(),
                         err
-                    ));
+                    )));
                 }
             }
         }
@@ -646,31 +794,43 @@ pub(super) fn cache_stats_from_files(
 enum VerilogACacheRecordReadError {
     Invalid(String),
     ResourceLimit(ResourceLimitError),
+    Cancelled,
 }
 
 #[cfg(feature = "veriloga")]
-struct LimitedReader<R> {
+struct LimitedReader<'a, R> {
     inner: R,
     bytes_read: usize,
     limit: usize,
     exceeded: bool,
+    cancelled: bool,
+    abort: &'a dyn AbortSignal,
 }
 
 #[cfg(feature = "veriloga")]
-impl<R> LimitedReader<R> {
-    fn new(inner: R, limit: usize) -> Self {
+impl<'a, R> LimitedReader<'a, R> {
+    fn new(inner: R, limit: usize, abort: &'a dyn AbortSignal) -> Self {
         Self {
             inner,
             bytes_read: 0,
             limit,
             exceeded: false,
+            cancelled: false,
+            abort,
         }
     }
 }
 
 #[cfg(feature = "veriloga")]
-impl<R: std::io::Read> std::io::Read for LimitedReader<R> {
+impl<R: std::io::Read> std::io::Read for LimitedReader<'_, R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.abort.is_aborted() {
+            self.cancelled = true;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "Verilog-A cache read cancelled",
+            ));
+        }
         let remaining = self.limit.saturating_sub(self.bytes_read);
         if remaining == 0 {
             let mut probe = [0_u8; 1];
@@ -696,6 +856,15 @@ fn read_cache_record_with_limits(
     path: &Path,
     limits: ResourceLimits,
 ) -> Result<VerilogADiskCacheRecord, VerilogACacheRecordReadError> {
+    read_cache_record_with_limits_and_abort(path, limits, &NoAbort)
+}
+
+#[cfg(feature = "veriloga")]
+fn read_cache_record_with_limits_and_abort(
+    path: &Path,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<VerilogADiskCacheRecord, VerilogACacheRecordReadError> {
     let file = std::fs::File::open(path).map_err(|error| {
         VerilogACacheRecordReadError::Invalid(format!(
             "failed to read cache record '{}': {}",
@@ -719,9 +888,10 @@ fn read_cache_record_with_limits(
     .map_err(VerilogACacheRecordReadError::ResourceLimit)?;
 
     let buffered = std::io::BufReader::new(file);
-    let mut reader = LimitedReader::new(buffered, limits.max_shared_cache_bytes);
+    let mut reader = LimitedReader::new(buffered, limits.max_shared_cache_bytes, abort);
     match serde_json::from_reader::<_, VerilogADiskCacheRecord>(&mut reader) {
         Ok(record) => Ok(record),
+        Err(_) if reader.cancelled => Err(VerilogACacheRecordReadError::Cancelled),
         Err(_) if reader.exceeded => Err(VerilogACacheRecordReadError::ResourceLimit(
             ResourceLimitError {
                 resource: ResourceKind::SharedCacheBytes,
@@ -968,9 +1138,13 @@ fn load_model_from_disk_locked_with_limits(
     source_path: &Path,
     cache_root: &Path,
     limits: ResourceLimits,
+    abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
     let cache_path = cache_record_path_with_root(source_path, cache_root);
-    let record = match read_cache_record_with_limits(&cache_path, limits) {
+    let record = match read_cache_record_with_limits_and_abort(&cache_path, limits, abort) {
         Ok(record) => record,
         Err(VerilogACacheRecordReadError::Invalid(error)) => {
             if cache_path.exists() {
@@ -987,6 +1161,9 @@ fn load_model_from_disk_locked_with_limits(
             );
             return Ok(None);
         }
+        Err(VerilogACacheRecordReadError::Cancelled) => {
+            return Err(SimulationError::Aborted);
+        }
     };
 
     if record.version != VERILOGA_CACHE_RECORD_VERSION {
@@ -1001,7 +1178,10 @@ fn load_model_from_disk_locked_with_limits(
         return Ok(None);
     }
 
-    if !dependencies_are_fresh_with_limits(&record.dependencies, limits)? {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    if !dependencies_are_fresh_with_limits_and_abort(&record.dependencies, limits, abort)? {
         remove_cache_file(&cache_path);
         return Ok(None);
     }
@@ -1029,24 +1209,37 @@ fn load_model_from_disk_with_limits(
     source_path: &Path,
     limits: ResourceLimits,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
+    load_model_from_disk_with_limits_and_abort(source_path, limits, &NoAbort)
+}
+
+#[cfg(feature = "veriloga")]
+fn load_model_from_disk_with_limits_and_abort(
+    source_path: &Path,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Option<CachedVerilogAModel>, SimulationError> {
     // No disk in the browser build: only the in-memory cache can hit.
     #[cfg(target_arch = "wasm32")]
     {
         let _ = source_path;
         let _ = limits;
+        let _ = abort;
         Ok(None)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         let cache_root = veriloga_cache_root();
-        let _lock = match VerilogACacheDiskLock::acquire(&cache_root) {
+        let _lock = match VerilogACacheDiskLock::acquire_with_abort(&cache_root, abort) {
             Ok(lock) => lock,
-            Err(error) => {
+            Err(VerilogACacheLockError::Cancelled) => {
+                return Err(SimulationError::Aborted);
+            }
+            Err(VerilogACacheLockError::Other(error)) => {
                 log::warn!("load Verilog-A cache record: {}", error);
                 return Ok(None);
             }
         };
-        load_model_from_disk_locked_with_limits(source_path, &cache_root, limits)
+        load_model_from_disk_locked_with_limits(source_path, &cache_root, limits, abort)
     }
 }
 
@@ -1055,8 +1248,13 @@ pub(super) fn load_model_from_disk_locked(
     source_path: &Path,
     cache_root: &Path,
 ) -> Result<Option<CachedVerilogAModel>, String> {
-    load_model_from_disk_locked_with_limits(source_path, cache_root, ResourceLimits::default())
-        .map_err(|error| error.to_string())
+    load_model_from_disk_locked_with_limits(
+        source_path,
+        cache_root,
+        ResourceLimits::default(),
+        &NoAbort,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(feature = "veriloga")]
@@ -1108,6 +1306,9 @@ pub fn veriloga_cache_entries() -> Result<Vec<VerilogACacheEntry>, String> {
                         error
                     );
                     continue;
+                }
+                Err(VerilogACacheRecordReadError::Cancelled) => {
+                    unreachable!("the no-op abort signal cannot cancel")
                 }
             };
             if record.version != VERILOGA_CACHE_RECORD_VERSION {
@@ -1186,10 +1387,46 @@ pub(super) fn resolve_cached_or_compile_veriloga(
 }
 
 #[cfg(feature = "veriloga")]
+struct VerilogACompileControl<'a> {
+    abort: &'a dyn AbortSignal,
+}
+
+#[cfg(feature = "veriloga")]
+impl rspice_veriloga::PipelineControl for VerilogACompileControl<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.abort.is_aborted()
+    }
+
+    fn phase_completed(
+        &self,
+        _timing: rspice_veriloga::PhaseTiming,
+        metrics: &rspice_veriloga::PipelineMetrics,
+    ) {
+        const EXPECTED_RUNTIME_PHASES: f64 = 9.0;
+        self.abort.observe_progress(
+            (metrics.phases.len() as f64 / EXPECTED_RUNTIME_PHASES).clamp(0.0, 1.0),
+        );
+    }
+}
+
+#[cfg(all(test, feature = "veriloga"))]
 pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
     path: &Path,
     limits: ResourceLimits,
 ) -> Result<CachedVerilogAModel, SimulationError> {
+    resolve_cached_or_compile_veriloga_with_limits_and_abort(path, limits, &NoAbort)
+}
+
+#[cfg(feature = "veriloga")]
+pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
+    path: &Path,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<CachedVerilogAModel, SimulationError> {
+    use std::sync::atomic::Ordering::Relaxed;
+
+    VERILOGA_CACHE_TELEMETRY.lookups.fetch_add(1, Relaxed);
+    check_build_abort(abort)?;
     let canonical = canonicalize_for_cache(path);
     let memory_entry = if let Ok(mut cache) = veriloga_model_cache().write() {
         cache.enforce_limit(limits.max_shared_cache_bytes);
@@ -1199,10 +1436,14 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
     };
 
     if let Some(entry) = memory_entry {
-        if dependencies_are_fresh_with_limits(&entry.dependencies, limits)? {
+        if dependencies_are_fresh_with_limits_and_abort(&entry.dependencies, limits, abort)? {
+            VERILOGA_CACHE_TELEMETRY.memory_hits.fetch_add(1, Relaxed);
             log::debug!("Verilog-A cache hit (memory): '{}'", canonical.display());
             return Ok(entry);
         }
+        VERILOGA_CACHE_TELEMETRY
+            .stale_memory_entries
+            .fetch_add(1, Relaxed);
         if let Ok(mut cache) = veriloga_model_cache().write()
             && cache
                 .get(&canonical)
@@ -1216,13 +1457,16 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
     // never a filesystem locator. A missing registration must fail closed;
     // disk cache and ambient files are not eligible fallbacks.
     if is_project_veriloga_virtual_path(path) {
+        VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
         return Err(SimulationError::Netlist(format!(
             "Project Verilog-A runtime '{}' is not installed for this execution",
             path.display()
         )));
     }
 
-    if let Some(entry) = load_model_from_disk_with_limits(&canonical, limits)? {
+    check_build_abort(abort)?;
+    if let Some(entry) = load_model_from_disk_with_limits_and_abort(&canonical, limits, abort)? {
+        VERILOGA_CACHE_TELEMETRY.disk_hits.fetch_add(1, Relaxed);
         if let Err(error) = retain_veriloga_model(
             canonical.clone(),
             entry.clone(),
@@ -1239,6 +1483,8 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
         return Ok(entry);
     }
 
+    VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
+    check_build_abort(abort)?;
     let source_metadata = std::fs::metadata(&canonical).map_err(|error| {
         SimulationError::Netlist(format!(
             "Verilog-A source '{}' does not exist or is unreadable: {}",
@@ -1254,16 +1500,44 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
 
     log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
     let compiler = rspice_veriloga::VerilogACompiler::default();
-    let compiled = compiler
-        .compile_file_runtime_with_metadata(path, None)
-        .map_err(|e| {
-            SimulationError::Netlist(format!(
+    let control = VerilogACompileControl { abort };
+    VERILOGA_CACHE_TELEMETRY
+        .compilations_started
+        .fetch_add(1, Relaxed);
+    let compile_started = crate::time_compat::Instant::now();
+    let compiled = compiler.compile_file_runtime_with_metadata_and_control(path, None, &control);
+    let compilation_nanos = u64::try_from(compile_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    let _ = VERILOGA_CACHE_TELEMETRY
+        .total_compilation_nanos
+        .fetch_update(Relaxed, Relaxed, |total| {
+            Some(total.saturating_add(compilation_nanos))
+        });
+    let compiled = match compiled {
+        Ok(compiled) => {
+            VERILOGA_CACHE_TELEMETRY
+                .compilations_succeeded
+                .fetch_add(1, Relaxed);
+            compiled
+        }
+        Err(rspice_veriloga::CompileError::Cancelled(_)) => {
+            VERILOGA_CACHE_TELEMETRY
+                .compilations_cancelled
+                .fetch_add(1, Relaxed);
+            return Err(SimulationError::Aborted);
+        }
+        Err(error) => {
+            VERILOGA_CACHE_TELEMETRY
+                .compilations_failed
+                .fetch_add(1, Relaxed);
+            return Err(SimulationError::Netlist(format!(
                 "Failed to compile Verilog-A '{}': {}",
                 path.display(),
-                e
-            ))
-        })?;
+                error
+            )));
+        }
+    };
 
+    check_build_abort(abort)?;
     validate_runtime_artifact_pair(&compiled.model, Some(&compiled.canonical_ir)).map_err(
         |error| {
             SimulationError::Netlist(format!(
@@ -1273,13 +1547,15 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
             ))
         },
     )?;
-    let dependencies = fingerprint_paths_with_limits(&compiled.dependencies, limits)?;
+    let dependencies =
+        fingerprint_paths_with_limits_and_abort(&compiled.dependencies, limits, abort)?;
     let entry = CachedVerilogAModel {
         dependencies,
         model: std::sync::Arc::new(compiled.model),
         canonical_ir: Some(std::sync::Arc::new(compiled.canonical_ir)),
     };
 
+    check_build_abort(abort)?;
     if let Err(error) = retain_veriloga_model(
         canonical.clone(),
         entry.clone(),
@@ -1294,6 +1570,9 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
     }
 
     if let Err(err) = persist_model_to_disk_with_limits(&canonical, &entry, limits) {
+        VERILOGA_CACHE_TELEMETRY
+            .persistence_failures
+            .fetch_add(1, Relaxed);
         log::warn!(
             "Failed to persist Verilog-A cache entry for '{}': {}",
             canonical.display(),
@@ -1883,7 +2162,7 @@ endmodule
         limits.max_shared_cache_bytes = cache_bytes.saturating_sub(1);
 
         assert!(
-            load_model_from_disk_locked_with_limits(&source_path, &cache_root, limits)
+            load_model_from_disk_locked_with_limits(&source_path, &cache_root, limits, &NoAbort,)
                 .expect("an oversized optimization is a recoverable cache miss")
                 .is_none()
         );
@@ -2216,6 +2495,89 @@ endmodule
         let after = resolve_cached_or_compile_veriloga(&key).expect("reinstalled cached runtime");
         assert!(std::sync::Arc::ptr_eq(&before.model, &after.model));
         remove_project_runtime_keys(&[&key]);
+    }
+
+    #[test]
+    fn cache_telemetry_reports_memory_hits_as_monotonic_deltas() {
+        let key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000109/digest/telemetry.va",
+        );
+        register_project_veriloga_runtimes_for_session([project_registration(
+            &key,
+            "telemetry_model",
+            &[],
+        )])
+        .expect("register telemetry runtime");
+        let before = veriloga_cache_telemetry();
+
+        resolve_cached_or_compile_veriloga(&key).expect("first memory hit");
+        resolve_cached_or_compile_veriloga(&key).expect("second memory hit");
+        let after = veriloga_cache_telemetry();
+
+        assert!(after.lookups.saturating_sub(before.lookups) >= 2);
+        assert!(after.memory_hits.saturating_sub(before.memory_hits) >= 2);
+        remove_project_runtime_keys(&[&key]);
+    }
+
+    #[test]
+    fn cache_resolution_honors_cancellation_before_io() {
+        let before = veriloga_cache_telemetry();
+        let error = resolve_cached_or_compile_veriloga_with_limits_and_abort(
+            Path::new("must-not-be-read.va"),
+            ResourceLimits::default(),
+            &crate::abort_signal::ImmediateAbort,
+        )
+        .expect_err("immediate cancellation must stop cache resolution");
+        let after = veriloga_cache_telemetry();
+
+        assert!(matches!(error, SimulationError::Aborted));
+        assert!(after.lookups > before.lookups);
+    }
+
+    struct AbortOnCompilerProgress {
+        aborted: std::sync::atomic::AtomicBool,
+    }
+
+    impl AbortSignal for AbortOnCompilerProgress {
+        fn is_aborted(&self) -> bool {
+            self.aborted.load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        fn observe_progress(&self, fraction: f64) {
+            if fraction > 0.0 {
+                self.aborted
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
+    #[test]
+    fn cache_maps_compiler_cancellation_to_simulation_abort() {
+        let root = unique_test_root("compile-cancellation");
+        std::fs::create_dir_all(&root).expect("create cancellation fixture root");
+        let source = root.join("cancel.va");
+        std::fs::write(
+            &source,
+            "module cancel(p,n); inout p,n; electrical p,n; analog I(p,n) <+ V(p,n); endmodule\n",
+        )
+        .expect("write cancellation fixture");
+        let abort = AbortOnCompilerProgress {
+            aborted: std::sync::atomic::AtomicBool::new(false),
+        };
+        let before = veriloga_cache_telemetry();
+
+        let error = resolve_cached_or_compile_veriloga_with_limits_and_abort(
+            &source,
+            ResourceLimits::default(),
+            &abort,
+        )
+        .expect_err("compiler progress callback must cancel cache resolution");
+        let after = veriloga_cache_telemetry();
+
+        assert!(matches!(error, SimulationError::Aborted));
+        assert!(after.compilations_started > before.compilations_started);
+        assert!(after.compilations_cancelled > before.compilations_cancelled);
+        std::fs::remove_dir_all(root).expect("remove cancellation fixture root");
     }
 
     #[test]

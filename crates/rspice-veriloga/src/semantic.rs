@@ -441,7 +441,44 @@ impl SemanticAnalyzer {
         // Phase 7: Analyze parameters (defaults may reference earlier ones)
         let param_names: std::collections::HashSet<SmolStr> =
             module.parameters.iter().map(|p| p.name.clone()).collect();
-        for param in &module.parameters {
+        let parameter_scopes: Vec<_> = module
+            .parameters
+            .iter()
+            .map(|parameter| self.parameter_scope(parameter))
+            .collect();
+        let instance_parameter_names: std::collections::HashSet<SmolStr> = module
+            .parameters
+            .iter()
+            .zip(&parameter_scopes)
+            .filter(|(_, scope)| **scope == ParameterScope::Instance)
+            .map(|(parameter, _)| parameter.name.clone())
+            .collect();
+        for (param, scope) in module.parameters.iter().zip(parameter_scopes) {
+            if scope == ParameterScope::Model {
+                let default_reads_instance = param.default.as_ref().is_some_and(|expression| {
+                    Self::references_identifiers(expression, &instance_parameter_names)
+                });
+                let range_reads_instance = param.range.as_ref().is_some_and(|range| {
+                    range
+                        .bounds
+                        .iter()
+                        .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
+                        .flatten()
+                        .chain(range.exclude.iter())
+                        .any(|expression| {
+                            Self::references_identifiers(expression, &instance_parameter_names)
+                        })
+                });
+                if default_reads_instance || range_reads_instance {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "model parameter '{}' cannot depend on an instance parameter",
+                            param.name
+                        )),
+                        param.span,
+                    );
+                }
+            }
             let value_type = match param.param_type {
                 ParamType::Real => ValueType::Real,
                 ParamType::Integer => ValueType::Integer,
@@ -551,6 +588,7 @@ impl SemanticAnalyzer {
 
             analyzed.parameters.push(AnalyzedParameter {
                 name: param.name.clone(),
+                scope,
                 param_type: param.param_type,
                 value_type,
                 default,
@@ -827,6 +865,60 @@ impl SemanticAnalyzer {
 
         analyzed.symbol_table = self.symbols.clone();
         Ok(analyzed)
+    }
+
+    /// Interpret the CMC parameter storage convention without letting backend
+    /// policy override what the Verilog-A source declares.
+    fn parameter_scope(&mut self, parameter: &ParameterDecl) -> ParameterScope {
+        let mut scope = ParameterScope::Model;
+        let mut declared = false;
+        for attribute in &parameter.attributes {
+            if !attribute.name.eq_ignore_ascii_case("type") {
+                continue;
+            }
+            let Some(Expression::StringLit(value)) = &attribute.value else {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter '{}' attribute 'type' must be the string \"model\" or \
+                         \"instance\"",
+                        parameter.name
+                    )),
+                    attribute.span,
+                );
+                continue;
+            };
+            let parsed = if value.value.eq_ignore_ascii_case("model") {
+                Some(ParameterScope::Model)
+            } else if value.value.eq_ignore_ascii_case("instance") {
+                Some(ParameterScope::Instance)
+            } else {
+                None
+            };
+            let Some(parsed) = parsed else {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter '{}' has unsupported type attribute {:?}; expected \"model\" \
+                         or \"instance\"",
+                        parameter.name, value.value
+                    )),
+                    attribute.span,
+                );
+                continue;
+            };
+            if declared && scope != parsed {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter '{}' has conflicting model/instance type attributes",
+                        parameter.name
+                    )),
+                    attribute.span,
+                );
+                continue;
+            }
+            scope = parsed;
+            declared = true;
+        }
+        scope
     }
 
     fn define_symbol(&mut self, symbol: Symbol) -> CompileResult<()> {

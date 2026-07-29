@@ -206,12 +206,16 @@ impl Mosfet {
             return (qgs_int + qgs_ov, qgd_int + qgd_ov, qgb_int + qgb_ov);
         }
 
-        let channel_length = if self.level == 6 {
-            self.level6_effective_length()
-        } else {
-            self.l
-        };
-        let cox_wl = self.cox * self.w * channel_length;
+        // The intrinsic gate charge rides the *effective* oxide capacitance,
+        // the same `Cox·Weff·Leff` the Meyer capacitances above are built from
+        // and the same quantity ngspice forms as
+        // `oxideCapFactor · EffectiveLength · W · m`. Using the drawn `L` here
+        // instead silently inflated the intrinsic charge by `L/(L − 2·LD)` —
+        // 1.63x on `general/mosamp.cir`, whose devices are drawn at L=12.7 µm
+        // with LD=2.4485 µm. Too much gate charge is a slower switch, so it
+        // showed up as a growing lag through the amplifier's turnover rather
+        // than as a wrong level anywhere.
+        let cox_wl = self.oxide_capacitance_total();
 
         let vth = p * self.vth(self.vbs);
         let vgt = vgs - vth;
@@ -353,6 +357,47 @@ mod tests {
             )
         } else {
             ((2.0 / 3.0) * oxide_cap * vgt + qgs_ov, qgd_ov, qgb_ov)
+        }
+    }
+
+    /// The intrinsic gate charge scales with `Leff = L - 2·LD`, not the drawn
+    /// length — the same oxide capacitance the Meyer capacitances use and the
+    /// same one ngspice builds as `oxideCapFactor · EffectiveLength · W · m`.
+    /// A deck with a large lateral diffusion makes the two differ sharply:
+    /// `general/mosamp.cir` draws L=12.7 µm with LD=2.4485 µm, so the drawn
+    /// length overstates the charge by 1.63x.
+    #[test]
+    fn classic_gate_charges_scale_with_the_effective_channel_length() {
+        for level in [1_i32, 2, 6] {
+            let mut mos = Mosfet::new_nmos(format!("m{level}"), 1, 2, 3, 0);
+            mos.level = level;
+            mos.w = 100.0e-6;
+            mos.l = 12.7e-6;
+            mos.ld = 2.4485e-6;
+            mos.cgso = 0.0;
+            mos.cgdo = 0.0;
+            mos.cgbo = 0.0;
+            // Saturation, so the intrinsic term is (2/3)·Cox_eff·Vgt.
+            mos.vgs = 5.0;
+            mos.vds = 5.0;
+            mos.vbs = 0.0;
+
+            let (qgs, _, _) = mos.gate_charges();
+            let effective = mos.oxide_capacitance_total();
+            let drawn = mos.cox * mos.w * mos.l;
+            assert!(
+                drawn > effective * 1.6,
+                "the fixture must actually separate drawn from effective geometry"
+            );
+
+            let vgt = mos.vgs - mos.vth(mos.vbs);
+            let expected = (2.0 / 3.0) * effective * vgt;
+            assert!(
+                (qgs - expected).abs() <= expected.abs() * 1e-12,
+                "level {level}: qgs={qgs:e} expected {expected:e} \
+                 (drawn geometry would give {:e})",
+                (2.0 / 3.0) * drawn * vgt
+            );
         }
     }
 

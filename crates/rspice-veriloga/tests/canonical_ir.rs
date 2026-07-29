@@ -18,7 +18,9 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
 use rspice_veriloga::types::ValueType;
-use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler};
+use rspice_veriloga::{
+    Lexer, ParameterScope, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler,
+};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -976,7 +978,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 5);
+    assert_eq!(metadata.schema_version, 6);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -1132,7 +1134,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=5"));
+    assert!(first.contains("schema_version=6"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("compiler_version="));
@@ -1140,6 +1142,94 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
     assert!(first.contains("mir_digest="));
     assert!(first.contains("hir module=tiny_res ports=2 parameters=1 contributions=1"));
     assert!(first.contains("mir nodes=2 equations=1"));
+}
+
+#[test]
+fn canonical_ir_preserves_verilog_declared_parameter_scope() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module scoped_parameters(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real model_gain = 2.0;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    (* TYPE = "MODEL" *) parameter real explicit_model = 3.0;
+    analog I(p, n) <+ model_gain * width * explicit_model * V(p, n);
+endmodule
+"#,
+        )
+        .expect("parameter scopes compile");
+
+    let expected = [
+        ParameterScope::Model,
+        ParameterScope::Instance,
+        ParameterScope::Model,
+    ];
+    assert_eq!(
+        artifact
+            .hir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.scope)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(
+        artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.scope)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(artifact.validate().is_ok());
+}
+
+#[test]
+fn model_parameter_scope_rejects_instance_dependencies() {
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module invalid_scope(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    parameter real model_gain = width * 2.0;
+    analog I(p, n) <+ model_gain * V(p, n);
+endmodule
+"#,
+        )
+        .expect_err("shared model-card preprocessing cannot read per-instance geometry");
+    assert!(
+        error
+            .to_string()
+            .contains("model parameter 'model_gain' cannot depend on an instance parameter"),
+        "{error}"
+    );
+}
+
+#[test]
+fn parameter_scope_rejects_unknown_type_attributes() {
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module invalid_type(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "global" *) parameter real gain = 1.0;
+    analog I(p, n) <+ gain * V(p, n);
+endmodule
+"#,
+        )
+        .expect_err("unknown parameter storage scope must not be guessed");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported type attribute \"global\""),
+        "{error}"
+    );
 }
 
 #[test]
