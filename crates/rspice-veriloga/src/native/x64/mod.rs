@@ -83,21 +83,33 @@ fn compile_model_inner(
         Some(mir) => Some(build_canonical_noise_plan(model, mir)?),
         None => None,
     };
-    let assignment_current_pairs = if canonical_mir.is_some() {
-        all_terminal_current_pairs(model.num_terminals)?
-    } else {
-        Vec::new()
-    };
+    let mut assignment_prior_current_probes = Vec::new();
+    if canonical_mir.is_some() {
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+            {
+                push_completed_current_probe_aliases(
+                    &mut assignment_prior_current_probes,
+                    stamp_index,
+                    pos,
+                    neg,
+                    model.num_terminals,
+                );
+            }
+        }
+    }
 
     let mut image = Vec::new();
     let mut entry_starts = Vec::new();
-    let (assignment, assignment_dependencies) = append_assignment_entry(
-        model,
-        canonical_artifact,
-        base_limits.with_available_current_pairs(&assignment_current_pairs),
-        &mut image,
-        &mut entry_starts,
-    )?;
+    let (assignment, post_assignment, assignment_dependencies, post_assignment_dependencies) =
+        append_assignment_entries(
+            model,
+            canonical_artifact,
+            base_limits.with_prior_current_probes(&assignment_prior_current_probes),
+            &mut image,
+            &mut entry_starts,
+        )?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
     for (parameter_index, parameter) in model.parameters.iter().enumerate() {
@@ -383,7 +395,7 @@ fn compile_model_inner(
 
     let entries = NativeEntryOffsets {
         assignment,
-        post_assignment: None,
+        post_assignment,
         stamp_kernel: Some(stamp_kernel),
         parameter_defaults,
         static_conditions,
@@ -397,9 +409,9 @@ fn compile_model_inner(
         assignment_current_pairs: assignment_dependencies.current_pairs,
         assignment_prior_currents: assignment_dependencies.prior_currents,
         assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
-        post_assignment_current_pairs: Vec::new(),
-        post_assignment_prior_currents: Vec::new(),
-        post_assignment_branch_unknowns: Vec::new(),
+        post_assignment_current_pairs: post_assignment_dependencies.current_pairs,
+        post_assignment_prior_currents: post_assignment_dependencies.prior_currents,
+        post_assignment_branch_unknowns: post_assignment_dependencies.branch_unknowns,
         static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
         stamp_values: stamp_value_current_dependencies,
         stamp_value_prior_currents: stamp_value_prior_current_dependencies,
@@ -432,36 +444,6 @@ fn compile_model_inner(
         current_dependencies,
         NativeRequiredStorage::for_model(model),
     )
-}
-
-fn all_terminal_current_pairs(terminal_count: usize) -> JitResult<Vec<usize>> {
-    let mut pairs = Vec::with_capacity(
-        terminal_count
-            .checked_add(1)
-            .and_then(|width| width.checked_mul(width))
-            .ok_or_else(|| JitError::InvalidCanonicalIr {
-                model: "native-x64".into(),
-                detail: "terminal-pair current table dimensions overflow".into(),
-            })?,
-    );
-    for pos_axis in 0..=terminal_count {
-        for neg_axis in 0..=terminal_count {
-            let pos = if pos_axis == terminal_count {
-                CURRENT_PAIR_GROUND
-            } else {
-                pos_axis
-            };
-            let neg = if neg_axis == terminal_count {
-                CURRENT_PAIR_GROUND
-            } else {
-                neg_axis
-            };
-            if let Some(pair) = terminal_pair_current_index(pos, neg, terminal_count) {
-                pairs.push(pair);
-            }
-        }
-    }
-    Ok(pairs)
 }
 
 fn lower_parameter_default_program(
@@ -3006,36 +2988,155 @@ struct AssignmentDependencies {
     branch_unknowns: Vec<usize>,
 }
 
-fn append_assignment_entry(
+fn append_assignment_entries(
     model: &CompiledModel,
     canonical_artifact: Option<&CanonicalIrArtifact>,
     limits: NativeLoweringLimits<'_>,
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
-) -> JitResult<(CodeOffset, AssignmentDependencies)> {
-    let assignments = match canonical_artifact {
+) -> JitResult<(
+    CodeOffset,
+    Option<CodeOffset>,
+    AssignmentDependencies,
+    AssignmentDependencies,
+)> {
+    let (assignments, post_assignments) = match canonical_artifact {
         Some(artifact) => {
-            lower_live_canonical_assignment_statements(model, &artifact.hir, &artifact.mir, limits)?
+            let assignments = lower_live_canonical_assignment_statements(
+                model,
+                &artifact.hir,
+                &artifact.mir,
+                limits,
+            )?;
+            split_canonical_assignment_phases(model, &artifact.mir, assignments, limits)?
         }
         None => {
             let live_assignment_steps = live_native_assignment_steps(model);
-            live_assignment_steps
+            let assignments = live_assignment_steps
                 .iter()
                 .map(|step| lower_assignment_step_with_limits(model, step, limits))
-                .collect::<JitResult<Vec<_>>>()?
+                .collect::<JitResult<Vec<_>>>()?;
+            (assignments, Vec::new())
         }
     };
-    let mut dependencies = AssignmentDependencies::default();
-    collect_assignment_dependencies(&assignments, &mut dependencies);
+    let (assignment, assignment_dependencies) =
+        append_assignment_pass(&assignments, image, entry_starts)?;
+    let (post_assignment, post_assignment_dependencies) = if post_assignments.is_empty() {
+        (None, AssignmentDependencies::default())
+    } else {
+        let (entry, dependencies) = append_assignment_pass(&post_assignments, image, entry_starts)?;
+        (Some(entry), dependencies)
+    };
+    Ok((
+        assignment,
+        post_assignment,
+        assignment_dependencies,
+        post_assignment_dependencies,
+    ))
+}
 
+fn append_assignment_pass(
+    assignments: &[NativeAssignment],
+    image: &mut Vec<u8>,
+    entry_starts: &mut Vec<CodeOffset>,
+) -> JitResult<(CodeOffset, AssignmentDependencies)> {
+    let mut dependencies = AssignmentDependencies::default();
+    collect_assignment_dependencies(assignments, &mut dependencies);
     let bytes = if assignments.is_empty() {
         vec![0xC3]
     } else {
-        codegen::compile_assignment_pass_function(&assignments)?
+        codegen::compile_assignment_pass_function(assignments)?
     };
     let offset = align_image_for_entry(image, entry_starts);
     image.extend_from_slice(&bytes);
     Ok((offset, dependencies))
+}
+
+fn split_canonical_assignment_phases(
+    model: &CompiledModel,
+    mir: &MirModel,
+    mut assignments: Vec<NativeAssignment>,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<(Vec<NativeAssignment>, Vec<NativeAssignment>)> {
+    let Some(split_index) = assignments
+        .iter()
+        .position(native_assignment_reads_contribution_current)
+    else {
+        return Ok((assignments, Vec::new()));
+    };
+
+    let post_assignments = assignments.split_off(split_index);
+    let mut post_targets = vec![false; model.num_variables];
+    mark_native_assignment_targets(&post_assignments, &mut post_targets);
+
+    let mut pre_current_roots = vec![false; model.num_variables];
+    mark_canonical_entry_variable_roots(model, mir, limits, false, &mut pre_current_roots)?;
+    propagate_live_assignment_slots(model, &mut pre_current_roots);
+
+    if let Some(slot) = post_targets
+        .iter()
+        .zip(&pre_current_roots)
+        .position(|(post, required)| *post && *required)
+    {
+        let name = model
+            .variable_names
+            .get(slot)
+            .map(SmolStr::as_str)
+            .unwrap_or("<unnamed>");
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "assignment variable '{name}' (slot {slot}) depends on a contribution current but is required before contribution-current evaluation"
+            )
+            .into(),
+        });
+    }
+
+    Ok((assignments, post_assignments))
+}
+
+fn native_assignment_reads_contribution_current(assignment: &NativeAssignment) -> bool {
+    match assignment {
+        NativeAssignment::Direct { program, .. } => {
+            native_program_reads_contribution_current(program)
+        }
+        NativeAssignment::Indexed { index, value, .. } => {
+            native_program_reads_contribution_current(index)
+                || native_program_reads_contribution_current(value)
+        }
+        NativeAssignment::Loop { condition, body } => {
+            native_program_reads_contribution_current(condition)
+                || body
+                    .iter()
+                    .any(native_assignment_reads_contribution_current)
+        }
+    }
+}
+
+fn native_program_reads_contribution_current(program: &NativeProgram) -> bool {
+    !program.current_pair_dependencies().is_empty()
+        || !program.prior_current_dependencies().is_empty()
+}
+
+fn mark_native_assignment_targets(assignments: &[NativeAssignment], targets: &mut [bool]) {
+    for assignment in assignments {
+        match assignment {
+            NativeAssignment::Direct { var_index, .. } => {
+                if let Some(target) = targets.get_mut(*var_index) {
+                    *target = true;
+                }
+            }
+            NativeAssignment::Indexed { base, len, .. } => {
+                let end = base.saturating_add(*len).min(targets.len());
+                for target in targets.iter_mut().take(end).skip(*base) {
+                    *target = true;
+                }
+            }
+            NativeAssignment::Loop { body, .. } => {
+                mark_native_assignment_targets(body, targets);
+            }
+        }
+    }
 }
 
 fn collect_assignment_dependencies(
@@ -3102,7 +3203,7 @@ fn live_canonical_assignment_slots(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<bool>> {
     let mut live = native_observable_assignment_roots(model);
-    mark_canonical_entry_variable_roots(model, mir, limits, &mut live)?;
+    mark_canonical_entry_variable_roots(model, mir, limits, true, &mut live)?;
     propagate_live_assignment_slots(model, &mut live);
     Ok(live)
 }
@@ -4142,6 +4243,7 @@ fn mark_canonical_entry_variable_roots(
     model: &CompiledModel,
     mir: &MirModel,
     limits: NativeLoweringLimits<'_>,
+    include_noise: bool,
     live: &mut [bool],
 ) -> JitResult<()> {
     let canonical_noise_plan = if model.noise_sources.is_empty() {
@@ -4244,30 +4346,32 @@ fn mark_canonical_entry_variable_roots(
         }
     }
 
-    let noise_limits = limits
-        .with_available_current_pairs(&available_current_pairs)
-        .with_prior_current_probes(&prior_current_probes);
-    for (source_index, source) in model.noise_sources.iter().enumerate() {
-        let psd_program = lower_noise_psd_program(
-            model,
-            canonical_noise_plan.as_ref(),
-            source_index,
-            source,
-            &source.psd_program,
-            noise_limits,
-        )?;
-        mark_native_program_variable_reads(&psd_program, live);
-
-        if let Some(program) = &source.exponent_program {
-            let exponent_program = lower_noise_exponent_program(
+    if include_noise {
+        let noise_limits = limits
+            .with_available_current_pairs(&available_current_pairs)
+            .with_prior_current_probes(&prior_current_probes);
+        for (source_index, source) in model.noise_sources.iter().enumerate() {
+            let psd_program = lower_noise_psd_program(
                 model,
                 canonical_noise_plan.as_ref(),
                 source_index,
                 source,
-                program,
+                &source.psd_program,
                 noise_limits,
             )?;
-            mark_native_program_variable_reads(&exponent_program, live);
+            mark_native_program_variable_reads(&psd_program, live);
+
+            if let Some(program) = &source.exponent_program {
+                let exponent_program = lower_noise_exponent_program(
+                    model,
+                    canonical_noise_plan.as_ref(),
+                    source_index,
+                    source,
+                    program,
+                    noise_limits,
+                )?;
+                mark_native_program_variable_reads(&exponent_program, live);
+            }
         }
     }
 
@@ -4608,6 +4712,56 @@ fn push_prior_current_probe_aliases(
                 neg: pos,
                 current_index,
                 inverted: true,
+            },
+        );
+    }
+}
+
+fn push_completed_current_probe_aliases(
+    probes: &mut Vec<PriorCurrentProbe>,
+    current_index: usize,
+    pos: usize,
+    neg: usize,
+    terminal_count: usize,
+) {
+    push_prior_current_probe_aliases(probes, current_index, pos, neg);
+    if pos < terminal_count {
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos,
+                neg: CURRENT_PAIR_GROUND,
+                current_index,
+                inverted: false,
+            },
+        );
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: CURRENT_PAIR_GROUND,
+                neg: pos,
+                current_index,
+                inverted: true,
+            },
+        );
+    }
+    if neg < terminal_count {
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: neg,
+                neg: CURRENT_PAIR_GROUND,
+                current_index,
+                inverted: true,
+            },
+        );
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: CURRENT_PAIR_GROUND,
+                neg,
+                current_index,
+                inverted: false,
             },
         );
     }
@@ -5594,8 +5748,92 @@ endmodule
             .expect("canonical guarded assignment current compiles");
         assert_eq!(
             native.assignment_current_pairs().len(),
-            1,
-            "native metadata records the guarded terminal-current dependency"
+            0,
+            "pre-current assignments must not read the terminal-current cache"
+        );
+        assert_eq!(native.plan_stats().assignment_entry_points, 2);
+        assert_eq!(
+            native.post_assignment_prior_currents(),
+            &[0],
+            "the post-current assignment reads the exact contribution slot"
+        );
+    }
+
+    #[test]
+    fn canonical_post_current_assignments_preserve_source_order() {
+        let source = r#"
+module native_canonical_post_current_order(p, n);
+  inout p, n;
+  electrical p, n;
+  real before, sensed, after;
+  analog begin
+    before = 1.0;
+    I(p, n) <+ V(p, n);
+    sensed = I(p, n) + before;
+    before = 2.0;
+    after = sensed + before;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("post-current assignment phases compile");
+        let variable = |name: &str| {
+            model
+                .variable_names
+                .iter()
+                .position(|candidate| candidate == name)
+                .unwrap_or_else(|| panic!("fixture has {name} variable"))
+        };
+        let before = variable("before");
+        let sensed = variable("sensed");
+        let after = variable("after");
+        let currents = [3.0_f64];
+        let mut ctx = eval_context(&[], &[0.0, 0.0]);
+        ctx.currents = currents.as_ptr();
+        ctx.currents_len = currents.len();
+        let mut variables = vec![0.0_f64; native.num_variables.max(1)];
+
+        native.run_assignments(&ctx, variables.as_mut_ptr());
+        assert_eq!(variables[before].to_bits(), 1.0_f64.to_bits());
+        assert_eq!(variables[sensed].to_bits(), 0.0_f64.to_bits());
+
+        assert!(native.run_post_assignments(&ctx, variables.as_mut_ptr()));
+        assert_eq!(variables[sensed].to_bits(), 4.0_f64.to_bits());
+        assert_eq!(variables[before].to_bits(), 2.0_f64.to_bits());
+        assert_eq!(variables[after].to_bits(), 6.0_f64.to_bits());
+    }
+
+    #[test]
+    fn canonical_current_dependent_stamp_assignment_is_rejected_as_a_cycle() {
+        let source = r#"
+module native_canonical_current_assignment_cycle(p, n);
+  inout p, n;
+  electrical p, n;
+  real sensed;
+  analog begin
+    sensed = I(p, n);
+    I(p, n) <+ sensed;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("current-dependent stamp assignment must be rejected");
+
+        let message = error.to_string();
+        assert!(message.contains("sensed"), "{message}");
+        assert!(
+            message.contains("required before contribution-current evaluation"),
+            "{message}"
         );
     }
 
