@@ -47,7 +47,7 @@
 use crate::device::traits::{
     DynamicDevice, MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice,
 };
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 use std::f64::consts::PI;
 
 //=============================================================================
@@ -116,8 +116,6 @@ pub struct XyceCoreTrial {
     pub p: Value,
     /// `1 + (1-gap/path) * P`, the normalized branch factor.
     pub mid: Value,
-    /// Vacuum inductance multiplied by `mid`.
-    pub effective_inductance: Value,
     /// Applied field H before optional gap/turning-point display filtering.
     pub applied_field: Value,
     /// Forward-Euler magnetic update produced by this Newton evaluation.
@@ -164,53 +162,7 @@ impl Default for JilesAthertonParams {
 }
 
 impl JilesAthertonParams {
-    /// Create parameters for a typical power ferrite core
-    pub fn power_ferrite() -> Self {
-        Self {
-            ms: 0.4,
-            a: 200.0,
-            k: 150.0,
-            c: 0.1,
-            alpha: 1e-4,
-            area: 1e-4,
-            length: 0.08,
-            n_turns: 50.0,
-            gap: 0.0,
-            xyce_core: false,
-            xyce_core_level2: false,
-            xyce_core_clim: 0.005,
-            xyce_core_include_m_equation: true,
-            delta_v: 0.1,
-            v_inf: 1.0,
-            delta_v_scaling: 1.0e3,
-            beta_h: 0.0001,
-            beta_m: 3.125e-5,
-        }
-    }
 
-    /// Create parameters for silicon steel (transformer grade)
-    pub fn silicon_steel() -> Self {
-        Self {
-            ms: 1.6,
-            a: 500.0,
-            k: 300.0,
-            c: 0.05,
-            alpha: 5e-4,
-            area: 2e-4,
-            length: 0.2,
-            n_turns: 100.0,
-            gap: 0.0,
-            xyce_core: false,
-            xyce_core_level2: false,
-            xyce_core_clim: 0.005,
-            xyce_core_include_m_equation: true,
-            delta_v: 0.1,
-            v_inf: 1.0,
-            delta_v_scaling: 1.0e3,
-            beta_h: 0.0001,
-            beta_m: 3.125e-5,
-        }
-    }
 
     /// Create parameters for nickel-iron (permalloy-like)
     pub fn permalloy() -> Self {
@@ -236,10 +188,6 @@ impl JilesAthertonParams {
         }
     }
 
-    /// Calculate reluctance factor for inductance calculation
-    pub fn reluctance_factor(&self) -> Value {
-        self.length / (self.area * self.n_turns * self.n_turns)
-    }
 
     /// Calculate base inductance (at Ms = 0)
     /// L = μ₀ * N² * A / l
@@ -713,19 +661,6 @@ impl JilesAthertonInductor {
         }
     }
 
-    /// Evaluate the accepted-step constitutive state for a Newton trial.
-    ///
-    /// Xyce's `MutIndNonLin` devices solve the magnetization update together
-    /// with the electrical branch equation. Keeping this operation pure lets
-    /// the transient assembler linearize that coupled equation without
-    /// contaminating rejected Newton attempts.
-    pub fn xyce_core_trial(&self, current: Value, voltage: Value) -> Option<XyceCoreTrial> {
-        if !self.params.xyce_core {
-            return None;
-        }
-
-        self.xyce_core_trial_with_update(current, voltage, self.xyce_mag_update)
-    }
 
     /// Evaluate one source-ordered MutIndNonLin update using an explicit
     /// `MagVarUpdate` value.  Keeping the carried update as an argument makes
@@ -774,12 +709,10 @@ impl JilesAthertonInductor {
         };
         let m_new = old_m + magnetization_update;
         let mid = 1.0 + (1.0 - self.params.gap / self.params.length) * p;
-        let effective_inductance = self.params.base_inductance() * mid;
         Some(XyceCoreTrial {
             magnetization: m_new,
             p,
             mid,
-            effective_inductance,
             applied_field: happ,
             magnetization_update,
             latest_magnetization: latest_m,
@@ -1043,7 +976,6 @@ impl JilesAthertonInductor {
             magnetization: latest_m,
             p,
             mid,
-            effective_inductance,
             applied_field: happ,
             magnetization_update: latest_m - old_m,
             latest_magnetization: latest_m,
@@ -1198,7 +1130,6 @@ impl JilesAthertonInductor {
             magnetization,
             p,
             mid,
-            effective_inductance,
             applied_field: happ,
             magnetization_update: magnetization - self.state.m,
             latest_magnetization: magnetization,
@@ -2021,10 +1952,6 @@ impl JilesAthertonInductor {
         );
     }
 
-    /// Get hysteresis loop area (approximates core loss per cycle)
-    pub fn core_loss_per_cycle(&self) -> Value {
-        self.core_loss
-    }
 
     /// Calculate equivalent resistance for trapezoidal integration
     fn req(&self, dt: Value) -> Value {

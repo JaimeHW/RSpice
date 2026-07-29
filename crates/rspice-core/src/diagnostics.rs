@@ -117,23 +117,8 @@ impl Diagnostic {
         }
     }
 
-    /// Add time context
-    pub fn at_time(mut self, time: Value) -> Self {
-        self.time = Some(time);
-        self
-    }
 
-    /// Add location context (node name, element name)
-    pub fn at_location(mut self, location: impl Into<String>) -> Self {
-        self.location = Some(location.into());
-        self
-    }
 
-    /// Add additional details
-    pub fn with_details(mut self, details: impl Into<String>) -> Self {
-        self.details = Some(details.into());
-        self
-    }
 
     /// Create an info diagnostic
     pub fn info(category: DiagnosticCategory, message: impl Into<String>) -> Self {
@@ -200,13 +185,6 @@ impl ConvergenceQuality {
         Self::default()
     }
 
-    /// Record a successful solve
-    pub fn record_solve(&mut self, iterations: usize, residual: Value) {
-        self.total_iterations += iterations;
-        if residual > self.max_residual {
-            self.max_residual = residual;
-        }
-    }
 
     /// Record GMIN stepping usage
     pub fn record_gmin_stepping(&mut self) {
@@ -229,10 +207,6 @@ impl ConvergenceQuality {
         self.timestep_reductions += 1;
     }
 
-    /// Record an LTE rejection
-    pub fn record_lte_rejection(&mut self) {
-        self.lte_rejections += 1;
-    }
 
     /// Calculate average iterations per solve
     pub fn finalize(&mut self, total_solves: usize) {
@@ -334,13 +308,6 @@ impl SimulationDiagnostics {
             .collect()
     }
 
-    /// Get diagnostics filtered by category
-    pub fn by_category(&self, category: DiagnosticCategory) -> Vec<&Diagnostic> {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.category == category)
-            .collect()
-    }
 
     /// Get all warnings
     pub fn warnings(&self) -> Vec<&Diagnostic> {
@@ -352,12 +319,6 @@ impl SimulationDiagnostics {
         self.by_level(DiagnosticLevel::Error)
     }
 
-    /// Check if any warnings were generated
-    pub fn has_warnings(&self) -> bool {
-        self.diagnostics
-            .iter()
-            .any(|d| d.level == DiagnosticLevel::Warning)
-    }
 
     /// Check if any errors were generated
     pub fn has_errors(&self) -> bool {

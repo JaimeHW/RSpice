@@ -157,10 +157,6 @@ impl VerilogADevices {
         self.devices.get_mut(index)
     }
 
-    /// Find device by name
-    pub fn find_by_name(&self, name: &str) -> Option<&VerilogADevice> {
-        self.devices.iter().find(|d| d.name.as_str() == name)
-    }
 
     /// Iterate over devices
     pub fn iter(&self) -> impl Iterator<Item = &VerilogADevice> {
@@ -193,25 +189,6 @@ impl VerilogADevices {
         }
     }
 
-    /// Stamp all devices into matrix and RHS, returning the first model
-    /// diagnostic instead of unwinding across the simulator boundary.
-    pub fn try_stamp_all<M, R>(
-        &mut self,
-        circuit_voltages: &[Value],
-        matrix_add: M,
-        rhs_add: R,
-    ) -> Result<(), String>
-    where
-        M: FnMut(usize, usize, Value),
-        R: FnMut(usize, Value),
-    {
-        self.try_stamp_all_with_mode(
-            circuit_voltages,
-            matrix_add,
-            rhs_add,
-            VerilogAEvaluationMode::NewtonLimited,
-        )
-    }
 
     /// Stamp every device with an explicit named-limiter evaluation policy.
     pub fn try_stamp_all_with_mode<M, R>(
@@ -243,10 +220,6 @@ impl VerilogADevices {
         self.devices.iter().all(VerilogADevice::limiter_converged)
     }
 
-    /// Get total number of internal nodes across all devices
-    pub fn total_internal_nodes(&self) -> usize {
-        self.devices.iter().map(|d| d.num_internal_nodes()).sum()
-    }
 
     /// Remap all terminal and internal circuit node IDs after topology changes.
     pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {

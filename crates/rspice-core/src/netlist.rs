@@ -11,6 +11,7 @@
 //! - Analysis commands (.OP, .DC, .AC, .DISTO, .TRAN, .NOISE, .PZ, .SENS, .FOUR, .STEP, .MC, .TEMP)
 //! - File inclusion (.INCLUDE, .LIB)
 //! - Subcircuits with parameter passing
+use crate::config::ExpressionDialect;
 
 mod add_resistors;
 mod ast;
@@ -38,7 +39,7 @@ pub use add_resistors::*;
 pub use ast::*;
 pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
 pub use expr::{
-    ExpressionDialect, ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
+    ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
 };
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
@@ -50,7 +51,7 @@ pub(crate) use flattener::{
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
 pub use include::{
-    DEFAULT_MAX_INCLUDE_DEPTH, IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle,
+    IncludeProcessor, ResolvedIncludeDependency, SealedSourceBundle,
     SealedSourceEdge, normalize_source_path_literal, parse_include_directive, parse_lib_directive,
 };
 pub use initcond::{
@@ -919,15 +920,6 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
     }
 
-    /// Parse with include resolution and validate output symbols.
-    pub fn parse_validated_with_path(
-        input: &str,
-        file_path: &std::path::Path,
-    ) -> Result<Self, ParseError> {
-        finish_non_aborting_parse(Self::parse_validated_with_path_and_abort(
-            input, file_path, &NoAbort,
-        ))
-    }
 
     /// Parse with include resolution, validate output symbols, and observe
     /// cooperative cancellation.
@@ -1232,15 +1224,6 @@ impl Netlist {
         ))
     }
 
-    /// Parse a netlist file with include expansion and cooperative
-    /// cancellation. File reads are chunked so cancellation can be observed
-    /// while ingesting unusually large decks.
-    pub fn parse_file_with_abort(
-        path: &std::path::Path,
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, ParseWithAbortError> {
-        Self::parse_file_with_options_and_abort(path, NetlistParseOptions::default(), abort)
-    }
 
     /// Parse a netlist file with explicit options and cooperative cancellation.
     pub fn parse_file_with_options_and_abort(
@@ -1322,20 +1305,6 @@ impl Netlist {
         ))
     }
 
-    /// Parse a netlist file with additional include search paths and
-    /// cooperative cancellation.
-    pub fn parse_file_with_search_paths_and_abort(
-        path: &std::path::Path,
-        search_paths: &[std::path::PathBuf],
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, ParseWithAbortError> {
-        Self::parse_file_with_search_paths_and_options_and_abort(
-            path,
-            search_paths,
-            NetlistParseOptions::default(),
-            abort,
-        )
-    }
 
     /// Parse a file with search paths, explicit options, and cancellation.
     pub fn parse_file_with_search_paths_and_options_and_abort(
@@ -1360,22 +1329,6 @@ impl Netlist {
         )
     }
 
-    /// Parse netlist source text as if it lived at `path`, with additional
-    /// include search directories — the source-text twin of
-    /// [`Netlist::parse_file_with_search_paths`], for callers that rewrite
-    /// the deck before parsing (multi-run expansion, parameter overrides).
-    pub fn parse_with_search_paths(
-        input: &str,
-        path: &std::path::Path,
-        search_paths: &[std::path::PathBuf],
-    ) -> Result<Self, ParseError> {
-        Self::parse_with_search_paths_and_options(
-            input,
-            path,
-            search_paths,
-            NetlistParseOptions::default(),
-        )
-    }
 
     /// Parse source text with search paths and explicit parsing options.
     pub fn parse_with_search_paths_and_options(
@@ -1393,22 +1346,6 @@ impl Netlist {
         ))
     }
 
-    /// Parse source text with additional include search paths and cooperative
-    /// cancellation.
-    pub fn parse_with_search_paths_and_abort(
-        input: &str,
-        path: &std::path::Path,
-        search_paths: &[std::path::PathBuf],
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, ParseWithAbortError> {
-        Self::parse_with_search_paths_and_options_and_abort(
-            input,
-            path,
-            search_paths,
-            NetlistParseOptions::default(),
-            abort,
-        )
-    }
 
     /// Parse source text with search paths, explicit options, and cancellation.
     pub fn parse_with_search_paths_and_options_and_abort(
@@ -2098,10 +2035,6 @@ impl Netlist {
         ensure_parse_not_aborted(abort)
     }
 
-    /// Add a global node
-    pub fn add_global(&mut self, node: &str) {
-        self.global_nodes.insert(node.to_uppercase());
-    }
 
     /// Check if a node is global
     pub fn is_global(&self, node: &str) -> bool {
@@ -12279,7 +12212,7 @@ mod tests {
 
     #[test]
     fn xyce_nonlinear_continuation_aliases_and_selectors_are_typed() {
-        use NonlinearContinuationMode as Mode;
+        use crate::config::NonlinearContinuationMode as Mode;
 
         for (value, expected) in [
             ("standard", Mode::Standard),

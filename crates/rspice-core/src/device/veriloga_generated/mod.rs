@@ -908,6 +908,7 @@ mod tests {
     /// `stamp_current_packed` exists so a backend carrying derivatives as an
     /// array does not need a distinct entry point per arity. It is only useful
     /// if it puts exactly what the loose-argument calls put.
+    #[cfg(feature = "veriloga-builtins-base")]
     fn stamp_both_ways(
         derivative0: crate::Value,
         derivative1: crate::Value,

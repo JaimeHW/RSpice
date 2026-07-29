@@ -13,14 +13,14 @@ pub(super) struct StaticMatrixChargeStamper<'a> {
 
 impl crate::device::MatrixStamper for StaticMatrixChargeStamper<'_> {
     #[inline]
-    fn stamp(&mut self, row: crate::circuit::NodeId, col: crate::circuit::NodeId, value: Value) {
+    fn stamp(&mut self, row: crate::NodeId, col: crate::NodeId, value: Value) {
         if row > 0 && col > 0 {
             self.matrix.add(row - 1, col - 1, value);
         }
     }
 
     #[inline]
-    fn stamp_rhs(&mut self, index: crate::circuit::NodeId, value: Value) {
+    fn stamp_rhs(&mut self, index: crate::NodeId, value: Value) {
         if index > 0 && index <= self.rhs.len() {
             self.rhs[index - 1] += value;
         }

@@ -1,7 +1,25 @@
-//! Engine configuration types.
+//! Simulation configuration: what the engine was asked to do.
+//!
+//! `SimulationConfig` used to live in `engine`, which meant the circuit
+//! store, the solver and the device models all had to reach *up* into the
+//! orchestrator to read a tolerance or a dialect flag. Nothing about a
+//! configuration struct requires the module that consumes it, so it sits
+//! below everything that reads it and those references are downward.
+//!
+//! `NonlinearContinuationMode` came from `netlist::ast` for the same reason:
+//! it is an `.OPTIONS` selector that configures a solve, not syntax the parser
+//! produces for its own use.
+//!
+//! A setting whose meaning belongs to one subsystem is named here but defined
+//! there — `IntegrationMethod` and `TransientLteReference` are the estimator's
+//! own vocabulary, so they live in `numerics::integration` and this module
+//! reaches down for them.
+//!
+//! Turning `.OPTIONS` text into one of these is a different job and stays in
+//! `engine::config_resolver`, where the rest of elaboration lives.
 
 use crate::Value;
-use crate::netlist::{NonlinearContinuationMode, TransientLteReference};
+use crate::numerics::integration::TransientLteReference;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use thiserror::Error;
 
@@ -88,6 +106,21 @@ pub enum SimulationConfigError {
         /// Preceding time value.
         previous: Value,
     },
+}
+
+/// Dialect-specific expression-function semantics.
+///
+/// Beside [`SpiceDialect`] rather than in `netlist`, because the expression VM
+/// and the power operator decide semantics from it — `log(x)` is natural log
+/// in ngspice and base-10 in Xyce — and they sit below the parser that used to
+/// own the enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExpressionDialect {
+    /// ngspice-compatible expression functions: `log(x)` is natural log.
+    #[default]
+    Ngspice,
+    /// Xyce-compatible expression functions: `log(x)` is base-10 log.
+    Xyce,
 }
 
 /// Broad SPICE compatibility policy for internal device-model selection.
@@ -190,7 +223,7 @@ pub struct SimulationConfig {
     /// 2 = force transport, 3 = force inertial.
     pub digital_delay_type: Option<i64>,
     /// Integration method for transient analysis
-    pub integration_method: crate::analysis::IntegrationMethod,
+    pub integration_method: crate::numerics::integration::IntegrationMethod,
     /// Broad SPICE compatibility policy used by config resolution.
     pub spice_dialect: SpiceDialect,
     /// Lossless transmission-line delay interpolation used in Xyce mode.
@@ -647,7 +680,7 @@ impl Default for SimulationConfig {
             temperature: crate::constants::TEMP_REFERENCE,
             ramptime: 0.0,
             digital_delay_type: None,
-            integration_method: crate::analysis::IntegrationMethod::TrapGear,
+            integration_method: crate::numerics::integration::IntegrationMethod::TrapGear,
             spice_dialect: SpiceDialect::BestAvailable,
             xyce_tra_interpolation: XyceTraInterpolation::default(),
             jfet_level2_model: JfetLevel2Model::DialectDefault,
@@ -766,4 +799,49 @@ fn validate_locked_time_grid(grid: &[Value]) -> Result<(), SimulationConfigError
         previous = Some((index, value));
     }
     Ok(())
+}
+
+/// `.OPTIONS NONLIN CONTINUATION=...`.
+///
+/// The variants preserve the canonical Xyce selectors so configuration
+/// resolution never silently turns an unsupported continuation algorithm into
+/// a different solve. Execution sites must explicitly match the modes they
+/// implement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonlinearContinuationMode {
+    Standard,
+    Natural,
+    Mosfet,
+    Gmin,
+    PseudoTransient,
+    SimultaneousSourceStep,
+    SequentialSourceStep,
+}
+
+impl NonlinearContinuationMode {
+    /// Canonical numeric selector accepted by Xyce 7.10.
+    pub fn xyce_selector(self) -> i64 {
+        match self {
+            Self::Standard => 0,
+            Self::Natural => 1,
+            Self::Mosfet => 2,
+            Self::Gmin => 3,
+            Self::PseudoTransient => 9,
+            Self::SimultaneousSourceStep => 34,
+            Self::SequentialSourceStep => 35,
+        }
+    }
+
+    pub fn from_xyce_selector(selector: i64) -> Option<Self> {
+        match selector {
+            0 => Some(Self::Standard),
+            1 => Some(Self::Natural),
+            2 => Some(Self::Mosfet),
+            3 => Some(Self::Gmin),
+            9 => Some(Self::PseudoTransient),
+            34 => Some(Self::SimultaneousSourceStep),
+            35 => Some(Self::SequentialSourceStep),
+            _ => None,
+        }
+    }
 }

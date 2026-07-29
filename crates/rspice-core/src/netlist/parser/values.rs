@@ -280,7 +280,7 @@ pub(super) fn parse_model_params(
     let opened_paren = stream.consume(&TokenKind::LParen);
     let allow_missing_close = opened_paren
         && model_type
-            .map(crate::xspice::CodeModelRegistry::is_builtin_model_name)
+            .map(crate::codemodels::is_builtin_model_name)
             .unwrap_or(false);
 
     loop {
@@ -730,7 +730,7 @@ fn push_model_scalar_expression_param(
 
 fn xspice_model_type_accepts_contiguous_expressions(model_type: Option<&str>) -> bool {
     model_type
-        .map(crate::xspice::CodeModelRegistry::is_builtin_model_name)
+        .map(crate::codemodels::is_builtin_model_name)
         .unwrap_or(false)
 }
 

@@ -8,7 +8,7 @@ use super::smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smo
 use crate::constants::VT_REFERENCE;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 /// Separate smoothing width for Vds-dependent region transitions.
 ///

@@ -499,12 +499,12 @@ impl Engine {
         family: &str,
         instance_params: &[(String, f64)],
         deferred_params: &[(String, String)],
-        node_drain: crate::circuit::NodeId,
-        node_gate: crate::circuit::NodeId,
-        node_source: crate::circuit::NodeId,
-        node_body: crate::circuit::NodeId,
-        node_e: crate::circuit::NodeId,
-        node_p: crate::circuit::NodeId,
+        node_drain: crate::NodeId,
+        node_gate: crate::NodeId,
+        node_source: crate::NodeId,
+        node_body: crate::NodeId,
+        node_e: crate::NodeId,
+        node_p: crate::NodeId,
     ) -> Result<crate::device::mosfet::b3soi::common::B3SoiInstanceIc, SimulationError> {
         for (name, expr) in deferred_params {
             if b3soi_ic_param_name(name) {
@@ -1246,9 +1246,9 @@ fn allocate_b3soi_ic_branch(
     family: &str,
     name: &str,
     value: f64,
-    node_pos: crate::circuit::NodeId,
-    node_neg: crate::circuit::NodeId,
-) -> Result<Option<crate::circuit::NodeId>, SimulationError> {
+    node_pos: crate::NodeId,
+    node_neg: crate::NodeId,
+) -> Result<Option<crate::NodeId>, SimulationError> {
     if node_pos == node_neg {
         if value.abs() <= 1.0e-15 {
             return Ok(None);

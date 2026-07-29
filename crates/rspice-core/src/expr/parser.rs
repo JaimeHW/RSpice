@@ -952,7 +952,7 @@ mod tests {
         let program = compile(&ast);
         let mut vm = Vm::new();
         let ctx =
-            Context::dc(&[], &[]).with_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+            Context::dc(&[], &[]).with_expression_dialect(crate::config::ExpressionDialect::Xyce);
         vm.execute(&program, &ctx)
     }
 

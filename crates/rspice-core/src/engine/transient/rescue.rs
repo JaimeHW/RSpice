@@ -38,7 +38,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn rescue_transient_step_with_gmin_continuation(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         seed: &[Value],
@@ -74,7 +74,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     fn walk_gmin_continuation_levels(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         seed: &[Value],

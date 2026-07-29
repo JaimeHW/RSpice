@@ -28,4 +28,4 @@ mod dc;
 pub use ac::{
     AcSweepType, AcTransferAnalyzer, AcTransferConfig, AcTransferPoint, AcTransferResult,
 };
-pub use dc::{TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult};
+pub use dc::{TransferFunctionConfig, TransferFunctionResult};

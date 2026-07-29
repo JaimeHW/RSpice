@@ -566,11 +566,6 @@ impl CircuitData {
         self.inductors.names.clone()
     }
 
-    /// Resolve a probe name to the inductor state tracked during periodic RF analyses.
-    pub fn resolve_inductor_probe(&self, probe_name: &str) -> Option<InductorProbeInfo> {
-        let branch_ordinal = self.get_branch_by_name(probe_name)?;
-        self.inductor_probe_for_branch(branch_ordinal)
-    }
 
     /// Resolve an existing branch ordinal to the owning inductor probe metadata.
     pub fn inductor_probe_for_branch(&self, branch_ordinal: NodeId) -> Option<InductorProbeInfo> {
@@ -687,18 +682,6 @@ impl CircuitData {
             });
     }
 
-    /// Register a multi-winding transformer runtime binding.
-    pub fn add_multi_winding_transformer(
-        &mut self,
-        branch_ordinals: Vec<NodeId>,
-        device: crate::device::MultiWindingTransformer,
-    ) {
-        self.multi_winding_transformers
-            .push(MultiWindingTransformerBinding {
-                branch_ordinals,
-                device,
-            });
-    }
 
     /// Resolve all pending CCCS/CCVS/ISWITCH control element references.
     /// Call this after all elements have been added to the circuit

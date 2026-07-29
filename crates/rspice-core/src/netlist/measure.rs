@@ -133,21 +133,7 @@ impl TrigSpec {
         }
     }
 
-    pub fn with_edge(mut self, edge: EdgeType) -> Self {
-        if let TriggerEvent::When(condition) = &mut self.event {
-            condition.occurrence.edge = edge;
-        }
-        self
-    }
 
-    pub fn with_number(mut self, n: usize) -> Self {
-        if let TriggerEvent::When(condition) = &mut self.event {
-            // Preserve the infallible builder while failing closed for values
-            // that the signed Xyce occurrence domain cannot represent.
-            condition.occurrence.number = isize::try_from(n).unwrap_or(0);
-        }
-        self
-    }
 }
 
 /// Type of measurement to perform

@@ -55,10 +55,6 @@ impl EyeMeasurements {
         Self::default()
     }
 
-    /// Calculate eye area as normalized value
-    pub fn calculate_eye_area(&self) -> f64 {
-        self.eye_height * self.eye_width
-    }
 
     /// Calculate Q-factor from eye height and noise
     pub fn calculate_q(&self, v_high: f64, v_low: f64, sigma_high: f64, sigma_low: f64) -> f64 {
@@ -85,54 +81,12 @@ impl EyeMeasurements {
         }
     }
 
-    /// Format eye height with SI prefix
-    pub fn format_height(&self) -> String {
-        format_si_voltage(self.eye_height)
-    }
 
-    /// Format eye width as percentage of UI
-    pub fn format_width(&self) -> String {
-        format!("{:.1}% UI", self.eye_width * 100.0)
-    }
 
-    /// Format jitter with SI prefix
-    pub fn format_jitter(&self) -> String {
-        format_si_time(self.jitter_pp)
-    }
 
-    /// Format rise time with SI prefix
-    pub fn format_rise_time(&self) -> String {
-        format_si_time(self.rise_time)
-    }
 
-    /// Format fall time with SI prefix
-    pub fn format_fall_time(&self) -> String {
-        format_si_time(self.fall_time)
-    }
 
-    /// Format BER in scientific notation
-    pub fn format_ber(&self) -> String {
-        if self.estimated_ber <= 0.0 {
-            "< 1e-15".to_string()
-        } else if self.estimated_ber >= 1.0 {
-            "> 1".to_string()
-        } else {
-            format!("{:.2e}", self.estimated_ber)
-        }
-    }
 
-    /// Format data rate
-    pub fn format_data_rate(&self) -> String {
-        if self.data_rate >= 1e12 {
-            format!("{:.2} Tbps", self.data_rate / 1e12)
-        } else if self.data_rate >= 1e9 {
-            format!("{:.2} Gbps", self.data_rate / 1e9)
-        } else if self.data_rate >= 1e6 {
-            format!("{:.2} Mbps", self.data_rate / 1e6)
-        } else {
-            format!("{:.2} kbps", self.data_rate / 1e3)
-        }
-    }
 }
 
 // =============================================================================
@@ -598,37 +552,7 @@ fn erfc_approx(x: f64) -> f64 {
     if x >= 0.0 { tau } else { 2.0 - tau }
 }
 
-/// Format voltage with SI prefix
-fn format_si_voltage(v: f64) -> String {
-    let abs_v = v.abs();
-    if abs_v >= 1.0 {
-        format!("{:.2} V", v)
-    } else if abs_v >= 1e-3 {
-        format!("{:.2} mV", v * 1e3)
-    } else if abs_v >= 1e-6 {
-        format!("{:.2} µV", v * 1e6)
-    } else {
-        format!("{:.2} nV", v * 1e9)
-    }
-}
 
-/// Format time with SI prefix
-fn format_si_time(t: f64) -> String {
-    let abs_t = t.abs();
-    if abs_t >= 1.0 {
-        format!("{:.2} s", t)
-    } else if abs_t >= 1e-3 {
-        format!("{:.2} ms", t * 1e3)
-    } else if abs_t >= 1e-6 {
-        format!("{:.2} µs", t * 1e6)
-    } else if abs_t >= 1e-9 {
-        format!("{:.2} ns", t * 1e9)
-    } else if abs_t >= 1e-12 {
-        format!("{:.2} ps", t * 1e12)
-    } else {
-        format!("{:.2} fs", t * 1e15)
-    }
-}
 
 // =============================================================================
 // Tests

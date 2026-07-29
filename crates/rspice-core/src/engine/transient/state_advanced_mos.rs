@@ -5,7 +5,7 @@ use super::*;
 impl Engine {
     #[inline]
     pub(super) fn initialize_b3soi_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> B3SoiTransientHistory {
         let n = circuit.b3soi.len();
@@ -121,7 +121,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn reseed_b3soi_first_transient_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
         history: &mut B3SoiTransientHistory,
     ) {
@@ -274,7 +274,7 @@ impl Engine {
     /// the thermal `qth` companion onto the temperature node.
     #[inline]
     pub(super) fn stamp_b3soi_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -363,7 +363,7 @@ impl Engine {
     /// Commit the SOI (DD/FD/PD) charge history after an accepted timestep.
     #[inline]
     pub(super) fn update_b3soi_history(
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         voltages: &[Value],
         coeff: &CompanionCoefficients,
         dt: Value,
@@ -425,7 +425,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_bsim3_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> Bsim3TransientHistory {
         let n = circuit.bsim3v3.len();
@@ -591,7 +591,7 @@ impl Engine {
     /// charge-deficit row from b3ld.c.
     #[inline]
     pub(super) fn stamp_bsim3_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -659,7 +659,7 @@ impl Engine {
     /// Commit the BSIM3 charge history after an accepted timestep.
     #[inline]
     pub(super) fn update_bsim3_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         voltages: &[Value],
         coeff: &CompanionCoefficients,
         dt: Value,
@@ -712,7 +712,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_bsim4_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> Bsim4TransientHistory {
         let n = circuit.bsim4v8.len();
@@ -954,7 +954,7 @@ impl Engine {
     /// equivalent charge currents (b4ld.c charge load, trnqsMod = 0).
     #[inline]
     pub(super) fn stamp_bsim4_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -1038,7 +1038,7 @@ impl Engine {
     /// Commit the BSIM4 charge history after an accepted timestep.
     #[inline]
     pub(super) fn update_bsim4_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         voltages: &[Value],
         coeff: &CompanionCoefficients,
         trnqs_coeff: &CompanionCoefficients,
@@ -1114,7 +1114,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_ekv26_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> Ekv26TransientHistory {
         let n = circuit.ekv26s.devices.len();
@@ -1173,7 +1173,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_ekv26_transient_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -1199,7 +1199,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn update_ekv26_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         voltages: &[Value],
         coeff: &CompanionCoefficients,
         dt: Value,

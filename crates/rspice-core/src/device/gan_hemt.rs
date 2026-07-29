@@ -162,41 +162,7 @@ impl Default for GanHemtParams {
 }
 
 impl GanHemtParams {
-    /// Create parameters for power switching GaN
-    pub fn power_gan(voltage_rating: Value, current_rating: Value) -> Self {
-        let beta = current_rating / 25.0; // Approximate scaling
-        let cgs = current_rating * 10e-12; // Scale capacitance with current
 
-        Self {
-            vth0: 1.5,
-            beta,
-            bv: voltage_rating * 1.2, // 20% margin
-            cgs,
-            cgd: cgs * 0.1,
-            cds: cgs * 0.5,
-            rs: 0.1 / current_rating,
-            rd: 0.1 / current_rating,
-            rth: 1.0 / current_rating.sqrt(),
-            ..Default::default()
-        }
-    }
-
-    /// Create parameters for RF GaN
-    pub fn rf_gan(ft_ghz: Value) -> Self {
-        // Estimate capacitance from target ft
-        let cgs = 1e-12 / ft_ghz; // Simplified
-
-        Self {
-            vth0: -3.0, // Depletion mode
-            beta: 100e-3,
-            alpha: 1.0,
-            cgs,
-            cgd: cgs * 0.2,
-            cds: cgs * 0.1,
-            lambda: 0.05,
-            ..Default::default()
-        }
-    }
 
     /// Get temperature-adjusted threshold voltage
     pub fn vth_at_temp(&self, temp: Value) -> Value {
@@ -246,14 +212,6 @@ impl Default for GanHemtState {
 }
 
 impl GanHemtState {
-    /// Create state with bias voltages
-    pub fn with_bias(vgs: Value, vds: Value) -> Self {
-        Self {
-            vgs,
-            vds,
-            ..Default::default()
-        }
-    }
 }
 
 //=============================================================================
@@ -390,40 +348,7 @@ impl GanHemt {
         ft / (2.0 * (rg * gds + 2.0 * std::f64::consts::PI * ft * rg * cgd).sqrt())
     }
 
-    /// Update thermal state (for transient)
-    pub fn update_thermal(&mut self, power: Value, ambient_temp: Value, dt: Value) {
-        let tj_target = ambient_temp + power * self.params.rth;
-        let tau = self.params.tau_th;
 
-        // First-order thermal response
-        let alpha = 1.0 - (-dt / tau).exp();
-        self.state.tj = self.state.tj + alpha * (tj_target - self.state.tj);
-        self.state.power = power;
-    }
-
-    /// Check if device is in safe operating area
-    pub fn is_soa_ok(&self, _vgs: Value, vds: Value, ids: Value) -> bool {
-        let tj = self.state.tj;
-
-        // Voltage limit
-        if vds > self.params.bv * 0.9 {
-            return false;
-        }
-
-        // Temperature limit
-        if tj > self.params.tj_max {
-            return false;
-        }
-
-        // Power limit (thermal)
-        let power = ids * vds;
-        let tj_estimated = TREF + power * self.params.rth;
-        if tj_estimated > self.params.tj_max {
-            return false;
-        }
-
-        true
-    }
 }
 
 impl Default for GanHemt {
@@ -453,16 +378,6 @@ pub enum ProcessCorner {
 }
 
 impl ProcessCorner {
-    /// Get all standard corners
-    pub fn all_standard() -> Vec<Self> {
-        vec![
-            Self::Typical,
-            Self::FastFast,
-            Self::SlowSlow,
-            Self::FastSlow,
-            Self::SlowFast,
-        ]
-    }
 
     /// Get corner description
     pub fn name(&self) -> &'static str {
@@ -509,18 +424,6 @@ impl ProcessCorner {
     }
 }
 
-/// Apply process corner to GaN HEMT parameters
-pub fn apply_corner(params: &GanHemtParams, corner: ProcessCorner) -> GanHemtParams {
-    let mut result = params.clone();
-
-    result.vth0 *= corner.vth_scale();
-    result.beta *= corner.mobility_scale();
-    result.cgs *= corner.cap_scale();
-    result.cgd *= corner.cap_scale();
-    result.cds *= corner.cap_scale();
-
-    result
-}
 
 //=============================================================================
 // Statistical Variability
@@ -572,21 +475,6 @@ impl StatisticalVariation {
         result
     }
 
-    /// Generate parameter set for Monte Carlo
-    ///
-    /// Returns parameters with 3-sigma variations applied
-    pub fn three_sigma_samples(&self, base: &GanHemtParams) -> Vec<(&'static str, GanHemtParams)> {
-        vec![
-            ("Vth+3σ", self.apply(base, &[3.0, 0.0, 0.0, 0.0])),
-            ("Vth-3σ", self.apply(base, &[-3.0, 0.0, 0.0, 0.0])),
-            ("β+3σ", self.apply(base, &[0.0, 3.0, 0.0, 0.0])),
-            ("β-3σ", self.apply(base, &[0.0, -3.0, 0.0, 0.0])),
-            ("C+3σ", self.apply(base, &[0.0, 0.0, 3.0, 0.0])),
-            ("C-3σ", self.apply(base, &[0.0, 0.0, -3.0, 0.0])),
-            ("R+3σ", self.apply(base, &[0.0, 0.0, 0.0, 3.0])),
-            ("R-3σ", self.apply(base, &[0.0, 0.0, 0.0, -3.0])),
-        ]
-    }
 }
 
 //=============================================================================

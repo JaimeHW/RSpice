@@ -9,7 +9,7 @@
 #![allow(clippy::too_many_arguments)]
 use super::{Engine, SimulationError, SpiceDialect, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::transient::{
+use crate::numerics::integration::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
 };
 use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};

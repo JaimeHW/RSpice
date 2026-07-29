@@ -52,9 +52,9 @@ impl TestRunner {
         // Pade(1,1), not a defect in it. The hybrid damps where ngspice's order
         // control damps, and tracks the same reference to 0.4%.
         let integration_method = if locked_time_grid.is_some() {
-            rspice_core::analysis::IntegrationMethod::TrapGear
+            rspice_core::numerics::integration::IntegrationMethod::TrapGear
         } else {
-            rspice_core::analysis::IntegrationMethod::Trapezoidal
+            rspice_core::numerics::integration::IntegrationMethod::Trapezoidal
         };
         let config = SimulationConfig {
             locked_time_grid,

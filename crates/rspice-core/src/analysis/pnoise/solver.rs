@@ -57,15 +57,6 @@ impl PnoiseState {
         }
     }
 
-    /// Set PSS waveform for a node
-    pub fn set_waveform(&mut self, node_idx: usize, waveform: Vec<Value>, times: Vec<Value>) {
-        if node_idx < self.num_nodes {
-            self.pss_waveforms[node_idx] = waveform;
-            if self.time_points.is_empty() {
-                self.time_points = times;
-            }
-        }
-    }
 
     /// Number of time samples
     pub fn num_samples(&self) -> usize {
@@ -270,12 +261,6 @@ impl PnoiseSolver {
         &mut self.state
     }
 
-    /// Initialize Floquet analyzer
-    pub fn init_floquet(&mut self, num_harmonics: usize) {
-        let analyzer = FloquetAnalyzer::new(self.state.period, num_harmonics)
-            .with_carrier_freq(self.state.carrier_freq);
-        self.state.floquet = Some(analyzer);
-    }
 
     /// Compute phase noise at all offset frequencies
     pub fn compute(&mut self) -> Result<PnoiseResult, PnoiseError> {

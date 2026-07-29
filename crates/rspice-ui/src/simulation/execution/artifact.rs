@@ -689,10 +689,10 @@ impl PeriodicStateArtifact {
         writer.f64(config.max_period_change);
         writer.option(config.integration_method.as_ref(), |writer, method| {
             writer.u8(match method {
-                rspice_core::analysis::IntegrationMethod::BackwardEuler => 0,
-                rspice_core::analysis::IntegrationMethod::Trapezoidal => 1,
-                rspice_core::analysis::IntegrationMethod::Gear2 => 2,
-                rspice_core::analysis::IntegrationMethod::TrapGear => 3,
+                rspice_core::numerics::integration::IntegrationMethod::BackwardEuler => 0,
+                rspice_core::numerics::integration::IntegrationMethod::Trapezoidal => 1,
+                rspice_core::numerics::integration::IntegrationMethod::Gear2 => 2,
+                rspice_core::numerics::integration::IntegrationMethod::TrapGear => 3,
             });
         });
         writer.usize(config.points_per_period);
@@ -1336,12 +1336,12 @@ impl ResolvedExecutionDependencies {
                                 config_max_period_change: config.max_period_change,
                                 config_integration_method: config.integration_method.map(
                                     |method| match method {
-                                        rspice_core::analysis::IntegrationMethod::BackwardEuler => {
+                                        rspice_core::numerics::integration::IntegrationMethod::BackwardEuler => {
                                             0
                                         }
-                                        rspice_core::analysis::IntegrationMethod::Trapezoidal => 1,
-                                        rspice_core::analysis::IntegrationMethod::Gear2 => 2,
-                                        rspice_core::analysis::IntegrationMethod::TrapGear => 3,
+                                        rspice_core::numerics::integration::IntegrationMethod::Trapezoidal => 1,
+                                        rspice_core::numerics::integration::IntegrationMethod::Gear2 => 2,
+                                        rspice_core::numerics::integration::IntegrationMethod::TrapGear => 3,
                                     },
                                 ),
                                 config_points_per_period: config.points_per_period,
@@ -1535,10 +1535,10 @@ impl ResolvedExecutionDependencies {
                         let integration_method = metadata
                             .config_integration_method
                             .map(|tag| match tag {
-                                0 => Ok(rspice_core::analysis::IntegrationMethod::BackwardEuler),
-                                1 => Ok(rspice_core::analysis::IntegrationMethod::Trapezoidal),
-                                2 => Ok(rspice_core::analysis::IntegrationMethod::Gear2),
-                                3 => Ok(rspice_core::analysis::IntegrationMethod::TrapGear),
+                                0 => Ok(rspice_core::numerics::integration::IntegrationMethod::BackwardEuler),
+                                1 => Ok(rspice_core::numerics::integration::IntegrationMethod::Trapezoidal),
+                                2 => Ok(rspice_core::numerics::integration::IntegrationMethod::Gear2),
+                                3 => Ok(rspice_core::numerics::integration::IntegrationMethod::TrapGear),
                                 _ => Err(ExecutionArtifactError::Transport(format!(
                                     "periodic-state transfer has unknown integration-method tag {tag}"
                                 ))),

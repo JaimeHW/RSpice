@@ -8,7 +8,7 @@
 
 #![allow(clippy::too_many_arguments)]
 use crate::solver::{StaticMatrix, TripletMatrix};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // VCVS (E-element): V_out = gain * V(nc+, nc-)

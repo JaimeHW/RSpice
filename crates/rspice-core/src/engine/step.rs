@@ -370,13 +370,6 @@ impl Engine {
         })
     }
 
-    /// Materialize every member of an already checked `.STEP` plan.
-    pub fn materialize_step_plan(
-        &self,
-        plan: &StepPlan<'_>,
-    ) -> Result<Vec<MaterializedStepRun>, SimulationError> {
-        self.materialize_step_plan_with_abort(plan, &NoAbort)
-    }
 
     /// Materialize one indexed member of a checked `.STEP` plan.
     ///

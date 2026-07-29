@@ -6,7 +6,7 @@
 
 use super::mosfet::MosType;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 use std::collections::HashMap;
 
 const NODE_COUNT: usize = 4;

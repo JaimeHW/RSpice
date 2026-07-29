@@ -137,21 +137,7 @@ impl SimulationResult {
         self.try_voltage(node)
     }
 
-    /// Initialize waveform storage for transient analysis
-    pub fn init_waveforms(&mut self, num_nodes: usize, estimated_points: usize) {
-        self.voltage_waveforms = vec![Vec::with_capacity(estimated_points); num_nodes + 1];
-        self.time_points = Vec::with_capacity(estimated_points);
-    }
 
-    /// Record a time point
-    pub fn record_point(&mut self, time: Value, voltages: &[Value]) {
-        self.time_points.push(time);
-        for (i, &v) in voltages.iter().enumerate() {
-            if i < self.voltage_waveforms.len() {
-                self.voltage_waveforms[i].push(v);
-            }
-        }
-    }
 
     /// Get branch current by index
     ///
@@ -215,7 +201,7 @@ pub struct Simulator {
 
 impl Default for Simulator {
     fn default() -> Self {
-        crate::engine::SimulationConfig::default().into()
+        crate::config::SimulationConfig::default().into()
     }
 }
 
@@ -237,8 +223,8 @@ impl Simulator {
     }
 }
 
-impl From<&crate::engine::SimulationConfig> for Simulator {
-    fn from(config: &crate::engine::SimulationConfig) -> Self {
+impl From<&crate::config::SimulationConfig> for Simulator {
+    fn from(config: &crate::config::SimulationConfig) -> Self {
         Self {
             tolerance: config.tolerance,
             max_iterations: config.max_iterations,
@@ -248,8 +234,8 @@ impl From<&crate::engine::SimulationConfig> for Simulator {
     }
 }
 
-impl From<crate::engine::SimulationConfig> for Simulator {
-    fn from(config: crate::engine::SimulationConfig) -> Self {
+impl From<crate::config::SimulationConfig> for Simulator {
+    fn from(config: crate::config::SimulationConfig) -> Self {
         Self::from(&config)
     }
 }

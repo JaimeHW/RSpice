@@ -8,8 +8,8 @@ use crate::expr::{
     CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict,
     resolve_file_lookup_functions_with_limits,
 };
-use crate::netlist::ExpressionDialect;
-use crate::{Value, circuit::NodeId};
+use crate::config::ExpressionDialect;
+use crate::{NodeId, Value};
 use std::path::Path;
 
 const DERIVATIVE_REL_STEP: Value = 1.0e-6;
@@ -374,10 +374,6 @@ impl Capacitor {
         }
     }
 
-    /// Set initial voltage
-    pub fn set_initial_voltage(&mut self, voltage: Value) {
-        self.voltage_prev = voltage;
-    }
 
     /// Get equivalent conductance for trapezoidal integration
     pub fn geq(&self, dt: Value) -> Value {

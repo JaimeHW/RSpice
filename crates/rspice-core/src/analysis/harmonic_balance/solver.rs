@@ -161,16 +161,6 @@ impl HbSolverState {
             )
     }
 
-    /// Compute solution norm for relative tolerance
-    pub fn solution_norm(&self) -> Value {
-        let sum: Value = self
-            .x
-            .iter()
-            .flat_map(|node| node.iter())
-            .map(|c| c.norm_sqr())
-            .sum();
-        sum.sqrt()
-    }
 
     /// Total number of unknowns
     pub fn total_unknowns(&self) -> usize {
@@ -210,11 +200,6 @@ impl VoltageSourceBranch {
         }
     }
 
-    /// Set AC parameters at the fundamental harmonic (k=1).
-    pub fn with_ac(mut self, magnitude: Value, phase: Value) -> Self {
-        self.set_harmonic_component(1, Complex64::from_polar(magnitude, phase));
-        self
-    }
 
     /// Set AC parameters for a specific harmonic.
     pub fn with_harmonic(mut self, harmonic: usize, magnitude: Value, phase: Value) -> Self {

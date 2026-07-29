@@ -343,17 +343,6 @@ impl CircuitData {
         pairs
     }
 
-    pub fn force_accept_floating_ideal_output_pairs(&self) -> Vec<(NodeId, NodeId)> {
-        let reachable = self.force_accept_ground_reachable_nodes();
-        self.ideal_voltage_output_pairs()
-            .into_iter()
-            .filter(|&(node_pos, node_neg)| {
-                let pos_reachable = reachable.get(node_pos).copied().unwrap_or(false);
-                let neg_reachable = reachable.get(node_neg).copied().unwrap_or(false);
-                !(pos_reachable || neg_reachable)
-            })
-            .collect()
-    }
 
     /// Nodal-prefix unknowns that must not receive generic voltage clamps.
     ///

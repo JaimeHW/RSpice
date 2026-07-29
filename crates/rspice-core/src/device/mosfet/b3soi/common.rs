@@ -3,7 +3,7 @@
 //! Values are transcribed from ngspice-46 `b3soiddld.c` / `b3soiddset.c` /
 //! `b3soiddtemp.c` (the FD and PD sources use the same numeric constants).
 
-use crate::{Value, circuit::NodeId, device::traits::MatrixStamper};
+use crate::{NodeId, Value, device::traits::MatrixStamper};
 use std::collections::HashMap;
 
 pub(crate) const B3SOI_MOBMOD_VALUES: &[i32] = &[0, 1, 2, 3];

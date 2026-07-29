@@ -503,7 +503,7 @@ fn resolve_level1_model_geometry_resistance(
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
     eval_ctx: &crate::netlist::ParamContext,
-    expression_dialect: crate::netlist::ExpressionDialect,
+    expression_dialect: crate::config::ExpressionDialect,
     spice_dialect: SpiceDialect,
 ) -> Result<Option<f64>, SimulationError> {
     let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?;
@@ -536,12 +536,12 @@ fn resolve_level1_model_geometry_resistance(
             })
             .unwrap_or(10.0e-6);
         let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
-        let short = if expression_dialect == crate::netlist::ExpressionDialect::Xyce {
+        let short = if expression_dialect == crate::config::ExpressionDialect::Xyce {
             0.0
         } else {
             resolve_model_param(model_def, &["SHORT"], eval_ctx)?.unwrap_or(0.0)
         };
-        let (l_eff, w_eff) = if expression_dialect == crate::netlist::ExpressionDialect::Xyce {
+        let (l_eff, w_eff) = if expression_dialect == crate::config::ExpressionDialect::Xyce {
             // Xyce 7.10 defines no resistor-model SHORT parameter and uses
             // the same one-sided NARROW correction for both dimensions.
             (l - narrow, w - narrow)
@@ -959,7 +959,7 @@ mod tests {
         let netlist = crate::netlist::Netlist::parse_with_options(
             source,
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )
@@ -1033,7 +1033,7 @@ mod tests {
         let netlist = crate::netlist::Netlist::parse_with_options(
             source,
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )
@@ -1138,7 +1138,7 @@ R1 in 0 RMOD L=2 A=1 M=2
         let netlist = crate::netlist::Netlist::parse_with_options(
             &transient_source,
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )

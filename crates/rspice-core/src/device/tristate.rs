@@ -192,21 +192,7 @@ impl DrivenSignal {
         }
     }
 
-    /// Create strong high
-    pub fn strong_high() -> Self {
-        Self {
-            value: LogicValue::High,
-            strength: DriveStrength::Strong,
-        }
-    }
 
-    /// Create strong low
-    pub fn strong_low() -> Self {
-        Self {
-            value: LogicValue::Low,
-            strength: DriveStrength::Strong,
-        }
-    }
 
     /// Create pull-up (weak high)
     pub fn pull_up() -> Self {
@@ -224,39 +210,13 @@ impl DrivenSignal {
         }
     }
 
-    /// Create weak keeper high
-    pub fn weak_high() -> Self {
-        Self {
-            value: LogicValue::High,
-            strength: DriveStrength::Weak,
-        }
-    }
 
-    /// Create weak keeper low
-    pub fn weak_low() -> Self {
-        Self {
-            value: LogicValue::Low,
-            strength: DriveStrength::Weak,
-        }
-    }
 
     /// Check if this is high-impedance
     pub fn is_high_z(&self) -> bool {
         self.strength == DriveStrength::HighZ || self.value == LogicValue::HighZ
     }
 
-    /// Convert to analog voltage with equivalent resistance
-    /// Returns (voltage, resistance) for SPICE stamping
-    pub fn to_analog(&self, vdd: Value, vss: Value) -> (Option<Value>, Value) {
-        let r = self.strength.to_resistance();
-        let v = match self.value {
-            LogicValue::High => Some(vdd),
-            LogicValue::Low => Some(vss),
-            LogicValue::Unknown => Some((vdd + vss) / 2.0),
-            LogicValue::HighZ => None,
-        };
-        (v, r)
-    }
 }
 
 impl Default for DrivenSignal {
@@ -298,15 +258,7 @@ impl BusResolver {
         Self::new(3.3, 0.0)
     }
 
-    /// Create with standard 5V logic levels
-    pub fn logic_5v() -> Self {
-        Self::new(5.0, 0.0)
-    }
 
-    /// Create with standard 1.8V logic levels
-    pub fn logic_1v8() -> Self {
-        Self::new(1.8, 0.0)
-    }
 
     /// Resolve two signals according to strength rules
     pub fn resolve_pair(&self, a: DrivenSignal, b: DrivenSignal) -> DrivenSignal {
@@ -449,12 +401,6 @@ impl TristateBuffer {
         }
     }
 
-    /// Set drive strength
-    pub fn with_strength(mut self, strength: DriveStrength) -> Self {
-        self.drive_strength = strength;
-        self.r_on = strength.to_resistance();
-        self
-    }
 
     /// Update buffer state from analog voltages
     pub fn update(&mut self, v_enable: Value, v_in: Value, vth: Value) {
@@ -473,14 +419,6 @@ impl TristateBuffer {
         }
     }
 
-    /// Get output as driven signal
-    pub fn output_signal(&self) -> DrivenSignal {
-        if self.enabled {
-            DrivenSignal::new(self.output, self.drive_strength)
-        } else {
-            DrivenSignal::high_z()
-        }
-    }
 
     /// Get equivalent output resistance
     pub fn output_resistance(&self) -> Value {
@@ -535,10 +473,6 @@ impl PullResistor {
         }
     }
 
-    /// Get as driven signal
-    pub fn as_signal(&self) -> DrivenSignal {
-        DrivenSignal::new(self.direction, self.strength)
-    }
 }
 
 //=============================================================================
@@ -575,20 +509,8 @@ impl Bus {
         }
     }
 
-    /// Add a driver to the bus
-    pub fn add_driver(&mut self, signal: DrivenSignal) {
-        self.drivers.push(signal);
-    }
 
-    /// Add a pull resistor
-    pub fn add_pull(&mut self, signal: DrivenSignal) {
-        self.pulls.push(signal);
-    }
 
-    /// Clear all drivers (called each simulation step)
-    pub fn clear_drivers(&mut self) {
-        self.drivers.clear();
-    }
 
     /// Resolve the bus value from all drivers
     pub fn resolve(&mut self) -> DrivenSignal {
@@ -600,29 +522,13 @@ impl Bus {
         self.resolved
     }
 
-    /// Get Thevenin equivalent for SPICE stamping
-    /// Returns (voltage, resistance)
-    pub fn thevenin_equivalent(&self) -> (Value, Value) {
-        let mut all_signals: Vec<DrivenSignal> = self.drivers.clone();
-        all_signals.extend(self.pulls.iter().cloned());
-        self.resolver.resolve_analog(&all_signals)
-    }
 
     /// Get current resolved value
     pub fn value(&self) -> DrivenSignal {
         self.resolved
     }
 
-    /// Check if bus has a conflict
-    pub fn has_conflict(&self) -> bool {
-        self.resolved.value == LogicValue::Unknown
-            && self.resolved.strength >= DriveStrength::Strong
-    }
 
-    /// Get number of active drivers
-    pub fn active_driver_count(&self) -> usize {
-        self.drivers.iter().filter(|d| !d.is_high_z()).count()
-    }
 }
 
 //=============================================================================

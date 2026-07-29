@@ -283,11 +283,6 @@ impl PssConfig {
         self
     }
 
-    /// Set integration method for transient shooting.
-    pub fn with_integration_method(mut self, method: crate::numerics::integration::IntegrationMethod) -> Self {
-        self.integration_method = Some(method);
-        self
-    }
 
     /// Set points per period for waveform storage.
     pub fn with_points_per_period(mut self, points: usize) -> Self {

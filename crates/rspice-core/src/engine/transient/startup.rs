@@ -28,13 +28,13 @@ impl Engine {
     }
 
     #[inline]
-    fn startup_warmup_conditioning_gmin(&self, circuit: &crate::circuit::Circuit) -> Value {
+    fn startup_warmup_conditioning_gmin(&self, circuit: &crate::circuit::CircuitData) -> Value {
         self.dc_nodal_gmin_floor(circuit)
             .clamp(STARTUP_WARMUP_MIN_GMIN, STARTUP_WARMUP_MAX_GMIN)
     }
 
     fn apply_inductor_element_initial_conditions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         solution: &mut [Value],
     ) -> bool {
         let num_nodes = circuit.num_nodes();
@@ -56,7 +56,7 @@ impl Engine {
     }
 
     fn grounded_capacitor_startup_voltage_hints(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         dc_solution: &[Value],
     ) -> Vec<(usize, Value)> {
         let mut hints = Vec::new();
@@ -95,7 +95,7 @@ impl Engine {
 
     pub(super) fn nonlinear_startup_warmup_seed(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         seed: &[Value],
         abort: &dyn AbortSignal,
@@ -175,7 +175,7 @@ impl Engine {
 
     pub(super) fn nonlinear_transient_startup_warmup_seed(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         seed: &[Value],
         time: Value,
@@ -266,7 +266,7 @@ impl Engine {
 
     fn t0_transient_seed_after_dc_fallback(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         dc_solution: &[Value],
         abort: &dyn AbortSignal,
@@ -382,7 +382,7 @@ impl Engine {
 
     fn t0_linearized_transient_startup_seed(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
@@ -417,7 +417,7 @@ impl Engine {
     fn solve_direct_dc_startup_with_abort(
         &self,
         netlist: &Netlist,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
@@ -431,7 +431,7 @@ impl Engine {
     }
 
     #[inline]
-    fn should_try_configured_dc_startup_aids(circuit: &crate::circuit::Circuit) -> bool {
+    fn should_try_configured_dc_startup_aids(circuit: &crate::circuit::CircuitData) -> bool {
         const MAX_CONFIGURED_DC_STARTUP_MATRIX_SIZE: usize = 160;
         // Junction-limited (legacy GP) circuits take ngspice's full-step
         // Newton; the configured aid chain is their proven startup path and
@@ -445,7 +445,7 @@ impl Engine {
 
     fn transient_startup_from_dc_solution(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         solution: Vec<Value>,
         abort: &dyn AbortSignal,
@@ -464,7 +464,7 @@ impl Engine {
     pub(super) fn solve_transient_initial_solution(
         &self,
         netlist: &Netlist,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, InitialSolutionMode), SimulationError> {

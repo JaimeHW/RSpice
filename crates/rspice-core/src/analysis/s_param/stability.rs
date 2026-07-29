@@ -140,37 +140,9 @@ impl StabilityAnalysis {
         }
     }
 
-    /// Get stability circle points for plotting (input)
-    pub fn input_circle_points(&self, num_points: usize) -> Vec<(Value, Value)> {
-        circle_points(
-            self.input_stability_center,
-            self.input_stability_radius,
-            num_points,
-        )
-    }
 
-    /// Get stability circle points for plotting (output)
-    pub fn output_circle_points(&self, num_points: usize) -> Vec<(Value, Value)> {
-        circle_points(
-            self.output_stability_center,
-            self.output_stability_radius,
-            num_points,
-        )
-    }
 }
 
-/// Generate points on a circle for plotting
-fn circle_points(center: Complex, radius: Value, num_points: usize) -> Vec<(Value, Value)> {
-    (0..num_points)
-        .map(|i| {
-            let theta = 2.0 * PI * i as f64 / num_points as f64;
-            (
-                center.re + radius * theta.cos(),
-                center.im + radius * theta.sin(),
-            )
-        })
-        .collect()
-}
 
 //=============================================================================
 // Gain Calculations

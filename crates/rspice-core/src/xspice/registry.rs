@@ -36,132 +36,6 @@ fn canonical_model_lookup_key(name: &str) -> Cow<'_, str> {
     }
 }
 
-const BUILTIN_MODEL_NAMES: &[&str] = &[
-    "adc_bridge",
-    "astate",
-    "aswitch",
-    "bidi_bridge",
-    "capacitor",
-    "capacitoric",
-    "climit",
-    "cmeter",
-    "core",
-    "cpline",
-    "cpmlin",
-    "d_and",
-    "d_buffer",
-    "d_cosim",
-    "d_dff",
-    "d_dlatch",
-    "d_dt",
-    "d_fdiv",
-    "d_genlut",
-    "d_inverter",
-    "d_jkff",
-    "d_lut",
-    "d_nand",
-    "d_nor",
-    "d_open_c",
-    "d_open_e",
-    "d_or",
-    "d_osc",
-    "d_process",
-    "d_pulldown",
-    "d_pullup",
-    "d_pwm",
-    "d_ram",
-    "d_source",
-    "d_srff",
-    "d_srlatch",
-    "d_state",
-    "d_tff",
-    "d_to_real",
-    "d_tristate",
-    "d_xnor",
-    "d_xor",
-    "dac_bridge",
-    "delay",
-    "differentiator",
-    "divide",
-    "divider",
-    "file_source",
-    "filesource",
-    "gain",
-    "hyst",
-    "icm_spice2poly",
-    "ilimit",
-    "inductor",
-    "inductoric",
-    "int",
-    "integrator",
-    "lcouple",
-    "limit",
-    "lmeter",
-    "memristor",
-    "mlin",
-    "msopen",
-    "mult",
-    "multi_input_pwl",
-    "nco",
-    "oneshot",
-    "potentiometer",
-    "print_param_types",
-    "pswitch",
-    "pwl",
-    "pwlts",
-    "r_to_v",
-    "real_delay",
-    "real_gain",
-    "real_to_v",
-    "s_h",
-    "s_xfer",
-    "seegen",
-    "seegenerator",
-    "sidiode",
-    "sine",
-    "slew",
-    "spice2poly",
-    "square",
-    "summer",
-    "table2d",
-    "table3d",
-    "tline",
-    "triangle",
-    "xfer",
-    "xyce_d_and",
-    "xyce_d_add",
-    "xyce_d_dff",
-    "xyce_d_dlatch",
-    "xyce_d_jkff",
-    "xyce_d_buffer",
-    "xyce_d_inverter",
-    "xyce_d_nand",
-    "xyce_d_nor",
-    "xyce_d_or",
-    "xyce_d_tff",
-    "xyce_d_xnor",
-    "xyce_d_xor",
-    "xyce_legacy_d_and",
-    "xyce_legacy_d_dff",
-    "xyce_legacy_d_inverter",
-    "xyce_legacy_d_nand",
-    "xyce_legacy_d_nor",
-    "xyce_legacy_d_or",
-    "xyce_legacy_d_xnor",
-    "xyce_legacy_d_xor",
-    "zener",
-];
-
-const BUILTIN_CODEMODEL_LIBRARY_NAMES: &[&str] = &[
-    "analog.cm",
-    "digital.cm",
-    "spice2poly.cm",
-    "table.cm",
-    "tlines.cm",
-    "xtradev.cm",
-    "xtraevt.cm",
-];
-
 impl CodeModelRegistry {
     /// Create a new empty registry
     pub fn new() -> Self {
@@ -173,45 +47,6 @@ impl CodeModelRegistry {
         let mut registry = Self::new();
         registry.register_builtins();
         registry
-    }
-
-    /// Get all built-in model names without constructing model instances.
-    pub fn builtin_model_names() -> &'static [&'static str] {
-        BUILTIN_MODEL_NAMES
-    }
-
-    /// Get the standard ngspice-46 `.cm` bundles whose models are compiled in.
-    pub fn builtin_codemodel_library_names() -> &'static [&'static str] {
-        BUILTIN_CODEMODEL_LIBRARY_NAMES
-    }
-
-    /// Check whether a name belongs to a built-in code model.
-    pub fn is_builtin_model_name(name: &str) -> bool {
-        BUILTIN_MODEL_NAMES
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(name))
-    }
-
-    /// Check whether an ngspice `.codemodel` path names a built-in bundle.
-    ///
-    /// RSpice compiles the ngspice-46 XSPICE models into the binary instead of
-    /// loading their generated `.cm` shared libraries. Netlists may still carry
-    /// `codemodel .../analog.cm` style directives from ngspice startup files;
-    /// those are compatibility no-ops when the basename is one of the official
-    /// bundles listed above.
-    pub fn is_builtin_codemodel_library_path(path: &str) -> bool {
-        let trimmed = path
-            .trim()
-            .trim_matches('"')
-            .trim_matches('\'')
-            .trim_matches(|ch| matches!(ch, ';' | ','));
-        let normalized = trimmed.replace('\\', "/");
-        let Some(name) = normalized.rsplit('/').next() else {
-            return false;
-        };
-        Self::builtin_codemodel_library_names()
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(name))
     }
 
     /// Register a code model
@@ -396,32 +231,8 @@ impl CodeModelRegistry {
         }
     }
 
-    /// Get models by category
-    pub fn analog_models(&self) -> Vec<Arc<dyn CodeModel>> {
-        self.models
-            .values()
-            .filter(|m| m.is_analog_only())
-            .cloned()
-            .collect()
-    }
 
-    /// Get digital models
-    pub fn digital_models(&self) -> Vec<Arc<dyn CodeModel>> {
-        self.models
-            .values()
-            .filter(|m| m.is_digital_only())
-            .cloned()
-            .collect()
-    }
 
-    /// Get mixed-signal models (have both analog and digital ports)
-    pub fn mixed_models(&self) -> Vec<Arc<dyn CodeModel>> {
-        self.models
-            .values()
-            .filter(|m| !m.is_analog_only() && !m.is_digital_only())
-            .cloned()
-            .collect()
-    }
 }
 
 impl std::fmt::Debug for CodeModelRegistry {
@@ -535,18 +346,18 @@ mod tests {
         let mut registered = registry.model_names();
         registered.sort_unstable();
 
-        let mut catalog = CodeModelRegistry::builtin_model_names().to_vec();
+        let mut catalog = crate::codemodels::BUILTIN_MODEL_NAMES.to_vec();
         catalog.sort_unstable();
 
         assert_eq!(registered, catalog);
-        assert!(CodeModelRegistry::is_builtin_model_name("DAC_BRIDGE"));
-        assert!(!CodeModelRegistry::is_builtin_model_name("d_rom"));
+        assert!(crate::codemodels::is_builtin_model_name("DAC_BRIDGE"));
+        assert!(!crate::codemodels::is_builtin_model_name("d_rom"));
     }
 
     #[test]
     fn built_in_codemodel_library_paths_match_ngspice_46_icm_bundles() {
         assert_eq!(
-            CodeModelRegistry::builtin_codemodel_library_names(),
+            crate::codemodels::BUILTIN_CODEMODEL_LIBRARY_NAMES,
             [
                 "analog.cm",
                 "digital.cm",
@@ -558,13 +369,13 @@ mod tests {
             ]
         );
 
-        assert!(CodeModelRegistry::is_builtin_codemodel_library_path(
+        assert!(crate::codemodels::is_builtin_codemodel_library_path(
             "/usr/lib/ngspice/analog.cm"
         ));
-        assert!(CodeModelRegistry::is_builtin_codemodel_library_path(
+        assert!(crate::codemodels::is_builtin_codemodel_library_path(
             r"C:\ngspice\lib\DIGITAL.CM"
         ));
-        assert!(!CodeModelRegistry::is_builtin_codemodel_library_path(
+        assert!(!crate::codemodels::is_builtin_codemodel_library_path(
             "./custom.cm"
         ));
     }

@@ -96,14 +96,6 @@ impl Bjt {
         }
     }
 
-    pub(crate) fn legacy_transient_charge_state(
-        &self,
-        vbe: Value,
-        vbc: Value,
-        vcs: Value,
-    ) -> LegacyTransientChargeState {
-        self.legacy_transient_charge_state_with_vbx(vbe, vbc, vbc, vcs)
-    }
 
     pub(crate) fn legacy_transient_charge_state_with_vbx(
         &self,

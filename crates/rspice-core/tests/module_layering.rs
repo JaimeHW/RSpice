@@ -63,24 +63,25 @@ const LAYERS: &[(&str, u32)] = &[
     // they may share a rank without concealing an edge.
     //
     // `constants` holds the physical constants and the Celsius/Kelvin
-    // conversions that are arithmetic on them. `resource` is the intended
-    // home of the include-depth limit still owned by `netlist`.
+    // conversions that are arithmetic on them. `resource` holds the limits
+    // that bound what a deck may ask for, including the include depth.
     ("constants", 0),
     ("time_compat", 0),
     ("resource", 0),
     ("abort_signal", 0),
     ("builtin_lib", 0),
+    // Names of the XSPICE code models compiled in. A catalogue of names is
+    // data: the parser classifies against it while reading an `A` card and
+    // `xspice` registers against it, so both read down instead of the parser
+    // reaching eight ranks up.
+    ("codemodels", 0),
     // SPICE naming rules. Everything above depends on this, so it depends on
     // nothing.
     ("naming", 0),
     // Structured convergence-quality reporting. Wired into the drivers in
     // Phase 5b; it depends only on `Value` and stays a leaf.
     ("diagnostics", 0),
-    // Numerics. `simd` is a kernel library beneath the solvers; `solver`
-    // becomes `numerics::la` in Phase 5, absorbing `engine::convergence`, and
-    // gains a `numerics::integration` sibling holding the companion
-    // coefficients and LTE machinery that `analysis::core::transient` owns
-    // today.
+    // A kernel library beneath the solvers.
     ("simd", 1),
     // SPICE RAW waveform files, read and written. A leaf by construction:
     // `raw_export` names nothing in the crate at all and the reader needs only
@@ -88,33 +89,42 @@ const LAYERS: &[(&str, u32)] = &[
     // when a result type changes. It shares rank 1 with `simd` because neither
     // references the other.
     ("io", 1),
-    // Numerics shared by every analysis. `integration` holds the integration
-    // method and the companion-model coefficients that the circuit store, the
-    // device models and XSPICE all stamp with. `crate::solver` joins it as
-    // `numerics::la` in the rest of Phase 5.
+    // Numerics shared by every analysis: how a derivative is discretized, how
+    // large a step may be, where a step may not land, and whether the step
+    // taken was accurate enough to keep. Below the circuit store, the device
+    // models and XSPICE, all three of which stamp with the coefficients.
+    //
+    // `solver` stays its own rank rather than becoming `numerics::la`: it
+    // solves against an assembled matrix, so it sits above the layer that
+    // defines one, and the rename would have cost five crates a path for no
+    // gain.
     ("numerics", 2),
-    ("solver", 3),
+    // Simulation configuration. Below the solver, the device models and the
+    // circuit store, all of which read a tolerance or a dialect flag and used
+    // to reach up into `engine` to do it.
+    ("config", 3),
+    ("solver", 4),
     // Expression evaluation. Two deliberate subsystems: the bytecode VM here
     // and the complex-valued `.PARAM` evaluator inside `netlist`, mirroring
     // ngspice's inpptree/numparam split.
-    ("expr", 4),
+    ("expr", 5),
     // Deck text to AST. Phase 7 moves its circuit transforms (flattener,
     // add_resistors, remove_unused, topology) up into `elab`, leaving parsing.
-    ("netlist", 5),
+    ("netlist", 6),
     // `.lib` model-library and Verilog-A pack discovery. Above `netlist`
     // because resolving a library produces deck content.
-    ("library", 6),
+    ("library", 7),
     // Device model evaluation, plus the Verilog-A and FFI extension points.
-    ("device", 7),
+    ("device", 8),
     // The XSPICE code-model subsystem: a device extension with its own event
     // queue, so it sits just above `device`.
-    ("xspice", 8),
+    ("xspice", 9),
     // Struct-of-arrays circuit storage and stamping. Phase 8 consolidates the
     // four stamping surfaces into `circuit::assembly`.
-    ("circuit", 9),
+    ("circuit", 10),
     // Analysis algorithms and result types. Phase 6 merges the `engine::X` /
     // `analysis::X` twins into one module per analysis.
-    ("analysis", 10),
+    ("analysis", 11),
     // The facade: configuration resolution, dispatch, health, abort plumbing.
     // Phase 3 moves `SimulationConfig` and friends out to their own low rank;
     // Phase 7 moves `engine::builder` out to `elab`.
@@ -139,25 +149,23 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // which now live in `constants` beside the physical constants they are
     // arithmetic on.
     //
-    // `resource -> netlist` is a single reference to the default include
-    // depth, a limit that belongs in `resource` with the other limits. Left
-    // for now because `netlist/include.rs`, where the constant is defined, is
-    // being edited concurrently.
-    ("resource", "netlist", 1),
+    // `resource -> netlist` is retired too: it was the default include depth,
+    // which `resource` had to reach up into `netlist` to read even though it
+    // is a resource limit and sits beside the other fifteen now. Phase 2 has
+    // no remaining edges.
+
     // ---------------------------------------------------------------------
     // Phase 3 — extract `config`.
     //
-    // All three edges are `SimulationConfig` and its companions, which live in
-    // `engine` only because that is where the orchestrator is. Nothing about a
-    // configuration struct requires the module that consumes it; moving them
-    // below everything that reads them makes all three downward.
-    ("circuit", "engine", 21),
-    ("solver", "engine", 5),
-    ("device", "engine", 2),
-    // `expr::parser` naming `netlist::ExpressionDialect` to build a test
-    // context. The dialect enums are configuration, and travel to `config`
-    // with `SpiceDialect`.
-    ("expr", "netlist", 1),
+    // `SimulationConfig`, `SpiceDialect` and their companions now live in
+    // `crate::config` at rank 3, below everything that reads them, so the
+    // twenty-seven references that made those three edges are downward.
+    //
+    // `expr -> netlist` is retired too: it was `ExpressionDialect`, the last
+    // dialect enum left in `netlist`, which the VM and the power operator both
+    // read to decide whether `log(x)` is natural or base 10. It followed
+    // `SpiceDialect` into `config`.
+    //
     // ---------------------------------------------------------------------
     // Phase 6 — one module per analysis.
     //
@@ -168,19 +176,29 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // boundary, and now sits beside it in `engine::waveform`.
     ("analysis", "engine", 1),
     // ---------------------------------------------------------------------
-    // Phase 7 — elaboration.
+    // Phase 7 — built-in name catalogues.
     //
-    // The parser asking the device layer which built-in Verilog-A models exist
-    // (`flattener`), and reaching into the XSPICE subsystem while parsing `A`
-    // cards. Both are elaboration concerns that will sit above both modules.
-    ("netlist", "xspice", 5),
+    // The flattener asking the device layer which built-in Verilog-A models
+    // exist, so an `X` card naming one is not mistaken for a missing
+    // subcircuit. The XSPICE half of this edge went to `codemodels`; this half
+    // cannot follow, because the list is generator output whose `#[cfg]` gates
+    // must stay in lockstep with the generated model modules beside it. Moving
+    // it is a change to `rspice-veriloga-gen`, not a change to this crate.
     ("netlist", "device", 1),
     // ---------------------------------------------------------------------
-    // Phase 8 — device layer.
+    // Phase 8 — device layer. Both edges retired.
     //
-    // Devices reaching into circuit storage. Retired by the `circuit::assembly`
-    // consolidation, which gives devices a stamp target instead of the store.
-    ("device", "circuit", 4),
+    // `device -> circuit` was never devices reaching into circuit storage, as
+    // this list claimed while the counter under-reported it at four. It was
+    // thirty-eight files importing `NodeId`, an alias to `usize`. It sits
+    // beside `Value` at the crate root now: shared vocabulary, named by every
+    // layer and owned by none.
+    //
+    // `device -> engine` was one `#[ignore]`d probe in `transmission_line`
+    // that built an `Engine` to print where an LTRA trajectory drifts from an
+    // ngspice oracle. It asserted nothing, so it could not fail and could not
+    // protect anything; the asserting replay test beside it keeps both
+    // fixtures.
 ];
 
 fn src_dir() -> PathBuf {
@@ -245,6 +263,75 @@ fn strip_line_comments(source: &str) -> String {
         .join("\n")
 }
 
+/// Rewrite `crate::{a, b::c}` into `crate::a crate::b::c`.
+///
+/// The counter below matches the literal prefix `crate::<module>`, so a
+/// grouped import hides every member but the first behind a brace. That is
+/// not a rare spelling: `use crate::{Value, circuit::NodeId};` was how
+/// thirty-four of the thirty-eight device references to `NodeId` stayed
+/// invisible while the edge showed a count of four.
+fn expand_grouped_paths(source: &str) -> String {
+    const OPEN: &str = "crate::{";
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(index) = rest.find(OPEN) {
+        out.push_str(&rest[..index]);
+        let after = &rest[index + OPEN.len()..];
+        let mut depth = 1usize;
+        let mut end = None;
+        for (offset, ch) in after.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // An unbalanced brace means this is not an import we can expand;
+        // emit the opener verbatim so the literal match still applies.
+        let Some(end) = end else {
+            out.push_str(OPEN);
+            rest = after;
+            continue;
+        };
+        let (group, remainder) = after.split_at(end);
+        let mut depth = 0usize;
+        let mut member = String::new();
+        let flush = |member: &mut String, out: &mut String| {
+            let trimmed = member.trim();
+            if !trimmed.is_empty() {
+                out.push_str("crate::");
+                out.push_str(trimmed);
+                out.push(' ');
+            }
+            member.clear();
+        };
+        for ch in group.chars() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    member.push(ch);
+                }
+                '}' => {
+                    depth -= 1;
+                    member.push(ch);
+                }
+                ',' if depth == 0 => flush(&mut member, &mut out),
+                _ => member.push(ch),
+            }
+        }
+        flush(&mut member, &mut out);
+        rest = &remainder[1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn count_occurrences(haystack: &str, needle: &str) -> usize {
     if needle.is_empty() {
         return 0;
@@ -279,7 +366,7 @@ fn edge_counts() -> BTreeMap<(String, String), usize> {
         };
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        let code = strip_line_comments(&source);
+        let code = expand_grouped_paths(&strip_line_comments(&source));
         for to in &modules {
             if *to == from {
                 continue;

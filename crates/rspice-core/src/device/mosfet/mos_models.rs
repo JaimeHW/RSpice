@@ -297,59 +297,7 @@ pub fn calculate_gm(params: &MosParams, vgs: Value, vds: Value, vth: Value) -> V
     gm_clm.max(1e-12)
 }
 
-/// Calculate output conductance gds = dId/dVds with C1 continuity
-#[inline]
-pub fn calculate_gds(params: &MosParams, vgs: Value, vds: Value, vth: Value) -> Value {
-    let p = params.polarity;
-    let vgs_eff = p * vgs;
-    let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
 
-    // Smooth gate overdrive
-    let vgt_raw = vgs_eff - vth;
-    let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
-
-    // Smooth Vdsat
-    let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
-
-    // Blend factor for region transition
-    let lin_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
-
-    // In linear region: gds = beta * (Vgt - Vds) + lambda term
-    // In saturation: gds = lambda * Id (small)
-    // Derivative of Vdsat w.r.t Vds: ~1 in linear, ~0 in saturation
-    let dvdsat_dvds = 1.0 - lin_blend;
-
-    // dId/dVds from main current term
-    let gds_core = params.beta * (vgt - vdsat) * dvdsat_dvds;
-
-    // Channel length modulation term
-    let id_core = params.beta * (vgt * vdsat - 0.5 * vdsat * vdsat);
-    let gds_clm = id_core * params.lambda;
-
-    // Total conductance
-    let gds_total = gds_core * (1.0 + params.lambda * vds_eff) + gds_clm;
-
-    // Ensure minimum conductance
-    gds_total.max(1e-12)
-}
-
-/// Calculate body transconductance gmb = dId/dVbs with C1 continuity
-///
-/// gmb represents the change in drain current due to body bias.
-#[inline]
-pub fn calculate_gmb(params: &MosParams, vgs: Value, vds: Value, vbs: Value, vth: Value) -> Value {
-    let p = params.polarity;
-    let vbs_eff = p * vbs;
-
-    // gmb = -gm * (gamma / (2 * sqrt(phi - Vbs)))
-    // The gm function is already smooth, so gmb inherits smoothness
-    let gm = calculate_gm(params, vgs, vds, vth);
-
-    // Smooth the phi - Vbs term to avoid singularity
-    let phi_vbs = smooth_max(params.phi - vbs_eff, SMOOTH_VOLTAGE, SMOOTH_VOLTAGE);
-
-    gm * params.gamma / (2.0 * phi_vbs.sqrt())
-}
 
 //=============================================================================
 // Threshold Voltage Calculation

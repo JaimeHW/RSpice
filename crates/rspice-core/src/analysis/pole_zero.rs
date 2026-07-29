@@ -137,41 +137,13 @@ impl PoleZeroResult {
         }
     }
 
-    /// Add a pole
-    pub fn add_pole(&mut self, pole: Complex) {
-        self.poles.push(pole);
-    }
 
-    /// Add a zero
-    pub fn add_zero(&mut self, zero: Complex) {
-        self.zeros.push(zero);
-    }
 
     /// Get real poles only
     pub fn real_poles(&self) -> Vec<&Complex> {
         self.poles.iter().filter(|p| p.is_real(1e-10)).collect()
     }
 
-    /// Get complex conjugate pole pairs
-    pub fn complex_pole_pairs(&self) -> Vec<(&Complex, &Complex)> {
-        let mut pairs = Vec::new();
-        let mut used = vec![false; self.poles.len()];
-
-        for i in 0..self.poles.len() {
-            if used[i] || self.poles[i].is_real(1e-10) {
-                continue;
-            }
-            for j in (i + 1)..self.poles.len() {
-                if !used[j] && self.poles[i].is_conjugate_of(&self.poles[j], 1e-10) {
-                    pairs.push((&self.poles[i], &self.poles[j]));
-                    used[i] = true;
-                    used[j] = true;
-                    break;
-                }
-            }
-        }
-        pairs
-    }
 
     /// Get dominant pole (slowest, closest to imaginary axis)
     pub fn dominant_pole(&self) -> Option<&Complex> {
@@ -281,17 +253,6 @@ impl Matrix {
         (self.rows, self.cols)
     }
 
-    /// Matrix-vector multiply
-    pub fn mul_vec(&self, v: &[Value]) -> Vec<Value> {
-        assert_eq!(v.len(), self.cols);
-        let mut result = vec![0.0; self.rows];
-        for i in 0..self.rows {
-            for j in 0..self.cols {
-                result[i] += self.data[i][j] * v[j];
-            }
-        }
-        result
-    }
 }
 
 impl std::ops::Add for &Matrix {
@@ -395,19 +356,7 @@ impl PoleZeroConfig {
         }
     }
 
-    /// Poles only
-    pub fn poles_only(input: usize, output: usize) -> Self {
-        let mut config = Self::poles_and_zeros(input, output);
-        config.compute_zeros = false;
-        config
-    }
 
-    /// Zeros only
-    pub fn zeros_only(input: usize, output: usize) -> Self {
-        let mut config = Self::poles_and_zeros(input, output);
-        config.compute_poles = false;
-        config
-    }
 }
 
 /// Pole-zero analyzer using eigenvalue methods

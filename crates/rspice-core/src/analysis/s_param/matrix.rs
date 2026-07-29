@@ -138,15 +138,7 @@ impl SParameterResult {
         self.data.iter().map(|s| s.frequency).collect()
     }
 
-    /// Get S11 magnitude in dB across frequency
-    pub fn s11_db(&self) -> Vec<Value> {
-        self.data.iter().map(|s| s.s11().mag_db()).collect()
-    }
 
-    /// Get S21 magnitude in dB across frequency
-    pub fn s21_db(&self) -> Vec<Value> {
-        self.data.iter().map(|s| s.s21().mag_db()).collect()
-    }
 
     /// Get VSWR from S11
     /// VSWR = (1 + |S11|) / (1 - |S11|)
@@ -164,25 +156,8 @@ impl SParameterResult {
             .collect()
     }
 
-    /// Get return loss (dB) from S11
-    /// RL = -20·log10(|S11|)
-    pub fn return_loss(&self) -> Vec<Value> {
-        self.data.iter().map(|s| -s.s11().mag_db()).collect()
-    }
 
-    /// Get insertion loss (dB) from S21
-    /// IL = -20·log10(|S21|)
-    pub fn insertion_loss(&self) -> Vec<Value> {
-        self.data.iter().map(|s| -s.s21().mag_db()).collect()
-    }
 
-    /// Check if network is reciprocal (S12 ≈ S21)
-    pub fn is_reciprocal(&self, tolerance: Value) -> bool {
-        self.data.iter().all(|s| {
-            let diff = s.s12() - s.s21();
-            diff.magnitude() < tolerance
-        })
-    }
 }
 
 //=============================================================================

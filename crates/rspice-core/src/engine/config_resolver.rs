@@ -7,8 +7,9 @@
 
 use super::{ConvergenceConfig, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use crate::Value;
-use crate::analysis::IntegrationMethod;
-use crate::netlist::{SimulationOptions as NetlistSimulationOptions, TransientLteReference};
+use crate::numerics::integration::IntegrationMethod;
+use crate::numerics::integration::TransientLteReference;
+use crate::netlist::SimulationOptions as NetlistSimulationOptions;
 
 /// Convergence preset selection used by frontends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -750,7 +751,7 @@ mod tests {
 
     #[test]
     fn deck_nonlinear_continuation_mode_propagates_to_engine_config() {
-        use crate::netlist::NonlinearContinuationMode;
+        use crate::config::NonlinearContinuationMode;
 
         let base = SimulationConfig::default();
         let options = NetlistSimulationOptions {

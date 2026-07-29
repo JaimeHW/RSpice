@@ -116,37 +116,6 @@ pub fn sum(slice: &[Value]) -> Value {
     result
 }
 
-/// Compute the sum of squares: `sum(x[i]^2)`.
-///
-/// Useful for computing norms and RMS values.
-#[inline]
-pub fn sum_of_squares(slice: &[Value]) -> Value {
-    if slice.is_empty() {
-        return 0.0;
-    }
-
-    if !should_use_simd(slice.len()) {
-        return slice.iter().map(|x| x * x).sum();
-    }
-
-    let aligned_len = slice.len() - (slice.len() % SIMD_WIDTH);
-    let mut sum_vec = f64x4::ZERO;
-
-    let mut i = 0;
-    while i < aligned_len {
-        let chunk = f64x4::from(&slice[i..i + SIMD_WIDTH]);
-        sum_vec += chunk * chunk;
-        i += SIMD_WIDTH;
-    }
-
-    let mut result = horizontal_sum(sum_vec);
-
-    for &val in &slice[aligned_len..] {
-        result += val * val;
-    }
-
-    result
-}
 
 //=============================================================================
 // Absolute Value Reductions

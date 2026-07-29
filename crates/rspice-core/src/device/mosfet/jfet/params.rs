@@ -133,53 +133,14 @@ impl Default for JfetParams {
 }
 
 impl JfetParams {
-    /// Create parameters from IDSS and VTO
-    ///
-    /// IDSS is the drain current at Vgs=0, Vds >> Vgs-Vto (saturation)
-    /// Beta = IDSS / Vto²
-    pub fn from_idss(idss: Value, vto: Value) -> Self {
-        let beta = idss / (vto * vto);
-        Self {
-            vto,
-            beta,
-            ..Default::default()
-        }
-    }
 
     /// Create with specified parameters
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set VTO
-    pub fn with_vto(mut self, vto: Value) -> Self {
-        self.vto = vto;
-        self
-    }
 
-    /// Set BETA
-    pub fn with_beta(mut self, beta: Value) -> Self {
-        self.beta = beta;
-        self
-    }
 
-    /// Set LAMBDA
-    pub fn with_lambda(mut self, lambda: Value) -> Self {
-        self.lambda = lambda;
-        self
-    }
 
-    /// Set capacitances
-    pub fn with_capacitances(mut self, cgs: Value, cgd: Value) -> Self {
-        self.cgs = cgs;
-        self.cgd = cgd;
-        self
-    }
 
-    /// Set junction parameters
-    pub fn with_junction(mut self, is: Value, pb: Value) -> Self {
-        self.is = is;
-        self.pb = pb;
-        self
-    }
 }

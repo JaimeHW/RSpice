@@ -22,7 +22,7 @@
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::transient::{
+use crate::numerics::integration::{
     BreakpointManager, LteEstimator, TimestepController, TrapGearController,
 };
 use crate::numerics::integration::CompanionCoefficients;

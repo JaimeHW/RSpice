@@ -38,9 +38,9 @@
 //! where `[L]` is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-use crate::analysis::CompanionCoefficients;
+use crate::numerics::integration::CompanionCoefficients;
 use crate::device::traits::{DynamicDevice, MatrixStamper};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // Coupling Coefficient
@@ -169,15 +169,7 @@ impl CoupledInductorPair {
         (self.l1 / self.l2).sqrt()
     }
 
-    /// Get leakage inductance of primary (for k < 1)
-    pub fn leakage_primary(&self) -> Value {
-        self.l1 * (1.0 - self.k * self.k)
-    }
 
-    /// Get leakage inductance of secondary (for k < 1)
-    pub fn leakage_secondary(&self) -> Value {
-        self.l2 * (1.0 - self.k * self.k)
-    }
 
     /// DC stamp for the coupling: intentionally nothing.
     ///

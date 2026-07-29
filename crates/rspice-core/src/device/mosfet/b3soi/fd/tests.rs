@@ -7,7 +7,7 @@
 //! reduces to the `minIsub` leakage.
 
 use super::*;
-use crate::circuit::NodeId;
+use crate::NodeId;
 use crate::device::mosfet::b3soi::common::B3SoiDialect;
 use crate::device::mosfet::b3soi::fd::params::B3SoiFdModel;
 use crate::device::mosfet::b3soi::fd::temp::{B3SoiFdGeometry, B3SoiFdSized};

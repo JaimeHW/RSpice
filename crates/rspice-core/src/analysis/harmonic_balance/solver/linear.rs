@@ -110,25 +110,6 @@ impl HbSolver {
         branch_idx
     }
 
-    /// Add voltage source with AC component
-    pub fn add_voltage_source_branch_ac(
-        &mut self,
-        node_pos: usize,
-        node_neg: usize,
-        dc_voltage: Value,
-        ac_magnitude: Value,
-        ac_phase: Value,
-    ) -> usize {
-        let branch_idx = self.num_branches;
-        self.voltage_source_branches.push(
-            VoltageSourceBranch::new(node_pos, node_neg, branch_idx, dc_voltage)
-                .with_ac(ac_magnitude, ac_phase),
-        );
-        self.voltage_source_branch_names
-            .push(format!("V{}", branch_idx + 1));
-        self.num_branches += 1;
-        branch_idx
-    }
 
     /// Add voltage source with arbitrary AC harmonic entries.
     pub fn add_voltage_source_branch_harmonics(
@@ -162,12 +143,6 @@ impl HbSolver {
         self.num_branches
     }
 
-    /// Set DC source current at a node
-    pub fn set_dc_source(&mut self, node: usize, current: Value) {
-        if node < self.source_spectra.len() {
-            self.source_spectra[node][0] = Complex64::new(current, 0.0);
-        }
-    }
 
     /// Add DC source current contribution at a node
     pub fn add_dc_source(&mut self, node: usize, current: Value) {
@@ -176,15 +151,7 @@ impl HbSolver {
         }
     }
 
-    /// Set AC source at a node (sinusoidal at fundamental)
-    pub fn set_ac_source(&mut self, node: usize, magnitude: Value, phase: Value) {
-        self.set_harmonic_source(node, 1, magnitude, phase);
-    }
 
-    /// Add AC source contribution at the fundamental harmonic for a node
-    pub fn add_ac_source(&mut self, node: usize, magnitude: Value, phase: Value) {
-        self.add_harmonic_source(node, 1, magnitude, phase);
-    }
 
     /// Set AC source contribution at an arbitrary harmonic for a node.
     ///
@@ -223,21 +190,7 @@ impl HbSolver {
         }
     }
 
-    /// Set full source spectrum at a node
-    pub fn set_source_spectrum(&mut self, node: usize, spectrum: Vec<Complex64>) {
-        if node < self.source_spectra.len() {
-            self.source_spectra[node] = spectrum;
-        }
-    }
 
-    /// Initialize solution with DC operating point
-    pub fn initialize_dc(&mut self, state: &mut HbSolverState, dc_solution: &[Value]) {
-        for (node, &v_dc) in dc_solution.iter().enumerate() {
-            if node < state.x.len() && !state.x[node].is_empty() {
-                state.x[node][0] = Complex64::new(v_dc, 0.0);
-            }
-        }
-    }
 
     /// Compute residual for linear circuit (KCL: sum of currents INTO node = 0)
     ///

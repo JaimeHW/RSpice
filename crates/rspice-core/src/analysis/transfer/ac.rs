@@ -452,11 +452,6 @@ impl AcTransferConfig {
         }
     }
 
-    /// Set reference node
-    pub fn with_ref(mut self, ref_node: &str) -> Self {
-        self.ref_node = Some(ref_node.to_string());
-        self
-    }
 
     /// Validate sweep configuration.
     pub fn validate(&self) -> Result<(), String> {
@@ -567,60 +562,9 @@ impl AcTransferAnalyzer {
         result
     }
 
-    /// Create a test lowpass filter transfer function
-    ///
-    /// H(s) = ω₀ / (s + ω₀) = 1 / (1 + s/ω₀)
-    pub fn test_lowpass(&self, cutoff_freq: Value) -> AcTransferResult {
-        let omega_0 = 2.0 * PI * cutoff_freq;
 
-        self.analyze(|freq| {
-            let s = Complex64::new(0.0, 2.0 * PI * freq);
-            Complex64::new(omega_0, 0.0) / (s + Complex64::new(omega_0, 0.0))
-        })
-    }
 
-    /// Create a test highpass filter transfer function
-    ///
-    /// H(s) = s / (s + ω₀)
-    pub fn test_highpass(&self, cutoff_freq: Value) -> AcTransferResult {
-        let omega_0 = 2.0 * PI * cutoff_freq;
 
-        self.analyze(|freq| {
-            let s = Complex64::new(0.0, 2.0 * PI * freq);
-            s / (s + Complex64::new(omega_0, 0.0))
-        })
-    }
-
-    /// Create a test bandpass filter transfer function
-    ///
-    /// H(s) = ωₒ/Q · s / (s² + ωₒ/Q · s + ωₒ²)
-    pub fn test_bandpass(&self, center_freq: Value, q_factor: Value) -> AcTransferResult {
-        let omega_0 = 2.0 * PI * center_freq;
-        let omega_q = omega_0 / q_factor;
-
-        self.analyze(|freq| {
-            let s = Complex64::new(0.0, 2.0 * PI * freq);
-            let num = Complex64::new(omega_q, 0.0) * s;
-            let denom =
-                s * s + s * Complex64::new(omega_q, 0.0) + Complex64::new(omega_0 * omega_0, 0.0);
-            num / denom
-        })
-    }
-
-    /// Create a test two-pole lowpass (Butterworth-like)
-    ///
-    /// H(s) = ω₀² / (s² + √2·ω₀·s + ω₀²)
-    pub fn test_butterworth_lowpass(&self, cutoff_freq: Value) -> AcTransferResult {
-        let omega_0 = 2.0 * PI * cutoff_freq;
-        let omega_0_sq = omega_0 * omega_0;
-        let sqrt2_omega_0 = 2.0_f64.sqrt() * omega_0;
-
-        self.analyze(|freq| {
-            let s = Complex64::new(0.0, 2.0 * PI * freq);
-            Complex64::new(omega_0_sq, 0.0)
-                / (s * s + s * Complex64::new(sqrt2_omega_0, 0.0) + Complex64::new(omega_0_sq, 0.0))
-        })
-    }
 }
 
 //=============================================================================

@@ -5,6 +5,7 @@
 //! results rather than erroring: `LOG` is the natural logarithm except under
 //! [`ExpressionDialect::Xyce`], where it is base 10, and `PH`/`PHASE`
 //! returns degrees. Both are pinned by oracle tests.
+use crate::config::ExpressionDialect;
 
 use super::*;
 use std::collections::HashMap;

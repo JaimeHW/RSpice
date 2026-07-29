@@ -6,7 +6,7 @@
 //! - Separation of topology (static) from values (mutable)
 
 #![allow(clippy::too_many_arguments)]
-use crate::Value;
+use crate::{NodeId, Value};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
@@ -38,8 +38,6 @@ mod magnetic;
 mod nonlinear;
 pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
 
-/// Node identifier (0 = ground, always)
-pub type NodeId = usize;
 
 type XspiceDriverId = (String, String, usize);
 type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
@@ -525,11 +523,3 @@ impl Default for CircuitData {
     }
 }
 
-/// Shorter spelling of [`CircuitData`], on its way out.
-///
-/// Two names for one type means a search for `Circuit` returns both, and
-/// neither spelling tells you which the surrounding code prefers. Every
-/// remaining user is `engine::hb::state`, four signatures; when they change,
-/// delete this and the `Circuit` arm of the re-export in `lib.rs`. Nothing
-/// new should name it.
-pub type Circuit = CircuitData;

@@ -1,8 +1,22 @@
-//! Streaming Waveform Storage
+//! Writing a SPICE RAW file without holding the run in memory.
 //!
-//! Provides disk-backed waveform storage for long transient simulations.
-//! Waveform data is buffered in memory and periodically flushed to disk
-//! to avoid memory exhaustion on multi-hour simulations.
+//! [`super::raw_export`] takes a finished result and writes it; this takes one
+//! point at a time and writes as it goes, so peak memory is the buffer rather
+//! than the waveform. For a multi-hour transient that is the difference
+//! between a file and an OOM.
+//!
+//! The format is the same SPICE RAW either way, which is what makes streaming
+//! possible at all: `No. Points` is unknown until the run ends, so it is
+//! written as a fixed-width field of zeroes and overwritten by [`
+//! StreamingWaveformWriter::finalize`] seeking back to it. Anything that reads
+//! RAW reads this, including this crate's own [`super::ltspice_raw`] parser —
+//! which is why there is no reader here. There was one, and it was a
+//! whole-file loader for the same bytes that required the caller to already
+//! know the channel count.
+//!
+//! Nothing calls this yet. It is kept rather than deleted because it is not a
+//! duplicate of `raw_export` but the constant-memory version of it, and the
+//! hard part — the seek-and-backfill — is written and tested.
 //!
 //! # Usage
 //! ```ignore
@@ -21,7 +35,7 @@
 
 use crate::Value;
 use crate::resource::{
-    ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_file_bytes_limited,
+    ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError,
 };
 use std::fs::File;
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
@@ -409,213 +423,6 @@ fn chrono_lite_now() -> String {
 }
 
 //=============================================================================
-// Streaming Reader (for loading waveform files)
-//=============================================================================
-
-/// Reader for streaming waveform files
-#[derive(Debug)]
-pub struct StreamingWaveformReader {
-    /// Memory-mapped or file-backed data
-    data: Vec<Value>,
-    /// Number of channels (including time)
-    num_columns: usize,
-    /// Total number of points
-    num_points: usize,
-}
-
-impl StreamingWaveformReader {
-    /// Load a binary waveform file
-    pub fn load_binary<P: AsRef<Path>>(path: P, num_channels: usize) -> io::Result<Self> {
-        Self::load_binary_with_limits(path, num_channels, ResourceLimits::default())
-            .map_err(WaveformStreamError::into_io)
-    }
-
-    /// Load a binary waveform with explicit external-data and result limits.
-    pub fn load_binary_with_limits<P: AsRef<Path>>(
-        path: P,
-        num_channels: usize,
-        resource_limits: ResourceLimits,
-    ) -> Result<Self, WaveformStreamError> {
-        let num_columns = num_channels.checked_add(1).ok_or_else(|| {
-            WaveformStreamError::InvalidConfiguration(
-                "channel count overflows this platform".to_string(),
-            )
-        })?;
-        let bytes = read_file_bytes_limited(
-            path.as_ref(),
-            ResourceKind::ExternalDataBytes,
-            resource_limits.max_external_data_bytes,
-        )?;
-        let header = parse_binary_stream_header(&bytes)?;
-        if header.num_columns != num_columns {
-            return Err(WaveformStreamError::InvalidFormat(format!(
-                "binary waveform header declares {} column(s), but the caller supplied {} channel(s) ({} column(s))",
-                header.num_columns, num_channels, num_columns
-            )));
-        }
-
-        let data_bytes = &bytes[header.payload_offset..];
-        if !data_bytes.len().is_multiple_of(8) {
-            return Err(WaveformStreamError::InvalidFormat(format!(
-                "binary waveform payload has {} trailing byte(s)",
-                data_bytes.len() % 8
-            )));
-        }
-        let num_values = data_bytes.len() / 8;
-        if !num_values.is_multiple_of(num_columns) {
-            return Err(WaveformStreamError::InvalidFormat(format!(
-                "binary waveform contains {num_values} values, which is not divisible by {num_columns} columns"
-            )));
-        }
-        ResourceLimitError::ensure(
-            ResourceKind::ExternalDataValues,
-            num_values,
-            resource_limits.max_external_data_values,
-        )?;
-        ResourceLimitError::ensure(
-            ResourceKind::ResultValues,
-            num_values,
-            resource_limits.max_result_values,
-        )?;
-        let num_points = num_values / num_columns;
-        if header.num_points != 0 && header.num_points != num_points {
-            return Err(WaveformStreamError::InvalidFormat(format!(
-                "binary waveform header declares {} point(s), but the payload contains {}",
-                header.num_points, num_points
-            )));
-        }
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            num_points,
-            resource_limits.max_analysis_points,
-        )?;
-
-        let mut data = Vec::new();
-        data.try_reserve_exact(num_values).map_err(|error| {
-            WaveformStreamError::InvalidFormat(format!(
-                "unable to allocate {num_values} waveform values: {error}"
-            ))
-        })?;
-        for chunk in data_bytes.chunks_exact(8) {
-            let value = f64::from_le_bytes([
-                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
-            ]);
-            if !value.is_finite() {
-                return Err(WaveformStreamError::InvalidFormat(format!(
-                    "binary waveform contains non-finite value {value}"
-                )));
-            }
-            data.push(value);
-        }
-
-        Ok(Self {
-            data,
-            num_columns,
-            num_points,
-        })
-    }
-
-    /// Get time array
-    pub fn times(&self) -> Vec<Value> {
-        self.data
-            .chunks(self.num_columns)
-            .map(|row| row[0])
-            .collect()
-    }
-
-    /// Get channel data by index (0-based, not including time)
-    pub fn channel(&self, index: usize) -> Vec<Value> {
-        self.data
-            .chunks(self.num_columns)
-            .map(|row| row.get(index + 1).copied().unwrap_or(0.0))
-            .collect()
-    }
-
-    /// Get number of points
-    pub fn num_points(&self) -> usize {
-        self.num_points
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct BinaryStreamHeader {
-    payload_offset: usize,
-    num_columns: usize,
-    num_points: usize,
-}
-
-fn parse_binary_stream_header(bytes: &[u8]) -> Result<BinaryStreamHeader, WaveformStreamError> {
-    let mut line_start = 0usize;
-    let mut num_columns = None;
-    let mut num_points = None;
-
-    while line_start < bytes.len() {
-        let relative_end = bytes[line_start..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .ok_or_else(|| {
-                WaveformStreamError::InvalidFormat(
-                    "binary waveform header line has no terminating newline".to_string(),
-                )
-            })?;
-        let newline = line_start + relative_end;
-        let content_end = if newline > line_start && bytes[newline - 1] == b'\r' {
-            newline - 1
-        } else {
-            newline
-        };
-        let line = std::str::from_utf8(&bytes[line_start..content_end]).map_err(|error| {
-            WaveformStreamError::InvalidFormat(format!(
-                "binary waveform header is not UTF-8: {error}"
-            ))
-        })?;
-        let line = line.trim();
-
-        if line == "Binary:" {
-            let num_columns = num_columns.ok_or_else(|| {
-                WaveformStreamError::InvalidFormat(
-                    "binary waveform header has no No. Variables field".to_string(),
-                )
-            })?;
-            let num_points = num_points.ok_or_else(|| {
-                WaveformStreamError::InvalidFormat(
-                    "binary waveform header has no No. Points field".to_string(),
-                )
-            })?;
-            return Ok(BinaryStreamHeader {
-                payload_offset: newline + 1,
-                num_columns,
-                num_points,
-            });
-        }
-        if line == "Values:" {
-            return Err(WaveformStreamError::InvalidFormat(
-                "ASCII waveform data cannot be loaded by the binary reader".to_string(),
-            ));
-        }
-        if let Some(value) = line.strip_prefix("No. Variables:") {
-            num_columns = Some(parse_header_count("No. Variables", value)?);
-        } else if let Some(value) = line.strip_prefix("No. Points:") {
-            num_points = Some(parse_header_count("No. Points", value)?);
-        }
-
-        line_start = newline + 1;
-    }
-
-    Err(WaveformStreamError::InvalidFormat(
-        "binary waveform header has no Binary: marker".to_string(),
-    ))
-}
-
-fn parse_header_count(field: &str, value: &str) -> Result<usize, WaveformStreamError> {
-    value.trim().parse::<usize>().map_err(|_| {
-        WaveformStreamError::InvalidFormat(format!(
-            "binary waveform header has invalid {field} value {value:?}"
-        ))
-    })
-}
-
-//=============================================================================
 // Tests
 //=============================================================================
 
@@ -708,34 +515,48 @@ mod tests {
         std::fs::remove_file(path).expect("remove test waveform");
     }
 
+    /// What this writer emits is a SPICE RAW file, not a private format, and
+    /// the crate's own RAW reader is what proves it. The backfilled point
+    /// count is the part worth pinning: it is written as zeroes, seeked back
+    /// to and overwritten by `finalize`, and a reader that trusted the header
+    /// would silently return nothing if that seek were ever dropped.
     #[test]
-    fn binary_reader_rejects_file_byte_limit_before_decoding() {
+    fn finalized_binary_output_round_trips_through_the_raw_reader() {
+        let path = temporary_path("raw-round-trip");
+        let mut writer =
+            StreamingWaveformWriter::new(&path, &["V(out)"], 2).expect("create binary writer");
+        writer.write_point(0.0, &[1.0]).expect("write point");
+        writer.write_point(1.0e-9, &[2.0]).expect("write point");
+        writer.finalize().expect("finalize");
+
+        let parsed = crate::io::ltspice_raw::parse_raw_file(&path)
+            .expect("binary output must round-trip through the raw reader");
+
+        assert!(parsed.header.is_double);
+        assert_eq!(parsed.header.no_points, 2);
+        assert_eq!(parsed.waveforms[0].y, vec![0.0, 1.0e-9]);
+        assert_eq!(parsed.waveforms[1].y, vec![1.0, 2.0]);
+        std::fs::remove_file(path).expect("remove test waveform");
+    }
+
+    #[test]
+    fn raw_reader_rejects_file_byte_limit_before_decoding() {
         let path = temporary_path("reader-limit");
         let mut writer =
             StreamingWaveformWriter::new(&path, &["V(out)"], 2).expect("create binary writer");
         writer.write_point(0.0, &[1.0]).expect("write point");
         writer.finalize().expect("finalize");
-        let streamed =
-            StreamingWaveformReader::load_binary(&path, 1).expect("load finalized binary waveform");
-        assert_eq!(streamed.num_points(), 1);
-        assert_eq!(streamed.times(), vec![0.0]);
-        assert_eq!(streamed.channel(0), vec![1.0]);
-        let parsed = crate::io::ltspice_raw::parse_raw_file(&path)
-            .expect("binary output must round-trip through the raw reader");
-        assert!(parsed.header.is_double);
-        assert_eq!(parsed.header.no_points, 1);
-        assert_eq!(parsed.waveforms[1].y, vec![1.0]);
         let file_bytes = usize::try_from(std::fs::metadata(&path).expect("metadata").len())
             .expect("test file fits usize");
         let mut limits = ResourceLimits::default();
         limits.max_external_data_bytes = file_bytes - 1;
 
-        let error = StreamingWaveformReader::load_binary_with_limits(&path, 1, limits)
+        let error = crate::io::ltspice_raw::parse_raw_file_with_limits(path.as_path(), limits)
             .expect_err("file byte policy must reject before decoding");
 
         assert!(matches!(
             error,
-            WaveformStreamError::ResourceLimit(ResourceLimitError {
+            crate::io::ltspice_raw::RawParseError::ResourceLimit(ResourceLimitError {
                 resource: ResourceKind::ExternalDataBytes,
                 requested,
                 limit,

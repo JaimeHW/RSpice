@@ -869,7 +869,8 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), XyceAddResistorsMaterializ
 mod tests {
     use super::*;
     use crate::abort_signal::ImmediateAbort;
-    use crate::netlist::{ExpressionDialect, NetlistParseOptions, flatten_netlist_with_models};
+    use crate::config::ExpressionDialect;
+    use crate::netlist::{NetlistParseOptions, flatten_netlist_with_models};
 
     fn parse(source: &str) -> Netlist {
         Netlist::parse_with_options(

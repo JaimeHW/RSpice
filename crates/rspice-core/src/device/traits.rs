@@ -1,6 +1,6 @@
 //! Device behavior traits
 
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 /// SPICE-style tolerances used to accept or reject a nonlinear Newton step.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,13 +30,6 @@ impl NonlinearConvergenceCriteria {
         }
     }
 
-    #[inline]
-    pub fn voltage_only(voltage_abs: Value) -> Self {
-        Self {
-            voltage_abs,
-            ..Self::default()
-        }
-    }
 
     #[inline]
     pub fn voltage_tolerance(self) -> Value {

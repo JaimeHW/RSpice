@@ -25,14 +25,16 @@ use rspice_core::netlist::expr::{
 use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DeviceInitialConditionError,
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
-    ElementProvenance, ExpressionDialect, MissingSubcircuitEndsBoundary,
+    ElementProvenance, MissingSubcircuitEndsBoundary,
     MissingSubcircuitEndsError, Netlist, NetlistParseOptions, OutputDirectiveKind,
     OutputSymbolKind, ParameterRedefinitionPolicy, ParametricValue, ParseError,
     StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist, flatten_netlist_with_models,
     validate_output_symbols,
 };
+use rspice_core::config::ExpressionDialect;
+use rspice_core::numerics::integration::TransientLteReference;
 use rspice_core::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;

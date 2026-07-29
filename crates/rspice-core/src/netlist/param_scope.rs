@@ -123,23 +123,6 @@ impl ScopedParam {
         self
     }
 
-    /// Check if this parameter applies to the given path
-    ///
-    /// A parameter applies if its path is an ancestor of (or equal to)
-    /// the query path.
-    pub fn applies_to(&self, query_path: &HierarchyPath) -> bool {
-        match self.scope {
-            ParamScope::Global | ParamScope::Library => true,
-            ParamScope::Subcircuit => {
-                // Subcircuit defaults apply to any instance of that subcircuit
-                true
-            }
-            ParamScope::Instance | ParamScope::Local => {
-                // Must be exact path match or ancestor
-                query_path.starts_with(&self.path)
-            }
-        }
-    }
 }
 
 //=============================================================================
@@ -186,33 +169,9 @@ impl ParamResolver {
         self.global_params.insert(name.to_uppercase(), value);
     }
 
-    /// Set multiple global parameters
-    pub fn set_globals(&mut self, params: &[(String, Value)]) {
-        for (name, value) in params {
-            self.set_global(name, *value);
-        }
-    }
 
-    /// Set a library parameter
-    pub fn set_library(&mut self, library: &str, name: &str, value: Value) {
-        self.library_params
-            .entry(library.to_string())
-            .or_default()
-            .insert(name.to_uppercase(), value);
-    }
 
-    /// Set the active library context
-    pub fn set_active_library(&mut self, library: Option<String>) {
-        self.active_library = library;
-    }
 
-    /// Set a subcircuit default parameter
-    pub fn set_subcircuit_default(&mut self, subckt_name: &str, name: &str, value: Value) {
-        self.subcircuit_defaults
-            .entry(subckt_name.to_uppercase())
-            .or_default()
-            .insert(name.to_uppercase(), value);
-    }
 
     /// Set subcircuit defaults from a parsed SubcircuitDef
     pub fn add_subcircuit_defaults(&mut self, subckt_name: &str, params: &[(String, Value)]) {
@@ -234,23 +193,7 @@ impl ParamResolver {
             .insert(name.to_uppercase(), value);
     }
 
-    /// Set instance overrides for a path
-    pub fn add_instance_overrides(&mut self, path: &HierarchyPath, params: &[(String, Value)]) {
-        let path_key = path.to_string().to_uppercase();
-        let entry = self.instance_overrides.entry(path_key).or_default();
-        for (name, value) in params {
-            entry.insert(name.to_uppercase(), *value);
-        }
-    }
 
-    /// Set a local/occurrence-level override
-    pub fn set_local(&mut self, path: &HierarchyPath, name: &str, value: Value) {
-        let path_key = path.to_string().to_uppercase();
-        self.local_overrides
-            .entry(path_key)
-            .or_default()
-            .insert(name.to_uppercase(), value);
-    }
 
     //-------------------------------------------------------------------------
     // Parameter Resolution
@@ -302,134 +245,14 @@ impl ParamResolver {
         self.global_params.get(&name_upper).copied()
     }
 
-    /// Resolve with explicit subcircuit context
-    ///
-    /// Used during expansion when the subcircuit name is known.
-    pub fn resolve_with_subcircuit(
-        &self,
-        name: &str,
-        path: &HierarchyPath,
-        subcircuit_name: &str,
-    ) -> Option<Value> {
-        // First try normal resolution
-        if let Some(value) = self.resolve(name, path) {
-            return Some(value);
-        }
 
-        // Then check subcircuit defaults
-        let name_upper = name.to_uppercase();
-        let subckt_upper = subcircuit_name.to_uppercase();
 
-        self.subcircuit_defaults
-            .get(&subckt_upper)
-            .and_then(|params| params.get(&name_upper))
-            .copied()
-    }
-
-    /// Implement pPar() style parent parameter lookup
-    ///
-    /// Looks up a parameter from the parent scope in the hierarchy.
-    /// Returns the value defined at the parent instance level.
-    pub fn parent_param(&self, name: &str, path: &HierarchyPath) -> Option<Value> {
-        if let Some(parent) = path.parent() {
-            self.resolve(name, &parent)
-        } else {
-            // At root, fall back to global
-            self.global_params.get(&name.to_uppercase()).copied()
-        }
-    }
-
-    /// Get all parameters in scope at a given path
-    ///
-    /// Returns a merged map with higher precedence values overriding lower.
-    pub fn all_params_at(&self, path: &HierarchyPath) -> HashMap<String, Value> {
-        let mut result = HashMap::new();
-
-        // Start with globals (lowest precedence)
-        for (name, &value) in &self.global_params {
-            result.insert(name.clone(), value);
-        }
-
-        // Add library params
-        if let Some(lib) = &self.active_library
-            && let Some(params) = self.library_params.get(lib)
-        {
-            for (name, &value) in params {
-                result.insert(name.clone(), value);
-            }
-        }
-
-        // Add instance overrides from ancestors (closer ancestors override)
-        let mut ancestors: Vec<_> = path.ancestors();
-        ancestors.push(path.clone());
-
-        for ancestor in ancestors {
-            let p_str = ancestor.to_string().to_uppercase();
-            if let Some(params) = self.instance_overrides.get(&p_str) {
-                for (name, &value) in params {
-                    result.insert(name.clone(), value);
-                }
-            }
-        }
-
-        // Add local overrides (highest precedence)
-        let path_str = path.to_string().to_uppercase();
-        if let Some(params) = self.local_overrides.get(&path_str) {
-            for (name, &value) in params {
-                result.insert(name.clone(), value);
-            }
-        }
-
-        result
-    }
 
     /// Check if a parameter is defined at any scope
     pub fn is_defined(&self, name: &str, path: &HierarchyPath) -> bool {
         self.resolve(name, path).is_some()
     }
 
-    /// Get the scope level at which a parameter is defined
-    pub fn get_defining_scope(&self, name: &str, path: &HierarchyPath) -> Option<ParamScope> {
-        let name_upper = name.to_uppercase();
-        let path_str = path.to_string().to_uppercase();
-
-        // Check in precedence order
-        if self
-            .local_overrides
-            .get(&path_str)
-            .is_some_and(|p| p.contains_key(&name_upper))
-        {
-            return Some(ParamScope::Local);
-        }
-
-        let mut current = Some(path.clone());
-        while let Some(p) = current {
-            let p_str = p.to_string().to_uppercase();
-            if self
-                .instance_overrides
-                .get(&p_str)
-                .is_some_and(|p| p.contains_key(&name_upper))
-            {
-                return Some(ParamScope::Instance);
-            }
-            current = p.parent();
-        }
-
-        if let Some(lib) = &self.active_library
-            && self
-                .library_params
-                .get(lib)
-                .is_some_and(|p| p.contains_key(&name_upper))
-        {
-            return Some(ParamScope::Library);
-        }
-
-        if self.global_params.contains_key(&name_upper) {
-            return Some(ParamScope::Global);
-        }
-
-        None
-    }
 
     //-------------------------------------------------------------------------
     // Utilities

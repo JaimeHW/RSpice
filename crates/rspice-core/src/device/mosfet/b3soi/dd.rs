@@ -57,7 +57,7 @@ pub mod params;
 pub mod temp;
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 use eval::{B3SoiDdBias, B3SoiDdOp, ModelConsts};
 use std::borrow::Cow;
 use std::sync::Arc;

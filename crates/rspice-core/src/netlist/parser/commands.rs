@@ -1,6 +1,7 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
-use crate::netlist::{TransientLteReference, XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
+use crate::numerics::integration::TransientLteReference;
+use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
 
 use super::*;
 
@@ -622,7 +623,7 @@ fn parse_xspice_codemodel_command(
     let requested = collect_codemodel_library_args(stream);
     let unsupported = requested
         .iter()
-        .filter(|path| !crate::xspice::CodeModelRegistry::is_builtin_codemodel_library_path(path))
+        .filter(|path| !crate::codemodels::is_builtin_codemodel_library_path(path))
         .cloned()
         .collect::<Vec<_>>();
 
@@ -669,7 +670,7 @@ fn unsupported_xspice_codemodel_command(
              but RSpice does not yet load arbitrary .cm/MIF libraries; {target}. \
              Standard ngspice-46 built-in bundle names ({}) are accepted as compatibility no-ops \
              because those XSPICE models are compiled into RSpice.",
-            crate::xspice::CodeModelRegistry::builtin_codemodel_library_names().join(", ")
+            crate::codemodels::BUILTIN_CODEMODEL_LIBRARY_NAMES.join(", ")
         ),
     }
 }
@@ -1726,8 +1727,8 @@ fn parse_nonlinear_continuation_option(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<crate::netlist::NonlinearContinuationMode, ParseError> {
-    use crate::netlist::NonlinearContinuationMode as Mode;
+) -> Result<crate::config::NonlinearContinuationMode, ParseError> {
+    use crate::config::NonlinearContinuationMode as Mode;
 
     if let TokenKind::Ident(name) = &stream.peek().kind {
         let name = name.clone();
@@ -2350,7 +2351,7 @@ pub(super) fn parse_meas_command(
                     stream.advance();
                     expr
                 }
-                _ if params.expression_dialect() == crate::netlist::ExpressionDialect::Xyce => {
+                _ if params.expression_dialect() == crate::config::ExpressionDialect::Xyce => {
                     collect_measure_equation_expression(stream, line_num)?
                 }
                 other => {
@@ -2364,7 +2365,7 @@ pub(super) fn parse_meas_command(
                 }
             };
             if measure_type_key == "EQN"
-                || params.expression_dialect() == crate::netlist::ExpressionDialect::Xyce
+                || params.expression_dialect() == crate::config::ExpressionDialect::Xyce
             {
                 let (from, to, td) = parse_measure_equation_options(stream, line_num, params)?;
                 MeasureType::Equation {
@@ -5018,7 +5019,7 @@ mod tests {
              .PRINT DC V($) V(//)\n\
              .END\n",
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..Default::default()
             },
         )

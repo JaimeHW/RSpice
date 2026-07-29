@@ -96,11 +96,6 @@ impl ThermalNetwork {
         self.last_update_time = time;
     }
 
-    /// Get steady-state junction temperature for given power
-    #[inline]
-    pub fn steady_state_temperature(&self, power: Value) -> Value {
-        self.t_ambient + power * self.rth
-    }
 
     /// Reset thermal state to ambient
     pub fn reset(&mut self) {

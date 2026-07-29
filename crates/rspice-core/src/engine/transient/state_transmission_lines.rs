@@ -5,7 +5,7 @@ use super::*;
 impl Engine {
     #[inline]
     pub(super) fn stamp_tline_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         time: Value,
@@ -30,7 +30,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn stamp_coupled_tline_companions(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         time: Value,
@@ -169,7 +169,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_tline_history(
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         initial_solution: &[Value],
         initial_time: Value,
     ) -> Vec<(Value, Value)> {
@@ -217,7 +217,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn initialize_coupled_tline_history(
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         initial_solution: &[Value],
         initial_time: Value,
     ) -> Vec<CoupledTlineReferenceState> {

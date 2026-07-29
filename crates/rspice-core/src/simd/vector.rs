@@ -60,32 +60,6 @@ pub fn fill_zero(slice: &mut [Value]) {
     }
 }
 
-/// Fill a slice with a constant value using SIMD.
-///
-/// # Arguments
-///
-/// * `slice` - The slice to fill
-/// * `value` - The value to fill with
-#[inline]
-pub fn fill_value(slice: &mut [Value], value: Value) {
-    if !should_use_simd(slice.len()) {
-        slice.fill(value);
-        return;
-    }
-
-    let vec_value = f64x4::splat(value);
-    let aligned_len = slice.len() - (slice.len() % SIMD_WIDTH);
-
-    let mut i = 0;
-    while i < aligned_len {
-        store_f64x4(vec_value, &mut slice[i..i + SIMD_WIDTH]);
-        i += SIMD_WIDTH;
-    }
-
-    for val in &mut slice[aligned_len..] {
-        *val = value;
-    }
-}
 
 //=============================================================================
 // Copy Operations

@@ -7,7 +7,6 @@
 //! - Spot noise values
 
 use crate::Value;
-use std::collections::HashMap;
 
 #[inline]
 fn interpolate_over_frequency(
@@ -139,23 +138,6 @@ impl PnoiseResult {
         }
     }
 
-    /// Get spot noise at standard offsets (1kHz, 10kHz, 100kHz, 1MHz)
-    pub fn spot_noise_summary(&self) -> HashMap<String, Value> {
-        let mut summary = HashMap::new();
-
-        for offset in [1e3, 10e3, 100e3, 1e6] {
-            if let Some(pn) = self.phase_noise_at(offset) {
-                let label = if offset >= 1e6 {
-                    format!("{}MHz", offset / 1e6)
-                } else {
-                    format!("{}kHz", offset / 1e3)
-                };
-                summary.insert(label, pn);
-            }
-        }
-
-        summary
-    }
 
     /// Get total integrated noise power `dBc` over frequency range
     pub fn integrated_noise_power(&self, f_start: Value, f_stop: Value) -> Option<Value> {
@@ -198,10 +180,6 @@ impl PnoiseResult {
         }
     }
 
-    /// Convert RMS jitter to picoseconds
-    pub fn rms_jitter_ps(&self) -> Option<Value> {
-        self.rms_jitter.map(|j| j * 1e12)
-    }
 
     /// Number of spectral points
     pub fn num_points(&self) -> usize {
@@ -261,11 +239,6 @@ impl PhaseNoisePoint {
         }
     }
 
-    /// Set AM noise component
-    pub fn with_am_noise(mut self, am_dbc_hz: Value) -> Self {
-        self.am_noise = Some(am_dbc_hz);
-        self
-    }
 }
 
 /// Individual noise contributor (for noise summary)
@@ -300,40 +273,7 @@ impl NoiseContributor {
         self.contributions.push((offset_freq, contribution_dbc));
     }
 
-    /// Set percentage contribution
-    pub fn with_percentage(mut self, pct: Value) -> Self {
-        self.percentage = Some(pct);
-        self
-    }
 
-    /// Get contribution at specific offset (interpolated)
-    pub fn contribution_at(&self, offset_freq: Value) -> Option<Value> {
-        if self.contributions.is_empty() || !offset_freq.is_finite() {
-            return None;
-        }
-
-        let mut below: Option<(Value, Value)> = None;
-        let mut above: Option<(Value, Value)> = None;
-
-        for &(freq, contrib) in &self.contributions {
-            if freq <= offset_freq && below.map(|(f, _)| freq > f).unwrap_or(true) {
-                below = Some((freq, contrib));
-            }
-            if freq >= offset_freq && above.map(|(f, _)| freq < f).unwrap_or(true) {
-                above = Some((freq, contrib));
-            }
-        }
-
-        match (below, above) {
-            (Some((fb, cb)), Some((fa, _ca))) if (fa - fb).abs() < 1e-10 => Some(cb),
-            (Some((fb, cb)), Some((fa, ca))) => {
-                Some(interpolate_over_frequency(offset_freq, fb, cb, fa, ca))
-            }
-            (Some((_, cb)), None) => Some(cb),
-            (None, Some((_, ca))) => Some(ca),
-            (None, None) => None,
-        }
-    }
 }
 
 // =============================================================================

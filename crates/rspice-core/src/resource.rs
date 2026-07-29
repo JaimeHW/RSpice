@@ -443,6 +443,15 @@ where
 /// accidental or hostile amplification. Services with a known memory budget
 /// should start from [`Default`] and lower individual fields. Setting a field
 /// to `usize::MAX` effectively disables that specific limit.
+/// Default nesting depth allowed while expanding `.INCLUDE` and `.LIB`.
+///
+/// Foundry PDKs have substantially deeper include trees than hand-written
+/// decks, so this is generous. It used to live in `netlist::include`, which
+/// put a resource limit above the module that holds every other resource
+/// limit — and made `resource` reach up into `netlist` to read its own
+/// default.
+pub const DEFAULT_MAX_INCLUDE_DEPTH: usize = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResourceLimits {
@@ -490,7 +499,7 @@ impl Default for ResourceLimits {
             max_external_data_bytes: 256 * 1024 * 1024,
             max_external_data_values: 25_000_000,
             max_shared_cache_bytes: 512 * 1024 * 1024,
-            max_include_depth: crate::netlist::DEFAULT_MAX_INCLUDE_DEPTH,
+            max_include_depth: DEFAULT_MAX_INCLUDE_DEPTH,
             max_hierarchy_depth: 100,
             max_flattened_elements: 250_000,
             max_circuit_nodes: 250_000,

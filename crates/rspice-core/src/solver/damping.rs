@@ -125,12 +125,6 @@ impl DampingController {
         }
     }
 
-    /// Create with custom voltage limits
-    pub fn with_voltage_limits(mut self, vmax: Value, vt: Value) -> Self {
-        self.vmax_junction = vmax;
-        self.vt = vt;
-        self
-    }
 
     /// Get current damping factor
     #[inline]
@@ -144,10 +138,6 @@ impl DampingController {
         self.strategy
     }
 
-    /// Set strategy
-    pub fn set_strategy(&mut self, strategy: DampingStrategy) {
-        self.strategy = strategy;
-    }
 
     /// Reset for new Newton solve
     pub fn reset(&mut self) {
@@ -203,31 +193,6 @@ impl DampingController {
         dv
     }
 
-    /// Apply voltage limiting to a full update vector
-    ///
-    /// # Arguments
-    /// * `x_old` - Current solution vector
-    /// * `dx` - Proposed update vector
-    /// * `junction_nodes` - Indices of nodes that are junction voltages
-    ///
-    /// # Returns
-    /// Modified update vector with limited junction voltages
-    pub fn limit_update_vector(
-        &mut self,
-        x_old: &[Value],
-        dx: &[Value],
-        junction_nodes: &[usize],
-    ) -> Vec<Value> {
-        let mut dx_limited = dx.to_vec();
-
-        for &node in junction_nodes {
-            if node < x_old.len() && node < dx_limited.len() {
-                dx_limited[node] = self.limit_junction_voltage(x_old[node], dx[node]);
-            }
-        }
-
-        dx_limited
-    }
 
     /// Compute damping factor using Bank-Rose algorithm
     ///
@@ -313,38 +278,7 @@ impl DampingController {
         self.alpha
     }
 
-    /// Get optimal damping factor based on current strategy
-    ///
-    /// This is the main entry point for getting a damping factor.
-    ///
-    /// # Arguments
-    /// * `residual_norm` - Current residual norm
-    ///
-    /// # Returns
-    /// Recommended damping factor
-    pub fn get_damping_factor(&mut self, residual_norm: Value) -> Value {
-        match self.strategy {
-            DampingStrategy::None => 1.0,
-            DampingStrategy::Fixed => 0.5,
-            DampingStrategy::BankRose | DampingStrategy::Combined => {
-                self.bank_rose_damping(residual_norm)
-            }
-            DampingStrategy::LineSearch => {
-                // Line search is handled separately via line_search()
-                self.alpha
-            }
-            DampingStrategy::VoltageLimiting => {
-                // Voltage limiting doesn't affect alpha directly
-                1.0
-            }
-        }
-    }
 
-    /// Apply damping to Newton update
-    #[inline]
-    pub fn damp_update(&self, dx: &[Value]) -> Vec<Value> {
-        dx.iter().map(|&d| d * self.alpha).collect()
-    }
 
     /// Get statistics
     pub fn statistics(&self) -> DampingStatistics {

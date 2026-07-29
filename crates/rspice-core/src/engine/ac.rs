@@ -2545,7 +2545,7 @@ mod tests {
              .AC LIN 2 10 100\n\
              .END\n",
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )

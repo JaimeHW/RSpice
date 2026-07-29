@@ -34,21 +34,6 @@ impl EyeTrace {
         self.len() == 0
     }
 
-    /// Get min/max amplitude
-    pub fn amplitude_range(&self) -> Option<(f64, f64)> {
-        if self.amplitude.is_empty() {
-            return None;
-        }
-        let mut min = f64::MAX;
-        let mut max = f64::MIN;
-        for &v in &self.amplitude {
-            if v.is_finite() {
-                min = min.min(v);
-                max = max.max(v);
-            }
-        }
-        if min <= max { Some((min, max)) } else { None }
-    }
 }
 
 // =============================================================================
@@ -122,35 +107,6 @@ impl EyeData {
         self.traces.clear();
     }
 
-    /// Calculate amplitude statistics across all traces
-    pub fn amplitude_stats(&self) -> Option<AmplitudeStats> {
-        if self.traces.is_empty() {
-            return None;
-        }
-
-        let mut all_values = Vec::new();
-        for trace in &self.traces {
-            all_values.extend(trace.amplitude.iter().copied().filter(|v| v.is_finite()));
-        }
-
-        if all_values.is_empty() {
-            return None;
-        }
-
-        let n = all_values.len() as f64;
-        let mean = all_values.iter().sum::<f64>() / n;
-        let variance = all_values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
-
-        all_values.sort_by(|a, b| a.total_cmp(b));
-
-        Some(AmplitudeStats {
-            min: all_values.first().copied().unwrap_or(0.0),
-            max: all_values.last().copied().unwrap_or(0.0),
-            mean,
-            std_dev: variance.sqrt(),
-            count: all_values.len(),
-        })
-    }
 }
 
 /// Amplitude statistics

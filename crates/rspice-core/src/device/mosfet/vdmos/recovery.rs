@@ -102,38 +102,6 @@ impl DiodeRecovery {
         self.prev_current = diode_current;
     }
 
-    /// Get recovery current contribution
-    ///
-    /// Returns additional current that flows during reverse recovery.
-    /// Uses a softness-dependent waveform shape.
-    pub fn recovery_current(&self, time: Value) -> Value {
-        if !self.in_recovery || self.stored_charge <= 0.0 {
-            return 0.0;
-        }
-
-        let t_rel = time - self.recovery_start_time;
-        if t_rel < 0.0 || t_rel > 3.0 * self.trr {
-            return 0.0;
-        }
-
-        // Recovery waveform: triangular modified by softness
-        // ta = trr * softness (time of peak reverse current)
-        // tb = trr * (1 - softness) (decay time)
-        let ta = self.trr * (1.0 - self.softness * 0.5);
-        let tb = self.trr * (1.0 + self.softness);
-
-        let irr_peak = 2.0 * self.qrr / (ta + tb);
-
-        if t_rel < ta {
-            // Rising to peak
-            -irr_peak * t_rel / ta
-        } else if t_rel < ta + tb {
-            // Decaying from peak
-            -irr_peak * (1.0 - (t_rel - ta) / tb)
-        } else {
-            0.0
-        }
-    }
 
     /// Reset recovery state
     pub fn reset(&mut self) {
