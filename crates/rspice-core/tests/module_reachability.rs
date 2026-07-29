@@ -187,3 +187,47 @@ mod inline_with_brace { }
     assert!(!declared.contains("tests"));
     assert!(!declared.contains("inline_with_brace"));
 }
+
+/// A module with submodules is `foo.rs` beside `foo/`, never `foo/mod.rs`.
+///
+/// Both spellings compile and Rust has no opinion between them. The crate
+/// does, because it had twenty-nine of one and nineteen of the other, and a
+/// convention held half the time is not a convention — it is a coin flip you
+/// perform every time you open a directory.
+///
+/// Sibling style wins on the one thing that is not taste: every file gets a
+/// distinct name. `mod.rs` in an editor tab, a fuzzy-finder result, a `grep
+/// -l` list or a stack frame identifies nothing, and this crate has enough
+/// depth (`device/mosfet/b3soi/fd/`) that the parent directory is not on
+/// screen to disambiguate it.
+///
+/// `device/veriloga_generated/` is exempt. It is emitted by
+/// `rspice-veriloga-gen`, and generated layout is the generator's decision.
+#[test]
+fn module_files_use_sibling_style_not_mod_rs() {
+    let root = src_dir();
+    let mut offenders = Vec::new();
+
+    for path in rust_sources(&root) {
+        if path.file_name().is_some_and(|name| name != "mod.rs") {
+            continue;
+        }
+        let relative = path.strip_prefix(&root).unwrap_or(&path);
+        let display = relative.display().to_string().replace('\\', "/");
+        if display.starts_with("device/veriloga_generated/") {
+            continue;
+        }
+        let directory = relative
+            .parent()
+            .and_then(|dir| dir.to_str())
+            .unwrap_or_default()
+            .replace('\\', "/");
+        offenders.push(format!("  {display}  ->  {directory}.rs"));
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "these modules still use `mod.rs`; rename each to the sibling form:\n{}",
+        offenders.join("\n")
+    );
+}
