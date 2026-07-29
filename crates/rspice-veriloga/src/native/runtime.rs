@@ -11,10 +11,10 @@
 //! native backend be reviewed as ordinary code.
 
 use super::{JitError, JitResult};
-use std::ptr;
+use std::ptr::{self, NonNull};
 
 pub(crate) struct ExecutableMemory {
-    ptr: *mut u8,
+    ptr: NonNull<u8>,
     len: usize,
 }
 
@@ -38,7 +38,12 @@ impl ExecutableMemory {
                 .into(),
             });
         }
-        Ok(unsafe { self.ptr.add(offset) as *const u8 })
+        Ok(unsafe { self.ptr.as_ptr().add(offset) as *const u8 })
+    }
+
+    #[cfg(test)]
+    fn base_ptr(&self) -> *const u8 {
+        self.ptr.as_ptr()
     }
 }
 
@@ -100,7 +105,7 @@ impl ExecutableMemory {
         }
 
         Ok(Self {
-            ptr: ptr.cast::<u8>(),
+            ptr: NonNull::new(ptr.cast::<u8>()).expect("VirtualAlloc returned a checked pointer"),
             len: bytes.len(),
         })
     }
@@ -159,7 +164,7 @@ impl ExecutableMemory {
         }
 
         Ok(Self {
-            ptr: ptr.cast::<u8>(),
+            ptr: NonNull::new(ptr.cast::<u8>()).expect("mmap returned a checked pointer"),
             len: bytes.len(),
         })
     }
@@ -218,24 +223,23 @@ fn sync_instruction_cache(_ptr: *const u8, _len: usize) -> JitResult<()> {
 
 impl Drop for ExecutableMemory {
     fn drop(&mut self) {
-        if self.ptr.is_null() || self.len == 0 {
-            return;
-        }
-
         #[cfg(windows)]
         unsafe {
             use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree};
 
-            VirtualFree(self.ptr.cast(), 0, MEM_RELEASE);
+            VirtualFree(self.ptr.as_ptr().cast(), 0, MEM_RELEASE);
         }
 
         #[cfg(unix)]
         unsafe {
-            libc::munmap(self.ptr.cast(), self.len);
+            libc::munmap(self.ptr.as_ptr().cast(), self.len);
         }
     }
 }
 
+// Safety: allocation publishes only immutable RX pages. `ptr_at` exposes
+// const pointers, mutation is impossible after construction, and Drop needs
+// exclusive ownership before unmapping.
 unsafe impl Send for ExecutableMemory {}
 unsafe impl Sync for ExecutableMemory {}
 
@@ -316,5 +320,63 @@ mod tests {
         let ptr = memory.ptr_at(0).expect("entry point inside image");
         sync_instruction_cache(ptr, memory.len())
             .expect("sync instruction cache for executable memory");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn executable_memory_is_read_execute_and_not_writable() {
+        use std::mem::{MaybeUninit, size_of};
+        use windows_sys::Win32::System::Memory::{
+            MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READ, VirtualQuery,
+        };
+
+        let mut enc = X64Encoder::new();
+        enc.mov_eax_imm32(42);
+        enc.ret();
+        let memory =
+            ExecutableMemory::allocate(&enc.into_bytes()).expect("allocate executable memory");
+        let mut info = MaybeUninit::<MEMORY_BASIC_INFORMATION>::zeroed();
+        let bytes = unsafe {
+            VirtualQuery(
+                memory.base_ptr().cast(),
+                info.as_mut_ptr(),
+                size_of::<MEMORY_BASIC_INFORMATION>(),
+            )
+        };
+        assert_eq!(bytes, size_of::<MEMORY_BASIC_INFORMATION>());
+        let info = unsafe { info.assume_init() };
+        assert_eq!(
+            info.Protect & 0xff,
+            PAGE_EXECUTE_READ,
+            "published native pages must be RX, never writable"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn executable_memory_is_read_execute_and_not_writable() {
+        let mut enc = X64Encoder::new();
+        enc.mov_eax_imm32(42);
+        enc.ret();
+        let memory =
+            ExecutableMemory::allocate(&enc.into_bytes()).expect("allocate executable memory");
+        let address = memory.base_ptr() as usize;
+        let maps = std::fs::read_to_string("/proc/self/maps").expect("read process mappings");
+        let permissions = maps
+            .lines()
+            .find_map(|line| {
+                let mut fields = line.split_whitespace();
+                let range = fields.next()?;
+                let permissions = fields.next()?;
+                let (start, end) = range.split_once('-')?;
+                let start = usize::from_str_radix(start, 16).ok()?;
+                let end = usize::from_str_radix(end, 16).ok()?;
+                (start <= address && address < end).then_some(permissions)
+            })
+            .expect("find executable-memory mapping");
+        assert!(
+            permissions.starts_with("r-x"),
+            "published native pages must be RX, never writable; got {permissions}"
+        );
     }
 }
