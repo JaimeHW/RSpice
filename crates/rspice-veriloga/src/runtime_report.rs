@@ -50,6 +50,23 @@ pub struct RuntimeQualificationOptions {
     pub generated_rust: bool,
     /// Compile the native x86-64 qualification artifact when supported.
     pub native_x64_jit: bool,
+    /// Whether failure of a requested optimized backend may fall back to the
+    /// portable bytecode interpreter.
+    #[serde(default)]
+    pub interpreter_fallback: InterpreterFallbackPolicy,
+}
+
+/// Policy for a requested optimized backend that cannot accept the model.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InterpreterFallbackPolicy {
+    /// Preserve the portable runtime and report backend readiness in the
+    /// qualification matrix. Appropriate for editors and exploratory tools.
+    #[default]
+    Allow,
+    /// Fail compilation when any explicitly requested optimized backend is
+    /// unavailable or rejects the model. Appropriate for release pipelines
+    /// and performance-qualified simulation products.
+    Reject,
 }
 
 impl RuntimeQualificationOptions {
@@ -58,13 +75,35 @@ impl RuntimeQualificationOptions {
     pub const NONE: Self = Self {
         generated_rust: false,
         native_x64_jit: false,
+        interpreter_fallback: InterpreterFallbackPolicy::Allow,
     };
 
     /// Qualify every optional backend available in this build.
     pub const ALL: Self = Self {
         generated_rust: true,
         native_x64_jit: true,
+        interpreter_fallback: InterpreterFallbackPolicy::Allow,
     };
+
+    /// Require portable generated Rust; never silently accept the interpreter.
+    pub const GENERATED_RUST_REQUIRED: Self = Self {
+        generated_rust: true,
+        native_x64_jit: false,
+        interpreter_fallback: InterpreterFallbackPolicy::Reject,
+    };
+
+    /// Require the native x86-64 JIT; never silently accept the interpreter.
+    pub const NATIVE_X64_REQUIRED: Self = Self {
+        generated_rust: false,
+        native_x64_jit: true,
+        interpreter_fallback: InterpreterFallbackPolicy::Reject,
+    };
+
+    /// Require every requested backend to qualify.
+    pub const fn rejecting_interpreter_fallback(mut self) -> Self {
+        self.interpreter_fallback = InterpreterFallbackPolicy::Reject;
+        self
+    }
 }
 
 impl RuntimeCompileReport {
@@ -148,6 +187,34 @@ impl RuntimeCompileReport {
             validate_generated_rust(generated, canonical_module, canonical_digest)?;
         }
 
+        Ok(())
+    }
+
+    /// Enforce the caller's optimized-backend fallback policy.
+    ///
+    /// Qualification remains report-only by default. Release tooling can use a
+    /// `*_REQUIRED` option or [`RuntimeQualificationOptions::rejecting_interpreter_fallback`]
+    /// to make a rejected or unavailable requested backend a typed error.
+    pub fn enforce_fallback_policy(
+        &self,
+        options: RuntimeQualificationOptions,
+    ) -> Result<(), BackendQualificationError> {
+        if options.interpreter_fallback == InterpreterFallbackPolicy::Allow {
+            return Ok(());
+        }
+        for (requested, target) in [
+            (options.generated_rust, RuntimeTarget::GeneratedRust),
+            (options.native_x64_jit, RuntimeTarget::NativeX64Jit),
+        ] {
+            let qualification = self.targets.get(target);
+            if requested && !qualification.is_available() {
+                return Err(BackendQualificationError {
+                    target,
+                    readiness: qualification.readiness,
+                    detail: qualification.detail.clone(),
+                });
+            }
+        }
         Ok(())
     }
 }
@@ -240,12 +307,34 @@ pub enum RuntimeTarget {
     GeneratedRust,
 }
 
+impl RuntimeTarget {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::SemanticIr => "semantic IR",
+            Self::BytecodeVm => "bytecode VM",
+            Self::NativeX64Jit => "native x86-64 JIT",
+            Self::WasmInterpreter => "WebAssembly interpreter",
+            Self::GeneratedRust => "generated Rust",
+        }
+    }
+}
+
 /// Whether a target can consume this exact compiled artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeTargetReadiness {
     Available,
     Unavailable,
     Rejected,
+}
+
+impl RuntimeTargetReadiness {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Unavailable => "unavailable",
+            Self::Rejected => "rejected",
+        }
+    }
 }
 
 /// Product maturity of a target, independent of artifact readiness.
@@ -507,6 +596,20 @@ fn validate_generated_rust(
     Ok(())
 }
 
+/// A required optimized backend was not available for the compiled model.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error(
+    "required {} backend is {}: {}; interpreter fallback is disabled",
+    .target.label(),
+    .readiness.label(),
+    .detail
+)]
+pub struct BackendQualificationError {
+    pub target: RuntimeTarget,
+    pub readiness: RuntimeTargetReadiness,
+    pub detail: String,
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum RuntimeArtifactIntegrityError {
     #[error("compiled model module '{model}' does not match canonical module '{canonical}'")]
@@ -555,6 +658,7 @@ pub enum CompileDiagnosticPhase {
     Parser,
     Semantic,
     CodeGeneration,
+    BackendQualification,
     PerformanceBudget,
     ModuleSelection,
 }
@@ -635,6 +739,12 @@ fn collect_compile_diagnostics(
             CompileDiagnosticPhase::CodeGeneration,
             error.to_string(),
             error.span,
+        )),
+        CompileError::BackendQualification(_) => diagnostics.push(diagnostic(
+            source,
+            CompileDiagnosticPhase::BackendQualification,
+            error.to_string(),
+            None,
         )),
         CompileError::PerformanceBudget(_) => diagnostics.push(diagnostic(
             source,

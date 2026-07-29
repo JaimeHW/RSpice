@@ -32,7 +32,6 @@ fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> Ru
     )
 }
 
-
 pub(super) fn generate_mod_file() -> String {
     [
         "#[cfg(feature = \"veriloga-builtins-noise\")]",
@@ -687,11 +686,12 @@ pub(super) fn finalize_checkpoint_identity(
     device: &mut GeneratedRustDevice,
 ) -> Result<(), RustBackendError> {
     let mut hasher = blake3::Hasher::new();
+    // The schema tag is the manual compatibility boundary for the checkpoint
+    // encoding. The remaining fields describe the generated model itself.
+    // Do not salt this identity with the compiler build digest: unrelated
+    // compiler changes must not invalidate persisted state or every generated
+    // model crate in Cargo's cache.
     hasher.update(b"rspice-generated-persistent-state-v2\0");
-    hash_identity_field(
-        &mut hasher,
-        env!("RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST").as_bytes(),
-    );
     hash_identity_field(&mut hasher, device.module_name.as_bytes());
     hash_identity_field(&mut hasher, device.public_model_name.as_bytes());
     hash_identity_field(&mut hasher, device.folder_name.as_bytes());
@@ -726,7 +726,6 @@ pub(super) fn finalize_checkpoint_identity(
     }
     Ok(())
 }
-
 
 fn emit_parameter_defaults(
     artifact: &CanonicalIrArtifact,
@@ -1042,7 +1041,6 @@ fn emit_parameter_metadata(
 
     Ok(())
 }
-
 
 fn generate_shared_parameter_validator() -> String {
     r###"
@@ -1515,7 +1513,6 @@ fn parameter_default_rust_expr(
     ))
 }
 
-
 fn parameter_validation_call(
     parameter_name: &str,
     value_expr: &str,
@@ -1560,7 +1557,6 @@ fn parameter_validation_call(
         max.unwrap_or_else(|| "None".to_string())
     ))
 }
-
 
 fn lower_parameter_default_expr(
     artifact: &CanonicalIrArtifact,
@@ -1672,7 +1668,6 @@ fn lower_parameter_default_expr(
     }
 }
 
-
 fn validate_parameter_value_for_codegen(
     artifact: &CanonicalIrArtifact,
     parameter_name: &str,
@@ -1717,7 +1712,6 @@ fn validate_parameter_value_for_codegen(
     Ok(())
 }
 
-
 fn parameter_range_has_runtime_constraints(
     parameter_name: &str,
     range: Option<&crate::canonical_ir::HirParamRange>,
@@ -1753,7 +1747,6 @@ fn range_excluded_arg(value: f64) -> String {
     format!("({}, {:?})", label, label)
 }
 
-
 fn format_f64(value: f64) -> String {
     if value.is_nan() {
         "f64::NAN".to_string()
@@ -1765,7 +1758,6 @@ fn format_f64(value: f64) -> String {
         format!("{value:?}")
     }
 }
-
 
 fn lower_parameter_default_condition(
     artifact: &CanonicalIrArtifact,
@@ -1808,7 +1800,6 @@ fn lower_parameter_default_condition(
     }
 }
 
-
 fn negate_condition(condition: &str) -> String {
     let condition = condition.trim();
     if let Some(inner) = condition
@@ -1830,7 +1821,6 @@ fn negate_condition(condition: &str) -> String {
     }
     format!("(!{condition})")
 }
-
 
 fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> bool {
     if let Some(min) = range.min {

@@ -128,8 +128,9 @@ pub use preprocessor::{
     PreprocessorError, SourceDocument, SourceDocumentOrigin, SourceProvider, SourceProviderLimits,
 };
 pub use runtime_report::{
-    CompileDiagnostic, CompileDiagnosticPhase, CompileDiagnosticSeverity, CompileDiagnosticSpan,
-    CompileSourcePosition, RuntimeAbiParameter, RuntimeAbiPort, RuntimeAbiSummary,
+    BackendQualificationError, CompileDiagnostic, CompileDiagnosticPhase,
+    CompileDiagnosticSeverity, CompileDiagnosticSpan, CompileSourcePosition,
+    InterpreterFallbackPolicy, RuntimeAbiParameter, RuntimeAbiPort, RuntimeAbiSummary,
     RuntimeArtifactIntegrityError, RuntimeCompileReport, RuntimeQualificationOptions,
     RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetQualifications,
     RuntimeTargetReadiness, compile_diagnostics,
@@ -643,6 +644,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let mut report = RuntimeCompileReport::from_artifacts(model, canonical_ir, qualifications);
         measurements.record(PipelinePhase::RuntimeQualification, phase_started.elapsed())?;
+        report.enforce_fallback_policy(qualifications)?;
         measurements.checkpoint(PipelinePhase::IntegrityValidation)?;
         let phase_started = web_time::Instant::now();
         report.validate_integrity().map_err(|error| {

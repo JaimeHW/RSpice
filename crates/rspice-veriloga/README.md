@@ -213,6 +213,14 @@ top. Its `veriloga-builtins` feature is a different path entirely: it
 selects pre-generated artifacts from `rspice-veriloga-models/models/` and does
 not link this compiler at all.
 
+Optional backend qualification is report-only by default so the editor can
+show every target's readiness. Release tooling must use
+`RuntimeQualificationOptions::GENERATED_RUST_REQUIRED`,
+`RuntimeQualificationOptions::NATIVE_X64_REQUIRED`, or
+`rejecting_interpreter_fallback()` when interpreter execution is not permitted.
+A requested backend that is unavailable or rejects the model then returns a
+typed `BackendQualification` compile error; it never silently runs bytecode.
+
 ## Generating the built-in device models
 
 The crate ships one binary, `rspice-veriloga-gen`. It walks a tree of
