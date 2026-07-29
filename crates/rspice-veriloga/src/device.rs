@@ -2171,9 +2171,10 @@ impl VerilogADevice {
         Self::validate_native_prior_currents(vm.context, dependencies.prior_currents)?;
         Self::validate_native_branch_unknowns(vm.context, dependencies.branch_unknowns)?;
 
-        let ctx = Self::eval_context_from(vm.context);
+        let mut ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
         clear_native_runtime_error();
+        ctx.clear_runtime_error();
         let value = match entry {
             NativeValueEntry::ParameterDefault(index) => native
                 .run_parameter_default(index, &ctx, vars_ptr)
@@ -2197,7 +2198,7 @@ impl VerilogADevice {
                 .run_noise_exponent(index, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
         };
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error().or_else(take_native_runtime_error) {
             return Err(VmError::NativeJit(error));
         }
         Ok(value)
@@ -2499,11 +2500,12 @@ impl VerilogADevice {
         )?;
         Self::validate_native_prior_currents(vm.context, native.assignment_prior_currents())?;
         Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
-        let ctx = Self::eval_context_from(vm.context);
+        let mut ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         clear_native_runtime_error();
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, vars_ptr);
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error().or_else(take_native_runtime_error) {
             return Err(VmError::NativeJit(error));
         }
         Ok(())
@@ -2535,16 +2537,17 @@ impl VerilogADevice {
             vm.context,
             native.post_assignment_branch_unknowns(),
         )?;
-        let ctx = Self::eval_context_from(vm.context);
+        let mut ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         clear_native_runtime_error();
+        ctx.clear_runtime_error();
         if !native.run_post_assignments(&ctx, vars_ptr) {
             return Err(VmError::NativeJit(
                 "native JIT image is missing its post-current assignment entry; no interpreter fallback"
                     .into(),
             ));
         }
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error().or_else(take_native_runtime_error) {
             return Err(VmError::NativeJit(error));
         }
         Ok(())
@@ -2933,20 +2936,21 @@ impl VerilogADevice {
             Self::validate_native_branch_unknowns(context, native.stamp_kernel_branch_unknowns())?;
 
             self.native_stamp_jacobians.fill(0.0);
-            let ctx = Self::eval_context_from(context);
+            let mut ctx = Self::eval_context_from(context);
             let io = NativeStampKernelIo {
                 program_active: self.native_program_active.as_ptr(),
                 jacobians: self.native_stamp_jacobians.as_mut_ptr(),
             };
             let vars = context.variables.as_mut_ptr();
             clear_native_runtime_error();
+            ctx.clear_runtime_error();
             if !native.run_stamp_kernel(&ctx, vars, &io) {
                 return Err(VmError::NativeJit(
                     "native JIT image is missing its fused stamp entry; no interpreter fallback"
                         .into(),
                 ));
             }
-            if let Some(error) = take_native_runtime_error() {
+            if let Some(error) = ctx.take_runtime_error().or_else(take_native_runtime_error) {
                 return Err(VmError::NativeJit(error));
             }
         }
