@@ -451,24 +451,6 @@ impl SimSetupState {
         Ok(())
     }
 
-    /// Rename any retained inactive plan while enforcing project-wide
-    /// uniqueness.
-    fn rename_plan(
-        &mut self,
-        id: SimulationPlanId,
-        new_name: impl Into<String>,
-    ) -> Result<(), SimulationPlanCatalogError> {
-        let new_name = SimulationPlanName::new(new_name)?;
-        self.ensure_plan_name_available(&new_name, Some(id))?;
-        let plan = self
-            .inactive_plans
-            .iter_mut()
-            .find(|plan| plan.id() == id)
-            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        plan.name = new_name;
-        Ok(())
-    }
-
     /// Advance the active plan revision for a committed variables, outputs,
     /// specifications, PVT, model-binding, or other plan-owned configuration
     /// change. This invalidates revision-pinned preflight evidence without

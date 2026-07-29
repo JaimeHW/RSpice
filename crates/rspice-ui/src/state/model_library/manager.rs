@@ -1027,11 +1027,6 @@ impl ModelLibraryManager {
             .corner_model_bindings(processes)
     }
 
-    /// Get available sections/corners from a .lib file without fully loading it
-    pub fn peek_library_sections(path: impl AsRef<std::path::Path>) -> Result<Vec<String>, String> {
-        rspice_core::library::LibraryManager::peek_lib_sections(path)
-    }
-
     /// Load models from all discovered files in a PdkConfig
     ///
     /// Scans all discovered .lib and .scs files and adds them as libraries.

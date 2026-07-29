@@ -1702,19 +1702,6 @@ pub enum EntitlementState {
     Unknown,
 }
 
-impl EntitlementState {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Granted => "granted",
-            Self::Denied => "denied",
-            Self::Expired => "expired",
-            Self::Revoked => "revoked",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
 /// Coarse, display-only classification of the exact fixture binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EvidenceClassification {
@@ -1722,18 +1709,6 @@ pub enum EvidenceClassification {
     Missing,
     Unverified,
     Stale,
-}
-
-impl EvidenceClassification {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Bound => "bound",
-            Self::Missing => "missing",
-            Self::Unverified => "unverified",
-            Self::Stale => "stale",
-        }
-    }
 }
 
 /// Customer projection of one product-mode resolver case. These rows are

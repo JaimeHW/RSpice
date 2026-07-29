@@ -619,17 +619,6 @@ impl GridStyle {
     }
 }
 
-/// An in-flight inspector edit session: the inspected component and the
-/// pre-edit snapshot. One undo entry commits when the session ends (focus
-/// leaves the fields or the selection moves) — not per keystroke.
-#[derive(Debug, Clone)]
-pub struct InspectorEdit {
-    /// Component being edited.
-    pub component_id: u64,
-    /// Design state captured when the first keystroke landed.
-    pub before: crate::state::SchematicSnapshot,
-}
-
 /// Transient, device-local recovery point for a governed Select All command.
 ///
 /// It is intentionally excluded from [`UiSessionStateSer`]: selection is
@@ -738,8 +727,6 @@ pub struct UiSessionState {
     pub code_workspace: crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState,
     /// Runtime state for the Schematic-family symbol editor surface.
     pub symbol: SymbolUiState,
-    /// In-flight inspector edit session, if any.
-    pub inspector_edit: Option<InspectorEdit>,
 }
 
 impl UiSessionState {

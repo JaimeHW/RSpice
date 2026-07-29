@@ -987,10 +987,6 @@ impl UserPreferences {
         self.units.current()
     }
 
-    pub fn units_mut(&mut self) -> Result<&mut UnitsPreferences, &'static str> {
-        self.units.current_mut()
-    }
-
     /// Immutable display/input policy for one UI transaction.
     #[must_use]
     pub fn quantity_presentation_policy(&self) -> QuantityPresentationPolicy {

@@ -53,8 +53,6 @@ const HIERARCHICAL_RC_CORE_CELL: &str = "rc_filter_core";
 pub struct ExampleCircuit {
     /// Display name
     pub name: &'static str,
-    /// Description
-    pub description: &'static str,
     /// Category (Analog, Digital, RF, etc.)
     pub category: &'static str,
     /// Whether this example needs the full project workspace to load.
@@ -65,43 +63,36 @@ pub struct ExampleCircuit {
 pub const EXAMPLES: &[ExampleCircuit] = &[
     ExampleCircuit {
         name: "RC Lowpass Filter",
-        description: "Simple 1st-order RC lowpass with 1kHz cutoff",
         category: "Analog",
         requires_workspace: false,
     },
     ExampleCircuit {
         name: "Voltage Divider",
-        description: "Two-resistor voltage divider (2:1 ratio)",
         category: "Basics",
         requires_workspace: false,
     },
     ExampleCircuit {
         name: "Common Emitter Amplifier",
-        description: "Single-stage BJT amplifier with biasing",
         category: "Analog",
         requires_workspace: false,
     },
     ExampleCircuit {
         name: "CMOS Inverter",
-        description: "Basic CMOS NOT gate",
         category: "Digital",
         requires_workspace: false,
     },
     ExampleCircuit {
         name: "Differential Pair",
-        description: "BJT differential amplifier input stage",
         category: "Analog",
         requires_workspace: false,
     },
     ExampleCircuit {
         name: "Opamp Inverting Amplifier",
-        description: "Inverting amplifier with gain = -10",
         category: "Analog",
         requires_workspace: false,
     },
     ExampleCircuit {
         name: HIERARCHICAL_RC_FILTER,
-        description: "Top-level testbench using an authored RC filter cell symbol",
         category: "Hierarchy",
         requires_workspace: true,
     },

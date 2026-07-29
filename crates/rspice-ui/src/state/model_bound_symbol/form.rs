@@ -118,10 +118,6 @@ pub struct SymbolFormDiagnostic {
 }
 
 impl SymbolParameterForm {
-    pub fn sections(&self) -> &[SymbolParameterSection] {
-        &self.sections
-    }
-
     pub fn add_section(
         &mut self,
         section: SymbolParameterSection,

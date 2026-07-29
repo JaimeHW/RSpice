@@ -577,11 +577,6 @@ impl WindowSessionRegistry {
         count
     }
 
-    pub fn recover_off_screen(&mut self) -> usize {
-        let windows = self.secondary_window_ids();
-        self.recover_windows(windows)
-    }
-
     pub fn recover_windows(
         &mut self,
         windows: impl IntoIterator<Item = ApplicationWindowId>,
@@ -599,12 +594,6 @@ impl WindowSessionRegistry {
             count += 1;
         }
         count
-    }
-
-    pub fn acknowledge_recovery(&mut self, window: ApplicationWindowId) {
-        if let Some(state) = self.windows.get_mut(&window) {
-            state.bounds.recovery_pending = false;
-        }
     }
 
     pub fn retain_documents(&mut self, available: impl IntoIterator<Item = WorkspaceDocumentId>) {

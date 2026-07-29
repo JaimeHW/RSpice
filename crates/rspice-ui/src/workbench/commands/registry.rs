@@ -753,10 +753,6 @@ impl Command {
             .map_or("", |binding| binding.chord.label)
     }
 
-    pub fn shortcut_context_matches(self, app: &RSpiceApp) -> bool {
-        self.shortcut_context().matches(app)
-    }
-
     pub fn availability(self, app: &RSpiceApp) -> CommandAvailability {
         if matches!(self, Self::PreviousWorkspace | Self::NextWorkspace) {
             return CommandAvailability::Hidden;

@@ -110,15 +110,6 @@ impl ConfirmationDialogState {
         self.pending_example = None;
     }
 
-    /// Open the confirmation dialog for an action that targets a known path.
-    pub fn show_with_path(&mut self, action: ConfirmationAction, path: std::path::PathBuf) {
-        self.visible = true;
-        self.pending_action = Some(action);
-        self.pending_path = Some(path);
-        self.pending_recent_kind = None;
-        self.pending_example = None;
-    }
-
     /// Open the confirmation dialog for an exact recent-file entry.
     pub(crate) fn show_recent(
         &mut self,

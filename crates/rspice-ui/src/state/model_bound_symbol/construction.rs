@@ -33,7 +33,6 @@ pub struct SymbolConstructionPlan {
     pub(super) cell: String,
     pub(super) before: Option<Cell>,
     pub(super) after: Cell,
-    pub(super) validation_digest: String,
     pub(super) expected_cell_json: Option<String>,
     pub(super) after_cell_json: String,
 }

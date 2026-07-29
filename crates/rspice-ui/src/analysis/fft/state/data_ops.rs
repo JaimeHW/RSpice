@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
+use super::super::data::{FftData, SpectrumAnalysis};
 use super::super::pipeline::{
     FftInputOptions, FftInputPolicy, FftTimeWindow, MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
     PreparedFftInput,

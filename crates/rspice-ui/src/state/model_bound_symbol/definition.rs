@@ -447,7 +447,6 @@ impl ModelBoundSymbolDefinition {
             before,
             after,
             after_cell_json,
-            validation_digest: self.validation_digest()?,
         })
     }
 

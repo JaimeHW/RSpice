@@ -397,17 +397,6 @@ pub struct ModelReleaseComparisonRow {
     pub disposition: ModelComparisonDisposition,
 }
 
-impl ModelDefinitionDelta {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        !self.identity_changed
-            && !self.description_changed
-            && self.added_parameters.is_empty()
-            && self.removed_parameters.is_empty()
-            && self.changed_parameters.is_empty()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedEditableProjectModel {
     pub(crate) source_id: ModelSourceId,

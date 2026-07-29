@@ -317,10 +317,6 @@ impl LogBuffer {
         self.severity_counts[severity_index(severity)]
     }
 
-    /// Get warning count (useful for status bar)
-    pub fn warning_count(&self) -> usize {
-        self.count_by_severity(LogSeverity::Warning)
-    }
 }
 
 // =============================================================================
