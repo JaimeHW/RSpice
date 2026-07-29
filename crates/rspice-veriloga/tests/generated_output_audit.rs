@@ -6,6 +6,14 @@ use rspice_veriloga::rust_backend::validate_generated_builtins;
 
 const LEGACY_LOCAL_SLOT_MARKERS: &[&str] =
     &["_slot: &mut f64", "_slot: &mut [f64]", " = *var_", "*var_"];
+const INTERPRETER_OR_JIT_MARKERS: &[&str] = &[
+    "rspice_veriloga::",
+    "BytecodeProgram",
+    "CompiledModel",
+    "VmContext",
+    "NativeModel",
+    "compile_native(",
+];
 
 #[test]
 fn generated_veriloga_bundle_passes_the_authoritative_generator_audit() {
@@ -49,6 +57,55 @@ fn generated_veriloga_devices_do_not_use_legacy_local_slot_abi() {
     assert!(
         failures.is_empty(),
         "generated Verilog-A devices must use the local frame ABI instead of helper slot parameters:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn generated_veriloga_devices_are_portable_direct_rust_artifacts() {
+    let generated_root = generated_veriloga_root();
+    let mut failures = Vec::new();
+    scan_generated_rust(&generated_root, &mut |path, source| {
+        for marker in INTERPRETER_OR_JIT_MARKERS {
+            if source.contains(marker) {
+                failures.push(format!("{} contains `{marker}`", display_path(path)));
+            }
+        }
+    });
+
+    let models_root = generated_root.join("models");
+    let mut model_crates = 0usize;
+    for entry in fs::read_dir(&models_root)
+        .unwrap_or_else(|error| panic!("read model crates {}: {error}", models_root.display()))
+    {
+        let path = entry.expect("read model crate entry").path();
+        if !path.is_dir() {
+            continue;
+        }
+        model_crates += 1;
+        let manifest_path = path.join("Cargo.toml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest_path.display()));
+        if !manifest.contains("rspice-veriloga-runtime.workspace = true") {
+            failures.push(format!(
+                "{} does not depend on the stable generated-model runtime ABI",
+                display_path(&manifest_path)
+            ));
+        }
+        for marker in ["rspice-veriloga.workspace", "rspice-veriloga ="] {
+            if manifest.contains(marker) {
+                failures.push(format!(
+                    "{} links the compiler through `{marker}`",
+                    display_path(&manifest_path)
+                ));
+            }
+        }
+    }
+
+    assert_eq!(model_crates, 42, "audit every generated model crate");
+    assert!(
+        failures.is_empty(),
+        "generated models must be portable direct Rust and independent of interpreter/JIT/compiler implementation:\n{}",
         failures.join("\n")
     );
 }
@@ -213,9 +270,7 @@ fn generated_model_features_match_the_core_feature_catalog() {
     );
     for feature in &model_features {
         assert!(
-            core_manifest.contains(&format!(
-                "\"rspice-veriloga-models/{feature}\","
-            )),
+            core_manifest.contains(&format!("\"rspice-veriloga-models/{feature}\",")),
             "rspice-core does not forward generated model feature `{feature}`"
         );
         assert!(
