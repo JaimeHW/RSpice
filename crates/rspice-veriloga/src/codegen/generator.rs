@@ -808,6 +808,9 @@ impl CodeGenerator {
                     IrFunction::Asin => Instruction::Asin,
                     IrFunction::Acos => Instruction::Acos,
                     IrFunction::Atan => Instruction::Atan,
+                    IrFunction::Asinh => Instruction::Asinh,
+                    IrFunction::Acosh => Instruction::Acosh,
+                    IrFunction::Atanh => Instruction::Atanh,
                     IrFunction::Atan2 => Instruction::Atan2,
                     // Rounding
                     IrFunction::Floor => Instruction::Floor,

@@ -2204,6 +2204,9 @@ impl NativeProgram {
                 | Instruction::Asin
                 | Instruction::Acos
                 | Instruction::Atan
+                | Instruction::Asinh
+                | Instruction::Acosh
+                | Instruction::Atanh
                 | Instruction::Floor
                 | Instruction::Ceil => {
                     require_stack(
@@ -8294,6 +8297,9 @@ fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
             | Instruction::Asin
             | Instruction::Acos
             | Instruction::Atan
+            | Instruction::Asinh
+            | Instruction::Acosh
+            | Instruction::Atanh
             | Instruction::Floor
             | Instruction::Ceil
     )
@@ -8342,6 +8348,9 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::Asin
             | Instruction::Acos
             | Instruction::Atan
+            | Instruction::Asinh
+            | Instruction::Acosh
+            | Instruction::Atanh
             | Instruction::Atan2
             | Instruction::Floor
             | Instruction::Ceil
@@ -9398,6 +9407,9 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::Asin => "Asin",
         Instruction::Acos => "Acos",
         Instruction::Atan => "Atan",
+        Instruction::Asinh => "Asinh",
+        Instruction::Acosh => "Acosh",
+        Instruction::Atanh => "Atanh",
         Instruction::Atan2 => "Atan2",
         Instruction::Floor => "Floor",
         Instruction::Ceil => "Ceil",
@@ -9490,6 +9502,9 @@ fn unary_math_op(instruction: &Instruction) -> UnaryMathOp {
         Instruction::Asin => UnaryMathOp::Asin,
         Instruction::Acos => UnaryMathOp::Acos,
         Instruction::Atan => UnaryMathOp::Atan,
+        Instruction::Asinh => UnaryMathOp::Asinh,
+        Instruction::Acosh => UnaryMathOp::Acosh,
+        Instruction::Atanh => UnaryMathOp::Atanh,
         Instruction::Floor => UnaryMathOp::Floor,
         Instruction::Ceil => UnaryMathOp::Ceil,
         _ => unreachable!("unary math lowering only accepts supported unary math instructions"),
@@ -13138,6 +13153,9 @@ endmodule
             (Instruction::Asin, UnaryMathOp::Asin),
             (Instruction::Acos, UnaryMathOp::Acos),
             (Instruction::Atan, UnaryMathOp::Atan),
+            (Instruction::Asinh, UnaryMathOp::Asinh),
+            (Instruction::Acosh, UnaryMathOp::Acosh),
+            (Instruction::Atanh, UnaryMathOp::Atanh),
             (Instruction::Floor, UnaryMathOp::Floor),
             (Instruction::Ceil, UnaryMathOp::Ceil),
         ];
@@ -13267,6 +13285,9 @@ endmodule
             ("asin-domain-nan", Instruction::Asin, 2.0, 2.0_f64.asin()),
             ("acos", Instruction::Acos, 0.25, 0.25_f64.acos()),
             ("atan", Instruction::Atan, 0.25, 0.25_f64.atan()),
+            ("asinh", Instruction::Asinh, 0.25, 0.25_f64.asinh()),
+            ("acosh", Instruction::Acosh, 1.25, 1.25_f64.acosh()),
+            ("atanh", Instruction::Atanh, 0.25, 0.25_f64.atanh()),
             ("floor", Instruction::Floor, 3.75, 3.75_f64.floor()),
             (
                 "floor-negative",

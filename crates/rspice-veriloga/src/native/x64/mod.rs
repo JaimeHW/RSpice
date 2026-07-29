@@ -7983,9 +7983,14 @@ endmodule
             if !is_live || post_current_targets.get(index).copied().unwrap_or(false) {
                 continue;
             }
+            let variable_name = model
+                .variable_names
+                .get(index)
+                .map(|name| name.as_str())
+                .unwrap_or("<unnamed>");
             assert_close_or_skip_nonfinite(
                 name,
-                format!("variable {index}"),
+                format!("variable {index} ({variable_name})"),
                 vm.context.variables[index],
                 native_context.variables[index],
                 &mut stats.variables,

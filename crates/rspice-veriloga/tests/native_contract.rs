@@ -641,7 +641,10 @@ module native_transcendental_assignment(p, n);
              + tanh(x)
              + asin(x * 0.1)
              + acos(x * 0.1)
-             + atan(x);
+             + atan(x)
+             + asinh(x * 0.1)
+             + acosh(x + 2.0)
+             + atanh(x * 0.1);
         I(p, n) <+ gain * V(p, n);
     end
 endmodule
@@ -3786,7 +3789,10 @@ fn native_device_executes_transcendental_assignments() {
             + x.tanh()
             + (x * 0.1).asin()
             + (x * 0.1).acos()
-            + x.atan();
+            + x.atan()
+            + (x * 0.1).asinh()
+            + (x + 2.0).acosh()
+            + (x * 0.1).atanh();
         let currents = device
             .try_evaluate()
             .expect("native transcendental assignment evaluation succeeds");

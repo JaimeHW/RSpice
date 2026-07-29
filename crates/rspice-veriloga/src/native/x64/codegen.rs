@@ -9982,6 +9982,9 @@ mod tests {
             ("asin", Instruction::Asin, 0.25, runtime_asin(0.25)),
             ("acos", Instruction::Acos, 0.25, runtime_acos(0.25)),
             ("atan", Instruction::Atan, 0.25, runtime_atan(0.25)),
+            ("asinh", Instruction::Asinh, 0.25, runtime_asinh(0.25)),
+            ("acosh", Instruction::Acosh, 1.25, runtime_acosh(1.25)),
+            ("atanh", Instruction::Atanh, 0.25, runtime_atanh(0.25)),
             ("floor", Instruction::Floor, 3.75, runtime_floor(3.75)),
             (
                 "floor-negative",
@@ -10396,6 +10399,9 @@ mod tests {
             ("asin-domain-nan", Instruction::Asin, 2.0, runtime_asin(2.0)),
             ("acos", Instruction::Acos, 0.25, runtime_acos(0.25)),
             ("atan", Instruction::Atan, 0.25, runtime_atan(0.25)),
+            ("asinh", Instruction::Asinh, 0.25, runtime_asinh(0.25)),
+            ("acosh", Instruction::Acosh, 1.25, runtime_acosh(1.25)),
+            ("atanh", Instruction::Atanh, 0.25, runtime_atanh(0.25)),
             ("floor", Instruction::Floor, 3.75, runtime_floor(3.75)),
             (
                 "floor-negative",
@@ -11879,6 +11885,18 @@ mod tests {
 
     fn runtime_atan(value: f64) -> f64 {
         std::hint::black_box(value).atan()
+    }
+
+    fn runtime_asinh(value: f64) -> f64 {
+        std::hint::black_box(value).asinh()
+    }
+
+    fn runtime_acosh(value: f64) -> f64 {
+        std::hint::black_box(value).acosh()
+    }
+
+    fn runtime_atanh(value: f64) -> f64 {
+        std::hint::black_box(value).atanh()
     }
 
     fn runtime_floor(value: f64) -> f64 {
