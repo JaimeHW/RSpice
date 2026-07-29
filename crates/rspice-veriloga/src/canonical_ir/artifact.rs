@@ -299,6 +299,7 @@ fn validate_hir_mir_parameters(
     {
         if hir_parameter.id != mir_parameter.id
             || hir_parameter.name != mir_parameter.name
+            || hir_parameter.scope != mir_parameter.scope
             || hir_parameter.value_type != mir_parameter.value_type
             || hir_parameter.default != mir_parameter.default
             || hir_parameter.default_expr != mir_parameter.default_expr
@@ -620,9 +621,10 @@ fn write_hir_port(out: &mut String, port: &HirPort) {
 fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
     writeln!(
         out,
-        "parameter id={} name={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} scope={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
+        parameter.scope.name(),
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
@@ -772,9 +774,10 @@ fn write_mir_node(out: &mut String, node: &MirNode) {
 fn write_mir_parameter(out: &mut String, parameter: &MirParameterSlot) {
     writeln!(
         out,
-        "parameter id={} name={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} scope={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
+        parameter.scope.name(),
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),

@@ -134,7 +134,7 @@ pub use runtime_report::{
     RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetQualifications,
     RuntimeTargetReadiness, compile_diagnostics,
 };
-pub use semantic::SemanticAnalyzer;
+pub use semantic::{ParameterScope, SemanticAnalyzer};
 pub use source::{SourceId, SourceMap, Span};
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
 pub use virtual_source::{

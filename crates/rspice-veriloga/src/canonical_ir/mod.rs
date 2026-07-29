@@ -68,4 +68,5 @@ pub use noise::{
 };
 pub use schedule::{
     InvalidationClass as CfgInvalidationClass, Schedule as CfgSchedule, schedule as schedule_cfg,
+    schedule_with_parameter_scopes as schedule_cfg_with_parameter_scopes,
 };

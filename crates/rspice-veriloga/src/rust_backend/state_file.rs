@@ -57,6 +57,7 @@ pub(super) struct StateFileExtensions {
     pub new_initializers: String,
     pub after_new: String,
     pub set_parameter_hook: String,
+    pub set_multiplicity_hook: String,
     pub impl_methods: String,
     pub limiter_converged_expr: String,
     pub rollback_value_count: usize,
@@ -79,6 +80,7 @@ impl Default for StateFileExtensions {
             new_initializers: String::new(),
             after_new: String::new(),
             set_parameter_hook: String::new(),
+            set_multiplicity_hook: String::new(),
             impl_methods: String::new(),
             limiter_converged_expr: "true".to_string(),
             rollback_value_count: 0,
@@ -533,7 +535,23 @@ pub(super) fn generate_state_file_with_extensions(
         "    pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {\n",
     );
     out.push_str("        if multiplicity.is_finite() && multiplicity > 0.0 {\n");
+    if !extensions.set_multiplicity_hook.is_empty() {
+        out.push_str(
+            "            let changed = self.multiplicity.to_bits() != multiplicity.to_bits();\n",
+        );
+    }
     out.push_str("            self.multiplicity = multiplicity;\n");
+    if !extensions.set_multiplicity_hook.is_empty() {
+        out.push_str("            if changed {\n");
+        for line in extensions.set_multiplicity_hook.lines() {
+            if !line.trim().is_empty() {
+                out.push_str("                ");
+                out.push_str(line.trim_end());
+                out.push('\n');
+            }
+        }
+        out.push_str("            }\n");
+    }
     out.push_str("            Ok(())\n");
     out.push_str("        } else {\n");
     out.push_str(
@@ -848,6 +866,17 @@ fn emit_parameter_metadata(
         "const PARAMETER_NAME_LOOKUP: [(&str, usize); {lookup_count}] = [\n"
     ));
     emit_parameter_name_lookup_entries(artifact, out);
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_MODEL_FLAGS: [bool; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        32,
+        |parameter| Ok((parameter.scope == crate::semantic::ParameterScope::Model).to_string()),
+        out,
+    )?;
     out.push_str("];\n\n");
 
     out.push_str(&format!(
@@ -1824,4 +1853,3 @@ fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> boo
     }
     !range.exclude.contains(&value)
 }
-

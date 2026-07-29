@@ -89,6 +89,52 @@ endmodule
     );
 }
 
+#[test]
+fn generated_stages_follow_model_and_instance_parameter_scope() {
+    let source = r#"
+module scoped_stage(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real model_gain = 2.0;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    real model_shape, geometry;
+    analog begin
+        model_shape = model_gain * model_gain;
+        model_shape = model_shape * model_shape + 3.0 * model_gain;
+        geometry = width * width;
+        geometry = geometry * geometry * model_shape;
+        I(p, n) <+ geometry * V(p, n);
+    end
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("front end");
+    let device = canonical::generate_device(&artifact, &options()).expect("generation");
+    let files: Vec<(&str, &str)> = device
+        .files
+        .iter()
+        .map(|file| (file.relative_path.as_str(), file.contents.as_str()))
+        .collect();
+    let state = find(&files, "state.rs", "scoped stage");
+    let stamp = find(&files, "stamp.rs", "scoped stage");
+    let noise = find(&files, "noise.rs", "scoped stage");
+
+    assert!(stamp.contains("fn canonical_model_stage"));
+    assert!(stamp.contains("fn canonical_instance_stage"));
+    assert!(stamp.contains("self.canonical_model_stage(ctx);"));
+    assert!(stamp.contains("self.canonical_instance_stage(ctx);"));
+    assert!(state.contains("const PARAMETER_MODEL_FLAGS: [bool; 2]"));
+    assert!(state.contains("true, false"));
+    assert!(state.contains("if PARAMETER_MODEL_FLAGS[index]"));
+    assert!(state.contains("let changed = self.multiplicity.to_bits()"));
+    assert!(state.contains("self.canonical_instance_valid = false;"));
+
+    if let Err(report) = compile("scoped stage", state, stamp, noise) {
+        panic!("scoped stage: generated device does not compile:\n{report}");
+    }
+}
+
 /// A model whose residual is a `ddt` gets a reactive stamp, and one without
 /// gets an empty one rather than the conduction Jacobian by mistake.
 #[test]

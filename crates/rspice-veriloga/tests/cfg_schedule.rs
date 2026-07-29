@@ -12,7 +12,9 @@
 
 use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
-use rspice_veriloga::canonical_ir::schedule::{InvalidationClass, split, worth_splitting};
+use rspice_veriloga::canonical_ir::schedule::{
+    InvalidationClass, schedule_with_parameter_scopes, split, worth_splitting,
+};
 use rspice_veriloga::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CfgEvalInputs, ValueId, differentiate, evaluate_cfg, optimize_cfg,
     schedule_cfg,
@@ -124,6 +126,36 @@ endmodule
         stages.iter().any(|stage| !stage.exports.is_empty()),
         "a split that caches nothing has not split anything"
     );
+}
+
+#[test]
+fn source_parameter_scope_separates_model_card_and_instance_geometry_work() {
+    let source = r#"
+module scoped(d, s);
+    inout d, s;
+    electrical d, s;
+    parameter real model_gain = 2.0;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    analog begin
+        I(d, s) <+ model_gain * model_gain;
+        I(d, s) <+ width * width;
+        I(d, s) <+ model_gain * width * V(d, s);
+    end
+endmodule
+"#;
+    let artifact = artifact(source);
+    let (function, wanted) = pipeline_artifact(&artifact, "scoped");
+    let scopes: Vec<_> = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| parameter.scope)
+        .collect();
+    let schedule = schedule_with_parameter_scopes(&function, &scopes);
+
+    assert_eq!(schedule.class(wanted[0]), InvalidationClass::Model);
+    assert_eq!(schedule.class(wanted[1]), InvalidationClass::Instance);
+    assert_eq!(schedule.class(wanted[2]), InvalidationClass::Newton);
 }
 
 /// Splitting is a caching decision, and it has to be declined when there is
@@ -260,8 +292,18 @@ fn every_output_is_readable_once_the_stages_have_run() {
 
 /// Everything the emitter would be handed: differentiated, simplified, and with
 /// the Jacobian read-outs already taken.
-fn pipeline(source: &str, name: &str) -> (rspice_veriloga::canonical_ir::CfgFunction, Vec<ValueId>) {
+fn pipeline(
+    source: &str,
+    name: &str,
+) -> (rspice_veriloga::canonical_ir::CfgFunction, Vec<ValueId>) {
     let artifact = artifact(source);
+    pipeline_artifact(&artifact, name)
+}
+
+fn pipeline_artifact(
+    artifact: &CanonicalIrArtifact,
+    name: &str,
+) -> (rspice_veriloga::canonical_ir::CfgFunction, Vec<ValueId>) {
     let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir)
         .unwrap_or_else(|diagnostics| panic!("{name}: {diagnostics:?}"));
 

@@ -29,6 +29,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::semantic::ParameterScope;
+
 use super::cfg::{
     CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgValidationError, CfgValue,
     CfgValueKind,
@@ -44,8 +46,11 @@ use super::{BlockId, ValueId};
 /// mixing the two is what made the old schedule hard to reason about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum InvalidationClass {
-    /// Parameters, the instance multiplier, and constants. Recomputed when an
-    /// instance is bound to a model card.
+    /// Constants and model-card parameters. Recomputed when a model card is
+    /// created or changed, before any per-device geometry is applied.
+    Model,
+    /// Per-device parameters and the instance multiplier. Recomputed when an
+    /// instance is bound to a model card or its geometry changes.
     Instance,
     /// Adds the temperature and the thermal voltage.
     Temperature,
@@ -57,7 +62,8 @@ pub enum InvalidationClass {
 }
 
 impl InvalidationClass {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
+        Self::Model,
         Self::Instance,
         Self::Temperature,
         Self::Timestep,
@@ -66,6 +72,7 @@ impl InvalidationClass {
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::Model => "model",
             Self::Instance => "instance",
             Self::Temperature => "temperature",
             Self::Timestep => "timestep",
@@ -94,8 +101,8 @@ impl Schedule {
     }
 
     /// How many values fall in each class, coarsest first.
-    pub fn census(&self) -> [usize; 4] {
-        let mut counts = [0usize; 4];
+    pub fn census(&self) -> [usize; 5] {
+        let mut counts = [0usize; 5];
         for class in &self.values {
             counts[*class as usize] += 1;
         }
@@ -113,9 +120,21 @@ impl Schedule {
 /// instance-class consumer in a stage that dropped the block defining what it
 /// reads, and the value ends up in the stage's table with nothing defining it.
 ///
-/// Both halves only ever raise, over a four-element lattice, so this settles.
+/// Both halves only ever raise, over a five-element lattice, so this settles.
 pub fn schedule(function: &CfgFunction) -> Schedule {
-    let mut schedule = classify(function);
+    schedule_with_parameter_scopes(function, &[])
+}
+
+/// Classify every value while preserving the model/instance parameter boundary
+/// declared by the Verilog-A source.
+///
+/// Missing entries are conservatively instance-scoped, which keeps hand-built
+/// CFG fixtures and older callers behaviorally compatible.
+pub fn schedule_with_parameter_scopes(
+    function: &CfgFunction,
+    parameter_scopes: &[ParameterScope],
+) -> Schedule {
+    let mut schedule = classify(function, parameter_scopes);
     loop {
         let before = schedule.clone();
         raise_loops(function, &mut schedule);
@@ -138,7 +157,7 @@ pub fn schedule(function: &CfgFunction) -> Schedule {
 fn raise_loops(function: &CfgFunction, schedule: &mut Schedule) {
     let block_of = block_of_value(function);
     for body in natural_loops(function) {
-        let mut class = InvalidationClass::Instance;
+        let mut class = InvalidationClass::Model;
         for block in &body {
             class = class.join(schedule.blocks[usize::from(*block)]);
         }
@@ -204,6 +223,7 @@ fn raise_ambiguous_projections(function: &CfgFunction, schedule: &mut Schedule) 
 
     // Newton keeps every block, so it can never be ambiguous.
     for class in [
+        InvalidationClass::Model,
         InvalidationClass::Instance,
         InvalidationClass::Temperature,
         InvalidationClass::Timestep,
@@ -343,7 +363,7 @@ fn back_edges(function: &CfgFunction) -> Vec<(BlockId, BlockId)> {
     edges
 }
 
-fn classify(function: &CfgFunction) -> Schedule {
+fn classify(function: &CfgFunction, parameter_scopes: &[ParameterScope]) -> Schedule {
     let values: Vec<InvalidationClass> = function
         .values
         .iter()
@@ -358,10 +378,10 @@ fn classify(function: &CfgFunction) -> Schedule {
             if value.value_type.shape().is_some() {
                 return InvalidationClass::Newton;
             }
-            leaf_class(&value.kind)
+            leaf_class(&value.kind, parameter_scopes)
         })
         .collect();
-    let blocks = vec![InvalidationClass::Instance; function.blocks.len()];
+    let blocks = vec![InvalidationClass::Model; function.blocks.len()];
     let mut schedule = Schedule { values, blocks };
     propagate(function, &mut schedule);
     schedule
@@ -378,13 +398,13 @@ fn propagate(function: &CfgFunction, schedule: &mut Schedule) {
     let Schedule { values, blocks } = schedule;
 
     // A branch's condition is a value with a class of its own, so the two
-    // halves are mutually recursive. Monotone over a four-element lattice, so
+    // halves are mutually recursive. Monotone over a five-element lattice, so
     // it settles.
     loop {
         let mut changed = false;
 
         for (block, sources) in control.iter().enumerate() {
-            let mut class = InvalidationClass::Instance;
+            let mut class = InvalidationClass::Model;
             for source in sources {
                 if let CfgTerminator::Branch { condition, .. } = &function.block(*source).terminator
                 {
@@ -626,7 +646,7 @@ pub fn split(
         .iter()
         .copied()
         .max()
-        .unwrap_or(InvalidationClass::Instance);
+        .unwrap_or(InvalidationClass::Model);
     for block in &function.blocks {
         match &block.terminator {
             CfgTerminator::Jump { target, args } => {
@@ -1514,7 +1534,10 @@ fn loop_headers(blocks: &[CfgBlock], entry: BlockId) -> HashSet<BlockId> {
 }
 
 /// What a value depends on before anything it reads is considered.
-fn leaf_class(kind: &CfgValueKind) -> InvalidationClass {
+fn leaf_class(
+    kind: &CfgValueKind,
+    parameter_scopes: &[ParameterScope],
+) -> InvalidationClass {
     match kind {
         CfgValueKind::NodePotential(_)
         | CfgValueKind::BranchFlow(_)
@@ -1541,7 +1564,20 @@ fn leaf_class(kind: &CfgValueKind) -> InvalidationClass {
 
         CfgValueKind::Temperature | CfgValueKind::ThermalVoltage => InvalidationClass::Temperature,
 
-        _ => InvalidationClass::Instance,
+        CfgValueKind::Multiplicity => InvalidationClass::Instance,
+
+        CfgValueKind::Parameter(parameter) | CfgValueKind::ParameterGiven(parameter) => {
+            match parameter_scopes
+                .get(usize::from(*parameter))
+                .copied()
+                .unwrap_or(ParameterScope::Instance)
+            {
+                ParameterScope::Model => InvalidationClass::Model,
+                ParameterScope::Instance => InvalidationClass::Instance,
+            }
+        }
+
+        _ => InvalidationClass::Model,
     }
 }
 

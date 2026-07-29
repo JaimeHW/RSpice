@@ -187,6 +187,7 @@ impl RuntimeAbiSummary {
                 .iter()
                 .map(|parameter| RuntimeAbiParameter {
                     name: parameter.name.clone(),
+                    scope: parameter.scope,
                     value_type: parameter.value_type,
                     default: parameter.default,
                     aliases: parameter.aliases.clone(),
@@ -223,6 +224,7 @@ pub struct RuntimeAbiPort {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeAbiParameter {
     pub name: SmolStr,
+    pub scope: crate::semantic::ParameterScope,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
     pub aliases: Vec<SmolStr>,

@@ -64,7 +64,9 @@ use crate::canonical_ir::cfg::{
 };
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_opt::optimize_with_control;
-use crate::canonical_ir::schedule::{InvalidationClass, Stage, schedule, split, worth_splitting};
+use crate::canonical_ir::schedule::{
+    InvalidationClass, Stage, schedule_with_parameter_scopes, split, worth_splitting,
+};
 use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
 };
@@ -116,7 +118,7 @@ pub(crate) fn generate_device_measured(
         plan.ddt_slots.len(),
         plan.idt_slots.len(),
         artifact.mir.branch_unknowns.len(),
-        &plan.state_extensions(),
+        &plan.state_extensions(artifact),
     )?;
     record_phase(
         artifact,
@@ -512,7 +514,13 @@ impl ModelPlan {
         let conduction = Stamps::place(conduction, &mut outputs);
         let reactive = Stamps::place(reactive, &mut outputs);
 
-        let schedule = schedule(&function);
+        let parameter_scopes: Vec<_> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.scope)
+            .collect();
+        let schedule = schedule_with_parameter_scopes(&function, &parameter_scopes);
         let stages = split(&function, &schedule, &outputs)
             .map_err(|error| unsupported(artifact, format!("invalidation split: {error}")))?;
         let (stages, slots) = if worth_splitting(&function, &stages) {
@@ -841,6 +849,9 @@ impl ModelPlan {
             "    fn {name}(&mut self, ctx: &GeneratedEvalContext<'_>) {{"
         );
         match stage.class {
+            InvalidationClass::Model => out.push_str(
+                "        if self.canonical_model_valid {\n            return;\n        }\n",
+            ),
             InvalidationClass::Temperature => out.push_str(
                 "        let temperature = ctx.temperature();\n\
                  \x20       let thermal_voltage = ctx.thermal_voltage();\n\
@@ -879,6 +890,9 @@ impl ModelPlan {
             );
         }
         match stage.class {
+            InvalidationClass::Model => {
+                out.push_str("        self.canonical_model_valid = true;\n")
+            }
             InvalidationClass::Temperature => out.push_str(
                 "        self.canonical_temperature = temperature;\n\
                  \x20       self.canonical_thermal_voltage = thermal_voltage;\n\
@@ -1730,7 +1744,7 @@ impl ModelPlan {
         })
     }
 
-    fn state_extensions(&self) -> state_file::StateFileExtensions {
+    fn state_extensions(&self, artifact: &CanonicalIrArtifact) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions::default();
         self.push_limit_state_fields(&mut extensions);
         if self.slots > 0 || self.reactive.width() > 0 {
@@ -1765,6 +1779,7 @@ impl ModelPlan {
         let _ = write!(
             extensions.instance_fields,
             "    pub(crate) canonical_staged: Box<[f64; {slots}]>,\n\
+             \x20   pub(crate) canonical_model_valid: bool,\n\
              \x20   pub(crate) canonical_instance_valid: bool,\n\
              \x20   pub(crate) canonical_temperature_valid: bool,\n\
              \x20   pub(crate) canonical_temperature: f64,\n\
@@ -1772,6 +1787,7 @@ impl ModelPlan {
         );
         extensions.clone_fields.push_str(
             "            canonical_staged: self.canonical_staged.clone(),\n\
+             \x20           canonical_model_valid: self.canonical_model_valid,\n\
              \x20           canonical_instance_valid: self.canonical_instance_valid,\n\
              \x20           canonical_temperature_valid: self.canonical_temperature_valid,\n\
              \x20           canonical_temperature: self.canonical_temperature,\n\
@@ -1779,15 +1795,26 @@ impl ModelPlan {
         );
         extensions.new_initializers.push_str(
             "            canonical_staged: canonical_boxed_zero_f64(),\n\
+             \x20           canonical_model_valid: false,\n\
              \x20           canonical_instance_valid: false,\n\
              \x20           canonical_temperature_valid: false,\n\
              \x20           canonical_temperature: 0.0,\n\
              \x20           canonical_thermal_voltage: 0.0,\n",
         );
-        // A parameter write invalidates both caches, because a parameter is
-        // read by every class.
+        // Model-card writes invalidate every coarser stage. Per-device geometry
+        // cannot affect the model stage, because the schedule proves that
+        // boundary from the source parameter attributes.
         extensions.set_parameter_hook.push_str(
-            "self.canonical_instance_valid = false;\nself.canonical_temperature_valid = false;\n",
+            "if PARAMETER_MODEL_FLAGS[index] {\n    self.canonical_model_valid = false;\n}\n\
+             self.canonical_instance_valid = false;\n\
+             self.canonical_temperature_valid = false;\n",
+        );
+        if artifact.mir.parameters.is_empty() {
+            extensions.set_parameter_hook.clear();
+        }
+        extensions.set_multiplicity_hook.push_str(
+            "self.canonical_instance_valid = false;\n\
+             self.canonical_temperature_valid = false;\n",
         );
         extensions
     }
@@ -2413,6 +2440,7 @@ fn reject_unsupported_kinds(
 
 fn stage_fn_name(class: InvalidationClass) -> &'static str {
     match class {
+        InvalidationClass::Model => "canonical_model_stage",
         InvalidationClass::Instance => "canonical_instance_stage",
         InvalidationClass::Temperature => "canonical_temperature_stage",
         InvalidationClass::Timestep => "canonical_timestep_stage",
