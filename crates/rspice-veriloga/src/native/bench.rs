@@ -1306,6 +1306,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         integration_active: u8::from(context.integration.active),
         limiter_active: &mut context.limiter_active,
         limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
+        runtime_status: Default::default(),
     }
 }
 

@@ -1306,6 +1306,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         };
 
         let mut encoder = X64Encoder::new();

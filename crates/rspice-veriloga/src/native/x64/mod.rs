@@ -8724,6 +8724,7 @@ endmodule
             integration_active: u8::from(context.integration.active),
             limiter_active: &mut context.limiter_active,
             limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
+            runtime_status: Default::default(),
         }
     }
 
@@ -9050,6 +9051,7 @@ endmodule
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         }
     }
 }

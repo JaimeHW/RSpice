@@ -14,9 +14,56 @@
 //! This is an internal contract between this crate's compiler and its own
 //! generated code, not a stable ABI. It may change with any release.
 
-use std::cell::RefCell;
+use std::cell::{RefCell, UnsafeCell};
 
 use crate::vm::terminal_pair_current_index;
+
+/// Per-dispatch failure state owned by one [`EvalContext`].
+///
+/// JIT code reads only `failed`; Rust helpers own the diagnostic payload.
+/// The status is intentionally not `Sync`: one evaluation frame may be used
+/// by only one native dispatch at a time.
+#[repr(C)]
+pub struct NativeRuntimeStatus {
+    failed: UnsafeCell<u8>,
+    message: UnsafeCell<Option<String>>,
+}
+
+impl Default for NativeRuntimeStatus {
+    fn default() -> Self {
+        Self {
+            failed: UnsafeCell::new(0),
+            message: UnsafeCell::new(None),
+        }
+    }
+}
+
+impl NativeRuntimeStatus {
+    fn record(&self, message: impl Into<String>) {
+        // Safety: EvalContext's contract requires exclusive dispatch access.
+        // Helpers execute synchronously on that dispatching thread.
+        unsafe {
+            let slot = &mut *self.message.get();
+            if slot.is_none() {
+                *slot = Some(message.into());
+                *self.failed.get() = 1;
+            }
+        }
+    }
+
+    pub(crate) fn take(&mut self) -> Option<String> {
+        *self.failed.get_mut() = 0;
+        self.message.get_mut().take()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        let _ = self.take();
+    }
+
+    pub(crate) fn failed_offset() -> usize {
+        std::mem::offset_of!(Self, failed)
+    }
+}
 
 /// Evaluation context passed to JIT-compiled functions.
 #[repr(C)]
@@ -136,6 +183,24 @@ pub struct EvalContext {
     /// Nonzero only for limited Newton assembly. Probe and small-signal
     /// evaluation bypass limiter history entirely.
     pub limiting_enabled: u8,
+    /// Failure state for this dispatch. This must not be shared by concurrent
+    /// native calls.
+    #[doc(hidden)]
+    pub runtime_status: NativeRuntimeStatus,
+}
+
+impl EvalContext {
+    pub(crate) fn clear_runtime_error(&mut self) {
+        self.runtime_status.clear();
+    }
+
+    pub(crate) fn take_runtime_error(&mut self) -> Option<String> {
+        self.runtime_status.take()
+    }
+
+    pub(crate) fn record_runtime_error(&self, message: impl Into<String>) {
+        self.runtime_status.record(message);
+    }
 }
 
 thread_local! {
@@ -1623,7 +1688,7 @@ pub unsafe extern "C" fn rspice_current_lookup(
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        EvalContext, clear_native_runtime_error, rspice_above_state_native,
+        EvalContext, NativeRuntimeStatus, clear_native_runtime_error, rspice_above_state_native,
         rspice_absdelay_state_native, rspice_cross_state_native, rspice_current_lookup,
         rspice_ddt_state_native, rspice_dynamic_variable_load_native,
         rspice_dynamic_variable_slot_native, rspice_laplace_step, rspice_laplace_step_native,
@@ -1698,7 +1763,13 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, integration_active), 400);
         assert_eq!(offset_of!(EvalContext, limiter_active), 408);
         assert_eq!(offset_of!(EvalContext, limiting_enabled), 416);
-        assert_eq!(size_of::<EvalContext>(), 424);
+        assert_eq!(offset_of!(EvalContext, runtime_status), 424);
+        assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
+        assert_eq!(
+            NativeRuntimeStatus::failed_offset(),
+            offset_of!(NativeRuntimeStatus, failed)
+        );
+        assert_eq!(size_of::<EvalContext>(), 456);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -2016,6 +2087,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         };
 
         assert_eq!(
@@ -2733,6 +2805,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         }
     }
 }
