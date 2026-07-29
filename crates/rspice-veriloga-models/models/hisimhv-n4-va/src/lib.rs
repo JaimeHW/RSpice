@@ -1,0 +1,7 @@
+//! Precompiled generated Verilog-A model. Do not edit.
+
+#![allow(clippy::all, unused_assignments)]
+
+#[allow(non_snake_case)]
+#[path = "hisimhv_n4__hisimhv_n4_va__69344dcf/mod.rs"]
+pub mod hisimhv_n4__hisimhv_n4_va__69344dcf;

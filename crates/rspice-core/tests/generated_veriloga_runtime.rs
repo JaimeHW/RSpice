@@ -110,40 +110,42 @@ fn generated_structured_cache_preserves_temperature_and_parameter_semantics() {
 #[test]
 fn generated_builtins_are_materialized_in_source_tree() {
     let generated_root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/device/veriloga_generated");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-veriloga-models");
     let registry_path = generated_root.join("registry.rs");
     let registry = std::fs::read_to_string(&registry_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", registry_path.display()));
 
     assert!(
-        !registry.contains("devices/"),
-        "generated registry should point at direct per-device folders"
+        !registry.contains("#[path ="),
+        "the core registry should consume precompiled model artifacts, not include model source"
     );
 
-    let module_paths: Vec<_> = registry
+    let module_names: Vec<_> = registry
         .lines()
         .filter_map(|line| {
             line.trim()
-                .strip_prefix("#[path = \"")
-                .and_then(|rest| rest.strip_suffix("\"]"))
+                .strip_prefix("pub use rspice_veriloga_models::")
+                .and_then(|rest| rest.strip_suffix(';'))
         })
         .collect();
     assert_eq!(
-        module_paths.len(),
+        module_names.len(),
         builtins::builtin_names().len(),
-        "registry should include one source-tree module path per generated builtin"
+        "registry should import one precompiled module per generated builtin"
     );
 
-    for relative in module_paths {
+    let package_roots = std::fs::read_dir(generated_root.join("models"))
+        .expect("read generated model packages")
+        .map(|entry| entry.expect("read model package entry").path())
+        .collect::<Vec<_>>();
+    for module_name in module_names {
+        let module_path = package_roots
+            .iter()
+            .map(|package| package.join("src").join(module_name).join("mod.rs"))
+            .find(|path| path.is_file());
         assert!(
-            relative.ends_with("/mod.rs") && !relative.starts_with("devices/"),
-            "generated module path should be a direct device folder: {relative}"
-        );
-        let module_path = generated_root.join(relative);
-        assert!(
-            module_path.exists(),
-            "generated module should exist at {}",
-            module_path.display()
+            module_path.is_some(),
+            "generated module '{module_name}' should belong to one model package"
         );
     }
 }
@@ -231,7 +233,7 @@ fn generated_runtime_snapshots_only_mutable_evaluation_state() {
     let manifest_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let generated_root = manifest_root.join("src/device/veriloga_generated");
     let runtime_path = generated_root.join("mod.rs");
-    let registry_path = generated_root.join("registry.rs");
+    let registry_path = manifest_root.join("../rspice-veriloga-models/registry.rs");
     let nonlinear_path = manifest_root.join("src/circuit/nonlinear.rs");
 
     let runtime = std::fs::read_to_string(&runtime_path)

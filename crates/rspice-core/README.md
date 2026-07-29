@@ -157,8 +157,9 @@ qualification is feature-gated work through generated Rust from Verilog-A), ther
 **Extension points** — external Verilog-A devices via the `rspice-veriloga` compiler
 (`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed on-disk
 caching of compiled models), build-time generated Verilog-A built-ins
-(`veriloga-builtins`, materialized under `src/device/veriloga_generated/` and
-instantiated by model name when the feature is enabled), dynamically loaded FFI
+(`veriloga-builtins`, materialized as reusable packages under
+`../rspice-veriloga-models/models/` and instantiated by model name when the
+feature is enabled), dynamically loaded FFI
 models (`ffi.rs`, behind `ffi`), and SIMD batch evaluation for diodes, BJTs,
 JFETs, and MOSFET batches (`batch/`, behind `simd`).
 
@@ -238,7 +239,7 @@ only.
 | `veriloga-model-*` | no | Compiles one checked-in generated Verilog-A model and the shared runtime. Prefer these granular features in production to minimize compile time, peak rustc memory, and binary size |
 | `veriloga-builtins-noise` | no | Adds generated noise schedules to whichever `veriloga-model-*` features are selected |
 | `veriloga-builtins-models` | no | Enables every checked-in generated Verilog-A model without the optional noise schedules |
-| `veriloga-builtins` | no | Backwards-compatible umbrella that enables every generated model plus noise. Generated sources live under `src/device/veriloga_generated/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins` |
+| `veriloga-builtins` | no | Backwards-compatible umbrella that enables every generated model plus noise. Each model is a reusable artifact under `../rspice-veriloga-models/models/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins` |
 | `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
 | `ffi` | no | Experimental `libloading` integration for dynamically loaded external device models; not a production-stable device ABI until the callback ownership, library lifetime, and stamping contracts are audited |
 

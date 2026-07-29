@@ -210,16 +210,18 @@ then do nothing, so a model cannot print from the analog block.
 `rspice-core` maps these as `veriloga` (interpreter) and `veriloga-native`
 (native JIT) and adds a blake3-keyed on-disk cache for compiled models on
 top. Its `veriloga-builtins` feature is a different path entirely: it
-compiles the pre-generated Rust in `rspice-core/src/device/veriloga_generated/`
-and does not link this compiler at all.
+selects pre-generated artifacts from `rspice-veriloga-models/models/` and does
+not link this compiler at all.
 
 ## Generating the built-in device models
 
 The crate ships one binary, `rspice-veriloga-gen`. It walks a tree of
 Verilog-A sources, compiles each module to canonical IR, and emits a Rust
 device folder per module into
-`crates/rspice-core/src/device/veriloga_generated/`, alongside a
-`registry.rs` and a `manifest.txt`. That generated Rust — not this
+`crates/rspice-veriloga-models/models/`, with one Cargo package per model plus
+a feature-selectable catalog, `registry.rs`, and `manifest.txt`. Cargo can
+compile those packages in parallel and reuse an unchanged model artifact
+without rebuilding it through `rspice-core`. That generated Rust — not this
 compiler — is what `rspice-core`'s `veriloga-builtins` feature builds.
 
 The generated backend preserves the compact-model parameter convention in

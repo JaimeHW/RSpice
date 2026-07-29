@@ -68,16 +68,9 @@ fn generated_veriloga_devices_carry_their_own_helpers() {
 
     let mut partitioned = Vec::new();
     let mut streamed = Vec::new();
-    let mut runtime_is_empty = false;
     let mut saw_packed_lane_type = false;
     scan_generated_rust(&generated_root, &mut |path, source| {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
-        if name == "kernel_runtime.rs" {
-            // Empty is the whole point: every helper the packed form calls is
-            // emitted into the device that calls it.
-            runtime_is_empty = !source.contains("fn ");
-            return;
-        }
         if name.starts_with("stamp_blocks_") {
             partitioned.push(display_path(path));
         }
@@ -98,8 +91,8 @@ fn generated_veriloga_devices_carry_their_own_helpers() {
         streamed.join("\n")
     );
     assert!(
-        runtime_is_empty,
-        "kernel_runtime.rs has no callers left and must not be regenerated with a body"
+        !generated_root.join("kernel_runtime.rs").exists(),
+        "the obsolete shared kernel runtime must not be regenerated"
     );
     assert!(
         saw_packed_lane_type,
@@ -196,6 +189,8 @@ fn generated_model_features_match_the_core_feature_catalog() {
         .expect("read generated built-in registry");
     let core_manifest = fs::read_to_string(workspace_root.join("crates/rspice-core/Cargo.toml"))
         .expect("read rspice-core manifest");
+    let catalog_manifest = fs::read_to_string(generated_root.join("Cargo.toml"))
+        .expect("read generated model catalog manifest");
 
     let mut model_features = BTreeSet::new();
     for line in registry.lines() {
@@ -218,8 +213,14 @@ fn generated_model_features_match_the_core_feature_catalog() {
     );
     for feature in &model_features {
         assert!(
-            core_manifest.contains(&format!("{feature} = [\"veriloga-builtins-base\"]")),
-            "rspice-core is missing generated model feature `{feature}`"
+            core_manifest.contains(&format!(
+                "\"rspice-veriloga-models/{feature}\","
+            )),
+            "rspice-core does not forward generated model feature `{feature}`"
+        );
+        assert!(
+            catalog_manifest.contains(&format!("{feature} = [\"dep:rspice-{feature}\"]")),
+            "the model catalog is missing artifact feature `{feature}`"
         );
         assert!(
             core_manifest.contains(&format!("    \"{feature}\",")),
@@ -227,7 +228,7 @@ fn generated_model_features_match_the_core_feature_catalog() {
         );
     }
     assert!(
-        core_manifest.contains("veriloga-builtins-noise = [\"veriloga-builtins-base\"]"),
+        core_manifest.contains("\"rspice-veriloga-models/veriloga-builtins-noise\","),
         "rspice-core must expose generated noise as an independent feature"
     );
     assert!(
@@ -262,7 +263,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn generated_veriloga_root() -> PathBuf {
-    workspace_root().join("crates/rspice-core/src/device/veriloga_generated")
+    workspace_root().join("crates/rspice-veriloga-models")
 }
 
 fn scan_generated_rust(root: &Path, visit: &mut dyn FnMut(&Path, &str)) {

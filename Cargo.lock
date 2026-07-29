@@ -4623,6 +4623,7 @@ dependencies = [
  "rayon",
  "rspice-matrix",
  "rspice-veriloga",
+ "rspice-veriloga-models",
  "rspice-veriloga-runtime",
  "rustc-hash 2.1.3",
  "rustfft",
@@ -4724,6 +4725,348 @@ dependencies = [
  "thiserror 2.0.18",
  "web-time",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-veriloga-model-angelov"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-angelov-gan"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-asmesd"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-asmesd-dio"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-asmhemt"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bjt505-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bjt505t-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bjtd505-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bjtd505t-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimbulk"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimcmg-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimimg"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimsoi-18c250bc"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimsoi-e2aff994"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimsoi-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-diode-cmc"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-ekv-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-epfl-hemt-10a"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hicuml0va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hicuml2va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hisimhv-n4-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hisimhv-n5-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hisimhv-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hisimsoi-va-242bc21d"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hisimsoi-va-38074d06"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hisimsoi-va-5be18005"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-hisimsotb-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-juncap200"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-l-utsoi-485e0ac9"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-l-utsoi-832ce87d"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-mosvar"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-mvsg-cmc"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-psp104tva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-psp104va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-pspnqs104va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-r2-cmc"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-r2-et-cmc"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-r3-cmc"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-vbic-4t-et-cf"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-vbic13"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-vbic13-3t-et"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-vbic13-4t"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-models"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-model-angelov",
+ "rspice-veriloga-model-angelov-gan",
+ "rspice-veriloga-model-asmesd",
+ "rspice-veriloga-model-asmesd-dio",
+ "rspice-veriloga-model-asmhemt",
+ "rspice-veriloga-model-bjt505-va",
+ "rspice-veriloga-model-bjt505t-va",
+ "rspice-veriloga-model-bjtd505-va",
+ "rspice-veriloga-model-bjtd505t-va",
+ "rspice-veriloga-model-bsimbulk",
+ "rspice-veriloga-model-bsimcmg-va",
+ "rspice-veriloga-model-bsimimg",
+ "rspice-veriloga-model-bsimsoi-18c250bc",
+ "rspice-veriloga-model-bsimsoi-e2aff994",
+ "rspice-veriloga-model-bsimsoi-va",
+ "rspice-veriloga-model-diode-cmc",
+ "rspice-veriloga-model-ekv-va",
+ "rspice-veriloga-model-epfl-hemt-10a",
+ "rspice-veriloga-model-hicuml0va",
+ "rspice-veriloga-model-hicuml2va",
+ "rspice-veriloga-model-hisimhv-n4-va",
+ "rspice-veriloga-model-hisimhv-n5-va",
+ "rspice-veriloga-model-hisimhv-va",
+ "rspice-veriloga-model-hisimsoi-va-242bc21d",
+ "rspice-veriloga-model-hisimsoi-va-38074d06",
+ "rspice-veriloga-model-hisimsoi-va-5be18005",
+ "rspice-veriloga-model-hisimsotb-va",
+ "rspice-veriloga-model-juncap200",
+ "rspice-veriloga-model-l-utsoi-485e0ac9",
+ "rspice-veriloga-model-l-utsoi-832ce87d",
+ "rspice-veriloga-model-mosvar",
+ "rspice-veriloga-model-mvsg-cmc",
+ "rspice-veriloga-model-psp104tva",
+ "rspice-veriloga-model-psp104va",
+ "rspice-veriloga-model-pspnqs104va",
+ "rspice-veriloga-model-r2-cmc",
+ "rspice-veriloga-model-r2-et-cmc",
+ "rspice-veriloga-model-r3-cmc",
+ "rspice-veriloga-model-vbic-4t-et-cf",
+ "rspice-veriloga-model-vbic13",
+ "rspice-veriloga-model-vbic13-3t-et",
+ "rspice-veriloga-model-vbic13-4t",
 ]
 
 [[package]]

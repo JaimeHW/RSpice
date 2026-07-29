@@ -338,7 +338,7 @@ pub(super) fn generate_state_file_with_extensions(
         .saturating_add(idt_state_count)
         .saturating_add(extensions.rollback_flag_count);
     out.push_str(
-        "    pub(crate) fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {\n",
+        "    #[doc(hidden)]\n    pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {\n",
     );
     out.push_str(&format!(
         "        let mut values = Vec::with_capacity({rollback_value_count});\n"
@@ -361,7 +361,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
 
     out.push_str(
-        "    pub(crate) fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {\n",
+        "    #[doc(hidden)]\n    pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {\n",
     );
     out.push_str(&format!(
         "        debug_assert_eq!(state.values.len(), {rollback_value_count});\n"
@@ -403,7 +403,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
 
     out.push_str(
-        "    pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
+        "    #[doc(hidden)]\n    pub fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
     );
     out.push_str("        GeneratedVerilogAPersistentState {\n");
     out.push_str("            ddt_previous: self.stamp_state.ddt_previous.to_vec(),\n");
@@ -417,7 +417,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.checkpoint_capture_fields);
     out.push_str("        }\n");
     out.push_str("    }\n\n");
-    out.push_str("    pub(crate) fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("    #[doc(hidden)]\n    pub fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {\n");
     out.push_str("            return Err(format!(\"generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}\", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));\n");
     out.push_str("        }\n");
@@ -430,7 +430,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.checkpoint_shape_checks);
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
-    out.push_str("    pub(crate) fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("    #[doc(hidden)]\n    pub fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        self.validate_persistent_state_shape(state)?;\n");
     out.push_str("        self.stamp_state.ddt_previous.copy_from_slice(&state.ddt_previous);\n");
     out.push_str("        self.stamp_state.ddt_current.copy_from_slice(&state.ddt_previous);\n");

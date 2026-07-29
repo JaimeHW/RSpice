@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/rspice-matrix",
     "crates/rspice-veriloga-runtime",
+    "crates/rspice-veriloga-models",
+    "crates/rspice-veriloga-models/models/*",
     "crates/rspice-core",
     "crates/rspice-cli",
     "crates/rspice-ui",
@@ -54,6 +56,7 @@ unicode-normalization = "0.1"
 # Internal crates
 rspice-matrix = { path = "crates/rspice-matrix", version = "0.1.0" }
 rspice-veriloga-runtime = { path = "crates/rspice-veriloga-runtime", version = "0.1.0" }
+rspice-veriloga-models = { path = "crates/rspice-veriloga-models", version = "0.1.0", default-features = false }
 rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
 
 # One lint policy for the whole workspace. Crates opt in with
