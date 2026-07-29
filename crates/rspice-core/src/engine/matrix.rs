@@ -11,7 +11,10 @@ use crate::{CircuitData, Value};
 
 impl Engine {
     /// Build static matrix structure from circuit topology
-    pub fn build_matrix(&self, circuit: &CircuitData) -> Result<StaticMatrix, SimulationError> {
+    pub(crate) fn build_matrix(
+        &self,
+        circuit: &CircuitData,
+    ) -> Result<StaticMatrix, SimulationError> {
         let size = circuit.matrix_size();
         if size == 0 {
             return Err(SimulationError::Circuit("Empty circuit".to_string()));

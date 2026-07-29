@@ -645,7 +645,7 @@ impl Engine {
     }
 
     /// Two-source DC sweep that preserves per-point device operating reports.
-    pub fn run_dc_sweep2_with_report_and_abort(
+    pub(crate) fn run_dc_sweep2_with_report_and_abort(
         &self,
         netlist: &Netlist,
         source_name: &str,
@@ -819,7 +819,7 @@ impl Engine {
     }
 
     /// Run a DC sweep from an already parsed sweep specification.
-    pub fn run_dc_sweep_spec_with_report_and_abort(
+    pub(crate) fn run_dc_sweep_spec_with_report_and_abort(
         &self,
         netlist: &Netlist,
         source_name: &str,

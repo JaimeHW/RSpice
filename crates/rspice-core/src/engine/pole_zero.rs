@@ -256,7 +256,7 @@ impl Engine {
     }
 
     /// Cancellable form of [`Self::run_pz`].
-    pub fn run_pz_with_abort(
+    pub(crate) fn run_pz_with_abort(
         &self,
         netlist: &Netlist,
         input_node: usize,
