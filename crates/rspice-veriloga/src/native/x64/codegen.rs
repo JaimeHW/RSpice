@@ -1330,6 +1330,8 @@ impl FunctionCompiler {
     fn emit_runtime_loop_limit_error_call(&mut self) {
         let frame_bytes = call_frame_bytes_for_slots(0);
         self.encoder.sub_rsp_imm32(frame_bytes);
+        self.encoder
+            .mov_r64_r64(entry_ctx_arg_reg(), self.ctx_arg_reg());
         let helper: VoidHelper = rspice_native_loop_limit_error;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -1429,6 +1431,10 @@ impl FunctionCompiler {
 
         self.patch_rel32_to_current(negative_count)?;
         self.patch_rel32_to_current(too_large_count)?;
+        #[cfg(windows)]
+        if restore_entry_ctx {
+            self.encoder.mov_r64_r64(entry_ctx_arg_reg(), Gpr::R10);
+        }
         self.emit_integer_shift_count_error_return();
         self.patch_rel32_to_current(valid_count_done)?;
         Ok(())
@@ -2112,6 +2118,8 @@ impl FunctionCompiler {
     fn emit_void_error_return(&mut self, helper: VoidHelper) {
         let frame_bytes = call_frame_bytes_for_slots(0);
         self.encoder.sub_rsp_imm32(frame_bytes);
+        self.encoder
+            .mov_r64_r64(entry_ctx_arg_reg(), self.ctx_arg_reg());
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -3007,7 +3015,7 @@ enum RoundDirection {
 
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
-type VoidHelper = extern "C" fn();
+type VoidHelper = extern "C" fn(*const crate::native::EvalContext);
 type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
 type ContextFilterHelper =
@@ -8791,13 +8799,17 @@ mod tests {
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
             let params = [left, right];
-            let ctx = eval_context(&params, &[], &[], &[]);
+            let mut ctx = eval_context(&params, &[], &[], &[]);
 
             clear_native_runtime_error();
+            ctx.clear_runtime_error();
             let result = f(&ctx, std::ptr::null());
 
             assert_eq!(result.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error().expect("invalid shift count must hard-fail");
+            let error = ctx
+                .take_runtime_error()
+                .expect("invalid shift count must hard-fail in its dispatch context");
+            let _ = take_native_runtime_error();
             assert!(
                 error.contains("integer shift count"),
                 "{name}: error must identify shift-count failure, got: {error}"

@@ -234,42 +234,60 @@ fn set_native_context_error(ctx: &EvalContext, message: impl Into<String>) {
     set_native_runtime_error(message);
 }
 
+fn set_native_context_error_ptr(ctx: *const EvalContext, message: impl Into<String>) {
+    let message = message.into();
+    if ctx.is_null() {
+        set_native_runtime_error(message);
+    } else {
+        // SAFETY: Native entry points only pass their live dispatch context.
+        set_native_context_error(unsafe { &*ctx }, message);
+    }
+}
+
 #[unsafe(export_name = "rspice_native_loop_limit_error")]
-pub extern "C" fn rspice_native_loop_limit_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_loop_limit_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native runtime loop iteration limit exceeded; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_integer_shift_count_error")]
-pub extern "C" fn rspice_native_integer_shift_count_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_integer_shift_count_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native integer shift count outside valid range [0:63]; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_values_error")]
-pub extern "C" fn rspice_native_limit_state_values_error() {
-    set_native_runtime_error("native limit state missing state storage; no interpreter fallback");
+pub extern "C" fn rspice_native_limit_state_values_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
+        "native limit state missing state storage; no interpreter fallback",
+    );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_values_bounds_error")]
-pub extern "C" fn rspice_native_limit_state_values_bounds_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_limit_state_values_bounds_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native limit state index outside state storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_initialized_error")]
-pub extern "C" fn rspice_native_limit_state_initialized_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_limit_state_initialized_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native limit state missing initialization flag storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_bounds_error")]
-pub extern "C" fn rspice_native_limit_state_bounds_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_limit_state_bounds_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native limit state index outside initialization flag storage; no interpreter fallback",
     );
 }
@@ -279,7 +297,7 @@ unsafe fn native_limiter_storage(
     state_id: usize,
 ) -> Option<(*mut f64, *mut u8)> {
     if ctx.is_null() {
-        rspice_native_limit_state_values_error();
+        rspice_native_limit_state_values_error(ctx);
         return None;
     }
     let ctx = unsafe { &*ctx };
@@ -330,7 +348,7 @@ pub unsafe extern "C" fn rspice_limiter_previous_native(
     state_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        rspice_native_limit_state_values_error();
+        rspice_native_limit_state_values_error(ctx);
         return 0.0;
     }
     if unsafe { (*ctx).limiting_enabled } == 0 {
@@ -364,7 +382,7 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
     state_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        rspice_native_limit_state_values_error();
+        rspice_native_limit_state_values_error(ctx);
         return 0.0;
     }
     let context = unsafe { &*ctx };
@@ -403,50 +421,57 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
 }
 
 #[unsafe(export_name = "rspice_native_state_values_error")]
-pub extern "C" fn rspice_native_state_values_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_state_values_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native state operator missing state storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_state_values_bounds_error")]
-pub extern "C" fn rspice_native_state_values_bounds_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_state_values_bounds_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native state operator index outside state storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_state_prev_bounds_error")]
-pub extern "C" fn rspice_native_state_prev_bounds_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_state_prev_bounds_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native state operator index outside prior-state storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_current_probe_error")]
-pub extern "C" fn rspice_native_current_probe_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_current_probe_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native current probe missing terminal-pair current storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_prior_current_error")]
-pub extern "C" fn rspice_native_prior_current_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_prior_current_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native prior current load missing contribution current storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_param_given_error")]
-pub extern "C" fn rspice_native_param_given_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_param_given_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native param_given load missing parameter-given storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_port_connected_error")]
-pub extern "C" fn rspice_native_port_connected_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_port_connected_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native port_connected load missing connection-flag storage; no interpreter fallback",
     );
 }
@@ -2308,7 +2333,7 @@ mod tests {
     #[test]
     fn transition_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 0.2, 0.4, 0.4];
-        let mut ctx = empty_eval_context();
+        let ctx = empty_eval_context();
         clear_native_runtime_error();
 
         let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 7) };
@@ -2407,7 +2432,7 @@ mod tests {
     #[test]
     fn slew_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 2.0, 2.0];
-        let mut ctx = empty_eval_context();
+        let ctx = empty_eval_context();
         clear_native_runtime_error();
 
         let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 7) };
