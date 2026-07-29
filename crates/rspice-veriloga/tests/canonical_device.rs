@@ -568,6 +568,14 @@ fn transpiler_reports_hot_phases_and_exact_output_size() {
         .sum::<u64>();
     assert_eq!(generated.metrics.generated_rust_bytes, bytes);
     assert_eq!(generated.metrics.generated_rust_lines, lines);
+    assert!(generated.metrics.derivative_seed_count > 0);
+    let derivative_values = generated
+        .metrics
+        .scalar_derivative_value_count
+        .saturating_add(generated.metrics.packed_derivative_value_count);
+    assert!(derivative_values > 0);
+    assert!(generated.metrics.derivative_lane_entry_count >= derivative_values);
+    assert!(generated.metrics.max_derivative_width > 0);
 }
 
 struct ImmediatePipelineCancellation;

@@ -21,6 +21,8 @@
 //!
 //! The reported figure is the minimum over trials, not the mean: the true cost
 //! is a floor that scheduler noise can only add to.
+//! Set `RSPICE_VERILOGA_BENCH_FILTER` to a module-name substring for repeated
+//! A/B measurements of one model without recompiling the rest of the corpus.
 
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::schedule::{Stage, split as split_cfg};
@@ -82,6 +84,7 @@ fn the_wide_models_report_what_they_cost() {
 
 fn report(models: &[Model]) {
     let root = model_root();
+    let filter = std::env::var("RSPICE_VERILOGA_BENCH_FILTER").ok();
     eprintln!(
         "{:>16}  {:>8}  {:>8}  {:>10}  {:>10}  {:>7}   {:>10}  {:>10}  {:>7}   {:>6}  {:>10}",
         "model",
@@ -96,7 +99,14 @@ fn report(models: &[Model]) {
         "rustc s",
         "notes"
     );
+    let mut measured = 0;
     for (module, directory, file) in models {
+        if filter
+            .as_deref()
+            .is_some_and(|filter| !module.contains(filter))
+        {
+            continue;
+        }
         let path = directory
             .split('/')
             .fold(root.clone(), |path, part| path.join(part))
@@ -105,7 +115,12 @@ fn report(models: &[Model]) {
 
         let measurement = measure(&root, &path, module);
         measurement.print();
+        measured += 1;
     }
+    assert!(
+        measured > 0,
+        "RSPICE_VERILOGA_BENCH_FILTER={filter:?} matched no benchmark model"
+    );
 }
 
 struct Measurement {
@@ -214,7 +229,8 @@ fn measure(root: &Path, path: &Path, module: &str) -> Measurement {
     // The Newton stage alone, reading what the coarser stages cached.
     let schedule = schedule_cfg(&optimized);
     let census = schedule.census();
-    let newton_share = census[3] as f64 / census.iter().sum::<usize>().max(1) as f64;
+    let newton_share =
+        census[census.len() - 1] as f64 / census.iter().sum::<usize>().max(1) as f64;
     let stages = split_cfg(&optimized, &schedule, &wanted)
         .unwrap_or_else(|error| panic!("{module}: split: {error}"));
     let staged = staged_values(&stages, &bias, module);

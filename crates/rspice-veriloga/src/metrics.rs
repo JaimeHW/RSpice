@@ -131,6 +131,22 @@ pub struct PipelineMetrics {
     /// matching the repeated branch work a specializer can remove.
     #[serde(default)]
     pub structural_guard_newton_values: u64,
+    /// Independent variables carried into automatic differentiation, including
+    /// the limiter-correction lane when present.
+    #[serde(default)]
+    pub derivative_seed_count: u64,
+    /// Optimized derivative values emitted as plain `f64`.
+    #[serde(default)]
+    pub scalar_derivative_value_count: u64,
+    /// Optimized derivative values emitted as `Lanes<N>`, where `N >= 2`.
+    #[serde(default)]
+    pub packed_derivative_value_count: u64,
+    /// Sum of live lane widths over optimized derivative values.
+    #[serde(default)]
+    pub derivative_lane_entry_count: u64,
+    /// Widest optimized derivative value.
+    #[serde(default)]
+    pub max_derivative_width: u64,
     pub generated_rust_bytes: u64,
     pub generated_rust_lines: u64,
 }
@@ -404,11 +420,21 @@ mod tests {
         object.remove("model_structural_guard_count");
         object.remove("instance_structural_guard_count");
         object.remove("structural_guard_newton_values");
+        object.remove("derivative_seed_count");
+        object.remove("scalar_derivative_value_count");
+        object.remove("packed_derivative_value_count");
+        object.remove("derivative_lane_entry_count");
+        object.remove("max_derivative_width");
 
         let decoded: PipelineMetrics =
             serde_json::from_value(encoded).expect("deserialize an older metrics payload");
         assert_eq!(decoded.model_structural_guard_count, 0);
         assert_eq!(decoded.instance_structural_guard_count, 0);
         assert_eq!(decoded.structural_guard_newton_values, 0);
+        assert_eq!(decoded.derivative_seed_count, 0);
+        assert_eq!(decoded.scalar_derivative_value_count, 0);
+        assert_eq!(decoded.packed_derivative_value_count, 0);
+        assert_eq!(decoded.derivative_lane_entry_count, 0);
+        assert_eq!(decoded.max_derivative_width, 0);
     }
 }

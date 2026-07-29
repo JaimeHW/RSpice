@@ -501,6 +501,30 @@ impl ModelPlan {
         reactive.remap(&mapped[wanted.len() - reactive_wanted.len()..]);
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
+        let mut scalar_derivatives = 0usize;
+        let mut packed_derivatives = 0usize;
+        let mut lane_entries = 0usize;
+        let mut max_width = 0usize;
+        for value in &function.values {
+            let Some(lanes) = function.lanes_of(value.id) else {
+                continue;
+            };
+            if lanes.len() == 1 {
+                scalar_derivatives += 1;
+            } else {
+                packed_derivatives += 1;
+            }
+            lane_entries = lane_entries.saturating_add(lanes.len());
+            max_width = max_width.max(lanes.len());
+        }
+        let metrics = measurements.metrics_mut();
+        metrics.derivative_seed_count = crate::metrics::usize_to_u64(seeds.len());
+        metrics.scalar_derivative_value_count =
+            crate::metrics::usize_to_u64(scalar_derivatives);
+        metrics.packed_derivative_value_count =
+            crate::metrics::usize_to_u64(packed_derivatives);
+        metrics.derivative_lane_entry_count = crate::metrics::usize_to_u64(lane_entries);
+        metrics.max_derivative_width = crate::metrics::usize_to_u64(max_width);
         record_phase(
             artifact,
             measurements,

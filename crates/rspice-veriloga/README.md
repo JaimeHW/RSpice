@@ -231,6 +231,15 @@ values and `$param_given` bits, so devices bound to the same card reuse one
 Verilog-derived preprocessing result; instance geometry and solver state are
 never shared.
 
+Automatic differentiation keeps exact sparse lane shapes. Its fixed point uses
+a bounded compact bit matrix for ordinary compact models and falls back to
+sparse storage before hostile lane counts can force an oversized dense
+allocation. One-lane derivative values emit as plain `f64`; widths two and above
+remain packed `Lanes<N>` values, avoiding both scalar source explosion and
+one-element array overhead. Generator progress reports scalar/packed value
+counts, seed count, and maximum width so representation changes are visible on
+the shipped corpus.
+
 When the same cached model/instance predicate guards at least three Newton
 regions, the emitter evaluates a two-variant specialization candidate. It is
 accepted only when neither outcome controls a loop and the complete specialized

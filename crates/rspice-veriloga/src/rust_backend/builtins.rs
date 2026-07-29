@@ -1070,7 +1070,8 @@ fn generate_device_work_item(
             format!(
                 "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} \
                  (transpile {:.2?}, differentiate {:.2?}, schedule {:.2?}, static guards {}/{} \
-                 over {} Newton values, {} bytes, total {:.2?})",
+                 over {} Newton values, AD {} scalar/{} packed ({} seeds, max {}), {} bytes, \
+                 total {:.2?})",
                 relative_source.display(),
                 item.module,
                 transpile_started.elapsed(),
@@ -1079,6 +1080,10 @@ fn generate_device_work_item(
                 metrics.model_structural_guard_count,
                 metrics.instance_structural_guard_count,
                 metrics.structural_guard_newton_values,
+                metrics.scalar_derivative_value_count,
+                metrics.packed_derivative_value_count,
+                metrics.derivative_seed_count,
+                metrics.max_derivative_width,
                 metrics.generated_rust_bytes,
                 started.elapsed()
             ),
