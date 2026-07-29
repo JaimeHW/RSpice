@@ -125,9 +125,9 @@ pub use preprocessor::{
 pub use runtime_report::{
     CompileDiagnostic, CompileDiagnosticPhase, CompileDiagnosticSeverity, CompileDiagnosticSpan,
     CompileSourcePosition, RuntimeAbiParameter, RuntimeAbiPort, RuntimeAbiSummary,
-    RuntimeArtifactIntegrityError, RuntimeCompileReport, RuntimeTarget, RuntimeTargetMaturity,
-    RuntimeTargetQualification, RuntimeTargetQualifications, RuntimeTargetReadiness,
-    compile_diagnostics,
+    RuntimeArtifactIntegrityError, RuntimeCompileReport, RuntimeQualificationOptions,
+    RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetQualifications,
+    RuntimeTargetReadiness, compile_diagnostics,
 };
 pub use semantic::SemanticAnalyzer;
 pub use source::{SourceId, SourceMap, Span};
@@ -361,11 +361,30 @@ impl VerilogACompiler {
         source: &str,
         module_name: Option<&str>,
     ) -> CompileResult<RuntimeCompileReport> {
+        self.compile_runtime_with_qualifications(
+            source,
+            module_name,
+            RuntimeQualificationOptions::NONE,
+        )
+    }
+
+    /// Compile source text and explicitly request optional, expensive backend
+    /// qualification products.
+    ///
+    /// Ordinary runtime/editor compilation should use [`Self::compile_runtime`].
+    /// Generated Rust and native qualification are intended for offline
+    /// validation and are never produced unless selected here.
+    pub fn compile_runtime_with_qualifications(
+        &self,
+        source: &str,
+        module_name: Option<&str>,
+        qualifications: RuntimeQualificationOptions,
+    ) -> CompileResult<RuntimeCompileReport> {
         let mut pp = self.configured_in_memory_preprocessor();
         let preprocessed = pp
             .preprocess_source(source)
             .map_err(|error| CompileError::io_error(format!("Preprocessor error: {error}")))?;
-        self.compile_runtime_preprocessed("<input>", &preprocessed, module_name)
+        self.compile_runtime_preprocessed("<input>", &preprocessed, module_name, qualifications)
     }
 
     /// Compile one explicitly selected module from a sealed virtual source
@@ -380,8 +399,30 @@ impl VerilogACompiler {
         module_name: &str,
         limits: VirtualCompileLimits,
     ) -> CompileResult<VirtualRuntimeCompilation> {
-        self.compile_virtual_runtime_diagnosed(bundle, module_name, limits)
-            .map_err(|failure| failure.error)
+        self.compile_virtual_runtime_with_qualifications(
+            bundle,
+            module_name,
+            limits,
+            RuntimeQualificationOptions::NONE,
+        )
+    }
+
+    /// Compile a sealed virtual source bundle with explicit optional backend
+    /// qualifications.
+    pub fn compile_virtual_runtime_with_qualifications(
+        &self,
+        bundle: &VirtualSourceBundle,
+        module_name: &str,
+        limits: VirtualCompileLimits,
+        qualifications: RuntimeQualificationOptions,
+    ) -> CompileResult<VirtualRuntimeCompilation> {
+        self.compile_virtual_runtime_diagnosed_with_qualifications(
+            bundle,
+            module_name,
+            limits,
+            qualifications,
+        )
+        .map_err(|failure| failure.error)
     }
 
     /// Compile a sealed virtual source bundle while retaining source-authentic
@@ -391,6 +432,23 @@ impl VerilogACompiler {
         bundle: &VirtualSourceBundle,
         module_name: &str,
         limits: VirtualCompileLimits,
+    ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
+        self.compile_virtual_runtime_diagnosed_with_qualifications(
+            bundle,
+            module_name,
+            limits,
+            RuntimeQualificationOptions::NONE,
+        )
+    }
+
+    /// Diagnosed virtual compilation with explicit optional backend
+    /// qualifications.
+    pub fn compile_virtual_runtime_diagnosed_with_qualifications(
+        &self,
+        bundle: &VirtualSourceBundle,
+        module_name: &str,
+        limits: VirtualCompileLimits,
+        qualifications: RuntimeQualificationOptions,
     ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
         let limits = virtual_source::validate_compile_request(bundle, module_name, limits)
             .map_err(CompileError::from)
@@ -424,6 +482,7 @@ impl VerilogACompiler {
                 bundle.root_path(),
                 &preprocessed.source,
                 Some(module_name),
+                qualifications,
             )
             .map_err(|error| {
                 VirtualRuntimeCompileFailure::from_compiler(
@@ -457,6 +516,7 @@ impl VerilogACompiler {
         source_package: &str,
         preprocessed: &str,
         module_name: Option<&str>,
+        qualifications: RuntimeQualificationOptions,
     ) -> CompileResult<RuntimeCompileReport> {
         let analyzed = self.analyze_preprocessed(source_package, preprocessed)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
@@ -467,7 +527,7 @@ impl VerilogACompiler {
         )?;
         let canonical_ir =
             self.build_canonical_ir_artifact(source_package, preprocessed, &analyzed, module_name)?;
-        let report = RuntimeCompileReport::from_artifacts(model, canonical_ir);
+        let report = RuntimeCompileReport::from_artifacts(model, canonical_ir, qualifications);
         report.validate_integrity().map_err(|error| {
             CompileError::CodeGen(error::CodeGenError::new(error::CodeGenErrorKind::Internal(
                 format!("runtime artifact integrity validation failed: {error}"),
