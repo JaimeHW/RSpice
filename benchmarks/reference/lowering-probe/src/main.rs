@@ -9,11 +9,12 @@
 //!
 //! Three forms of the same arithmetic are timed against each other:
 //!
-//!   workspace — today's StructuredKernel: values indexed out of one big array
-//!               behind a `&mut`, derivative loop driven by a runtime mask, and
-//!               the per-op helper marked `#[inline(never)]`.
-//!   array     — the proposal: values in locals, derivatives in `[f64; L]`.
-//!   flat      — today's SparseLocalKernel: one named scalar per lane.
+//!   workspace — the retired indexed-workspace design: values behind a `&mut`,
+//!               derivative loop driven by a runtime mask, and the per-op
+//!               helper marked `#[inline(never)]`.
+//!   array     — the canonical design: values in locals, derivatives in
+//!               `[f64; L]`.
+//!   flat      — the retired flattened-scalar design: one named scalar per lane.
 //!
 //! `flat` is the target to match and `workspace` the thing to beat. The op mix
 //! (mul, add, exp, div) and chain depth are chosen to look like a compact model
@@ -56,7 +57,10 @@ impl<const L: usize> Workspace<L> {
     fn new(masks: &'static [u128]) -> Self {
         Self {
             v: vec![0.0; WS_VALUES].into_boxed_slice().try_into().unwrap(),
-            d: vec![[0.0; L]; WS_VALUES].into_boxed_slice().try_into().unwrap(),
+            d: vec![[0.0; L]; WS_VALUES]
+                .into_boxed_slice()
+                .try_into()
+                .unwrap(),
             masks,
         }
     }
@@ -193,34 +197,64 @@ fn run_flat(seed: f64) -> f64 {
     for _ in 0..CHAIN {
         // mul by (v1, e*)
         let mv = cv * v1;
-        let m0 = c0 * v1 + cv * e0; let m1 = c1 * v1 + cv * e1;
-        let m2 = c2 * v1 + cv * e2; let m3 = c3 * v1 + cv * e3;
-        let m4 = c4 * v1 + cv * e4; let m5 = c5 * v1 + cv * e5;
-        let m6 = c6 * v1 + cv * e6; let m7 = c7 * v1 + cv * e7;
-        let m8 = c8 * v1 + cv * e8; let m9 = c9 * v1 + cv * e9;
-        let m10 = c10 * v1 + cv * e10; let m11 = c11 * v1 + cv * e11;
+        let m0 = c0 * v1 + cv * e0;
+        let m1 = c1 * v1 + cv * e1;
+        let m2 = c2 * v1 + cv * e2;
+        let m3 = c3 * v1 + cv * e3;
+        let m4 = c4 * v1 + cv * e4;
+        let m5 = c5 * v1 + cv * e5;
+        let m6 = c6 * v1 + cv * e6;
+        let m7 = c7 * v1 + cv * e7;
+        let m8 = c8 * v1 + cv * e8;
+        let m9 = c9 * v1 + cv * e9;
+        let m10 = c10 * v1 + cv * e10;
+        let m11 = c11 * v1 + cv * e11;
         // add (v0, b*)
         let sv = mv + v0;
-        let s0 = m0 + b0; let s1 = m1 + b1; let s2 = m2 + b2; let s3 = m3 + b3;
-        let s4 = m4 + b4; let s5 = m5 + b5; let s6 = m6 + b6; let s7 = m7 + b7;
-        let s8 = m8 + b8; let s9 = m9 + b9; let s10 = m10 + b10; let s11 = m11 + b11;
+        let s0 = m0 + b0;
+        let s1 = m1 + b1;
+        let s2 = m2 + b2;
+        let s3 = m3 + b3;
+        let s4 = m4 + b4;
+        let s5 = m5 + b5;
+        let s6 = m6 + b6;
+        let s7 = m7 + b7;
+        let s8 = m8 + b8;
+        let s9 = m9 + b9;
+        let s10 = m10 + b10;
+        let s11 = m11 + b11;
         // exp
         let ev = sv.exp();
-        let x0 = ev * s0; let x1 = ev * s1; let x2 = ev * s2; let x3 = ev * s3;
-        let x4 = ev * s4; let x5 = ev * s5; let x6 = ev * s6; let x7 = ev * s7;
-        let x8 = ev * s8; let x9 = ev * s9; let x10 = ev * s10; let x11 = ev * s11;
+        let x0 = ev * s0;
+        let x1 = ev * s1;
+        let x2 = ev * s2;
+        let x3 = ev * s3;
+        let x4 = ev * s4;
+        let x5 = ev * s5;
+        let x6 = ev * s6;
+        let x7 = ev * s7;
+        let x8 = ev * s8;
+        let x9 = ev * s9;
+        let x10 = ev * s10;
+        let x11 = ev * s11;
         // div by (sv, s*)
         let r = 1.0 / sv;
         let q = ev * r;
-        c0 = (x0 - q * s0) * r; c1 = (x1 - q * s1) * r;
-        c2 = (x2 - q * s2) * r; c3 = (x3 - q * s3) * r;
-        c4 = (x4 - q * s4) * r; c5 = (x5 - q * s5) * r;
-        c6 = (x6 - q * s6) * r; c7 = (x7 - q * s7) * r;
-        c8 = (x8 - q * s8) * r; c9 = (x9 - q * s9) * r;
-        c10 = (x10 - q * s10) * r; c11 = (x11 - q * s11) * r;
+        c0 = (x0 - q * s0) * r;
+        c1 = (x1 - q * s1) * r;
+        c2 = (x2 - q * s2) * r;
+        c3 = (x3 - q * s3) * r;
+        c4 = (x4 - q * s4) * r;
+        c5 = (x5 - q * s5) * r;
+        c6 = (x6 - q * s6) * r;
+        c7 = (x7 - q * s7) * r;
+        c8 = (x8 - q * s8) * r;
+        c9 = (x9 - q * s9) * r;
+        c10 = (x10 - q * s10) * r;
+        c11 = (x11 - q * s11) * r;
         cv = q;
     }
-    cv + c0+c1+c2+c3+c4+c5+c6+c7+c8+c9+c10+c11
+    cv + c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9 + c10 + c11
 }
 
 // --------------------------------------------------------------------- main
@@ -238,14 +272,21 @@ fn bench(label: &str, mut f: impl FnMut(f64) -> f64) {
         samples.push(ns);
     }
     samples.sort_by(f64::total_cmp);
-    println!("{label:<28} {:>9.3} ns/op   (min {:>7.3})", samples[SAMPLES / 2], samples[0]);
+    println!(
+        "{label:<28} {:>9.3} ns/op   (min {:>7.3})",
+        samples[SAMPLES / 2],
+        samples[0]
+    );
 }
 
 static MASK12: [u128; WS_VALUES] = [0xfff; WS_VALUES];
 static MASK32: [u128; WS_VALUES] = [0xffff_ffff; WS_VALUES];
 
 fn main() {
-    println!("chain={CHAIN} ops/iter={} iters={ITERS} samples={SAMPLES}\n", CHAIN * 4);
+    println!(
+        "chain={CHAIN} ops/iter={} iters={ITERS} samples={SAMPLES}\n",
+        CHAIN * 4
+    );
 
     let mut ws12 = Workspace::<12>::new(&MASK12);
     bench("workspace  L=12", |s| run_workspace(&mut ws12, s));
