@@ -68,7 +68,7 @@ impl DiodeLevel {
 /// independent, and foundry cards routinely set `TLEVC=1` to replace the
 /// bandgap-derived capacitance shift with measured linear coefficients.
 #[derive(Debug, Clone, Copy)]
-pub struct DiodeTemperatureModel {
+pub(crate) struct DiodeTemperatureModel {
     /// Saturation-current / breakdown temperature-equation selector.
     pub tlev: u8,
     /// Junction-capacitance / potential temperature-equation selector.
@@ -147,7 +147,7 @@ impl DiodeTemperatureModel {
 /// breakdown but not tunneling is not merely imprecise in reverse, it is
 /// wrong by orders of magnitude.
 #[derive(Debug, Clone, Copy)]
-pub struct DiodeTunneling {
+pub(crate) struct DiodeTunneling {
     /// Bottom tunneling saturation current, scaled by AREA (JTUN).
     pub bottom: Value,
     /// Sidewall tunneling saturation current, scaled by PJ (JTUNSW).
@@ -1257,7 +1257,7 @@ impl Diode {
     /// multiplicity at LEVEL=3. IBV feeds the forward/reverse matching loop
     /// that sets the effective breakdown voltage, so getting this wrong moves
     /// the knee rather than just its height.
-    pub fn apply_instance_scaling(&mut self, area: Value, multiplicity: Value) {
+    pub(crate) fn apply_instance_scaling(&mut self, area: Value, multiplicity: Value) {
         let scale = area * multiplicity;
         self.junction_scale *= scale;
         self.is *= scale;
@@ -1350,7 +1350,7 @@ impl Diode {
     ///
     /// Returns `(area, perimeter)` — both still un-multiplied by `M`, which
     /// `apply_instance_scaling` and `set_sidewall_perimeter` apply.
-    pub fn geometric_area_and_perimeter(
+    pub(crate) fn geometric_area_and_perimeter(
         width: Value,
         length: Value,
         multiplicity: Value,
@@ -1372,7 +1372,7 @@ impl Diode {
     /// overlaps between the diode's routing and the bulk, so they add a fixed
     /// capacitance rather than a junction one.
     #[allow(clippy::too_many_arguments)]
-    pub fn set_overlap_capacitance(
+    pub(crate) fn set_overlap_capacitance(
         &mut self,
         multiplicity: Value,
         width_metal: Value,

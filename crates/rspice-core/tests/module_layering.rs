@@ -63,24 +63,25 @@ const LAYERS: &[(&str, u32)] = &[
     // they may share a rank without concealing an edge.
     //
     // `constants` holds the physical constants and the Celsius/Kelvin
-    // conversions that are arithmetic on them. `resource` is the intended
-    // home of the include-depth limit still owned by `netlist`.
+    // conversions that are arithmetic on them. `resource` holds the limits
+    // that bound what a deck may ask for, including the include depth.
     ("constants", 0),
     ("time_compat", 0),
     ("resource", 0),
     ("abort_signal", 0),
     ("builtin_lib", 0),
+    // Names of the XSPICE code models compiled in. A catalogue of names is
+    // data: the parser classifies against it while reading an `A` card and
+    // `xspice` registers against it, so both read down instead of the parser
+    // reaching eight ranks up.
+    ("codemodels", 0),
     // SPICE naming rules. Everything above depends on this, so it depends on
     // nothing.
     ("naming", 0),
     // Structured convergence-quality reporting. Wired into the drivers in
     // Phase 5b; it depends only on `Value` and stays a leaf.
     ("diagnostics", 0),
-    // Numerics. `simd` is a kernel library beneath the solvers; `solver`
-    // becomes `numerics::la` in Phase 5, absorbing `engine::convergence`, and
-    // gains a `numerics::integration` sibling holding the companion
-    // coefficients and LTE machinery that `analysis::core::transient` owns
-    // today.
+    // A kernel library beneath the solvers.
     ("simd", 1),
     // SPICE RAW waveform files, read and written. A leaf by construction:
     // `raw_export` names nothing in the crate at all and the reader needs only
@@ -88,10 +89,15 @@ const LAYERS: &[(&str, u32)] = &[
     // when a result type changes. It shares rank 1 with `simd` because neither
     // references the other.
     ("io", 1),
-    // Numerics shared by every analysis. `integration` holds the integration
-    // method and the companion-model coefficients that the circuit store, the
-    // device models and XSPICE all stamp with. `crate::solver` joins it as
-    // `numerics::la` in the rest of Phase 5.
+    // Numerics shared by every analysis: how a derivative is discretized, how
+    // large a step may be, where a step may not land, and whether the step
+    // taken was accurate enough to keep. Below the circuit store, the device
+    // models and XSPICE, all three of which stamp with the coefficients.
+    //
+    // `solver` stays its own rank rather than becoming `numerics::la`: it
+    // solves against an assembled matrix, so it sits above the layer that
+    // defines one, and the rename would have cost five crates a path for no
+    // gain.
     ("numerics", 2),
     // Simulation configuration. Below the solver, the device models and the
     // circuit store, all of which read a tolerance or a dialect flag and used
@@ -176,12 +182,14 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // boundary, and now sits beside it in `engine::waveform`.
     ("analysis", "engine", 1),
     // ---------------------------------------------------------------------
-    // Phase 7 — elaboration.
+    // Phase 7 — built-in name catalogues.
     //
-    // The parser asking the device layer which built-in Verilog-A models exist
-    // (`flattener`), and reaching into the XSPICE subsystem while parsing `A`
-    // cards. Both are elaboration concerns that will sit above both modules.
-    ("netlist", "xspice", 5),
+    // The flattener asking the device layer which built-in Verilog-A models
+    // exist, so an `X` card naming one is not mistaken for a missing
+    // subcircuit. The XSPICE half of this edge went to `codemodels`; this half
+    // cannot follow, because the list is generator output whose `#[cfg]` gates
+    // must stay in lockstep with the generated model modules beside it. Moving
+    // it is a change to `rspice-veriloga-gen`, not a change to this crate.
     ("netlist", "device", 1),
     // ---------------------------------------------------------------------
     // Phase 8 — device layer.

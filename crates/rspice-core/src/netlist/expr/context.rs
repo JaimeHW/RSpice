@@ -86,7 +86,7 @@ impl RandomState {
     ///
     /// Takes `&self` because the counter is shared: every context derived from
     /// the netlist has to see the rewind.
-    pub fn restart(&self) {
+    pub(crate) fn restart(&self) {
         self.counter.store(0, Ordering::Relaxed);
     }
 
@@ -531,7 +531,7 @@ impl ParamContext {
     }
 
     /// Rewind the statistical stream to draw zero. See [`RandomState::restart`].
-    pub fn restart_statistical_stream(&self) {
+    pub(crate) fn restart_statistical_stream(&self) {
         self.random.restart();
     }
 

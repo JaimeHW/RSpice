@@ -3,7 +3,7 @@
 //! Provides a comprehensive library of analog and digital code models.
 //!
 //! The inventory below is grouped for reading. The authoritative list is
-//! [`CodeModelRegistry::builtin_model_names`](crate::xspice::CodeModelRegistry::builtin_model_names),
+//! [`crate::codemodels::BUILTIN_MODEL_NAMES`],
 //! and each model's own `description()` is what the registry reports; names
 //! joined by `/` are aliases for one model.
 //!

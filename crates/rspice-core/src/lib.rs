@@ -100,6 +100,9 @@ pub mod analysis;
 /// that library, netlist and engine can all share one copy.
 pub(crate) mod builtin_lib;
 pub mod circuit;
+/// Names of the XSPICE code models compiled in; a leaf so that both the parser
+/// that classifies a name and the subsystem that instantiates it read down.
+pub(crate) mod codemodels;
 /// Simulation configuration. Below everything that reads it, so a tolerance
 /// or dialect flag is a downward reference rather than a reach into `engine`.
 pub mod config;

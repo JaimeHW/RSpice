@@ -50,9 +50,7 @@ pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
     SaturableInductor, SolutionDependentCapacitor, SolutionDependentCapacitorLinearization,
 };
-pub use semiconductor::{
-    Bjt, BjtType, Diode, DiodeLevel, DiodeTemperatureModel, DiodeTunneling,
-};
+pub use semiconductor::{Bjt, BjtType, Diode, DiodeLevel};
 
 // Re-export from root-level modules
 pub use behavioral::{BehavioralCurrentSource, BehavioralSources, BehavioralVoltageSource};

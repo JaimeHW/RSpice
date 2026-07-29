@@ -623,7 +623,7 @@ fn parse_xspice_codemodel_command(
     let requested = collect_codemodel_library_args(stream);
     let unsupported = requested
         .iter()
-        .filter(|path| !crate::xspice::CodeModelRegistry::is_builtin_codemodel_library_path(path))
+        .filter(|path| !crate::codemodels::is_builtin_codemodel_library_path(path))
         .cloned()
         .collect::<Vec<_>>();
 
@@ -670,7 +670,7 @@ fn unsupported_xspice_codemodel_command(
              but RSpice does not yet load arbitrary .cm/MIF libraries; {target}. \
              Standard ngspice-46 built-in bundle names ({}) are accepted as compatibility no-ops \
              because those XSPICE models are compiled into RSpice.",
-            crate::xspice::CodeModelRegistry::builtin_codemodel_library_names().join(", ")
+            crate::codemodels::BUILTIN_CODEMODEL_LIBRARY_NAMES.join(", ")
         ),
     }
 }

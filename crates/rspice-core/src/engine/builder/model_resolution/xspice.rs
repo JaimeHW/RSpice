@@ -32,7 +32,7 @@ fn unknown_xspice_model_error(model_name: &str, alias: Option<(&str, &str)>) -> 
          in-process; standard built-in .cm bundle directives ({}) are accepted \
          as compatibility no-ops, but arbitrary external .cm/MIF code-model \
          libraries are not loaded.",
-        crate::xspice::CodeModelRegistry::builtin_codemodel_library_names().join(", ")
+        crate::codemodels::BUILTIN_CODEMODEL_LIBRARY_NAMES.join(", ")
     ))
 }
 
