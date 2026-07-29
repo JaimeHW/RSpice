@@ -190,18 +190,8 @@ pub struct PnoiseData {
     pub output_noise: Vec<Value>,
     /// Optional input-referred noise vector (V^2/Hz), when available.
     pub input_noise: Option<Vec<Value>>,
-    /// Optional total integrated output noise (RMS).
-    pub total_output_noise: Option<Value>,
     /// Device contributors (name, percentage) at the measured output port.
     pub contributors: Vec<(String, Value)>,
-    /// Carrier frequency used for the analysis (Hz).
-    pub carrier_frequency: Value,
-    /// Effective sideband folding multiplier.
-    pub sideband_factor: usize,
-    /// Requested noise reference.
-    pub reference: PnoiseReference,
-    /// Non-fatal caveats for approximations/fallbacks.
-    pub warnings: Vec<String>,
 }
 
 /// Run PNoise analysis standalone -- computing its own periodic solution
@@ -491,15 +481,7 @@ fn run_pnoise_analysis_impl(
                         frequencies,
                         output_noise: osc.phase_noise_dbc,
                         input_noise,
-                        // The integral of the driven-fold PSD does not
-                        // describe the PPV spectrum; omit rather than mix
-                        // models.
-                        total_output_noise: None,
                         contributors: Vec::new(),
-                        carrier_frequency: 1.0 / osc.period,
-                        sideband_factor,
-                        reference: config.noise_ref,
-                        warnings,
                     });
                 }
                 Err(rspice_core::SimulationError::Aborted) => {
@@ -561,12 +543,7 @@ fn run_pnoise_analysis_impl(
         frequencies,
         output_noise,
         input_noise,
-        total_output_noise,
         contributors,
-        carrier_frequency: pss_data.frequency,
-        sideband_factor,
-        reference: config.noise_ref,
-        warnings,
     })
 }
 
@@ -711,12 +688,7 @@ fn run_pnoise_from_retained_state(
             frequencies,
             output_noise: oscillator.phase_noise_dbc,
             input_noise: None,
-            total_output_noise: None,
             contributors: Vec::new(),
-            carrier_frequency: 1.0 / oscillator.period,
-            sideband_factor,
-            reference: config.noise_ref,
-            warnings: Vec::new(),
         });
     }
 
@@ -770,12 +742,7 @@ fn run_pnoise_from_retained_state(
         frequencies,
         output_noise: exact.output_noise,
         input_noise,
-        total_output_noise,
         contributors,
-        carrier_frequency: operating_point.analysis().result.frequency,
-        sideband_factor,
-        reference: config.noise_ref,
-        warnings: Vec::new(),
     })
 }
 

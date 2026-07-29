@@ -29,8 +29,6 @@ impl FftState {
             name: input.name,
             samples: Arc::from(input.samples),
             sample_rate: input.sample_rate,
-            original_count: input.original_count,
-            decimation_factor: input.decimation_factor,
         });
         self.sync_sample_count_control_value();
         self.recompute_from_source();

@@ -1,34 +1,6 @@
-//! Magnitude scales and their axis labels.
+//! FFT input fidelity policy.
 
 use super::super::pipeline::FftInputPolicy;
-
-// =============================================================================
-// Scale Mode
-// =============================================================================
-
-/// Magnitude scale mode
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum MagnitudeScale {
-    /// dB scale (20 * log10)
-    #[default]
-    DB,
-    /// dBc relative to fundamental level
-    DBc,
-    /// Linear scale
-    Linear,
-    /// dBm (power into 50Ω)
-    DBm,
-}
-
-/// Frequency axis mode
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum FrequencyScale {
-    /// Linear frequency axis
-    #[default]
-    Linear,
-    /// Logarithmic frequency axis
-    Log,
-}
 
 /// FFT input fidelity mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

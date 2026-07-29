@@ -1,0 +1,77 @@
+**************** uncommented deck **************
+
+bug-378-test-sequence.cir       1       1  PORT TYPE MODIFIERS TEST
+bug-378-test-sequence.cir       3       2  .param sel=0
+internal       0       3  .global gnd
+bug-378-test-sequence.cir       5       4  v_vss vss 0 dc 0
+bug-378-test-sequence.cir       7       5  v_signal pls1 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 1e-3 2e-3)
+bug-378-test-sequence.cir       8       6  v_signal2 pls2 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 2e-3 4e-3)
+bug-378-test-sequence.cir      11       8  .if{sel==1}
+bug-378-test-sequence.cir      13      10  a_adc %v[ pls1 %vd(pls2 0)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      15      12  .elseif{sel==2}
+bug-378-test-sequence.cir      17      14  a_adc [ %vd(pls1 0) %v(pls2)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      19      16  .else
+bug-378-test-sequence.cir      21      18  a_adc %v[ pls1 pls2] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      23      20  .endif
+bug-378-test-sequence.cir      25      21  a_and [dpls1 dpls2] dand and
+bug-378-test-sequence.cir      26      22  a_dac [dand] [aand] dac
+bug-378-test-sequence.cir      28      23  .model and d_and
+bug-378-test-sequence.cir      29      24  .model adc adc_bridge
+bug-378-test-sequence.cir      30      25  .model dac dac_bridge
+bug-378-test-sequence.cir      32      26  .control
+bug-378-test-sequence.cir      33      27  tran 1e-3 4e-3
+bug-378-test-sequence.cir      34      28  eprint dand
+bug-378-test-sequence.cir      35      29  alterparam sel=1
+bug-378-test-sequence.cir      36      30  reset
+bug-378-test-sequence.cir      37      31  tran 1e-3 4e-3
+bug-378-test-sequence.cir      38      32  eprint dand
+bug-378-test-sequence.cir      39      33  alterparam sel=2
+bug-378-test-sequence.cir      40      34  reset
+bug-378-test-sequence.cir      41      35  tran 1e-3 4e-3
+bug-378-test-sequence.cir      42      36  eprint dand
+bug-378-test-sequence.cir      44      37  quit 0
+bug-378-test-sequence.cir      45      38  .endc
+bug-378-test-sequence.cir      48      40  .end
+
+****************** complete deck ***************
+
+bug-378-test-sequence.cir       1       1  PORT TYPE MODIFIERS TEST
+bug-378-test-sequence.cir       3       2  .param sel=0
+internal       0       3  .global gnd
+bug-378-test-sequence.cir       5       4  v_vss vss 0 dc 0
+bug-378-test-sequence.cir       7       5  v_signal pls1 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 1e-3 2e-3)
+bug-378-test-sequence.cir       8       6  v_signal2 pls2 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 2e-3 4e-3)
+bug-378-test-sequence.cir      10       7  *  modes selected by command 'alterparam'
+bug-378-test-sequence.cir      11       8  .if{sel==1}
+bug-378-test-sequence.cir      12       9  ********************* mode 1 ***********************
+bug-378-test-sequence.cir      13      10  a_adc %v[ pls1 %vd(pls2 0)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      14      11  ****************************************************
+bug-378-test-sequence.cir      15      12  .elseif{sel==2}
+bug-378-test-sequence.cir      16      13  ********************* mode 2 ***********************
+bug-378-test-sequence.cir      17      14  a_adc [ %vd(pls1 0) %v(pls2)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      18      15  ****************************************************
+bug-378-test-sequence.cir      19      16  .else
+bug-378-test-sequence.cir      20      17  ********************* mode 3 ***********************
+bug-378-test-sequence.cir      21      18  a_adc %v[ pls1 pls2] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      22      19  ****************************************************
+bug-378-test-sequence.cir      23      20  .endif
+bug-378-test-sequence.cir      25      21  a_and [dpls1 dpls2] dand and
+bug-378-test-sequence.cir      26      22  a_dac [dand] [aand] dac
+bug-378-test-sequence.cir      28      23  .model and d_and
+bug-378-test-sequence.cir      29      24  .model adc adc_bridge
+bug-378-test-sequence.cir      30      25  .model dac dac_bridge
+bug-378-test-sequence.cir      32      26  .control
+bug-378-test-sequence.cir      33      27  tran 1e-3 4e-3
+bug-378-test-sequence.cir      34      28  eprint dand
+bug-378-test-sequence.cir      35      29  alterparam sel=1
+bug-378-test-sequence.cir      36      30  reset
+bug-378-test-sequence.cir      37      31  tran 1e-3 4e-3
+bug-378-test-sequence.cir      38      32  eprint dand
+bug-378-test-sequence.cir      39      33  alterparam sel=2
+bug-378-test-sequence.cir      40      34  reset
+bug-378-test-sequence.cir      41      35  tran 1e-3 4e-3
+bug-378-test-sequence.cir      42      36  eprint dand
+bug-378-test-sequence.cir      44      37  quit 0
+bug-378-test-sequence.cir      45      38  .endc
+bug-378-test-sequence.cir      46      39  *end
+bug-378-test-sequence.cir      48      40  .end

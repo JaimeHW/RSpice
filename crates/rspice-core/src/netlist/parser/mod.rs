@@ -707,6 +707,7 @@ fn parse_netlist_impl(
     }
     normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
     resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
+    resolve_static_model_expression_params_with_abort(&mut state, abort)?;
     validate_resistor_model_references_with_abort(&state, abort)?;
     validate_coupling_model_references_with_abort(&state, abort)?;
 
@@ -3166,6 +3167,109 @@ fn sanitize_pspice_u_generated_model_name(raw: &str) -> String {
         }
     }
     out
+}
+
+/// Fold model parameter expressions that the finished deck can already
+/// evaluate back into numeric parameters.
+///
+/// A `.model` card is parsed in one forward pass, so a parameter citing a
+/// `.param` defined later in the expansion cannot be evaluated where it is
+/// read and is deferred as an expression. Foundry corner libraries do this
+/// routinely — GF180MCU's `.LIB typical` includes its MOS model cards before
+/// the `.LIB noise_corner` section that defines the flicker-noise parameters
+/// those cards cite — so without this pass a released PDK reaches the builder
+/// carrying deferred parameters.
+///
+/// That matters because the native compact models refuse them: BSIM4, BSIMSOI
+/// and their neighbours require finite numeric literals, since a model
+/// parameter that changes under the solver is not something their
+/// initialisation can honour. The refusal is right; what was missing was
+/// resolving the references first.
+///
+/// Only expressions that evaluate against the *static* parameter context are
+/// folded. Anything referencing `TEMP`, `TNOM`, or another simulation-time
+/// scalar deliberately fails here and stays deferred, so the builder's
+/// temperature-aware resolution keeps its job and this pass cannot freeze a
+/// temperature sweep at its nominal value.
+fn resolve_static_model_expression_params_with_abort(
+    state: &mut ParseState,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+
+    let mut context = state.params.clone();
+    crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
+
+    for (index, model) in state.models.iter_mut().enumerate() {
+        poll_parse_abort(abort, index)?;
+        if model.expr_params.is_empty() {
+            continue;
+        }
+
+        // Subcircuit-local models are off limits. Their parameters are
+        // resolved per instance at flatten time against the caller's scope —
+        // `.model DM D (IS={is0})` inside a subckt means a different IS for
+        // every instantiation — so folding them here against the top-level
+        // context would freeze every instance at the enclosing deck's value
+        // and silently collapse the scoping. `qualify_local_model_name`
+        // marks them with `::`, which is the only signal available at this
+        // point.
+        if model.name.contains("::") {
+            continue;
+        }
+
+        // Model parameters may cite each other, so keep folding until a pass
+        // resolves nothing new. Bounded by the number of deferred parameters:
+        // each round either resolves at least one or stops.
+        let mut deferred = std::mem::take(&mut model.expr_params);
+        loop {
+            let mut unresolved = Vec::with_capacity(deferred.len());
+            let mut progressed = false;
+
+            for (name, expression) in deferred {
+                match crate::netlist::expr::eval_expression(&expression, &context) {
+                    Ok(value) if value.is_finite() => {
+                        context.set(&name, value);
+                        model.params.push((name, value));
+                        progressed = true;
+                    }
+                    _ => unresolved.push((name, expression)),
+                }
+            }
+
+            deferred = unresolved;
+            if !progressed || deferred.is_empty() {
+                break;
+            }
+        }
+
+        model.expr_params = deferred;
+    }
+
+    // A bare identifier nothing defines is a typo, not a forward reference:
+    // the deck has been read, so nothing later can supply it. Failing here
+    // keeps the guarantee the parser used to give directly, that
+    // `.model dmod D(IS=missing)` is rejected rather than silently letting
+    // the model fall back to its default IS.
+    //
+    // Only the identifiers the parser recorded are checked. A braced
+    // `{missing}` is an explicit expression whose resolution belongs to
+    // whoever consumes it — the XSPICE resolver rejects its own with a better
+    // message — and inferring the difference from expression text after the
+    // fact would catch those too.
+    if let Some((param, reference, line)) = state
+        .model_bare_ident_deferrals
+        .iter()
+        .find(|(_, reference, _)| context.get(reference).is_none())
+    {
+        return Err(ParseError::Syntax {
+            line: *line,
+            message: format!("Expected value for model parameter '{param}', found {reference}"),
+        }
+        .into());
+    }
+
+    ensure_parse_not_aborted(abort)
 }
 
 fn validate_resistor_model_references_with_abort(

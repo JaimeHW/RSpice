@@ -47,26 +47,6 @@ pub enum InterpolationMethod {
     Linear,
     /// Cubic spline interpolation (smoother, preserves derivatives)
     CubicSpline,
-    /// Zero-order hold (step function, for digital signals)
-    ZeroOrderHold,
-}
-
-// =============================================================================
-// Extrapolation Mode
-// =============================================================================
-
-/// Behavior when interpolating outside the data range
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ExtrapolationMode {
-    /// Hold the first/last value constant
-    #[default]
-    Flat,
-    /// Linear extrapolation from the endpoint (can diverge)
-    Linear,
-    /// Return NaN for out-of-range queries
-    NaN,
-    /// Return an error for out-of-range queries
-    Error,
 }
 
 // =============================================================================
@@ -82,8 +62,6 @@ pub struct WaveformInterpolator<'a> {
     y: &'a [f64],
     /// Interpolation method
     method: InterpolationMethod,
-    /// Extrapolation behavior
-    extrap: ExtrapolationMode,
     /// Pre-computed spline coefficients (for CubicSpline)
     spline_coeffs: Option<SplineCoefficients>,
 }
@@ -103,7 +81,6 @@ impl<'a> WaveformInterpolator<'a> {
             x,
             y,
             method: InterpolationMethod::Linear,
-            extrap: ExtrapolationMode::Flat,
             spline_coeffs: None,
         }
     }
@@ -114,12 +91,6 @@ impl<'a> WaveformInterpolator<'a> {
         if method == InterpolationMethod::CubicSpline && self.x.len() > 2 {
             self.spline_coeffs = Some(compute_spline_coeffs(self.x, self.y));
         }
-        self
-    }
-
-    /// Set extrapolation mode
-    pub fn with_extrapolation(mut self, mode: ExtrapolationMode) -> Self {
-        self.extrap = mode;
         self
     }
 
@@ -139,10 +110,10 @@ impl<'a> WaveformInterpolator<'a> {
 
         // Handle extrapolation
         if target_x < x_min {
-            return self.extrapolate_left(target_x, x_min);
+            return Ok(self.extrapolate_left());
         }
         if target_x > x_max {
-            return self.extrapolate_right(target_x, x_max);
+            return Ok(self.extrapolate_right());
         }
 
         // Find bracketing interval using binary search
@@ -152,7 +123,6 @@ impl<'a> WaveformInterpolator<'a> {
         match self.method {
             InterpolationMethod::Linear => Ok(self.interpolate_linear(idx, target_x)),
             InterpolationMethod::CubicSpline => Ok(self.interpolate_cubic(idx, target_x)),
-            InterpolationMethod::ZeroOrderHold => Ok(self.y[idx]),
         }
     }
 
@@ -225,40 +195,15 @@ impl<'a> WaveformInterpolator<'a> {
         a * y0 + b * y1 + ((a * a * a - a) * y2_0 + (b * b * b - b) * y2_1) * (h * h) / 6.0
     }
 
-    /// Extrapolate to the left
-    fn extrapolate_left(&self, target_x: f64, x_min: f64) -> Result<f64, InterpolationError> {
-        match self.extrap {
-            ExtrapolationMode::Flat => Ok(self.y[0]),
-            ExtrapolationMode::Linear => {
-                if self.x.len() < 2 {
-                    Ok(self.y[0])
-                } else {
-                    // Linear extrapolation from first two points
-                    let slope = (self.y[1] - self.y[0]) / (self.x[1] - self.x[0]);
-                    Ok(self.y[0] + slope * (target_x - x_min))
-                }
-            }
-            ExtrapolationMode::NaN => Ok(f64::NAN),
-            ExtrapolationMode::Error => Err(InterpolationError::OutOfRange(target_x)),
-        }
+    /// Extrapolate to the left. Out-of-range queries hold the endpoint value:
+    /// a resampled trace never invents samples beyond what was measured.
+    fn extrapolate_left(&self) -> f64 {
+        self.y[0]
     }
 
-    /// Extrapolate to the right
-    fn extrapolate_right(&self, target_x: f64, x_max: f64) -> Result<f64, InterpolationError> {
-        let n = self.x.len();
-        match self.extrap {
-            ExtrapolationMode::Flat => Ok(self.y[n - 1]),
-            ExtrapolationMode::Linear => {
-                if n < 2 {
-                    Ok(self.y[n - 1])
-                } else {
-                    let slope = (self.y[n - 1] - self.y[n - 2]) / (self.x[n - 1] - self.x[n - 2]);
-                    Ok(self.y[n - 1] + slope * (target_x - x_max))
-                }
-            }
-            ExtrapolationMode::NaN => Ok(f64::NAN),
-            ExtrapolationMode::Error => Err(InterpolationError::OutOfRange(target_x)),
-        }
+    /// Extrapolate to the right, holding the endpoint value.
+    fn extrapolate_right(&self) -> f64 {
+        self.y[self.y.len() - 1]
     }
 }
 
@@ -311,15 +256,12 @@ fn compute_spline_coeffs(x: &[f64], y: &[f64]) -> SplineCoefficients {
 pub enum InterpolationError {
     /// Empty waveform provided
     EmptyWaveform,
-    /// Target x is out of range
-    OutOfRange(f64),
 }
 
 impl std::fmt::Display for InterpolationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyWaveform => write!(f, "Empty waveform"),
-            Self::OutOfRange(x) => write!(f, "Value {} is out of interpolation range", x),
         }
     }
 }
@@ -345,9 +287,7 @@ pub fn align_waveforms(
     }
 
     // Use first waveform's x-axis as reference
-    let interp = WaveformInterpolator::new(x2, y2)
-        .with_method(method)
-        .with_extrapolation(ExtrapolationMode::Flat);
+    let interp = WaveformInterpolator::new(x2, y2).with_method(method);
 
     let y2_resampled = interp.resample(x1)?;
 

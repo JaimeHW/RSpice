@@ -1,0 +1,35 @@
+**************** uncommented deck **************
+
+     1       0  PORT TYPE MODIFIERS TEST
+     5       3  v_vss vss 0 dc 0
+     7       4  v_signal pls1 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 1e-3 2e-3)
+     8       5  v_signal2 pls2 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 2e-3 4e-3)
+    17       9  a_adc [ %vd(pls1 0) %v(pls2)] [dpls1 dpls2] adc
+    25      13  a_and [dpls1 dpls2] dand and
+    26      14  a_dac [dand] [aand] dac
+    28      15  .model and d_and
+    29      16  .model adc adc_bridge
+    30      17  .model dac dac_bridge
+    48      19  .end
+
+****************** complete deck ***************
+
+     1       0  PORT TYPE MODIFIERS TEST
+     0       2  *global gnd
+     5       3  v_vss vss 0 dc 0
+     7       4  v_signal pls1 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 1e-3 2e-3)
+     8       5  v_signal2 pls2 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 2e-3 4e-3)
+    11       6  *if    0.000000000000000e+00   
+    13       7  *_adc %v[ pls1 %vd(pls2 0)] [dpls1 dpls2] adc
+    15       8  *elseif    1.000000000000000e+00   
+    17       9  a_adc [ %vd(pls1 0) %v(pls2)] [dpls1 dpls2] adc
+    19      10  *else
+    21      11  *_adc %v[ pls1 pls2] [dpls1 dpls2] adc
+    23      12  *endif
+    25      13  a_and [dpls1 dpls2] dand and
+    26      14  a_dac [dand] [aand] dac
+    28      15  .model and d_and
+    29      16  .model adc adc_bridge
+    30      17  .model dac dac_bridge
+    46      18  *end
+    48      19  .end

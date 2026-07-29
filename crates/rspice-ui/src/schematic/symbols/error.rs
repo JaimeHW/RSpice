@@ -1,6 +1,5 @@
 //! Symbol library errors.
 
-use crate::state::ComponentType;
 
 /// Errors that can occur during symbol loading or parsing
 #[derive(Debug, Clone)]
@@ -9,8 +8,6 @@ pub enum SymbolError {
     IoError { path: String, message: String },
     /// Failed to parse SVG content
     ParseError(String),
-    /// Symbol not found in library
-    NotFound(ComponentType),
 }
 
 impl std::fmt::Display for SymbolError {
@@ -20,7 +17,6 @@ impl std::fmt::Display for SymbolError {
                 write!(f, "Failed to read '{}': {}", path, message)
             }
             SymbolError::ParseError(msg) => write!(f, "SVG parse error: {}", msg),
-            SymbolError::NotFound(t) => write!(f, "Symbol not found for {:?}", t),
         }
     }
 }

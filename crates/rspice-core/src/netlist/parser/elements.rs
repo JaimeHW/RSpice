@@ -5282,7 +5282,10 @@ pub(super) fn parse_subcircuit_instance(
     elements: &mut Vec<Element>,
     params_ctx: &ParamContext,
 ) -> Result<(), ParseError> {
-    let fields = split_spice_fields(line);
+    // `W = 10u` must become one field before the scan below looks for the
+    // first field containing `=`; otherwise the bare `=` is that field and
+    // the subcircuit name is read off the parameter name preceding it.
+    let fields = coalesce_assignment_fields(split_spice_fields(line));
     if fields.len() < 2 {
         return Err(ParseError::Syntax {
             line: line_num,

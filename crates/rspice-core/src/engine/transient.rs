@@ -2410,16 +2410,36 @@ impl Engine {
                     {
                         step_target = step_target.min(breakpoint);
                     }
-                    // `hinted_max_step` is deliberately not applied here. It
-                    // descends from the caller's `max_step` and `.OPTIONS`
-                    // bounds -- adaptive step-selection input, which is exactly
-                    // what a locked grid replaces. Clamping to it subdivides
-                    // the prescribed schedule, and any device whose state is a
-                    // function of the accepted-step sequence rather than of
-                    // time alone then diverges from the reference: the generic
-                    // switch reads its hysteresis band from the store vector
-                    // two accepted points back, so extra points between two
-                    // reference samples silently pick the wrong band.
+                    // Whether `hinted_max_step` may subdivide the interval
+                    // depends on which of the two locking contracts is in
+                    // force, and they are told apart by whether the caller
+                    // supplied recorded step sizes.
+                    //
+                    // *With* step sizes the grid is a bit-exact replay of a
+                    // producing run's accepted-step sequence, and that
+                    // sequence is the contract. Subdividing it diverges any
+                    // device whose state is a function of the sequence rather
+                    // than of time alone: the generic switch reads its
+                    // hysteresis band from the store vector two accepted
+                    // points back, so extra points between two reference
+                    // samples silently pick the wrong band.
+                    //
+                    // *Without* them the caller knows only the times -- an
+                    // ngspice `.out` table records where the reference landed,
+                    // not the accepted intervals it chose, and its adaptive
+                    // axis is coarse wherever it judged the waveform slow.
+                    // Landing on every target is still required; how the
+                    // integrator gets there is its own business, and refusing
+                    // to sub-step means one trapezoidal step across whatever
+                    // gap the reference happened to leave. On `mosamp.cir`
+                    // that is a 65 ns step through an amplifier slew, and the
+                    // truncation error shows up as a ~0.6 ns phase lead.
+                    if locked_step_sizes.is_none()
+                        && hinted_max_step.is_finite()
+                        && hinted_max_step > 0.0
+                    {
+                        step_target = step_target.min(t + hinted_max_step);
+                    }
                     locked_step_lands_on_grid = (step_target - target).abs() <= tolerance;
                     let mut locked_dt = step_target - t;
                     if locked_schedule_aligned

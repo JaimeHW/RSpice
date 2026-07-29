@@ -575,6 +575,34 @@ fn reseeding_restarts_the_stream() {
 }
 
 #[test]
+fn restarting_rewinds_the_stream_without_changing_the_seed() {
+    let ctx = ParamContext::new();
+    let first = eval_with(&ctx, "agauss(0, 1, 1)");
+    let second = eval_with(&ctx, "agauss(0, 1, 1)");
+    assert_ne!(first, second, "consecutive draws must differ");
+
+    // Unlike reseeding, this keeps the seed and only rewinds the counter, so
+    // the identical sequence replays. It is what scopes the draws to a single
+    // elaboration: a netlist built twice must produce the same circuit.
+    ctx.restart_statistical_stream();
+    assert_eq!(eval_with(&ctx, "agauss(0, 1, 1)"), first);
+    assert_eq!(eval_with(&ctx, "agauss(0, 1, 1)"), second);
+}
+
+#[test]
+fn restarting_reaches_every_context_sharing_the_stream() {
+    let ctx = ParamContext::new();
+    let shared = ctx.clone();
+    let first = eval_with(&ctx, "agauss(0, 1, 1)");
+    let _ = eval_with(&shared, "agauss(0, 1, 1)");
+
+    // The rewind has to be visible through the shared counter, otherwise a
+    // derived scope keeps drawing from where the previous build left off.
+    shared.restart_statistical_stream();
+    assert_eq!(eval_with(&ctx, "agauss(0, 1, 1)"), first);
+}
+
+#[test]
 fn cloned_contexts_share_one_netlist_wide_stream() {
     // Clones pull from a single shared sequence: interleaved draws across
     // the original and a clone must replay exactly as sequential draws on a

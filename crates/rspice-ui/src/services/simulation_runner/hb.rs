@@ -18,18 +18,10 @@ use std::path::Path;
 /// Harmonic Balance analysis data
 #[derive(Debug, Clone)]
 pub struct HbData {
-    /// Fundamental frequencies (one per tone)
-    pub fundamentals: Vec<Value>,
-    /// Number of harmonics per tone
-    pub harmonics_per_tone: Vec<usize>,
     /// DC operating point voltages
     pub dc_voltages: Vec<(String, Value)>,
     /// Harmonic spectra: (node_name, [(freq, magnitude, phase_deg)])
     pub spectra: Vec<(String, Vec<(Value, Value, Value)>)>,
-    /// Total number of frequency components
-    pub num_components: usize,
-    /// Whether solution converged
-    pub converged: bool,
 }
 
 /// Harmonic Balance run configuration passed from the simulation pipeline.
@@ -51,25 +43,6 @@ impl HbToneRunConfig {
         }
     }
 
-    pub fn with_source(mut self, source: impl Into<String>) -> Self {
-        let source = source.into();
-        self.source = if source.trim().is_empty() {
-            None
-        } else {
-            Some(source)
-        };
-        self
-    }
-
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        let name = name.into();
-        self.name = if name.trim().is_empty() {
-            None
-        } else {
-            Some(name)
-        };
-        self
-    }
 }
 
 /// Harmonic Balance run configuration passed from the simulation pipeline.
@@ -319,17 +292,10 @@ pub fn run_hb_analysis_with_source_path_and_abort(
         spectra.push((format!("V({})", sv.node_name), spectrum));
     }
 
-    // Number of frequency components
-    let num_components = hb_result.num_harmonics + 1;
-
     ensure_not_aborted(abort)?;
     Ok(HbData {
-        fundamentals,
-        harmonics_per_tone,
         dc_voltages,
         spectra,
-        num_components,
-        converged: hb_result.converged,
     })
 }
 

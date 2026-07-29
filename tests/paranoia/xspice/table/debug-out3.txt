@@ -1,0 +1,40 @@
+**************** uncommented deck **************
+
+     1       0  ** npn bipolar: table 2d (vce, ib) compared to q model
+     7       2  q3 2 1 3 qinn
+     8       3  ib 0 1 2u
+     9       4  vce 2 0 5
+    10       5  vee 3 0 0
+    27      12  a.xbip.abip1 %vd cc ee %id xbip.bint ee %id cc ee xbip:biptable1
+    28      13  .model xbip:biptable1 table2d (offset=0.0                                                                                                                order=2 file="qinn-clc409-2d-1.table")
+    30      14  c.xbip.cje bb ee 1.632e-13 
+    32      15  c.xbip.cjc bb cc 1.720e-13 
+    34      16  d.xbip.dbe bb xbip.bint xbip:dmod 
+    35      17  .model xbip:dmod d (bv=5 is=1e-17 n=1.1)
+    13       7  ib2 0 bb 2u
+    14       8  vce2 cc 0 1
+    15       9  vee2 ee 0 0
+    39      19  .model qinn npn is=0.166f bf=3.239e+02 nf=1.000e+00 vaf=8.457e+01 ikf=2.462e-02 ise=2.956e-17 ne=1.197e+00 br=3.719e+01 nr=1.000e+00 var=1.696e+00 ikr=3.964e-02 isc=1.835e-19 nc=1.700e+00 rb=118 irb=0.000e+00 rbm=65.1 rc=2.645e+01 cje=1.632e-13 vje=7.973e-01 mje=4.950e-01 tf=1.948e-11 xtf=1.873e+01 vtf=2.825e+00 itf=5.955e-02 ptf=0.000e+00 cjc=1.720e-13 vjc=8.046e-01 mjc=4.931e-01 xcjc=589m tr=4.212e-10 cjs=629f mjs=0 kf=2.000e-12 af=1.000e+00 fc=9.765e-01
+    52      20  .end
+
+****************** complete deck ***************
+
+     1       0  ** npn bipolar: table 2d (vce, ib) compared to q model
+     0       1  *global gnd
+     7       2  q3 2 1 3 qinn
+     8       3  ib 0 1 2u
+     9       4  vce 2 0 5
+    10       5  vee 3 0 0
+    12       6  *bip cc bb ee tbqnpn
+    27      12  a.xbip.abip1 %vd cc ee %id xbip.bint ee %id cc ee xbip:biptable1
+    28      13  .model xbip:biptable1 table2d (offset=0.0                                                                                                                order=2 file="qinn-clc409-2d-1.table")
+    30      14  c.xbip.cje bb ee 1.632e-13 
+    32      15  c.xbip.cjc bb cc 1.720e-13 
+    34      16  d.xbip.dbe bb xbip.bint xbip:dmod 
+    35      17  .model xbip:dmod d (bv=5 is=1e-17 n=1.1)
+    36      18  *ends
+    13       7  ib2 0 bb 2u
+    14       8  vce2 cc 0 1
+    15       9  vee2 ee 0 0
+    39      19  .model qinn npn is=0.166f bf=3.239e+02 nf=1.000e+00 vaf=8.457e+01 ikf=2.462e-02 ise=2.956e-17 ne=1.197e+00 br=3.719e+01 nr=1.000e+00 var=1.696e+00 ikr=3.964e-02 isc=1.835e-19 nc=1.700e+00 rb=118 irb=0.000e+00 rbm=65.1 rc=2.645e+01 cje=1.632e-13 vje=7.973e-01 mje=4.950e-01 tf=1.948e-11 xtf=1.873e+01 vtf=2.825e+00 itf=5.955e-02 ptf=0.000e+00 cjc=1.720e-13 vjc=8.046e-01 mjc=4.931e-01 xcjc=589m tr=4.212e-10 cjs=629f mjs=0 kf=2.000e-12 af=1.000e+00 fc=9.765e-01
+    52      20  .end

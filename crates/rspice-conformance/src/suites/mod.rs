@@ -17,10 +17,24 @@
 //! differences would buy nothing today; the moment to do it is when a third
 //! suite arrives and the shape has to be honoured rather than invented.
 //!
-//! Adding a suite meanwhile: implement the five types, drop a corpus under
+//! [`execution`] is that third suite, and it settled the question the other
+//! way. It does not implement the quintet at all: with no reference data
+//! there is no mismatch type to implement, no tolerance to model, and no
+//! reference format to select. The trait those two suites *would* have shared
+//! turns out not to describe conformance testing in general — it describes
+//! comparing against a reference simulator, which is one of two things this
+//! crate does. So the boundary that matters is not runner-versus-runner but
+//! oracle-versus-no-oracle, and it is drawn at the module level here.
+//!
+//! Adding a suite meanwhile: decide first whether the corpus carries a
+//! numeric oracle. With one, implement the five types, drop the corpus under
 //! `tests/<suite>/` at the workspace root, add a module here, and give it an
-//! integration test plus a nightly step.
+//! integration test plus a nightly step. Without one, it belongs in
+//! [`execution`] as another [`ExecutionCorpus`](execution::ExecutionCorpus)
+//! and needs only a corpus directory and a manifest.
 
+pub mod execution;
+pub mod gf180mcu;
 pub mod ngspice;
 pub mod xyce;
 

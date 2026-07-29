@@ -8,7 +8,6 @@
 mod error;
 mod library;
 mod parser;
-mod pins;
 mod render;
 mod types;
 

@@ -1,0 +1,14 @@
+GF180MCU np_3p3 diode I-V, area=100um2 perim=40um, ss corner, 125C
+* Rendered from models/ngspice/testing/regression/diode/device_netlists/iv.spice
+* (GlobalFoundries PDK, Apache-2.0). Two deliberate departures from upstream:
+* the `.control` block is replaced by an equivalent `.dc` card so the deck
+* states its own analysis, and the sweep is taken from this device's measured
+* bias points rather than the template's hardcoded np_3p3 range.
+Vn n 0 dc 1
+.temp 125
+.options tnom=125
+dn1 n 0 np_3p3 AREA = 100p PJ = 40u
+.dc Vn -12.13 1.13 0.13
+.include "../../models/design.ngspice"
+.lib "../../models/sm141064.ngspice" diode_ss
+.end

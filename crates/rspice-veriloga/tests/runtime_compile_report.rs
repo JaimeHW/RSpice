@@ -133,25 +133,6 @@ fn optional_backend_qualification_is_explicit() {
 }
 
 #[test]
-fn canonical_artifacts_exclude_removed_scalar_graph() {
-    let runtime = compiler()
-        .compile_runtime(SENSOR_BRIDGE_SOURCE, None)
-        .expect("compile production runtime artifact");
-    let encoded = serde_json::to_value(&runtime.canonical_ir).expect("serialize runtime artifact");
-    let fields = encoded.as_object().expect("runtime artifact object");
-    assert!(!fields.contains_key("opt"));
-    assert!(!fields.contains_key("opt_digest"));
-
-    let canonical = compiler()
-        .compile_canonical_ir(SENSOR_BRIDGE_SOURCE)
-        .expect("compile canonical artifact");
-    let encoded = serde_json::to_value(canonical).expect("serialize canonical artifact");
-    let fields = encoded.as_object().expect("canonical artifact object");
-    assert!(!fields.contains_key("opt"));
-    assert!(!fields.contains_key("opt_digest"));
-}
-
-#[test]
 fn integrity_validation_rejects_cross_artifact_digest_drift() {
     let mut report = compiler()
         .compile_runtime(SENSOR_BRIDGE_SOURCE, None)

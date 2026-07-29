@@ -1,7 +1,6 @@
 //! Optimizer configuration and state.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 // =============================================================================
 // Optimizer Algorithm
@@ -24,17 +23,6 @@ pub enum OptimizerAlgo {
 // =============================================================================
 // Optimizer State & Result
 // =============================================================================
-
-/// Current state of the optimization process
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OptimizerState {
-    pub iteration: usize,
-    pub current_cost: f64,
-    pub best_cost: f64,
-    pub elapsed_secs: f64,
-    pub converged: bool,
-    pub var_values: HashMap<String, f64>,
-}
 
 // =============================================================================
 // Optimizer Engine

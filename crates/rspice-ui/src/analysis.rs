@@ -42,7 +42,7 @@ pub(crate) mod smith_chart;
 // the lib *with* `cfg(test)`; an import still reported unused there is used by
 // nobody and is safe to delete. Cross-check `--target wasm32-unknown-unknown`
 // the same way before deleting anything a browser-only path might name.
-pub use bode::{BodeData, FrequencyResponse};
+pub use bode::BodeData;
 pub use eye_diagram::{EyeData, EyeTrace};
 pub use fft::{FftData, FftState, InputFidelity, WindowFunction};
 pub use histogram::{HistogramBuilder, HistogramDisplayMode};

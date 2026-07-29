@@ -4143,7 +4143,7 @@ impl XyceTestRunner {
                 runtime.sidewall_emission_given,
                 runtime.breakdown_emission_given,
                 runtime.tnom_c.is_some(),
-                runtime.pspice_level2,
+                runtime.level == rspice_core::device::DiodeLevel::Pspice,
             ],
         };
         Ok(XyceDiodeModelAliasFamilySnapshot {

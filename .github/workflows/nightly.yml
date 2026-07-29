@@ -52,6 +52,32 @@ jobs:
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --release
+      - name: GF180MCU device corpus (release)
+        # A released Apache-2.0 foundry PDK: BSIM4 through the vendor's own
+        # subcircuit wrappers and corner libraries, across four temperatures.
+        # Nightly rather than CI because every case re-parses the 1.3 MB model
+        # library, which dominates the runtime.
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test gf180mcu_devices -- --nocapture
+      - name: Oracle-free corpora (release, full depth)
+        # ISCAS85 and the ngspice example decks carry no reference data, so
+        # this gates execution rather than conformance: every deck must load,
+        # build, and either complete or refuse cleanly against its
+        # execution-manifest.tsv.
+        #
+        # EXTENDED=1 is what makes this a nightly step rather than a CI one.
+        # The whole ISCAS85 corpus is marked extended — its smallest circuit
+        # is 160 gates over a 45nm BSIM4 card and its largest is ~89k netlist
+        # lines — so without the flag the simulations are skipped entirely and
+        # only discovery and manifest integrity are checked. The deck budget
+        # is raised to match; the 120 s default is sized for paranoia.
+        env:
+          RSPICE_EXECUTION_EXTENDED: "1"
+          RSPICE_EXECUTION_DECK_TIMEOUT_MS: "900000"
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test execution_corpora -- --nocapture --test-threads 1
       - name: ngspice conformance report
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner

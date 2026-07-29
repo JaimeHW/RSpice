@@ -32,6 +32,7 @@ pub(super) fn parse_command(
         origin,
         defer_scoped_values,
         deferred_body_params,
+        model_bare_ident_deferrals,
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
@@ -195,7 +196,14 @@ pub(super) fn parse_command(
             });
         }
         ".MODEL" => {
-            let model = parse_model_definition(stream, line_num, params, models, false)?;
+            let model = parse_model_definition(
+                stream,
+                line_num,
+                params,
+                models,
+                false,
+                model_bare_ident_deferrals,
+            )?;
             models.push(model);
         }
         ".RSPICE_AUTO_BRIDGE_TEMPLATE" => {
@@ -1452,6 +1460,14 @@ pub(super) fn parse_options_command(
             (_, "TNOM") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.tnom = Some(parse_celsius_option("TNOM", value, line_num)?);
+            }
+            (_, "SCALE") => {
+                // Element geometry scale factor. ngspice exposes it as the
+                // `scale` shell variable and reads it in device setup; the
+                // geometric LEVEL=3 diode is the first RSpice device to derive
+                // dimensions from it.
+                let value = expect_value(stream, line_num, params)?;
+                options.scale = Some(parse_positive_real_option("SCALE", value, line_num)?);
             }
             (_, "SEED" | "RNDSEED") => {
                 // The parse pre-scan applies the seed before any parameter

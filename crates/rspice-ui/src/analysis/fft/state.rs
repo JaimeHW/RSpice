@@ -10,7 +10,7 @@ mod data_ops;
 mod modes;
 mod view;
 
-pub use modes::{FrequencyScale, InputFidelity, MagnitudeScale};
+pub use modes::InputFidelity;
 const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
 
 #[derive(Debug, Clone)]
@@ -18,8 +18,6 @@ pub struct FftSourceCache {
     pub name: String,
     pub samples: Arc<[f64]>,
     pub sample_rate: f64,
-    pub original_count: usize,
-    pub decimation_factor: usize,
 }
 
 // =============================================================================
@@ -41,10 +39,6 @@ pub struct FftState {
     pub normalization: SpectrumNormalization,
     /// Window function
     pub window: WindowFunction,
-    /// Magnitude scale
-    pub mag_scale: MagnitudeScale,
-    /// Frequency scale
-    pub freq_scale: FrequencyScale,
     /// Input preparation fidelity policy.
     pub input_fidelity: InputFidelity,
     /// Auto-select full source time range for FFT.
@@ -71,8 +65,6 @@ pub struct FftState {
     pub freq_max: f64,
     /// Auto-scale frequency
     pub freq_auto: bool,
-    /// Reference impedance for dBm
-    pub z0: f64,
     /// Interactive marker frequencies (Hz) placed by user.
     pub marker_frequencies: Vec<f64>,
     /// Runtime spectrum revision for display caches.
@@ -88,8 +80,6 @@ impl Default for FftState {
             selected_source: None,
             normalization: SpectrumNormalization::Rms,
             window: WindowFunction::Hanning,
-            mag_scale: MagnitudeScale::DB,
-            freq_scale: FrequencyScale::Linear,
             input_fidelity: InputFidelity::Reference,
             time_window_auto: true,
             time_window_start: 0.0,
@@ -103,7 +93,6 @@ impl Default for FftState {
             freq_min: 0.0,
             freq_max: 1000.0,
             freq_auto: true,
-            z0: 50.0,
             marker_frequencies: Vec::new(),
             spectrum_revision: 0,
         }

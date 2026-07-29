@@ -873,27 +873,6 @@ impl ModelLibraryManager {
         })
     }
 
-    /// Create a project-owned single-card copy of one selected external or
-    /// built-in model without changing its source library.
-    pub fn copy_model_to_project(
-        &mut self,
-        source_library: &str,
-        model_name: &str,
-        target_library: &str,
-    ) -> Result<ProjectModelCommit, String> {
-        let definition = {
-            let library = self
-                .libraries
-                .get(source_library)
-                .ok_or_else(|| format!("Model library '{source_library}' does not exist"))?;
-            let model = library.models.get(model_name).ok_or_else(|| {
-                format!("Model '{model_name}' does not exist in library '{source_library}'")
-            })?;
-            ProjectModelDefinition::from_device_model(model)
-        };
-        self.create_project_model(target_library, &definition)
-    }
-
     fn build_project_model_library(
         library_name: &str,
         previous: Option<&ModelLibrary>,

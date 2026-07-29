@@ -109,6 +109,20 @@ jobs:
         run: >-
           cargo test --locked -p rspice-conformance --lib
           --test ngspice_oracle_audit --test y_device_policy
+      - name: Oracle-free corpora (routine tier)
+        # The execution corpora are cheap here only because the expensive
+        # decks opt out: every ISCAS85 deck is marked `!extended` and is
+        # skipped without RSPICE_EXECUTION_EXTENDED=1, so this step runs the
+        # ~200 ngspice example decks and, for ISCAS85, checks discovery and
+        # manifest integrity without simulating. Nightly runs the full depth.
+        #
+        # Worth keeping in CI despite the weaker claim: these decks are the
+        # ones that catch ingestion regressions, because unlike the reference
+        # corpora they were not written by someone who could already simulate
+        # them.
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test execution_corpora -- --test-threads 1
       - name: Verilog-A suite unit tests
         # The Verilog-A suite sits behind `veriloga-builtins-base`, so the
         # featureless run above compiles the whole module — oracle included —

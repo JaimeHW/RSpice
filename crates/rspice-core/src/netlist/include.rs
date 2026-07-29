@@ -1040,17 +1040,23 @@ impl IncludeProcessor {
                     }
                     .into());
                 };
+                // The label on `.ENDL` is documentation, not structure: every
+                // reference simulator closes the innermost open section and
+                // ignores the name. Enforcing a match here reads as stricter
+                // and safer, but it rejects real foundry PDKs over typos that
+                // change no semantics — GlobalFoundries' GF180MCU
+                // `sm141064.ngspice` closes its `.LIB dio` section with
+                // `.endl diode`, and no other simulator notices. Warn so the
+                // typo is still visible, then close the frame the way the
+                // deck's author observed it behaving.
                 if let Some(end_name) = end_name
                     && !end_name.eq_ignore_ascii_case(&open_frame.name)
                 {
-                    return Err(ParseError::Syntax {
-                        line: line_number,
-                        message: format!(
-                            ".ENDL section '{end_name}' does not match open .LIB section '{}'",
-                            open_frame.name
-                        ),
-                    }
-                    .into());
+                    log::warn!(
+                        "line {line_number}: .ENDL section '{end_name}' does not match open .LIB section '{}'; closing '{}'",
+                        open_frame.name,
+                        open_frame.name
+                    );
                 }
                 inline_sections.pop();
                 continue;
@@ -1892,6 +1898,43 @@ R1 1 0 {selected}
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// A mislabelled `.ENDL` closes its section instead of failing the parse.
+    ///
+    /// Foundry PDKs ship this typo — GF180MCU's `sm141064.ngspice` opens
+    /// `.LIB dio` and closes it with `.endl diode` — and every reference
+    /// simulator loads them, because the label is documentation rather than
+    /// structure. Rejecting the deck would make RSpice the only simulator
+    /// that cannot read a released Apache-2.0 PDK. The following sections
+    /// must still resolve, which is what proves the frame closed at the
+    /// right place rather than being skipped.
+    #[test]
+    fn mislabelled_endl_closes_its_section_and_later_sections_still_resolve() {
+        let dir = unique_include_temp_dir("mislabelled-endl");
+        std::fs::create_dir_all(&dir).expect("create mislabelled .endl fixture");
+        let library_path = dir.join("corners.lib");
+        std::fs::write(
+            &library_path,
+            ".lib dio\n.param junction=1\n.endl diode\n.lib res\n.param sheet=2\n.endl res\n",
+        )
+        .expect("write mislabelled .endl fixture");
+        let deck_path = dir.join("deck.cir");
+
+        for (section, expected, rejected) in
+            [("dio", "junction=1", "sheet=2"), ("res", "sheet=2", "junction=1")]
+        {
+            let expanded = IncludeProcessor::new(&deck_path)
+                .expand_content(
+                    &format!(".lib 'corners.lib' {section}\nR1 1 0 1\n"),
+                    &deck_path,
+                )
+                .expect("mislabelled .endl must not reject the library");
+            assert!(expanded.contains(expected), "{section}: {expanded}");
+            assert!(!expanded.contains(rejected), "{section}: {expanded}");
+        }
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn inactive_library_end_card_does_not_preempt_selected_section() {
         let dir = unique_include_temp_dir("inactive-lib-end-card");
@@ -1919,11 +1962,6 @@ R1 1 0 {selected}
                 ".endl orphan\n",
                 1,
                 ".ENDL encountered without an open .LIB section",
-            ),
-            (
-                ".lib first\n.endl second\n",
-                2,
-                ".ENDL section 'second' does not match open .LIB section 'first'",
             ),
             (
                 ".lib unfinished\nR1 1 0 1\n",

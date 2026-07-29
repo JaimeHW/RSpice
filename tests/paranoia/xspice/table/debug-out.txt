@@ -1,0 +1,39 @@
+**************** uncommented deck **************
+
+./table-model-mos-2d-2-oc.sp       1       1  code model test - 2d table model
+internal       0       2  .global gnd
+./table-model-mos-2d-2-oc.sp       8       8  v1 d 0 dc 0.1
+./table-model-mos-2d-2-oc.sp      10      10  v2 g 0 dc 1.5
+./table-model-mos-2d-2-oc.sp      12      12  vs s 0 0
+./table-model-mos-2d-2-oc.sp      13      13  vs2 s2 0 0
+./table-model-mos-2d-2-oc.sp      16      16  amos1 %vd(d s) %vd(g s) %id(d s) mostable1
+./table-model-mos-2d-2-oc.sp      17      17  .model mostable1 table2d (offset=0.0 gain=0.5 order=3 file="bsim4n-2d-1.table")
+./table-model-mos-2d-2-oc.sp      23      22  amos2 %vd(d s2) %vd(d s2) %id(d s2) mostable1
+./table-model-mos-2d-2-oc.sp      26      24  .end
+
+****************** complete deck ***************
+
+./table-model-mos-2d-2-oc.sp       1       1  code model test - 2d table model
+internal       0       2  .global gnd
+./table-model-mos-2d-2-oc.sp       2       3  * bsim4 transistor dc input and output characteristics
+./table-model-mos-2d-2-oc.sp       3       4  *
+./table-model-mos-2d-2-oc.sp       5       5  *
+./table-model-mos-2d-2-oc.sp       6       6  *** input sources ***
+./table-model-mos-2d-2-oc.sp       7       7  *
+./table-model-mos-2d-2-oc.sp       8       8  v1 d 0 dc 0.1
+./table-model-mos-2d-2-oc.sp       9       9  *
+./table-model-mos-2d-2-oc.sp      10      10  v2 g 0 dc 1.5
+./table-model-mos-2d-2-oc.sp      11      11  *
+./table-model-mos-2d-2-oc.sp      12      12  vs s 0 0
+./table-model-mos-2d-2-oc.sp      13      13  vs2 s2 0 0
+./table-model-mos-2d-2-oc.sp      14      14  *
+./table-model-mos-2d-2-oc.sp      15      15  *** table model of mos transistor ***
+./table-model-mos-2d-2-oc.sp      16      16  amos1 %vd(d s) %vd(g s) %id(d s) mostable1
+./table-model-mos-2d-2-oc.sp      17      17  .model mostable1 table2d (offset=0.0 gain=0.5 order=3 file="bsim4n-2d-1.table")
+./table-model-mos-2d-2-oc.sp      18      18  * l=0.13u w=10.0u rgeomod=1
+./table-model-mos-2d-2-oc.sp      19      19  * bsim 4.7
+./table-model-mos-2d-2-oc.sp      20      20  * change width of transistor by modifying parameter "gain"
+./table-model-mos-2d-2-oc.sp      21      21  * source is always tied to bulk (2d model!)
+./table-model-mos-2d-2-oc.sp      23      22  amos2 %vd(d s2) %vd(d s2) %id(d s2) mostable1
+./table-model-mos-2d-2-oc.sp      25      23  *end
+./table-model-mos-2d-2-oc.sp      26      24  .end

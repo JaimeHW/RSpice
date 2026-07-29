@@ -1,0 +1,20 @@
+GF180MCU pmos_3p3 Id-Vds, W=10um L=0.28um, -40C
+* Rendered from models/ngspice/testing/regression/mos_iv_vgs/device_netlists_Id
+* (GlobalFoundries PDK, Apache-2.0). The upstream `.control` block is replaced
+* by a single-source `.dc` card at one gate bias. Upstream sweeps six gate
+* biases in one two-source run; splitting them makes each case a single I-V
+* curve, so a failure names one bias condition instead of a family and the
+* comparison cannot depend on how a simulator orders a nested sweep.
+Vds D_tn 0 dc -3.3
+Vgs G_tn 0 -2.8
+.temp -40
+.options tnom=-40
+xmn1 D_tn G_tn 0 0 pmos_3p3 W = 10u L = 0.28u ad=2.5p pd=20.5u as=2.5p ps=20.5u
+.dc Vds 0 -3.3 -0.05
+.include "../../models/design.ngspice"
+.lib "../../models/sm141064.ngspice" typical
+* Statistical mismatch is switched off below so the curve is reproducible:
+* the PDK wrappers otherwise apply a random per-instance delvto.
+.param sw_stat_mismatch=0
+.param sw_stat_global=0
+.end

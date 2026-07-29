@@ -1289,7 +1289,7 @@ fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::bode::{BodeData, FrequencyResponse};
+    use crate::analysis::bode::BodeData;
     use crate::analysis::eye_diagram::{EyeData, EyeTrace};
     use crate::analysis::fft::{FftData, window::WindowFunction};
     use crate::analysis::histogram::HistogramBuilder;
@@ -1427,11 +1427,7 @@ mod tests {
             .load_histogram(HistogramBuilder::new().build(&[1.0, 2.0, 3.0]));
 
         let mut bode = BodeData::new();
-        bode.add_response(FrequencyResponse::from_arrays(
-            &[1.0, 10.0],
-            &[1.0, 0.1],
-            &[0.0, -1.0],
-        ));
+        bode.add_response();
         state.analysis.bode_plot_state.load_data(bode);
 
         state

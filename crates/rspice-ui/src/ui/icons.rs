@@ -57,8 +57,6 @@ pub enum Icon {
     ZoomFit,
     /// Grid toggle (line grid / generic grid).
     Grid,
-    /// Dot-grid variant of the grid toggle.
-    GridDots,
     /// Undo.
     Undo,
     /// Redo.
@@ -130,7 +128,6 @@ impl Icon {
             Self::ZoomOut => "Zoom out",
             Self::ZoomFit => "Zoom to fit",
             Self::Grid => "Grid",
-            Self::GridDots => "Dot grid",
             Self::Undo => "Undo",
             Self::Redo => "Redo",
             Self::Refresh => "Refresh",
@@ -222,17 +219,6 @@ impl Icon {
                 Line(&[[4.0, 15.0], [20.0, 15.0]]),
                 Line(&[[9.0, 4.0], [9.0, 20.0]]),
                 Line(&[[15.0, 4.0], [15.0, 20.0]]),
-            ],
-            Icon::GridDots => &[
-                Dot([5.0, 5.0], 1.4),
-                Dot([12.0, 5.0], 1.4),
-                Dot([19.0, 5.0], 1.4),
-                Dot([5.0, 12.0], 1.4),
-                Dot([12.0, 12.0], 1.4),
-                Dot([19.0, 12.0], 1.4),
-                Dot([5.0, 19.0], 1.4),
-                Dot([12.0, 19.0], 1.4),
-                Dot([19.0, 19.0], 1.4),
             ],
             Icon::Undo => &[
                 Line(&[[8.0, 5.0], [3.0, 10.0], [8.0, 15.0]]),

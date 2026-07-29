@@ -11,7 +11,6 @@ use crate::state::ComponentType;
 
 use super::error::SymbolError;
 use super::parser::parse_svg;
-use super::pins::add_default_pins;
 use super::render::{BakedSymbol, bake_symbol};
 use super::types::Symbol;
 
@@ -477,7 +476,6 @@ impl SymbolLibrary {
             symbol.target_height = target_h as f32;
         }
 
-        add_default_pins(&mut symbol, component_type);
         Ok(symbol)
     }
 

@@ -1,0 +1,43 @@
+**************** uncommented deck **************
+
+bug-378-test-sequence.cir       1       0  PORT TYPE MODIFIERS TEST
+bug-378-test-sequence.cir       3       1  .param sel=2
+bug-378-test-sequence.cir       5       3  v_vss vss 0 dc 0
+bug-378-test-sequence.cir       7       4  v_signal pls1 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 1e-3 2e-3)
+bug-378-test-sequence.cir       8       5  v_signal2 pls2 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 2e-3 4e-3)
+bug-378-test-sequence.cir      11       6  .if    0.000000000000000e+00   
+bug-378-test-sequence.cir      13       7  a_adc %v[ pls1 %vd(pls2 0)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      15       8  .elseif    1.000000000000000e+00   
+bug-378-test-sequence.cir      17       9  a_adc [ %vd(pls1 0) %v(pls2)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      19      10  .else
+bug-378-test-sequence.cir      21      11  a_adc %v[ pls1 pls2] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      23      12  .endif
+bug-378-test-sequence.cir      25      13  a_and [dpls1 dpls2] dand and
+bug-378-test-sequence.cir      26      14  a_dac [dand] [aand] dac
+bug-378-test-sequence.cir      28      15  .model and d_and
+bug-378-test-sequence.cir      29      16  .model adc adc_bridge
+bug-378-test-sequence.cir      30      17  .model dac dac_bridge
+bug-378-test-sequence.cir      48      19  .end
+
+****************** complete deck ***************
+
+bug-378-test-sequence.cir       1       0  PORT TYPE MODIFIERS TEST
+bug-378-test-sequence.cir       3       1  .param sel=2
+internal       0       2  *global gnd
+bug-378-test-sequence.cir       5       3  v_vss vss 0 dc 0
+bug-378-test-sequence.cir       7       4  v_signal pls1 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 1e-3 2e-3)
+bug-378-test-sequence.cir       8       5  v_signal2 pls2 0 dc 0 pulse(0 5 1e-9 1e-9 1e-9 2e-3 4e-3)
+bug-378-test-sequence.cir      11       6  .if    0.000000000000000e+00   
+bug-378-test-sequence.cir      13       7  a_adc %v[ pls1 %vd(pls2 0)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      15       8  .elseif    1.000000000000000e+00   
+bug-378-test-sequence.cir      17       9  a_adc [ %vd(pls1 0) %v(pls2)] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      19      10  .else
+bug-378-test-sequence.cir      21      11  a_adc %v[ pls1 pls2] [dpls1 dpls2] adc
+bug-378-test-sequence.cir      23      12  .endif
+bug-378-test-sequence.cir      25      13  a_and [dpls1 dpls2] dand and
+bug-378-test-sequence.cir      26      14  a_dac [dand] [aand] dac
+bug-378-test-sequence.cir      28      15  .model and d_and
+bug-378-test-sequence.cir      29      16  .model adc adc_bridge
+bug-378-test-sequence.cir      30      17  .model dac dac_bridge
+bug-378-test-sequence.cir      46      18  *end
+bug-378-test-sequence.cir      48      19  .end

@@ -12,8 +12,8 @@ pub use capacitors::XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION;
 pub(super) use capacitors::*;
 pub(super) use inductors::*;
 pub(super) use magnetic::*;
-pub(super) use resistors::*;
 pub use resistors::ResolvedResistorParameters;
+pub(super) use resistors::*;
 pub use transmission::validate_native_xyce_ltra_model_contract;
 pub(super) use transmission::*;
 pub(super) use xspice::*;
@@ -42,6 +42,18 @@ pub(super) fn instance_param(params: &[(String, f64)], names: &[&str]) -> Option
             None
         }
     })
+}
+
+/// Read a finite `.model` card parameter by its canonical uppercase name.
+///
+/// Diode geometry parameters are read back out of the already-uppercased model
+/// map after `with_model_params` has run, because the instance scaling needs
+/// the card's AREA/PJ defaults and its LEVEL=3 overlap dimensions.
+pub(super) fn diode_model_param(
+    params: &std::collections::HashMap<String, f64>,
+    name: &str,
+) -> Option<f64> {
+    params.get(name).copied().filter(|value| value.is_finite())
 }
 
 fn normalize_temperature_param_to_celsius(value: f64) -> f64 {
@@ -301,6 +313,26 @@ fn model_matches_geometry(
         && bin_range_contains(nfin, nfinmin, nfinmax)
 }
 
+/// Absolute slack on a bin boundary comparison, in metres.
+///
+/// ngspice's `is_equal` (inpgmod.c) treats two dimensions within 1 nm as the
+/// same number before testing a bin, and the tolerance is doing real work: a
+/// deck writing `W=0.22u` produces `0.22 × 1e-6`, which is one ULP *below* the
+/// `wmin = 2.2e-007` on the model card. Compared exactly, such a device
+/// matches no bin at all and the whole family fails to resolve.
+const BIN_BOUND_TOLERANCE: f64 = 1e-9;
+
+fn bin_bound_equal(left: f64, right: f64) -> bool {
+    (left - right).abs() < BIN_BOUND_TOLERANCE
+}
+
+/// ngspice's `in_range`: **inclusive at both ends**, within the tolerance
+/// above.
+///
+/// Inclusive at both ends means adjacent bins overlap on their shared
+/// boundary — `L=0.5u` satisfies both `lmax=5e-7` and `lmin=5e-7` — which is
+/// resolved by taking the first matching bin rather than by narrowing the
+/// ranges. See `find_binned_model_def`.
 fn bin_range_contains(value: Option<f64>, min: Option<f64>, max: Option<f64>) -> bool {
     if min.is_none() && max.is_none() {
         return true;
@@ -308,28 +340,8 @@ fn bin_range_contains(value: Option<f64>, min: Option<f64>, max: Option<f64>) ->
     let Some(value) = value else {
         return false;
     };
-    min.is_none_or(|min| value >= min) && max.is_none_or(|max| value < max)
-}
-
-fn model_bin_range_size(model_def: &crate::netlist::ModelDef) -> f64 {
-    bin_range_size(
-        model_binning_param(model_def, "LMIN"),
-        model_binning_param(model_def, "LMAX"),
-    ) + bin_range_size(
-        model_binning_param(model_def, "WMIN"),
-        model_binning_param(model_def, "WMAX"),
-    ) + bin_range_size(
-        model_binning_param(model_def, "NFINMIN"),
-        model_binning_param(model_def, "NFINMAX"),
-    )
-}
-
-fn bin_range_size(min: Option<f64>, max: Option<f64>) -> f64 {
-    match (min, max) {
-        (Some(min), Some(max)) => max - min,
-        (Some(_), None) | (None, Some(_)) => f64::MAX / 4.0,
-        (None, None) => 0.0,
-    }
+    min.is_none_or(|min| value > min || bin_bound_equal(value, min))
+        && max.is_none_or(|max| value < max || bin_bound_equal(value, max))
 }
 
 pub(super) fn resolve_bjt_type_from_model(model_type: &str) -> Option<crate::netlist::BjtType> {
@@ -435,19 +447,18 @@ pub(super) fn find_binned_model_def<'a>(
 
     let prefix = format!("{model_name}.");
 
-    netlist
-        .models
-        .iter()
-        .filter(|model_def| {
-            model_def.name.len() > prefix.len()
-                && model_def.name[..prefix.len()].eq_ignore_ascii_case(&prefix)
-                && model_matches_geometry(model_def, instance_params)
-        })
-        .min_by(|left, right| {
-            model_bin_range_size(left)
-                .partial_cmp(&model_bin_range_size(right))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+    // First match in declaration order, which is ngspice's rule
+    // (`INPgetModBin` walks the model table and returns on the first bin whose
+    // ranges contain the geometry). It is what disambiguates the overlap that
+    // inclusive bounds create: a device sitting exactly on a shared boundary
+    // takes the *lower* bin, because foundry tables are written in ascending
+    // order. Choosing by some notion of "most specific bin" instead silently
+    // picks the upper one and swaps in a different parameter set.
+    netlist.models.iter().find(|model_def| {
+        model_def.name.len() > prefix.len()
+            && model_def.name[..prefix.len()].eq_ignore_ascii_case(&prefix)
+            && model_matches_geometry(model_def, instance_params)
+    })
 }
 
 pub(super) fn expected_model_type_text(expected_types: &[&str]) -> String {
@@ -491,14 +502,35 @@ pub(super) fn map_switch_state(state: crate::netlist::SwitchState) -> crate::dev
 mod tests {
     use super::bin_range_contains;
 
+    /// ngspice's `in_range` is inclusive at *both* ends, so adjacent bins
+    /// overlap on their shared edge. `find_binned_model_def` resolves the
+    /// overlap by taking the first matching bin, which is the lower one.
     #[test]
-    fn model_bin_ranges_are_lower_inclusive_and_upper_exclusive() {
+    fn model_bin_ranges_are_inclusive_at_both_ends() {
         assert!(bin_range_contains(Some(1.0), Some(1.0), Some(2.0)));
         assert!(bin_range_contains(Some(1.5), Some(1.0), Some(2.0)));
-        assert!(!bin_range_contains(Some(2.0), Some(1.0), Some(2.0)));
+        assert!(bin_range_contains(Some(2.0), Some(1.0), Some(2.0)));
         assert!(!bin_range_contains(Some(0.5), Some(1.0), Some(2.0)));
+        assert!(!bin_range_contains(Some(2.5), Some(1.0), Some(2.0)));
         assert!(bin_range_contains(Some(2.0), Some(1.0), None));
         assert!(bin_range_contains(Some(1.0), None, Some(2.0)));
         assert!(!bin_range_contains(None, Some(1.0), Some(2.0)));
+    }
+
+    /// A deck writes `W=0.22u`; the model card writes `wmin = 2.2e-007`. Those
+    /// are not the same double — `0.22 × 1e-6` is one ULP low — so an exact
+    /// comparison puts the device below the narrowest bin in the table and it
+    /// resolves to no model at all. GF180MCU's minimum-width devices are
+    /// exactly this case.
+    #[test]
+    fn bin_bounds_absorb_deck_round_off() {
+        let drawn = 0.22 * 1e-6;
+        let card = 2.2e-007;
+        assert!(drawn < card, "the premise: mantissa × suffix lands low");
+        assert!(bin_range_contains(Some(drawn), Some(card), Some(5e-7)));
+
+        // The slack is 1 nm, not a licence to match a neighbouring bin: GF180's
+        // narrowest W band is 280 nm wide, so nothing else comes close.
+        assert!(!bin_range_contains(Some(2.2e-7), Some(5e-7), Some(1.2e-6)));
     }
 }

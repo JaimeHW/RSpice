@@ -432,11 +432,21 @@ pub(super) fn known_unsupported_bjt_family(level: f64) -> Option<(&'static str, 
 }
 
 pub(super) fn supported_diode_level(level: f64) -> bool {
-    bjt_level_matches(level, 0.0) || bjt_level_matches(level, 1.0) || xyce_diode_level2(level)
+    bjt_level_matches(level, 0.0)
+        || bjt_level_matches(level, 1.0)
+        || xyce_diode_level2(level)
+        || ngspice_diode_level3(level)
 }
 
 fn xyce_diode_level2(level: f64) -> bool {
     bjt_level_matches(level, 2.0)
+}
+
+/// ngspice's geometric diode. Note that ngspice itself implements 1 and 3 and
+/// rejects 2, while Xyce implements 1 and 2 and has no 3; RSpice carries all
+/// three because its conformance corpora draw decks from both.
+fn ngspice_diode_level3(level: f64) -> bool {
+    bjt_level_matches(level, 3.0)
 }
 
 pub(super) fn supported_bjt_level(level: f64) -> bool {
@@ -760,10 +770,9 @@ pub(super) fn validate_diode_model_level(
         let descriptor = bjt_level_descriptor(level);
         return Err(SimulationError::Circuit(format!(
             "Diode '{element_name}': model '{model}' requests {descriptor}, which has no native \
-             implementation. Supported diode model levels: legacy SPICE diode (no LEVEL, LEVEL=0, \
-             or LEVEL=1) and Xyce/HSPICE LEVEL=2 when all model parameters are in the native diode \
-             subset. Advanced CMC diode models will be generated from Verilog-A rather than \
-             hand-written here."
+             implementation. Supported diode model levels: legacy SPICE (no LEVEL, LEVEL=0, or \
+             LEVEL=1), Xyce/HSPICE LEVEL=2 when all model parameters are in the native diode \
+             subset, and ngspice LEVEL=3."
         )));
     }
 
@@ -1420,6 +1429,39 @@ mod tests {
 
         validate_diode_model_level("D1", "DXX", &params, &[], &[], false)
             .expect("Xyce/HSPICE diode LEVEL=2 with native params is supported");
+    }
+
+    /// LEVEL=3 carries the full ngspice geometric parameter set, so unlike
+    /// LEVEL=2 it is not gated on a native-subset check.
+    #[test]
+    fn diode_policy_accepts_ngspice_level3_with_its_geometric_parameters() {
+        let params = diode_params(&[
+            ("LEVEL", 3.0),
+            ("IS", 2.2959e-7),
+            ("JSW", 2.1207e-13),
+            ("JTUN", 1.1223e-5),
+            ("NTUN", 10.0),
+            ("TLEV", 1.0),
+            ("TLEVC", 1.0),
+            ("CTA", 9.438e-4),
+        ]);
+
+        validate_diode_model_level("D1", "NP_3P3", &params, &[], &[], false)
+            .expect("ngspice diode LEVEL=3 is supported");
+    }
+
+    #[test]
+    fn diode_policy_still_rejects_an_unimplemented_level() {
+        let params = diode_params(&[("LEVEL", 9.0)]);
+
+        let err = validate_diode_model_level("D1", "DXX", &params, &[], &[], false)
+            .expect_err("an unknown diode level fails closed");
+        let message = err.to_string();
+        assert!(message.contains("LEVEL=9"), "unexpected error: {message}");
+        assert!(
+            message.contains("ngspice LEVEL=3"),
+            "the diagnostic must list what is supported: {message}"
+        );
     }
 
     #[test]
