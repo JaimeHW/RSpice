@@ -458,18 +458,12 @@ impl SemanticAnalyzer {
                 let default_reads_instance = param.default.as_ref().is_some_and(|expression| {
                     Self::references_identifiers(expression, &instance_parameter_names)
                 });
-                let range_reads_instance = param.range.as_ref().is_some_and(|range| {
-                    range
-                        .bounds
-                        .iter()
-                        .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
-                        .flatten()
-                        .chain(range.exclude.iter())
-                        .any(|expression| {
-                            Self::references_identifiers(expression, &instance_parameter_names)
-                        })
-                });
-                if default_reads_instance || range_reads_instance {
+                // Range bounds are validation expressions, not part of the
+                // model-card value. CMC models legitimately constrain a model
+                // parameter against instance geometry (for example XGL <= L).
+                // Those bounds are evaluated after instance overrides and do
+                // not make the model parameter itself instance-owned.
+                if default_reads_instance {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(format!(
                             "model parameter '{}' cannot depend on an instance parameter",

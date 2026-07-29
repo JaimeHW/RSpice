@@ -140,9 +140,10 @@ jobs:
       - name: Gate generated Verilog-A Rust resources
         # Ratchets, not targets. Every budget here is the measured tree plus
         # roughly 11% — enough headroom to add a model, not enough for a
-        # regression to hide in. Measured 2026-07-28: 50,421,301 bytes total,
-        # 15,228,029 noise, 4,217,493 for the largest model (hisimhv_va), 214
-        # files.
+        # regression to hide in. Measured 2026-07-28: 50,086,163 bytes total,
+        # 15,218,952 noise, 4,189,431 for the largest model (hisimhv_va), 339
+        # files. The file count includes independent package files that let
+        # Cargo cache and compile the 42 model shards in parallel.
         #
         # These were 113 MB / 59 MB / 8.8 MB / 650 until now, sized against the
         # old backend's 104 MB tree and never re-derived when the rebuild cut it
@@ -159,7 +160,7 @@ jobs:
           --max-source-bytes 56000000
           --max-noise-source-bytes 17000000
           --max-model-source-bytes 4700000
-          --max-file-count 240
+          --max-file-count 380
           --max-pooled-workspace-payload-bytes 0
           --max-stamp-state-payload-bytes 6200
           --top 10

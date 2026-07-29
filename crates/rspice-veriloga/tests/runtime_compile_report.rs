@@ -135,6 +135,74 @@ fn optional_backend_qualification_is_explicit() {
 }
 
 #[test]
+fn required_generated_rust_never_silently_falls_back_to_the_interpreter() {
+    let report = compiler()
+        .compile_runtime_with_qualifications(
+            SENSOR_BRIDGE_SOURCE,
+            None,
+            RuntimeQualificationOptions::GENERATED_RUST_REQUIRED,
+        )
+        .expect("the portable direct Rust backend must qualify this model");
+
+    assert!(report.targets.is_available(RuntimeTarget::GeneratedRust));
+    assert!(report.generated_rust.is_some());
+}
+
+#[test]
+fn required_native_backend_is_a_typed_fail_closed_contract() {
+    let result = compiler().compile_runtime_with_qualifications(
+        SENSOR_BRIDGE_SOURCE,
+        None,
+        RuntimeQualificationOptions::NATIVE_X64_REQUIRED,
+    );
+
+    #[cfg(all(feature = "native", target_arch = "x86_64"))]
+    assert!(
+        result
+            .expect("supported native host must qualify the sample")
+            .targets
+            .is_available(RuntimeTarget::NativeX64Jit)
+    );
+
+    #[cfg(not(all(feature = "native", target_arch = "x86_64")))]
+    {
+        let error = result.expect_err("required native backend must fail closed");
+        assert!(
+            matches!(
+                &error,
+                CompileError::BackendQualification(qualification)
+                    if qualification.target == RuntimeTarget::NativeX64Jit
+                        && qualification.readiness == RuntimeTargetReadiness::Unavailable
+            ),
+            "{error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("interpreter fallback is disabled")
+        );
+        let diagnostics = compile_diagnostics(SENSOR_BRIDGE_SOURCE, &error);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].phase,
+            CompileDiagnosticPhase::BackendQualification
+        );
+    }
+}
+
+#[test]
+fn older_qualification_options_default_to_allowing_portable_fallback() {
+    let options: RuntimeQualificationOptions =
+        serde_json::from_str(r#"{"generated_rust":true,"native_x64_jit":false}"#)
+            .expect("deserialize the previous options shape");
+
+    assert_eq!(
+        options.interpreter_fallback,
+        rspice_veriloga::InterpreterFallbackPolicy::Allow
+    );
+}
+
+#[test]
 fn runtime_compile_reports_ordered_frontend_phase_metrics() {
     let report = compiler()
         .compile_runtime(SENSOR_BRIDGE_SOURCE, Some("sensor_bridge"))

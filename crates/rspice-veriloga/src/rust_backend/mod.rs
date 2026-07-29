@@ -2,8 +2,9 @@
 //!
 //! Unlike the VM and the JIT, nothing here runs during a simulation. This
 //! backend takes canonical IR and emits Rust source, which is checked into
-//! `rspice-core/src/device/veriloga_generated/` and compiled as ordinary code
-//! by the `veriloga-builtins` feature — a build that uses generated built-ins
+//! feature-selectable crates under `rspice-veriloga-models/` and compiled
+//! against the stable generated-model runtime ABI by the
+//! `veriloga-builtins` feature — a build that uses generated built-ins
 //! does not link this crate at all. The [`crate`] README documents the
 //! `rspice-veriloga-gen` binary that drives it.
 //!

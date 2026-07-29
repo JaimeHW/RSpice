@@ -131,6 +131,10 @@ pub struct PipelineMetrics {
     /// matching the repeated branch work a specializer can remove.
     #[serde(default)]
     pub structural_guard_newton_values: u64,
+    /// Number of invalidation-class splits that safely fell back to the
+    /// unsplit direct CFG because its control-flow projection was not total.
+    #[serde(default)]
+    pub invalidation_split_fallback_count: u64,
     /// Independent variables carried into automatic differentiation, including
     /// the limiter-correction lane when present.
     #[serde(default)]
@@ -420,6 +424,7 @@ mod tests {
         object.remove("model_structural_guard_count");
         object.remove("instance_structural_guard_count");
         object.remove("structural_guard_newton_values");
+        object.remove("invalidation_split_fallback_count");
         object.remove("derivative_seed_count");
         object.remove("scalar_derivative_value_count");
         object.remove("packed_derivative_value_count");
@@ -431,6 +436,7 @@ mod tests {
         assert_eq!(decoded.model_structural_guard_count, 0);
         assert_eq!(decoded.instance_structural_guard_count, 0);
         assert_eq!(decoded.structural_guard_newton_values, 0);
+        assert_eq!(decoded.invalidation_split_fallback_count, 0);
         assert_eq!(decoded.derivative_seed_count, 0);
         assert_eq!(decoded.scalar_derivative_value_count, 0);
         assert_eq!(decoded.packed_derivative_value_count, 0);

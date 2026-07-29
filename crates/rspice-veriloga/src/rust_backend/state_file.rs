@@ -32,7 +32,6 @@ fn unsupported(artifact: &CanonicalIrArtifact, feature: impl Into<String>) -> Ru
     )
 }
 
-
 pub(super) fn generate_mod_file() -> String {
     [
         "#[cfg(feature = \"veriloga-builtins-noise\")]",
@@ -338,7 +337,7 @@ pub(super) fn generate_state_file_with_extensions(
         .saturating_add(idt_state_count)
         .saturating_add(extensions.rollback_flag_count);
     out.push_str(
-        "    pub(crate) fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {\n",
+        "    #[doc(hidden)]\n    pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {\n",
     );
     out.push_str(&format!(
         "        let mut values = Vec::with_capacity({rollback_value_count});\n"
@@ -361,7 +360,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
 
     out.push_str(
-        "    pub(crate) fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {\n",
+        "    #[doc(hidden)]\n    pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {\n",
     );
     out.push_str(&format!(
         "        debug_assert_eq!(state.values.len(), {rollback_value_count});\n"
@@ -403,7 +402,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
 
     out.push_str(
-        "    pub(crate) fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
+        "    #[doc(hidden)]\n    pub fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {\n",
     );
     out.push_str("        GeneratedVerilogAPersistentState {\n");
     out.push_str("            ddt_previous: self.stamp_state.ddt_previous.to_vec(),\n");
@@ -417,7 +416,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.checkpoint_capture_fields);
     out.push_str("        }\n");
     out.push_str("    }\n\n");
-    out.push_str("    pub(crate) fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("    #[doc(hidden)]\n    pub fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {\n");
     out.push_str("            return Err(format!(\"generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}\", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));\n");
     out.push_str("        }\n");
@@ -430,7 +429,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.checkpoint_shape_checks);
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
-    out.push_str("    pub(crate) fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("    #[doc(hidden)]\n    pub fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        self.validate_persistent_state_shape(state)?;\n");
     out.push_str("        self.stamp_state.ddt_previous.copy_from_slice(&state.ddt_previous);\n");
     out.push_str("        self.stamp_state.ddt_current.copy_from_slice(&state.ddt_previous);\n");
@@ -687,11 +686,12 @@ pub(super) fn finalize_checkpoint_identity(
     device: &mut GeneratedRustDevice,
 ) -> Result<(), RustBackendError> {
     let mut hasher = blake3::Hasher::new();
+    // The schema tag is the manual compatibility boundary for the checkpoint
+    // encoding. The remaining fields describe the generated model itself.
+    // Do not salt this identity with the compiler build digest: unrelated
+    // compiler changes must not invalidate persisted state or every generated
+    // model crate in Cargo's cache.
     hasher.update(b"rspice-generated-persistent-state-v2\0");
-    hash_identity_field(
-        &mut hasher,
-        env!("RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST").as_bytes(),
-    );
     hash_identity_field(&mut hasher, device.module_name.as_bytes());
     hash_identity_field(&mut hasher, device.public_model_name.as_bytes());
     hash_identity_field(&mut hasher, device.folder_name.as_bytes());
@@ -726,7 +726,6 @@ pub(super) fn finalize_checkpoint_identity(
     }
     Ok(())
 }
-
 
 fn emit_parameter_defaults(
     artifact: &CanonicalIrArtifact,
@@ -1042,7 +1041,6 @@ fn emit_parameter_metadata(
 
     Ok(())
 }
-
 
 fn generate_shared_parameter_validator() -> String {
     r###"
@@ -1515,7 +1513,6 @@ fn parameter_default_rust_expr(
     ))
 }
 
-
 fn parameter_validation_call(
     parameter_name: &str,
     value_expr: &str,
@@ -1560,7 +1557,6 @@ fn parameter_validation_call(
         max.unwrap_or_else(|| "None".to_string())
     ))
 }
-
 
 fn lower_parameter_default_expr(
     artifact: &CanonicalIrArtifact,
@@ -1672,7 +1668,6 @@ fn lower_parameter_default_expr(
     }
 }
 
-
 fn validate_parameter_value_for_codegen(
     artifact: &CanonicalIrArtifact,
     parameter_name: &str,
@@ -1717,7 +1712,6 @@ fn validate_parameter_value_for_codegen(
     Ok(())
 }
 
-
 fn parameter_range_has_runtime_constraints(
     parameter_name: &str,
     range: Option<&crate::canonical_ir::HirParamRange>,
@@ -1753,7 +1747,6 @@ fn range_excluded_arg(value: f64) -> String {
     format!("({}, {:?})", label, label)
 }
 
-
 fn format_f64(value: f64) -> String {
     if value.is_nan() {
         "f64::NAN".to_string()
@@ -1765,7 +1758,6 @@ fn format_f64(value: f64) -> String {
         format!("{value:?}")
     }
 }
-
 
 fn lower_parameter_default_condition(
     artifact: &CanonicalIrArtifact,
@@ -1808,7 +1800,6 @@ fn lower_parameter_default_condition(
     }
 }
 
-
 fn negate_condition(condition: &str) -> String {
     let condition = condition.trim();
     if let Some(inner) = condition
@@ -1830,7 +1821,6 @@ fn negate_condition(condition: &str) -> String {
     }
     format!("(!{condition})")
 }
-
 
 fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> bool {
     if let Some(min) = range.min {

@@ -143,7 +143,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Op
     let mut generated_root = match command {
         Command::GenerateBuiltinsSubset => workspace_root.join("target/veriloga-generated-subset"),
         Command::RegenerateBuiltins | Command::CheckBuiltins => {
-            workspace_root.join("crates/rspice-core/src/device/veriloga_generated")
+            workspace_root.join("crates/rspice-veriloga-models")
         }
     };
     let mut generator_root = workspace_root.join("crates/rspice-veriloga");
