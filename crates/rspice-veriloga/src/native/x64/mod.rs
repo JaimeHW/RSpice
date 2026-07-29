@@ -383,6 +383,7 @@ fn compile_model_inner(
 
     let entries = NativeEntryOffsets {
         assignment,
+        post_assignment: None,
         stamp_kernel: Some(stamp_kernel),
         parameter_defaults,
         static_conditions,
@@ -396,6 +397,9 @@ fn compile_model_inner(
         assignment_current_pairs: assignment_dependencies.current_pairs,
         assignment_prior_currents: assignment_dependencies.prior_currents,
         assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
+        post_assignment_current_pairs: Vec::new(),
+        post_assignment_prior_currents: Vec::new(),
+        post_assignment_branch_unknowns: Vec::new(),
         static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
         stamp_values: stamp_value_current_dependencies,
         stamp_value_prior_currents: stamp_value_prior_current_dependencies,
@@ -7115,6 +7119,7 @@ endmodule
         let offset = CodeOffset::new(0);
         let entries = NativeEntryOffsets {
             assignment: offset,
+            post_assignment: None,
             stamp_kernel: None,
             parameter_defaults: model
                 .parameters
@@ -7148,6 +7153,9 @@ endmodule
             assignment_current_pairs: Vec::new(),
             assignment_prior_currents: Vec::new(),
             assignment_branch_unknowns: Vec::new(),
+            post_assignment_current_pairs: Vec::new(),
+            post_assignment_prior_currents: Vec::new(),
+            post_assignment_branch_unknowns: Vec::new(),
             static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
