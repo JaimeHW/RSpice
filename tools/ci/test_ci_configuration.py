@@ -324,6 +324,38 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-core --lib", ci_workflow)
         self.assertIn("cargo test --locked -p rspice-core --lib --release", nightly_workflow)
 
+    def test_nightly_qualifies_shipped_models_through_native_x64(self) -> None:
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertIn(
+            "Shipped models execute through the native x64 device route",
+            nightly_workflow,
+        )
+        self.assertIn(
+            "native_x64_shipped_model_devices_run_without_interpreter_fallback",
+            nightly_workflow,
+        )
+        self.assertIn(
+            "Shipped native x64 finite entries match bytecode",
+            nightly_workflow,
+        )
+        self.assertIn(
+            "native_x64_shipped_model_finite_entries_match_bytecode_reference",
+            nightly_workflow,
+        )
+        self.assertGreaterEqual(
+            nightly_workflow.count(
+                "cargo test --locked --release -p rspice-veriloga --features native --lib"
+            ),
+            2,
+            "shipped-model probes should compile only their library test target",
+        )
+        self.assertGreaterEqual(
+            nightly_workflow.count('RUST_MIN_STACK: "67108864"'),
+            3,
+            "all full-corpus Verilog-A gates need the raised test-thread stack",
+        )
+
     def test_linux_ci_runs_clippy_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 
