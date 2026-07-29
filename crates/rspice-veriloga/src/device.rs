@@ -40,9 +40,7 @@ use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmContext, VmError};
 use smol_str::SmolStr;
 
 #[cfg(feature = "native")]
-use crate::native::{
-    NativeModel, NativeRequiredStorage, clear_native_runtime_error, take_native_runtime_error,
-};
+use crate::native::{NativeModel, NativeRequiredStorage, NativeStampKernelIo};
 
 #[cfg(feature = "native")]
 #[derive(Clone, Copy)]
@@ -170,23 +168,24 @@ pub struct VerilogADevice {
     branch_active: Vec<bool>,
     /// Pre-computed matrix indices for O(1) stamping
     matrix_indices: MatrixIndices,
+    /// Preallocated transaction buffer for one matrix-stamp pass. Solver
+    /// callbacks are invoked only after the complete pass validates.
+    stamp_matrix_buffer: Vec<(usize, usize, f64)>,
+    /// Preallocated transaction buffer for one RHS-stamp pass.
+    stamp_rhs_buffer: Vec<(usize, f64)>,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
     native_model: std::sync::Arc<NativeModel>,
+    /// Byte-addressable mirror of `program_active` for the native stamp ABI.
+    #[cfg(feature = "native")]
+    native_program_active: Vec<u8>,
+    /// Flat, model-order Jacobian output storage for the fused stamp driver.
+    #[cfg(feature = "native")]
+    native_stamp_jacobians: Vec<f64>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
 }
-
-// Safety: VerilogADevice owns per-instance VmContext and solver mapping state.
-// The NativeModel is shared through Arc and immutable after native image
-// construction. Calls supply mutable evaluation state through the device
-// instance, so cloned devices used by line-search probes do not share
-// VmContext mutation.
-#[cfg(feature = "native")]
-unsafe impl Send for VerilogADevice {}
-#[cfg(feature = "native")]
-unsafe impl Sync for VerilogADevice {}
 
 /// Pre-computed matrix indices for fast stamping
 #[derive(Debug, Clone, Default)]
@@ -235,6 +234,26 @@ impl VerilogADevice {
                 context.into()
             )))
         }
+    }
+
+    #[cfg(feature = "native")]
+    #[inline]
+    fn finite_native_stamp_value(
+        value: f64,
+        stamp: usize,
+        entry: Option<usize>,
+        phase: &'static str,
+    ) -> Result<f64, VmError> {
+        if value.is_finite() {
+            return Ok(value);
+        }
+        let context = match entry {
+            Some(entry) => format!("{phase} {stamp}:{entry}"),
+            None => format!("{phase} {stamp}"),
+        };
+        Err(VmError::InvalidNumericResult(format!(
+            "{context} evaluated to {value}"
+        )))
     }
 
     fn noise_power(value: f64, source_index: usize) -> Result<f64, VmError> {
@@ -346,6 +365,12 @@ impl VerilogADevice {
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
+        #[cfg(feature = "native")]
+        let native_jacobian_count = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum();
         let mut device = Self {
             name: name.into(),
             model,
@@ -357,8 +382,14 @@ impl VerilogADevice {
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
             matrix_indices: MatrixIndices::default(),
+            stamp_matrix_buffer: Vec::new(),
+            stamp_rhs_buffer: Vec::new(),
             #[cfg(feature = "native")]
             native_model,
+            #[cfg(feature = "native")]
+            native_program_active: vec![1; num_stamp_programs],
+            #[cfg(feature = "native")]
+            native_stamp_jacobians: vec![0.0; native_jacobian_count],
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
@@ -646,6 +677,12 @@ impl VerilogADevice {
     #[cfg(feature = "native")]
     pub fn native_plan_stats(&self) -> crate::native::PlanStats {
         self.native_model.plan_stats()
+    }
+
+    /// Size of this model's shared immutable native executable image.
+    #[cfg(feature = "native")]
+    pub fn native_code_size_bytes(&self) -> usize {
+        self.native_model.code_size_bytes()
     }
 
     /// Check if this device is using native compiled code
@@ -1375,6 +1412,9 @@ impl VerilogADevice {
         }
 
         self.program_active = program_active;
+        self.native_program_active.clear();
+        self.native_program_active
+            .extend(self.program_active.iter().map(|active| u8::from(*active)));
         self.branch_active = branch_active;
         Ok(())
     }
@@ -1660,6 +1700,30 @@ impl VerilogADevice {
             reactive,
             rhs,
         };
+        let matrix_capacity = self
+            .model
+            .branch_sources
+            .len()
+            .saturating_mul(4)
+            .saturating_add(
+                self.matrix_indices
+                    .jacobian
+                    .iter()
+                    .flatten()
+                    .filter(|entry| entry.row.is_some() && entry.col.is_some())
+                    .count(),
+            );
+        let rhs_capacity = self
+            .matrix_indices
+            .rhs
+            .iter()
+            .flatten()
+            .filter(|entry| entry.node.is_some())
+            .count();
+        self.stamp_matrix_buffer
+            .reserve(matrix_capacity.saturating_sub(self.stamp_matrix_buffer.capacity()));
+        self.stamp_rhs_buffer
+            .reserve(rhs_capacity.saturating_sub(self.stamp_rhs_buffer.capacity()));
     }
 
     /// Stamp the reactive (charge/flux) Jacobian dQ/dx.
@@ -1911,6 +1975,8 @@ impl VerilogADevice {
                 vm.context.set_branch_current(pos, neg, value);
             }
         }
+        #[cfg(feature = "native")]
+        Self::run_post_assignment_pass(&mut vm, &self.model, native)?;
 
         Ok(currents)
     }
@@ -1941,7 +2007,7 @@ impl VerilogADevice {
             params: context.parameters.as_ptr(),
             branch_currents: context.terminal_pair_currents_ptr(),
             branch_currents_len: context.terminal_pair_currents_len(),
-            currents: context.currents.as_ptr(),
+            currents: context.currents.as_mut_ptr() as *const f64,
             currents_len: context.currents.len(),
             num_terminals: context.terminal_count(),
             port_connected: context.port_connected.as_ptr(),
@@ -2023,8 +2089,11 @@ impl VerilogADevice {
             analysis_initial_step: u8::from(context.analysis_initial_step),
             analysis_final_step: u8::from(context.analysis_final_step),
             state_older: context.state_values_older.as_ptr(),
+            state_older_len: context.state_values_older.len(),
             state_derivatives: context.state_derivatives.as_mut_ptr(),
+            state_derivatives_len: context.state_derivatives.len(),
             state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
+            state_derivatives_prev_len: context.state_derivatives_prev.len(),
             integration_derivative_scale: context.integration.derivative_scale,
             integration_previous_value_scale: context.integration.previous_value_scale,
             integration_older_value_scale: context.integration.older_value_scale,
@@ -2032,6 +2101,7 @@ impl VerilogADevice {
             integration_active: u8::from(context.integration.active),
             limiter_active: &mut context.limiter_active,
             limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
+            runtime_status: Default::default(),
         }
     }
 
@@ -2131,7 +2201,7 @@ impl VerilogADevice {
 
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         let value = match entry {
             NativeValueEntry::ParameterDefault(index) => native
                 .run_parameter_default(index, &ctx, vars_ptr)
@@ -2155,7 +2225,7 @@ impl VerilogADevice {
                 .run_noise_exponent(index, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
         };
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
             return Err(VmError::NativeJit(error));
         }
         Ok(value)
@@ -2190,6 +2260,35 @@ impl VerilogADevice {
             context
                 .try_current(pos, neg)
                 .map_err(|_| Self::missing_native_terminal_pair_current_slot(*pair_index))?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    fn validate_native_current_pair_storage(
+        context: &VmContext,
+        compiled_terminal_count: usize,
+        current_pairs: &[usize],
+    ) -> Result<(), VmError> {
+        if current_pairs.is_empty() {
+            return Ok(());
+        }
+
+        let terminal_count = context.terminal_count();
+        if terminal_count != compiled_terminal_count {
+            return Err(Self::mismatched_native_terminal_context(
+                compiled_terminal_count,
+                terminal_count,
+            ));
+        }
+        let available = context.terminal_pair_currents_len();
+        for pair_index in current_pairs {
+            if terminal_pair_current_endpoints(*pair_index, compiled_terminal_count).is_none()
+                || *pair_index >= available
+            {
+                return Err(Self::missing_native_terminal_pair_current_slot(*pair_index));
+            }
         }
 
         Ok(())
@@ -2291,6 +2390,21 @@ impl VerilogADevice {
             "prior state-value storage",
             required.state_values_prev,
             context.state_values_prev.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "older state-value storage",
+            required.state_values,
+            context.state_values_older.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "candidate state-derivative storage",
+            required.state_values,
+            context.state_derivatives.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "prior state-derivative storage",
+            required.state_values,
+            context.state_derivatives_prev.len(),
         )?;
         Self::validate_native_runtime_storage_len(
             "state-initialization flag storage",
@@ -2403,7 +2517,10 @@ impl VerilogADevice {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
         Self::validate_native_storage(vm.context, native)?;
-        Self::validate_native_current_pairs(
+        // Assignment loads can be guarded by runtime control flow. Validate
+        // their memory contract here without rejecting a currently-unpublished
+        // value that the generated code may never read.
+        Self::validate_native_current_pair_storage(
             vm.context,
             native.num_terminals,
             native.assignment_current_pairs(),
@@ -2412,9 +2529,50 @@ impl VerilogADevice {
         Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, vars_ptr);
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
+            return Err(VmError::NativeJit(error));
+        }
+        Ok(())
+    }
+
+    /// Execute assignments that consume the completed contribution-current
+    /// vector. These entries are never run while contribution slots are still
+    /// being populated.
+    #[cfg(feature = "native")]
+    fn run_post_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        native: &NativeModel,
+    ) -> Result<(), VmError> {
+        if native.plan_stats().assignment_entry_points == 1 {
+            return Ok(());
+        }
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
+        }
+        Self::validate_native_storage(vm.context, native)?;
+        Self::validate_native_current_pairs(
+            vm.context,
+            native.num_terminals,
+            native.post_assignment_current_pairs(),
+        )?;
+        Self::validate_native_prior_currents(vm.context, native.post_assignment_prior_currents())?;
+        Self::validate_native_branch_unknowns(
+            vm.context,
+            native.post_assignment_branch_unknowns(),
+        )?;
+        let ctx = Self::eval_context_from(vm.context);
+        let vars_ptr = vm.context.variables.as_mut_ptr();
+        ctx.clear_runtime_error();
+        if !native.run_post_assignments(&ctx, vars_ptr) {
+            return Err(VmError::NativeJit(
+                "native JIT image is missing its post-current assignment entry; no interpreter fallback"
+                    .into(),
+            ));
+        }
+        if let Some(error) = ctx.take_runtime_error() {
             return Err(VmError::NativeJit(error));
         }
         Ok(())
@@ -2646,6 +2804,8 @@ impl VerilogADevice {
                 });
             }
         }
+        #[cfg(feature = "native")]
+        Self::run_post_assignment_pass(&mut vm, model, native)?;
 
         Ok(entries)
     }
@@ -2688,8 +2848,262 @@ impl VerilogADevice {
         self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
     }
 
+    fn buffer_structural_branches(
+        model: &CompiledModel,
+        branch_active: &[bool],
+        node_mapping: &[usize],
+        internal_node_indices: &[usize],
+        branch_current_indices: &[usize],
+        matrix_buffer: &mut Vec<(usize, usize, f64)>,
+        multiplicity: f64,
+    ) {
+        for (ordinal, source) in model.branch_sources.iter().enumerate() {
+            let br = Self::index_to_node(
+                &StampIndex::Branch(ordinal),
+                node_mapping,
+                internal_node_indices,
+                branch_current_indices,
+            );
+            let Some(br) = br else { continue };
+
+            if !branch_active.get(ordinal).copied().unwrap_or(false) {
+                matrix_buffer.push((br, br, 1.0));
+                continue;
+            }
+
+            let pos = Self::index_to_node(
+                &source.pos,
+                node_mapping,
+                internal_node_indices,
+                branch_current_indices,
+            );
+            let neg = Self::index_to_node(
+                &source.neg,
+                node_mapping,
+                internal_node_indices,
+                branch_current_indices,
+            );
+
+            if let Some(p) = pos {
+                matrix_buffer.push((p, br, multiplicity));
+                if !source.indirect {
+                    matrix_buffer.push((br, p, 1.0));
+                }
+            }
+            if let Some(n) = neg {
+                matrix_buffer.push((n, br, -multiplicity));
+                if !source.indirect {
+                    matrix_buffer.push((br, n, -1.0));
+                }
+            }
+        }
+    }
+
     /// Checked stamping with an explicit named-limiter evaluation policy.
     pub fn try_stamp_with_mode<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        matrix_add: M,
+        rhs_add: R,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        #[cfg(feature = "native")]
+        if self.native_model.stamp_kernel_is_eligible() {
+            return self.try_stamp_native_kernel(circuit_voltages, matrix_add, rhs_add, mode);
+        }
+
+        self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
+    }
+
+    #[cfg(feature = "native")]
+    fn try_stamp_native_kernel<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        mut matrix_add: M,
+        mut rhs_add: R,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        self.try_update_all_voltages(circuit_voltages)?;
+        self.begin_evaluation(mode);
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
+
+        let model = &self.model;
+        let native = self.native_model.as_ref();
+        let stamp_count = model.stamp_programs.len();
+        let expected_jacobians = native.plan_stats().jacobian_entry_points;
+        if self.native_program_active.len() != stamp_count
+            || self.native_stamp_jacobians.len() != expected_jacobians
+        {
+            return Err(VmError::NativeJit(format!(
+                "native fused-stamp buffers do not match compiled model shape ({}/{stamp_count} active flags, {}/{expected_jacobians} Jacobians); no interpreter fallback",
+                self.native_program_active.len(),
+                self.native_stamp_jacobians.len()
+            )));
+        }
+
+        {
+            let context = &mut self.context;
+            context.prepare_indexed_currents(stamp_count);
+            if context.variables.len() < model.num_variables {
+                context.variables.resize(model.num_variables, 0.0);
+            }
+            Self::validate_native_storage(context, native)?;
+            Self::validate_native_current_pair_storage(
+                context,
+                native.num_terminals,
+                native.assignment_current_pairs(),
+            )?;
+            Self::validate_native_prior_currents(context, native.assignment_prior_currents())?;
+            Self::validate_native_branch_unknowns(context, native.assignment_branch_unknowns())?;
+
+            Self::validate_native_branch_unknowns(context, native.stamp_kernel_branch_unknowns())?;
+
+            self.native_stamp_jacobians.fill(0.0);
+            let ctx = Self::eval_context_from(context);
+            let io = NativeStampKernelIo {
+                program_active: self.native_program_active.as_ptr(),
+                jacobians: self.native_stamp_jacobians.as_mut_ptr(),
+            };
+            let vars = context.variables.as_mut_ptr();
+            ctx.clear_runtime_error();
+            if !native.run_stamp_kernel(&ctx, vars, &io) {
+                return Err(VmError::NativeJit(
+                    "native JIT image is missing its fused stamp entry; no interpreter fallback"
+                        .into(),
+                ));
+            }
+            if let Some(error) = ctx.take_runtime_error() {
+                return Err(VmError::NativeJit(error));
+            }
+        }
+
+        // Validate every native result before any solver callback observes it,
+        // then publish contribution currents for later simulator APIs.
+        let mut jacobian_base = 0usize;
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            if self.native_program_active[program_idx] != 0 {
+                let value = Self::finite_native_stamp_value(
+                    self.context.currents[program_idx],
+                    program_idx,
+                    None,
+                    "contribution",
+                )?;
+                self.context.currents[program_idx] = value;
+                if program.branch_ordinal.is_none()
+                    && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+                {
+                    self.context.set_branch_current(pos, neg, value);
+                }
+                for entry_idx in 0..program.jacobian_programs.len() {
+                    Self::finite_native_stamp_value(
+                        self.native_stamp_jacobians[jacobian_base + entry_idx],
+                        program_idx,
+                        Some(entry_idx),
+                        "Jacobian",
+                    )?;
+                }
+            }
+            jacobian_base += program.jacobian_programs.len();
+        }
+        {
+            let mut vm = Vm::new(&mut self.context);
+            Self::run_post_assignment_pass(&mut vm, model, native)?;
+        }
+
+        let m = self.context.multiplicity;
+        Self::buffer_structural_branches(
+            model,
+            &self.branch_active,
+            &self.node_mapping,
+            &self.internal_node_indices,
+            &self.branch_current_indices,
+            &mut self.stamp_matrix_buffer,
+            m,
+        );
+
+        jacobian_base = 0;
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            if self.native_program_active[program_idx] == 0 {
+                jacobian_base += program.jacobian_programs.len();
+                continue;
+            }
+
+            let scale = if program.branch_ordinal.is_none() {
+                m
+            } else {
+                1.0
+            };
+            let value = self.context.currents[program_idx];
+            let mut eq_value = Self::finite_native_stamp_value(
+                value * scale,
+                program_idx,
+                None,
+                "scaled contribution",
+            )?;
+
+            for jacobian_entry in &self.matrix_indices.jacobian[program_idx] {
+                let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
+                let deriv = Self::finite_native_stamp_value(
+                    self.native_stamp_jacobians[jacobian_base + jacobian_entry.jacobian_idx]
+                        * scale,
+                    program_idx,
+                    Some(jacobian_entry.jacobian_idx),
+                    "Jacobian",
+                )?;
+
+                match (program.branch_ordinal, program.indirect) {
+                    (None, _) | (Some(_), true) => {
+                        if model_entry.sign > 0.0 {
+                            let x_col = Self::axis_value(&self.context, &model_entry.col_axis);
+                            eq_value -= deriv * x_col;
+                        }
+                    }
+                    (Some(_), false) => {
+                        let x_col = Self::axis_value(&self.context, &model_entry.col_axis);
+                        eq_value += model_entry.sign * deriv * x_col;
+                    }
+                }
+
+                if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
+                    self.stamp_matrix_buffer
+                        .push((row, col, jacobian_entry.sign * deriv));
+                }
+            }
+
+            eq_value = Self::finite_native_stamp_value(
+                eq_value,
+                program_idx,
+                None,
+                "equivalent source for contribution",
+            )?;
+            for entry in &self.matrix_indices.rhs[program_idx] {
+                if let Some(row) = entry.node {
+                    self.stamp_rhs_buffer.push((row, entry.sign * eq_value));
+                }
+            }
+            jacobian_base += program.jacobian_programs.len();
+        }
+        for &(row, col, value) in &self.stamp_matrix_buffer {
+            matrix_add(row, col, value);
+        }
+        for &(row, value) in &self.stamp_rhs_buffer {
+            rhs_add(row, value);
+        }
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
+        Ok(())
+    }
+
+    fn try_stamp_scalar_with_mode<M, R>(
         &mut self,
         circuit_voltages: &[f64],
         mut matrix_add: M,
@@ -2704,6 +3118,8 @@ impl VerilogADevice {
         // nodes, and branch-current unknowns)
         self.try_update_all_voltages(circuit_voltages)?;
         self.begin_evaluation(mode);
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
 
         // Extract disjoint fields to satisfy borrow checker
         let context = &mut self.context;
@@ -2729,56 +3145,18 @@ impl VerilogADevice {
             native,
         )?;
 
-        // Structural stamps of the branch-current unknowns: the KCL rows of
-        // the source nodes couple to the branch column, and the branch row
-        // reads the node potentials. An undriven branch (all its potential
-        // contributions mode-disabled) is pinned to zero current so its row
-        // stays non-singular while the branch itself is open.
-        for (ordinal, source) in model.branch_sources.iter().enumerate() {
-            let br = Self::index_to_node(
-                &StampIndex::Branch(ordinal),
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
-            );
-            let Some(br) = br else { continue };
-
-            if !self.branch_active.get(ordinal).copied().unwrap_or(false) {
-                matrix_add(br, br, 1.0);
-                continue;
-            }
-
-            let pos = Self::index_to_node(
-                &source.pos,
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
-            );
-            let neg = Self::index_to_node(
-                &source.neg,
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
-            );
-
-            // The unknown is the per-copy branch current; m copies inject
-            // m times that current into the external KCL rows
-            if let Some(p) = pos {
-                matrix_add(p, br, m);
-                // Indirect branches replace the V(p)-V(n)-E row with the
-                // constraint equation; only the KCL couplings are
-                // structural
-                if !source.indirect {
-                    matrix_add(br, p, 1.0);
-                }
-            }
-            if let Some(n) = neg {
-                matrix_add(n, br, -m);
-                if !source.indirect {
-                    matrix_add(br, n, -1.0);
-                }
-            }
-        }
+        // Buffer structural branch stamps with the computed entries. Nothing
+        // is visible to the solver until every native/interpreter result and
+        // post-current assignment has validated.
+        Self::buffer_structural_branches(
+            model,
+            &self.branch_active,
+            &self.node_mapping,
+            &self.internal_node_indices,
+            &self.branch_current_indices,
+            &mut self.stamp_matrix_buffer,
+            m,
+        );
 
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             if !self
@@ -2787,6 +3165,7 @@ impl VerilogADevice {
                 .copied()
                 .unwrap_or(true)
             {
+                vm.context.currents.push(0.0);
                 continue;
             }
 
@@ -2871,7 +3250,8 @@ impl VerilogADevice {
                 }
 
                 if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
-                    matrix_add(row, col, jacobian_entry.sign * deriv);
+                    self.stamp_matrix_buffer
+                        .push((row, col, jacobian_entry.sign * deriv));
                 }
             }
 
@@ -2884,10 +3264,20 @@ impl VerilogADevice {
             // potential contributions stamp +Eeq at the branch row
             for entry in &matrix_indices.rhs[program_idx] {
                 if let Some(row) = entry.node {
-                    rhs_add(row, entry.sign * eq_value);
+                    self.stamp_rhs_buffer.push((row, entry.sign * eq_value));
                 }
             }
         }
+        #[cfg(feature = "native")]
+        Self::run_post_assignment_pass(&mut vm, model, native)?;
+        for &(row, col, value) in &self.stamp_matrix_buffer {
+            matrix_add(row, col, value);
+        }
+        for &(row, value) in &self.stamp_rhs_buffer {
+            rhs_add(row, value);
+        }
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
         Ok(())
     }
 
@@ -2930,6 +3320,7 @@ impl VerilogADevice {
         let mut vm = Vm::new(context);
         Self::run_assignment_pass(&mut vm, model, native)?;
         Self::populate_noise_current_probe_cache(&mut vm, model, program_active, native)?;
+        Self::run_post_assignment_pass(&mut vm, model, native)?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -3349,6 +3740,13 @@ mod tests {
     use crate::{CompilerOptions, VerilogACompiler};
     use std::sync::Arc;
 
+    #[test]
+    fn native_device_send_sync_are_derived_from_owned_fields() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<VerilogADevice>();
+    }
+
     fn compile(source: &str) -> CompiledModel {
         VerilogACompiler::new(CompilerOptions::default())
             .compile(source)
@@ -3371,6 +3769,7 @@ mod tests {
             .iter()
             .map(|stamp| stamp.reactive_jacobians.len())
             .collect::<Vec<_>>();
+        let native_jacobian_count = jacobian_entry_points.iter().sum();
 
         let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
         context.port_connected = vec![1; num_terminals];
@@ -3396,6 +3795,8 @@ mod tests {
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
             matrix_indices: MatrixIndices::default(),
+            stamp_matrix_buffer: Vec::new(),
+            stamp_rhs_buffer: Vec::new(),
             native_model: Arc::new(NativeModel::new_for_test_with_shape(
                 num_terminals,
                 num_internal_nodes,
@@ -3404,6 +3805,8 @@ mod tests {
                 jacobian_entry_points,
                 reactive_jacobian_entry_points,
             )),
+            native_program_active: vec![1; num_stamp_programs],
+            native_stamp_jacobians: vec![0.0; native_jacobian_count],
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
@@ -3503,6 +3906,190 @@ endmodule
                 .try_evaluate()
                 .expect("canonical builder device evaluates"),
             vec![2.0]
+        );
+    }
+
+    #[test]
+    fn native_device_runs_completed_current_assignments_on_all_value_paths() {
+        let source = r#"
+`include "disciplines.vams"
+module completed_current_assignment_paths(p, n);
+    inout p, n;
+    electrical p, n, x;
+    real sensed, reverse, port_n;
+    analog begin
+        I(x, n) <+ 2.0 * V(p, n);
+        I(x, n) <+ 1.0;
+        sensed = I(x, n);
+        reverse = I(n, x);
+        port_n = I(<n>);
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile completed-current device model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile completed-current canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("POSTCURRENT1", model, &artifact, &[1, 0])
+                .expect("build completed-current native device");
+        let solution = [2.0_f64, 0.0_f64];
+        device
+            .try_update_all_voltages(&solution)
+            .expect("update terminal and internal voltages");
+
+        let assert_outputs = |device: &VerilogADevice| {
+            assert_eq!(device.variable("sensed"), Some(5.0));
+            assert_eq!(device.variable("reverse"), Some(-5.0));
+            assert_eq!(device.variable("port_n"), Some(-5.0));
+        };
+
+        assert_eq!(
+            device.try_evaluate().expect("native device evaluation"),
+            vec![4.0, 1.0]
+        );
+        assert_outputs(&device);
+
+        device
+            .try_compute_jacobian()
+            .expect("native standalone Jacobian evaluation");
+        assert_outputs(&device);
+
+        device
+            .try_stamp(&solution, |_, _, _| {}, |_, _| {})
+            .expect("native fused stamp evaluation");
+        assert_outputs(&device);
+
+        assert!(
+            device
+                .try_noise_sources(&solution)
+                .expect("native noise operating-point evaluation")
+                .is_empty()
+        );
+        assert_outputs(&device);
+    }
+
+    #[test]
+    fn native_scalar_stamp_preserves_inactive_contribution_current_slots() {
+        let source = r#"
+`include "disciplines.vams"
+module inactive_prior_current_slot(p, n);
+    inout p, n;
+    electrical p, n, x;
+    parameter integer enabled = 0;
+    real sensed;
+    analog begin
+        if (enabled)
+            I(x, n) <+ 10.0;
+        I(x, n) <+ I(x, n) + 1.0;
+        sensed = I(x, n);
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile inactive prior-current model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile inactive prior-current canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("INACTIVEPRIOR1", model, &artifact, &[1, 0])
+                .expect("build inactive prior-current native device");
+
+        device
+            .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
+            .expect("scalar stamp retains the inactive contribution slot");
+
+        assert_eq!(device.context.currents, vec![0.0, 1.0]);
+        assert_eq!(device.variable("sensed"), Some(1.0));
+    }
+
+    #[test]
+    fn native_stamp_paths_publish_no_solver_callbacks_after_late_runtime_failure() {
+        let source = r#"
+`include "disciplines.vams"
+module transactional_stamp_failure(p, n);
+    inout p, n;
+    electrical p, n;
+    integer idx;
+    real values[0:0];
+    analog begin
+        idx = V(p, n);
+        I(p, n) <+ V(p, n);
+        I(p, n) <+ values[idx];
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile transactional stamp fixture");
+        assert_eq!(
+            model.stamp_programs.len(),
+            2,
+            "fixture requires a valid contribution before the failing one"
+        );
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile transactional stamp canonical IR");
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "STAMPTRANSACTION1",
+            model,
+            &artifact,
+            &[1, 0],
+        )
+        .expect("build transactional native device");
+        assert!(
+            device.native_model.stamp_kernel_is_eligible(),
+            "fixture must exercise both scalar and fused stamp paths"
+        );
+
+        let mut scalar_matrix_calls = 0usize;
+        let mut scalar_rhs_calls = 0usize;
+        let scalar_error = device
+            .try_stamp_scalar_with_mode(
+                &[2.0, 0.0],
+                |_, _, _| scalar_matrix_calls += 1,
+                |_, _| scalar_rhs_calls += 1,
+                crate::vm::VerilogAEvaluationMode::StaticProbe,
+            )
+            .expect_err("late scalar contribution failure must surface");
+        assert!(
+            scalar_error
+                .to_string()
+                .contains("array index 2 outside declared bounds [0:0]"),
+            "unexpected scalar stamp error: {scalar_error}"
+        );
+        assert_eq!(
+            (scalar_matrix_calls, scalar_rhs_calls),
+            (0, 0),
+            "scalar stamping must publish atomically"
+        );
+
+        let mut fused_matrix_calls = 0usize;
+        let mut fused_rhs_calls = 0usize;
+        let fused_error = device
+            .try_stamp_with_mode(
+                &[2.0, 0.0],
+                |_, _, _| fused_matrix_calls += 1,
+                |_, _| fused_rhs_calls += 1,
+                crate::vm::VerilogAEvaluationMode::StaticProbe,
+            )
+            .expect_err("late fused contribution failure must surface");
+        assert!(
+            fused_error
+                .to_string()
+                .contains("array index 2 outside declared bounds [0:0]"),
+            "unexpected fused stamp error: {fused_error}"
+        );
+        assert_eq!(
+            (fused_matrix_calls, fused_rhs_calls),
+            (0, 0),
+            "fused stamping must publish atomically"
         );
     }
 
@@ -3840,6 +4427,45 @@ endmodule
             .expect_err("missing state storage must preflight before native dispatch");
 
         assert_native_hard_fail(err, "state-value storage");
+    }
+
+    #[test]
+    fn native_integration_history_storage_preflights_before_dispatch() {
+        fn populated_context() -> VmContext {
+            let mut context = VmContext::default();
+            context.state_values.resize(1, 0.0);
+            context.state_values_prev.resize(1, 0.0);
+            context.state_values_older.resize(1, 0.0);
+            context.state_derivatives.resize(1, 0.0);
+            context.state_derivatives_prev.resize(1, 0.0);
+            context.state_initialized.resize(1, false);
+            context
+        }
+
+        let required = NativeRequiredStorage {
+            state_values: 1,
+            state_values_prev: 1,
+            state_initialized: 1,
+            ..NativeRequiredStorage::default()
+        };
+
+        let mut context = populated_context();
+        context.state_values_older.clear();
+        let error = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing older state storage must hard-fail before dispatch");
+        assert_native_hard_fail(error, "older state-value storage");
+
+        let mut context = populated_context();
+        context.state_derivatives.clear();
+        let error = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing candidate derivative storage must hard-fail before dispatch");
+        assert_native_hard_fail(error, "candidate state-derivative storage");
+
+        let mut context = populated_context();
+        context.state_derivatives_prev.clear();
+        let error = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing prior derivative storage must hard-fail before dispatch");
+        assert_native_hard_fail(error, "prior state-derivative storage");
     }
 
     #[test]

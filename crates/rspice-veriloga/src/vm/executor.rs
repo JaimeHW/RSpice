@@ -228,6 +228,9 @@ impl<'a> Vm<'a> {
             Instruction::Asin => self.unary_op(|a| a.asin())?,
             Instruction::Acos => self.unary_op(|a| a.acos())?,
             Instruction::Atan => self.unary_op(|a| a.atan())?,
+            Instruction::Asinh => self.unary_op(|a| a.asinh())?,
+            Instruction::Acosh => self.unary_op(|a| a.acosh())?,
+            Instruction::Atanh => self.unary_op(|a| a.atanh())?,
             Instruction::Atan2 => self.binary_op(|y, x| y.atan2(x))?,
 
             // Rounding functions
@@ -821,6 +824,30 @@ mod tests {
     ) -> Result<f64, VmError> {
         let mut vm = Vm::new(context);
         vm.execute(&BytecodeProgram { instructions })
+    }
+
+    #[test]
+    fn inverse_hyperbolic_instructions_use_stable_library_operations() {
+        let tiny = 4.076_064_268_724_245e-15;
+        let asinh = execute(vec![Instruction::PushConst(tiny), Instruction::Asinh])
+            .expect("asinh instruction");
+        let atanh = execute(vec![Instruction::PushConst(tiny), Instruction::Atanh])
+            .expect("atanh instruction");
+        let acosh_input = 1.0 + f64::EPSILON;
+        let acosh = execute(vec![
+            Instruction::PushConst(acosh_input),
+            Instruction::Acosh,
+        ])
+        .expect("acosh instruction");
+
+        assert_eq!(asinh.to_bits(), tiny.asinh().to_bits());
+        assert_eq!(atanh.to_bits(), tiny.atanh().to_bits());
+        assert_eq!(acosh.to_bits(), acosh_input.acosh().to_bits());
+        assert_ne!(
+            asinh.to_bits(),
+            (tiny + (tiny * tiny + 1.0).sqrt()).ln().to_bits(),
+            "the former expanded formula loses low-order input information"
+        );
     }
 
     #[test]

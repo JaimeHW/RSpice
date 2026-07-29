@@ -7,7 +7,7 @@ impl Engine {
         solver: &mut HbSolver,
         num_nodes: usize,
     ) {
-        use crate::analysis::advanced::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
+        use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 
         for diode in &circuit.diodes.devices {
             let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);

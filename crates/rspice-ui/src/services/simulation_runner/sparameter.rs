@@ -14,7 +14,7 @@ use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::AcResult;
-use rspice_core::analysis::advanced::s_param;
+use rspice_core::analysis::s_param;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind, SourceSpec};
 use std::path::Path;
@@ -351,7 +351,7 @@ mod tests {
     }
 
     /// The conversion itself, and its in-loop cancellation, are covered by
-    /// `rspice_core::analysis::advanced::s_param::network`. What this module
+    /// `rspice_core::analysis::s_param::network`. What this module
     /// still owns is the mapping from that failure onto the service error
     /// type, so that is what is tested here.
     #[test]

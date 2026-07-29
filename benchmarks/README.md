@@ -48,6 +48,31 @@ The process exits non-zero if any simulator run failed or any baseline gate
 failed. The current scoreboard is still written and includes the complete
 `regression_gate` report so CI can retain evidence for a failed run.
 
+## Verilog-A native JIT gate
+
+The native x64 backend has a separate in-process release gate:
+
+```text
+cargo run --locked -p rspice-bench --release -- native-jit \
+  --iterations 100000 \
+  --samples 9 \
+  --min-dense-speedup 2.00 \
+  --min-speedup 1.10 \
+  --min-full-stamp-speedup 2.00 \
+  --max-native-setup-ms 10 \
+  --max-native-p95-ns-per-sweep 5000 \
+  --max-relative-stddev 0.25 \
+  --max-native-code-bytes 16384
+```
+
+It compares dense entrypoint, public device-evaluation, and full solver-stamp
+sweeps against bytecode references. The gate checks numerical checksums,
+median speedups, p95 latency, timing stability, canonical-to-native setup
+time, generated image size, and the expected fused-driver plan shape. Linux
+and Windows CI run the same command. The absolute ceilings are regression
+ratchets; they are not performance targets or representative compact-model
+latencies.
+
 ## Methodology
 
 Wall-clock of the full child process, `std::time::Instant` around spawn and

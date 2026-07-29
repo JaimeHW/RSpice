@@ -15,7 +15,7 @@ the GUI's Verilog-A dialog, and the generated-Rust built-in path used by
 
 ```
 source text ─▶ preprocessor ─▶ lexer ─▶ parser ─▶ semantic ─▶ IR (+ autodiff) ─▶ canonical IR
-               `include/`define  tokens    AST     symbol/type  device equations   HIR/MIR/OptIR
+               `include/`define  tokens    AST     symbol/type  device equations      HIR/MIR
                                                    resolution   + derivatives            │
                         ┌──────────────────────────────────────────────────────┬─────────┤
                         ▼                                                      ▼         ▼
@@ -38,7 +38,7 @@ runs offline, ahead of the build, and its output is compiled into
 | `ast` | AST types for expressions, statements, declarations, analog operators, event expressions |
 | `semantic` | Symbol table, type inference, discipline validation; rejects unsupported constructs with explicit errors |
 | `ir` / `expr_converter` | Lowering to device-equation IR; the `autodiff` submodule generates derivative ("shadow") assignments by symbolic forward-mode differentiation, so Jacobians are analytic rather than finite-difference |
-| `canonical_ir` | Stable HIR/MIR/OptIR artifact with validation, diagnostics, content digests, and backend input for generated Rust and future native/JIT paths |
+| `canonical_ir` | Stable HIR/MIR artifact with validation, diagnostics, content digests, and backend input for generated Rust and native/JIT paths |
 | `codegen` | Emits the bytecode `CompiledModel`: assignment programs, per-stamp value and Jacobian programs, reactive (charge) programs, noise metadata |
 | `rust_backend` | Deterministic Verilog-A-to-Rust backend for generated built-ins: lowers canonical IR to Rust source folders, registry/support modules, manifest data, and cleanup guards used by `rspice-core`'s `veriloga-builtins` feature |
 | `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
@@ -47,6 +47,7 @@ runs offline, ahead of the build, and its output is compiled into
 | `native/` | RSpice-owned native JIT backend (feature `native`): full native JIT or typed construction error, no bytecode fallback. x86-64 only — the AArch64 arm of the target dispatch returns `JitError::UnsupportedTarget` |
 | `virtual_source` | Sealed, file-system-free source bundles: portable logical paths, include resolution restricted to the bundle plus the built-in headers, and BLAKE3 identities for the source, dependency closure, compiler contract, and runtime contract. The transport boundary for browser workers and retained run snapshots |
 | `runtime_report` | In-memory compilation reports: the simulator ABI a compiled artifact exposes, its user-facing diagnostics with source positions, and which runtime targets have actually qualified for it. Performs no file-system access |
+| `metrics` | Stable phase identifiers, structured timing/work-size reports, measured-result wrappers, and opt-in performance budgets shared by the compiler and offline Rust backend |
 | `disciplines` / `stdlib` / `types` | Discipline database, the built-in `disciplines.vams`/`constants.vams` headers (LRM 2.4 physical constants), the type system, function registry, and parameter-range types |
 | `source` / `error` | Source maps/spans and the `CompileError`/`CompileResult` types |
 
@@ -62,14 +63,16 @@ let compiler = VerilogACompiler::new(CompilerOptions::default());
 
 // Bytecode CompiledModel
 let model = compiler.compile(source)?;                       // exactly one module
+let measured = compiler.compile_measured(source)?;           // model + phase metrics
 let model = compiler.compile_module(source, Some("nmos"))?;  // pick one of several
 let model = compiler.compile_file(path)?;                    // from disk, with includes
 let model = compiler.compile_file_module(path, Some("nmos"))?;
 let file  = compiler.compile_file_with_metadata(path)?;      // + include dependency list
 let file  = compiler.compile_file_module_with_metadata(path, Some("nmos"))?;
 
-// Canonical HIR/MIR/OptIR artifact
+// Canonical HIR/MIR artifact
 let ir = compiler.compile_canonical_ir(source)?;
+let measured_ir = compiler.compile_canonical_ir_measured(source)?;
 let ir = compiler.compile_canonical_ir_module(source, Some("nmos"))?;
 let ir = compiler.compile_file_canonical_ir_with_metadata(path, Some("nmos"))?;
 
@@ -93,16 +96,28 @@ resolves its own graph into a `VirtualSourceBundle` first.
 only in failure: it keeps source-authentic diagnostics mapped back to
 bundle paths instead of collapsing to a bare `CompileError`.
 
-Two environment variables affect compilation, both diagnostic only:
+Runtime reports and file-metadata results carry `PipelineMetrics`.
+`compile_measured` and `compile_canonical_ir_measured` expose the same data
+for source-only artifact calls. `RustTranspiler::transpile_measured` reports
+the offline backend's CFG lowering, differentiation, optimization,
+scheduling, emission, and exact generated byte/line counts. Timings are
+operational evidence and never participate in artifact or cache identities.
+`CompilerOptions::performance_budget` and
+`RustTranspileOptions::performance_budget` can enforce opt-in total or
+per-phase limits; empty budgets are the default.
+
+Two environment variables also provide diagnostic-only output:
 `RSPICE_DEBUG_PP=1` writes the preprocessed source beside the input file
 as `*.pp.va`, and `RSPICE_VERILOGA_PHASE_TRACE=1` (or the narrower
 `RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE=1`) prints per-phase timings to
 stderr.
 
-`CompilerOptions` carries three fields that change what the compiler
-produces, all of them preprocessor inputs: `include_paths` (searched by
+`CompilerOptions` carries three fields that change generated artifacts, all
+of them preprocessor inputs: `include_paths` (searched by
 `` `include ``, and only by the file-system entry points), `defines`, and
-`undefines` (drops a standard macro so `defines` can replace it).
+`undefines` (drops a standard macro so `defines` can replace it). The
+performance budget changes only whether a slow invocation is accepted and
+is excluded from compiler-contract identities.
 
 `enable_ams`, `strict_mode`, and `integration_order` are **reserved**:
 they are accepted and they participate in the compiler-contract identity

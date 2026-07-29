@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use rspice_veriloga::{
-    CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions,
+    CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions, PipelinePhase,
     RuntimeArtifactIntegrityError, RuntimeQualificationOptions, RuntimeTarget,
     RuntimeTargetMaturity, RuntimeTargetReadiness, VerilogACompiler, compile_diagnostics,
 };
@@ -130,6 +130,62 @@ fn optional_backend_qualification_is_explicit() {
     report
         .validate_integrity()
         .expect("explicit qualification remains coherent");
+}
+
+#[test]
+fn runtime_compile_reports_ordered_frontend_phase_metrics() {
+    let report = compiler()
+        .compile_runtime(SENSOR_BRIDGE_SOURCE, Some("sensor_bridge"))
+        .expect("compile measured workbench source");
+
+    for phase in [
+        PipelinePhase::Preprocess,
+        PipelinePhase::Lex,
+        PipelinePhase::Parse,
+        PipelinePhase::Semantic,
+        PipelinePhase::BytecodeGeneration,
+        PipelinePhase::HirLowering,
+        PipelinePhase::MirLowering,
+        PipelinePhase::CanonicalNoisePlanning,
+        PipelinePhase::RuntimeQualification,
+        PipelinePhase::IntegrityValidation,
+    ] {
+        assert!(
+            report.metrics.has_phase(phase),
+            "missing structured metric for {phase}"
+        );
+    }
+    assert!(report.metrics.preprocessed_bytes > 0);
+    assert!(report.metrics.token_count > 0);
+    assert_eq!(report.metrics.module_count, 1);
+    assert_eq!(
+        report.metrics.total_elapsed_nanos,
+        report
+            .metrics
+            .phases
+            .iter()
+            .map(|timing| timing.elapsed_nanos)
+            .sum::<u64>()
+    );
+}
+
+#[test]
+fn canonical_artifacts_exclude_removed_scalar_graph() {
+    let runtime = compiler()
+        .compile_runtime(SENSOR_BRIDGE_SOURCE, None)
+        .expect("compile production runtime artifact");
+    let encoded = serde_json::to_value(&runtime.canonical_ir).expect("serialize runtime artifact");
+    let fields = encoded.as_object().expect("runtime artifact object");
+    assert!(!fields.contains_key("opt"));
+    assert!(!fields.contains_key("opt_digest"));
+
+    let canonical = compiler()
+        .compile_canonical_ir(SENSOR_BRIDGE_SOURCE)
+        .expect("compile canonical artifact");
+    let encoded = serde_json::to_value(canonical).expect("serialize canonical artifact");
+    let fields = encoded.as_object().expect("canonical artifact object");
+    assert!(!fields.contains_key("opt"));
+    assert!(!fields.contains_key("opt_digest"));
 }
 
 #[test]

@@ -9,6 +9,7 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RustBackendErrorKind {
     Unsupported,
+    PerformanceBudget,
     Internal,
 }
 
@@ -47,6 +48,19 @@ impl RustBackendError {
             source: source.into(),
             module: module.into(),
             message: message.into(),
+        }
+    }
+
+    pub fn performance_budget(
+        source: impl Into<String>,
+        module: impl Into<String>,
+        error: crate::metrics::PerformanceBudgetExceeded,
+    ) -> Self {
+        Self {
+            kind: RustBackendErrorKind::PerformanceBudget,
+            source: source.into(),
+            module: module.into(),
+            message: error.to_string(),
         }
     }
 

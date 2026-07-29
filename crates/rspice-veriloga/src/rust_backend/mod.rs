@@ -36,8 +36,8 @@ mod manifest;
 mod names;
 mod noise;
 mod registry;
-mod state_file;
 pub mod stamp_plan;
+mod state_file;
 
 pub use builtins::{
     BuiltinGenerationReport, BuiltinSubsetGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
@@ -64,6 +64,7 @@ pub use names::{RustDeviceNames, sanitize_identifier};
 pub use registry::resolve_generated_registry_model_names;
 
 use crate::canonical_ir::CanonicalIrArtifact;
+use crate::metrics::{Measured, MetricsRecorder, PerformanceBudget, PipelinePhase, usize_to_u64};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedRustFile {
@@ -83,12 +84,15 @@ pub struct GeneratedRustDevice {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustTranspileOptions {
     pub runtime_path: String,
+    /// Optional wall-clock limits for offline lowering and emission.
+    pub performance_budget: PerformanceBudget,
 }
 
 impl Default for RustTranspileOptions {
     fn default() -> Self {
         Self {
             runtime_path: "crate::device::veriloga_generated".to_string(),
+            performance_budget: PerformanceBudget::default(),
         }
     }
 }
@@ -107,9 +111,43 @@ impl RustTranspiler {
         &self,
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDevice, RustBackendError> {
-        let mut device = canonical::generate_device(artifact, &self.options)?;
+        self.transpile_measured(artifact)
+            .map(|generated| generated.output)
+    }
+
+    /// Transpile one canonical artifact and retain structured phase metrics.
+    pub fn transpile_measured(
+        &self,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<Measured<GeneratedRustDevice>, RustBackendError> {
+        let mut measurements = MetricsRecorder::new(0, self.options.performance_budget.clone());
+        let mut device =
+            canonical::generate_device_measured(artifact, &self.options, &mut measurements)?;
+        let phase_started = web_time::Instant::now();
         state_file::finalize_checkpoint_identity(&mut device)?;
-        Ok(device)
+        measurements
+            .record(
+                PipelinePhase::CheckpointFinalization,
+                phase_started.elapsed(),
+            )
+            .map_err(|error| {
+                RustBackendError::performance_budget(
+                    artifact.metadata.source_package.as_str(),
+                    artifact.mir.module_name.as_str(),
+                    error,
+                )
+            })?;
+        let generated_bytes = device.files.iter().fold(0_usize, |total, file| {
+            total.saturating_add(file.contents.len())
+        });
+        let generated_lines = device.files.iter().fold(0_usize, |total, file| {
+            total.saturating_add(file.contents.lines().count())
+        });
+        measurements.metrics_mut().generated_rust_bytes = usize_to_u64(generated_bytes);
+        measurements.metrics_mut().generated_rust_lines = usize_to_u64(generated_lines);
+        Ok(Measured {
+            output: device,
+            metrics: measurements.finish(),
+        })
     }
 }
-

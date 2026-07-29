@@ -67,6 +67,7 @@ use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, differentiate,
     optimize_cfg,
 };
+use crate::metrics::{MetricsRecorder, PipelinePhase};
 
 use super::emit::{EmitBindings, RUNTIME_PRELUDE, emit_body};
 use super::expr::parameter_field_names;
@@ -78,7 +79,16 @@ pub fn generate_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
-    let plan = ModelPlan::build(artifact)?;
+    let mut measurements = MetricsRecorder::new(0, options.performance_budget.clone());
+    generate_device_measured(artifact, options, &mut measurements)
+}
+
+pub(crate) fn generate_device_measured(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+    measurements: &mut MetricsRecorder,
+) -> Result<GeneratedRustDevice, RustBackendError> {
+    let plan = ModelPlan::build(artifact, measurements)?;
 
     let names = RustDeviceNames::new(
         artifact.metadata.source_package.as_str(),
@@ -87,7 +97,15 @@ pub fn generate_device(
     );
     let parameter_fields = parameter_field_names(artifact);
 
+    let phase_started = web_time::Instant::now();
     let stamp = plan.stamp_file(artifact, options)?;
+    record_phase(
+        artifact,
+        measurements,
+        PipelinePhase::StampEmission,
+        phase_started.elapsed(),
+    )?;
+    let phase_started = web_time::Instant::now();
     let state = state_file::generate_state_file_with_extensions(
         artifact,
         options,
@@ -96,6 +114,20 @@ pub fn generate_device(
         plan.idt_slots.len(),
         artifact.mir.branch_unknowns.len(),
         &plan.state_extensions(),
+    )?;
+    record_phase(
+        artifact,
+        measurements,
+        PipelinePhase::StateEmission,
+        phase_started.elapsed(),
+    )?;
+    let phase_started = web_time::Instant::now();
+    let noise = plan.noise_file(artifact, options)?;
+    record_phase(
+        artifact,
+        measurements,
+        PipelinePhase::NoiseEmission,
+        phase_started.elapsed(),
     )?;
 
     let files = vec![
@@ -111,7 +143,7 @@ pub fn generate_device(
             relative_path: "stamp.rs".to_string(),
             contents: stamp,
         },
-        plan.noise_file(artifact, options)?,
+        noise,
     ];
 
     Ok(GeneratedRustDevice {
@@ -120,6 +152,21 @@ pub fn generate_device(
         folder_name: names.folder,
         source_digest: artifact.metadata.source_digest.to_string(),
         files,
+    })
+}
+
+fn record_phase(
+    artifact: &CanonicalIrArtifact,
+    measurements: &mut MetricsRecorder,
+    phase: PipelinePhase,
+    elapsed: std::time::Duration,
+) -> Result<(), RustBackendError> {
+    measurements.record(phase, elapsed).map_err(|error| {
+        RustBackendError::performance_budget(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            error,
+        )
     })
 }
 
@@ -215,7 +262,11 @@ struct ModelPlan {
 }
 
 impl ModelPlan {
-    fn build(artifact: &CanonicalIrArtifact) -> Result<Self, RustBackendError> {
+    fn build(
+        artifact: &CanonicalIrArtifact,
+        measurements: &mut MetricsRecorder,
+    ) -> Result<Self, RustBackendError> {
+        let phase_started = web_time::Instant::now();
         let mut cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
             let mut reasons: Vec<String> = diagnostics
                 .iter()
@@ -230,7 +281,14 @@ impl ModelPlan {
             )
         })?;
         reject_unsupported_kinds(artifact, &cfg.function)?;
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::CfgLowering,
+            phase_started.elapsed(),
+        )?;
 
+        let phase_started = web_time::Instant::now();
         // In value order, which is the lowering's order, so the numbering is a
         // property of the model rather than of a hash map's iteration.
         let mut ddt_slots: HashMap<ExprId, usize> = HashMap::new();
@@ -290,10 +348,24 @@ impl ModelPlan {
         cfg.function
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::DerivativePreparation,
+            phase_started.elapsed(),
+        )?;
 
+        let phase_started = web_time::Instant::now();
         let mut differentiated = differentiate(&cfg.function, &seeds)
             .map_err(|error| unsupported(artifact, format!("differentiation: {error}")))?;
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::Differentiation,
+            phase_started.elapsed(),
+        )?;
 
+        let phase_started = web_time::Instant::now();
         // Every read-out first, and both bodies' worth of them: taking a lane
         // appends an instruction, so a row taken after a simplification would
         // name values the simplified function does not have.
@@ -308,7 +380,14 @@ impl ModelPlan {
                 None => Vec::new(),
             })
             .collect();
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::DerivativeExtraction,
+            phase_started.elapsed(),
+        )?;
 
+        let phase_started = web_time::Instant::now();
         // Every read-out is taken, so the function has stopped growing and the
         // noise slice can be cut from it.
         //
@@ -322,6 +401,12 @@ impl ModelPlan {
         // because the AD pass leaves bookkeeping the magnitudes can reach.
         let noise = plan_noise(artifact, &cfg, &cfg.function)
             .or_else(|| plan_noise(artifact, &cfg, &differentiated.function));
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::NoisePlanning,
+            phase_started.elapsed(),
+        )?;
 
         // A contribution with no `ddt` stores no charge. Its row is kept and
         // emptied rather than dropped, so both row lists stay parallel to
@@ -333,6 +418,7 @@ impl ModelPlan {
             .map(|(charge, residual)| charge.unwrap_or(*residual))
             .collect();
 
+        let phase_started = web_time::Instant::now();
         let mut conduction = plan_stamps(artifact, &residuals, &conduction_rows, correction_lane);
         // The reactive matrix stamps no residual, so a charge's correction lane
         // has nothing to correct: it is split out and dropped rather than
@@ -349,7 +435,14 @@ impl ModelPlan {
         if !charged {
             reactive.rows.clear();
         }
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::StampPlanning,
+            phase_started.elapsed(),
+        )?;
 
+        let phase_started = web_time::Instant::now();
         // One simplification over both, so what the two matrices share is
         // computed once.
         let mut wanted = conduction.wanted();
@@ -360,7 +453,14 @@ impl ModelPlan {
         reactive.remap(&mapped[wanted.len() - reactive_wanted.len()..]);
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::CfgOptimization,
+            phase_started.elapsed(),
+        )?;
 
+        let phase_started = web_time::Instant::now();
         // The output list both stamps read from, conduction first.
         let mut outputs = Vec::new();
         let conduction = Stamps::place(conduction, &mut outputs);
@@ -393,6 +493,12 @@ impl ModelPlan {
                     .map(|unknown| usize::from(unknown.id))
             })
             .collect();
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::Scheduling,
+            phase_started.elapsed(),
+        )?;
 
         Ok(Self {
             function,
@@ -451,7 +557,10 @@ fn plan_noise(
             .iter()
             .find(|lowered| lowered.contribution == contribution && lowered.ordinal == ordinal)?;
 
-        let table_width = source.table.as_ref().map_or(0, |table| table.operands.len());
+        let table_width = source
+            .table
+            .as_ref()
+            .map_or(0, |table| table.operands.len());
         if lowered.kind != source.kind
             || lowered.exponent.is_some() != source.exponent.is_some()
             || lowered.table.len() != table_width
@@ -628,10 +737,7 @@ impl Stamps {
 
     /// How many cached values the reactive stamp reads.
     fn width(&self) -> usize {
-        self.rows
-            .iter()
-            .map(|row| 1 + row.derivatives.len())
-            .sum()
+        self.rows.iter().map(|row| 1 + row.derivatives.len()).sum()
     }
 }
 
@@ -640,7 +746,6 @@ impl ModelPlan {
         &self,
         artifact: &CanonicalIrArtifact,
         options: &RustTranspileOptions,
-
     ) -> Result<String, RustBackendError> {
         let mut out = String::new();
         out.push_str(
@@ -698,8 +803,9 @@ impl ModelPlan {
                  \x20           && self.canonical_thermal_voltage == thermal_voltage\n\
                  \x20       {\n            return;\n        }\n",
             ),
-            InvalidationClass::Instance => out
-                .push_str("        if self.canonical_instance_valid {\n            return;\n        }\n"),
+            InvalidationClass::Instance => out.push_str(
+                "        if self.canonical_instance_valid {\n            return;\n        }\n",
+            ),
             // Nothing tells `stamp` that a new timestep began, so this one is
             // recomputed rather than cached.
             _ => {}
@@ -1096,7 +1202,9 @@ impl ModelPlan {
             );
         }
         if wants.limit_previous {
-            out.push_str("        let limit_previous = |_operator: usize, proposed: f64| proposed;\n");
+            out.push_str(
+                "        let limit_previous = |_operator: usize, proposed: f64| proposed;\n",
+            );
         }
     }
 
@@ -1118,12 +1226,8 @@ impl ModelPlan {
         newton: Option<&Stage>,
     ) -> Result<(String, Vec<String>), RustBackendError> {
         let Some(newton) = newton else {
-            let (body, names) = emit_body(
-                &self.function,
-                &self.outputs,
-                &bindings(),
-            )
-            .map_err(|error| unsupported(artifact, format!("body: {error}")))?;
+            let (body, names) = emit_body(&self.function, &self.outputs, &bindings())
+                .map_err(|error| unsupported(artifact, format!("body: {error}")))?;
             return Ok((body, names));
         };
 
@@ -1821,7 +1925,11 @@ fn apply_insertions(function: &mut CfgFunction, insertions: &[(ValueId, ValueId)
             let anchor = instruction.result;
             rebuilt.push(instruction);
             if let Some(values) = after.get(&anchor) {
-                rebuilt.extend(values.iter().map(|result| CfgInstruction { result: *result }));
+                rebuilt.extend(
+                    values
+                        .iter()
+                        .map(|result| CfgInstruction { result: *result }),
+                );
             }
         }
         block.instructions = rebuilt;
@@ -2118,7 +2226,8 @@ fn materialise_charge(
             }
             let parameter = push_value(function, CfgValueType::Real, CfgValueKind::BlockParameter);
             function.blocks[usize::from(*block)].params.push(parameter);
-            for ((source, slot), argument) in edges_into(function, *block).into_iter().zip(arguments)
+            for ((source, slot), argument) in
+                edges_into(function, *block).into_iter().zip(arguments)
             {
                 edge_arguments_mut(function, source, slot).push(argument);
             }
@@ -2189,10 +2298,7 @@ fn edge_arguments_mut(
     source: BlockId,
     slot: EdgeSlot,
 ) -> &mut Vec<ValueId> {
-    match (
-        &mut function.blocks[usize::from(source)].terminator,
-        slot,
-    ) {
+    match (&mut function.blocks[usize::from(source)].terminator, slot) {
         (CfgTerminator::Jump { args, .. }, EdgeSlot::Jump) => args,
         (CfgTerminator::Branch { then_args, .. }, EdgeSlot::Then) => then_args,
         (CfgTerminator::Branch { else_args, .. }, EdgeSlot::Else) => else_args,
@@ -2216,14 +2322,14 @@ fn zero_constant(function: &mut CfgFunction) -> ValueId {
     {
         return existing.id;
     }
-    push_value(function, CfgValueType::Real, CfgValueKind::RealConstant(0.0))
+    push_value(
+        function,
+        CfgValueType::Real,
+        CfgValueKind::RealConstant(0.0),
+    )
 }
 
-fn push_value(
-    function: &mut CfgFunction,
-    value_type: CfgValueType,
-    kind: CfgValueKind,
-) -> ValueId {
+fn push_value(function: &mut CfgFunction, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
     let id = ValueId::from(function.values.len());
     function.values.push(CfgValue {
         id,
