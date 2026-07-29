@@ -11,8 +11,8 @@
 
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::advanced::harmonic_balance::PeriodicAcExcitation;
-use crate::analysis::advanced::pac::{PacConfig, PacResult};
+use crate::analysis::harmonic_balance::PeriodicAcExcitation;
+use crate::analysis::pac::{PacConfig, PacResult};
 use crate::analysis::{HbConfig, HbSolverState};
 
 /// PAC analysis result with convergence info

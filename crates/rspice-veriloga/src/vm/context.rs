@@ -505,6 +505,21 @@ impl VmContext {
         self.terminal_pair_currents.fill(f64::NAN);
     }
 
+    /// Prepare fixed-index contribution storage for a fused evaluation pass.
+    ///
+    /// Unlike [`Self::clear_currents`], this preserves the allocation and
+    /// establishes the final logical length up front so native code can write
+    /// values by contribution index. Terminal-pair probes are invalidated for
+    /// the new pass exactly as they are on the scalar path.
+    pub(crate) fn prepare_indexed_currents(&mut self, count: usize) {
+        if self.currents.len() != count {
+            self.currents.resize(count, 0.0);
+        } else {
+            self.currents.fill(0.0);
+        }
+        self.terminal_pair_currents.fill(f64::NAN);
+    }
+
     /// Set branch current from `pos` to `neg`.
     ///
     /// Also populates the reverse direction with opposite sign.

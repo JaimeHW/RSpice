@@ -10,7 +10,7 @@
 //! Each controller only tracks the continuation parameter and its step-size
 //! policy; the caller owns the Newton loop and reports success or failure
 //! back through `advance_on_success` / `reduce_on_failure`. Harmonic balance
-//! drives both (see `analysis::advanced::harmonic_balance::solver`), and the
+//! drives both (see `analysis::harmonic_balance::solver`), and the
 //! engine's DC convergence aids in `engine::convergence` drive the
 //! pseudo-transient path.
 

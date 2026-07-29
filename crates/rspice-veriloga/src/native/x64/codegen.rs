@@ -33,33 +33,35 @@ use crate::native::abi::{
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
-use crate::native::{JitError, JitResult};
+use crate::native::{EvalContext, JitError, JitResult};
 
 const MODEL: &str = "native-x64";
-const VOLTAGES_OFFSET: i32 = 0;
-const INTERNAL_VOLTAGES_OFFSET: i32 = 8;
-const PARAMS_OFFSET: i32 = 16;
-const BRANCH_CURRENTS_OFFSET: i32 = 24;
-const BRANCH_CURRENTS_LEN_OFFSET: i32 = 32;
-const CURRENTS_OFFSET: i32 = 40;
-const CURRENTS_LEN_OFFSET: i32 = 48;
-const PORT_CONNECTED_OFFSET: i32 = 64;
-const PORT_CONNECTED_LEN_OFFSET: i32 = 72;
-const TEMPERATURE_OFFSET: i32 = 80;
-const TIME_OFFSET: i32 = 88;
-const STATE_VALUES_OFFSET: i32 = 112;
-const STATE_INITIALIZED_OFFSET: i32 = 120;
-const STATE_INITIALIZED_LEN_OFFSET: i32 = 128;
-const LOOKUP_TABLES_OFFSET: i32 = 136;
-const LOOKUP_TABLES_LEN_OFFSET: i32 = 144;
-const PARAM_GIVEN_OFFSET: i32 = 168;
-const PARAM_GIVEN_LEN_OFFSET: i32 = 176;
-const BRANCH_UNKNOWNS_OFFSET: i32 = 184;
-const ANALYSIS_TYPE_OFFSET: i32 = 192;
-const MFACTOR_OFFSET: i32 = 200;
-const STATE_VALUES_LEN_OFFSET: i32 = 296;
-const ANALYSIS_INITIAL_STEP_OFFSET: i32 = 312;
-const ANALYSIS_FINAL_STEP_OFFSET: i32 = 313;
+const VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, voltages) as i32;
+const INTERNAL_VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, internal_voltages) as i32;
+const PARAMS_OFFSET: i32 = std::mem::offset_of!(EvalContext, params) as i32;
+const BRANCH_CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_currents) as i32;
+const BRANCH_CURRENTS_LEN_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, branch_currents_len) as i32;
+const CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, currents) as i32;
+const CURRENTS_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, currents_len) as i32;
+const PORT_CONNECTED_OFFSET: i32 = std::mem::offset_of!(EvalContext, port_connected) as i32;
+const PORT_CONNECTED_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, port_connected_len) as i32;
+const TEMPERATURE_OFFSET: i32 = std::mem::offset_of!(EvalContext, temperature) as i32;
+const TIME_OFFSET: i32 = std::mem::offset_of!(EvalContext, time) as i32;
+const STATE_VALUES_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values) as i32;
+const STATE_INITIALIZED_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_initialized) as i32;
+const STATE_INITIALIZED_LEN_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, state_initialized_len) as i32;
+const PARAM_GIVEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given) as i32;
+const PARAM_GIVEN_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given_len) as i32;
+const BRANCH_UNKNOWNS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_unknowns) as i32;
+const ANALYSIS_TYPE_OFFSET: i32 = std::mem::offset_of!(EvalContext, analysis_type) as i32;
+const MFACTOR_OFFSET: i32 = std::mem::offset_of!(EvalContext, multiplicity) as i32;
+const STATE_VALUES_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values_len) as i32;
+const ANALYSIS_INITIAL_STEP_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, analysis_initial_step) as i32;
+const ANALYSIS_FINAL_STEP_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, analysis_final_step) as i32;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const LITERAL_POOL_ALIGNMENT: usize = WORD_BYTES;
 const VECTOR_LITERAL_ALIGNMENT: usize = 16;
@@ -1326,6 +1328,8 @@ impl FunctionCompiler {
     fn emit_runtime_loop_limit_error_call(&mut self) {
         let frame_bytes = call_frame_bytes_for_slots(0);
         self.encoder.sub_rsp_imm32(frame_bytes);
+        self.encoder
+            .mov_r64_r64(entry_ctx_arg_reg(), self.ctx_arg_reg());
         let helper: VoidHelper = rspice_native_loop_limit_error;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
@@ -1425,6 +1429,10 @@ impl FunctionCompiler {
 
         self.patch_rel32_to_current(negative_count)?;
         self.patch_rel32_to_current(too_large_count)?;
+        #[cfg(windows)]
+        if restore_entry_ctx {
+            self.encoder.mov_r64_r64(entry_ctx_arg_reg(), Gpr::R10);
+        }
         self.emit_integer_shift_count_error_return();
         self.patch_rel32_to_current(valid_count_done)?;
         Ok(())
@@ -1624,25 +1632,9 @@ impl FunctionCompiler {
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
         }
-        let ctx = self.ctx_arg_reg();
-        if table_ptr_arg_reg() == ctx {
-            self.encoder.mov_r64_m64_base_disp32(
-                table_len_arg_reg(),
-                ctx,
-                LOOKUP_TABLES_LEN_OFFSET,
-            );
-            self.encoder
-                .mov_r64_m64_base_disp32(table_ptr_arg_reg(), ctx, LOOKUP_TABLES_OFFSET);
-        } else {
-            self.encoder
-                .mov_r64_m64_base_disp32(table_ptr_arg_reg(), ctx, LOOKUP_TABLES_OFFSET);
-            self.encoder.mov_r64_m64_base_disp32(
-                table_len_arg_reg(),
-                ctx,
-                LOOKUP_TABLES_LEN_OFFSET,
-            );
-        }
-        self.emit_usize_arg(table_id_arg_reg(), table_id);
+        self.encoder
+            .mov_r64_r64(context_filter_ctx_arg_reg(), self.ctx_arg_reg());
+        self.emit_usize_arg(context_filter_id_arg_reg(), table_id);
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -2108,6 +2100,8 @@ impl FunctionCompiler {
     fn emit_void_error_return(&mut self, helper: VoidHelper) {
         let frame_bytes = call_frame_bytes_for_slots(0);
         self.encoder.sub_rsp_imm32(frame_bytes);
+        self.encoder
+            .mov_r64_r64(entry_ctx_arg_reg(), self.ctx_arg_reg());
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -3003,9 +2997,8 @@ enum RoundDirection {
 
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
-type VoidHelper = extern "C" fn();
-type TableHelper =
-    unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
+type VoidHelper = extern "C" fn(*const crate::native::EvalContext);
+type TableHelper = unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 type OperandContextFilterHelper =
@@ -3385,36 +3378,6 @@ fn entry_ctx_arg_reg() -> Gpr {
 #[cfg(not(windows))]
 fn entry_vars_arg_reg() -> Gpr {
     Gpr::Rsi
-}
-
-#[cfg(windows)]
-fn table_ptr_arg_reg() -> Gpr {
-    Gpr::Rdx
-}
-
-#[cfg(windows)]
-fn table_len_arg_reg() -> Gpr {
-    Gpr::R8
-}
-
-#[cfg(windows)]
-fn table_id_arg_reg() -> Gpr {
-    Gpr::R9
-}
-
-#[cfg(not(windows))]
-fn table_ptr_arg_reg() -> Gpr {
-    Gpr::Rdi
-}
-
-#[cfg(not(windows))]
-fn table_len_arg_reg() -> Gpr {
-    Gpr::Rsi
-}
-
-#[cfg(not(windows))]
-fn table_id_arg_reg() -> Gpr {
-    Gpr::Rdx
 }
 
 #[cfg(windows)]
@@ -4030,10 +3993,13 @@ mod tests {
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -4264,7 +4230,6 @@ mod tests {
             LookupTable::from_data(vec![0.0, 1.0], vec![2.0, 3.0]),
             LookupTable::from_data(vec![0.0, 1.0], vec![4.0, 5.0]),
         ];
-        ABI_EXPECTED_TABLE_PTR.store(table.as_ptr() as usize, std::sync::atomic::Ordering::SeqCst);
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.lookup_tables = table.as_ptr();
         ctx.lookup_tables_len = table.len();
@@ -6748,10 +6713,13 @@ mod tests {
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -6840,10 +6808,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -6957,10 +6928,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -7072,10 +7046,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -7109,10 +7086,13 @@ mod tests {
             ctx.timestep = 0.25;
             ctx.state_prev = previous_state.as_ptr();
             ctx.state_older = older_state.as_ptr();
+            ctx.state_older_len = older_state.len();
             ctx.state_prev_len = previous_state.len();
             ctx.state_values = state_values.as_mut_ptr();
             ctx.state_derivatives = state_derivatives.as_mut_ptr();
+            ctx.state_derivatives_len = state_derivatives.len();
             ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+            ctx.state_derivatives_prev_len = previous_derivatives.len();
             ctx.state_initialized = state_initialized.as_mut_ptr();
             ctx.state_initialized_len = state_initialized.len();
             ctx.state_values_len = state_values.len();
@@ -7243,10 +7223,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -8766,13 +8749,17 @@ mod tests {
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
             let params = [left, right];
-            let ctx = eval_context(&params, &[], &[], &[]);
+            let mut ctx = eval_context(&params, &[], &[], &[]);
 
             clear_native_runtime_error();
+            ctx.clear_runtime_error();
             let result = f(&ctx, std::ptr::null());
 
             assert_eq!(result.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error().expect("invalid shift count must hard-fail");
+            let error = ctx
+                .take_runtime_error()
+                .expect("invalid shift count must hard-fail in its dispatch context");
+            let _ = take_native_runtime_error();
             assert!(
                 error.contains("integer shift count"),
                 "{name}: error must identify shift-count failure, got: {error}"
@@ -9417,11 +9404,17 @@ mod tests {
             let bytes = compile_value_function(&program).expect("compile table helper leaf");
             if name.ends_with("second-table") {
                 assert!(
-                    contains_bytes(&bytes, &mov_r32_imm32_bytes(super::table_id_arg_reg(), 1)),
+                    contains_bytes(
+                        &bytes,
+                        &mov_r32_imm32_bytes(super::context_filter_id_arg_reg(), 1)
+                    ),
                     "table helper should materialize small table IDs with a compact imm32 move"
                 );
                 assert!(
-                    !contains_bytes(&bytes, &movabs_imm64_bytes(super::table_id_arg_reg(), 1)),
+                    !contains_bytes(
+                        &bytes,
+                        &movabs_imm64_bytes(super::context_filter_id_arg_reg(), 1)
+                    ),
                     "table helper should not use movabs for small table IDs"
                 );
             }
@@ -11074,9 +11067,6 @@ mod tests {
         XMM_STACK.len().max(8) + 1
     }
 
-    static ABI_EXPECTED_TABLE_PTR: std::sync::atomic::AtomicUsize =
-        std::sync::atomic::AtomicUsize::new(0);
-
     fn run_table_helper_sentinel(helper: TableHelper, ctx: &EvalContext) -> f64 {
         let mut compiler = abi_sentinel_compiler();
         push_abi_sentinel_const(&mut compiler, 3.25);
@@ -11142,22 +11132,23 @@ mod tests {
 
     unsafe extern "C" fn abi_sentinel_table_helper(
         input: f64,
-        tables: *const LookupTable,
-        table_count: usize,
+        ctx: *const EvalContext,
         table_id: usize,
     ) -> f64 {
         if input.to_bits() != 3.25_f64.to_bits() {
             return -1.0;
         }
-        let expected = ABI_EXPECTED_TABLE_PTR.load(std::sync::atomic::Ordering::SeqCst);
-        if tables as usize != expected {
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
             return -2.0;
-        }
-        if table_count != 2 {
+        };
+        if ctx.lookup_tables.is_null() {
             return -3.0;
         }
-        if table_id != 7 {
+        if ctx.lookup_tables_len != 2 {
             return -4.0;
+        }
+        if table_id != 7 {
+            return -5.0;
         }
         101.0
     }
@@ -11303,8 +11294,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,
@@ -11312,6 +11306,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         }
     }
 

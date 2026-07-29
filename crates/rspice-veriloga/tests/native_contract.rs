@@ -2609,6 +2609,103 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_differentiates_runtime_parameter_power_exponent() {
+    let source = r#"
+`include "disciplines.vams"
+module native_runtime_power_exponent(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exponent = 2.5;
+    analog I(p, n) <+ pow(V(p, n), exponent);
+endmodule
+"#;
+    let mut device = canonical_device_from_source("POWEXP1", source);
+    let x = 2.0_f64;
+    let (matrix, _) = stamp_device(&mut device, &[x]);
+    let expected = 2.5 * x.powf(1.5);
+    let actual = matrix.get(&(0, 0)).copied().unwrap_or_default();
+    assert!(
+        (actual - expected).abs() <= 1.0e-12 * expected.abs(),
+        "runtime-exponent Jacobian mismatch: native={actual} expected={expected}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_differentiates_runtime_parameter_power_exponent_twice() {
+    let source = r#"
+`include "disciplines.vams"
+module native_runtime_power_exponent_ddx(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exponent = 2.5;
+    analog I(p, n) <+ ddx(pow(V(p, n), exponent), V(p, n));
+endmodule
+"#;
+    let mut device = canonical_device_from_source("POWEXPDDX1", source);
+    let x = 2.0_f64;
+    let currents = {
+        device.update_voltages(&[x]);
+        device
+            .try_evaluate()
+            .expect("runtime-exponent ddx evaluates natively")
+    };
+    let expected_current = 2.5 * x.powf(1.5);
+    assert!((currents[0] - expected_current).abs() <= 1.0e-12 * expected_current.abs());
+
+    let (matrix, _) = stamp_device(&mut device, &[x]);
+    let expected_jacobian = 2.5 * 1.5 * x.powf(0.5);
+    let actual = matrix.get(&(0, 0)).copied().unwrap_or_default();
+    assert!(
+        (actual - expected_jacobian).abs() <= 1.0e-12 * expected_jacobian.abs(),
+        "runtime-exponent second derivative mismatch: native={actual} expected={expected_jacobian}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_differentiates_solution_dependent_power_exponent_twice() {
+    let source = r#"
+`include "disciplines.vams"
+module native_solution_power_exponent_ddx(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddx(
+        pow(V(p, n) + 3.0, 0.5 + 0.1 * V(p, n)),
+        V(p, n));
+endmodule
+"#;
+    let mut device = canonical_device_from_source("POWSOLDDX1", source);
+    let x = 0.75_f64;
+    device.update_voltages(&[x]);
+    let currents = device
+        .try_evaluate()
+        .expect("solution-dependent exponent ddx evaluates natively");
+
+    let base = x + 3.0;
+    let exponent = 0.5 + 0.1 * x;
+    let power = base.powf(exponent);
+    let logarithmic_derivative = 0.1 * base.ln() + exponent / base;
+    let expected_current = power * logarithmic_derivative;
+    assert!(
+        (currents[0] - expected_current).abs() <= 1.0e-11 * expected_current.abs().max(1.0),
+        "solution-dependent exponent derivative mismatch: native={} expected={expected_current}",
+        currents[0]
+    );
+
+    let (matrix, _) = stamp_device(&mut device, &[x]);
+    let logarithmic_second_derivative = 0.2 / base - exponent / base.powi(2);
+    let expected_jacobian =
+        power * (logarithmic_derivative.powi(2) + logarithmic_second_derivative);
+    let actual = matrix.get(&(0, 0)).copied().unwrap_or_default();
+    assert!(
+        (actual - expected_jacobian).abs() <= 1.0e-11 * expected_jacobian.abs().max(1.0),
+        "solution-dependent exponent second derivative mismatch: native={actual} expected={expected_jacobian}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_assignment_fed_ddx_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

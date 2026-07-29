@@ -3,7 +3,7 @@
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::LteEstimator;
-use crate::analysis::advanced::harmonic_balance::{
+use crate::analysis::harmonic_balance::{
     DC_SHORT_CONDUCTANCE, HbContinuationLimitation, HbReactiveKind, HbReactiveSpectrum,
 };
 use crate::circuit::Circuit;

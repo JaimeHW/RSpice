@@ -17,6 +17,20 @@ use crate::vm::terminal_pair_current_endpoints;
 
 type AssignmentEntry = unsafe extern "C" fn(*const EvalContext, *mut f64);
 type ValueEntry = unsafe extern "C" fn(*const EvalContext, *const f64) -> f64;
+type StampKernelEntry =
+    unsafe extern "C" fn(*const EvalContext, *mut f64, *const NativeStampKernelIo);
+
+/// Caller-owned buffers consumed by the whole-stamp native driver.
+///
+/// The active mask and Jacobian buffer are validated by the device before
+/// entering native code. Contribution values are written directly to the
+/// `EvalContext::currents` buffer so prior-contribution probes observe them
+/// without returning to Rust between expressions.
+#[repr(C)]
+pub(crate) struct NativeStampKernelIo {
+    pub program_active: *const u8,
+    pub jacobians: *mut f64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CodeOffset(usize);
@@ -48,6 +62,8 @@ impl NativeEntryStarts {
     #[cfg(test)]
     pub(crate) fn from_entries(entries: &NativeEntryOffsets) -> Self {
         let mut starts = vec![entries.assignment];
+        starts.extend(entries.post_assignment);
+        starts.extend(entries.stamp_kernel);
         starts.extend(entries.parameter_defaults.iter().flatten().copied());
         starts.extend(entries.static_conditions.iter().flatten().copied());
         starts.extend(entries.stamp_values.iter().copied());
@@ -70,6 +86,8 @@ impl NativeEntryStarts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeEntryOffsets {
     pub assignment: CodeOffset,
+    pub post_assignment: Option<CodeOffset>,
+    pub stamp_kernel: Option<CodeOffset>,
     pub parameter_defaults: Vec<Option<CodeOffset>>,
     pub static_conditions: Vec<Option<CodeOffset>>,
     pub stamp_values: Vec<CodeOffset>,
@@ -84,6 +102,9 @@ pub(crate) struct NativeCurrentDependencies {
     pub assignment_current_pairs: Vec<usize>,
     pub assignment_prior_currents: Vec<usize>,
     pub assignment_branch_unknowns: Vec<usize>,
+    pub post_assignment_current_pairs: Vec<usize>,
+    pub post_assignment_prior_currents: Vec<usize>,
+    pub post_assignment_branch_unknowns: Vec<usize>,
     pub static_condition_branch_unknowns: Vec<Vec<usize>>,
     pub stamp_values: Vec<Vec<usize>>,
     pub stamp_value_prior_currents: Vec<Vec<usize>>,
@@ -227,12 +248,27 @@ fn scan_assignment_steps(
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct PlanStats {
     pub assignment_entry_points: usize,
+    pub stamp_kernel_entry_points: usize,
     pub parameter_default_entry_points: usize,
     pub static_condition_entry_points: usize,
     pub stamp_value_entry_points: usize,
     pub jacobian_entry_points: usize,
     pub reactive_jacobian_entry_points: usize,
     pub noise_source_entry_points: usize,
+}
+
+impl PlanStats {
+    /// Total number of callable entry points in the executable image.
+    pub const fn total_entry_points(self) -> usize {
+        self.assignment_entry_points
+            + self.stamp_kernel_entry_points
+            + self.parameter_default_entry_points
+            + self.static_condition_entry_points
+            + self.stamp_value_entry_points
+            + self.jacobian_entry_points
+            + self.reactive_jacobian_entry_points
+            + self.noise_source_entry_points
+    }
 }
 
 pub struct NativeModel {
@@ -243,6 +279,8 @@ pub struct NativeModel {
     image: ExecutableMemory,
     entries: NativeEntryOffsets,
     current_dependencies: NativeCurrentDependencies,
+    stamp_kernel_branch_unknowns: Vec<usize>,
+    stamp_kernel_current_order_safe: bool,
     required_storage: NativeRequiredStorage,
     stats: PlanStats,
 }
@@ -316,8 +354,47 @@ impl NativeModel {
         let static_condition_entry_points = entries.static_conditions.iter().flatten().count();
         let noise_source_entry_points =
             entries.noise_psd.len() + entries.noise_exponents.iter().flatten().count();
+        let mut stamp_kernel_branch_unknowns =
+            current_dependencies.assignment_branch_unknowns.clone();
+        stamp_kernel_branch_unknowns.extend(
+            current_dependencies
+                .stamp_value_branch_unknowns
+                .iter()
+                .flatten()
+                .copied(),
+        );
+        stamp_kernel_branch_unknowns.extend(
+            current_dependencies
+                .jacobian_branch_unknowns
+                .iter()
+                .flatten()
+                .flatten()
+                .copied(),
+        );
+        stamp_kernel_branch_unknowns.sort_unstable();
+        stamp_kernel_branch_unknowns.dedup();
+        let stamp_kernel_current_order_safe =
+            current_dependencies.assignment_prior_currents.is_empty()
+                && current_dependencies
+                    .stamp_value_prior_currents
+                    .iter()
+                    .enumerate()
+                    .all(|(stamp, dependencies)| {
+                        dependencies.iter().all(|dependency| *dependency < stamp)
+                    })
+                && current_dependencies
+                    .jacobian_prior_currents
+                    .iter()
+                    .enumerate()
+                    .all(|(stamp, entries)| {
+                        entries
+                            .iter()
+                            .flatten()
+                            .all(|dependency| *dependency <= stamp)
+                    });
         let stats = PlanStats {
-            assignment_entry_points: 1,
+            assignment_entry_points: 1 + usize::from(entries.post_assignment.is_some()),
+            stamp_kernel_entry_points: usize::from(entries.stamp_kernel.is_some()),
             parameter_default_entry_points,
             static_condition_entry_points,
             stamp_value_entry_points: entries.stamp_values.len(),
@@ -334,6 +411,8 @@ impl NativeModel {
             image,
             entries,
             current_dependencies,
+            stamp_kernel_branch_unknowns,
+            stamp_kernel_current_order_safe,
             required_storage,
             stats,
         })
@@ -382,6 +461,8 @@ impl NativeModel {
         );
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            post_assignment: None,
+            stamp_kernel: None,
             parameter_defaults: vec![],
             static_conditions: vec![Some(stamp_entry); stamp_value_entry_points],
             stamp_values: vec![stamp_entry; stamp_value_entry_points],
@@ -462,6 +543,12 @@ impl NativeModel {
         }
 
         Self::validate_entry_offset(entries.assignment, entry_starts, image_len)?;
+        if let Some(offset) = entries.post_assignment {
+            Self::validate_entry_offset(offset, entry_starts, image_len)?;
+        }
+        if let Some(offset) = entries.stamp_kernel {
+            Self::validate_entry_offset(offset, entry_starts, image_len)?;
+        }
         for offset in entries.parameter_defaults.iter().flatten() {
             Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
@@ -529,6 +616,9 @@ impl NativeModel {
             assignment_current_pairs: Vec::new(),
             assignment_prior_currents: Vec::new(),
             assignment_branch_unknowns: Vec::new(),
+            post_assignment_current_pairs: Vec::new(),
+            post_assignment_prior_currents: Vec::new(),
+            post_assignment_branch_unknowns: Vec::new(),
             static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
@@ -638,6 +728,11 @@ impl NativeModel {
             &dependencies.assignment_current_pairs,
             num_terminals,
         )?;
+        Self::validate_current_pair_dependency_list(
+            "post-assignment",
+            &dependencies.post_assignment_current_pairs,
+            num_terminals,
+        )?;
         Self::validate_current_pair_dependency_table(
             "stamp value",
             &dependencies.stamp_values,
@@ -669,6 +764,11 @@ impl NativeModel {
             &dependencies.assignment_prior_currents,
             entries.stamp_values.len(),
         )?;
+        Self::validate_prior_current_dependency_list(
+            "post-assignment",
+            &dependencies.post_assignment_prior_currents,
+            entries.stamp_values.len(),
+        )?;
         Self::validate_prior_current_dependency_table(
             "stamp value",
             &dependencies.stamp_value_prior_currents,
@@ -698,6 +798,11 @@ impl NativeModel {
         Self::validate_branch_unknown_dependency_list(
             "assignment",
             &dependencies.assignment_branch_unknowns,
+            num_branch_unknowns,
+        )?;
+        Self::validate_branch_unknown_dependency_list(
+            "post-assignment",
+            &dependencies.post_assignment_branch_unknowns,
             num_branch_unknowns,
         )?;
         Self::validate_branch_unknown_dependency_table(
@@ -903,6 +1008,38 @@ impl NativeModel {
         unsafe { entry(ctx as *const EvalContext, vars) };
     }
 
+    /// Runs assignments whose values depend on the completed contribution-current
+    /// vector. Returns `false` when the model has no such assignments.
+    pub(crate) fn run_post_assignments(&self, ctx: &EvalContext, vars: *mut f64) -> bool {
+        let Some(offset) = self.entries.post_assignment else {
+            return false;
+        };
+        // Safety: construction validated that `offset` is a recorded function
+        // start emitted with the AssignmentEntry ABI.
+        let entry: AssignmentEntry = unsafe { std::mem::transmute(self.entry_ptr(offset)) };
+        // Safety: callers provide pointers matching the native assignment ABI.
+        unsafe { entry(ctx as *const EvalContext, vars) };
+        true
+    }
+
+    /// Runs the fused assignment/value/Jacobian driver when this image has one.
+    pub(crate) fn run_stamp_kernel(
+        &self,
+        ctx: &EvalContext,
+        vars: *mut f64,
+        io: &NativeStampKernelIo,
+    ) -> bool {
+        let Some(offset) = self.entries.stamp_kernel else {
+            return false;
+        };
+        // Safety: construction validated that `offset` is a recorded function
+        // start in the executable image, emitted with StampKernelEntry's ABI.
+        let entry: StampKernelEntry = unsafe { std::mem::transmute(self.entry_ptr(offset)) };
+        // Safety: the device validates and pins every pointee for the call.
+        unsafe { entry(ctx as *const EvalContext, vars, io) };
+        true
+    }
+
     pub(crate) fn assignment_current_pairs(&self) -> &[usize] {
         &self.current_dependencies.assignment_current_pairs
     }
@@ -913,6 +1050,33 @@ impl NativeModel {
 
     pub(crate) fn assignment_branch_unknowns(&self) -> &[usize] {
         &self.current_dependencies.assignment_branch_unknowns
+    }
+
+    pub(crate) fn post_assignment_current_pairs(&self) -> &[usize] {
+        &self.current_dependencies.post_assignment_current_pairs
+    }
+
+    pub(crate) fn post_assignment_prior_currents(&self) -> &[usize] {
+        &self.current_dependencies.post_assignment_prior_currents
+    }
+
+    pub(crate) fn post_assignment_branch_unknowns(&self) -> &[usize] {
+        &self.current_dependencies.post_assignment_branch_unknowns
+    }
+
+    /// Whether the current fused stamp driver can preserve all current-probe
+    /// ordering semantics without publishing terminal-pair currents inside
+    /// native code.
+    ///
+    /// Prior-contribution and contribution-produced terminal-pair probes are
+    /// deliberately kept on the scalar path until the driver publishes those
+    /// values at the exact expression boundary.
+    pub(crate) fn stamp_kernel_is_eligible(&self) -> bool {
+        self.entries.stamp_kernel.is_some() && self.stamp_kernel_current_order_safe
+    }
+
+    pub(crate) fn stamp_kernel_branch_unknowns(&self) -> &[usize] {
+        &self.stamp_kernel_branch_unknowns
     }
 
     pub(crate) fn run_parameter_default(
@@ -1158,6 +1322,11 @@ impl NativeModel {
         self.stats.stamp_value_entry_points
     }
 
+    /// Size of the immutable executable image, including entry alignment and literals.
+    pub fn code_size_bytes(&self) -> usize {
+        self.image.len()
+    }
+
     pub fn plan_stats(&self) -> PlanStats {
         self.stats
     }
@@ -1191,6 +1360,8 @@ mod tests {
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
         assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 0);
+        assert_eq!(model.plan_stats().total_entry_points(), 4);
+        assert!(model.code_size_bytes() > 0);
     }
 
     #[test]
@@ -1231,6 +1402,8 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                post_assignment: None,
+                stamp_kernel: None,
                 parameter_defaults: vec![],
                 static_conditions: vec![Some(stamp_entry)],
                 stamp_values: vec![stamp_entry],
@@ -1359,6 +1532,8 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(1),
+                post_assignment: None,
+                stamp_kernel: None,
                 parameter_defaults: vec![],
                 static_conditions: vec![],
                 stamp_values: vec![],
@@ -1380,6 +1555,8 @@ mod tests {
             ExecutableMemory::allocate(&[0xC3, 0x90, 0xC3]).expect("allocate native test image");
         let entries = NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            post_assignment: None,
+            stamp_kernel: None,
             parameter_defaults: vec![],
             static_conditions: vec![None],
             stamp_values: vec![CodeOffset::new(1)],
@@ -1421,6 +1598,8 @@ mod tests {
             image,
             NativeEntryOffsets {
                 assignment: CodeOffset::new(0),
+                post_assignment: None,
+                stamp_kernel: None,
                 parameter_defaults: vec![],
                 static_conditions: vec![],
                 stamp_values: vec![],
@@ -1515,6 +1694,8 @@ mod tests {
     fn one_stamp_entries() -> NativeEntryOffsets {
         NativeEntryOffsets {
             assignment: CodeOffset::new(0),
+            post_assignment: None,
+            stamp_kernel: None,
             parameter_defaults: vec![],
             static_conditions: vec![None],
             stamp_values: vec![CodeOffset::new(0)],
@@ -1605,8 +1786,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,
@@ -1614,6 +1798,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         }
     }
 }

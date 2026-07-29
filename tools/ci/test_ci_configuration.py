@@ -258,10 +258,23 @@ class CiConfigurationTests(unittest.TestCase):
             "--max-stamp-state-payload-bytes 6200",
         ]:
             self.assertIn(budget, workflow)
+        self.assertIn("Compile Verilog-A native JIT tests (Linux x64)", workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --features native native:: --no-run",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --release --features native native:: --no-run",
+            workflow,
+        )
         self.assertIn("Test Verilog-A native JIT units (Linux x64)", workflow)
         self.assertRegex(
             workflow,
             r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
+        )
+        self.assertRegex(
+            workflow,
+            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
         )
         self.assertIn("Test Verilog-A native JIT contracts (Linux x64)", workflow)
         self.assertIn(
@@ -279,9 +292,16 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("Smoke Verilog-A native JIT benchmark gate (Linux x64)", workflow)
-        self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
+        self.assertRegex(
             workflow,
+            r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
+            r"--iterations 100000\s+"
+            r"--samples 9\s+"
+            r"--min-speedup 1\.10\s+"
+            r"--min-full-stamp-speedup 1\.50\s+"
+            r"--max-native-setup-ms 50\s+"
+            r"--max-native-p95-ns-per-sweep 25000\s+"
+            r"--max-relative-stddev 0\.25",
         )
         self.assertIn("Test UI library (Linux)", workflow)
         self.assertIn("cargo test --locked -p rspice-ui --lib", workflow)
@@ -314,6 +334,7 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("runs-on: windows-latest", workflow)
+        self.assertIn("Compile Verilog-A native JIT tests", workflow)
         self.assertIn("Verilog-A native JIT unit tests", workflow)
         self.assertIn("Verilog-A native JIT contract tests", workflow)
         self.assertIn("Verilog-A native multiplicity tests", workflow)
@@ -321,6 +342,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertRegex(
             workflow,
             r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
+        )
+        self.assertRegex(
+            workflow,
+            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
         )
         self.assertIn(
             "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
@@ -330,9 +355,16 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1",
             workflow,
         )
-        self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
+        self.assertRegex(
             workflow,
+            r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
+            r"--iterations 100000\s+"
+            r"--samples 9\s+"
+            r"--min-speedup 1\.10\s+"
+            r"--min-full-stamp-speedup 1\.50\s+"
+            r"--max-native-setup-ms 50\s+"
+            r"--max-native-p95-ns-per-sweep 25000\s+"
+            r"--max-relative-stddev 0\.25",
         )
 
     def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:
