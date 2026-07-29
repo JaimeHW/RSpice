@@ -82,6 +82,50 @@ fn the_emitted_rust_reproduces_the_interpreter() {
     }
 }
 
+#[test]
+fn one_lane_derivatives_are_scalar_and_executable() {
+    let source = r#"
+module one_lane(p);
+    inout p;
+    electrical p;
+    analog I(p) <+ V(p) * V(p);
+endmodule
+"#;
+    let artifact = artifact(source);
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+    assert_eq!(artifact.mir.nodes.len(), 1);
+    let lanes = [AdSeed::NodePotential(0usize.into())];
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("differentiates");
+    let mut wanted = cfg.residuals.clone();
+    for residual in &cfg.residuals {
+        wanted.extend(differentiated.derivative_row(*residual).into_iter().flatten());
+    }
+    let (optimized, wanted) = optimize_cfg(&differentiated.function, &wanted);
+    let (body, names) =
+        emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+
+    assert!(
+        !body.contains("Lanes<1>") && !body.contains("Lanes(["),
+        "one-lane derivatives must use plain f64:\n{body}"
+    );
+
+    let bias = bias(&artifact);
+    let expected = evaluate_cfg(&optimized, &inputs(&bias)).expect("interprets");
+    let expected: Vec<f64> = wanted
+        .iter()
+        .map(|value| expected.value(*value).expect("defined"))
+        .collect();
+    let actual = compile_and_run(
+        &scratch("one_lane_scalar"),
+        "one_lane_scalar",
+        &program(&body, &names, &bias),
+    );
+    assert_eq!(actual.len(), expected.len());
+    for (emitted, interpreted) in actual.iter().zip(expected) {
+        assert!(bit_identical(*emitted, interpreted));
+    }
+}
+
 /// The emitter and the interpreter evaluate the same operations in the same
 /// order, so anything less than bit equality is a real difference in meaning
 /// rather than a rounding artefact.
