@@ -42,28 +42,28 @@ impl PySParameterResult {
     /// device, so anything else yields None.
     fn two_port_stability(
         &self,
-    ) -> Option<Vec<rspice_core::analysis::advanced::s_param::StabilityAnalysis>> {
+    ) -> Option<Vec<rspice_core::analysis::s_param::StabilityAnalysis>> {
         Some(
             self.two_port_matrices()?
                 .iter()
-                .map(rspice_core::analysis::advanced::s_param::StabilityAnalysis::from_s_matrix)
+                .map(rspice_core::analysis::s_param::StabilityAnalysis::from_s_matrix)
                 .collect(),
         )
     }
 
     /// Per-frequency gain analysis, for two-port results only.
-    fn two_port_gain(&self) -> Option<Vec<rspice_core::analysis::advanced::s_param::GainAnalysis>> {
+    fn two_port_gain(&self) -> Option<Vec<rspice_core::analysis::s_param::GainAnalysis>> {
         Some(
             self.two_port_matrices()?
                 .iter()
-                .map(rspice_core::analysis::advanced::s_param::GainAnalysis::from_s_matrix)
+                .map(rspice_core::analysis::s_param::GainAnalysis::from_s_matrix)
                 .collect(),
         )
     }
 
     /// Rebuild core's one-based `SMatrix` at each frequency.
-    fn two_port_matrices(&self) -> Option<Vec<rspice_core::analysis::advanced::s_param::SMatrix>> {
-        use rspice_core::analysis::advanced::s_param::{Complex as SComplex, SMatrix};
+    fn two_port_matrices(&self) -> Option<Vec<rspice_core::analysis::s_param::SMatrix>> {
+        use rspice_core::analysis::s_param::{Complex as SComplex, SMatrix};
         if self.parameters.len() != 2 {
             return None;
         }
@@ -95,7 +95,7 @@ impl PySParameterResult {
         select: F,
     ) -> Option<Bound<'py, PyArray1<f64>>>
     where
-        F: Fn(&rspice_core::analysis::advanced::s_param::StabilityAnalysis) -> f64,
+        F: Fn(&rspice_core::analysis::s_param::StabilityAnalysis) -> f64,
     {
         let values: Vec<f64> = self.two_port_stability()?.iter().map(select).collect();
         Some(values.to_pyarray(py))
@@ -104,7 +104,7 @@ impl PySParameterResult {
     /// Project one scalar out of the per-frequency gain analyses.
     fn gain_series<'py, F>(&self, py: Python<'py>, select: F) -> Option<Bound<'py, PyArray1<f64>>>
     where
-        F: Fn(&rspice_core::analysis::advanced::s_param::GainAnalysis) -> f64,
+        F: Fn(&rspice_core::analysis::s_param::GainAnalysis) -> f64,
     {
         let values: Vec<f64> = self.two_port_gain()?.iter().map(select).collect();
         Some(values.to_pyarray(py))

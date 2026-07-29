@@ -7,7 +7,7 @@
 //! here.
 
 use rspice_core::Netlist;
-use rspice_core::analysis::advanced::measure_signals;
+use rspice_core::analysis::measure_signals;
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
 

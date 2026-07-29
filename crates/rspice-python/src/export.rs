@@ -29,7 +29,7 @@ use rspice_core::Complex64;
 
 // The Touchstone writer lives in core so the CLI and the desktop runner emit
 // byte-identical files; the result types keep reaching it through this module.
-pub(crate) use rspice_core::analysis::advanced::s_param::{
+pub(crate) use rspice_core::analysis::s_param::{
     TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, touchstone, touchstone_extension,
 };
 

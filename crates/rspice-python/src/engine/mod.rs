@@ -21,9 +21,9 @@ use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
-use rspice_core::analysis::advanced::harmonic_balance::{HbConfig, HbTone};
-use rspice_core::analysis::advanced::pac::{PacConfig, PacSweepType};
-use rspice_core::analysis::advanced::stb::{StbConfig, StbSweepType};
+use rspice_core::analysis::harmonic_balance::{HbConfig, HbTone};
+use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+use rspice_core::analysis::stb::{StbConfig, StbSweepType};
 use rspice_core::analysis::{AcSensitivityOutput, Distribution};
 use rspice_core::netlist::{
     AnalysisCommand, DcSecondSweep, DcSweepMode, DcSweepSpec, FreqVariation, PoleZeroAnalysisType,
@@ -35,7 +35,7 @@ use rspice_core::{
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
-use rspice_core::analysis::advanced::s_param;
+use rspice_core::analysis::s_param;
 
 use crate::abort::{ActiveRuns, run_interruptible};
 use crate::config::{PyIntegrationMethod, PySimulationConfig};

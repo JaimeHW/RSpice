@@ -24,7 +24,7 @@ impl PyHbResult {
     fn spectral_voltage(
         &self,
         node: &str,
-    ) -> PyResult<&rspice_core::analysis::advanced::harmonic_balance::SpectralVoltage> {
+    ) -> PyResult<&rspice_core::analysis::harmonic_balance::SpectralVoltage> {
         self.inner
             .spectral_voltages
             .iter()

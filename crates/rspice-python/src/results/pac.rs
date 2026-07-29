@@ -11,7 +11,7 @@ use super::*;
 #[pyclass(name = "PacResult", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyPacResult {
-    inner: rspice_core::analysis::advanced::PacResult,
+    inner: rspice_core::analysis::PacResult,
     #[pyo3(get)]
     pub converged: bool,
 }
@@ -156,7 +156,7 @@ impl PyPacResult {
         let (fundamental_frequency, sideband_min, sideband_max, iterations, residual, converged) =
             sweep;
         let (node_names, branch_names) = names;
-        let mut inner = rspice_core::analysis::advanced::PacResult::new(
+        let mut inner = rspice_core::analysis::PacResult::new(
             fundamental_frequency,
             frequencies.clone(),
             sideband_min,
@@ -172,7 +172,7 @@ impl PyPacResult {
                 }
             }
         }
-        let mut matrix = rspice_core::analysis::advanced::ConversionMatrix::new(
+        let mut matrix = rspice_core::analysis::ConversionMatrix::new(
             fundamental_frequency,
             sideband_min,
             sideband_max,
