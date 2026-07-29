@@ -7673,6 +7673,15 @@ endmodule
             .unwrap_or_else(|error| {
                 panic!("{name}: shipped device voltage update failed: {error}")
             });
+        device
+            .try_set_analysis_step(true, false)
+            .unwrap_or_else(|error| panic!("{name}: enter initial analysis step: {error}"));
+        device.try_evaluate().unwrap_or_else(|error| {
+            panic!("{name}: shipped device native initial-step evaluation failed: {error}")
+        });
+        device
+            .try_set_analysis_step(false, false)
+            .unwrap_or_else(|error| panic!("{name}: leave initial analysis step: {error}"));
         shipped_probe_trace(name, "evaluate:start");
         let currents = device.try_evaluate().unwrap_or_else(|error| {
             panic!("{name}: shipped device native evaluate failed: {error}")
@@ -7832,6 +7841,10 @@ endmodule
             ("bsimimg", "di") => Some(shipped_device_terminal_bias(name, 0)),
             ("bsimimg", "si") => Some(shipped_device_terminal_bias(name, 2)),
             ("bsimimg", "ge" | "gi") => Some(shipped_device_terminal_bias(name, 1)),
+            ("vbic13_4t", "cx" | "ci") => Some(shipped_device_terminal_bias(name, 0)),
+            ("vbic13_4t", "bx" | "bi" | "bp") => Some(shipped_device_terminal_bias(name, 1)),
+            ("vbic13_4t", "ei") => Some(shipped_device_terminal_bias(name, 2)),
+            ("vbic13_4t", "si") => Some(shipped_device_terminal_bias(name, 3)),
             _ => None,
         }
     }
