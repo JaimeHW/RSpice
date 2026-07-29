@@ -1284,14 +1284,6 @@ impl Diode {
         };
     }
 
-    /// Set junction capacitance parameters
-    pub fn with_capacitance(mut self, cj0: Value, vj: Value, m: Value, tt: Value) -> Self {
-        self.cj0 = cj0;
-        self.vj = vj;
-        self.m = m;
-        self.tt = tt;
-        self
-    }
 
     /// Junction charge and capacitance at `vd` for transient integration
     /// (dioload.c): depletion charge with the F1/F2/F3 polynomial

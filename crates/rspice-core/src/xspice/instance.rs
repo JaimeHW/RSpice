@@ -2467,17 +2467,6 @@ impl XspiceInstance {
         probes
     }
 
-    /// Branch ordinal for a scalar analog control port.
-    pub fn branch_control_ordinal(&self, port_name: &str) -> Option<usize> {
-        let index = *self.port_indices.get(port_name)?;
-        match self.connections.get(index)? {
-            PortConnection::CurrentProbe { branch_ordinal, .. }
-            | PortConnection::BranchCurrent { branch_ordinal }
-            | PortConnection::Hybrid { branch_ordinal, .. } => Some(*branch_ordinal),
-            PortConnection::NamedBranchCurrent { branch_ordinal, .. } => *branch_ordinal,
-            _ => None,
-        }
-    }
 
     /// Branch ordinal for one element of an analog vector control port.
     pub fn branch_vector_control_ordinal(&self, port_name: &str, index: usize) -> Option<usize> {

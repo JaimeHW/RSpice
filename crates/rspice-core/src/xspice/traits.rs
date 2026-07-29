@@ -548,12 +548,6 @@ impl ParamSpec {
         self
     }
 
-    /// Set maximum value
-    pub fn with_max(mut self, max: Value) -> Self {
-        self.max = Some(max);
-        self.max_is_soft = false;
-        self
-    }
 
     /// Set value range
     pub fn with_range(mut self, min: Value, max: Value) -> Self {
@@ -564,28 +558,8 @@ impl ParamSpec {
         self
     }
 
-    /// Set a documented minimum that the model clamps at runtime.
-    pub fn with_soft_min(mut self, min: Value) -> Self {
-        self.min = Some(min);
-        self.min_is_soft = true;
-        self
-    }
 
-    /// Set a documented maximum that the model clamps at runtime.
-    pub fn with_soft_max(mut self, max: Value) -> Self {
-        self.max = Some(max);
-        self.max_is_soft = true;
-        self
-    }
 
-    /// Set a documented range that the model clamps at runtime.
-    pub fn with_soft_range(mut self, min: Value, max: Value) -> Self {
-        self.min = Some(min);
-        self.max = Some(max);
-        self.min_is_soft = true;
-        self.max_is_soft = true;
-        self
-    }
 
     /// Set minimum vector length
     pub fn with_vector_min_len(mut self, min_len: usize) -> Self {

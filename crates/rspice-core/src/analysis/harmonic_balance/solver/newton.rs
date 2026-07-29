@@ -6,20 +6,6 @@ use crate::solver::limit_pn_voltage;
 use std::f64::consts::PI;
 
 impl HbSolver {
-    /// Full Newton-Raphson iteration for nonlinear HB analysis
-    ///
-    /// Advanced implementation following standard methodology:
-    /// 1. Try direct Newton-Raphson first
-    /// 2. If that fails, use source stepping (ramp sources from 0 to full)
-    /// 3. Use GMIN as a constant stabilizer throughout
-    ///
-    /// The Jacobian includes:
-    /// - Linear part: block-diagonal Y = G + jωC + 1/(jωL) per harmonic
-    /// - Nonlinear part: FFT-based convolution of time-domain Jacobians
-    /// - GMIN: diagonal conductance for numerical stability
-    pub fn solve_newton(&mut self, state: &mut HbSolverState) -> Result<(), HbError> {
-        self.solve_newton_with_abort(state, &NoAbort)
-    }
 
     /// Full nonlinear HB solve with cooperative cancellation.
     pub fn solve_newton_with_abort(

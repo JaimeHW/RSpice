@@ -282,32 +282,7 @@ impl ArcLengthContinuation {
         (x_pred, lambda_pred.clamp(0.0, 1.0))
     }
 
-    /// Compute the arc-length constraint residual
-    ///
-    /// The constraint is: ||x - x_prev||² + (λ - λ_prev)² - Δs² = 0
-    ///
-    /// Using a normalized form orthogonal to the tangent for better conditioning.
-    pub fn constraint_residual(&self, x: &[Value], lambda: Value) -> Value {
-        // Arc-length constraint using tangent projection
-        // N = (x - x_prev) · tangent_x + (λ - λ_prev) · tangent_λ - Δs = 0
-        let mut proj = 0.0;
 
-        for ((&xi, &xi_prev), &ti) in x.iter().zip(self.x_prev.iter()).zip(self.tangent_x.iter()) {
-            proj += (xi - xi_prev) * ti;
-        }
-        proj += (lambda - self.lambda_prev) * self.tangent_lambda;
-
-        proj - self.arc_step
-    }
-
-    /// Compute constraint Jacobian entries
-    ///
-    /// Returns (dN/dx, dN/dλ) for use in augmented Newton system
-    pub fn constraint_jacobian(&self) -> (&[Value], Value) {
-        // dN/dx_i = tangent_x_i
-        // dN/dλ = tangent_λ
-        (&self.tangent_x, self.tangent_lambda)
-    }
 
     /// Update tangent direction from converged corrector
     ///

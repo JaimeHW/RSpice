@@ -23,7 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::manager::{ModelDefinition, ModelType, SubcircuitDefinition};
+use super::manager::{ModelDefinition, ModelType};
 
 //=============================================================================
 // Library Section (Corner)
@@ -235,14 +235,6 @@ impl ParsedSubcircuit {
         }
     }
 
-    /// Convert to SubcircuitDefinition for library manager
-    pub fn to_subcircuit_definition(&self, library: impl Into<Arc<str>>) -> SubcircuitDefinition {
-        let mut def = SubcircuitDefinition::new(self.name.clone(), self.pins.clone(), library);
-        if let Some(ref desc) = self.description {
-            def = def.with_description(desc.clone());
-        }
-        def
-    }
 }
 
 //=============================================================================
@@ -1221,21 +1213,7 @@ impl LibParseResult {
             .find(|s| s.name.eq_ignore_ascii_case(name))
     }
 
-    /// Get all models from a specific section
-    pub fn models_in_section(&self, section_name: &str) -> Vec<&ParsedModel> {
-        self.get_section(section_name)
-            .map(|s| s.models.iter().collect())
-            .unwrap_or_default()
-    }
 
-    /// Get all models (top-level + all sections)
-    pub fn all_models(&self) -> Vec<&ParsedModel> {
-        let mut models: Vec<_> = self.top_level_models.iter().collect();
-        for section in &self.sections {
-            models.extend(section.models.iter());
-        }
-        models
-    }
 
     /// Find a model by name (searches all sections)
     pub fn find_model(&self, name: &str) -> Option<&ParsedModel> {

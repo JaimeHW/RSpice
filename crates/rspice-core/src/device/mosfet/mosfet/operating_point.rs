@@ -255,42 +255,7 @@ impl Mosfet {
         self.gate_charges().2
     }
 
-    /// Calculate gate current contribution for transient: Ig = dQg/dt
-    ///
-    /// Given previous charges and timestep, computes:
-    /// - Igs = (Qgs - Qgs_prev) / dt
-    /// - Igd = (Qgd - Qgd_prev) / dt
-    /// - Igb = (Qgb - Qgb_prev) / dt
-    pub fn gate_currents(
-        &self,
-        qgs_prev: Value,
-        qgd_prev: Value,
-        qgb_prev: Value,
-        dt: Value,
-    ) -> (Value, Value, Value) {
-        if dt <= 0.0 {
-            return (0.0, 0.0, 0.0);
-        }
-        let (qgs, qgd, qgb) = self.gate_charges();
-        (
-            (qgs - qgs_prev) / dt,
-            (qgd - qgd_prev) / dt,
-            (qgb - qgb_prev) / dt,
-        )
-    }
 
-    /// Calculate source/drain series resistance (per side)
-    /// Returns resistance in Ohms
-    pub fn source_drain_resistance(&self) -> Value {
-        // Rsd = RDSW / W (per side, so total is 2x)
-        // If RSH is specified, add sheet resistance contribution
-        if self.rsh > 0.0 {
-            // Assume 1 square of S/D diffusion
-            self.rdsw / (self.w * 1e6) + self.rsh
-        } else {
-            self.rdsw / (self.w * 1e6)
-        }
-    }
 
     /// Calculate W/L ratio
     pub fn wl_ratio(&self) -> Value {

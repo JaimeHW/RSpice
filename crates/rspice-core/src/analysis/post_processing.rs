@@ -293,60 +293,7 @@ pub struct ImdResult {
 }
 
 impl ImdResult {
-    /// Calculate intercept points from two-tone test data
-    ///
-    /// # Arguments
-    /// * `f1`, `f2` - Input frequencies
-    /// * `input_level_dbm` - Input power per tone
-    /// * `fundamental_output_dbm` - Output power at fundamentals
-    /// * `imd2_output_dbm` - Output power at 2nd-order IMD products
-    /// * `imd3_output_dbm` - Output power at 3rd-order IMD products
-    pub fn from_two_tone_test(
-        f1: Value,
-        f2: Value,
-        input_level_dbm: Value,
-        fundamental_output_dbm: Value,
-        imd2_output_dbm: Value,
-        imd3_output_dbm: Value,
-    ) -> Self {
-        let gain_db = fundamental_output_dbm - input_level_dbm;
 
-        // OIP2 = Pout + (Pout - P_IMD2)
-        // The IMD2 product grows at 2x rate, so slope is 2:1
-        let oip2 = fundamental_output_dbm + (fundamental_output_dbm - imd2_output_dbm);
-        let iip2 = oip2 - gain_db;
-
-        // OIP3 = Pout + (Pout - P_IMD3) / 2
-        // The IMD3 product grows at 3x rate, so slope is 3:1
-        // OIP3 = Pout + (Pout - P_IMD3) / 2
-        let oip3 = fundamental_output_dbm + (fundamental_output_dbm - imd3_output_dbm) / 2.0;
-        let iip3 = oip3 - gain_db;
-
-        Self {
-            f1,
-            f2,
-            fundamental_levels: (fundamental_output_dbm, fundamental_output_dbm),
-            imd2_products: vec![
-                (f1 + f2, imd2_output_dbm),
-                ((f1 - f2).abs(), imd2_output_dbm),
-            ],
-            imd3_products: vec![
-                (2.0 * f1 - f2, imd3_output_dbm),
-                (2.0 * f2 - f1, imd3_output_dbm),
-            ],
-            oip2_dbm: oip2,
-            iip2_dbm: iip2,
-            oip3_dbm: oip3,
-            iip3_dbm: iip3,
-            gain_db,
-        }
-    }
-
-    /// Calculate 1dB compression point estimate from IP3
-    pub fn p1db_estimate(&self) -> Value {
-        // P1dB ≈ OIP3 - 9.6 dB (theoretical)
-        self.oip3_dbm - 9.6
-    }
 }
 
 //=============================================================================
@@ -504,27 +451,6 @@ impl SnrResult {
         }
     }
 
-    /// Calculate SINAD and ENOB from signal, noise, and distortion
-    pub fn with_distortion(
-        signal_power: Value,
-        noise_power: Value,
-        distortion_power: Value,
-    ) -> Self {
-        let nad = noise_power + distortion_power;
-        let sinad_db = if nad > 0.0 {
-            10.0 * (signal_power / nad).log10()
-        } else {
-            f64::INFINITY
-        };
-
-        // ENOB = (SINAD - 1.76) / 6.02
-        let enob = (sinad_db - 1.76) / 6.02;
-
-        let mut result = Self::from_powers(signal_power, noise_power);
-        result.sinad_db = Some(sinad_db);
-        result.enob = Some(enob);
-        result
-    }
 }
 
 //=============================================================================
@@ -540,36 +466,10 @@ pub fn rms(samples: &[Value]) -> Value {
     (sum_sq / samples.len() as Value).sqrt()
 }
 
-/// Calculate power spectrum (magnitude squared) from complex spectrum
-pub fn power_spectrum(spectrum: &[Complex64]) -> Vec<Value> {
-    spectrum.iter().map(|c| c.norm_sqr()).collect()
-}
 
-/// Calculate power in dB from linear power
-pub fn power_db(power: Value, reference: Value) -> Value {
-    if power <= 0.0 || reference <= 0.0 {
-        return f64::NEG_INFINITY;
-    }
-    10.0 * (power / reference).log10()
-}
 
-/// Calculate voltage/amplitude in dB from linear value
-pub fn amplitude_db(amplitude: Value, reference: Value) -> Value {
-    if amplitude <= 0.0 || reference <= 0.0 {
-        return f64::NEG_INFINITY;
-    }
-    20.0 * (amplitude / reference).log10()
-}
 
-/// Convert dB to linear (power)
-pub fn db_to_linear_power(db: Value) -> Value {
-    10.0_f64.powf(db / 10.0)
-}
 
-/// Convert dB to linear (voltage/amplitude)
-pub fn db_to_linear_amplitude(db: Value) -> Value {
-    10.0_f64.powf(db / 20.0)
-}
 
 //=============================================================================
 // Tests

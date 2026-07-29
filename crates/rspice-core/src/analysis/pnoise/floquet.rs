@@ -146,42 +146,9 @@ impl FloquetAnalyzer {
         self
     }
 
-    /// Set number of time samples per period for Jacobian integration
-    pub fn with_time_samples(mut self, n: usize) -> Self {
-        self.num_time_samples = n.max(16); // Minimum 16 samples
-        self
-    }
 
-    /// Set number of state variables
-    pub fn with_num_states(mut self, n: usize) -> Self {
-        self.num_states = n;
-        self
-    }
 
-    /// Initialize with time-varying Jacobian samples from PSS solution
-    ///
-    /// `jacobians[t][i][j]` = dI_i/dV_j at time t
-    ///
-    /// Time samples should be uniformly spaced over one period [0, T)
-    pub fn set_jacobian_samples(&mut self, jacobians: Vec<Vec<Vec<Value>>>) {
-        if jacobians.is_empty() {
-            return;
-        }
 
-        self.num_time_samples = jacobians.len();
-        if let Some(first) = jacobians.first() {
-            self.num_states = first.len();
-        }
-
-        self.jacobian_samples = jacobians;
-    }
-
-    /// Set periodic waveform samples for ISF computation
-    ///
-    /// `waveform[node][time_sample]` = voltage at node at each time sample
-    pub fn set_waveform_samples(&mut self, waveforms: Vec<Vec<Value>>) {
-        self.waveform_samples = waveforms;
-    }
 
     /// Compute Floquet analysis from Jacobian samples
     ///
@@ -577,40 +544,14 @@ impl FloquetAnalyzer {
         }
     }
 
-    /// Get number of Floquet modes
-    pub fn num_modes(&self) -> usize {
-        self.modes.len()
-    }
 
     /// Get ISF RMS values for each node
     pub fn isf_rms(&self) -> &[Value] {
         &self.isf_rms
     }
 
-    /// Set Floquet modes manually
-    pub fn set_modes(&mut self, modes: Vec<FloquetMode>) {
-        self.modes = modes;
-        self.compute_exponents_from_modes();
-    }
 
-    /// Set Floquet multipliers manually
-    pub fn set_multipliers(&mut self, multipliers: Vec<Complex64>) {
-        self.floquet_multipliers = multipliers;
-        self.floquet_exponents = self
-            .floquet_multipliers
-            .iter()
-            .map(|m| m.ln() / self.period)
-            .collect();
-    }
 
-    fn compute_exponents_from_modes(&mut self) {
-        self.floquet_exponents = self.modes.iter().map(|m| m.exponent).collect();
-        self.floquet_multipliers = self
-            .floquet_exponents
-            .iter()
-            .map(|e| (e * self.period).exp())
-            .collect();
-    }
 
     /// Get Floquet exponents
     pub fn floquet_exponents(&self) -> &[Complex64] {
@@ -697,27 +638,6 @@ impl FloquetAnalyzer {
         10.0 * (phase_psd_rad2_hz / 2.0).log10()
     }
 
-    /// Compute phase sensitivity vector (PPV) at normalized time [0, 1]
-    ///
-    /// The PPV projects noise perturbations onto the phase deviation.
-    /// This is essentially the ISF sampled at the given time.
-    pub fn phase_sensitivity(&self, time_normalized: Value) -> Vec<Complex64> {
-        let n_samples = self.num_time_samples.max(1);
-
-        // Map normalized time to sample index
-        let t_idx = ((time_normalized * n_samples as f64) as usize) % n_samples;
-
-        self.isf_samples
-            .iter()
-            .map(|isf| {
-                if t_idx < isf.len() {
-                    Complex64::new(isf[t_idx], 0.0)
-                } else {
-                    Complex64::new(0.0, 0.0)
-                }
-            })
-            .collect()
-    }
 }
 
 // ============================================================================
@@ -775,10 +695,6 @@ impl FloquetMode {
         -self.exponent.re
     }
 
-    /// Get natural frequency ω = Im(λ)
-    pub fn natural_freq(&self) -> Value {
-        self.exponent.im
-    }
 }
 
 // ============================================================================

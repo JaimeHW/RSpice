@@ -231,32 +231,8 @@ impl CodeModelRegistry {
         }
     }
 
-    /// Get models by category
-    pub fn analog_models(&self) -> Vec<Arc<dyn CodeModel>> {
-        self.models
-            .values()
-            .filter(|m| m.is_analog_only())
-            .cloned()
-            .collect()
-    }
 
-    /// Get digital models
-    pub fn digital_models(&self) -> Vec<Arc<dyn CodeModel>> {
-        self.models
-            .values()
-            .filter(|m| m.is_digital_only())
-            .cloned()
-            .collect()
-    }
 
-    /// Get mixed-signal models (have both analog and digital ports)
-    pub fn mixed_models(&self) -> Vec<Arc<dyn CodeModel>> {
-        self.models
-            .values()
-            .filter(|m| !m.is_analog_only() && !m.is_digital_only())
-            .cloned()
-            .collect()
-    }
 }
 
 impl std::fmt::Debug for CodeModelRegistry {

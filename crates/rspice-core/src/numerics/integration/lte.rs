@@ -56,7 +56,6 @@ impl TransientLteReference {
 }
 
 
-type ChargeLteInputs<'a> = (&'a [Value], &'a [Value], &'a [Value], &'a [Value]);
 
 /// Local Truncation Error (LTE) estimator for adaptive timestep
 ///
@@ -720,69 +719,6 @@ impl LteEstimator {
         (lte, accept)
     }
 
-    /// Richardson extrapolation LTE estimate (more accurate)
-    ///
-    /// Uses solutions computed with steps h and h/2 to estimate the true error:
-    /// `LTE ≈ (x_h - x_{h/2}) / (2^p - 1)` where p is the method order.
-    ///
-    /// This provides a more accurate LTE estimate by exploiting the known
-    /// convergence order of the integration method.
-    ///
-    /// # Arguments
-    /// * `x_full` - Solution computed with full timestep h
-    /// * `x_half` - Solution computed with two half-steps h/2
-    ///
-    /// # Returns
-    /// (lte_estimate, should_accept)
-    pub fn richardson_estimate(&self, x_full: &[Value], x_half: &[Value]) -> (Value, bool) {
-        if x_full.len() != x_half.len() || x_full.is_empty() {
-            return (0.0, true);
-        }
-
-        let order_factor = (1u64 << self.method_order) as Value - 1.0; // 2^p - 1
-        let mut aggregate = 0.0_f64;
-        let accepted_point_global = match self.reference {
-            TransientLteReference::PredictorLocal
-            | TransientLteReference::PointLocal
-            | TransientLteReference::SignalLocal => 0.0,
-            TransientLteReference::PointGlobal | TransientLteReference::SignalGlobal => {
-                let Some(reference) = self.accepted_point_global_reference() else {
-                    return (0.0, true);
-                };
-                reference
-            }
-        };
-
-        for (index, (&full, &half)) in x_full.iter().zip(x_half.iter()).enumerate() {
-            if !full.is_finite() || !half.is_finite() {
-                return (Value::INFINITY, false);
-            }
-            // Richardson extrapolation error estimate
-            let richardson_error = (half - full).abs() / order_factor;
-
-            let reference = if self.reference == TransientLteReference::PredictorLocal {
-                half.abs().max(full.abs())
-            } else {
-                self.accepted_reference_magnitude(index, accepted_point_global)
-            };
-            let scale = self.lte_scale_denominator(reference);
-            let normalized = richardson_error / scale;
-
-            if self.reference == TransientLteReference::PredictorLocal {
-                aggregate = aggregate.max(normalized);
-            } else {
-                aggregate += normalized * normalized;
-            }
-        }
-
-        let lte = if self.reference == TransientLteReference::PredictorLocal {
-            aggregate
-        } else {
-            (aggregate / x_full.len() as Value).sqrt()
-        };
-        let accept = lte <= self.reltol;
-        (lte, accept)
-    }
 
     /// Get recommended timestep scaling factor based on LTE
     /// Uses method order for proper scaling exponent
@@ -931,40 +867,6 @@ impl LteEstimator {
         (max_lte, accept)
     }
 
-    /// Combined voltage and charge LTE estimation
-    ///
-    /// Uses both voltage-based and charge-based LTE to determine timestep.
-    /// Takes the maximum of both to ensure both voltages and charges are
-    /// accurately integrated.
-    ///
-    /// # Arguments
-    /// * `voltages` - Current node voltages
-    /// * `dt` - Current timestep
-    /// * `charges` - Gate/junction charges (if available)
-    /// * `prev_charges` - Previous gate/junction charges
-    /// * `currents` - Node currents
-    /// * `prev_currents` - Previous node currents
-    pub fn estimate_combined(
-        &self,
-        voltages: &[Value],
-        dt: Value,
-        charges: Option<ChargeLteInputs<'_>>,
-    ) -> (Value, bool) {
-        // Standard voltage-based LTE
-        let (v_lte, v_accept) = self.estimate(voltages, dt);
-
-        // Charge-based LTE if charge data provided
-        let (combined_lte, combined_accept) = if let Some((q_curr, q_prev, i_curr, i_prev)) =
-            charges
-        {
-            let (q_lte, q_accept) = self.estimate_charge_lte(q_curr, q_prev, i_curr, i_prev, dt);
-            (v_lte.max(q_lte), v_accept && q_accept)
-        } else {
-            (v_lte, v_accept)
-        };
-
-        (combined_lte, combined_accept)
-    }
 
     /// Restart predictor history while retaining signal-history LTE references.
     pub fn restart_history(&mut self) {

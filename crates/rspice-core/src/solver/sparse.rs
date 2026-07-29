@@ -300,27 +300,6 @@ fn componentwise_backward_error(
 }
 
 impl StaticMatrix {
-    /// Create a zero-valued matrix with the same sparsity structure.
-    ///
-    /// This is used for residual probes that must stamp into an independent
-    /// numeric workspace while preserving O(1) matrix-entry lookup.
-    pub fn clone_structure(&self) -> Self {
-        Self {
-            nrows: self.nrows,
-            ncols: self.ncols,
-            csc: self.csc.clone(),
-            values: vec![0.0; self.values.len()],
-            max_row_nnz: self.max_row_nnz,
-            position_map: self.position_map.clone(),
-            lu: None,
-            klu: None,
-            probe_values: None,
-            probe_rhs: None,
-            residual_scratch: Vec::new(),
-            residual_gross_scratch: Vec::new(),
-            stamping_error: None,
-        }
-    }
 
     /// Run `f` against this matrix with zeroed scratch values and RHS swapped
     /// in, restoring the live values afterwards.
@@ -579,23 +558,6 @@ impl StaticMatrix {
         &mut self.values
     }
 
-    /// Compute infinity norm of the scaled residual `A*x-b`.
-    ///
-    /// Each row is normalized with a SPICE-like tolerance scale:
-    /// `abstol + reltol * max(|A*x|, |b|)`.
-    /// Returns `inf` when input vectors contain non-finite values.
-    ///
-    /// Takes `&mut self` to reuse the internal A*x scratch buffer; this is
-    /// evaluated once or twice per Newton iteration (merit + convergence).
-    pub fn scaled_residual_inf_norm(
-        &mut self,
-        solution: &[Value],
-        rhs: &[Value],
-        abstol: Value,
-        reltol: Value,
-    ) -> Result<Value, SolverError> {
-        self.scaled_residual_inf_norm_by_row(solution, rhs, reltol, |_| abstol)
-    }
 
     /// Compute infinity norm of the scaled residual `A*x-b` with row-specific
     /// absolute tolerances.
@@ -1648,10 +1610,6 @@ impl SparseLuSolver {
         finite_solution_or_singular((0..n).map(|i| b[(i, 0)]).collect())
     }
 
-    /// Clear cached symbolic factorization (call when matrix structure changes)
-    pub fn clear_cache(&mut self) {
-        self.symbolic_lu = None;
-    }
 }
 
 impl Default for SparseLuSolver {
@@ -1660,12 +1618,6 @@ impl Default for SparseLuSolver {
     }
 }
 
-/// Solve a sparse system Ax = b (convenience function)
-pub fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
-    let sparse_mat = triplets.to_sparse_col_mat()?;
-    let mut solver = SparseLuSolver::new();
-    solver.solve(&sparse_mat, rhs)
-}
 
 /// Simple Gaussian elimination for small systems or fallback
 pub(crate) fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Value>, SolverError> {

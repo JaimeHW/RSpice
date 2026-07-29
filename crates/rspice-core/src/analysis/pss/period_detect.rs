@@ -74,11 +74,6 @@ impl PeriodDetector {
         }
     }
 
-    /// Set FFT size for frequency estimation (must be power of 2)
-    pub fn with_fft_size(mut self, size: usize) -> Self {
-        self.fft_size = size.next_power_of_two();
-        self
-    }
 
     fn has_valid_input_shape(time: &[Value], values: &[Value], min_len: usize) -> bool {
         values.len() == time.len() && time.len() >= min_len
@@ -600,68 +595,6 @@ impl PeriodDetector {
         })
     }
 
-    /// Refine period estimate using Newton iteration on the BVP residual
-    ///
-    /// Given an approximate period T, refines it by finding T* where
-    /// the derivative of the residual with respect to period is zero.
-    pub fn refine_period(
-        &self,
-        initial_period: Value,
-        state_end: &[Value],
-        state_start: &[Value],
-        d_state_end_dt: &[Value],
-    ) -> Value {
-        if !initial_period.is_finite() || initial_period <= 0.0 {
-            return self.min_period.max(0.0);
-        }
-
-        // The residual is r(T) = x(T) - x(0)
-        // We want dr/dT = dx/dT(T) = 0 at the saddle point
-        // For autonomous circuits, dx/dT = f(x(T)) where f is the RHS
-
-        // Newton step: T_new = T - r · (dr/dT)^(-1)
-        // Approximate dr/dT using the state derivative at T
-
-        let residual_norm_sq: Value = state_end
-            .iter()
-            .zip(state_start.iter())
-            .map(|(e, s)| (e - s).powi(2))
-            .sum();
-
-        if !residual_norm_sq.is_finite() || residual_norm_sq < 1e-20 {
-            return initial_period; // Already converged
-        }
-
-        // Inner product of residual with state derivative
-        let residual_dot_deriv: Value = state_end
-            .iter()
-            .zip(state_start.iter())
-            .zip(d_state_end_dt.iter())
-            .map(|((e, s), d)| (e - s) * d)
-            .sum();
-
-        let deriv_norm_sq: Value = d_state_end_dt.iter().map(|d| d * d).sum();
-
-        if !deriv_norm_sq.is_finite() || deriv_norm_sq < 1e-20 {
-            return initial_period;
-        }
-
-        // Newton update for period
-        let delta_t = -residual_dot_deriv / deriv_norm_sq;
-        if !delta_t.is_finite() {
-            return initial_period;
-        }
-
-        // Limit period change
-        let max_change = initial_period * 0.1;
-        let delta_t_limited = delta_t.clamp(-max_change, max_change);
-
-        let refined = initial_period + delta_t_limited;
-        if !refined.is_finite() {
-            return initial_period.max(self.min_period);
-        }
-        refined.max(self.min_period)
-    }
 }
 
 impl Default for PeriodDetector {

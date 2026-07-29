@@ -1559,25 +1559,6 @@ impl CurrentSources {
         self.pwl_waveforms.push(None);
     }
 
-    /// Add current source with AC parameters
-    pub fn add_with_ac(
-        &mut self,
-        name: String,
-        node_pos: NodeId,
-        node_neg: NodeId,
-        dc_value: Value,
-        ac_magnitude: Value,
-        ac_phase: Value,
-    ) {
-        self.names.push(name);
-        self.node_pos.push(node_pos);
-        self.node_neg.push(node_neg);
-        self.dc_values.push(dc_value);
-        self.ac_magnitudes.push(ac_magnitude);
-        self.ac_phases.push(ac_phase);
-        self.source_specs.push(None);
-        self.pwl_waveforms.push(None);
-    }
 
     /// Add current source with AC and transient specification.
     pub fn add_with_ac_and_spec(
@@ -1677,13 +1658,6 @@ impl CurrentSources {
         self.transient_context = None;
     }
 
-    /// Set AC parameters for existing source
-    pub fn set_ac(&mut self, index: usize, magnitude: Value, phase: Value) {
-        if index < self.ac_magnitudes.len() {
-            self.ac_magnitudes[index] = magnitude;
-            self.ac_phases[index] = phase;
-        }
-    }
 
     pub fn len(&self) -> usize {
         self.names.len()

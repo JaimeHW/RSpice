@@ -262,10 +262,6 @@ pub struct StabilityMargins {
 }
 
 impl StabilityMargins {
-    /// Check if margins meet minimum thresholds
-    pub fn meets_thresholds(&self, min_gm_db: Value, min_pm_deg: Value) -> bool {
-        self.gain_margin_db >= min_gm_db && self.phase_margin_deg >= min_pm_deg
-    }
 
     /// Check if the system is stable (positive margins)
     pub fn is_stable(&self) -> bool {
@@ -414,13 +410,6 @@ impl StbResult {
             .collect()
     }
 
-    /// Get Nyquist contour
-    pub fn nyquist_contour(&self) -> Vec<(Value, Value)> {
-        self.nyquist_points
-            .iter()
-            .map(|p| (p.real, p.imag))
-            .collect()
-    }
 
     /// Check if stable
     pub fn is_stable(&self) -> bool {
@@ -667,45 +656,7 @@ impl StbAnalyzer {
         }
     }
 
-    /// Create a test loop gain (single-pole system with gain)
-    pub fn create_test_loop_gain(&self, dc_gain_db: Value, pole_freq: Value) -> StbResult {
-        let frequencies = self.config.frequency_points();
-        let dc_gain = 10.0_f64.powf(dc_gain_db / 20.0);
 
-        let loop_gains: Vec<Complex64> = frequencies
-            .iter()
-            .map(|&f| {
-                let s = Complex64::new(0.0, 2.0 * PI * f);
-                let pole = 2.0 * PI * pole_freq;
-                Complex64::new(dc_gain, 0.0) / (1.0 + s / pole)
-            })
-            .collect();
-
-        self.analyze(&frequencies, &loop_gains)
-    }
-
-    /// Create a two-pole system (typical op-amp feedback)
-    pub fn create_two_pole_loop_gain(
-        &self,
-        dc_gain_db: Value,
-        pole1_freq: Value,
-        pole2_freq: Value,
-    ) -> StbResult {
-        let frequencies = self.config.frequency_points();
-        let dc_gain = 10.0_f64.powf(dc_gain_db / 20.0);
-
-        let loop_gains: Vec<Complex64> = frequencies
-            .iter()
-            .map(|&f| {
-                let s = Complex64::new(0.0, 2.0 * PI * f);
-                let p1 = 2.0 * PI * pole1_freq;
-                let p2 = 2.0 * PI * pole2_freq;
-                Complex64::new(dc_gain, 0.0) / ((1.0 + s / p1) * (1.0 + s / p2))
-            })
-            .collect();
-
-        self.analyze(&frequencies, &loop_gains)
-    }
 }
 
 //=============================================================================

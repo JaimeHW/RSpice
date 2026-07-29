@@ -578,15 +578,6 @@ impl Bsim3 {
         self.region
     }
 
-    /// Get region as string
-    pub fn region_str(&self) -> &'static str {
-        match self.region {
-            Bsim3Region::Cutoff => "cutoff",
-            Bsim3Region::Linear => "linear",
-            Bsim3Region::Saturation => "saturation",
-            Bsim3Region::Subthreshold => "subthreshold",
-        }
-    }
 
     /// Calculate gate-source capacitance
     pub fn cgs(&self) -> Value {

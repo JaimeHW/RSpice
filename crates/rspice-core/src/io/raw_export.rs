@@ -120,15 +120,6 @@ impl RawExporter {
         }
     }
 
-    /// Create a new raw exporter for AC analysis
-    pub fn new_ac(title: &str) -> Self {
-        Self {
-            title: title.to_string(),
-            plot_name: "AC Analysis".to_string(),
-            variables: vec![RawVariable::frequency()],
-            data: Vec::new(),
-        }
-    }
 
     /// Add a voltage variable
     pub fn add_voltage(&mut self, node: &str) {
@@ -236,12 +227,6 @@ impl RawExporter {
         Ok(())
     }
 
-    /// Write to string in ASCII format
-    pub fn to_ascii_string(&self) -> String {
-        let mut buffer = Vec::new();
-        self.write(&mut buffer, RawFormat::Ascii).unwrap();
-        String::from_utf8_lossy(&buffer).into_owned()
-    }
 }
 
 fn invalid_data(message: impl Into<String>) -> io::Error {

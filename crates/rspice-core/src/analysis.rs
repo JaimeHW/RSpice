@@ -94,7 +94,7 @@ pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};
 pub use pole_zero::{Matrix as PzMatrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
 pub use pstb::{FloquetMultiplier, PstbAnalyzer, PstbConfig, PstbResult, StabilityType};
-pub use pxf::{PxfAnalyzer, PxfConfig, PxfError, PxfResult, PxfSweepType, TransferPoint};
+pub use pxf::{PxfConfig, PxfError, PxfResult, PxfSweepType, TransferPoint};
 pub use s_param::{
     NetworkError, Port, PortError, SMatrix, SParameterPort, SParameterResult, TwoPortNoise,
     collect_ports, derive_two_port_noise, invert_complex_matrix, s_from_y, set_excitations,
@@ -106,7 +106,7 @@ pub use sensitivity::{
 pub use stb::{
     BodePoint, NyquistPoint, StabilityMargins, StbAnalyzer, StbConfig, StbResult, StbSweepType,
 };
-pub use transfer::{TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult};
+pub use transfer::{TransferFunctionConfig, TransferFunctionResult};
 pub use pss::{
     PeriodDetector, PeriodEstimate, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver,
     ShootingState,

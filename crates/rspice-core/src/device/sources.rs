@@ -225,33 +225,6 @@ impl CurrentSource {
         }
     }
 
-    /// Get current at given time for transient analysis
-    pub fn current_at(&self, time: Value) -> Value {
-        // Similar implementation to VoltageSource::voltage_at
-        match &self.transient_fn {
-            None => self.dc_value,
-            Some(TransientSource::Sin {
-                offset,
-                amplitude,
-                frequency,
-                delay,
-                damping,
-                phase,
-            }) => {
-                if time < *delay {
-                    *offset
-                } else {
-                    let t = time - delay;
-                    offset
-                        + amplitude
-                            * (-damping * t).exp()
-                            * (2.0 * std::f64::consts::PI * frequency * t + phase).sin()
-                }
-            }
-            // Other transient sources follow same pattern as voltage source
-            _ => self.dc_value,
-        }
-    }
 }
 
 impl LinearDevice for CurrentSource {

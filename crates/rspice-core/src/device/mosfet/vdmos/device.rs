@@ -1696,16 +1696,6 @@ impl Vdmos {
         (id_plus - id_minus) / (2.0 * delta)
     }
 
-    /// Calculate body diode conductance
-    pub fn gdiode(&self, vds: Value) -> Value {
-        if vds < 0.0 {
-            let vt = 0.0259;
-            let vd = -vds;
-            (self.is / (self.n * vt)) * (vd / (self.n * vt)).exp()
-        } else {
-            1e-12
-        }
-    }
 
     //=========================================================================
     // Voltage-Dependent Capacitance Calculations

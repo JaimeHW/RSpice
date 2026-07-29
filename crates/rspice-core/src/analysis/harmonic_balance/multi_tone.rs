@@ -219,18 +219,5 @@ impl FrequencyMap {
         self.indices.iter().position(|i| i == freq_index)
     }
 
-    /// Get all frequencies
-    pub fn all_frequencies(&self) -> &[Value] {
-        &self.frequencies
-    }
 
-    /// Get positive (or zero) frequency indices only
-    /// For real signals, we only need one-sided spectrum
-    pub fn positive_frequencies(&self) -> Vec<(usize, &FrequencyIndex)> {
-        self.indices
-            .iter()
-            .enumerate()
-            .filter(|(_, idx)| idx.frequency(&self.tone_frequencies) >= 0.0)
-            .collect()
-    }
 }

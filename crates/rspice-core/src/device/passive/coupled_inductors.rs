@@ -169,15 +169,7 @@ impl CoupledInductorPair {
         (self.l1 / self.l2).sqrt()
     }
 
-    /// Get leakage inductance of primary (for k < 1)
-    pub fn leakage_primary(&self) -> Value {
-        self.l1 * (1.0 - self.k * self.k)
-    }
 
-    /// Get leakage inductance of secondary (for k < 1)
-    pub fn leakage_secondary(&self) -> Value {
-        self.l2 * (1.0 - self.k * self.k)
-    }
 
     /// DC stamp for the coupling: intentionally nothing.
     ///

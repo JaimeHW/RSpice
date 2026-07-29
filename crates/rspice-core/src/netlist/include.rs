@@ -1276,14 +1276,6 @@ impl IncludeProcessor {
         self.current_depth = 0;
     }
 
-    /// Set base directory (useful when changing context)
-    pub fn set_base_dir(&mut self, path: &Path) {
-        self.base_dir = if path.is_file() {
-            path.parent().unwrap_or(Path::new(".")).to_path_buf()
-        } else {
-            path.to_path_buf()
-        };
-    }
 }
 
 impl Default for IncludeProcessor {

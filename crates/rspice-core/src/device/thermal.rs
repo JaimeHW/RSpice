@@ -205,50 +205,7 @@ impl ThermalNetwork {
         }
     }
 
-    /// Create a multi-pole Foster network
-    ///
-    /// Foster network: Each (R, C) pair is a parallel RC connected in series
-    /// Input pairs are (Rth, Cth) tuples from junction toward ambient
-    pub fn foster(rc_pairs: &[(Value, Value)]) -> Self {
-        let elements: Vec<ThermalRcElement> = rc_pairs
-            .iter()
-            .map(|&(r, c)| ThermalRcElement::new(r, c))
-            .collect();
 
-        let rth_total: Value = elements.iter().map(|e| e.rth).sum();
-
-        Self {
-            network_type: ThermalNetworkType::Foster,
-            elements,
-            t_ambient: TAMB_DEFAULT,
-            t_junction: TAMB_DEFAULT,
-            rth_total,
-            power: 0.0,
-            enabled: true,
-        }
-    }
-
-    /// Create a multi-pole Cauer (ladder) network
-    ///
-    /// Cauer network: Series R followed by grounded C (physically meaningful)
-    pub fn cauer(rc_pairs: &[(Value, Value)]) -> Self {
-        let elements: Vec<ThermalRcElement> = rc_pairs
-            .iter()
-            .map(|&(r, c)| ThermalRcElement::new(r, c))
-            .collect();
-
-        let rth_total: Value = elements.iter().map(|e| e.rth).sum();
-
-        Self {
-            network_type: ThermalNetworkType::Cauer,
-            elements,
-            t_ambient: TAMB_DEFAULT,
-            t_junction: TAMB_DEFAULT,
-            rth_total,
-            power: 0.0,
-            enabled: true,
-        }
-    }
 
     /// Create isothermal (no self-heating) model
     pub fn isothermal(temperature: Value) -> Self {
@@ -263,27 +220,8 @@ impl ThermalNetwork {
         }
     }
 
-    /// Set ambient temperature
-    pub fn with_ambient(mut self, t_amb: Value) -> Self {
-        self.t_ambient = t_amb;
-        self.t_junction = t_amb;
-        for elem in &mut self.elements {
-            elem.reset(t_amb);
-        }
-        self
-    }
 
-    /// Enable or disable self-heating
-    pub fn with_enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
-    }
 
-    /// Get current junction temperature
-    #[inline]
-    pub fn junction_temperature(&self) -> Value {
-        self.t_junction
-    }
 
     /// Get junction temperature in Kelvin
     #[inline]
@@ -291,79 +229,7 @@ impl ThermalNetwork {
         self.t_junction + KELVIN_OFFSET
     }
 
-    /// Update junction temperature for DC analysis
-    ///
-    /// Uses steady-state thermal model: Tj = Ta + P × Rth_total
-    pub fn update_dc(&mut self, power: Value) {
-        self.power = power;
 
-        if !self.enabled || self.network_type == ThermalNetworkType::Isothermal {
-            return;
-        }
-
-        self.t_junction = self.t_ambient + power * self.rth_total;
-
-        // Update internal nodes (for monitoring)
-        match self.network_type {
-            ThermalNetworkType::Foster => {
-                // Foster: Parallel RC sections, each sees full power
-                for elem in &mut self.elements {
-                    elem.temperature = self.t_ambient + elem.dc_temperature_rise(power);
-                }
-            }
-            ThermalNetworkType::Cauer => {
-                // Cauer: Series ladder, temperature drops across each R
-                let mut t_in = self.t_junction;
-                for elem in self.elements.iter_mut().rev() {
-                    let dt = elem.dc_temperature_rise(power);
-                    elem.temperature = t_in;
-                    t_in -= dt;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Update junction temperature for transient analysis
-    ///
-    /// Solves thermal network dynamics with given timestep
-    pub fn update_transient(&mut self, power: Value, dt: Value) {
-        self.power = power;
-
-        if !self.enabled || self.network_type == ThermalNetworkType::Isothermal {
-            return;
-        }
-
-        match self.network_type {
-            ThermalNetworkType::SinglePole => {
-                if let Some(elem) = self.elements.first_mut() {
-                    self.t_junction = elem.transient_update(power, self.t_ambient, dt);
-                }
-            }
-            ThermalNetworkType::Foster => {
-                // Foster: Independent parallel RC sections
-                self.t_junction = self.t_ambient;
-                for elem in &mut self.elements {
-                    let delta_t = elem.transient_update(power, 0.0, dt);
-                    self.t_junction += delta_t;
-                }
-            }
-            ThermalNetworkType::Cauer => {
-                // Cauer: Ladder from junction to ambient
-                // Solve from ambient toward junction
-                let mut t_prev = self.t_ambient;
-                for elem in self.elements.iter_mut().rev() {
-                    t_prev = elem.transient_update(power, t_prev, dt);
-                }
-                self.t_junction = self
-                    .elements
-                    .first()
-                    .map(|e| e.temperature)
-                    .unwrap_or(self.t_ambient);
-            }
-            ThermalNetworkType::Isothermal => {}
-        }
-    }
 
     /// Accept current state for next transient step
     pub fn accept_step(&mut self) {

@@ -59,10 +59,6 @@ impl ParametricValue {
         ParametricValue::Resolved(v)
     }
 
-    /// Create from an expression string
-    pub fn from_expr(s: &str) -> Self {
-        ParametricValue::Expression(s.to_string())
-    }
 
     /// Try to get the resolved value
     pub fn as_value(&self) -> Option<Value> {
@@ -951,33 +947,14 @@ impl XspicePort {
         XspicePort::Digital(node.into())
     }
 
-    /// Create an explicitly typed single digital port
-    pub fn explicit_digital(node: impl Into<String>) -> Self {
-        XspicePort::ExplicitDigital(node.into())
-    }
 
-    /// Create a single inverted digital port
-    pub fn digital_inverted(node: impl Into<String>) -> Self {
-        XspicePort::DigitalInverted(node.into())
-    }
 
     /// Create a digital vector from node names
     pub fn digital_vector(nodes: Vec<String>) -> Self {
         XspicePort::DigitalVector(nodes)
     }
 
-    /// Create a digital vector with explicit per-node inversion flags
-    pub fn digital_vector_mixed(nodes: Vec<XspiceDigitalNode>) -> Self {
-        XspicePort::DigitalVectorMixed(nodes)
-    }
 
-    /// Create a differential voltage port
-    pub fn diff_voltage(pos: impl Into<String>, neg: impl Into<String>) -> Self {
-        XspicePort::DifferentialVoltage {
-            pos: pos.into(),
-            neg: neg.into(),
-        }
-    }
 
     /// Check if this is an analog port
     pub fn is_analog(&self) -> bool {
@@ -2390,9 +2367,6 @@ impl StartupDirectiveEntry {
         self.voltage
     }
 
-    pub fn voltage_expression(&self) -> Option<&str> {
-        self.voltage_expr.as_deref()
-    }
 }
 
 /// One physical `.IC` or `.NODESET` card with its ordered assignments.

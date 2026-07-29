@@ -118,17 +118,7 @@ impl MeasurementResult {
         }
     }
 
-    /// Add time information
-    pub fn with_time(mut self, time: Value) -> Self {
-        self.time = Some(time);
-        self
-    }
 
-    /// Add index information
-    pub fn with_index(mut self, index: usize) -> Self {
-        self.index = Some(index);
-        self
-    }
 }
 
 //=============================================================================
@@ -303,15 +293,6 @@ impl Waveform {
         (sum_sq / self.values.len() as Value).sqrt()
     }
 
-    /// Get AC RMS (RMS with DC removed)
-    pub fn ac_rms(&self) -> Value {
-        if self.values.is_empty() {
-            return 0.0;
-        }
-        let dc = self.average();
-        let sum_sq: Value = self.values.iter().map(|v| (v - dc).powi(2)).sum();
-        (sum_sq / self.values.len() as Value).sqrt()
-    }
 
     /// Calculate overshoot as percentage of final value
     ///
@@ -746,46 +727,6 @@ impl Waveform {
         Ok(harmonic_sum_sq.sqrt() / fund_linear * 100.0)
     }
 
-    /// Calculate Spurious-Free Dynamic Range (SFDR)
-    ///
-    /// SFDR = 20 × log10(V_fundamental / V_largest_spur) in dB
-    pub fn sfdr(&self) -> Result<Value, MeasurementError> {
-        let (freqs, mags) = self.fft()?;
-
-        if freqs.len() < 3 {
-            return Err(MeasurementError::FftError(
-                "Insufficient FFT bins".to_string(),
-            ));
-        }
-
-        // Find fundamental (largest magnitude, excluding DC)
-        let mut fund_idx = 1;
-        let mut fund_mag = mags[1];
-
-        for (i, &mag) in mags.iter().enumerate().skip(2) {
-            if mag > fund_mag {
-                fund_mag = mag;
-                fund_idx = i;
-            }
-        }
-
-        // Find largest spur (excluding fundamental and its immediate neighbors)
-        let mut spur_mag = f64::NEG_INFINITY;
-
-        for (i, &mag) in mags.iter().enumerate().skip(1) {
-            if (i as i64 - fund_idx as i64).abs() > 2 {
-                spur_mag = spur_mag.max(mag);
-            }
-        }
-
-        if spur_mag == f64::NEG_INFINITY {
-            return Err(MeasurementError::CalculationError(
-                "No spurs found".to_string(),
-            ));
-        }
-
-        Ok(fund_mag - spur_mag)
-    }
 
     /// Detect fundamental frequency from FFT
     pub fn fundamental_frequency(&self) -> Result<Value, MeasurementError> {

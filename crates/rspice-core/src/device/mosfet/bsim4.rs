@@ -636,143 +636,13 @@ impl Bsim4 {
     // Noise Analysis Methods
     //=========================================================================
 
-    /// Calculate noise power spectral density at a given frequency
-    ///
-    /// Returns a NoiseSpectrum containing thermal, flicker, and total noise
-    pub fn calculate_noise_psd(&self, freq: Value, temp: Value) -> NoiseSpectrum {
-        let p = &self.params;
-        let (weff, leff) = self.effective_dimensions();
-        let cox = self.cox();
 
-        // Thermal voltage
-        let temp_k = temp + 273.15;
-        let k_t = K_BOLTZMANN * temp_k;
-
-        //---------------------------------------------------------------------
-        // Channel Thermal Noise: Sid_thermal = 4kT * gamma * gm
-        //---------------------------------------------------------------------
-        // gamma is the channel thermal noise coefficient (2/3 for long channel,
-        // can be higher for short channel due to hot electrons)
-        let gamma = p.tnoia * 2.0 / 3.0; // typically 1.0 for 65nm
-        let sid_thermal = 4.0 * k_t * gamma * self.gm;
-
-        //---------------------------------------------------------------------
-        // Flicker (1/f) Noise: Sid_flicker = Kf * Id^Af / (Cox * W * L * f^Ef)
-        //---------------------------------------------------------------------
-        let sid_flicker = if freq > 0.0 {
-            let area = weff * leff;
-            p.kf * self.id.abs().powf(p.af) / (cox * area * freq.powf(p.ef))
-        } else {
-            0.0
-        };
-
-        //---------------------------------------------------------------------
-        // Shot Noise (gate leakage): Sig = 2 * q * Ig
-        //---------------------------------------------------------------------
-        // For deep submicron, gate leakage can contribute shot noise
-        // Simplified: assume Ig ~ 1e-12 A/um^2 for 65nm
-        let ig = 1e-12 * weff * leff * 1e12; // A
-        let sig_shot = 2.0 * Q_ELECTRON * ig.abs();
-
-        //---------------------------------------------------------------------
-        // S/D Resistance Thermal Noise (output-referred current noise)
-        //---------------------------------------------------------------------
-        // Resistance thermal noise: Sv = 4kT * R, Si = 4kT / R
-        let rd = p.rdw / weff.max(1e-9); // Drain resistance (Ω)
-        let rs = p.rsw / weff.max(1e-9); // Source resistance (Ω)
-        let sid_rsd = 4.0 * k_t / (rd + rs).max(1e-3); // Current noise from R
-
-        //---------------------------------------------------------------------
-        // Induced Gate Noise (for high frequencies)
-        //---------------------------------------------------------------------
-        // Sig_induced = 4kT * (2/15) * (w^2 * Cgs^2 / gm)
-        let cgs = p.cgso * weff + 2.0 / 3.0 * cox * weff * leff;
-        let omega = 2.0 * std::f64::consts::PI * freq;
-        let sig_induced = if omega > 0.0 {
-            4.0 * k_t * (p.tnoib / 15.0) * omega.powi(2) * cgs.powi(2) / self.gm.max(1e-15)
-        } else {
-            0.0
-        };
-
-        NoiseSpectrum {
-            frequency: freq,
-            thermal: sid_thermal,
-            flicker: sid_flicker,
-            shot: sig_shot,
-            rsd: sid_rsd,
-            induced_gate: sig_induced,
-            total: sid_thermal + sid_flicker + sig_shot + sid_rsd + sig_induced,
-        }
-    }
-
-    /// Calculate flicker noise corner frequency
-    ///
-    /// Returns the frequency where flicker noise equals thermal noise
-    pub fn flicker_corner_freq(&self, temp: Value) -> Value {
-        let p = &self.params;
-        let (weff, leff) = self.effective_dimensions();
-        let cox = self.cox();
-        let temp_k = temp + 273.15;
-        let k_t = K_BOLTZMANN * temp_k;
-
-        // At corner: Sid_thermal = Sid_flicker
-        // 4kT*gamma*gm = Kf*Id^Af / (Cox*W*L*fc^Ef)
-        // fc^Ef = Kf*Id^Af / (4kT*gamma*gm*Cox*W*L)
-        // fc = (Kf*Id^Af / (4kT*gamma*gm*Cox*W*L))^(1/Ef)
-
-        let gamma = p.tnoia * 2.0 / 3.0;
-        let area = weff * leff;
-        let thermal = 4.0 * k_t * gamma * self.gm;
-
-        if thermal > 0.0 && p.ef != 0.0 {
-            let ratio = p.kf * self.id.abs().powf(p.af) / (thermal * cox * area);
-            ratio.powf(1.0 / p.ef).max(1.0) // At least 1 Hz
-        } else {
-            1e3 // Default 1kHz
-        }
-    }
 
     //=========================================================================
     // Self-Heating Methods
     //=========================================================================
 
-    /// Update self-heating temperature for transient simulation
-    ///
-    /// Uses a first-order RC thermal model: dT/dt = (P*Rth - T) / (Rth*Cth)
-    pub fn update_self_heating(&mut self, dt: Value) {
-        let p = &self.params;
 
-        if p.shmod == 0 || p.rth0 <= 0.0 {
-            // Self-heating disabled
-            self.delta_temp = 0.0;
-            return;
-        }
-
-        // Calculate power dissipation: P = Id * Vds
-        self.power_diss = (self.id * self.vds).abs();
-
-        // Steady-state temperature rise: dT_ss = P * Rth
-        let delta_temp_ss = self.power_diss * p.rth0;
-
-        // Time constant: tau = Rth * Cth
-        let tau = p.rth0 * p.cth0;
-
-        // First-order update: dT/dt = (dT_ss - dT) / tau
-        if tau > 0.0 {
-            let rate = (delta_temp_ss - self.delta_temp) / tau;
-            self.delta_temp += rate * dt;
-            // Clamp to physical limits
-            self.delta_temp = self.delta_temp.clamp(0.0, 200.0); // Max 200K rise
-        } else {
-            // Instantaneous (no thermal capacitance)
-            self.delta_temp = delta_temp_ss;
-        }
-    }
-
-    /// Get current device temperature including self-heating
-    pub fn effective_temperature(&self, ambient: Value) -> Value {
-        ambient + self.delta_temp
-    }
 
     /// Get current temperature rise (delta T)
     pub fn delta_temp(&self) -> Value {
@@ -784,60 +654,7 @@ impl Bsim4 {
         self.power_diss
     }
 
-    /// Reset self-heating state (for DC analysis)
-    pub fn reset_self_heating(&mut self) {
-        self.delta_temp = 0.0;
-        self.power_diss = 0.0;
-    }
 
-    /// Calculate steady-state self-heating temperature rise
-    pub fn steady_state_delta_temp(&self) -> Value {
-        let p = &self.params;
-        if p.shmod == 0 || p.rth0 <= 0.0 {
-            0.0
-        } else {
-            (self.id * self.vds).abs() * p.rth0
-        }
-    }
-}
-
-//=============================================================================
-// Noise Spectrum Result
-//=============================================================================
-
-/// Noise power spectral density components
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoiseSpectrum {
-    /// Frequency (Hz)
-    pub frequency: Value,
-    /// Channel thermal noise (A²/Hz)
-    pub thermal: Value,
-    /// Flicker (1/f) noise (A²/Hz)
-    pub flicker: Value,
-    /// Shot noise (A²/Hz)
-    pub shot: Value,
-    /// S/D resistance thermal noise (A²/Hz)
-    pub rsd: Value,
-    /// Induced gate noise (A²/Hz)
-    pub induced_gate: Value,
-    /// Total noise (A²/Hz)
-    pub total: Value,
-}
-
-impl NoiseSpectrum {
-    /// Get noise in dB relative to 1 A²/Hz
-    pub fn total_db(&self) -> Value {
-        10.0 * self.total.max(1e-30).log10()
-    }
-
-    /// Get equivalent input-referred noise voltage (V/√Hz)
-    pub fn input_referred_voltage(&self, gm: Value) -> Value {
-        if gm > 0.0 {
-            (self.total / gm.powi(2)).sqrt()
-        } else {
-            0.0
-        }
-    }
 }
 
 //=============================================================================

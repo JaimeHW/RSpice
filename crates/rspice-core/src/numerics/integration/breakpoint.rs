@@ -227,14 +227,6 @@ impl BreakpointManager {
                 .is_some_and(|existing| (*existing - time).abs() < tolerance)
     }
 
-    /// Add breakpoints from a periodic source (pulse edges, clock, etc.)
-    pub fn add_periodic(&mut self, start: Value, period: Value, end: Value) {
-        let mut t = start;
-        while t <= end {
-            self.add(t);
-            t += period;
-        }
-    }
 
     /// Get next breakpoint after given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
@@ -389,10 +381,6 @@ impl BreakpointManager {
         self.just_passed_breakpoint
     }
 
-    /// Clear the just-passed flag (call after first step post-breakpoint)
-    pub fn clear_breakpoint_flag(&mut self) {
-        self.just_passed_breakpoint = false;
-    }
 
     /// Reset the manager for a new simulation
     pub fn reset(&mut self) {

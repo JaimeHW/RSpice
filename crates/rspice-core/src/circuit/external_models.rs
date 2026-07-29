@@ -335,17 +335,6 @@ impl CircuitData {
         )
     }
 
-    /// Evaluate all XSPICE code model instances for transient with explicit timestep.
-    pub fn evaluate_xspice_with_timestep(
-        &mut self,
-        time: Value,
-        timestep: Value,
-        voltages: &[Value],
-    ) {
-        if let Err(e) = self.try_evaluate_xspice_with_timestep(time, timestep, voltages) {
-            log::warn!("XSPICE evaluation error: {e}");
-        }
-    }
 
     /// Fallible XSPICE evaluation for transient with explicit timestep.
     pub fn try_evaluate_xspice_with_timestep(
@@ -1941,14 +1930,6 @@ impl CircuitData {
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     }
 
-    /// Whether any Verilog-A device flagged `$discontinuity` at the
-    /// latest evaluation
-    #[cfg(feature = "veriloga")]
-    pub fn veriloga_discontinuity_pending(&self) -> bool {
-        self.veriloga_devices
-            .iter()
-            .any(|device| device.discontinuity_pending())
-    }
 
     /// Check if all XSPICE instances have converged
     pub fn xspice_converged(&self, tolerance: Value) -> bool {

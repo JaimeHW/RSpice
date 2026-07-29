@@ -40,10 +40,6 @@ impl SourceImpedance {
         Self::resistive(50.0)
     }
 
-    /// Standard 75Ω source (cable TV, video)
-    pub fn z75() -> Self {
-        Self::resistive(75.0)
-    }
 
     /// Convert to Complex type
     pub fn as_complex(&self) -> Complex {

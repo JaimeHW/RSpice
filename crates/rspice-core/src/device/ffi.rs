@@ -846,10 +846,6 @@ impl FfiModelRegistry {
         self.factories.contains_key(&name.to_uppercase())
     }
 
-    /// List all registered model names
-    pub fn list_models(&self) -> Vec<&str> {
-        self.factories.keys().map(|s| s.as_str()).collect()
-    }
 
     /// Create an instance from a loaded model and apply its registered parameters.
     #[cfg(feature = "ffi")]

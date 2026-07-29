@@ -12,105 +12,11 @@ impl HbSolver {
         self.add_nonlinear_device(NonlinearDeviceInstance::diode(anode, cathode, is, n));
     }
 
-    /// Add an NPN BJT for Newton iteration
-    pub fn add_npn_bjt(
-        &mut self,
-        collector: usize,
-        base: usize,
-        emitter: usize,
-        is: Value,
-        bf: Value,
-        br: Value,
-        nf: Value,
-        nr: Value,
-        vaf: Value,
-    ) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::npn_bjt(
-            collector, base, emitter, is, bf, br, nf, nr, vaf,
-        ));
-    }
 
-    /// Add a PNP BJT for Newton iteration
-    pub fn add_pnp_bjt(
-        &mut self,
-        collector: usize,
-        base: usize,
-        emitter: usize,
-        is: Value,
-        bf: Value,
-        br: Value,
-        nf: Value,
-        nr: Value,
-        vaf: Value,
-    ) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::pnp_bjt(
-            collector, base, emitter, is, bf, br, nf, nr, vaf,
-        ));
-    }
 
-    /// Add an NMOS for Newton iteration
-    pub fn add_nmos(
-        &mut self,
-        drain: usize,
-        gate: usize,
-        source: usize,
-        bulk: usize,
-        kp: Value,
-        vth: Value,
-        lambda: Value,
-    ) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::nmos(
-            drain, gate, source, bulk, vth, kp, lambda,
-        ));
-    }
 
-    /// Add a PMOS for Newton iteration (`vth` is the effective threshold, -VTO)
-    pub fn add_pmos(
-        &mut self,
-        drain: usize,
-        gate: usize,
-        source: usize,
-        bulk: usize,
-        kp: Value,
-        vth: Value,
-        lambda: Value,
-    ) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::pmos(
-            drain, gate, source, bulk, vth, kp, lambda,
-        ));
-    }
 
-    /// Add an N-channel JFET for Newton iteration
-    pub fn add_njfet(
-        &mut self,
-        drain: usize,
-        gate: usize,
-        source: usize,
-        vto: Value,
-        beta: Value,
-        lambda: Value,
-        is: Value,
-    ) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::njfet(
-            drain, gate, source, vto, beta, lambda, is,
-        ));
-    }
 
-    /// Add a P-channel JFET for Newton iteration
-    pub fn add_pjfet(
-        &mut self,
-        drain: usize,
-        gate: usize,
-        source: usize,
-        vto: Value,
-        beta: Value,
-        lambda: Value,
-        is: Value,
-    ) {
-        self.add_nonlinear_device(NonlinearDeviceInstance::pjfet(
-            drain, gate, source, vto, beta, lambda, is,
-        ));
-    }
 
     /// Add a voltage-controlled switch for Newton iteration
     pub fn add_voltage_switch(

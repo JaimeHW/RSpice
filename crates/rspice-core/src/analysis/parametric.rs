@@ -176,13 +176,6 @@ impl StepSpec {
         }
     }
 
-    /// Create a parameter step with list of values
-    pub fn param_list(name: &str, values: Vec<Value>) -> Self {
-        Self {
-            target: StepTarget::Parameter(name.to_string()),
-            step_type: StepType::List(values),
-        }
-    }
 
     /// Create a device value step
     pub fn device(device_name: &str, start: Value, stop: Value, step: Value) -> Self {
@@ -262,21 +255,7 @@ impl ParametricSweep {
         }
     }
 
-    /// Add a step specification
-    pub fn add_step(&mut self, step: StepSpec) {
-        self.steps.push(step);
-        self.current_indices.push(0);
-        self.total_combinations = self
-            .steps
-            .iter()
-            .map(|s| s.step_type.num_points())
-            .product();
-    }
 
-    /// Get number of step dimensions
-    pub fn num_dimensions(&self) -> usize {
-        self.steps.len()
-    }
 
     /// Get total number of combinations
     pub fn total_combinations(&self) -> usize {

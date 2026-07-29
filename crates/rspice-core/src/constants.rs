@@ -278,20 +278,4 @@ pub fn thermal_voltage(temp_kelvin: Value) -> Value {
     temp_kelvin * K_BOLTZMANN / Q_ELECTRON
 }
 
-/// Safe exponential function with overflow/underflow protection
-#[inline]
-pub fn safe_exp(x: Value) -> Value {
-    if x > MAX_EXP_ARG {
-        (MAX_EXP_ARG).exp()
-    } else if x < MIN_EXP_ARG {
-        0.0
-    } else {
-        x.exp()
-    }
-}
 
-/// Clamp a value to a range with a small epsilon margin
-#[inline]
-pub fn clamp_with_margin(x: Value, min: Value, max: Value) -> Value {
-    x.max(min + EPSILON).min(max - EPSILON)
-}

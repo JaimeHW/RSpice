@@ -30,13 +30,6 @@ impl NonlinearConvergenceCriteria {
         }
     }
 
-    #[inline]
-    pub fn voltage_only(voltage_abs: Value) -> Self {
-        Self {
-            voltage_abs,
-            ..Self::default()
-        }
-    }
 
     #[inline]
     pub fn voltage_tolerance(self) -> Value {

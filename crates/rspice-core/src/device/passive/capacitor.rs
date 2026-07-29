@@ -374,10 +374,6 @@ impl Capacitor {
         }
     }
 
-    /// Set initial voltage
-    pub fn set_initial_voltage(&mut self, voltage: Value) {
-        self.voltage_prev = voltage;
-    }
 
     /// Get equivalent conductance for trapezoidal integration
     pub fn geq(&self, dt: Value) -> Value {

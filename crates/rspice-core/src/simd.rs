@@ -41,7 +41,6 @@ pub use math::*;
 pub use reduce::*;
 pub use vector::*;
 
-use crate::Value;
 
 /// SIMD lane width for f64 operations.
 ///
@@ -73,39 +72,4 @@ pub const fn align_down(len: usize) -> usize {
 // Inline helper for common patterns
 //=============================================================================
 
-/// Process a slice in SIMD-width chunks, with a closure for each chunk.
-///
-/// This is internally used by the SIMD operations and optimizes the
-/// common pattern of processing 4 elements at a time.
-#[inline]
-pub fn process_chunks<F>(slice: &[Value], mut f: F)
-where
-    F: FnMut(&[Value; SIMD_WIDTH]),
-{
-    let chunks = slice.len() / SIMD_WIDTH;
-    for i in 0..chunks {
-        let start = i * SIMD_WIDTH;
-        // SAFETY: We've verified the slice is long enough
-        let chunk: &[Value; SIMD_WIDTH] = slice[start..start + SIMD_WIDTH]
-            .try_into()
-            .expect("chunk size mismatch");
-        f(chunk);
-    }
-}
 
-/// Process a mutable slice in SIMD-width chunks.
-#[inline]
-pub fn process_chunks_mut<F>(slice: &mut [Value], mut f: F)
-where
-    F: FnMut(&mut [Value; SIMD_WIDTH]),
-{
-    let chunks = slice.len() / SIMD_WIDTH;
-    for i in 0..chunks {
-        let start = i * SIMD_WIDTH;
-        // SAFETY: We've verified the slice is long enough
-        let chunk: &mut [Value; SIMD_WIDTH] = (&mut slice[start..start + SIMD_WIDTH])
-            .try_into()
-            .expect("chunk size mismatch");
-        f(chunk);
-    }
-}

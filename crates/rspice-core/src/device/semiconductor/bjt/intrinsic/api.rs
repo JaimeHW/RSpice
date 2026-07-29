@@ -21,26 +21,7 @@ impl Bjt {
         cj + cd
     }
 
-    /// Calculate base-collector junction capacitance
-    /// Cbc = CJC / (1 - Vbc/VJC)^MJC
-    pub fn cbc(&self, vbc: Value) -> Value {
-        let p = self.polarity();
-        let (_, factor) = self.vbic_depletion_charge_and_derivative(
-            p * vbc,
-            self.vjc,
-            self.mjc,
-            self.fc,
-            self.ajc,
-        );
-        self.cjc * factor
-    }
 
-    /// Calculate total capacitances for transient analysis
-    /// Returns (Cbe, Cbc)
-    pub fn junction_capacitances(&self, vbe: Value, vbc: Value) -> (Value, Value) {
-        let charges = self.legacy_transient_charge_state(vbe, vbc, 0.0);
-        (charges.capbe, charges.capbc)
-    }
 
     /// Return cached collector, base, and emitter currents at the operating point.
     pub fn operating_point_currents(&self) -> (Value, Value, Value) {

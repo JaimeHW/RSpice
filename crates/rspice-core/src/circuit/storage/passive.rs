@@ -1104,32 +1104,6 @@ impl Capacitors {
         }
     }
 
-    /// Initialize capacitor voltages from DC solution
-    ///
-    /// This is critical for correct transient startup. Capacitors without explicit
-    /// IC= values should start with the DC voltage across them. Otherwise, coupling
-    /// capacitors cause massive startup current spikes.
-    pub fn set_initial_voltages_from_dc(&mut self, solution: &[Value]) {
-        for (i, stamp) in self.stamps.iter().enumerate() {
-            // Only set if no explicit IC was provided
-            if self.ic[i].is_none() {
-                let v_pos = if stamp.pp.row != 0 {
-                    solution[stamp.pp.row - 1]
-                } else {
-                    0.0
-                };
-                let v_neg = if stamp.nn.row != 0 {
-                    solution[stamp.nn.row - 1]
-                } else {
-                    0.0
-                };
-                let v_dc = v_pos - v_neg;
-                self.v_prev[i] = v_dc;
-                self.v_prev_prev[i] = v_dc;
-                self.v_prev_prev_prev[i] = v_dc;
-            }
-        }
-    }
 
     pub fn len(&self) -> usize {
         self.names.len()
