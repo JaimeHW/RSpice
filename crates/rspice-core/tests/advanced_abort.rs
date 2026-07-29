@@ -3,9 +3,9 @@
 use rspice_core::AtomicAbort;
 use rspice_core::analysis::Distribution;
 use rspice_core::analysis::PssConfig;
-use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
-use rspice_core::analysis::advanced::pac::PacConfig;
-use rspice_core::analysis::advanced::stb::StbConfig;
+use rspice_core::analysis::harmonic_balance::HbConfig;
+use rspice_core::analysis::pac::PacConfig;
+use rspice_core::analysis::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 

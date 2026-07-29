@@ -6,7 +6,7 @@
 //! tolerance; the payoff is convergence rate, demonstrated on the rectifier
 //! by a strict iteration-count win.
 
-use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
+use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
 use rspice_core::netlist::Netlist;
 

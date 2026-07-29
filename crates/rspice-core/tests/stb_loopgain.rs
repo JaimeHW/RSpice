@@ -12,7 +12,7 @@
 
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::analysis::advanced::stb::StbConfig;
+use rspice_core::analysis::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig, StbAnalysisResult};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::PI;
@@ -222,7 +222,7 @@ fn loaded_break_matches_the_return_ratio_where_single_injection_fails() {
 /// way the CLI does reproduces the closed-form loop gain.
 #[test]
 fn stb_card_parses_and_drives_the_same_loop_gain() {
-    use rspice_core::analysis::advanced::stb::StbSweepType;
+    use rspice_core::analysis::stb::StbSweepType;
     use rspice_core::netlist::{AnalysisCommand, FreqVariation};
 
     let deck = "\

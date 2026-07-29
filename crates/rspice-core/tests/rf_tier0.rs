@@ -2,9 +2,9 @@
 //! periodic analyses. Every expected value here is a closed form — no
 //! reference simulator involved — so a failure is unambiguous.
 
-use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
-use rspice_core::analysis::advanced::pac::{PacConfig, PacSweepType};
-use rspice_core::analysis::advanced::pss::PssConfig;
+use rspice_core::analysis::harmonic_balance::HbConfig;
+use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+use rspice_core::analysis::pss::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 

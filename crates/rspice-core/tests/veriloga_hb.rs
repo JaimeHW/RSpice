@@ -1,6 +1,6 @@
 #![cfg(feature = "veriloga")]
 
-use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
+use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 

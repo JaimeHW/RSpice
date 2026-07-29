@@ -13,7 +13,7 @@
 //! Both regions have constant capacitance, so the response must also be
 //! distortion-free: the second harmonic is pinned at zero.
 
-use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
+use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::PI;

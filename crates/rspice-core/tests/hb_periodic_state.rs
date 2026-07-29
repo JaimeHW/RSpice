@@ -1,6 +1,6 @@
 use num_complex::Complex64;
 use rspice_core::AtomicAbort;
-use rspice_core::analysis::advanced::harmonic_balance::{
+use rspice_core::analysis::harmonic_balance::{
     HbConfig, HbContinuationLimitation, HbReactiveKind,
 };
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};

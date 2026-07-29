@@ -9,7 +9,7 @@
 //!    conversion gain is A/pi and whose direct feedthrough is A/2.
 
 use num_complex::Complex64;
-use rspice_core::analysis::advanced::pac::PacConfig;
+use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{Engine, PacAnalysisResult, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
@@ -34,7 +34,7 @@ c1 out 0 159.154943091895p
     let config = PacConfig::new()
         .with_fundamental(F0)
         .with_sweep(1.0e5, 5.0e5, 3)
-        .with_sweep_type(rspice_core::analysis::advanced::pac::PacSweepType::Linear)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
         .with_sidebands(-2, 2)
         .with_input_source("vin")
         .with_output_node("out");
@@ -101,7 +101,7 @@ cload out 0 1f
         let config = PacConfig::new()
             .with_fundamental(F0)
             .with_sweep(1.0e4, 1.0e4, 1)
-            .with_sweep_type(rspice_core::analysis::advanced::pac::PacSweepType::Linear)
+            .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
             .with_sidebands(-k, k)
             .with_input_source("vrf")
             .with_output_node("out");

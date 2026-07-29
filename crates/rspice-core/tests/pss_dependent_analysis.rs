@@ -5,8 +5,8 @@
 
 use num_complex::Complex64;
 use rspice_core::abort_signal::NoAbort;
-use rspice_core::analysis::advanced::pac::{PacConfig, PacSweepType};
-use rspice_core::analysis::advanced::pss::{PeriodicWaveform, PssConfig, PssResult};
+use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+use rspice_core::analysis::pss::{PeriodicWaveform, PssConfig, PssResult};
 use rspice_core::engine::{Engine, PssAnalysisResult, PssOperatingPoint, SimulationConfig};
 use rspice_core::netlist::Netlist;
 

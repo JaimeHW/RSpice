@@ -161,7 +161,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // ---------------------------------------------------------------------
     // Phase 6 — one module per analysis.
     //
-    // `analysis::advanced::measure_signals` reaching for `TransientResult`,
+    // `analysis::measure_signals` reaching for `TransientResult`,
     // a driver-side result type. The merge puts each analysis's result type in
     // the same module as its driver. The other half of this edge is gone:
     // `TransientResultCompressed` named `TransientStoreTrace` from across the

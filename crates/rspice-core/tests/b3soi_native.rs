@@ -7,7 +7,7 @@
 
 #![allow(clippy::excessive_precision)]
 
-use rspice_core::analysis::advanced::stb::StbConfig;
+use rspice_core::analysis::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 use rspice_core::{

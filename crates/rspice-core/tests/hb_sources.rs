@@ -7,7 +7,7 @@
 //! in-phase at the driven node. A mirrored injection produces an inverted
 //! bias that a symmetric-drive rectifier test can never catch.
 
-use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
+use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
