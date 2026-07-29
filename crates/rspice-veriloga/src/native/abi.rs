@@ -457,6 +457,7 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
 #[unsafe(export_name = "rspice_limit")]
 pub unsafe extern "C" fn rspice_limit(
     state_values: *mut f64,
+    state_values_len: usize,
     state_initialized: *mut u8,
     state_initialized_len: usize,
     state_idx: usize,
@@ -472,6 +473,12 @@ pub unsafe extern "C" fn rspice_limit(
     if state_initialized.is_null() {
         set_native_runtime_error(
             "native legacy limit helper missing initialization flag storage; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    if state_idx >= state_values_len {
+        set_native_runtime_error(
+            "native legacy limit helper state index outside state storage; no interpreter fallback",
         );
         return 0.0;
     }
@@ -1829,6 +1836,7 @@ mod tests {
         let value = unsafe {
             rspice_limit(
                 std::ptr::null_mut(),
+                0,
                 initialized.as_mut_ptr(),
                 initialized.len(),
                 0,
@@ -1837,6 +1845,24 @@ mod tests {
             )
         };
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert_runtime_error_contains("legacy limit");
+
+        let mut state_values = [1.0];
+        let mut initialized = [1_u8; 2];
+        clear_native_runtime_error();
+        let value = unsafe {
+            rspice_limit(
+                state_values.as_mut_ptr(),
+                state_values.len(),
+                initialized.as_mut_ptr(),
+                initialized.len(),
+                1,
+                2.0,
+                0.5,
+            )
+        };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(state_values[0].to_bits(), 1.0_f64.to_bits());
         assert_runtime_error_contains("legacy limit");
 
         clear_native_runtime_error();
