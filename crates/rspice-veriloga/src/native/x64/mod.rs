@@ -7824,6 +7824,11 @@ endmodule
 
     fn shipped_device_internal_bias(name: &str, node: &str) -> Option<f64> {
         match (name, node.to_ascii_lowercase().as_str()) {
+            ("bsimcmg", "di" | "di1" | "di2") => Some(shipped_device_terminal_bias(name, 0)),
+            ("bsimcmg", "si" | "si1") => Some(shipped_device_terminal_bias(name, 2)),
+            ("bsimcmg", "ge" | "gi" | "gint" | "gints" | "gintd") => {
+                Some(shipped_device_terminal_bias(name, 1))
+            }
             ("bsimimg", "di") => Some(shipped_device_terminal_bias(name, 0)),
             ("bsimimg", "si") => Some(shipped_device_terminal_bias(name, 2)),
             ("bsimimg", "ge" | "gi") => Some(shipped_device_terminal_bias(name, 1)),
