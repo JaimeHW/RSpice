@@ -134,7 +134,7 @@ impl CompiledExpr {
     }
 
     /// Get or assign a node index
-    pub fn get_or_create_node(&mut self, name: &str) -> usize {
+    pub(crate) fn get_or_create_node(&mut self, name: &str) -> usize {
         if let Some(&idx) = self.node_map.get(name) {
             idx
         } else {
@@ -145,7 +145,7 @@ impl CompiledExpr {
     }
 
     /// Get or assign a branch index
-    pub fn get_or_create_branch(&mut self, name: &str) -> usize {
+    pub(crate) fn get_or_create_branch(&mut self, name: &str) -> usize {
         if let Some(&idx) = self.branch_map.get(name) {
             idx
         } else {
@@ -156,14 +156,14 @@ impl CompiledExpr {
     }
 
     /// Store a file-backed lookup table and return its bytecode index.
-    pub fn add_lookup_table(&mut self, table: LookupTable) -> usize {
+    pub(crate) fn add_lookup_table(&mut self, table: LookupTable) -> usize {
         let idx = self.lookup_tables.len();
         self.lookup_tables.push(table);
         idx
     }
 
     /// Assign the next independent SDT state slot.
-    pub fn add_sdt(&mut self) -> usize {
+    pub(crate) fn add_sdt(&mut self) -> usize {
         let index = self.sdt_count;
         self.sdt_count += 1;
         index
@@ -226,7 +226,7 @@ impl<'a> Context<'a> {
     }
 
     /// Set the active analysis frequency in hertz.
-    pub fn with_frequency(mut self, frequency: Value) -> Self {
+    pub(crate) fn with_frequency(mut self, frequency: Value) -> Self {
         self.frequency = frequency;
         self
     }
