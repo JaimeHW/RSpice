@@ -68,6 +68,7 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: |
+          cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
           cargo check --locked -p rspice-core --features veriloga-builtins-base
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc --test generated_veriloga_feature_shards
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards
@@ -164,6 +165,17 @@ jobs:
           --max-pooled-workspace-payload-bytes 0
           --max-stamp-state-payload-bytes 6200
           --top 10
+      - name: Gate representative generated Verilog-A stamp performance
+        # Same-run ratios survive hosted-runner speed differences. This subset
+        # spans cheap through relatively expensive models and keeps the
+        # per-commit build bounded; nightly measures all 42.
+        run: >-
+          cargo run --locked -p rspice-bench --release
+          --features generated-stamp-subset -- generated-stamp
+          --iterations 2000
+          --samples 7
+          --max-corpus-median-reference-ratio 1.25
+          --max-model-reference-ratio 4.25
       - name: Compile Verilog-A native JIT tests (Linux x64)
         run: |
           cargo test --locked -p rspice-veriloga --features native native:: --no-run
@@ -210,6 +222,10 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --workspace --exclude rspice-python --exclude rspice-wasm
+      - name: Qualify portable generated Verilog-A shard
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
       - name: Unit tests
         run: cargo test --locked -p rspice-core --lib
       - name: CLI integration tests
@@ -290,6 +306,10 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-cli -p rspice-ui
+      - name: Qualify portable generated Verilog-A shard
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
@@ -316,6 +336,44 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-ui --target wasm32-unknown-unknown
+      - name: Qualify generated Verilog-A shard in WebAssembly
+        env:
+          RUSTFLAGS: -D warnings
+        run: >-
+          cargo check --locked -p rspice-core
+          --target wasm32-unknown-unknown
+          --no-default-features
+          --features veriloga-model-diode-cmc,veriloga-builtins-noise
+
+  veriloga-mobile:
+    name: Check generated Verilog-A (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Android ARM64
+            os: ubuntu-latest
+            target: aarch64-linux-android
+          - label: iOS ARM64
+            os: macos-latest
+            target: aarch64-apple-ios
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: veriloga-${{ matrix.target }}
+      - name: Qualify portable generated Verilog-A shard
+        env:
+          RUSTFLAGS: -D warnings
+        run: >-
+          cargo check --locked -p rspice-core
+          --target ${{ matrix.target }}
+          --no-default-features
+          --features veriloga-model-diode-cmc,veriloga-builtins-noise
 
   python:
     name: Check (Python bindings)
