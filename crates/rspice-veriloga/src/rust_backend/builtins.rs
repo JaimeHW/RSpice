@@ -1069,11 +1069,12 @@ fn generate_device_work_item(
             progress_lock,
             format!(
                 "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} \
-                 (transpile {:.2?}, schedule {:.2?}, static guards {}/{} over {} Newton values, \
-                 {} bytes, total {:.2?})",
+                 (transpile {:.2?}, differentiate {:.2?}, schedule {:.2?}, static guards {}/{} \
+                 over {} Newton values, {} bytes, total {:.2?})",
                 relative_source.display(),
                 item.module,
                 transpile_started.elapsed(),
+                metrics.phase_elapsed(PipelinePhase::Differentiation),
                 metrics.phase_elapsed(PipelinePhase::Scheduling),
                 metrics.model_structural_guard_count,
                 metrics.instance_structural_guard_count,

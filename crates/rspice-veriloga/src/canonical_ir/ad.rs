@@ -160,18 +160,182 @@ impl AdFunction {
 pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<usize>> {
     lane_liveness_with_control(function, lanes, &NoPipelineControl)
         .expect("the no-op pipeline control cannot cancel")
+        .into_hash_sets()
+}
+
+/// Compact storage for the sparse lane sets used by the liveness fixed point.
+///
+/// The old representation allocated one `HashSet` per value and another
+/// temporary set for every value on every fixed-point sweep. Compact models
+/// routinely have hundreds of thousands of values but only a few dozen
+/// derivative lanes, so a contiguous bit matrix is both materially smaller and
+/// turns propagation into straight-line word unions. Pathological lane counts
+/// fall back to sparse sets rather than being allowed to allocate an unbounded
+/// dense matrix from untrusted model input.
+struct LaneLiveness {
+    value_count: usize,
+    lane_count: usize,
+    words_per_value: usize,
+    storage: LaneLivenessStorage,
+}
+
+enum LaneLivenessStorage {
+    Dense(Vec<u64>),
+    Sparse(Vec<HashSet<usize>>),
+}
+
+impl LaneLiveness {
+    const MAX_DENSE_BYTES: usize = 64 * 1024 * 1024;
+
+    fn new(value_count: usize, lane_count: usize) -> Self {
+        let words_per_value = lane_count.div_ceil(u64::BITS as usize);
+        let dense_words = value_count.checked_mul(words_per_value);
+        let dense_bytes = dense_words.and_then(|words| words.checked_mul(size_of::<u64>()));
+        let storage = match (dense_words, dense_bytes) {
+            (Some(words), Some(bytes)) if bytes <= Self::MAX_DENSE_BYTES => {
+                LaneLivenessStorage::Dense(vec![0; words])
+            }
+            _ => LaneLivenessStorage::Sparse(vec![HashSet::new(); value_count]),
+        };
+        Self {
+            value_count,
+            lane_count,
+            words_per_value,
+            storage,
+        }
+    }
+
+    fn range(&self, value: ValueId) -> std::ops::Range<usize> {
+        let start = usize::from(value) * self.words_per_value;
+        start..start + self.words_per_value
+    }
+
+    fn insert(&mut self, value: ValueId, lane: usize) -> bool {
+        debug_assert!(lane < self.lane_count);
+        let value = usize::from(value);
+        match &mut self.storage {
+            LaneLivenessStorage::Dense(bits) => {
+                let index = value * self.words_per_value + lane / u64::BITS as usize;
+                let bit = 1_u64 << (lane % u64::BITS as usize);
+                let changed = bits[index] & bit == 0;
+                bits[index] |= bit;
+                changed
+            }
+            LaneLivenessStorage::Sparse(sets) => sets[value].insert(lane),
+        }
+    }
+
+    fn union_from(&mut self, target: ValueId, source: ValueId) -> bool {
+        let target_index = usize::from(target);
+        let source_index = usize::from(source);
+        if target_index == source_index {
+            return false;
+        }
+        match &mut self.storage {
+            LaneLivenessStorage::Dense(bits) => {
+                let target_start = target_index * self.words_per_value;
+                let source_start = source_index * self.words_per_value;
+                let mut changed = false;
+                for offset in 0..self.words_per_value {
+                    let previous = bits[target_start + offset];
+                    let merged = previous | bits[source_start + offset];
+                    bits[target_start + offset] = merged;
+                    changed |= merged != previous;
+                }
+                changed
+            }
+            LaneLivenessStorage::Sparse(sets) => {
+                let (target, source) = if target_index < source_index {
+                    let (before_source, from_source) = sets.split_at_mut(source_index);
+                    (&mut before_source[target_index], &from_source[0])
+                } else {
+                    let (before_target, from_target) = sets.split_at_mut(target_index);
+                    (&mut from_target[0], &before_target[source_index])
+                };
+                let previous_len = target.len();
+                target.extend(source.iter().copied());
+                target.len() != previous_len
+            }
+        }
+    }
+
+    fn is_empty(&self, value: ValueId) -> bool {
+        match &self.storage {
+            LaneLivenessStorage::Dense(bits) => {
+                bits[self.range(value)].iter().all(|word| *word == 0)
+            }
+            LaneLivenessStorage::Sparse(sets) => sets[usize::from(value)].is_empty(),
+        }
+    }
+
+    fn lanes(&self, value: ValueId) -> Vec<usize> {
+        match &self.storage {
+            LaneLivenessStorage::Dense(bits) => {
+                let mut lanes = Vec::new();
+                for (word_offset, word) in bits[self.range(value)].iter().copied().enumerate() {
+                    let mut word = word;
+                    while word != 0 {
+                        let bit = word.trailing_zeros() as usize;
+                        let lane = word_offset * u64::BITS as usize + bit;
+                        if lane < self.lane_count {
+                            lanes.push(lane);
+                        }
+                        word &= word - 1;
+                    }
+                }
+                lanes
+            }
+            LaneLivenessStorage::Sparse(sets) => {
+                let mut lanes: Vec<usize> = sets[usize::from(value)].iter().copied().collect();
+                lanes.sort_unstable();
+                lanes
+            }
+        }
+    }
+
+    fn into_hash_sets(self) -> Vec<HashSet<usize>> {
+        match self.storage {
+            LaneLivenessStorage::Sparse(sets) => sets,
+            LaneLivenessStorage::Dense(bits) => {
+                let words_per_value = self.words_per_value;
+                let lane_count = self.lane_count;
+                (0..self.value_count)
+                    .map(|value| {
+                        let start = value * words_per_value;
+                        let mut lanes = HashSet::new();
+                        for (word_offset, word) in bits[start..start + words_per_value]
+                            .iter()
+                            .copied()
+                            .enumerate()
+                        {
+                            let mut word = word;
+                            while word != 0 {
+                                let bit = word.trailing_zeros() as usize;
+                                let lane = word_offset * u64::BITS as usize + bit;
+                                if lane < lane_count {
+                                    lanes.insert(lane);
+                                }
+                                word &= word - 1;
+                            }
+                        }
+                        lanes
+                    })
+                    .collect()
+            }
+        }
+    }
 }
 
 fn lane_liveness_with_control(
     function: &CfgFunction,
     lanes: &[AdSeed],
     control: &dyn PipelineControl,
-) -> Result<Vec<HashSet<usize>>, PipelineCancelled> {
+) -> Result<LaneLiveness, PipelineCancelled> {
     check_cancelled(control)?;
     let seeds = seed_lanes(function, lanes);
-    let mut live: Vec<HashSet<usize>> = vec![HashSet::new(); function.values.len()];
+    let mut live = LaneLiveness::new(function.values.len(), lanes.len());
     for (value, lane) in &seeds {
-        live[usize::from(*value)].insert(*lane);
+        live.insert(*value, *lane);
     }
 
     // Every `$limit` carries the correction lane whether or not what it limits
@@ -184,7 +348,7 @@ fn lane_liveness_with_control(
                 check_cancelled(control)?;
             }
             if matches!(value.kind, CfgValueKind::Limit { .. }) {
-                live[usize::from(value.id)].insert(correction);
+                live.insert(value.id, correction);
             }
         }
     }
@@ -199,32 +363,38 @@ fn lane_liveness_with_control(
             if ordinal.is_multiple_of(1024) {
                 check_cancelled(control)?;
             }
-            let index = usize::from(value.id);
-            let incoming_lanes: HashSet<usize> = match &value.kind {
+            match &value.kind {
                 CfgValueKind::BlockParameter => match incoming.get(&value.id) {
-                    Some(arguments) => arguments
-                        .iter()
-                        .flat_map(|argument| live[usize::from(*argument)].iter().copied())
-                        .collect(),
-                    None => HashSet::new(),
+                    Some(arguments) => {
+                        for argument in arguments {
+                            changed |= live.union_from(value.id, *argument);
+                        }
+                    }
+                    None => {}
                 },
                 // Only `proposed`, not the limiter body: the rule chains through
                 // the value that was offered, so a lane only the body can reach
                 // would be a structural zero taking up a slot.
                 CfgValueKind::Limit { proposed, .. } => {
-                    live[usize::from(*proposed)].iter().copied().collect()
+                    changed |= live.union_from(value.id, *proposed);
                 }
-                kind if differentiable(kind) => kind
-                    .operands()
-                    .into_iter()
-                    .flat_map(|operand| live[usize::from(operand)].iter().copied())
-                    .collect(),
-                _ => HashSet::new(),
-            };
-            for lane in incoming_lanes {
-                if live[index].insert(lane) {
-                    changed = true;
+                kind if differentiable(kind) => {
+                    match kind {
+                        CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
+                            changed |= live.union_from(value.id, *input);
+                        }
+                        CfgValueKind::Binary { left, right, .. } => {
+                            changed |= live.union_from(value.id, *left);
+                            changed |= live.union_from(value.id, *right);
+                        }
+                        CfgValueKind::Idt { input, ic, .. } => {
+                            changed |= live.union_from(value.id, *input);
+                            changed |= live.union_from(value.id, *ic);
+                        }
+                        _ => unreachable!("every differentiable value kind is covered"),
+                    }
                 }
+                _ => {}
             }
         }
         if !changed {
@@ -440,7 +610,7 @@ impl<'a> AdBuilder<'a> {
     fn new(
         source: &'a CfgFunction,
         lanes: &[AdSeed],
-        live: &[HashSet<usize>],
+        live: &LaneLiveness,
         control: &dyn PipelineControl,
     ) -> Result<Self, PipelineCancelled> {
         let mut values = source.values.clone();
@@ -471,18 +641,19 @@ impl<'a> AdBuilder<'a> {
             emitted: Vec::new(),
         };
 
-        for (index, set) in live.iter().enumerate() {
+        for index in 0..source.values.len() {
             if index.is_multiple_of(1024) {
                 check_cancelled(control)?;
             }
-            if set.is_empty() {
+            let value = ValueId::from(index);
+            if live.is_empty(value) {
                 continue;
             }
-            let mut lanes: Vec<u32> = set
-                .iter()
-                .map(|lane| u32::try_from(*lane).expect("lane count fits a u32"))
+            let lanes: Vec<u32> = live
+                .lanes(value)
+                .into_iter()
+                .map(|lane| u32::try_from(lane).expect("lane count fits a u32"))
                 .collect();
-            lanes.sort_unstable();
             builder.target[index] = Some(builder.intern(lanes));
         }
 
@@ -1144,4 +1315,50 @@ fn reverse_postorder(function: &CfgFunction) -> Vec<BlockId> {
             .filter(|block| !visited[usize::from(*block)]),
     );
     postorder
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LaneLiveness, LaneLivenessStorage};
+    use crate::canonical_ir::ValueId;
+    use std::collections::HashSet;
+
+    #[test]
+    fn compact_lane_liveness_crosses_word_boundaries() {
+        let first = ValueId::from(0);
+        let second = ValueId::from(1);
+        let third = ValueId::from(2);
+        let mut live = LaneLiveness::new(3, 130);
+
+        for lane in [0, 63, 64, 65, 127, 129] {
+            assert!(live.insert(first, lane));
+            assert!(!live.insert(first, lane));
+        }
+        for lane in [1, 64, 128] {
+            live.insert(second, lane);
+        }
+        assert!(live.union_from(third, first));
+        assert!(live.union_from(third, second));
+        assert!(!live.union_from(third, first));
+
+        assert_eq!(live.lanes(first), [0, 63, 64, 65, 127, 129]);
+        assert_eq!(live.lanes(third), [0, 1, 63, 64, 65, 127, 128, 129]);
+    }
+
+    #[test]
+    fn empty_lane_census_preserves_one_result_per_value() {
+        let live = LaneLiveness::new(3, 0).into_hash_sets();
+        assert_eq!(live, vec![HashSet::new(), HashSet::new(), HashSet::new()]);
+    }
+
+    #[test]
+    fn pathological_dense_matrix_uses_sparse_storage() {
+        let mut live = LaneLiveness::new(100, 10_000_000);
+        assert!(matches!(live.storage, LaneLivenessStorage::Sparse(_)));
+        let first = ValueId::from(0);
+        let second = ValueId::from(1);
+        assert!(live.insert(first, 9_999_999));
+        assert!(live.union_from(second, first));
+        assert_eq!(live.lanes(second), [9_999_999]);
+    }
 }
