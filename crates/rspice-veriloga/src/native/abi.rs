@@ -420,30 +420,6 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
     candidate
 }
 
-#[unsafe(export_name = "rspice_native_state_values_error")]
-pub extern "C" fn rspice_native_state_values_error(ctx: *const EvalContext) {
-    set_native_context_error_ptr(
-        ctx,
-        "native state operator missing state storage; no interpreter fallback",
-    );
-}
-
-#[unsafe(export_name = "rspice_native_state_values_bounds_error")]
-pub extern "C" fn rspice_native_state_values_bounds_error(ctx: *const EvalContext) {
-    set_native_context_error_ptr(
-        ctx,
-        "native state operator index outside state storage; no interpreter fallback",
-    );
-}
-
-#[unsafe(export_name = "rspice_native_state_prev_bounds_error")]
-pub extern "C" fn rspice_native_state_prev_bounds_error(ctx: *const EvalContext) {
-    set_native_context_error_ptr(
-        ctx,
-        "native state operator index outside prior-state storage; no interpreter fallback",
-    );
-}
-
 #[unsafe(export_name = "rspice_native_current_probe_error")]
 pub extern "C" fn rspice_native_current_probe_error(ctx: *const EvalContext) {
     set_native_context_error_ptr(
@@ -474,34 +450,6 @@ pub extern "C" fn rspice_native_port_connected_error(ctx: *const EvalContext) {
         ctx,
         "native port_connected load missing connection-flag storage; no interpreter fallback",
     );
-}
-
-/// External helper function for table lookup interpolation.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers.
-#[unsafe(export_name = "rspice_table_lookup")]
-pub unsafe extern "C" fn rspice_table_lookup(
-    tables_ptr: *const crate::codegen::LookupTable,
-    tables_len: usize,
-    table_id: usize,
-    input: f64,
-) -> f64 {
-    if tables_ptr.is_null() {
-        set_native_runtime_error(format!(
-            "native legacy table lookup helper missing table storage for table {table_id}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-    if table_id >= tables_len {
-        set_native_runtime_error(format!(
-            "native legacy table lookup helper table {table_id} outside table length {tables_len}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-
-    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
-    tables[table_id].interpolate(input)
 }
 
 /// External helper function for native x64 table lookup interpolation.
@@ -587,62 +535,6 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
 
     let tables = unsafe { std::slice::from_raw_parts(ctx.lookup_tables, ctx.lookup_tables_len) };
     tables[table_id].derivative(input)
-}
-
-/// External helper function for $limit operation.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers.
-#[unsafe(export_name = "rspice_limit")]
-pub unsafe extern "C" fn rspice_limit(
-    state_values: *mut f64,
-    state_values_len: usize,
-    state_initialized: *mut u8,
-    state_initialized_len: usize,
-    state_idx: usize,
-    new_value: f64,
-    step_limit: f64,
-) -> f64 {
-    if state_values.is_null() {
-        set_native_runtime_error(
-            "native legacy limit helper missing state storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-    if state_initialized.is_null() {
-        set_native_runtime_error(
-            "native legacy limit helper missing initialization flag storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-    if state_idx >= state_values_len {
-        set_native_runtime_error(
-            "native legacy limit helper state index outside state storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-    if state_idx >= state_initialized_len {
-        set_native_runtime_error(
-            "native legacy limit helper state index outside initialization flag storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-
-    let initialized = unsafe { *state_initialized.add(state_idx) != 0 };
-    let limited = if initialized {
-        let prev_value = unsafe { *state_values.add(state_idx) };
-        let delta = new_value - prev_value;
-        let limited_delta = delta.clamp(-step_limit, step_limit);
-        prev_value + limited_delta
-    } else {
-        new_value
-    };
-
-    unsafe {
-        *state_values.add(state_idx) = limited;
-        *state_initialized.add(state_idx) = 1;
-    }
-    limited
 }
 
 /// External helper function for idtmod wrapping.
@@ -808,70 +700,6 @@ pub extern "C" fn rspice_hypot(left: f64, right: f64) -> f64 {
 #[unsafe(export_name = "rspice_mod")]
 pub extern "C" fn rspice_mod(left: f64, right: f64) -> f64 {
     left % right
-}
-
-/// External helper function for Verilog-A left shift.
-#[unsafe(export_name = "rspice_shl")]
-pub extern "C" fn rspice_shl(left: f64, right: f64) -> f64 {
-    ((left as i64) << (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A arithmetic right shift.
-#[unsafe(export_name = "rspice_shr")]
-pub extern "C" fn rspice_shr(left: f64, right: f64) -> f64 {
-    ((left as i64) >> (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A bitwise and.
-#[unsafe(export_name = "rspice_bitand")]
-pub extern "C" fn rspice_bitand(left: f64, right: f64) -> f64 {
-    ((left as i64) & (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A bitwise or.
-#[unsafe(export_name = "rspice_bitor")]
-pub extern "C" fn rspice_bitor(left: f64, right: f64) -> f64 {
-    ((left as i64) | (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A bitwise xor.
-#[unsafe(export_name = "rspice_bitxor")]
-pub extern "C" fn rspice_bitxor(left: f64, right: f64) -> f64 {
-    ((left as i64) ^ (right as i64)) as f64
-}
-
-/// External helper function for Laplace state-space filter step.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers.
-#[unsafe(export_name = "rspice_laplace_step")]
-pub unsafe extern "C" fn rspice_laplace_step(
-    filters_ptr: *mut crate::laplace::StateSpaceFilter,
-    filters_len: usize,
-    filter_id: usize,
-    input: f64,
-    timestep: f64,
-) -> f64 {
-    if filters_ptr.is_null() {
-        set_native_runtime_error(format!(
-            "native legacy Laplace helper missing filter storage for filter {filter_id}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-    if filter_id >= filters_len {
-        set_native_runtime_error(format!(
-            "native legacy Laplace helper filter {filter_id} outside filter table length {filters_len}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-
-    let filters = unsafe { std::slice::from_raw_parts_mut(filters_ptr, filters_len) };
-
-    if timestep <= 0.0 {
-        return filters[filter_id].dc_output(input);
-    }
-
-    filters[filter_id].step(input, timestep)
 }
 
 /// External helper function for native x64 Laplace state-space filter
@@ -1766,61 +1594,15 @@ fn dynamic_variable_bounds_error(
     )
 }
 
-/// External helper function for PushCurrent terminal-pair lookup.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers and lengths.
-#[unsafe(export_name = "rspice_current_lookup")]
-pub unsafe extern "C" fn rspice_current_lookup(
-    branch_currents_ptr: *const f64,
-    branch_currents_len: usize,
-    _currents_ptr: *const f64,
-    _currents_len: usize,
-    num_terminals: usize,
-    pos: usize,
-    neg: usize,
-) -> f64 {
-    if branch_currents_ptr.is_null() {
-        set_native_runtime_error(
-            "native legacy current helper missing terminal-pair current storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-
-    let Some(idx) = terminal_pair_current_index(pos, neg, num_terminals) else {
-        set_native_runtime_error(format!(
-            "native legacy current helper terminal pair {pos},{neg} outside terminal count {num_terminals}; no interpreter fallback"
-        ));
-        return 0.0;
-    };
-    if idx >= branch_currents_len {
-        set_native_runtime_error(format!(
-            "native legacy current helper terminal pair index {idx} outside current storage length {branch_currents_len}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-
-    let value = unsafe { *branch_currents_ptr.add(idx) };
-    if value.is_finite() {
-        return value;
-    }
-
-    set_native_runtime_error(
-        "native legacy current helper read non-finite terminal-pair current; no interpreter fallback",
-    );
-    0.0
-}
-
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
         EvalContext, NativeRuntimeStatus, clear_native_runtime_error, rspice_above_state_native,
-        rspice_absdelay_state_native, rspice_cross_state_native, rspice_current_lookup,
-        rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_laplace_step,
-        rspice_laplace_step_native, rspice_last_crossing_state_native, rspice_limit,
-        rspice_limiter_previous_native, rspice_limiter_store_native,
-        rspice_native_dynamic_variable_error, rspice_slew_state_native,
-        rspice_table_derivative_native, rspice_table_lookup, rspice_table_lookup_native,
+        rspice_absdelay_state_native, rspice_cross_state_native, rspice_ddt_state_native,
+        rspice_dynamic_variable_slot_native, rspice_laplace_step_native,
+        rspice_last_crossing_state_native, rspice_limiter_previous_native,
+        rspice_limiter_store_native, rspice_native_dynamic_variable_error,
+        rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
         rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
         take_native_runtime_error,
     };
@@ -2024,59 +1806,6 @@ mod tests {
             assert!(error.contains("table storage"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
         }
-    }
-
-    #[test]
-    fn legacy_helpers_record_runtime_error_for_invalid_metadata() {
-        clear_native_runtime_error();
-        let value = unsafe { rspice_table_lookup(std::ptr::null(), 0, 0, 1.0) };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy table");
-
-        let mut initialized = [0_u8];
-        clear_native_runtime_error();
-        let value = unsafe {
-            rspice_limit(
-                std::ptr::null_mut(),
-                0,
-                initialized.as_mut_ptr(),
-                initialized.len(),
-                0,
-                2.0,
-                0.5,
-            )
-        };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy limit");
-
-        let mut state_values = [1.0];
-        let mut initialized = [1_u8; 2];
-        clear_native_runtime_error();
-        let value = unsafe {
-            rspice_limit(
-                state_values.as_mut_ptr(),
-                state_values.len(),
-                initialized.as_mut_ptr(),
-                initialized.len(),
-                1,
-                2.0,
-                0.5,
-            )
-        };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_eq!(state_values[0].to_bits(), 1.0_f64.to_bits());
-        assert_runtime_error_contains("legacy limit");
-
-        clear_native_runtime_error();
-        let value = unsafe { rspice_laplace_step(std::ptr::null_mut(), 0, 0, 1.0, 1.0e-9) };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy Laplace");
-
-        clear_native_runtime_error();
-        let value =
-            unsafe { rspice_current_lookup(std::ptr::null(), 0, std::ptr::null(), 0, 2, 0, 1) };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy current");
     }
 
     #[test]
