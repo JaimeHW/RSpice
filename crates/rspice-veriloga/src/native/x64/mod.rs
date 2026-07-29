@@ -4839,6 +4839,7 @@ mod tests {
         StampIndex, StampProgram,
     };
     use crate::device::VerilogADevice;
+    use crate::native::EvalContext;
     use crate::native::expr::{
         CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
         PriorCurrentProbe,
@@ -4848,7 +4849,6 @@ mod tests {
     };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
-    use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
     use crate::vm::{Vm, VmContext};
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
@@ -5586,7 +5586,7 @@ endmodule
         let ctx = eval_context(&[], &voltages);
         let mut vars = vec![0.0_f64; native.num_variables.max(1)];
         native.run_assignments(&ctx, vars.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
             panic!("native canonical assignment failed: {error}");
         }
 
@@ -6009,9 +6009,9 @@ endmodule
         context.voltages[1] = 0.0;
         resolve_native_parameter_defaults(&model, &native, &mut context);
         let ctx = eval_context_from_vm_context(&mut context);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, context.variables.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
             panic!("native assignment failed before assignment-fed ddx Jacobian: {error}");
         }
         let ctx = eval_context_from_vm_context(&mut context);
@@ -6083,9 +6083,9 @@ endmodule
         context.voltages[1] = 0.0;
         resolve_native_parameter_defaults(&model, &native, &mut context);
         let ctx = eval_context_from_vm_context(&mut context);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, context.variables.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
             panic!("native assignment failed before array-fed ddx Jacobian: {error}");
         }
         let ctx = eval_context_from_vm_context(&mut context);
@@ -7858,6 +7858,16 @@ endmodule
         skipped_nonfinite: usize,
     }
 
+    fn require_clean_native_context(
+        ctx: &EvalContext,
+        stage: impl std::fmt::Display,
+    ) -> Result<(), String> {
+        if let Some(error) = ctx.take_runtime_error() {
+            return Err(format!("native runtime error during {stage}: {error}"));
+        }
+        Ok(())
+    }
+
     fn assert_native_matches_bytecode_finite_entries(
         model: &CompiledModel,
         artifact: &CanonicalIrArtifact,
@@ -7891,12 +7901,10 @@ endmodule
         native_context
             .currents
             .resize(model.stamp_programs.len(), 0.0);
-        clear_native_runtime_error();
         let mut ctx = eval_context_from_vm_context(&mut native_context);
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, native_context.variables.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
-            return Err(format!("native runtime error during assignments: {error}"));
-        }
+        require_clean_native_context(&ctx, "assignments")?;
 
         let mut stats = FiniteOracleStats::default();
         for (index, is_live) in live_variables.iter().copied().enumerate() {
@@ -7921,6 +7929,10 @@ endmodule
                 let actual = native
                     .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
                     .ok_or_else(|| format!("missing native static condition {stamp_index}"))?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("static condition {stamp_index} oracle"),
+                )?;
                 assert_finite_close(
                     name,
                     format!("static_condition {stamp_index}"),
@@ -7934,10 +7946,14 @@ endmodule
 
             let native_active = if stamp.static_condition.is_some() {
                 ctx = eval_context_from_vm_context(&mut native_context);
-                native
+                let active = native
                     .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
-                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?
-                    != 0.0
+                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("static condition {stamp_index} activity"),
+                )?;
+                active != 0.0
             } else {
                 true
             };
@@ -7966,6 +7982,7 @@ endmodule
             let actual = native
                 .run_stamp_value(stamp_index, &ctx, native_context.variables.as_ptr())
                 .ok_or_else(|| format!("missing native stamp-value entry {stamp_index}"))?;
+            require_clean_native_context(&ctx, format!("stamp {stamp_index}"))?;
             assert_close_or_skip_nonfinite(
                 name,
                 format!("stamp {stamp_index}"),
@@ -8008,6 +8025,10 @@ endmodule
                     .ok_or_else(|| {
                         format!("missing native Jacobian entry {stamp_index}.{entry_index}")
                     })?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("Jacobian {stamp_index}.{entry_index}"),
+                )?;
                 assert_close_or_skip_nonfinite(
                     name,
                     format!("jacobian {stamp_index}.{entry_index}"),
@@ -8035,6 +8056,10 @@ endmodule
                             "missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
                         )
                     })?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("reactive Jacobian {stamp_index}.{entry_index}"),
+                )?;
                 assert_close_or_skip_nonfinite(
                     name,
                     format!("reactive_jacobian {stamp_index}.{entry_index}"),
@@ -8053,11 +8078,6 @@ endmodule
             );
         }
 
-        if let Some(error) = take_native_runtime_error() {
-            return Err(format!(
-                "native runtime error during finite oracle: {error}"
-            ));
-        }
         Ok(stats)
     }
 
@@ -8181,21 +8201,29 @@ endmodule
         name: &str,
         nonfinite_reference: &NonFiniteReference,
     ) -> f64 {
-        clear_native_runtime_error();
         context.clear_currents();
         context.currents.resize(model.stamp_programs.len(), 0.0);
 
         let mut ctx = eval_context_from_vm_context(context);
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        require_clean_native_context(&ctx, format!("{name} assignments"))
+            .unwrap_or_else(|error| panic!("{error}"));
 
         let mut checksum = 0.0_f64;
         for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
             ctx = eval_context_from_vm_context(context);
             if let Some(active) =
                 native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
-                && active == 0.0
             {
-                continue;
+                require_clean_native_context(
+                    &ctx,
+                    format!("{name} static condition {stamp_index}"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
+                if active == 0.0 {
+                    continue;
+                }
             }
 
             ctx = eval_context_from_vm_context(context);
@@ -8204,6 +8232,8 @@ endmodule
                 .unwrap_or_else(|| {
                     panic!("{name}: missing native stamp-value entry {stamp_index}")
                 });
+            require_clean_native_context(&ctx, format!("{name} stamp {stamp_index}"))
+                .unwrap_or_else(|error| panic!("{error}"));
             if !value.is_finite() {
                 assert!(
                     nonfinite_reference.stamps.contains(&stamp_index),
@@ -8226,6 +8256,11 @@ endmodule
                     .unwrap_or_else(|| {
                         panic!("{name}: missing native Jacobian entry {stamp_index}.{entry_index}")
                     });
+                require_clean_native_context(
+                    &ctx,
+                    format!("{name} Jacobian {stamp_index}.{entry_index}"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
                 if !value.is_finite() {
                     assert!(
                         nonfinite_reference
@@ -8252,6 +8287,11 @@ endmodule
                             "{name}: missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
                         )
                     });
+                require_clean_native_context(
+                    &ctx,
+                    format!("{name} reactive Jacobian {stamp_index}.{entry_index}"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
                 if !value.is_finite() {
                     assert!(
                         nonfinite_reference
@@ -8265,9 +8305,6 @@ endmodule
             }
         }
 
-        if let Some(error) = take_native_runtime_error() {
-            panic!("{name}: native runtime error during shipped-model sweep: {error}");
-        }
         checksum
     }
 

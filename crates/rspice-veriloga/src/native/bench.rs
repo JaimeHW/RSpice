@@ -4,10 +4,7 @@
 //! native entrypoints without exposing the low-level executable-code ABI as a
 //! stable public interface.
 
-use super::{
-    EvalContext, NativeModel, PlanStats, clear_native_runtime_error,
-    compile_native_with_canonical_ir, take_native_runtime_error,
-};
+use super::{EvalContext, NativeModel, PlanStats, compile_native_with_canonical_ir};
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, StampIndex,
 };
@@ -596,12 +593,14 @@ fn resolve_native_defaults(
     context: &mut VmContext,
 ) -> Result<(), String> {
     for index in 0..model.parameters.len() {
-        let ctx = eval_context_from_vm_context(context);
-        if let Some(value) = native.run_parameter_default(index, &ctx, context.variables.as_ptr()) {
+        let mut ctx = eval_context_from_vm_context(context);
+        let value = native.run_parameter_default(index, &ctx, context.variables.as_ptr());
+        take_native_error(&mut ctx, "parameter defaults")?;
+        if let Some(value) = value {
             context.parameters[index] = value;
         }
     }
-    take_native_error("parameter defaults")
+    Ok(())
 }
 
 fn resolve_bytecode_defaults(model: &CompiledModel, context: &mut VmContext) -> Result<(), String> {
@@ -913,21 +912,19 @@ fn run_native_sweep(
     native: &NativeModel,
     context: &mut VmContext,
 ) -> Result<f64, String> {
-    clear_native_runtime_error();
     context.clear_currents();
     context.currents.resize(model.stamp_programs.len(), 0.0);
 
     let mut ctx = eval_context_from_vm_context(context);
     native.run_assignments(&ctx, context.variables.as_mut_ptr());
-    take_native_error("assignments")?;
+    take_native_error(&mut ctx, "assignments")?;
 
     let mut checksum = 0.0;
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         ctx = eval_context_from_vm_context(context);
-        if let Some(active) =
-            native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
-            && active == 0.0
-        {
+        let active = native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr());
+        take_native_error(&mut ctx, "static condition")?;
+        if active.is_some_and(|active| active == 0.0) {
             continue;
         }
 
@@ -935,42 +932,48 @@ fn run_native_sweep(
         let value = native
             .run_stamp_value(stamp_index, &ctx, context.variables.as_ptr())
             .ok_or_else(|| format!("native sweep missing stamp-value entry {stamp_index}"))?;
+        take_native_error(&mut ctx, "stamp value")?;
         checksum += value;
         context.currents[stamp_index] = value;
 
         for entry_index in 0..stamp.jacobian_programs.len() {
             ctx = eval_context_from_vm_context(context);
-            checksum += native
+            let value = native
                 .run_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
                 .ok_or_else(|| {
                     format!("native sweep missing Jacobian entry {stamp_index}.{entry_index}")
                 })?;
+            take_native_error(&mut ctx, "Jacobian")?;
+            checksum += value;
         }
         for entry_index in 0..stamp.reactive_jacobians.len() {
             ctx = eval_context_from_vm_context(context);
-            checksum += native
+            let value = native
                 .run_reactive_jacobian(stamp_index, entry_index, &ctx, context.variables.as_ptr())
                 .ok_or_else(|| {
                     format!(
                         "native sweep missing reactive-Jacobian entry {stamp_index}.{entry_index}"
                     )
                 })?;
+            take_native_error(&mut ctx, "reactive Jacobian")?;
+            checksum += value;
         }
     }
 
     for source_index in 0..model.noise_sources.len() {
         ctx = eval_context_from_vm_context(context);
-        checksum += native
+        let psd = native
             .run_noise_psd(source_index, &ctx, context.variables.as_ptr())
             .ok_or_else(|| format!("native sweep missing noise PSD entry {source_index}"))?;
-        if let Some(exponent) =
-            native.run_noise_exponent(source_index, &ctx, context.variables.as_ptr())
-        {
+        take_native_error(&mut ctx, "noise PSD")?;
+        checksum += psd;
+        let exponent = native.run_noise_exponent(source_index, &ctx, context.variables.as_ptr());
+        take_native_error(&mut ctx, "noise exponent")?;
+        if let Some(exponent) = exponent {
             checksum += exponent;
         }
     }
 
-    take_native_error("sweep")?;
     Ok(checksum)
 }
 
@@ -1402,8 +1405,8 @@ fn assert_close(name: &str, expected: f64, actual: f64) -> Result<(), String> {
     }
 }
 
-fn take_native_error(phase: &str) -> Result<(), String> {
-    if let Some(error) = take_native_runtime_error() {
+fn take_native_error(ctx: &mut EvalContext, phase: &str) -> Result<(), String> {
+    if let Some(error) = ctx.take_runtime_error() {
         Err(format!("native runtime error during {phase}: {error}"))
     } else {
         Ok(())

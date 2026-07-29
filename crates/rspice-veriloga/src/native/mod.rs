@@ -17,7 +17,6 @@ pub use abi::{
     rspice_limited_exp, rspice_slew_state_native, rspice_timer_state_native,
     rspice_transition_state_native, rspice_zi_step_native,
 };
-pub(crate) use abi::{clear_native_runtime_error, take_native_runtime_error};
 pub use error::{JitError, JitResult};
 pub(crate) use model::NativeRequiredStorage;
 pub(crate) use model::NativeStampKernelIo;

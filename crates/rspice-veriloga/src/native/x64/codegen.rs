@@ -3508,10 +3508,7 @@ mod tests {
         NativeLoweringLimits, NativeOp, NativeProgram, UnaryMathOp,
     };
     use crate::native::runtime::ExecutableMemory;
-    use crate::native::{
-        EvalContext, clear_native_runtime_error, rspice_limexp, rspice_limited_exp,
-        take_native_runtime_error,
-    };
+    use crate::native::{EvalContext, rspice_limexp, rspice_limited_exp};
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use crate::zfilter::ZiFilter;
 
@@ -5387,12 +5384,12 @@ mod tests {
 
         let vars = [99.0_f64, 2.0, 4.0, 8.0];
         let ctx = eval_context(&[2.49], &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let loaded = f(&ctx, vars.as_ptr());
 
         assert_eq!(loaded.to_bits(), 5.0_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5424,8 +5421,7 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
 
         let vars = [99.0_f64, 2.0, 4.0, 8.0];
-        let mut ctx = eval_context(&[4.0], &[], &[], &[]);
-        clear_native_runtime_error();
+        let ctx = eval_context(&[4.0], &[], &[], &[]);
         ctx.clear_runtime_error();
 
         let loaded = f(&ctx, vars.as_ptr());
@@ -5434,7 +5430,6 @@ mod tests {
         let error = ctx
             .take_runtime_error()
             .expect("out-of-range dynamic read must hard-fail in its dispatch");
-        let _ = take_native_runtime_error();
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve array bounds diagnostic, got: {error}"
@@ -5476,10 +5471,10 @@ mod tests {
 
         let vars = [2.0_f64, 4.0, 8.0, 16.0];
         let ctx = eval_context(&[2.49], &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 8.0_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5516,7 +5511,7 @@ mod tests {
 
         let vars = [99.0_f64, 2.0, 4.0, 8.0];
         let ctx = eval_context(&[2.49], &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let loaded = f(&ctx, vars.as_ptr());
 
@@ -5524,7 +5519,7 @@ mod tests {
             loaded.to_bits(),
             (constant_prefix_sum(prefix.len()) + 4.0).to_bits()
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5597,12 +5592,12 @@ mod tests {
 
         let vars = [99.0_f64, 2.0, 4.0, 8.0];
         let ctx = eval_context(&[], &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let loaded = f(&ctx, vars.as_ptr());
 
         assert_eq!(loaded.to_bits(), 5.0_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5626,8 +5621,7 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
 
         let vars = [99.0_f64, 2.0, 4.0, 8.0];
-        let mut ctx = eval_context(&[], &[], &[], &[]);
-        clear_native_runtime_error();
+        let ctx = eval_context(&[], &[], &[], &[]);
         ctx.clear_runtime_error();
 
         let loaded = f(&ctx, vars.as_ptr());
@@ -5636,7 +5630,6 @@ mod tests {
         let error = ctx
             .take_runtime_error()
             .expect("out-of-range native array read must hard-fail in its dispatch");
-        let _ = take_native_runtime_error();
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve bounds diagnostic, got: {error}"
@@ -5708,14 +5701,14 @@ mod tests {
 
         let mut vars = [0.0_f64, 2.0, 4.0, 8.0];
         let ctx = eval_context(&[], &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
 
         let expected = runtime_exp(2.0);
         assert_eq!(vars[2].to_bits(), expected.to_bits());
         assert_eq!(vars[0].to_bits(), (expected + 1.0).to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5771,12 +5764,12 @@ mod tests {
         let params = [2.49_f64, 11.0];
         let mut vars = [0.0_f64, 2.0, 4.0, 8.0];
         let ctx = eval_context(&params, &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars, [123.0, 2.0, 11.0, 8.0]);
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5828,12 +5821,12 @@ mod tests {
         let params = [-1.5_f64, 12.0];
         let mut vars = [0.0_f64, 2.0, 4.0, 8.0];
         let ctx = eval_context(&params, &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars, [0.0, 12.0, 4.0, 8.0]);
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5864,12 +5857,12 @@ mod tests {
         let params = [2.49_f64, 13.0];
         let mut vars = [2.0_f64, 4.0, 8.0, 16.0];
         let ctx = eval_context(&params, &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars, [2.0, 4.0, 13.0, 16.0]);
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -5921,8 +5914,7 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
 
         let mut vars = [0.0_f64, 2.0, 4.0, 8.0];
-        let mut ctx = eval_context(&[], &[], &[], &[]);
-        clear_native_runtime_error();
+        let ctx = eval_context(&[], &[], &[], &[]);
         ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
@@ -5931,7 +5923,6 @@ mod tests {
         let error = ctx
             .take_runtime_error()
             .expect("out-of-range native indexed write must hard-fail in its dispatch");
-        let _ = take_native_runtime_error();
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve array bounds diagnostic, got: {error}"
@@ -6072,12 +6063,12 @@ mod tests {
 
         let mut vars = [0.0_f64; 5];
         let ctx = eval_context(&[], &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars, [2.0, 2.0, 22.0, 10.0, 11.0]);
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -6125,12 +6116,12 @@ mod tests {
 
         let mut vars = [0.0_f64];
         let ctx = eval_context(&[], &[], &[], &[]);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars, [0.0]);
-        let error = take_native_runtime_error().expect("loop limit must hard-fail");
+        let error = ctx.take_runtime_error().expect("loop limit must hard-fail");
         assert!(
             error.contains("native runtime loop iteration limit exceeded"),
             "error must preserve loop-limit diagnostic, got: {error}"
@@ -6501,16 +6492,20 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()), -1.0);
 
         ctx.branch_currents = std::ptr::null();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing current probe must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing current probe must hard-fail");
         assert_current_probe_error(&error);
 
         ctx.branch_currents = branch_currents.as_ptr();
         ctx.branch_currents_len = 3;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("out-of-range current probe must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("out-of-range current probe must hard-fail");
         assert_current_probe_error(&error);
     }
 
@@ -6606,16 +6601,20 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 7.0_f64.to_bits());
 
         ctx.currents = std::ptr::null();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing prior current must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing prior current must hard-fail");
         assert_prior_current_error(&error);
 
         ctx.currents = currents.as_ptr();
         ctx.currents_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short prior current must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short prior current must hard-fail");
         assert_prior_current_error(&error);
     }
 
@@ -6648,16 +6647,20 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 1.0_f64.to_bits());
 
         ctx.param_given = std::ptr::null();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing param_given must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing param_given must hard-fail");
         assert_param_given_error(&error);
 
         ctx.param_given = param_given.as_ptr();
         ctx.param_given_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short param_given must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short param_given must hard-fail");
         assert_param_given_error(&error);
     }
 
@@ -6682,16 +6685,20 @@ mod tests {
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 1.0_f64.to_bits());
 
         ctx.port_connected = std::ptr::null();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing port_connected must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing port_connected must hard-fail");
         assert_port_connected_error(&error);
 
         ctx.port_connected = port_connected.as_ptr();
         ctx.port_connected_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short port_connected must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short port_connected must hard-fail");
         assert_port_connected_error(&error);
     }
 
@@ -6774,24 +6781,30 @@ mod tests {
 
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_values = std::ptr::null_mut();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing ddt state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing ddt state must hard-fail");
         assert_missing_state_storage_error(&error);
 
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short ddt state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short ddt state must hard-fail");
         assert_state_storage_bounds_error(&error);
 
         ctx.state_values_len = state_values.len();
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_prev_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short ddt prior state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short ddt prior state must hard-fail");
         assert_prior_state_storage_bounds_error(&error);
     }
 
@@ -6882,25 +6895,31 @@ mod tests {
 
         ctx.state_values = std::ptr::null_mut();
         set_backward_euler(&mut ctx, 0.0);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing idt state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing idt state must hard-fail");
         assert_missing_state_storage_error(&error);
 
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short idt state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short idt state must hard-fail");
         assert_state_storage_bounds_error(&error);
 
         ctx.state_values_len = state_values.len();
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_prev_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short idt prior state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short idt prior state must hard-fail");
         assert_prior_state_storage_bounds_error(&error);
     }
 
@@ -7034,25 +7053,31 @@ mod tests {
 
         ctx.state_values = std::ptr::null_mut();
         set_backward_euler(&mut ctx, 0.0);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing idtmod state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing idtmod state must hard-fail");
         assert_missing_state_storage_error(&error);
 
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short idtmod state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short idtmod state must hard-fail");
         assert_state_storage_bounds_error(&error);
 
         ctx.state_values_len = state_values.len();
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_prev_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short idtmod prior state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short idtmod prior state must hard-fail");
         assert_prior_state_storage_bounds_error(&error);
     }
 
@@ -7347,14 +7372,15 @@ mod tests {
         state_initialized[1] = 1;
         assert_eq!(state_initialized[1], 1);
         let vars = [20.0_f64];
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(
             f(&ctx, vars.as_ptr()).to_bits(),
             0.0_f64.to_bits(),
             "native limit must return through the hard-fail path"
         );
-        let error =
-            take_native_runtime_error().expect("out-of-range limit metadata must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("out-of-range limit metadata must hard-fail");
         assert!(
             error.contains("state index outside initialization flag storage"),
             "error must identify invalid limit metadata, got: {error}"
@@ -7371,16 +7397,20 @@ mod tests {
 
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = 1;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("short limit state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("short limit state must hard-fail");
         assert_limit_state_storage_bounds_error(&error);
 
         ctx.state_values_len = state_values.len();
         ctx.state_values = std::ptr::null_mut();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing limit state must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing limit state must hard-fail");
         assert!(
             error.contains("missing state storage"),
             "error must identify missing limit state storage, got: {error}"
@@ -7392,10 +7422,11 @@ mod tests {
 
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_initialized = std::ptr::null_mut();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("missing limit initialization flags must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing limit initialization flags must hard-fail");
         assert!(
             error.contains("missing initialization flag storage"),
             "error must identify missing limit initialization storage, got: {error}"
@@ -7529,7 +7560,7 @@ mod tests {
         assert_eq!(state_values, state_before_probe);
         assert_eq!(state_initialized[1], 1);
         assert_eq!(limiter_active, 0);
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
 
         let converged_program = NativeProgram::from_ops_for_test(
             vec![
@@ -8750,14 +8781,14 @@ mod tests {
             ctx.time = 2.0;
             let vars = [7.0_f64];
 
-            clear_native_runtime_error();
+            ctx.clear_runtime_error();
             assert_eq!(
                 f(&ctx, vars.as_ptr()).to_bits(),
                 (310.0 + ((7.0 + integer_expected) + 2.0)).to_bits(),
                 "{name}"
             );
             assert!(
-                take_native_runtime_error().is_none(),
+                ctx.take_runtime_error().is_none(),
                 "{name}: valid runtime shift count should not report a native runtime error"
             );
         }
@@ -8786,9 +8817,8 @@ mod tests {
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
             let params = [left, right];
-            let mut ctx = eval_context(&params, &[], &[], &[]);
+            let ctx = eval_context(&params, &[], &[], &[]);
 
-            clear_native_runtime_error();
             ctx.clear_runtime_error();
             let result = f(&ctx, std::ptr::null());
 
@@ -8796,7 +8826,6 @@ mod tests {
             let error = ctx
                 .take_runtime_error()
                 .expect("invalid shift count must hard-fail in its dispatch context");
-            let _ = take_native_runtime_error();
             assert!(
                 error.contains("integer shift count"),
                 "{name}: error must identify shift-count failure, got: {error}"

@@ -5,18 +5,14 @@
 //! are the `extern "C"` helpers it calls for anything not worth emitting
 //! inline — transcendental math and the stateful operators.
 //!
-//! Errors cannot propagate across this boundary as a `Result`, so a helper
-//! that fails records the reason in a thread-local that the caller drains
-//! after the compiled entry point returns. Every entry point must therefore
-//! clear the slot before running and check it after, or a stale failure would
-//! be attributed to the wrong evaluation.
+//! Errors cannot propagate across this boundary as a `Result`, so helpers
+//! publish the first failure into the active [`EvalContext`]. This keeps
+//! nested and parallel dispatches isolated without thread-local state.
 //!
 //! This is an internal contract between this crate's compiler and its own
 //! generated code, not a stable ABI. It may change with any release.
 
-use std::cell::{RefCell, UnsafeCell};
-
-use crate::vm::terminal_pair_current_index;
+use std::cell::UnsafeCell;
 
 /// Per-dispatch failure state owned by one [`EvalContext`].
 ///
@@ -51,12 +47,16 @@ impl NativeRuntimeStatus {
         }
     }
 
-    pub(crate) fn take(&mut self) -> Option<String> {
-        *self.failed.get_mut() = 0;
-        self.message.get_mut().take()
+    pub(crate) fn take(&self) -> Option<String> {
+        // Safety: the dispatch contract grants exclusive access while the
+        // status is cleared or drained.
+        unsafe {
+            *self.failed.get() = 0;
+            (&mut *self.message.get()).take()
+        }
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub(crate) fn clear(&self) {
         let _ = self.take();
     }
 
@@ -190,11 +190,11 @@ pub struct EvalContext {
 }
 
 impl EvalContext {
-    pub(crate) fn clear_runtime_error(&mut self) {
+    pub(crate) fn clear_runtime_error(&self) {
         self.runtime_status.clear();
     }
 
-    pub(crate) fn take_runtime_error(&mut self) -> Option<String> {
+    pub(crate) fn take_runtime_error(&self) -> Option<String> {
         self.runtime_status.take()
     }
 
@@ -203,44 +203,14 @@ impl EvalContext {
     }
 }
 
-thread_local! {
-    static NATIVE_RUNTIME_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-pub(crate) fn clear_native_runtime_error() {
-    NATIVE_RUNTIME_ERROR.with(|slot| {
-        slot.borrow_mut().take();
-    });
-}
-
-pub(crate) fn take_native_runtime_error() -> Option<String> {
-    NATIVE_RUNTIME_ERROR.with(|slot| slot.borrow_mut().take())
-}
-
-fn set_native_runtime_error(message: impl Into<String>) {
-    NATIVE_RUNTIME_ERROR.with(|slot| {
-        let mut error = slot.borrow_mut();
-        if error.is_none() {
-            *error = Some(message.into());
-        }
-    });
-}
-
 fn set_native_context_error(ctx: &EvalContext, message: impl Into<String>) {
-    let message = message.into();
-    ctx.record_runtime_error(message.clone());
-    // Transitional mirror while every generated helper and caller migrates
-    // to the per-dispatch status.
-    set_native_runtime_error(message);
+    ctx.record_runtime_error(message);
 }
 
 fn set_native_context_error_ptr(ctx: *const EvalContext, message: impl Into<String>) {
-    let message = message.into();
-    if ctx.is_null() {
-        set_native_runtime_error(message);
-    } else {
-        // SAFETY: Native entry points only pass their live dispatch context.
-        set_native_context_error(unsafe { &*ctx }, message);
+    // SAFETY: A non-null pointer comes from the active native entry point.
+    if let Some(ctx) = unsafe { ctx.as_ref() } {
+        set_native_context_error(ctx, message);
     }
 }
 
@@ -466,9 +436,12 @@ pub unsafe extern "C" fn rspice_table_lookup_native(
     table_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(format!(
-            "native table lookup helper missing EvalContext for table {table_id}; no interpreter fallback"
-        ));
+        set_native_context_error_ptr(
+            ctx,
+            format!(
+                "native table lookup helper missing EvalContext for table {table_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     let ctx = unsafe { &*ctx };
@@ -507,9 +480,12 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
     table_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(format!(
-            "native table derivative helper missing EvalContext for table {table_id}; no interpreter fallback"
-        ));
+        set_native_context_error_ptr(
+            ctx,
+            format!(
+                "native table derivative helper missing EvalContext for table {table_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     let ctx = unsafe { &*ctx };
@@ -720,7 +696,8 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
     filter_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native Laplace helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -773,7 +750,10 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     filter_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error("native zi helper missing EvalContext; no interpreter fallback");
+        set_native_context_error_ptr(
+            ctx,
+            "native zi helper missing EvalContext; no interpreter fallback",
+        );
         return 0.0;
     }
 
@@ -809,11 +789,7 @@ fn invalid_native_integration_context(
     detail: &str,
 ) -> f64 {
     let message = format!("native {operator} state {state_id} {detail}; no interpreter fallback");
-    if ctx.is_null() {
-        set_native_runtime_error(message);
-    } else {
-        set_native_context_error(unsafe { &*ctx }, message);
-    }
+    set_native_context_error_ptr(ctx, message);
     0.0
 }
 
@@ -1049,7 +1025,8 @@ pub unsafe extern "C" fn rspice_timer_state_native(
     _timer_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native timer helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -1100,7 +1077,8 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     filter_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native transition helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -1173,7 +1151,10 @@ pub unsafe extern "C" fn rspice_slew_state_native(
     filter_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error("native slew helper missing EvalContext; no interpreter fallback");
+        set_native_context_error_ptr(
+            ctx,
+            "native slew helper missing EvalContext; no interpreter fallback",
+        );
         return 0.0;
     }
     let ctx = unsafe { &*ctx };
@@ -1246,7 +1227,8 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
     buffer_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native absdelay helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -1311,7 +1293,8 @@ pub unsafe extern "C" fn rspice_cross_state_native(
     detector_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native cross helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -1382,7 +1365,8 @@ pub unsafe extern "C" fn rspice_above_state_native(
     detector_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native above helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -1440,7 +1424,8 @@ pub unsafe extern "C" fn rspice_last_crossing_state_native(
     detector_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native last_crossing helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -1597,14 +1582,13 @@ fn dynamic_variable_bounds_error(
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        EvalContext, NativeRuntimeStatus, clear_native_runtime_error, rspice_above_state_native,
-        rspice_absdelay_state_native, rspice_cross_state_native, rspice_ddt_state_native,
-        rspice_dynamic_variable_slot_native, rspice_laplace_step_native,
-        rspice_last_crossing_state_native, rspice_limiter_previous_native,
-        rspice_limiter_store_native, rspice_native_dynamic_variable_error,
-        rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
-        take_native_runtime_error,
+        EvalContext, NativeRuntimeStatus, rspice_above_state_native, rspice_absdelay_state_native,
+        rspice_cross_state_native, rspice_ddt_state_native, rspice_dynamic_variable_slot_native,
+        rspice_laplace_step_native, rspice_last_crossing_state_native,
+        rspice_limiter_previous_native, rspice_limiter_store_native,
+        rspice_native_dynamic_variable_error, rspice_slew_state_native,
+        rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
+        rspice_transition_state_native, rspice_zi_step_native,
     };
     use crate::codegen::LookupTable;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -1712,12 +1696,13 @@ mod tests {
                 "previous derivatives" => ctx.state_derivatives_prev_len = 0,
                 _ => unreachable!(),
             }
-            clear_native_runtime_error();
+            ctx.clear_runtime_error();
 
             let value = unsafe { rspice_ddt_state_native(operand.as_ptr(), &ctx, 0) };
 
             assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{missing}");
-            let error = take_native_runtime_error()
+            let error = ctx
+                .take_runtime_error()
                 .unwrap_or_else(|| panic!("{missing} length must hard-fail"));
             assert!(
                 error.contains("ddt") && error.contains("invalid state storage"),
@@ -1730,7 +1715,7 @@ mod tests {
     fn named_limiter_helpers_bypass_state_outside_limited_newton() {
         let mut ctx = empty_eval_context();
         ctx.limiting_enabled = 0;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         assert_eq!(
             unsafe { rspice_limiter_previous_native(3.5, &ctx, usize::MAX) }.to_bits(),
@@ -1742,7 +1727,7 @@ mod tests {
             3.5_f64.to_bits()
         );
         assert!(
-            take_native_runtime_error().is_none(),
+            ctx.take_runtime_error().is_none(),
             "probe and small-signal limiter bypass must not require state storage"
         );
     }
@@ -1780,7 +1765,7 @@ mod tests {
             4.0_f64.to_bits()
         );
         assert_eq!(limiter_active, 0);
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -1793,15 +1778,13 @@ mod tests {
             ),
             ("derivative", rspice_table_derivative_native),
         ] {
-            let mut ctx = empty_eval_context();
-            clear_native_runtime_error();
+            let ctx = empty_eval_context();
             ctx.clear_runtime_error();
             let value = unsafe { helper(1.0, &ctx, 0) };
             assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
             let error = ctx
                 .take_runtime_error()
                 .unwrap_or_else(|| panic!("{name} missing table storage must hard-fail"));
-            let _ = take_native_runtime_error();
             assert!(error.contains("table"), "{name}: {error}");
             assert!(error.contains("table storage"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
@@ -1822,14 +1805,12 @@ mod tests {
             let mut ctx = empty_eval_context();
             ctx.lookup_tables = table.as_ptr();
             ctx.lookup_tables_len = table.len();
-            clear_native_runtime_error();
             ctx.clear_runtime_error();
             let value = unsafe { helper(1.0, &ctx, 1) };
             assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
             let error = ctx
                 .take_runtime_error()
                 .unwrap_or_else(|| panic!("{name} out-of-range table id must hard-fail"));
-            let _ = take_native_runtime_error();
             assert!(error.contains("table"), "{name}: {error}");
             assert!(error.contains("outside table length"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
@@ -1837,32 +1818,9 @@ mod tests {
     }
 
     #[test]
-    fn laplace_native_helper_records_runtime_error_for_invalid_context() {
-        clear_native_runtime_error();
-
-        let value = unsafe { rspice_laplace_step_native(1.25, std::ptr::null(), 0) };
-
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
-            .expect("invalid native Laplace context must record a runtime error");
-        assert!(
-            error.contains("Laplace") && error.contains("EvalContext"),
-            "error must identify the invalid Laplace context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-        assert!(
-            take_native_runtime_error().is_none(),
-            "runtime error retrieval must clear the thread-local slot"
-        );
-    }
-
-    #[test]
     fn native_helper_records_failure_in_its_evaluation_context() {
-        let mut ctx = empty_eval_context();
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_laplace_step_native(1.25, &ctx, 0) };
 
@@ -1878,17 +1836,18 @@ mod tests {
     }
 
     #[test]
-    fn zi_native_helper_records_runtime_error_for_invalid_context() {
-        clear_native_runtime_error();
+    fn zi_native_helper_records_runtime_error_for_missing_storage() {
+        let ctx = empty_eval_context();
 
-        let value = unsafe { rspice_zi_step_native(1.25, std::ptr::null(), 0) };
+        let value = unsafe { rspice_zi_step_native(1.25, &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native zi context must record an error");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing native zi storage must record an error");
         assert!(
-            error.contains("zi") && error.contains("EvalContext"),
-            "error must identify the invalid zi context, got: {error}"
+            error.contains("zi") && error.contains("filter storage"),
+            "error must identify the missing zi storage, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
@@ -1897,23 +1856,8 @@ mod tests {
     }
 
     #[test]
-    fn timer_native_helper_matches_vm_events_and_reports_invalid_context() {
-        clear_native_runtime_error();
+    fn timer_native_helper_matches_vm_events() {
         let periodic = [1.0, 0.5, 0.0, 1.0];
-
-        let value = unsafe { rspice_timer_state_native(periodic.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native timer context must record an error");
-        assert!(
-            error.contains("timer") && error.contains("EvalContext"),
-            "error must identify the invalid timer context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
 
         let mut timer_bound = f64::INFINITY;
         let mut ctx = EvalContext {
@@ -2023,9 +1967,8 @@ mod tests {
 
     #[test]
     fn transition_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 0.2, 0.4, 0.4];
-        let mut ctx = empty_eval_context();
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
         let missing_operands = unsafe { rspice_transition_state_native(std::ptr::null(), &ctx, 0) };
 
@@ -2041,34 +1984,18 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_transition_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
-            .expect("invalid native transition context must record an error");
-        assert!(
-            error.contains("transition") && error.contains("EvalContext"),
-            "error must identify the invalid transition context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
     }
 
     #[test]
     fn transition_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 0.2, 0.4, 0.4];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 7) };
 
         assert_eq!(value.to_bits(), 1.25_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2076,12 +2003,14 @@ mod tests {
         let operands = [1.0, 0.2, 0.4, 0.4];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing transition storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing transition storage must hard-fail");
         assert!(
             error.contains("transition") && error.contains("filter storage"),
             "error must identify missing transition storage, got: {error}"
@@ -2100,7 +2029,7 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.transition_filters = filters.as_mut_ptr();
         ctx.transition_filters_len = filters.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 1.0;
         assert_eq!(
@@ -2117,14 +2046,13 @@ mod tests {
         ctx.time = 1.6;
         let done = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((done - 1.0).abs() < 1.0e-12, "done transition: {done}");
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
     fn slew_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 2.0, 2.0];
-        let mut ctx = empty_eval_context();
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
         let missing_operands = unsafe { rspice_slew_state_native(std::ptr::null(), &ctx, 0) };
 
@@ -2140,34 +2068,18 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_slew_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native slew context must record an error");
-        assert!(
-            error.contains("slew") && error.contains("EvalContext"),
-            "error must identify the invalid slew context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
     }
 
     #[test]
     fn slew_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 2.0, 2.0];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 7) };
 
         assert_eq!(value.to_bits(), 1.25_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2175,12 +2087,14 @@ mod tests {
         let operands = [1.0, 2.0, 2.0];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing slew storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing slew storage must hard-fail");
         assert!(
             error.contains("slew") && error.contains("filter storage"),
             "error must identify missing slew storage, got: {error}"
@@ -2199,7 +2113,7 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.slew_filters = filters.as_mut_ptr();
         ctx.slew_filters_len = filters.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 0.0;
         assert_eq!(
@@ -2216,14 +2130,13 @@ mod tests {
         ctx.time = 1.0;
         let done = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((done - 2.0).abs() < 1.0e-12, "done slew: {done}");
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
     fn absdelay_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 0.5];
-        let mut ctx = empty_eval_context();
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
         let missing_operands = unsafe { rspice_absdelay_state_native(std::ptr::null(), &ctx, 0) };
 
@@ -2239,34 +2152,18 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_absdelay_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
-            .expect("invalid native absdelay context must record an error");
-        assert!(
-            error.contains("absdelay") && error.contains("EvalContext"),
-            "error must identify the invalid absdelay context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
     }
 
     #[test]
     fn absdelay_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 0.5];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 7) };
 
         assert_eq!(value.to_bits(), 1.25_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2274,12 +2171,14 @@ mod tests {
         let operands = [1.0, 0.5];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing absdelay storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing absdelay storage must hard-fail");
         assert!(
             error.contains("absdelay") && error.contains("delay-buffer storage"),
             "error must identify missing absdelay storage, got: {error}"
@@ -2298,7 +2197,7 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.delay_buffers = buffers.as_mut_ptr();
         ctx.delay_buffers_len = buffers.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 0.0;
         assert_eq!(
@@ -2328,14 +2227,13 @@ mod tests {
             (interpolated - 2.0).abs() < 1.0e-12,
             "interpolated delay: {interpolated}"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
     fn cross_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 1.0, 0.0, 0.0, 1.0];
-        let mut ctx = empty_eval_context();
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
         let missing_operands = unsafe { rspice_cross_state_native(std::ptr::null(), &ctx, 0) };
 
@@ -2351,34 +2249,20 @@ mod tests {
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
         );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_cross_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native cross context must record an error");
-        assert!(
-            error.contains("cross") && error.contains("EvalContext"),
-            "error must identify the invalid cross context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
     }
 
     #[test]
     fn cross_native_helper_hard_fails_missing_detector_storage() {
         let operands = [1.0, 1.0, 0.0, 0.0, 1.0];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing cross storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing cross storage must hard-fail");
         assert!(
             error.contains("cross") && error.contains("detector storage"),
             "error must identify missing cross storage, got: {error}"
@@ -2396,7 +2280,7 @@ mod tests {
         let mut ctx = empty_eval_context();
         ctx.cross_detectors = detectors.as_mut_ptr();
         ctx.cross_detectors_len = detectors.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 0.0;
         assert_eq!(
@@ -2441,7 +2325,7 @@ mod tests {
             1.0_f64.to_bits(),
             "falling edge should obey negative direction"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2479,7 +2363,7 @@ mod tests {
             1.0_f64.to_bits(),
             "subsequent rising crossings must trigger above"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2508,27 +2392,24 @@ mod tests {
             0.5_f64.to_bits(),
             "native Newton reevaluation must be idempotent"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
     fn dynamic_variable_slot_resolver_returns_rounded_slot_without_side_effects() {
         let mut values = [2.0, 4.0, 8.0];
-        clear_native_runtime_error();
 
         let slot = unsafe {
             rspice_dynamic_variable_slot_native(2.49, values.as_mut_ptr(), values.len(), 1)
         };
 
         assert_eq!(slot, unsafe { values.as_mut_ptr().add(1) });
-        assert!(take_native_runtime_error().is_none());
 
         let slot = unsafe {
             rspice_dynamic_variable_slot_native(4.0, values.as_mut_ptr(), values.len(), 1)
         };
 
         assert!(slot.is_null());
-        assert!(take_native_runtime_error().is_none());
     }
 
     #[test]
@@ -2539,7 +2420,6 @@ mod tests {
             ("huge finite", 1.0e300, i64::MAX),
         ] {
             let mut values = [2.0];
-            clear_native_runtime_error();
 
             let slot = unsafe {
                 rspice_dynamic_variable_slot_native(raw_index, values.as_mut_ptr(), 1, lower)
@@ -2547,14 +2427,12 @@ mod tests {
 
             assert!(slot.is_null(), "{name}");
             assert_eq!(values[0].to_bits(), 2.0_f64.to_bits(), "{name}");
-            assert!(take_native_runtime_error().is_none(), "{name}");
         }
     }
 
     #[test]
     fn dynamic_variable_error_helper_reports_into_its_dispatch_context() {
-        let mut ctx = empty_eval_context();
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
         ctx.clear_runtime_error();
 
         let value = rspice_native_dynamic_variable_error(4.0, &ctx, 3, 1);
@@ -2563,23 +2441,9 @@ mod tests {
         let error = ctx
             .take_runtime_error()
             .expect("dynamic variable failure must publish to its dispatch");
-        let _ = take_native_runtime_error();
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve array bounds diagnostic, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-    }
-
-    fn assert_runtime_error_contains(feature: &str) {
-        let error =
-            take_native_runtime_error().unwrap_or_else(|| panic!("{feature} must hard-fail"));
-        assert!(
-            error.contains(feature),
-            "error must identify {feature}, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
