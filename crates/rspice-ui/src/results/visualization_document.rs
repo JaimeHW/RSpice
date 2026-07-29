@@ -634,11 +634,6 @@ impl SourceColumn {
     }
 
     #[must_use]
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    #[must_use]
     pub const fn value_type(&self) -> ValueType {
         self.value_type
     }
@@ -648,10 +643,6 @@ impl SourceColumn {
         self.role
     }
 
-    #[must_use]
-    pub fn unit(&self) -> Option<&str> {
-        self.unit.as_deref()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1732,11 +1723,6 @@ impl VisualizationDocument {
     }
 
     #[must_use]
-    pub fn title(&self) -> &str {
-        &self.title
-    }
-
-    #[must_use]
     pub fn datasets(&self) -> &[SourceDataset] {
         &self.datasets
     }
@@ -1782,18 +1768,8 @@ impl VisualizationDocument {
     }
 
     #[must_use]
-    pub fn link_groups(&self) -> &[LinkGroup] {
-        &self.link_groups
-    }
-
-    #[must_use]
     pub fn tombstones(&self) -> &[Tombstone] {
         &self.tombstones
-    }
-
-    #[must_use]
-    pub fn comparisons(&self) -> &[ComparisonReceipt] {
-        &self.comparisons
     }
 
     /// Authenticates the complete validated document envelope.

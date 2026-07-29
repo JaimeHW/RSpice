@@ -560,21 +560,6 @@ impl SymbolLibrary {
         self.get_with_rotation(component_type, rotation_degrees)
     }
 
-    /// Check if a symbol exists for the given component type
-    pub fn contains(&self, component_type: ComponentType) -> bool {
-        self.symbols.contains_key(&component_type)
-    }
-
-    /// Check whether a parsed embedded asset exists by filename.
-    pub fn contains_asset(&self, filename: &str) -> bool {
-        self.embedded_assets.contains_key(filename)
-    }
-
-    /// Get all loaded component types
-    pub fn loaded_types(&self) -> Vec<ComponentType> {
-        self.symbols.keys().copied().collect()
-    }
-
     /// Number of loaded symbols
     pub fn len(&self) -> usize {
         self.symbols.len()
@@ -585,10 +570,6 @@ impl SymbolLibrary {
         self.embedded_assets.len()
     }
 
-    /// Check if library is empty
-    pub fn is_empty(&self) -> bool {
-        self.symbols.is_empty()
-    }
 }
 
 #[cfg(test)]

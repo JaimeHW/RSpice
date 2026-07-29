@@ -29,8 +29,6 @@ pub struct PdkSettingsDialogState {
     pub scanning: bool,
     /// Filter text for discovered files
     pub file_filter: String,
-    /// Whether to show only enabled paths
-    pub show_only_enabled: bool,
     /// Index of path being edited (if any)
     pub editing_path_index: Option<usize>,
     /// Temporary edit buffer for path
@@ -61,15 +59,6 @@ impl PdkSettingsDialogState {
         if !self.config.library_paths().is_empty() {
             self.rescan();
         }
-    }
-
-    /// Open the dialog, loading from default location
-    pub fn open_default(&mut self) {
-        self.config = PdkConfig::load_or_default();
-        self.original_config = Some(self.config.clone());
-        self.open = true;
-        self.reset_inputs();
-        self.select_default_source();
     }
 
     /// Select the first source (or none when the list is empty).

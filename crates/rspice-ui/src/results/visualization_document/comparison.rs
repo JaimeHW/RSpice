@@ -253,28 +253,8 @@ impl ProgressiveOperation {
     }
 
     #[must_use]
-    pub const fn id(&self) -> OperationId {
-        self.id
-    }
-
-    #[must_use]
-    pub const fn completed_units(&self) -> u64 {
-        self.completed_units
-    }
-
-    #[must_use]
-    pub const fn total_units(&self) -> u64 {
-        self.total_units
-    }
-
-    #[must_use]
     pub const fn state(&self) -> &ProgressiveOperationState {
         &self.state
-    }
-
-    #[must_use]
-    pub const fn checkpoint_digest(&self) -> Option<ContentDigest> {
-        self.checkpoint_digest
     }
 
     #[must_use]
@@ -335,29 +315,6 @@ impl ProgressiveOperation {
             });
         }
         self.state = ProgressiveOperationState::Cancelled;
-        Ok(())
-    }
-
-    pub fn fail(
-        &mut self,
-        message: impl Into<String>,
-        checkpoint_digest: Option<ContentDigest>,
-    ) -> Result<(), VisualizationError> {
-        if !matches!(
-            &self.state,
-            ProgressiveOperationState::Running | ProgressiveOperationState::Cancelling
-        ) {
-            return Err(VisualizationError::InvalidOperationTransition {
-                from: self.state_label(),
-                event: "fail",
-            });
-        }
-        let message = message.into();
-        validate_label("operation.failure", &message)?;
-        if checkpoint_digest.is_some() {
-            self.checkpoint_digest = checkpoint_digest;
-        }
-        self.state = ProgressiveOperationState::Failed { message };
         Ok(())
     }
 

@@ -9,11 +9,6 @@ use super::super::pipeline::{
 };
 use super::*;
 impl FftState {
-    /// Create new state
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Load FFT data and analyze
     pub fn load_data(&mut self, mut data: FftData) {
         data.convert_normalization(self.normalization);
@@ -44,11 +39,6 @@ impl FftState {
     /// Select preferred source trace name.
     pub fn set_selected_source(&mut self, source_name: Option<String>) {
         self.selected_source = source_name;
-    }
-
-    /// Set FFT input fidelity mode.
-    pub fn set_input_fidelity(&mut self, input_fidelity: InputFidelity) {
-        self.input_fidelity = input_fidelity;
     }
 
     /// Active FFT input pipeline policy.
@@ -148,38 +138,6 @@ impl FftState {
         self.update_auto_scale();
     }
 
-    /// Set amplitude normalization mode.
-    ///
-    /// This performs an in-place O(N) rescale on loaded bins to avoid expensive
-    /// FFT recomputation for simple RMS/Peak toggles.
-    pub fn set_normalization(&mut self, normalization: SpectrumNormalization) {
-        if self.normalization == normalization {
-            return;
-        }
-        self.normalization = normalization;
-
-        if let Some(data) = self.data.as_mut() {
-            data.convert_normalization(normalization);
-            self.recompute_analysis();
-            self.mark_spectrum_changed();
-            self.update_auto_scale();
-            return;
-        }
-
-        if self.source_cache.is_some() {
-            self.recompute_from_source();
-        }
-    }
-
-    /// Recompute scalar analysis from currently loaded spectrum data.
-    pub fn recompute_analysis(&mut self) {
-        if let Some(data) = self.data.as_ref() {
-            self.analysis = Some(SpectrumAnalysis::analyze(data, self.num_harmonics));
-        } else {
-            self.analysis = None;
-        }
-    }
-
     /// Clear data
     pub fn clear(&mut self) {
         self.data = None;
@@ -194,10 +152,6 @@ impl FftState {
         self.data.is_some()
     }
 
-    /// Is empty?
-    pub fn is_empty(&self) -> bool {
-        self.data.is_none()
-    }
 }
 
 fn finite_time_bounds(time: &[f64]) -> Option<(f64, f64)> {

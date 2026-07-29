@@ -12,9 +12,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::workbench::workflows::export_workflow::{
-    ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
-};
+use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use crate::workbench::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
 use crate::workbench::{ShortcutPreferences, ShortcutProfileAudit};
 
@@ -254,12 +252,6 @@ pub(crate) fn export_shortcut_profile_with_io(
     Ok(Some(path))
 }
 
-pub fn export_shortcut_profile(
-    profile: &ShortcutPreferences,
-) -> Result<Option<PathBuf>, ShortcutProfileWorkflowError> {
-    export_shortcut_profile_with_io(profile, &NativeExportWorkflowIo)
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) trait ShortcutProfileImportIo {
     fn show_open_dialog(&self) -> Result<Option<PathBuf>, String>;
@@ -339,12 +331,6 @@ pub(crate) fn import_shortcut_profile_with_io(
         )
     })?;
     stage_shortcut_profile_json(display_name(&path), &contents).map(Some)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn import_shortcut_profile()
--> Result<Option<StagedShortcutProfile>, ShortcutProfileWorkflowError> {
-    import_shortcut_profile_with_io(&NativeShortcutProfileImportIo)
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]

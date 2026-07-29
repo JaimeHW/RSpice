@@ -100,11 +100,6 @@ impl VisualizationRasterPalette {
     }
 
 
-    #[must_use]
-    pub fn traces(&self) -> &[Rgb8] {
-        &self.traces
-    }
-
     fn validate(&self) -> Result<(), VisualizationRasterError> {
         if self.traces.is_empty() || self.traces.len() > MAX_RASTER_TRACES {
             return Err(VisualizationRasterError::InvalidProfile {
@@ -164,11 +159,6 @@ impl VisualizationRasterProfile {
         Ok(profile)
     }
 
-
-    #[must_use]
-    pub const fn palette(&self) -> &VisualizationRasterPalette {
-        &self.palette
-    }
 
     pub fn validate(&self) -> Result<(), VisualizationRasterError> {
         for (field, value) in [

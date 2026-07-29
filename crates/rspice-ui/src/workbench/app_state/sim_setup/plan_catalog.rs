@@ -185,15 +185,6 @@ impl StoredSimulationPlan {
         &self.analysis_plan
     }
 
-    #[must_use]
-    pub const fn reference_pvt(&self) -> ReferencePvtPoint {
-        self.reference_pvt
-    }
-
-    #[must_use]
-    pub const fn options(&self) -> &SimulationOptions {
-        &self.options
-    }
 }
 
 /// Content domains copied into a newly cloned plan.
@@ -235,15 +226,6 @@ pub struct SimulationPlanCloneOutcome {
     /// Exact source-to-clone analysis mapping for plan-owned payloads whose
     /// scope targets a selected analysis instance.
     pub analysis_identity_map: Vec<(AnalysisInstanceId, AnalysisInstanceId)>,
-}
-
-impl SimulationPlanCloneOutcome {
-    #[must_use]
-    pub fn remap_analysis_id(&self, source: AnalysisInstanceId) -> Option<AnalysisInstanceId> {
-        self.analysis_identity_map
-            .iter()
-            .find_map(|(candidate, cloned)| (*candidate == source).then_some(*cloned))
-    }
 }
 
 /// Atomic named-plan catalog operation failure.
@@ -469,32 +451,13 @@ impl SimSetupState {
         Ok(())
     }
 
-    /// Rename the active plan while enforcing project-wide uniqueness.
-    pub fn rename_active_plan(
-        &mut self,
-        new_name: impl Into<String>,
-    ) -> Result<(), SimulationPlanCatalogError> {
-        let id = self
-            .analysis_plan
-            .as_ref()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?
-            .id();
-        let new_name = SimulationPlanName::new(new_name)?;
-        self.ensure_plan_name_available(&new_name, Some(id))?;
-        self.active_plan_name = new_name;
-        Ok(())
-    }
-
     /// Rename any retained inactive plan while enforcing project-wide
-    /// uniqueness. Pass the active plan identity to rename the active plan.
-    pub fn rename_plan(
+    /// uniqueness.
+    fn rename_plan(
         &mut self,
         id: SimulationPlanId,
         new_name: impl Into<String>,
     ) -> Result<(), SimulationPlanCatalogError> {
-        if self.analysis_plan.as_ref().map(SimulationPlan::id) == Some(id) {
-            return self.rename_active_plan(new_name);
-        }
         let new_name = SimulationPlanName::new(new_name)?;
         self.ensure_plan_name_available(&new_name, Some(id))?;
         let plan = self

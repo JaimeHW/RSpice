@@ -35,10 +35,6 @@ impl SvgColor {
         }
     }
 
-    #[must_use]
-    pub const fn channels(self) -> [u8; 4] {
-        [self.red, self.green, self.blue, self.alpha]
-    }
 }
 
 impl fmt::Display for SvgColor {
@@ -141,8 +137,6 @@ pub struct SvgExportConfig {
     pub background_color: Option<SvgColor>,
     /// Font size for labels
     pub font_size: f64,
-    /// Include grid in output
-    pub include_grid: bool,
     /// Margin around content
     pub margin: f64,
 }
@@ -158,7 +152,6 @@ impl Default for SvgExportConfig {
             text_color: SvgColor::rgb(0xAA, 0xAA, 0xAA),
             background_color: Some(SvgColor::rgb(0x1A, 0x1A, 0x1A)),
             font_size: 12.0,
-            include_grid: false,
             margin: 50.0,
         }
     }

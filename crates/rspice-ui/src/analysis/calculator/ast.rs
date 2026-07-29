@@ -61,11 +61,6 @@ pub enum CalculatorConstant {
 }
 
 impl CalculatorExpr {
-    /// Helper to create a number node
-    pub fn number(val: f64) -> Self {
-        Self::Number(val)
-    }
-
     /// Helper to create a binary operation
     pub fn binary(op: BinaryOp, left: Self, right: Self) -> Self {
         Self::BinaryOp {

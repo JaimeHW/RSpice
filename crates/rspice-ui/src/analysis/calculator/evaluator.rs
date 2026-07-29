@@ -21,12 +21,6 @@ impl CalcValue {
         Self::Waveform(x, y)
     }
 
-    pub fn as_scalar(&self) -> Option<f64> {
-        match self {
-            Self::Scalar(v) => Some(*v),
-            _ => None,
-        }
-    }
 }
 
 /// Interface for retrieving simulation data

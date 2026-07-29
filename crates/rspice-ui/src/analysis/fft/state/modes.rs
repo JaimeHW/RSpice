@@ -20,23 +20,6 @@ pub enum MagnitudeScale {
     DBm,
 }
 
-impl MagnitudeScale {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::DB => "dB",
-            Self::DBc => "dBc",
-            Self::Linear => "Linear",
-            Self::DBm => "dBm",
-        }
-    }
-
-    /// All modes
-    pub fn all() -> &'static [MagnitudeScale] {
-        &[Self::DB, Self::DBc, Self::Linear, Self::DBm]
-    }
-}
-
 /// Frequency axis mode
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FrequencyScale {
@@ -45,21 +28,6 @@ pub enum FrequencyScale {
     Linear,
     /// Logarithmic frequency axis
     Log,
-}
-
-impl FrequencyScale {
-    /// Display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Linear => "Linear",
-            Self::Log => "Log",
-        }
-    }
-
-    /// All modes
-    pub fn all() -> &'static [FrequencyScale] {
-        &[Self::Linear, Self::Log]
-    }
 }
 
 /// FFT input fidelity mode.
@@ -73,19 +41,6 @@ pub enum InputFidelity {
 }
 
 impl InputFidelity {
-    /// Display name.
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Reference => "Reference",
-            Self::Interactive => "Interactive",
-        }
-    }
-
-    /// All modes.
-    pub fn all() -> &'static [InputFidelity] {
-        &[Self::Reference, Self::Interactive]
-    }
-
     /// Pipeline policy for this fidelity.
     pub fn input_policy(&self) -> FftInputPolicy {
         match self {

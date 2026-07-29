@@ -340,36 +340,6 @@ impl SimSetupState {
         setup
     }
 
-    /// Return the exact deterministic execution order for the current run
-    /// set. Persisted order wins; newly enabled analyses are appended in
-    /// numeric order so legacy and direct-toggle callers remain deterministic.
-    pub fn ordered_enabled_indices(&self) -> Vec<usize> {
-        let mut ordered = Vec::with_capacity(self.enabled.len());
-        let mut seen = HashSet::with_capacity(self.enabled.len());
-        for index in &self.analysis_order {
-            if *index < crate::workbench::simulation_analysis_tabs::ANALYSIS_COUNT
-                && self.enabled.contains(index)
-                && seen.insert(*index)
-            {
-                ordered.push(*index);
-            }
-        }
-        let mut missing: Vec<_> = self
-            .enabled
-            .iter()
-            .copied()
-            .filter(|index| !seen.contains(index))
-            .collect();
-        missing.sort_unstable();
-        ordered.extend(missing);
-        ordered
-    }
-
-    /// Normalize execution-order storage to the enabled supported analyses.
-    pub fn normalize_analysis_order(&mut self) {
-        self.analysis_order = self.ordered_enabled_indices();
-    }
-
     /// Rebuild transient editing state after a persisted plan is restored.
     pub(crate) fn prepare_after_restore(&mut self) {
         if let Some(plan) = &mut self.analysis_plan {
@@ -428,26 +398,6 @@ impl SimSetupState {
         self.options_draft.temp = format_temperature(temperature_celsius);
         self.op.ensure_initialized();
         self.op.temperature = format_temperature(temperature_celsius);
-        Ok(())
-    }
-
-    /// Synchronize a valid temperature edited in the OP analysis form without
-    /// replacing its in-progress text buffer.
-    pub fn apply_reference_temperature_from_op(&mut self) -> Result<(), String> {
-        let temperature_celsius = self
-            .op
-            .temperature
-            .parse::<f64>()
-            .map_err(|_| "Invalid temperature".to_owned())?;
-        if !temperature_celsius.is_finite() {
-            return Err("Reference temperature must be finite".to_owned());
-        }
-        if temperature_celsius <= -273.15 {
-            return Err("Reference temperature must be above absolute zero".to_owned());
-        }
-        self.reference_pvt.temperature_celsius = temperature_celsius;
-        self.options.temp = temperature_celsius;
-        self.options_draft.temp = format_temperature(temperature_celsius);
         Ok(())
     }
 

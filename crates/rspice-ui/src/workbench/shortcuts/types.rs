@@ -119,11 +119,6 @@ impl ShortcutStroke {
     }
 
     #[must_use]
-    pub fn display_label(self) -> String {
-        self.display_label_for(OperatingSystem::default())
-    }
-
-    #[must_use]
     pub fn display_label_for(self, operating_system: OperatingSystem) -> String {
         let mut parts = Vec::with_capacity(4);
         if self.primary {
@@ -268,11 +263,6 @@ impl ProfileShortcutBinding {
         &self.sequence
     }
 
-    #[must_use]
-    pub fn display_label(&self) -> String {
-        self.sequence.display_label()
-    }
-
     pub(crate) fn validate(&self) -> Result<(), ShortcutProfileError> {
         if self.platforms.is_empty() {
             return Err(ShortcutProfileError::EmptyPlatforms);
@@ -313,15 +303,6 @@ impl CommandShortcutOverride {
     #[must_use]
     pub fn bindings(&self) -> &[ProfileShortcutBinding] {
         &self.bindings
-    }
-
-    pub fn bindings_for_slot(
-        &self,
-        slot: ShortcutBindingSlot,
-    ) -> impl Iterator<Item = &ProfileShortcutBinding> {
-        self.bindings
-            .iter()
-            .filter(move |binding| binding.slot == slot)
     }
 
     pub fn replace_slot(

@@ -81,9 +81,4 @@ impl WaveformData {
         }
     }
 
-    /// Set Y unit
-    pub fn with_y_unit(mut self, unit: impl Into<String>) -> Self {
-        self.y_unit = unit.into();
-        self
-    }
 }

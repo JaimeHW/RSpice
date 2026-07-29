@@ -772,11 +772,6 @@ impl ShortcutProfileIssue {
     }
 
     #[must_use]
-    pub const fn platform(&self) -> Option<CommandPlatform> {
-        self.platform
-    }
-
-    #[must_use]
     pub const fn slot(&self) -> Option<ShortcutBindingSlot> {
         self.slot
     }

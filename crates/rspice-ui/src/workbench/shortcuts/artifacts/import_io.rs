@@ -110,10 +110,6 @@ impl ShortcutArtifactImportError {
         self.cause_code
     }
 
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
 }
 
 impl fmt::Display for ShortcutArtifactImportError {
