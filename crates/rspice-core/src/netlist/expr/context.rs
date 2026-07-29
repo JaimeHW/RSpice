@@ -74,6 +74,22 @@ impl RandomState {
         self.seed
     }
 
+    /// Rewind the stream to draw zero, keeping the seed.
+    ///
+    /// Elaborating a netlist consumes draws, so a second elaboration of the
+    /// *same* netlist would otherwise continue the sequence and produce a
+    /// different circuit — the same deck simulated twice in one process would
+    /// disagree with itself. Rewinding at each build scopes the sequence to
+    /// one elaboration, which is also what makes several analyses in one deck
+    /// see the same per-instance mismatch offsets instead of redrawing them
+    /// between the `.op` and the `.tran`.
+    ///
+    /// Takes `&self` because the counter is shared: every context derived from
+    /// the netlist has to see the rewind.
+    pub fn restart(&self) {
+        self.counter.store(0, Ordering::Relaxed);
+    }
+
     #[inline]
     fn next_bits(&self) -> u64 {
         // Relaxed is sufficient: draws are pure functions of the index, and
@@ -512,6 +528,11 @@ impl ParamContext {
     /// The stream used by `gauss`/`agauss`/`unif`/`aunif`/2-arg `limit`.
     pub fn random(&self) -> &RandomState {
         &self.random
+    }
+
+    /// Rewind the statistical stream to draw zero. See [`RandomState::restart`].
+    pub fn restart_statistical_stream(&self) {
+        self.random.restart();
     }
 
     /// Set the statistical-function evaluation policy.
