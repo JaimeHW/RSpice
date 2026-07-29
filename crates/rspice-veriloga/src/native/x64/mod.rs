@@ -7878,7 +7878,12 @@ endmodule
             .currents
             .resize(model.stamp_programs.len(), 0.0);
         let mut vm = Vm::new(&mut bytecode_context);
-        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+        let (pre_current_assignment_steps, post_current_targets) =
+            split_bytecode_assignment_steps_at_completed_current(
+                &model.assignment_steps,
+                model.num_variables,
+            );
+        execute_bytecode_assignment_steps(&mut vm, &pre_current_assignment_steps)
             .map_err(|error| error.to_string())?;
 
         let mut native_context = base_context;
@@ -7895,7 +7900,7 @@ endmodule
 
         let mut stats = FiniteOracleStats::default();
         for (index, is_live) in live_variables.iter().copied().enumerate() {
-            if !is_live {
+            if !is_live || post_current_targets.get(index).copied().unwrap_or(false) {
                 continue;
             }
             assert_close_or_skip_nonfinite(
@@ -8462,6 +8467,62 @@ endmodule
             }
         }
         Ok(())
+    }
+
+    fn split_bytecode_assignment_steps_at_completed_current(
+        steps: &[AssignmentStep],
+        num_variables: usize,
+    ) -> (Vec<AssignmentStep>, Vec<bool>) {
+        let split = steps
+            .iter()
+            .position(bytecode_assignment_step_reads_current)
+            .unwrap_or(steps.len());
+        let mut post_targets = vec![false; num_variables];
+        mark_bytecode_assignment_targets(&steps[split..], &mut post_targets);
+        (steps[..split].to_vec(), post_targets)
+    }
+
+    fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
+        match step {
+            AssignmentStep::Assign(assignment) => {
+                bytecode_program_reads_current(&assignment.program)
+            }
+            AssignmentStep::AssignIndexed { index, value, .. } => {
+                bytecode_program_reads_current(index) || bytecode_program_reads_current(value)
+            }
+            AssignmentStep::Loop { condition, body } => {
+                bytecode_program_reads_current(condition)
+                    || body.iter().any(bytecode_assignment_step_reads_current)
+            }
+        }
+    }
+
+    fn bytecode_program_reads_current(program: &BytecodeProgram) -> bool {
+        program
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
+    }
+
+    fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    if let Some(target) = targets.get_mut(assignment.var_index) {
+                        *target = true;
+                    }
+                }
+                AssignmentStep::AssignIndexed { base, len, .. } => {
+                    let end = base.saturating_add(*len).min(targets.len());
+                    for target in targets.iter_mut().take(end).skip(*base) {
+                        *target = true;
+                    }
+                }
+                AssignmentStep::Loop { body, .. } => {
+                    mark_bytecode_assignment_targets(body, targets);
+                }
+            }
+        }
     }
 
     fn preallocate_native_benchmark_context(context: &mut VmContext, model: &CompiledModel) {
