@@ -165,7 +165,7 @@ impl HbSolver {
     /// SIGNED absolute frequencies `f_k = offset + k*f0`. Each excitation is
     /// solved against the same admittance matrix; the result is indexed
     /// `[excitation][node][sideband - sideband_min]`.
-    pub fn solve_periodic_ac(
+    pub(crate) fn solve_periodic_ac(
         &mut self,
         state: &HbSolverState,
         offset_hz: Value,
@@ -331,7 +331,7 @@ impl HbSolver {
     /// time-varying intensity s(t) >= 0 (A^2/Hz) is returned as Fourier
     /// coefficients on the HB grid: shot noise `2q|I(t)|` for junction
     /// currents and channel thermal noise `(8/3)kT|gm(t)|` for FETs.
-    pub fn device_noise_sources(
+    pub(crate) fn device_noise_sources(
         &mut self,
         state: &HbSolverState,
         temperature: Value,
@@ -401,7 +401,7 @@ impl HbSolver {
     /// its terminals at sideband k and `S_d` the Fourier coefficients of its
     /// intensity (`S_{-d} = conj(S_d)`). Stationary sources reduce to the
     /// textbook folding `S0 * sum_k |A_k|^2`.
-    pub fn solve_periodic_noise(
+    pub(crate) fn solve_periodic_noise(
         &mut self,
         state: &HbSolverState,
         offset_hz: Value,

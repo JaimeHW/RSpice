@@ -58,7 +58,7 @@ impl FourierConfig {
     }
 
     /// Get analysis window duration
-    pub fn window_duration(&self) -> Value {
+    pub(crate) fn window_duration(&self) -> Value {
         self.period() * self.num_periods as f64
     }
 }

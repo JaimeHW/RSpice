@@ -425,7 +425,7 @@ impl MeasureEngine {
     /// start of a new accepted-point segment. This is required for nested DC
     /// sweeps: the primary sweep restarts for every secondary value, and the
     /// synthetic jump between cycles is not a physical interpolation interval.
-    pub fn evaluate_with_segment_starts(
+    pub(crate) fn evaluate_with_segment_starts(
         &self,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,

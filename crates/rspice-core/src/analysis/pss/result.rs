@@ -227,7 +227,7 @@ impl PeriodicWaveform {
     }
 
     /// Compute harmonic components using DFT
-    pub fn compute_harmonics(
+    pub(crate) fn compute_harmonics(
         &self,
         time: &[Value],
         fundamental_freq: Value,

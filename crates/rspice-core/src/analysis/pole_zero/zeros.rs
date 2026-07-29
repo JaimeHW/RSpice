@@ -304,7 +304,7 @@ impl PoleZeroAnalyzer {
     ///
     /// where B is the input excitation vector and L selects a measured voltage
     /// (including differential references).
-    pub fn find_zeros(&self, config: &PoleZeroConfig) -> Vec<Complex> {
+    pub(crate) fn find_zeros(&self, config: &PoleZeroConfig) -> Vec<Complex> {
         if self.num_nodes == 0 {
             return Vec::new();
         }

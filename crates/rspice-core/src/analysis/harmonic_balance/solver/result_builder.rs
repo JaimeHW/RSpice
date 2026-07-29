@@ -3,7 +3,7 @@
 use super::*;
 impl HbSolver {
     /// Build HbResult from solver state
-    pub fn build_result(&self, state: &HbSolverState) -> HbResult {
+    pub(crate) fn build_result(&self, state: &HbSolverState) -> HbResult {
         let mut result = HbResult::new(
             self.config.fundamental_freq,
             self.num_nodes,

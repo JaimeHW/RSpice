@@ -722,7 +722,7 @@ impl AcSweepSeries {
     /// Xyce scalar AC measures and equation expressions define unqualified
     /// `V()`/`I()` accessors as the real projection. This view overlays those
     /// aliases without changing the explicit magnitude series in `VM()`/`IM()`.
-    pub fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
+    pub(crate) fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
         let mut signals = self.signal_map();
         self.projections.insert_scalar_aliases(&mut signals);
         signals
@@ -900,7 +900,7 @@ impl NoiseSweepSeries {
 
     /// Signal table used by continuous NOISE equation measures. Bare complex
     /// probes are overlaid with their real-component projection.
-    pub fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
+    pub(crate) fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
         let mut signals = self.signal_map();
         self.projections.insert_scalar_aliases(&mut signals);
         signals

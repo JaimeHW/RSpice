@@ -113,7 +113,7 @@ impl NonlinearDeviceParams {
     }
 
     /// Create voltage-controlled switch parameters
-    pub fn voltage_switch(vt: Value, vh: Value, ron: Value, roff: Value, smooth: Value) -> Self {
+    pub(crate) fn voltage_switch(vt: Value, vh: Value, ron: Value, roff: Value, smooth: Value) -> Self {
         Self {
             vth: vt,
             vh: vh.abs(),
@@ -125,7 +125,7 @@ impl NonlinearDeviceParams {
     }
 
     /// Create current-controlled switch parameters.
-    pub fn current_switch(
+    pub(crate) fn current_switch(
         it: Value,
         ih: Value,
         ron: Value,
@@ -156,7 +156,7 @@ impl NonlinearDeviceInstance {
     }
 
     /// Create an NPN BJT instance
-    pub fn npn_bjt(
+    pub(crate) fn npn_bjt(
         collector: usize,
         base: usize,
         emitter: usize,
@@ -175,7 +175,7 @@ impl NonlinearDeviceInstance {
     }
 
     /// Create a PNP BJT instance
-    pub fn pnp_bjt(
+    pub(crate) fn pnp_bjt(
         collector: usize,
         base: usize,
         emitter: usize,
@@ -262,7 +262,7 @@ impl NonlinearDeviceInstance {
     }
 
     /// Create a voltage-controlled switch instance
-    pub fn voltage_switch(
+    pub(crate) fn voltage_switch(
         node_pos: usize,
         node_neg: usize,
         ctrl_pos: usize,
@@ -281,7 +281,7 @@ impl NonlinearDeviceInstance {
     }
 
     /// Create a current-controlled switch instance.
-    pub fn current_switch(
+    pub(crate) fn current_switch(
         node_pos: usize,
         node_neg: usize,
         ctrl_pos: usize,
@@ -335,7 +335,7 @@ impl NonlinearDeviceInstance {
     /// Noise branch terminal pairs, ordered to match `noise_intensities`:
     /// the device injects a white current-noise source between each pair
     /// whose intensity is periodically modulated by the operating point.
-    pub fn noise_branches(&self) -> Vec<(usize, usize)> {
+    pub(crate) fn noise_branches(&self) -> Vec<(usize, usize)> {
         match self.device_type {
             NonlinearDeviceType::Diode => vec![(self.terminals[0], self.terminals[1])],
             NonlinearDeviceType::NpnBjt | NonlinearDeviceType::PnpBjt => vec![
@@ -355,7 +355,7 @@ impl NonlinearDeviceInstance {
     }
 
     /// Human-readable mechanism label for one `noise_branches` entry.
-    pub fn noise_branch_label(&self, branch: usize) -> &'static str {
+    pub(crate) fn noise_branch_label(&self, branch: usize) -> &'static str {
         match self.device_type {
             NonlinearDeviceType::Diode => "shot",
             NonlinearDeviceType::NpnBjt | NonlinearDeviceType::PnpBjt => {
@@ -379,7 +379,7 @@ impl NonlinearDeviceInstance {
     /// branch of `noise_branches`, evaluated at one time sample: shot noise
     /// `2q|I|` for junction and transport currents, channel thermal
     /// `(8/3)kT(|gm| + gds)` for FETs, and `4kT g(t)` for switch resistance.
-    pub fn noise_intensities(
+    pub(crate) fn noise_intensities(
         &self,
         node_voltages: &[Value],
         temperature: Value,
@@ -439,7 +439,7 @@ impl NonlinearDeviceInstance {
     /// total oxide capacitance Cox' * W * Leff. Enables the
     /// charge-conserving square-law channel charge (Ward-Dutton partition)
     /// and the gate-bulk accumulation/depletion wedge.
-    pub fn with_intrinsic_gate(mut self, cox_wl: Value) -> Self {
+    pub(crate) fn with_intrinsic_gate(mut self, cox_wl: Value) -> Self {
         self.params.cox_wl = cox_wl.max(0.0);
         self
     }
@@ -449,7 +449,7 @@ impl NonlinearDeviceInstance {
     /// shared linear continuation) and store depletion charge; sidewall
     /// capacitance is folded into the zero-bias values at the bottom
     /// grading coefficient (separate MJSW treatment pending).
-    pub fn with_bulk_junctions(
+    pub(crate) fn with_bulk_junctions(
         mut self,
         cap_sb: DepletionCap,
         cap_db: DepletionCap,
@@ -466,7 +466,7 @@ impl NonlinearDeviceInstance {
     /// Set the MOSFET body-effect parameters: threshold shifts by
     /// `gamma*(sqrt(phi + vsb) - sqrt(phi))` with the source-bulk voltage
     /// measured in the polarity frame from the effective source.
-    pub fn with_body_effect(mut self, gamma: Value, phi: Value) -> Self {
+    pub(crate) fn with_body_effect(mut self, gamma: Value, phi: Value) -> Self {
         self.params.gamma = gamma.max(0.0);
         self.params.phi = phi.max(1e-3);
         self
@@ -475,7 +475,7 @@ impl NonlinearDeviceInstance {
     /// Set the thermal voltage kT/q the junction laws evaluate at; device
     /// structs carry it temperature-adjusted, so passing it through keeps HB
     /// at the same operating temperature as the rest of the engine.
-    pub fn with_thermal_voltage(mut self, vt: Value) -> Self {
+    pub(crate) fn with_thermal_voltage(mut self, vt: Value) -> Self {
         if vt.is_finite() && vt > 0.0 {
             self.params.vt = vt;
         }
@@ -485,7 +485,7 @@ impl NonlinearDeviceInstance {
     /// Attach junction charge parameters: `cap_a` is the primary junction
     /// (diode junction, BJT B-E, JFET G-S), `cap_b` the secondary (BJT B-C,
     /// JFET G-D); `tt_f`/`tt_r` are the forward/reverse transit times.
-    pub fn with_junction_caps(
+    pub(crate) fn with_junction_caps(
         mut self,
         cap_a: DepletionCap,
         cap_b: DepletionCap,
@@ -500,7 +500,7 @@ impl NonlinearDeviceInstance {
     }
 
     /// Whether this device stores charge (junction or diffusion capacitance).
-    pub fn has_charge_storage(&self) -> bool {
+    pub(crate) fn has_charge_storage(&self) -> bool {
         self.params.cap_a.cj0 > 0.0
             || self.params.cap_b.cj0 > 0.0
             || self.params.tt_f > 0.0
@@ -533,7 +533,7 @@ impl NonlinearDeviceInstance {
     /// Capacitance stamps: derivative of the charge ABSORBED at each
     /// terminal with respect to node voltage, mirroring the `jacobian`
     /// conductance-stamp convention.
-    pub fn charge_jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+    pub(crate) fn charge_jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
         if !self.has_charge_storage() {
             return Vec::new();
         }

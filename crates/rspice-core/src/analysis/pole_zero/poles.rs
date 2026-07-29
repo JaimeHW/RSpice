@@ -18,7 +18,7 @@ impl PoleZeroAnalyzer {
     ///
     /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
     /// For singular C, use generalized eigenvalue: G·x = -s·C·x
-    pub fn find_poles(&self, config: &PoleZeroConfig) -> Vec<Complex> {
+    pub(crate) fn find_poles(&self, config: &PoleZeroConfig) -> Vec<Complex> {
         let n = self.num_nodes;
         if n == 0 {
             return Vec::new();

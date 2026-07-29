@@ -136,7 +136,7 @@ pub struct TouchstoneInput<'a> {
 }
 
 /// Touchstone v1 permits at most four complex pairs on one physical line.
-pub const MAX_PAIRS_PER_LINE: usize = 4;
+pub(crate) const MAX_PAIRS_PER_LINE: usize = 4;
 
 /// Render a Touchstone v1 document.
 pub fn touchstone(
