@@ -1,6 +1,7 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
-use crate::netlist::{TransientLteReference, XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
+use crate::config::TransientLteReference;
+use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
 
 use super::*;
 
@@ -1710,8 +1711,8 @@ fn parse_nonlinear_continuation_option(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<crate::netlist::NonlinearContinuationMode, ParseError> {
-    use crate::netlist::NonlinearContinuationMode as Mode;
+) -> Result<crate::config::NonlinearContinuationMode, ParseError> {
+    use crate::config::NonlinearContinuationMode as Mode;
 
     if let TokenKind::Ident(name) = &stream.peek().kind {
         let name = name.clone();

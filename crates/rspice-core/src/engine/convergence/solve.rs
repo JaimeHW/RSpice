@@ -454,7 +454,7 @@ impl Engine {
             );
         }
         if let Some(mode) = self.config.convergence_config.nonlinear_continuation
-            && mode != crate::netlist::NonlinearContinuationMode::Standard
+            && mode != crate::config::NonlinearContinuationMode::Standard
         {
             return Err(SimulationError::Circuit(format!(
                 "nonlinear continuation mode {mode:?} is parsed but has no native solver implementation"

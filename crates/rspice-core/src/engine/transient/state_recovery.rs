@@ -318,7 +318,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::netlist::TransientLteReference;
+    use crate::config::TransientLteReference;
 
     #[test]
     fn accepted_solution_lte_controls_strict_linear_recovery() {

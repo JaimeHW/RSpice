@@ -2068,7 +2068,7 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::Netlist;
-    use crate::netlist::TransientLteReference;
+    use crate::config::TransientLteReference;
 
     #[test]
     fn accepted_solution_lte_excludes_ngspice_device_charge_truncation() {

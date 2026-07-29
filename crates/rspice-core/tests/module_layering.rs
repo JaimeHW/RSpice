@@ -93,28 +93,32 @@ const LAYERS: &[(&str, u32)] = &[
     // device models and XSPICE all stamp with. `crate::solver` joins it as
     // `numerics::la` in the rest of Phase 5.
     ("numerics", 2),
-    ("solver", 3),
+    // Simulation configuration. Below the solver, the device models and the
+    // circuit store, all of which read a tolerance or a dialect flag and used
+    // to reach up into `engine` to do it.
+    ("config", 3),
+    ("solver", 4),
     // Expression evaluation. Two deliberate subsystems: the bytecode VM here
     // and the complex-valued `.PARAM` evaluator inside `netlist`, mirroring
     // ngspice's inpptree/numparam split.
-    ("expr", 4),
+    ("expr", 5),
     // Deck text to AST. Phase 7 moves its circuit transforms (flattener,
     // add_resistors, remove_unused, topology) up into `elab`, leaving parsing.
-    ("netlist", 5),
+    ("netlist", 6),
     // `.lib` model-library and Verilog-A pack discovery. Above `netlist`
     // because resolving a library produces deck content.
-    ("library", 6),
+    ("library", 7),
     // Device model evaluation, plus the Verilog-A and FFI extension points.
-    ("device", 7),
+    ("device", 8),
     // The XSPICE code-model subsystem: a device extension with its own event
     // queue, so it sits just above `device`.
-    ("xspice", 8),
+    ("xspice", 9),
     // Struct-of-arrays circuit storage and stamping. Phase 8 consolidates the
     // four stamping surfaces into `circuit::assembly`.
-    ("circuit", 9),
+    ("circuit", 10),
     // Analysis algorithms and result types. Phase 6 merges the `engine::X` /
     // `analysis::X` twins into one module per analysis.
-    ("analysis", 10),
+    ("analysis", 11),
     // The facade: configuration resolution, dispatch, health, abort plumbing.
     // Phase 3 moves `SimulationConfig` and friends out to their own low rank;
     // Phase 7 moves `engine::builder` out to `elab`.
@@ -147,16 +151,20 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // ---------------------------------------------------------------------
     // Phase 3 — extract `config`.
     //
-    // All three edges are `SimulationConfig` and its companions, which live in
-    // `engine` only because that is where the orchestrator is. Nothing about a
-    // configuration struct requires the module that consumes it; moving them
-    // below everything that reads them makes all three downward.
-    ("circuit", "engine", 21),
-    ("solver", "engine", 5),
-    ("device", "engine", 2),
+    // `SimulationConfig`, `SpiceDialect` and their companions now live in
+    // `crate::config` at rank 3, below everything that reads them, so the
+    // twenty-seven references that made those three edges are downward.
+    //
+    // What remains of `circuit -> engine`, `solver -> engine` and
+    // `device -> engine` is a different edge: five constructions of
+    // `SimulationError` and one of `Engine`. Lower layers building the
+    // orchestrator's error type is a real inversion, but it is an error-type
+    // question rather than a configuration one, and it belongs with Phase 8's
+    // look at what `circuit` and `device` owe each other.
+    ("device", "engine", 1),
     // `expr::parser` naming `netlist::ExpressionDialect` to build a test
-    // context. The dialect enums are configuration, and travel to `config`
-    // with `SpiceDialect`.
+    // context. `ExpressionDialect` is the one dialect enum still in `netlist`;
+    // it follows `SpiceDialect` into `config` when the parser settles.
     ("expr", "netlist", 1),
     // ---------------------------------------------------------------------
     // Phase 6 — one module per analysis.

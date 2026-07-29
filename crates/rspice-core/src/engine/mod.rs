@@ -44,7 +44,7 @@ pub use builder::{
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor,
     validate_native_xyce_ltra_model_contract,
 };
-mod config;
+
 mod config_resolver;
 mod convergence;
 mod core;
@@ -81,7 +81,7 @@ pub use builder::{
     register_project_veriloga_runtimes_for_session_with_limits, veriloga_cache_entries,
     veriloga_cache_stats,
 };
-pub use config::{
+pub use crate::config::{
     BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,
     SimulationConfigError, SpiceDialect, XyceTraInterpolation,
 };

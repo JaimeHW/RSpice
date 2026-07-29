@@ -100,6 +100,9 @@ pub mod analysis;
 /// that library, netlist and engine can all share one copy.
 pub(crate) mod builtin_lib;
 pub mod circuit;
+/// Simulation configuration. Below everything that reads it, so a tolerance
+/// or dialect flag is a downward reference rather than a reach into `engine`.
+pub mod config;
 pub mod constants;
 pub mod device;
 pub mod diagnostics;

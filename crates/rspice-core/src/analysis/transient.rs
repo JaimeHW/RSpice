@@ -2,7 +2,7 @@
 
 #![allow(clippy::type_complexity)]
 use crate::Value;
-use crate::netlist::TransientLteReference;
+use crate::config::TransientLteReference;
 // Re-exported so `analysis::transient` keeps presenting the integration
 // method and its companion coefficients as part of its API surface; the
 // definitions live in `numerics`, below the layers that stamp with them.

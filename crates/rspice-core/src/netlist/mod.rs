@@ -12279,7 +12279,7 @@ mod tests {
 
     #[test]
     fn xyce_nonlinear_continuation_aliases_and_selectors_are_typed() {
-        use NonlinearContinuationMode as Mode;
+        use crate::config::NonlinearContinuationMode as Mode;
 
         for (value, expected) in [
             ("standard", Mode::Standard),

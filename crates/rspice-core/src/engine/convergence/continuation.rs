@@ -20,7 +20,7 @@ pub(crate) struct SourceContinuationPolicy {
 #[cfg(test)]
 mod source_continuation_policy_tests {
     use super::{SourceContinuationPolicy, explicit_source_continuation_policy};
-    use crate::netlist::NonlinearContinuationMode;
+    use crate::config::NonlinearContinuationMode;
 
     #[test]
     fn xyce_simultaneous_policy_matches_loca_defaults() {
@@ -119,11 +119,11 @@ impl SourceContinuationPolicy {
 }
 
 pub(in crate::engine::convergence) fn explicit_source_continuation_policy(
-    mode: Option<crate::netlist::NonlinearContinuationMode>,
+    mode: Option<crate::config::NonlinearContinuationMode>,
 ) -> Option<SourceContinuationPolicy> {
     matches!(
         mode,
-        Some(crate::netlist::NonlinearContinuationMode::SimultaneousSourceStep)
+        Some(crate::config::NonlinearContinuationMode::SimultaneousSourceStep)
     )
     .then_some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
 }

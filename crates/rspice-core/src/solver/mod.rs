@@ -233,7 +233,7 @@ pub struct Simulator {
 
 impl Default for Simulator {
     fn default() -> Self {
-        crate::engine::SimulationConfig::default().into()
+        crate::config::SimulationConfig::default().into()
     }
 }
 
@@ -255,8 +255,8 @@ impl Simulator {
     }
 }
 
-impl From<&crate::engine::SimulationConfig> for Simulator {
-    fn from(config: &crate::engine::SimulationConfig) -> Self {
+impl From<&crate::config::SimulationConfig> for Simulator {
+    fn from(config: &crate::config::SimulationConfig) -> Self {
         Self {
             tolerance: config.tolerance,
             max_iterations: config.max_iterations,
@@ -266,8 +266,8 @@ impl From<&crate::engine::SimulationConfig> for Simulator {
     }
 }
 
-impl From<crate::engine::SimulationConfig> for Simulator {
-    fn from(config: crate::engine::SimulationConfig) -> Self {
+impl From<crate::config::SimulationConfig> for Simulator {
+    fn from(config: crate::config::SimulationConfig) -> Self {
         Self::from(&config)
     }
 }

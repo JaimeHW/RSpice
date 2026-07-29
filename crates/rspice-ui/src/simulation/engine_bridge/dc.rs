@@ -308,7 +308,7 @@ fn configured_op_engine(
             convergence.pseudo_transient = false;
             convergence.arc_length = false;
             convergence.nonlinear_continuation =
-                Some(rspice_core::netlist::NonlinearContinuationMode::SimultaneousSourceStep);
+                Some(rspice_core::config::NonlinearContinuationMode::SimultaneousSourceStep);
         }
         OpHomotopy::GminStepping => {
             convergence.source_stepping = false;
