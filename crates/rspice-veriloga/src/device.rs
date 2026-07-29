@@ -185,16 +185,6 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-// Safety: VerilogADevice owns per-instance VmContext and solver mapping state.
-// The NativeModel is shared through Arc and immutable after native image
-// construction. Calls supply mutable evaluation state through the device
-// instance, so cloned devices used by line-search probes do not share
-// VmContext mutation.
-#[cfg(feature = "native")]
-unsafe impl Send for VerilogADevice {}
-#[cfg(feature = "native")]
-unsafe impl Sync for VerilogADevice {}
-
 /// Pre-computed matrix indices for fast stamping
 #[derive(Debug, Clone, Default)]
 pub struct MatrixIndices {
@@ -3705,6 +3695,13 @@ mod tests {
     };
     use crate::{CompilerOptions, VerilogACompiler};
     use std::sync::Arc;
+
+    #[test]
+    fn native_device_send_sync_are_derived_from_owned_fields() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<VerilogADevice>();
+    }
 
     fn compile(source: &str) -> CompiledModel {
         VerilogACompiler::new(CompilerOptions::default())
