@@ -1,0 +1,23 @@
+[package]
+name = "rspice-veriloga-runtime"
+description = "Stable runtime ABI for precompiled RSpice Verilog-A models"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+faer-parallel = ["rspice-matrix/faer-parallel"]
+
+[dependencies]
+rspice-matrix.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
