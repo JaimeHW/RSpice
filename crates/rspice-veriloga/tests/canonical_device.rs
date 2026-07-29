@@ -19,7 +19,7 @@ use rspice_veriloga::rust_backend::{
 use rspice_veriloga::{PipelineControl, PipelinePhase, VerilogACompiler};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
 fn a_generated_device_compiles_against_the_runtime_contract() {
@@ -142,6 +142,146 @@ endmodule
     if let Err(report) = run_shared_model_cache("scoped stage cache", state, stamp, noise) {
         panic!("scoped stage: shared model cache failed:\n{report}");
     }
+}
+
+#[test]
+fn repeated_static_hot_guards_are_specialized_with_a_source_size_cap() {
+    let source = repeated_structure_source();
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("front end");
+    let device = canonical::generate_device(&artifact, &options()).expect("generation");
+    let files: Vec<(&str, &str)> = device
+        .files
+        .iter()
+        .map(|file| (file.relative_path.as_str(), file.contents.as_str()))
+        .collect();
+    let state = find(&files, "state.rs", "repeated structure");
+    let stamp = find(&files, "stamp.rs", "repeated structure");
+    let noise = find(&files, "noise.rs", "repeated structure");
+
+    assert!(
+        stamp.contains("Bounded structural specialization: one dispatch replaces 3"),
+        "three uses of one cached model condition should become one bounded dispatch; \
+         stamp bytes={}, relevant lines:\n{}",
+        stamp.len(),
+        stamp
+            .lines()
+            .filter(|line| line.contains("if ") || line.contains("staged["))
+            .take(40)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(
+        stamp.contains("if staged[") && stamp.contains("canonical_structural_output_0"),
+        "the specialized variants must rejoin through explicit scalar outputs"
+    );
+    if let Err(report) = compile("repeated structure", state, stamp, noise) {
+        panic!("repeated structure: generated specialization does not compile:\n{report}");
+    }
+    if let Err(report) = run_structural_variants("repeated structure runtime", state, stamp, noise) {
+        panic!("repeated structure: generated specialization changed behavior:\n{report}");
+    }
+}
+
+fn repeated_structure_source() -> String {
+    let mut coefficient_work = String::new();
+    for index in 0..80 {
+        coefficient_work.push_str(&format!(
+            "        coefficient = coefficient * 1.0000001 + {}.0e-12;\n",
+            index + 1
+        ));
+    }
+    let mut guarded_work = String::new();
+    for branch in 0..3 {
+        guarded_work.push_str("        if (mode > 0.0) begin\n");
+        for index in 0..80 {
+            guarded_work.push_str(&format!(
+                "            current = current + coefficient * V(p, n) * {}.0e-9;\n",
+                branch * 80 + index + 1
+            ));
+        }
+        guarded_work.push_str("        end\n");
+    }
+    format!(
+        "module repeated_structure(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         \x20   parameter real mode = 1.0;\n\
+         \x20   real coefficient, current;\n\
+         \x20   analog begin\n\
+         \x20       coefficient = mode + 1.0;\n\
+         {coefficient_work}\
+         \x20       current = 0.0;\n\
+         {guarded_work}\
+         \x20       I(p, n) <+ current;\n\
+         \x20   end\n\
+         endmodule\n"
+    )
+}
+
+#[test]
+fn structural_specialization_rejects_source_growth_over_two_percent() {
+    let mut coefficient_work = String::new();
+    for index in 0..80 {
+        coefficient_work.push_str(&format!(
+            "        coefficient = coefficient * 1.0000001 + {}.0e-12;\n",
+            index + 1
+        ));
+    }
+    let mut common_work = String::new();
+    for index in 0..240 {
+        common_work.push_str(&format!(
+            "        current = current + coefficient * V(p, n) * {}.0e-9;\n",
+            index + 1
+        ));
+    }
+    let source = format!(
+        "module rejected_structure(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         \x20   parameter real mode = 1.0;\n\
+         \x20   real coefficient, current;\n\
+         \x20   analog begin\n\
+         \x20       coefficient = mode + 1.0;\n\
+         {coefficient_work}\
+         \x20       current = 0.0;\n\
+         {common_work}\
+         \x20       if (mode > 0.0) current = current + V(p, n) * 1.0e-12;\n\
+         \x20       if (mode > 0.0) current = current + V(p, n) * 2.0e-12;\n\
+         \x20       if (mode > 0.0) current = current + V(p, n) * 3.0e-12;\n\
+         \x20       I(p, n) <+ current;\n\
+         \x20   end\n\
+         endmodule\n"
+    );
+
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("front end");
+    let stamp = canonical::generate_device(&artifact, &options())
+        .expect("generation")
+        .files
+        .into_iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp.rs")
+        .contents;
+
+    assert!(
+        stamp.contains("fn canonical_model_stage"),
+        "the parameter prologue must be split so its repeated condition is cacheable"
+    );
+    assert!(
+        !stamp.contains("Bounded structural specialization"),
+        "duplicating the large common Newton path would violate the 2% source-size cap"
+    );
+    assert!(
+        stamp
+            .lines()
+            .filter(|line| line.trim_start().starts_with("if v"))
+            .count()
+            >= 3,
+        "the rejected candidate must retain its three ordinary branches"
+    );
 }
 
 /// A model whose residual is a `ddt` gets a reactive stamp, and one without
@@ -481,6 +621,55 @@ fn transpiler_polls_for_cancellation_inside_differentiation() {
     assert!(error.message.contains("differentiation"), "{error}");
 }
 
+struct CancelInsideStructuralSpecialization {
+    scheduling_complete: AtomicBool,
+    polls_after_scheduling: AtomicUsize,
+}
+
+impl PipelineControl for CancelInsideStructuralSpecialization {
+    fn is_cancelled(&self) -> bool {
+        if !self.scheduling_complete.load(Ordering::Relaxed) {
+            return false;
+        }
+        // The first poll is the StampEmission boundary. Let it enter, then
+        // cancel at the first poll in the variant's CFG optimization.
+        self.polls_after_scheduling
+            .fetch_add(1, Ordering::Relaxed)
+            >= 1
+    }
+
+    fn phase_completed(
+        &self,
+        timing: rspice_veriloga::PhaseTiming,
+        _metrics: &rspice_veriloga::PipelineMetrics,
+    ) {
+        if timing.phase == PipelinePhase::Scheduling {
+            self.scheduling_complete.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+#[test]
+fn structural_specialization_propagates_cancellation() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&repeated_structure_source())
+        .expect("front end");
+    let control = CancelInsideStructuralSpecialization {
+        scheduling_complete: AtomicBool::new(false),
+        polls_after_scheduling: AtomicUsize::new(0),
+    };
+    let error = RustTranspiler::new(options())
+        .transpile_measured_with_control(&artifact, &control)
+        .expect_err("the variant optimizer must honor cancellation");
+
+    assert_eq!(error.kind, RustBackendErrorKind::Cancelled);
+    assert!(error.message.contains("cfg_optimization"), "{error}");
+    assert!(
+        control.polls_after_scheduling.load(Ordering::Relaxed) >= 2,
+        "the cancellation must occur after stamp emission began"
+    );
+}
+
 fn find<'a>(files: &[(&'a str, &'a str)], name: &str, model: &str) -> &'a str {
     files
         .iter()
@@ -583,6 +772,74 @@ fn run_shared_model_cache(
     let output = Command::new(&binary)
         .output()
         .map_err(|error| format!("could not run generated cache probe: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
+fn run_structural_variants(
+    name: &str,
+    state: &str,
+    stamp: &str,
+    noise: &str,
+) -> Result<(), String> {
+    let root = scratch().join(name.replace(' ', "_"));
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let main = root.join("main.rs");
+    std::fs::write(
+        &main,
+        format!(
+            "{RUNTIME_STUB}\npub mod device {{\n\
+             pub mod state {{\n{}\n}}\n\
+             pub mod stamp {{\n{}\n}}\n\
+             pub mod noise {{\n{}\n}}\n}}\n\
+             fn evaluate(instance: &mut device::state::Instance, mode: f64) -> f64 {{\n\
+             \x20   instance.set_parameter(\"mode\", mode).unwrap();\n\
+             \x20   let voltages = [0.25, 0.0];\n\
+             \x20   let ctx = runtime::GeneratedEvalContext {{ voltages: &voltages, temperature: 300.15 }};\n\
+             \x20   let mut sink = [0.0];\n\
+             \x20   let mut stamper = runtime::GeneratedStamper {{ sink: Some(&mut sink) }};\n\
+             \x20   instance.stamp(&ctx, &mut stamper);\n\
+             \x20   sink[0]\n\
+             }}\n\
+             fn main() {{\n\
+             \x20   let mut instance = device::state::Instance::new(&[0, 1]);\n\
+             \x20   let enabled = evaluate(&mut instance, 1.0);\n\
+             \x20   let disabled = evaluate(&mut instance, -1.0);\n\
+             \x20   let enabled_again = evaluate(&mut instance, 1.0);\n\
+             \x20   assert!(enabled.is_finite() && enabled > 0.0, \"{{enabled}}\");\n\
+             \x20   assert_eq!(disabled.to_bits(), 0.0f64.to_bits());\n\
+             \x20   assert_eq!(enabled_again.to_bits(), enabled.to_bits());\n\
+             }}\n",
+            indent(state),
+            indent(stamp),
+            indent(noise)
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+
+    let binary = root.join(format!(
+        "structural_variants{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    let output = Command::new("rustc")
+        .arg("--edition=2024")
+        .arg("-O")
+        .arg("-A")
+        .arg("warnings")
+        .arg("-o")
+        .arg(&binary)
+        .arg(&main)
+        .output()
+        .map_err(|error| format!("could not run rustc: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let output = Command::new(&binary)
+        .output()
+        .map_err(|error| format!("could not run generated specialization probe: {error}"))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -915,6 +1172,11 @@ pub mod runtime {
             _branch_derivatives: [Value; BRANCH_COUNT],
             _scale: Value,
         ) {
+            if let Some(sink) = self.sink.as_deref_mut()
+                && let Some(first) = sink.first_mut()
+            {
+                *first += _value;
+            }
         }
 
         pub fn stamp_potential_branch_local(

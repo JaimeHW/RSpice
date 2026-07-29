@@ -54,7 +54,7 @@
 //! computed something else would be worse than one that is not generated: the
 //! caller falls back to a tier, which is what the tiers are still there for.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control};
@@ -71,7 +71,7 @@ use crate::canonical_ir::schedule::{
 use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
 };
-use crate::metrics::{MetricsRecorder, PipelinePhase};
+use crate::metrics::{MetricsRecorder, PipelineCancelled, PipelineControl, PipelinePhase};
 
 use super::emit::{EmitBindings, RUNTIME_PRELUDE, emit_body};
 use super::expr::parameter_field_names;
@@ -103,7 +103,7 @@ pub(crate) fn generate_device_measured(
 
     checkpoint_phase(artifact, measurements, PipelinePhase::StampEmission)?;
     let phase_started = web_time::Instant::now();
-    let stamp = plan.stamp_file(artifact, options)?;
+    let stamp = plan.stamp_file(artifact, options, measurements.control())?;
     record_phase(
         artifact,
         measurements,
@@ -818,6 +818,7 @@ impl ModelPlan {
         &self,
         artifact: &CanonicalIrArtifact,
         options: &RustTranspileOptions,
+        control: &dyn PipelineControl,
     ) -> Result<String, RustBackendError> {
         let mut out = String::new();
         out.push_str(
@@ -859,7 +860,7 @@ impl ModelPlan {
             }
             self.emit_cached_stage(artifact, stage, &mut out)?;
         }
-        self.emit_stamp(artifact, &mut out)?;
+        self.emit_stamp(artifact, control, &mut out)?;
         self.emit_stamp_reactive(&mut out)?;
 
         out.push_str("}\n");
@@ -1054,7 +1055,7 @@ impl ModelPlan {
     fn emit_stamp(
         &self,
         artifact: &CanonicalIrArtifact,
-
+        control: &dyn PipelineControl,
         out: &mut String,
     ) -> Result<(), RustBackendError> {
         out.push_str(
@@ -1083,7 +1084,7 @@ impl ModelPlan {
             .iter()
             .find(|stage| stage.class == InvalidationClass::Newton);
         let function = newton.map_or(&self.function, |stage| &stage.function);
-        let (body, values) = self.newton_outputs(artifact, newton)?;
+        let (body, values) = self.newton_outputs(artifact, newton, control)?;
         self.emit_prologue(artifact, function, 2, out)?;
         out.push_str(&indent(&body, 2));
 
@@ -1430,6 +1431,7 @@ impl ModelPlan {
         &self,
         artifact: &CanonicalIrArtifact,
         newton: Option<&Stage>,
+        control: &dyn PipelineControl,
     ) -> Result<(String, Vec<String>), RustBackendError> {
         let Some(newton) = newton else {
             let (body, names) = emit_body(&self.function, &self.outputs, &bindings())
@@ -1443,12 +1445,26 @@ impl ModelPlan {
             .enumerate()
             .filter_map(|(index, value)| value.map(|value| (index, value)))
             .collect();
-        let (body, names) = emit_body(
+        let owned_values: Vec<ValueId> = owned.iter().map(|(_, value)| *value).collect();
+        let (body, names) = emit_body(&newton.function, &owned_values, &bindings())
+            .map_err(|error| unsupported(artifact, format!("newton stage: {error}")))?;
+        let (body, names) = specialize_repeated_static_guards(
             &newton.function,
-            &owned.iter().map(|(_, value)| *value).collect::<Vec<_>>(),
-            &bindings(),
+            &owned_values,
+            body,
+            names,
+            control,
         )
-        .map_err(|error| unsupported(artifact, format!("newton stage: {error}")))?;
+        .map_err(|error| match error {
+            StructuralSpecializationError::Emit(error) => {
+                unsupported(artifact, format!("specialized newton stage: {error}"))
+            }
+            StructuralSpecializationError::Cancelled(error) => RustBackendError::cancelled(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                error,
+            ),
+        })?;
 
         let mut values = vec![String::new(); self.outputs.len()];
         for ((index, _), name) in owned.iter().zip(names) {
@@ -2063,6 +2079,357 @@ impl ModelPlan {
              \x20       self.canonical_limit.initialized.copy_from_slice(&state.limiter_initialized);\n\
              \x20       self.canonical_limit.active = false;\n",
         );
+    }
+}
+
+enum StructuralSpecializationError {
+    Emit(super::emit::EmitError),
+    Cancelled(PipelineCancelled),
+}
+
+/// Replace repeated reads of one cached model/instance condition with one
+/// dispatch into two complete hot paths.
+///
+/// This is intentionally not a combinatorial specializer. One condition gives
+/// exactly two variants, both outcomes are present, and source growth is capped
+/// before the result is accepted. Conditions controlling loops are excluded:
+/// turning a loop test into a constant changes the structured shape the emitter
+/// relies on and can turn a terminating parameter-bounded loop into an
+/// unbounded one.
+fn specialize_repeated_static_guards(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    baseline_body: String,
+    baseline_names: Vec<String>,
+    control: &dyn PipelineControl,
+) -> Result<(String, Vec<String>), StructuralSpecializationError> {
+    const MIN_REPEATED_BRANCHES: usize = 3;
+    const MIN_BODY_BYTES: usize = 8 * 1024;
+    const MAX_CANDIDATES: usize = 3;
+    const MAX_SOURCE_GROWTH_PERCENT: usize = 2;
+
+    if baseline_body.len() < MIN_BODY_BYTES
+        || outputs
+            .iter()
+            .any(|output| function.lanes_of(*output).is_some())
+    {
+        return Ok((baseline_body, baseline_names));
+    }
+
+    #[derive(Default)]
+    struct Candidate {
+        branches: usize,
+        controls_loop: bool,
+    }
+
+    let loop_headers = cfg_loop_headers(function);
+    let mut by_slot: HashMap<u32, Candidate> = HashMap::new();
+    for block in &function.blocks {
+        let CfgTerminator::Branch { condition, .. } = block.terminator else {
+            continue;
+        };
+        let CfgValueKind::Staged { slot } = function.value(condition).kind else {
+            continue;
+        };
+        let candidate = by_slot.entry(slot).or_default();
+        candidate.branches = candidate.branches.saturating_add(1);
+        candidate.controls_loop |= loop_headers.contains(&block.id);
+    }
+
+    let mut candidates: Vec<(u32, usize)> = by_slot
+        .into_iter()
+        .filter_map(|(slot, candidate)| {
+            (!candidate.controls_loop && candidate.branches >= MIN_REPEATED_BRANCHES)
+                .then_some((slot, candidate.branches))
+        })
+        .collect();
+    candidates.sort_unstable_by(|(left_slot, left_branches), (right_slot, right_branches)| {
+        right_branches
+            .cmp(left_branches)
+            .then_with(|| left_slot.cmp(right_slot))
+    });
+
+    let byte_limit = baseline_body
+        .len()
+        .saturating_add(
+            baseline_body
+                .len()
+                .saturating_mul(MAX_SOURCE_GROWTH_PERCENT)
+                / 100,
+        );
+    for (slot, branches) in candidates.into_iter().take(MAX_CANDIDATES) {
+        let (true_body, true_names) =
+            emit_static_guard_variant(function, outputs, slot, true, control)?;
+        let (false_body, false_names) =
+            emit_static_guard_variant(function, outputs, slot, false, control)?;
+        let specialized = render_static_guard_variants(
+            slot,
+            branches,
+            &true_body,
+            &true_names,
+            &false_body,
+            &false_names,
+        );
+        if specialized.len() <= byte_limit {
+            let names = (0..outputs.len())
+                .map(|index| format!("canonical_structural_output_{index}"))
+                .collect();
+            return Ok((specialized, names));
+        }
+    }
+
+    Ok((baseline_body, baseline_names))
+}
+
+fn emit_static_guard_variant(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    slot: u32,
+    outcome: bool,
+    control: &dyn PipelineControl,
+) -> Result<(String, Vec<String>), StructuralSpecializationError> {
+    let mut specialized = function.clone();
+    let conditions: HashSet<ValueId> = specialized
+        .values
+        .iter()
+        .filter_map(|value| {
+            matches!(value.kind, CfgValueKind::Staged { slot: held } if held == slot)
+                .then_some(value.id)
+        })
+        .collect();
+    for block in &mut specialized.blocks {
+        let CfgTerminator::Branch {
+            condition,
+            then_target,
+            then_args,
+            else_target,
+            else_args,
+        } = block.terminator.clone()
+        else {
+            continue;
+        };
+        if !conditions.contains(&condition) {
+            continue;
+        }
+        block.terminator = if outcome {
+            CfgTerminator::Jump {
+                target: then_target,
+                args: then_args,
+            }
+        } else {
+            CfgTerminator::Jump {
+                target: else_target,
+                args: else_args,
+            }
+        };
+    }
+    retain_reachable_blocks(&mut specialized);
+    let mut outputs = outputs.to_vec();
+    collapse_single_predecessor_parameters(&mut specialized, &mut outputs);
+    let (specialized, outputs) =
+        optimize_with_control(&specialized, &outputs, control)
+            .map_err(StructuralSpecializationError::Cancelled)?;
+    emit_body(&specialized, &outputs, &bindings()).map_err(StructuralSpecializationError::Emit)
+}
+
+fn render_static_guard_variants(
+    slot: u32,
+    branches: usize,
+    true_body: &str,
+    true_names: &[String],
+    false_body: &str,
+    false_names: &[String],
+) -> String {
+    debug_assert_eq!(true_names.len(), false_names.len());
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "    // Bounded structural specialization: one dispatch replaces {branches} \
+         repeated static branches without growing this body by more than 2%."
+    );
+    for index in 0..true_names.len() {
+        let _ = writeln!(out, "    let canonical_structural_output_{index}: f64;");
+    }
+    let _ = writeln!(out, "    if staged[{slot}] != 0.0 {{");
+    out.push_str(&indent(true_body, 1));
+    for (index, name) in true_names.iter().enumerate() {
+        let _ = writeln!(out, "        canonical_structural_output_{index} = {name};");
+    }
+    out.push_str("    } else {\n");
+    out.push_str(&indent(false_body, 1));
+    for (index, name) in false_names.iter().enumerate() {
+        let _ = writeln!(out, "        canonical_structural_output_{index} = {name};");
+    }
+    out.push_str("    }\n");
+    out
+}
+
+fn cfg_loop_headers(function: &CfgFunction) -> HashSet<BlockId> {
+    let mut headers = HashSet::new();
+    let mut state: HashMap<BlockId, u8> = HashMap::new();
+    let mut stack = vec![(function.entry, 0usize)];
+    state.insert(function.entry, 1);
+    while let Some((block, index)) = stack.pop() {
+        let successors = function.block(block).successors();
+        if index < successors.len() {
+            stack.push((block, index + 1));
+            let successor = successors[index];
+            match state.get(&successor) {
+                Some(1) => {
+                    headers.insert(successor);
+                }
+                Some(_) => {}
+                None => {
+                    state.insert(successor, 1);
+                    stack.push((successor, 0));
+                }
+            }
+        } else {
+            state.insert(block, 2);
+        }
+    }
+    headers
+}
+
+fn retain_reachable_blocks(function: &mut CfgFunction) {
+    let mut reachable = HashSet::from([function.entry]);
+    let mut pending = vec![function.entry];
+    while let Some(block) = pending.pop() {
+        for successor in function.block(block).successors() {
+            if reachable.insert(successor) {
+                pending.push(successor);
+            }
+        }
+    }
+
+    let mut remap = vec![None; function.blocks.len()];
+    let mut blocks = Vec::with_capacity(reachable.len());
+    for block in &function.blocks {
+        if !reachable.contains(&block.id) {
+            continue;
+        }
+        remap[usize::from(block.id)] = Some(BlockId::from(blocks.len()));
+        blocks.push(block.clone());
+    }
+    for block in &mut blocks {
+        block.id = remap[usize::from(block.id)].expect("a reachable block is remapped");
+        match &mut block.terminator {
+            CfgTerminator::Jump { target, .. } => {
+                *target = remap[usize::from(*target)].expect("a reachable target is remapped");
+            }
+            CfgTerminator::Branch {
+                then_target,
+                else_target,
+                ..
+            } => {
+                *then_target =
+                    remap[usize::from(*then_target)].expect("a reachable target is remapped");
+                *else_target =
+                    remap[usize::from(*else_target)].expect("a reachable target is remapped");
+            }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
+    }
+    function.entry = remap[usize::from(function.entry)].expect("the entry is reachable");
+    function.blocks = blocks;
+}
+
+fn collapse_single_predecessor_parameters(function: &mut CfgFunction, outputs: &mut [ValueId]) {
+    let mut incoming = vec![0usize; function.blocks.len()];
+    for block in &function.blocks {
+        for successor in block.successors() {
+            incoming[usize::from(successor)] = incoming[usize::from(successor)].saturating_add(1);
+        }
+    }
+    let collapsible: HashSet<BlockId> = function
+        .blocks
+        .iter()
+        .filter(|block| !block.params.is_empty() && incoming[usize::from(block.id)] == 1)
+        .map(|block| block.id)
+        .collect();
+    if collapsible.is_empty() {
+        return;
+    }
+
+    let mut replacement = vec![None; function.values.len()];
+    for source in &function.blocks {
+        match &source.terminator {
+            CfgTerminator::Jump { target, args } if collapsible.contains(target) => {
+                for (param, argument) in function.block(*target).params.iter().zip(args) {
+                    replacement[usize::from(*param)] = Some(*argument);
+                }
+            }
+            CfgTerminator::Branch {
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+                ..
+            } => {
+                for (target, args) in [
+                    (*then_target, then_args.as_slice()),
+                    (*else_target, else_args.as_slice()),
+                ] {
+                    if collapsible.contains(&target) {
+                        for (param, argument) in function.block(target).params.iter().zip(args) {
+                            replacement[usize::from(*param)] = Some(*argument);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let resolve = |mut value: ValueId| {
+        for _ in 0..replacement.len() {
+            match replacement[usize::from(value)] {
+                Some(next) if next != value => value = next,
+                _ => break,
+            }
+        }
+        value
+    };
+
+    for value in &mut function.values {
+        value.kind.map_operands(&resolve);
+    }
+    for output in outputs {
+        *output = resolve(*output);
+    }
+    for block in &mut function.blocks {
+        if collapsible.contains(&block.id) {
+            block.params.clear();
+        }
+        match &mut block.terminator {
+            CfgTerminator::Jump { target, args } => {
+                if collapsible.contains(target) {
+                    args.clear();
+                } else {
+                    for argument in args {
+                        *argument = resolve(*argument);
+                    }
+                }
+            }
+            CfgTerminator::Branch {
+                condition,
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+            } => {
+                *condition = resolve(*condition);
+                for (target, args) in [(*then_target, then_args), (*else_target, else_args)] {
+                    if collapsible.contains(&target) {
+                        args.clear();
+                    } else {
+                        for argument in args {
+                            *argument = resolve(*argument);
+                        }
+                    }
+                }
+            }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
     }
 }
 
