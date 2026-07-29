@@ -17,7 +17,7 @@
 //! 5. **IR Generation** ([`ir`], [`expr_converter`]) - Device equations plus
 //!    forward-mode symbolic derivatives, so Jacobians are analytic
 //! 6. **Canonical IR** ([`canonical_ir`]) - The validated, content-digested
-//!    HIR/MIR/OptIR artifact that the backends consume
+//!    HIR/MIR artifact that the backends consume
 //!
 //! The backends are [`codegen`], emitting a bytecode [`CompiledModel`] run by
 //! [`vm`]; `native`, a JIT behind the `native` feature; and [`rust_backend`],
@@ -152,11 +152,11 @@ pub struct CompiledFile {
 
 /// Result of compiling a Verilog-A source file to canonical IR from disk.
 ///
-/// Includes the canonical HIR/MIR/OptIR artifact and canonical dependency
+/// Includes the canonical HIR/MIR artifact and canonical dependency
 /// paths discovered during preprocessing (`include` expansion).
 #[derive(Debug, Clone)]
 pub struct CanonicalIrFile {
-    /// Canonical HIR/MIR/OptIR artifact for the selected module.
+    /// Canonical HIR/MIR artifact for the selected module.
     pub artifact: canonical_ir::CanonicalIrArtifact,
     /// Canonical source/include dependencies captured at compile time.
     pub dependencies: Vec<std::path::PathBuf>,
@@ -164,14 +164,14 @@ pub struct CanonicalIrFile {
 
 /// Result of compiling a Verilog-A source file for the runtime from disk.
 ///
-/// Includes the bytecode-era compiled model, the canonical HIR/MIR/OptIR
+/// Includes the bytecode-era compiled model, the canonical HIR/MIR
 /// artifact that native JIT backends consume, and canonical dependency paths
 /// discovered during preprocessing (`include` expansion).
 #[derive(Debug, Clone)]
 pub struct CompiledRuntimeFile {
     /// Compiled model artifact used by existing simulation metadata paths.
     pub model: CompiledModel,
-    /// Canonical HIR/MIR/OptIR artifact for the selected module.
+    /// Canonical HIR/MIR artifact for the selected module.
     pub canonical_ir: canonical_ir::CanonicalIrArtifact,
     /// Canonical source/include dependencies captured at compile time.
     pub dependencies: Vec<std::path::PathBuf>,
@@ -536,7 +536,7 @@ impl VerilogACompiler {
         Ok(report)
     }
 
-    /// Compile Verilog-A source code to the canonical HIR/MIR/OptIR artifact.
+    /// Compile Verilog-A source code to the canonical HIR/MIR artifact.
     ///
     /// The source is preprocessed first, so `include/`define/`ifdef work
     /// identically to [`Self::compile`]. The source must contain exactly one
@@ -549,7 +549,7 @@ impl VerilogACompiler {
         self.compile_canonical_ir_module(source, None)
     }
 
-    /// Compile one module of a Verilog-A source to canonical HIR/MIR/OptIR.
+    /// Compile one module of a Verilog-A source to canonical HIR/MIR.
     ///
     /// See [`Self::compile_module`] for module selection rules.
     pub fn compile_canonical_ir_module(
@@ -679,17 +679,10 @@ impl VerilogACompiler {
         let noise_sources =
             canonical_ir::CanonicalNoiseSourcePlan::from_hir_and_mir(&mut hir, &mut mir)
                 .map_err(Self::canonical_ir_error)?;
-        trace_canonical_ir_phase(trace, &module.name, "opt", None);
-        let phase_started = web_time::Instant::now();
-        let opt = canonical_ir::OptModel::from_hir_and_mir(&hir, &mir)
-            .map_err(Self::canonical_ir_error)?;
-        trace_canonical_ir_phase(trace, &module.name, "opt", Some(phase_started.elapsed()));
-
         canonical_ir::CanonicalIrArtifact::from_parts_with_noise_plan(
             metadata,
             hir,
             mir,
-            opt,
             noise_sources,
         )
         .map_err(Self::canonical_ir_error)

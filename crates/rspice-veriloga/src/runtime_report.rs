@@ -22,7 +22,7 @@ use crate::source::Span;
 pub struct RuntimeCompileReport {
     /// Bytecode-era model consumed by the simulator and portable interpreter.
     pub model: CompiledModel,
-    /// Canonical HIR/MIR/OptIR artifact consumed by qualified backends.
+    /// Canonical HIR/MIR artifact consumed by qualified backends.
     pub canonical_ir: CanonicalIrArtifact,
     /// Stable public simulator ABI derived from the canonical artifact.
     pub abi: RuntimeAbiSummary,
@@ -365,7 +365,7 @@ fn qualify_runtime_targets(
             RuntimeTarget::SemanticIr,
             RuntimeTargetReadiness::Available,
             RuntimeTargetMaturity::Production,
-            "canonical HIR/MIR/OptIR validated",
+            "canonical HIR/MIR validated",
         ),
         qualification(
             RuntimeTarget::BytecodeVm,

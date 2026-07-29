@@ -7,7 +7,7 @@
 
 use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
-use rspice_veriloga::canonical_ir::{HirExprKind, OptModel};
+use rspice_veriloga::canonical_ir::HirExprKind;
 #[cfg(feature = "native-bytecode-contract-tests")]
 use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
@@ -118,8 +118,7 @@ fn canonical_artifact_with_unsupported_root(
     mir.expressions[root].kind = unsupported;
     hir.contributions[0].expression.kind = "string".into();
     mir.equations[0].expression.kind = "string".into();
-    let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
-    CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect("synthetic canonical artifact has refreshed digests")
 }
 

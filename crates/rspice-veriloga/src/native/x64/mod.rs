@@ -4832,7 +4832,7 @@ mod tests {
     use crate::canonical_ir::hir::HirRegion;
     use crate::canonical_ir::{
         BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
-        MirEquationKind, NodeId, OptModel,
+        MirEquationKind, NodeId,
     };
     use crate::codegen::{
         AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, JacobianEntry,
@@ -4872,8 +4872,7 @@ mod tests {
         mir.expressions[root].kind = unsupported;
         hir.contributions[0].expression.kind = "string".into();
         mir.equations[0].expression.kind = "string".into();
-        let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        CanonicalIrArtifact::from_parts(metadata, hir, mir)
             .expect("synthetic canonical artifact has refreshed digests")
     }
 
@@ -4881,8 +4880,7 @@ mod tests {
         let CanonicalIrArtifact {
             metadata, hir, mir, ..
         } = artifact;
-        let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        CanonicalIrArtifact::from_parts(metadata, hir, mir)
             .expect("synthetic canonical artifact has refreshed digests")
     }
 

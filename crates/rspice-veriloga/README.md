@@ -15,7 +15,7 @@ the GUI's Verilog-A dialog, and the generated-Rust built-in path used by
 
 ```
 source text ─▶ preprocessor ─▶ lexer ─▶ parser ─▶ semantic ─▶ IR (+ autodiff) ─▶ canonical IR
-               `include/`define  tokens    AST     symbol/type  device equations   HIR/MIR/OptIR
+               `include/`define  tokens    AST     symbol/type  device equations      HIR/MIR
                                                    resolution   + derivatives            │
                         ┌──────────────────────────────────────────────────────┬─────────┤
                         ▼                                                      ▼         ▼
@@ -38,7 +38,7 @@ runs offline, ahead of the build, and its output is compiled into
 | `ast` | AST types for expressions, statements, declarations, analog operators, event expressions |
 | `semantic` | Symbol table, type inference, discipline validation; rejects unsupported constructs with explicit errors |
 | `ir` / `expr_converter` | Lowering to device-equation IR; the `autodiff` submodule generates derivative ("shadow") assignments by symbolic forward-mode differentiation, so Jacobians are analytic rather than finite-difference |
-| `canonical_ir` | Stable HIR/MIR/OptIR artifact with validation, diagnostics, content digests, and backend input for generated Rust and future native/JIT paths |
+| `canonical_ir` | Stable HIR/MIR artifact with validation, diagnostics, content digests, and backend input for generated Rust and native/JIT paths |
 | `codegen` | Emits the bytecode `CompiledModel`: assignment programs, per-stamp value and Jacobian programs, reactive (charge) programs, noise metadata |
 | `rust_backend` | Deterministic Verilog-A-to-Rust backend for generated built-ins: lowers canonical IR to Rust source folders, registry/support modules, manifest data, and cleanup guards used by `rspice-core`'s `veriloga-builtins` feature |
 | `vm` | Bytecode interpreter and per-instance runtime context (state for `ddt`/`idt`, transition/slew filters, delay buffers, event detectors, lookup tables) |
@@ -68,7 +68,7 @@ let model = compiler.compile_file_module(path, Some("nmos"))?;
 let file  = compiler.compile_file_with_metadata(path)?;      // + include dependency list
 let file  = compiler.compile_file_module_with_metadata(path, Some("nmos"))?;
 
-// Canonical HIR/MIR/OptIR artifact
+// Canonical HIR/MIR artifact
 let ir = compiler.compile_canonical_ir(source)?;
 let ir = compiler.compile_canonical_ir_module(source, Some("nmos"))?;
 let ir = compiler.compile_file_canonical_ir_with_metadata(path, Some("nmos"))?;
