@@ -217,9 +217,6 @@ pub struct CfgEvalSnapshot<S> {
     /// value's shape. Held apart from the scalars rather than in one enum so
     /// reading a scalar stays a `Copy`.
     pub lanes: Vec<Option<Vec<S>>>,
-    /// Blocks entered, in order. The shape of the path taken, which is what a
-    /// control-flow bug shows up in first.
-    pub trace: Vec<BlockId>,
 }
 
 impl<S: Copy> CfgEvalSnapshot<S> {
@@ -287,13 +284,11 @@ pub fn evaluate_with_limit<S: CfgScalar>(
         inputs,
         values: vec![None; function.values.len()],
         lanes: vec![None; function.values.len()],
-        trace: Vec::new(),
     };
     evaluator.run(step_limit)?;
     Ok(CfgEvalSnapshot {
         values: evaluator.values,
         lanes: evaluator.lanes,
-        trace: evaluator.trace,
     })
 }
 
@@ -302,7 +297,6 @@ struct Evaluator<'a, S> {
     inputs: &'a CfgEvalInputs<S>,
     values: Vec<Option<S>>,
     lanes: Vec<Option<Vec<S>>>,
-    trace: Vec<BlockId>,
 }
 
 impl<S: CfgScalar> Evaluator<'_, S> {
@@ -334,7 +328,6 @@ impl<S: CfgScalar> Evaluator<'_, S> {
 
         let mut block = function.entry;
         for _ in 0..step_limit {
-            self.trace.push(block);
             for instruction in &function.block(block).instructions {
                 let result = instruction.result;
                 if function.value(result).value_type.shape().is_some() {
