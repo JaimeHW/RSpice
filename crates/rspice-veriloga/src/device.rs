@@ -168,6 +168,11 @@ pub struct VerilogADevice {
     branch_active: Vec<bool>,
     /// Pre-computed matrix indices for O(1) stamping
     matrix_indices: MatrixIndices,
+    /// Preallocated transaction buffer for one matrix-stamp pass. Solver
+    /// callbacks are invoked only after the complete pass validates.
+    stamp_matrix_buffer: Vec<(usize, usize, f64)>,
+    /// Preallocated transaction buffer for one RHS-stamp pass.
+    stamp_rhs_buffer: Vec<(usize, f64)>,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
@@ -377,6 +382,8 @@ impl VerilogADevice {
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
             matrix_indices: MatrixIndices::default(),
+            stamp_matrix_buffer: Vec::new(),
+            stamp_rhs_buffer: Vec::new(),
             #[cfg(feature = "native")]
             native_model,
             #[cfg(feature = "native")]
@@ -1693,6 +1700,30 @@ impl VerilogADevice {
             reactive,
             rhs,
         };
+        let matrix_capacity = self
+            .model
+            .branch_sources
+            .len()
+            .saturating_mul(4)
+            .saturating_add(
+                self.matrix_indices
+                    .jacobian
+                    .iter()
+                    .flatten()
+                    .filter(|entry| entry.row.is_some() && entry.col.is_some())
+                    .count(),
+            );
+        let rhs_capacity = self
+            .matrix_indices
+            .rhs
+            .iter()
+            .flatten()
+            .filter(|entry| entry.node.is_some())
+            .count();
+        self.stamp_matrix_buffer
+            .reserve(matrix_capacity.saturating_sub(self.stamp_matrix_buffer.capacity()));
+        self.stamp_rhs_buffer
+            .reserve(rhs_capacity.saturating_sub(self.stamp_rhs_buffer.capacity()));
     }
 
     /// Stamp the reactive (charge/flux) Jacobian dQ/dx.
@@ -2817,47 +2848,52 @@ impl VerilogADevice {
         self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
     }
 
-    fn stamp_structural_branches<M>(&self, matrix_add: &mut M, multiplicity: f64)
-    where
-        M: FnMut(usize, usize, f64),
-    {
-        for (ordinal, source) in self.model.branch_sources.iter().enumerate() {
+    fn buffer_structural_branches(
+        model: &CompiledModel,
+        branch_active: &[bool],
+        node_mapping: &[usize],
+        internal_node_indices: &[usize],
+        branch_current_indices: &[usize],
+        matrix_buffer: &mut Vec<(usize, usize, f64)>,
+        multiplicity: f64,
+    ) {
+        for (ordinal, source) in model.branch_sources.iter().enumerate() {
             let br = Self::index_to_node(
                 &StampIndex::Branch(ordinal),
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
+                node_mapping,
+                internal_node_indices,
+                branch_current_indices,
             );
             let Some(br) = br else { continue };
 
-            if !self.branch_active.get(ordinal).copied().unwrap_or(false) {
-                matrix_add(br, br, 1.0);
+            if !branch_active.get(ordinal).copied().unwrap_or(false) {
+                matrix_buffer.push((br, br, 1.0));
                 continue;
             }
 
             let pos = Self::index_to_node(
                 &source.pos,
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
+                node_mapping,
+                internal_node_indices,
+                branch_current_indices,
             );
             let neg = Self::index_to_node(
                 &source.neg,
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
+                node_mapping,
+                internal_node_indices,
+                branch_current_indices,
             );
 
             if let Some(p) = pos {
-                matrix_add(p, br, multiplicity);
+                matrix_buffer.push((p, br, multiplicity));
                 if !source.indirect {
-                    matrix_add(br, p, 1.0);
+                    matrix_buffer.push((br, p, 1.0));
                 }
             }
             if let Some(n) = neg {
-                matrix_add(n, br, -multiplicity);
+                matrix_buffer.push((n, br, -multiplicity));
                 if !source.indirect {
-                    matrix_add(br, n, -1.0);
+                    matrix_buffer.push((br, n, -1.0));
                 }
             }
         }
@@ -2897,6 +2933,8 @@ impl VerilogADevice {
     {
         self.try_update_all_voltages(circuit_voltages)?;
         self.begin_evaluation(mode);
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
 
         let model = &self.model;
         let native = self.native_model.as_ref();
@@ -2982,7 +3020,15 @@ impl VerilogADevice {
         }
 
         let m = self.context.multiplicity;
-        self.stamp_structural_branches(&mut matrix_add, m);
+        Self::buffer_structural_branches(
+            model,
+            &self.branch_active,
+            &self.node_mapping,
+            &self.internal_node_indices,
+            &self.branch_current_indices,
+            &mut self.stamp_matrix_buffer,
+            m,
+        );
 
         jacobian_base = 0;
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
@@ -3028,7 +3074,8 @@ impl VerilogADevice {
                 }
 
                 if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
-                    matrix_add(row, col, jacobian_entry.sign * deriv);
+                    self.stamp_matrix_buffer
+                        .push((row, col, jacobian_entry.sign * deriv));
                 }
             }
 
@@ -3040,11 +3087,19 @@ impl VerilogADevice {
             )?;
             for entry in &self.matrix_indices.rhs[program_idx] {
                 if let Some(row) = entry.node {
-                    rhs_add(row, entry.sign * eq_value);
+                    self.stamp_rhs_buffer.push((row, entry.sign * eq_value));
                 }
             }
             jacobian_base += program.jacobian_programs.len();
         }
+        for &(row, col, value) in &self.stamp_matrix_buffer {
+            matrix_add(row, col, value);
+        }
+        for &(row, value) in &self.stamp_rhs_buffer {
+            rhs_add(row, value);
+        }
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
         Ok(())
     }
 
@@ -3063,6 +3118,8 @@ impl VerilogADevice {
         // nodes, and branch-current unknowns)
         self.try_update_all_voltages(circuit_voltages)?;
         self.begin_evaluation(mode);
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
 
         // Extract disjoint fields to satisfy borrow checker
         let context = &mut self.context;
@@ -3088,56 +3145,18 @@ impl VerilogADevice {
             native,
         )?;
 
-        // Structural stamps of the branch-current unknowns: the KCL rows of
-        // the source nodes couple to the branch column, and the branch row
-        // reads the node potentials. An undriven branch (all its potential
-        // contributions mode-disabled) is pinned to zero current so its row
-        // stays non-singular while the branch itself is open.
-        for (ordinal, source) in model.branch_sources.iter().enumerate() {
-            let br = Self::index_to_node(
-                &StampIndex::Branch(ordinal),
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
-            );
-            let Some(br) = br else { continue };
-
-            if !self.branch_active.get(ordinal).copied().unwrap_or(false) {
-                matrix_add(br, br, 1.0);
-                continue;
-            }
-
-            let pos = Self::index_to_node(
-                &source.pos,
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
-            );
-            let neg = Self::index_to_node(
-                &source.neg,
-                &self.node_mapping,
-                &self.internal_node_indices,
-                &self.branch_current_indices,
-            );
-
-            // The unknown is the per-copy branch current; m copies inject
-            // m times that current into the external KCL rows
-            if let Some(p) = pos {
-                matrix_add(p, br, m);
-                // Indirect branches replace the V(p)-V(n)-E row with the
-                // constraint equation; only the KCL couplings are
-                // structural
-                if !source.indirect {
-                    matrix_add(br, p, 1.0);
-                }
-            }
-            if let Some(n) = neg {
-                matrix_add(n, br, -m);
-                if !source.indirect {
-                    matrix_add(br, n, -1.0);
-                }
-            }
-        }
+        // Buffer structural branch stamps with the computed entries. Nothing
+        // is visible to the solver until every native/interpreter result and
+        // post-current assignment has validated.
+        Self::buffer_structural_branches(
+            model,
+            &self.branch_active,
+            &self.node_mapping,
+            &self.internal_node_indices,
+            &self.branch_current_indices,
+            &mut self.stamp_matrix_buffer,
+            m,
+        );
 
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             if !self
@@ -3231,7 +3250,8 @@ impl VerilogADevice {
                 }
 
                 if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
-                    matrix_add(row, col, jacobian_entry.sign * deriv);
+                    self.stamp_matrix_buffer
+                        .push((row, col, jacobian_entry.sign * deriv));
                 }
             }
 
@@ -3244,12 +3264,20 @@ impl VerilogADevice {
             // potential contributions stamp +Eeq at the branch row
             for entry in &matrix_indices.rhs[program_idx] {
                 if let Some(row) = entry.node {
-                    rhs_add(row, entry.sign * eq_value);
+                    self.stamp_rhs_buffer.push((row, entry.sign * eq_value));
                 }
             }
         }
         #[cfg(feature = "native")]
         Self::run_post_assignment_pass(&mut vm, model, native)?;
+        for &(row, col, value) in &self.stamp_matrix_buffer {
+            matrix_add(row, col, value);
+        }
+        for &(row, value) in &self.stamp_rhs_buffer {
+            rhs_add(row, value);
+        }
+        self.stamp_matrix_buffer.clear();
+        self.stamp_rhs_buffer.clear();
         Ok(())
     }
 
@@ -3767,6 +3795,8 @@ mod tests {
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
             matrix_indices: MatrixIndices::default(),
+            stamp_matrix_buffer: Vec::new(),
+            stamp_rhs_buffer: Vec::new(),
             native_model: Arc::new(NativeModel::new_for_test_with_shape(
                 num_terminals,
                 num_internal_nodes,
@@ -3976,6 +4006,91 @@ endmodule
 
         assert_eq!(device.context.currents, vec![0.0, 1.0]);
         assert_eq!(device.variable("sensed"), Some(1.0));
+    }
+
+    #[test]
+    fn native_stamp_paths_publish_no_solver_callbacks_after_late_runtime_failure() {
+        let source = r#"
+`include "disciplines.vams"
+module transactional_stamp_failure(p, n);
+    inout p, n;
+    electrical p, n;
+    integer idx;
+    real values[0:0];
+    analog begin
+        idx = V(p, n);
+        I(p, n) <+ V(p, n);
+        I(p, n) <+ values[idx];
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile transactional stamp fixture");
+        assert_eq!(
+            model.stamp_programs.len(),
+            2,
+            "fixture requires a valid contribution before the failing one"
+        );
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile transactional stamp canonical IR");
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "STAMPTRANSACTION1",
+            model,
+            &artifact,
+            &[1, 0],
+        )
+        .expect("build transactional native device");
+        assert!(
+            device.native_model.stamp_kernel_is_eligible(),
+            "fixture must exercise both scalar and fused stamp paths"
+        );
+
+        let mut scalar_matrix_calls = 0usize;
+        let mut scalar_rhs_calls = 0usize;
+        let scalar_error = device
+            .try_stamp_scalar_with_mode(
+                &[2.0, 0.0],
+                |_, _, _| scalar_matrix_calls += 1,
+                |_, _| scalar_rhs_calls += 1,
+                crate::vm::VerilogAEvaluationMode::StaticProbe,
+            )
+            .expect_err("late scalar contribution failure must surface");
+        assert!(
+            scalar_error
+                .to_string()
+                .contains("array index 2 outside declared bounds [0:0]"),
+            "unexpected scalar stamp error: {scalar_error}"
+        );
+        assert_eq!(
+            (scalar_matrix_calls, scalar_rhs_calls),
+            (0, 0),
+            "scalar stamping must publish atomically"
+        );
+
+        let mut fused_matrix_calls = 0usize;
+        let mut fused_rhs_calls = 0usize;
+        let fused_error = device
+            .try_stamp_with_mode(
+                &[2.0, 0.0],
+                |_, _, _| fused_matrix_calls += 1,
+                |_, _| fused_rhs_calls += 1,
+                crate::vm::VerilogAEvaluationMode::StaticProbe,
+            )
+            .expect_err("late fused contribution failure must surface");
+        assert!(
+            fused_error
+                .to_string()
+                .contains("array index 2 outside declared bounds [0:0]"),
+            "unexpected fused stamp error: {fused_error}"
+        );
+        assert_eq!(
+            (fused_matrix_calls, fused_rhs_calls),
+            (0, 0),
+            "fused stamping must publish atomically"
+        );
     }
 
     #[test]
