@@ -16,7 +16,7 @@ impl TestRunner {
     }
 
     pub(in crate::suites::ngspice) fn resolve_circuit_node_index(
-        circuit: &rspice_core::circuit::Circuit,
+        circuit: &rspice_core::circuit::CircuitData,
         node: &str,
         role: &str,
     ) -> Result<usize, String> {
@@ -26,7 +26,7 @@ impl TestRunner {
     }
 
     pub(in crate::suites::ngspice) fn resolve_optional_circuit_node_index(
-        circuit: &rspice_core::circuit::Circuit,
+        circuit: &rspice_core::circuit::CircuitData,
         node: Option<&str>,
         role: &str,
     ) -> Result<Option<usize>, String> {

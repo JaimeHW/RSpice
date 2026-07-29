@@ -23,7 +23,7 @@
 
 use crate::Value;
 use crate::analysis::LteEstimator;
-use crate::circuit::Circuit;
+use crate::circuit::CircuitData;
 use crate::device::veriloga_generated::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
@@ -1182,7 +1182,7 @@ impl TransientCheckpoint {
         simulation_identity: String,
         time: Value,
         solution: &[Value],
-        circuit: &Circuit,
+        circuit: &CircuitData,
         lte_estimator: Option<&LteEstimator>,
     ) -> Self {
         if !circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty() {
@@ -1252,7 +1252,7 @@ impl TransientCheckpoint {
 
     /// Inject the captured reactive-state histories into a freshly built
     /// circuit. Lengths must match the capture exactly.
-    pub(crate) fn inject(&self, circuit: &mut Circuit) -> Result<(), String> {
+    pub(crate) fn inject(&self, circuit: &mut CircuitData) -> Result<(), String> {
         self.validate_numeric_state()?;
 
         // Validate identity-bearing device state before ordinal storage
@@ -2438,7 +2438,7 @@ mod tests {
     #[test]
     fn generated_restore_rejection_leaves_all_reactive_histories_unchanged() {
         let checkpoint = sample();
-        let mut circuit = Circuit::new();
+        let mut circuit = CircuitData::new();
         circuit.capacitors.v_prev = vec![91.0, 92.0];
         circuit.capacitors.v_prev_prev = vec![81.0, 82.0];
         circuit.capacitors.v_prev_prev_prev = vec![71.0, 72.0];

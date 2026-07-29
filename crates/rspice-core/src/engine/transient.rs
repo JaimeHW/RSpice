@@ -1038,7 +1038,7 @@ impl Engine {
     }
 
     fn validated_transient_source_selection(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         source_names: &[String],
     ) -> Result<std::collections::HashSet<String>, SimulationError> {
         let available = circuit
@@ -1270,7 +1270,7 @@ impl Engine {
 
     #[inline]
     fn should_enable_nonlinear_source_ramp_cap(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         requires_conservative_nonlinear_limiting: bool,
     ) -> bool {
         // Native TXL and distributed-RLGC/LTRA scalar lines keep accepted-point
@@ -6213,7 +6213,7 @@ mod tests {
 
     #[test]
     fn nonlinear_terminal_activity_limit_respects_voltage_lte_exclusions() {
-        let mut circuit = crate::circuit::Circuit::new();
+        let mut circuit = crate::circuit::CircuitData::new();
         circuit.mosfets.add(crate::device::Mosfet::new_nmos(
             "M1".to_string(),
             1,
@@ -6282,7 +6282,7 @@ mod tests {
 
     #[test]
     fn transmission_source_ramp_cap_is_disabled_for_native_txl_and_ltra() {
-        let circuit = crate::circuit::Circuit::new();
+        let circuit = crate::circuit::CircuitData::new();
         assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
             &circuit, false
         ));
@@ -6290,14 +6290,14 @@ mod tests {
             &circuit, true
         ));
 
-        let mut lossless_circuit = crate::circuit::Circuit::new();
+        let mut lossless_circuit = crate::circuit::CircuitData::new();
         lossless_circuit.tlines.push(scalar_line("TLOSSLESS"));
         assert!(Engine::should_enable_nonlinear_source_ramp_cap(
             &lossless_circuit,
             true
         ));
 
-        let mut ltra_circuit = crate::circuit::Circuit::new();
+        let mut ltra_circuit = crate::circuit::CircuitData::new();
         let mut ltra_line = scalar_line("TLTRA");
         ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
         ltra_circuit.tlines.push(ltra_line);
@@ -6306,7 +6306,7 @@ mod tests {
             true
         ));
 
-        let mut txl_circuit = crate::circuit::Circuit::new();
+        let mut txl_circuit = crate::circuit::CircuitData::new();
         let mut txl_line = scalar_line("TTXL");
         assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
         txl_circuit.tlines.push(txl_line);

@@ -31,7 +31,7 @@ use crate::analysis::{
     PeriodDetector, PeriodicWaveform, PssConfig, PssResult,
     ShootingNewtonSolver, ShootingState,
 };
-use crate::circuit::Circuit;
+use crate::circuit::CircuitData;
 use crate::solver::StaticMatrix;
 use crate::{Netlist, Value};
 
@@ -303,7 +303,7 @@ impl PssDcOperatingPointSeed {
         Ok(())
     }
 
-    fn validate_for_circuit(&self, circuit: &Circuit) -> Result<(), SimulationError> {
+    fn validate_for_circuit(&self, circuit: &CircuitData) -> Result<(), SimulationError> {
         let expected_node_names = circuit.node_names_sorted();
         let expected_branch_names = circuit.branch_names_sorted();
         if self.node_names != expected_node_names {
@@ -873,7 +873,7 @@ impl Engine {
         self.run_tran_resume_with_abort(netlist, &state.checkpoint, tstop, max_step, abort)
     }
 
-    fn ensure_pss_continuation_state_supported(circuit: &Circuit) -> Result<(), SimulationError> {
+    fn ensure_pss_continuation_state_supported(circuit: &CircuitData) -> Result<(), SimulationError> {
         let mut blockers = Vec::new();
         // Keep this list aligned with transient/residual.rs and
         // transient/state_commit.rs. Shooting PSS currently advances only the
@@ -1008,7 +1008,7 @@ impl Engine {
     }
 
     fn freeze_pss_independent_sources(
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         frozen_sources: &std::collections::BTreeSet<String>,
     ) -> Result<(), SimulationError> {
         for source in frozen_sources {
@@ -1042,7 +1042,7 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
         abort: &dyn AbortSignal,
-    ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
+    ) -> Result<(PssAnalysisResult, CircuitData, StaticMatrix, Vec<Value>), SimulationError> {
         self.run_pss_with_state_and_frozen_sources_abort(
             netlist,
             config,
@@ -1061,7 +1061,7 @@ impl Engine {
         require_exact_continuation_state: bool,
         dc_seed: Option<&PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
-    ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
+    ) -> Result<(PssAnalysisResult, CircuitData, StaticMatrix, Vec<Value>), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -1297,7 +1297,7 @@ impl Engine {
     }
 
     /// Initialize reactive element state from DC solution
-    fn pss_initialize_reactive_state(&self, circuit: &mut Circuit, dc_solution: &[Value]) {
+    fn pss_initialize_reactive_state(&self, circuit: &mut CircuitData, dc_solution: &[Value]) {
         // Initialize capacitor voltages
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
@@ -1342,7 +1342,7 @@ impl Engine {
     }
 
     /// Extract state vector (capacitor voltages + inductor currents)
-    fn pss_extract_reactive_state(&self, circuit: &Circuit) -> Vec<Value> {
+    fn pss_extract_reactive_state(&self, circuit: &CircuitData) -> Vec<Value> {
         let mut state = Vec::with_capacity(circuit.capacitors.len() + circuit.inductors.len());
 
         // Capacitor voltages
@@ -1366,7 +1366,7 @@ impl Engine {
     /// function of the shooting state. Leaving stale history in place would
     /// leak the previous trajectory into the next one and corrupt both the
     /// shooting residual and the finite-difference Jacobian columns.
-    pub(in crate::engine) fn pss_set_reactive_state(&self, circuit: &mut Circuit, state: &[Value]) {
+    pub(in crate::engine) fn pss_set_reactive_state(&self, circuit: &mut CircuitData, state: &[Value]) {
         let n_caps = circuit.capacitors.len();
 
         // Set capacitor voltages
@@ -1387,7 +1387,7 @@ impl Engine {
     /// Run stabilization phase (`tstab`)
     fn pss_run_stabilization(
         &self,
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         dc_solution: &[Value],
         config: &PssConfig,
@@ -1492,7 +1492,7 @@ impl Engine {
     /// Simulate one complete period
     fn pss_simulate_one_period(
         &self,
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         period: Value,
         config: &PssConfig,
@@ -1532,7 +1532,7 @@ impl Engine {
     /// were all zeros.
     pub(in crate::engine) fn pss_initial_node_solution(
         &self,
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         period: Value,
         abort: &dyn AbortSignal,
@@ -1564,7 +1564,7 @@ impl Engine {
     /// is intentionally not Clone).
     fn pss_sensitivity_columns(
         &self,
-        circuit: &Circuit,
+        circuit: &CircuitData,
         x0: &[Value],
         period: Value,
         config: &PssConfig,
@@ -1580,7 +1580,7 @@ impl Engine {
             return Ok(Vec::new());
         }
 
-        let column = |worker_circuit: &mut Circuit,
+        let column = |worker_circuit: &mut CircuitData,
                       worker_matrix: &mut StaticMatrix,
                       j: usize|
          -> Result<Vec<Value>, SimulationError> {
@@ -1625,7 +1625,7 @@ impl Engine {
             let workers = self.parallel_worker_count(n);
             let chunk_len = n.div_ceil(workers);
             let indices: Vec<usize> = (0..n).collect();
-            let work: Vec<(Circuit, Vec<usize>)> = indices
+            let work: Vec<(CircuitData, Vec<usize>)> = indices
                 .chunks(chunk_len)
                 .map(|chunk| (circuit.clone(), chunk.to_vec()))
                 .collect();
@@ -1664,7 +1664,7 @@ impl Engine {
     /// caller can recycle it as the monodromy at convergence (J = M - I).
     fn pss_compute_newton_step(
         &self,
-        circuit: &Circuit,
+        circuit: &CircuitData,
         state: &ShootingState,
         period: Value,
         config: &PssConfig,
@@ -1703,7 +1703,7 @@ impl Engine {
     /// the orbit tangent at the endpoint.
     fn pss_compute_autonomous_newton_step(
         &self,
-        circuit: &Circuit,
+        circuit: &CircuitData,
         state: &ShootingState,
         period: Value,
         config: &PssConfig,
@@ -1766,7 +1766,7 @@ impl Engine {
     /// circuit clones.
     fn pss_compute_monodromy(
         &self,
-        circuit: &Circuit,
+        circuit: &CircuitData,
         state: &ShootingState,
         period: Value,
         config: &PssConfig,
@@ -1859,7 +1859,7 @@ impl Engine {
     /// `None` when Newton fails to converge at this step size.
     fn pss_newton_solve(
         &self,
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         coeff: &CompanionCoefficients,
         t_next: Value,
@@ -1914,7 +1914,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::engine) fn pss_stamp_system(
         &self,
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         coeff: &CompanionCoefficients,
@@ -2013,7 +2013,7 @@ impl Engine {
     /// derivative accuracy.
     pub(in crate::engine) fn pss_run_tran_internal(
         &self,
-        circuit: &mut Circuit,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         mut solution: Vec<Value>,
         tstop: Value,
@@ -2454,7 +2454,7 @@ mod tests {
 
     #[test]
     fn continuation_state_rejects_unadvanced_delay_history() {
-        let mut circuit = Circuit::new();
+        let mut circuit = CircuitData::new();
         circuit.tlines.push(crate::device::TransmissionLine::new(
             "T1".to_string(),
             1,

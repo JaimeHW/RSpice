@@ -5,7 +5,7 @@ use super::*;
 impl Engine {
     #[inline]
     pub(super) fn max_expected_source_delta(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         t0: Value,
         t1: Value,
     ) -> Value {
@@ -17,7 +17,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn startup_source_activity_delta_for_retry_floor(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         time: Value,
         attempted_dt: Value,
         tstop: Value,
@@ -52,7 +52,7 @@ impl Engine {
     }
 
     pub(super) fn collect_xspice_runtime_breakpoints(
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         breakpoints: &mut BreakpointManager,
         tstop: Value,
     ) {
@@ -506,7 +506,7 @@ impl Engine {
     }
 
     pub(in crate::engine) fn collect_transient_source_breakpoints(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         tstop: Value,
         tstep_hint: Value,
         dialect: crate::engine::SpiceDialect,
@@ -561,7 +561,7 @@ impl Engine {
     /// event-aligned sampling must follow the selected modulation sources,
     /// not internal switch, transmission-line, or code-model events.
     pub(in crate::engine) fn collect_independent_source_breakpoints(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         tstop: Value,
         tstep_hint: Value,
         dialect: crate::engine::SpiceDialect,
@@ -598,7 +598,7 @@ impl Engine {
         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
 
-    pub(super) fn transmission_line_delays(circuit: &crate::circuit::Circuit) -> Vec<Value> {
+    pub(super) fn transmission_line_delays(circuit: &crate::circuit::CircuitData) -> Vec<Value> {
         let mut delays: Vec<Value> = circuit
             .tlines
             .iter()
@@ -636,7 +636,7 @@ impl Engine {
     }
 
     pub(super) fn collect_transient_tline_breakpoints(
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         source_breakpoints: &[Value],
         tstop: Value,
         breakpoints: &mut BreakpointManager,
@@ -1034,7 +1034,7 @@ mod tests {
 
     #[test]
     fn transmission_line_delays_skip_native_txl_and_ltra_scalar_lines() {
-        let mut circuit = crate::circuit::Circuit::new();
+        let mut circuit = crate::circuit::CircuitData::new();
 
         circuit.tlines.push(crate::device::TransmissionLine::new(
             "TLOSSLESS".to_string(),
@@ -1093,7 +1093,7 @@ mod tests {
             &[],
         )
         .expect("pwlts instance constructs");
-        let mut circuit = crate::circuit::Circuit::new();
+        let mut circuit = crate::circuit::CircuitData::new();
         circuit.add_xspice_instance(instance);
 
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
@@ -1113,7 +1113,7 @@ mod tests {
 
     #[test]
     fn propagated_tline_breakpoints_skip_ltra_but_keep_lossless_scalar() {
-        let mut circuit = crate::circuit::Circuit::new();
+        let mut circuit = crate::circuit::CircuitData::new();
 
         circuit.tlines.push(crate::device::TransmissionLine::new(
             "TLOSSLESS".to_string(),

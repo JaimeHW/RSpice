@@ -60,7 +60,7 @@ impl Engine {
     /// Native/ngspice modes retain RSpice's row-scaled residual policy.
     pub(super) fn transient_residual_convergence_met(
         &self,
-        circuit: &crate::circuit::Circuit,
+        circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         solution: &[Value],
         rhs: &[Value],
@@ -90,7 +90,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn stamp_transient_system(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
@@ -121,7 +121,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn stamp_transient_system_with_generated_mode(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
@@ -445,7 +445,7 @@ impl Engine {
     /// histories and is reassembled with the attempted step size.
     pub(super) fn capture_xyce_static_residual(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         solution: &[Value],
         time: Value,
@@ -503,7 +503,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn transient_nonlinear_residual_converged(
         &self,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
@@ -581,7 +581,7 @@ mod tests {
         let mut engine = Engine::default();
         engine.config.spice_dialect = SpiceDialect::Xyce;
         engine.config.transient_nonlinear_rhstol = Some(0.25);
-        let circuit = crate::circuit::Circuit::default();
+        let circuit = crate::circuit::CircuitData::default();
         let mut matrix = crate::solver::StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0)])
             .expect("identity matrix");
 
@@ -633,7 +633,7 @@ Q1 C B E 0 QN
 .END
 ";
 
-    fn matrix_row_label(circuit: &crate::circuit::Circuit, index: usize) -> String {
+    fn matrix_row_label(circuit: &crate::circuit::CircuitData, index: usize) -> String {
         let num_nodes = circuit.num_nodes();
         if index < num_nodes {
             let names = circuit.node_names_sorted();
@@ -919,7 +919,7 @@ Q1 C B E 0 QN
     #[allow(clippy::too_many_arguments)]
     fn be_one_step_map_spectral_radius(
         engine: &Engine,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         base: &[Value],
         ctx: &TransientSystemContext<'_>,
@@ -1028,7 +1028,7 @@ Q1 C B E 0 QN
     #[allow(clippy::too_many_arguments)]
     fn be_one_step_map_gain_on_vector(
         engine: &Engine,
-        circuit: &mut crate::circuit::Circuit,
+        circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         base: &[Value],
         ctx: &TransientSystemContext<'_>,
