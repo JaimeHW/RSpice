@@ -4995,6 +4995,78 @@ endmodule
     }
 
     #[test]
+    fn fused_stamp_kernel_aborts_before_publishing_after_assignment_failure() {
+        let source = r#"
+module native_fused_abort(p, n);
+  inout p, n;
+  electrical p, n;
+  integer idx;
+  real values[0:0];
+  analog begin
+    idx = V(p, n);
+    values[idx] = 1.0;
+    I(p, n) <+ values[0] + 3.0 * V(p, n);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("compile failing fused stamp fixture");
+
+        let voltages = [2.0_f64, 0.0_f64];
+        let mut variables = vec![0.0; native.num_variables.max(1)];
+        let mut currents = vec![-101.0; model.stamp_programs.len()];
+        let current_axis_width = model.num_terminals + 1;
+        let mut branch_currents = vec![-303.0; current_axis_width * current_axis_width];
+        let jacobian_count = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum();
+        assert!(
+            jacobian_count > 0,
+            "fixture must contain later Jacobian work"
+        );
+        let mut jacobians = vec![-202.0; jacobian_count];
+        let mut ctx = eval_context(&[], &voltages);
+        ctx.branch_currents = branch_currents.as_mut_ptr();
+        ctx.branch_currents_len = branch_currents.len();
+        ctx.currents = currents.as_mut_ptr();
+        ctx.currents_len = currents.len();
+        let active = vec![1_u8; model.stamp_programs.len()];
+        let io = NativeStampKernelIo {
+            program_active: active.as_ptr(),
+            jacobians: jacobians.as_mut_ptr(),
+        };
+
+        assert!(native.run_stamp_kernel(&ctx, variables.as_mut_ptr(), &io));
+
+        let error = ctx
+            .take_runtime_error()
+            .expect("failing assignment must abort the fused driver");
+        assert!(
+            error.contains("array index 2 outside declared bounds [0:0]"),
+            "unexpected fused-driver diagnostic: {error}"
+        );
+        assert!(
+            currents.iter().all(|value| *value == -101.0),
+            "the driver must not publish a contribution after assignment failure"
+        );
+        assert!(
+            jacobians.iter().all(|value| *value == -202.0),
+            "the driver must not publish a Jacobian after assignment failure"
+        );
+        assert!(
+            branch_currents.iter().all(|value| *value == -303.0),
+            "the driver must not publish terminal-pair currents after assignment failure"
+        );
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_uses_mir_parameter_defaults() {
         let source = r#"
 module native_canonical_param_default(p, n);
