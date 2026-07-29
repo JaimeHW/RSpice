@@ -25,7 +25,7 @@ const OVERFLOW_WIDTH: f32 = 31.0;
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     reconcile_document_registry(&mut app.state);
     let documents = visible_documents(&app.state);
-    if !document_strip_visible(documents.len()) {
+    if !document_strip_visible(app.state.workbench.workspace, documents.len()) {
         return;
     }
 
@@ -86,7 +86,10 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
 }
 
 pub(in crate::workbench) fn is_visible(app: &RSpiceApp) -> bool {
-    document_strip_visible(visible_documents(&app.state).len())
+    document_strip_visible(
+        app.state.workbench.workspace,
+        visible_documents(&app.state).len(),
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -433,8 +436,8 @@ fn reconcile_document_registry(state: &mut AppState) {
         .retain_documents(all_available);
 }
 
-fn document_strip_visible(document_count: usize) -> bool {
-    document_count > 1
+fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
+    document_count > 1 || (workspace == Workspace::Design && document_count == 1)
 }
 
 fn document_tabs(
@@ -961,10 +964,17 @@ mod tests {
     use crate::state::SimulationRun;
 
     #[test]
-    fn strip_is_visible_only_for_multiple_open_documents() {
-        assert!(!document_strip_visible(0));
-        assert!(!document_strip_visible(1));
-        assert!(document_strip_visible(2));
+    fn design_strip_retains_the_single_active_cell_view() {
+        assert!(!document_strip_visible(Workspace::Design, 0));
+        assert!(document_strip_visible(Workspace::Design, 1));
+        assert!(document_strip_visible(Workspace::Design, 2));
+    }
+
+    #[test]
+    fn non_design_strips_remain_reserved_for_multiple_open_documents() {
+        assert!(!document_strip_visible(Workspace::Project, 0));
+        assert!(!document_strip_visible(Workspace::Project, 1));
+        assert!(document_strip_visible(Workspace::Project, 2));
     }
 
     #[test]
