@@ -22,7 +22,7 @@
 //! lean for the wasm build).
 
 use crate::Value;
-use crate::analysis::LteEstimator;
+use crate::numerics::integration::LteEstimator;
 use crate::circuit::CircuitData;
 use crate::device::veriloga_generated::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
@@ -31,7 +31,7 @@ use crate::device::veriloga_generated::{
 use crate::engine::SimulationConfig;
 use crate::expr::{Expr, Function, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
-use crate::config::TransientLteReference;
+use crate::numerics::integration::TransientLteReference;
 use crate::netlist::{
     Element, ElementKind, Netlist, ParamContext, SourceSpec, SubcircuitDef,
     flatten_netlist_with_models,
@@ -2263,7 +2263,7 @@ mod tests {
         let mut estimator = LteEstimator::with_tolerances_and_reference(
             1.0e-3,
             1.0e-6,
-            crate::config::TransientLteReference::SignalGlobal,
+            crate::numerics::integration::TransientLteReference::SignalGlobal,
         );
         estimator.seed_reference_prefix(&restored.solution, restored.solution.len());
         restored

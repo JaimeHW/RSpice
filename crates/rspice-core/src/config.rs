@@ -6,16 +6,20 @@
 //! configuration struct requires the module that consumes it, so it sits
 //! below everything that reads it and those references are downward.
 //!
-//! `TransientLteReference` and `NonlinearContinuationMode` came from
-//! `netlist::ast` for the same reason: they are `.OPTIONS` selectors that
-//! configure a solve, not syntax the parser produces for its own use.
+//! `NonlinearContinuationMode` came from `netlist::ast` for the same reason:
+//! it is an `.OPTIONS` selector that configures a solve, not syntax the parser
+//! produces for its own use.
+//!
+//! A setting whose meaning belongs to one subsystem is named here but defined
+//! there — `IntegrationMethod` and `TransientLteReference` are the estimator's
+//! own vocabulary, so they live in `numerics::integration` and this module
+//! reaches down for them.
 //!
 //! Turning `.OPTIONS` text into one of these is a different job and stays in
 //! `engine::config_resolver`, where the rest of elaboration lives.
 
-
 use crate::Value;
-
+use crate::numerics::integration::TransientLteReference;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use thiserror::Error;
 
@@ -782,52 +786,6 @@ fn validate_locked_time_grid(grid: &[Value]) -> Result<(), SimulationConfigError
     Ok(())
 }
 
-/// Reference magnitude used to normalize transient local-truncation error.
-///
-/// Four policies correspond exactly to Xyce's `.OPTIONS TIMEINT NEWLTE`
-/// selectors; `PredictorLocal` preserves RSpice's non-Xyce adaptive default.
-/// Historical modes retain only accepted solution magnitudes, so a rejected
-/// candidate cannot relax future error weights.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TransientLteReference {
-    /// RSpice legacy policy: scale by the larger candidate/predictor magnitude.
-    #[default]
-    PredictorLocal,
-    /// Scale each state by its magnitude at the prior accepted point (`NEWLTE=0`).
-    PointLocal,
-    /// Scale every state by the prior accepted point's infinity norm (`NEWLTE=1`).
-    PointGlobal,
-    /// Scale every state by the largest magnitude seen over the transient (`NEWLTE=2`).
-    SignalGlobal,
-    /// Scale each state by its own largest magnitude seen over the transient (`NEWLTE=3`).
-    SignalLocal,
-}
-
-impl TransientLteReference {
-    /// Convert a Xyce `NEWLTE` selector to its reference policy.
-    pub fn from_xyce_selector(selector: u8) -> Option<Self> {
-        match selector {
-            0 => Some(Self::PointLocal),
-            1 => Some(Self::PointGlobal),
-            2 => Some(Self::SignalGlobal),
-            3 => Some(Self::SignalLocal),
-            _ => None,
-        }
-    }
-
-    /// Return the corresponding Xyce `NEWLTE` selector.
-    pub fn xyce_selector(self) -> Option<u8> {
-        match self {
-            Self::PredictorLocal => None,
-            Self::PointLocal => Some(0),
-            Self::PointGlobal => Some(1),
-            Self::SignalGlobal => Some(2),
-            Self::SignalLocal => Some(3),
-        }
-    }
-}
-
-/// Xyce nonlinear solve/continuation policy selected by
 /// `.OPTIONS NONLIN CONTINUATION=...`.
 ///
 /// The variants preserve the canonical Xyce selectors so configuration

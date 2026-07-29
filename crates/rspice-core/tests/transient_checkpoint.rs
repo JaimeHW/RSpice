@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use rspice_core::analysis::IntegrationMethod;
+use rspice_core::numerics::integration::IntegrationMethod;
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::engine::ConvergenceConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheckpoint};

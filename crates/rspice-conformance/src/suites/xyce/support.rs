@@ -3151,7 +3151,7 @@ impl XyceTestRunner {
     ) -> Engine {
         let mut config = self.xyce_engine_config(locked_time_grid);
         config.transient_initial_timestep = initial_timestep;
-        config.integration_method = rspice_core::analysis::IntegrationMethod::Trapezoidal;
+        config.integration_method = rspice_core::numerics::integration::IntegrationMethod::Trapezoidal;
         Engine::new(config)
     }
 
@@ -3164,14 +3164,14 @@ impl XyceTestRunner {
         let mut config = self.xyce_engine_config(locked_time_grid);
         config.locked_time_step_sizes = locked_time_step_sizes.map(Arc::new);
         config.transient_initial_timestep = initial_timestep;
-        config.integration_method = rspice_core::analysis::IntegrationMethod::Trapezoidal;
+        config.integration_method = rspice_core::numerics::integration::IntegrationMethod::Trapezoidal;
         Engine::new(config)
     }
 
     pub(super) fn create_xyce_static_tran_engine_with_integration_method(
         &self,
         locked_time_grid: Option<Vec<Value>>,
-        integration_method: rspice_core::analysis::IntegrationMethod,
+        integration_method: rspice_core::numerics::integration::IntegrationMethod,
         initial_timestep: Option<Value>,
     ) -> Engine {
         let mut config = self.xyce_engine_config(locked_time_grid);

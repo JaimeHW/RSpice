@@ -1595,7 +1595,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
     let convergence_preset = ConvergencePreset::from_mode_name(convergence_mode);
 
     let integration_method = args.integration_method.as_deref().map(|method| {
-        use rspice_core::analysis::IntegrationMethod;
+        use rspice_core::numerics::integration::IntegrationMethod;
         match method {
             "euler" => IntegrationMethod::BackwardEuler,
             "trap" => IntegrationMethod::Trapezoidal,

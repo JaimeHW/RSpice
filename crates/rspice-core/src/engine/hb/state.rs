@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::LteEstimator;
+use crate::numerics::integration::LteEstimator;
 use crate::analysis::harmonic_balance::{
     DC_SHORT_CONDUCTANCE, HbContinuationLimitation, HbReactiveKind, HbReactiveSpectrum,
 };
@@ -459,7 +459,7 @@ impl Engine {
             let _ = reactive_at(oldest)?;
             circuit.capacitors.i_prev[index] = latest_reactive.1;
             let coefficients =
-                crate::analysis::CompanionCoefficients::for_method(self.config.integration_method);
+                crate::numerics::integration::CompanionCoefficients::for_method(self.config.integration_method);
             circuit.capacitors.i_eq[index] = coefficients.capacitor_ieq(
                 circuit.capacitors.capacitances[index],
                 history_step,

@@ -1,6 +1,6 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
-use crate::config::TransientLteReference;
+use crate::numerics::integration::TransientLteReference;
 use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
 
 use super::*;

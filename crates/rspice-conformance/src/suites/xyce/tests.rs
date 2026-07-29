@@ -17471,7 +17471,7 @@ fn xyce_runner_engine_uses_xyce_device_dialect() {
     assert_eq!(engine.config().spice_dialect, SpiceDialect::Xyce);
     assert_eq!(
         engine.config().integration_method,
-        rspice_core::analysis::IntegrationMethod::TrapGear
+        rspice_core::numerics::integration::IntegrationMethod::TrapGear
     );
     assert_eq!(
         engine.config().resolved_jfet_level2_model(),

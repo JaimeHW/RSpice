@@ -40,7 +40,7 @@ impl TestRunner {
             // ngspice transient reference decks default to trapezoidal integration.
             // Fixing method here avoids TrapGear switching artifacts in waveform
             // comparisons while preserving production defaults elsewhere.
-            integration_method: rspice_core::analysis::IntegrationMethod::Trapezoidal,
+            integration_method: rspice_core::numerics::integration::IntegrationMethod::Trapezoidal,
             // ngspice regression references run at 27C -> 300.15 K by default.
             temperature: 300.15,
             // Sub-ps floor improves waveform alignment around steep HFET/MESA edges.

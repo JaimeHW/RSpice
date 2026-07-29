@@ -49,17 +49,12 @@ pub mod signal_integrity;
 pub mod stb;
 pub mod temperature;
 pub mod transfer;
-pub mod transient;
 
 pub use ac::{AcAnalysis, AcResult};
 pub use dc::{DcAnalysis, DcSweep};
 pub use laplace::{DiscreteFilter, TransferFunction};
 pub use temperature::{
     JunctionTempScaling, MosfetTempScaling, ResistorTempCoeffs, TemperatureContext,
-};
-pub use transient::{
-    BreakpointManager, BreakpointStepPolicy, CompanionCoefficients, IntegrationMethod,
-    LteEstimator, TimestepController, TrapGearController,
 };
 pub use corner::{
     CornerConfig, CornerPoint, CornerResult, CornerRunner, CornerSimResult, CornerSummary,

@@ -6,7 +6,8 @@
 //! - Controlled sources (VCVS, VCCS, CCVS, CCCS)
 //! - Advanced components (switches, transmission lines, coupled inductors)
 //! - Analysis commands (DC, AC, transient, parametric, noise)
-use crate::config::{NonlinearContinuationMode, TransientLteReference};
+use crate::config::NonlinearContinuationMode;
+use crate::numerics::integration::TransientLteReference;
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};

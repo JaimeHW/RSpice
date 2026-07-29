@@ -1,4 +1,4 @@
-use rspice_core::analysis::IntegrationMethod;
+use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 

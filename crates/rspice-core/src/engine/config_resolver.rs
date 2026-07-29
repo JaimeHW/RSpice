@@ -7,8 +7,8 @@
 
 use super::{ConvergenceConfig, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use crate::Value;
-use crate::analysis::IntegrationMethod;
-use crate::config::TransientLteReference;
+use crate::numerics::integration::IntegrationMethod;
+use crate::numerics::integration::TransientLteReference;
 use crate::netlist::SimulationOptions as NetlistSimulationOptions;
 
 /// Convergence preset selection used by frontends.
