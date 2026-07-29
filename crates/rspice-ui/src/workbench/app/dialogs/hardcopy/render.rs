@@ -1466,7 +1466,7 @@ fn length_field(ui: &mut Ui, label: &str, value: &mut String, unit: LengthUnit) 
 fn enum_combo<T: Copy + PartialEq>(
     ui: &mut Ui,
     label: &str,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     value: &mut T,
     options: &[(T, &'static str)],
 ) {

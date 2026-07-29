@@ -344,7 +344,7 @@ impl CalculatorPanel {
         let at = state
             .cursor
             .char_range()
-            .map(|range| range.primary.index.min(total_chars))
+            .map(|range| range.primary.index.0.min(total_chars))
             .unwrap_or(total_chars);
         let byte = char_to_byte(&self.expression, at);
         self.expression.insert_str(byte, text);

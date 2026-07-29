@@ -2221,7 +2221,7 @@ fn blocker_note(ui: &mut Ui, text: &str) {
 
 fn render_table(
     ui: &mut Ui,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     columns: &[(&str, f32)],
     rows: &[Vec<DisplayCell>],
     empty: &str,

@@ -63,8 +63,8 @@ fn synchronize_panel_size(
 ) {
     let id = Id::new(panel_id);
     let cached_size = PanelState::load(ctx, id).map(|state| match dimension {
-        PanelDimension::Width => state.rect.width(),
-        PanelDimension::Height => state.rect.height(),
+        PanelDimension::Width => state.outer_rect.width(),
+        PanelDimension::Height => state.outer_rect.height(),
     });
     if panel_cache_is_stale(cached_size, authoritative_size, retain_matching_cache) {
         ctx.data_mut(|data| data.remove::<PanelState>(id));
@@ -165,7 +165,9 @@ fn expose_splitter_accessibility(
     });
 }
 
-pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     let t = Tokens::get(ctx);
     let panel = Panel::left(NAVIGATOR_PANEL_ID)
         .frame(Frame::new().fill(t.color.bg_panel))
@@ -178,7 +180,7 @@ pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     } else {
         panel.exact_size(layout.navigator_width).resizable(false)
     };
-    let shown = panel.show(ctx, |ui| navigator::show(ui, app));
+    let shown = panel.show(root, |ui| navigator::show(ui, app));
     if layout.navigator_resizable && splitter_is_dragged(ctx, NAVIGATOR_PANEL_ID) {
         let actual = shown.response.rect.width();
         app.state.workbench.navigator_width = actual.clamp(220.0, 440.0);
@@ -217,7 +219,9 @@ pub fn show_navigator(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     });
 }
 
-pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     let t = Tokens::get(ctx);
     let panel = Panel::right(INSPECTOR_PANEL_ID)
         .frame(Frame::new().fill(t.color.bg_panel))
@@ -233,7 +237,7 @@ pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         // canvas and adjacent controls as selection content changes.
         panel.exact_size(layout.inspector_width).resizable(false)
     };
-    let shown = panel.show(ctx, |ui| inspector::show(ui, app));
+    let shown = panel.show(root, |ui| inspector::show(ui, app));
     if layout.inspector_resizable && splitter_is_dragged(ctx, INSPECTOR_PANEL_ID) {
         let actual = shown.response.rect.width();
         app.state.workbench.inspector_width = actual.clamp(278.0, 440.0);
@@ -274,7 +278,9 @@ pub fn show_inspector(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     });
 }
 
-pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_console(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     if !layout.show_console_strip {
         return;
     }
@@ -292,7 +298,7 @@ pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         // no previously dragged desktop height may leak into them.
         panel.exact_size(layout.console_height).resizable(false)
     };
-    let shown = panel.show(ctx, |ui| console::show(ui, app, layout));
+    let shown = panel.show(root, |ui| console::show(ui, app, layout));
     if layout.console_resizable && splitter_is_dragged(ctx, CONSOLE_PANEL_ID) {
         app.state.workbench.console_height = shown
             .response
@@ -328,7 +334,9 @@ pub fn show_console(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     });
 }
 
-pub fn show_drawers(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show_drawers(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     drawers::show(ctx, app, layout);
 }
 

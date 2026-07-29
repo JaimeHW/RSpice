@@ -58,7 +58,7 @@ pub struct CodeEditorDiagnostic {
 /// Show an exact-entry editor and return whether its UTF-8 bytes changed.
 pub fn show_code_editor(
     ui: &mut Ui,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     source: &mut String,
     language: CodeEditorLanguage,
     diagnostics: &[CodeEditorDiagnostic],

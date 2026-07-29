@@ -236,7 +236,7 @@ fn text_row(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     before: &SymbolDocument,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
     label: &str,
     value: &str,
     is_valid: impl Fn(&str) -> bool,

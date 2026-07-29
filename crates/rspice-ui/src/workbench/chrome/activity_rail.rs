@@ -1,6 +1,6 @@
 //! Desktop/tablet primary workspace rail.
 
-use egui::{Context, Frame, Panel, Sense, Vec2};
+use egui::{Frame, Panel, Sense, Ui, Vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -10,7 +10,6 @@ use super::super::commands::vocabulary::Command;
 use super::super::design_system::{ACTIVITY_RAIL_W, WorkbenchIcon};
 use super::super::state::Workspace;
 
-const ACTIVITY_TOP_PADDING: f32 = 5.0;
 const ACTIVITY_BUTTON_WIDTH: f32 = 50.0;
 const ACTIVITY_BUTTON_HEIGHT: f32 = 45.0;
 const ACTIVITY_ICON_SIZE: f32 = 19.0;
@@ -55,16 +54,17 @@ pub(super) fn paint_numeric_badge(
     );
 }
 
-pub fn show(ctx: &Context, app: &mut RSpiceApp) {
+pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     let t = Tokens::get(ctx);
     let shown = Panel::left("workbench.activity_rail")
         .exact_size(ACTIVITY_RAIL_W)
         .resizable(false)
         .frame(Frame::new().fill(t.color.bg_app))
         .show_separator_line(true)
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            ui.add_space(ACTIVITY_TOP_PADDING);
             if app.state.workbench.workspace == Workspace::Results {
                 app.state.ui.results_seen_version = app.state.simulation.data_version;
             }
@@ -201,7 +201,6 @@ mod tests {
     #[test]
     fn desktop_activity_rail_geometry_matches_the_mockup() {
         assert_eq!(ACTIVITY_RAIL_W, 51.0);
-        assert_eq!(ACTIVITY_TOP_PADDING, 5.0);
         assert_eq!(ACTIVITY_BUTTON_WIDTH, 50.0);
         assert_eq!(ACTIVITY_BUTTON_HEIGHT, 45.0);
         assert_eq!(ACTIVITY_ICON_SIZE, 19.0);

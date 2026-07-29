@@ -42,18 +42,27 @@ pub enum WorkbenchIcon {
     Inspector,
     Console,
     Select,
+    Instance,
     Wire,
     Bus,
+    BusTap,
+    Junction,
     Label,
+    NetLabel,
+    Pin,
+    SchematicProbe,
+    Text,
     Probe,
     Rotate,
     Mirror,
+    MirrorVertical,
     Undo,
     Redo,
     ZoomOut,
     ZoomIn,
     ZoomFit,
     Grid,
+    Visibility,
     Check,
     Focus,
     Run,
@@ -302,6 +311,13 @@ impl WorkbenchIcon {
                 line(&[(4.0, 14.0), (20.0, 14.0)]);
             }
             Self::Select => closed(&[(5.0, 3.0), (19.0, 11.0), (12.5, 12.5), (9.0, 19.0)]),
+            Self::Instance => {
+                closed(&[(7.0, 6.0), (17.0, 6.0), (17.0, 18.0), (7.0, 18.0)]);
+                line(&[(3.0, 9.0), (7.0, 9.0)]);
+                line(&[(3.0, 15.0), (7.0, 15.0)]);
+                line(&[(17.0, 9.0), (21.0, 9.0)]);
+                line(&[(17.0, 15.0), (21.0, 15.0)]);
+            }
             Self::Wire => {
                 line(&[(4.0, 18.0), (11.0, 18.0), (11.0, 6.0), (20.0, 6.0)]);
                 painter.circle_filled(p(4.0, 18.0), 1.5 * scale, color);
@@ -312,9 +328,52 @@ impl WorkbenchIcon {
                 line(&[(7.0, 21.0), (21.0, 7.0)]);
                 line(&[(3.0, 9.0), (15.0, 21.0)]);
             }
+            Self::BusTap => {
+                line(&[(4.0, 4.0), (4.0, 20.0)]);
+                line(&[(8.0, 4.0), (8.0, 20.0)]);
+                line(&[(8.0, 12.0), (13.0, 12.0), (19.0, 7.0)]);
+                painter.circle_stroke(p(19.0, 7.0), 1.8 * scale, stroke);
+            }
+            Self::Junction => {
+                line(&[(3.0, 12.0), (21.0, 12.0)]);
+                line(&[(12.0, 3.0), (12.0, 21.0)]);
+                painter.circle_filled(p(12.0, 12.0), 2.6 * scale, color);
+            }
             Self::Label => {
                 line(&[(5.0, 5.0), (19.0, 5.0)]);
                 line(&[(12.0, 5.0), (12.0, 20.0)]);
+            }
+            Self::NetLabel => {
+                closed(&[
+                    (4.0, 5.0),
+                    (14.0, 5.0),
+                    (20.0, 12.0),
+                    (14.0, 19.0),
+                    (4.0, 19.0),
+                ]);
+                painter.circle_stroke(p(8.0, 12.0), 1.0 * scale, stroke);
+            }
+            Self::Pin => {
+                closed(&[(9.0, 4.0), (15.0, 4.0), (15.0, 10.0), (9.0, 10.0)]);
+                line(&[(12.0, 10.0), (12.0, 20.0)]);
+                line(&[(8.0, 20.0), (16.0, 20.0)]);
+            }
+            Self::Text => {
+                line(&[(5.0, 5.0), (19.0, 5.0)]);
+                line(&[(12.0, 5.0), (12.0, 20.0)]);
+                line(&[(9.0, 20.0), (15.0, 20.0)]);
+            }
+            Self::SchematicProbe => {
+                line(&[(5.0, 20.0), (16.0, 9.0)]);
+                line(&[
+                    (16.0, 9.0),
+                    (19.0, 6.0),
+                    (18.0, 4.0),
+                    (16.0, 3.0),
+                    (13.0, 6.0),
+                ]);
+                line(&[(16.0, 9.0), (18.0, 11.0)]);
+                line(&[(4.0, 20.0), (9.0, 20.0)]);
             }
             Self::Probe => {
                 painter.circle_stroke(p(10.0, 10.0), 5.5 * scale, stroke);
@@ -325,6 +384,11 @@ impl WorkbenchIcon {
             // context menu can never drift apart.
             Self::Rotate => crate::ui::icons::Icon::Rotate.paint(painter, rect, color),
             Self::Mirror => crate::ui::icons::Icon::Mirror.paint(painter, rect, color),
+            Self::MirrorVertical => {
+                line(&[(3.0, 12.0), (21.0, 12.0)]);
+                closed(&[(8.0, 9.0), (12.0, 4.0), (16.0, 9.0)]);
+                closed(&[(8.0, 15.0), (16.0, 15.0), (12.0, 20.0)]);
+            }
             Self::Undo => {
                 line(&[(8.0, 5.0), (3.0, 10.0), (8.0, 15.0)]);
                 line(&[(3.0, 10.0), (14.0, 10.0), (19.0, 14.0), (19.0, 19.0)]);
@@ -353,6 +417,27 @@ impl WorkbenchIcon {
                         painter.circle_filled(p(x, y), 1.0 * scale, color);
                     }
                 }
+            }
+            Self::Visibility => {
+                let mut outline = (0..=12)
+                    .map(|step| {
+                        let t = step as f32 / 12.0;
+                        p(
+                            2.0 + 20.0 * t,
+                            12.0 - 6.5 * (std::f32::consts::PI * t).sin(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                outline.extend((0..=12).rev().map(|step| {
+                    let t = step as f32 / 12.0;
+                    p(
+                        2.0 + 20.0 * t,
+                        12.0 + 6.5 * (std::f32::consts::PI * t).sin(),
+                    )
+                }));
+                outline.push(outline[0]);
+                painter.add(Shape::line(outline, stroke));
+                painter.circle_stroke(p(12.0, 12.0), 2.8 * scale, stroke);
             }
             Self::Check | Self::Success => line(&[(5.0, 12.0), (10.0, 17.0), (20.0, 6.0)]),
             Self::Run => {
@@ -1209,7 +1294,7 @@ pub fn property_row_input_action(
 pub fn property_row_combo(
     ui: &mut Ui,
     label: &str,
-    id_source: impl Hash,
+    id_source: impl Hash + std::fmt::Debug,
     selected: &mut String,
     options: &[(String, String)],
     enabled: bool,
@@ -1287,13 +1372,15 @@ fn property_row_with_tone(
         ui.painter()
             .layout(label.to_owned(), label_font, t.color.text_dim, label_column);
     let status_prefix = if mark.is_some() { 17.0 } else { 0.0 };
-    let value_galley = ui.painter().layout(
-        value.to_owned(),
-        value_font,
-        value_tone,
-        (value_column - status_prefix).max(1.0),
-    );
-    let height = (label_galley.size().y.max(value_galley.size().y) + 12.0).max(PROPERTY_ROW_MIN_H);
+    let value_width = (value_column - status_prefix).max(1.0);
+    let display_value = elide_text(ui, value, &value_font, value_width);
+    let value_galley =
+        ui.painter()
+            .layout_no_wrap(display_value, value_font, value_tone);
+    // The mockup's read-only values are single-line, ellipsized cells. A long
+    // engineering value must never reflow the rows below it when selection
+    // changes; only an intentionally wrapping label may grow the row.
+    let height = (label_galley.size().y + 12.0).max(PROPERTY_ROW_MIN_H);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
@@ -1304,7 +1391,10 @@ fn property_row_with_tone(
         Pos2::new(rect.right() - PROPERTY_ROW_PAD, rect.bottom()),
     );
     ui.painter().with_clip_rect(label_rect).galley(
-        Pos2::new(label_rect.left(), label_rect.top() + 6.0),
+        Pos2::new(
+            label_rect.left(),
+            label_rect.center().y - label_galley.size().y * 0.5,
+        ),
         label_galley,
         t.color.text_dim,
     );
@@ -1320,10 +1410,17 @@ fn property_row_with_tone(
         );
     }
     ui.painter().with_clip_rect(value_rect).galley(
-        Pos2::new(value_rect.left() + status_prefix, value_rect.top() + 6.0),
+        Pos2::new(
+            value_rect.left() + status_prefix,
+            value_rect.center().y - value_galley.size().y * 0.5,
+        ),
         value_galley,
         value_tone,
     );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(full_label);
+        node.set_value(full_value);
+    });
     response.on_hover_text(format!("{full_label}: {full_value}"))
 }
 
@@ -1421,7 +1518,6 @@ pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
         );
     });
 }
-
 
 pub fn heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
     let t = Tokens::get(ui.ctx());
@@ -1700,6 +1796,7 @@ mod tests {
         let mut value = "R1".to_owned();
         let mut tunable_value = "1k".to_owned();
         let mut selected = "tt".to_owned();
+        let read_only_value = "vendor_analog/OPA189/precision_zero_drift";
         let options = vec![
             ("tt".to_owned(), "Typical".to_owned()),
             ("ff".to_owned(), "Fast".to_owned()),
@@ -1732,6 +1829,7 @@ mod tests {
                         &options,
                         true,
                     );
+                    property_row(ui, "Library cell", read_only_value);
                 });
             })
             .platform_output
@@ -1755,6 +1853,34 @@ mod tests {
                 .iter()
                 .any(|(_, node)| node.label() == Some("Model section"))
         );
+        assert!(nodes.iter().any(|(_, node)| {
+            node.label() == Some("Library cell") && node.value() == Some(read_only_value)
+        }));
+    }
+
+    #[test]
+    fn long_read_only_values_do_not_reflow_property_rows() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut short_height = 0.0;
+        let mut long_height = 0.0;
+
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(180.0);
+                short_height = property_row(ui, "View", "schematic").rect.height();
+                long_height = property_row(
+                    ui,
+                    "Library cell",
+                    "vendor_analog/OPA189/precision_zero_drift/amplifier_symbol",
+                )
+                .rect
+                .height();
+            });
+        });
+
+        assert_eq!(short_height, PROPERTY_ROW_MIN_H);
+        assert_eq!(long_height, short_height);
     }
 
     #[test]

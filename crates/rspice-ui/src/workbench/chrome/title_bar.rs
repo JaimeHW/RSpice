@@ -67,7 +67,9 @@ const WINDOW_LAYOUT_COMMANDS: [Command; 5] = [
 ];
 const BRAND_WORDMARK_WIDTH: f32 = 88.0;
 
-pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     let t = Tokens::get(ctx);
     let viewport_width = ctx.content_rect().width();
     let menu_projection = MenuProjection::for_layout(viewport_width, layout.compact_shell);
@@ -76,7 +78,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         .exact_size(layout.title_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             let rect = ui.max_rect();
             let account_initials = account_initials(app);
             // Keep both one-pixel rules fully inside the panel clip. A stroke
@@ -86,7 +88,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
             ui.painter().hline(
                 rect.x_range(),
                 separator_top,
-                egui::Stroke::new(1.0, t.color.border_strong),
+                egui::Stroke::new(1.0, t.color.border),
             );
             ui.painter().hline(
                 rect.x_range(),
@@ -1239,6 +1241,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
         Command::CycleGrid => WorkbenchIcon::Grid,
+        Command::GridSnapRouting => WorkbenchIcon::Sliders,
         Command::VisibilityOptions => WorkbenchIcon::Layers,
         Command::ToggleNavigator => WorkbenchIcon::Navigator,
         Command::ToggleInspector => WorkbenchIcon::Inspector,
@@ -1420,6 +1423,7 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ] {
         command_item(ui, app, command);
     }
+    command_item(ui, app, Command::GridSnapRouting);
     command_item(ui, app, Command::VisibilityOptions);
     menu_separator(ui);
     command_item_as(
@@ -1710,12 +1714,15 @@ fn paint_title_context(
     let t = Tokens::get(ui.ctx());
     let dirty = app.state.schematic.is_dirty || app.state.workspace.any_dirty();
     let cell = active_title_cell(app);
-    let full = if compact {
-        cell.clone()
-    } else {
-        app.state.workspace.project.display_name().to_owned()
-    };
-    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let full = title_context_text(app, compact);
+    let font = theme::sans(
+        tokens::FS_1,
+        if compact {
+            FontWeight::Regular
+        } else {
+            FontWeight::Medium
+        },
+    );
     let clip = bounds.shrink2(egui::vec2(5.0, 0.0));
     let painter = ui.painter().with_clip_rect(clip);
     let text_origin = if left_aligned {
@@ -1756,6 +1763,18 @@ fn paint_title_context(
             }
         ));
     });
+}
+
+fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
+    if compact {
+        active_title_cell(app)
+    } else {
+        // On desktop the active cell/view already appears in both the
+        // document tab and the local canvas breadcrumb. Keep the centered
+        // title scoped to project identity so the shell does not repeat the
+        // same context three times.
+        app.state.workspace.project.display_name().to_owned()
+    }
 }
 
 fn ellipsize_to_width(

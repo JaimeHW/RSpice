@@ -166,7 +166,7 @@ pub fn show(
     }
 
     let cursor = range.primary;
-    let Some((token_start, token, line_start)) = token_at(buffer, cursor.index) else {
+    let Some((token_start, token, line_start)) = token_at(buffer, cursor.index.0) else {
         state.completion_open = false;
         return None;
     };
@@ -186,7 +186,7 @@ pub fn show(
 
     if let Some(index) = take {
         let chosen = &candidates[index];
-        let end = cursor.index;
+        let end = cursor.index.0;
         let byte_start = char_to_byte(buffer, token_start);
         let byte_end = char_to_byte(buffer, end);
         let caret = token_start + chosen.insert.chars().count();

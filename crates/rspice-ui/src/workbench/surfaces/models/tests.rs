@@ -234,16 +234,19 @@ fn parent_scrolled_summary_uses_natural_height_instead_of_nesting_scrollbars() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut consumed = None;
+    // Narrow enough that the long paths below wrap past the nominal summary
+    // height. egui 0.35's root `Ui` carries no margin, so the same screen rect
+    // yields a wider content column than it did on 0.34.
     let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(620.0, 260.0),
+                    egui::vec2(430.0, 260.0),
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            |root| {
+                egui::CentralPanel::default().show(root, |ui| {
                     let long = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
                     let left = [
                         ("Resolved bindings", long.clone()),

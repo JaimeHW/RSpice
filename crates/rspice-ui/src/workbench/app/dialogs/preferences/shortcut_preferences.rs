@@ -2114,21 +2114,12 @@ mod tests {
         assert!(import.x0 < export.x0);
         assert_eq!(import.y0, export.y0);
         assert!(import.y1 - import.y0 >= 44.0);
-        let import_index = nodes
-            .iter()
-            .position(|(_, node)| {
-                node.role() == egui::accesskit::Role::Button
-                    && node.label() == Some("Import\u{2026}")
-            })
-            .unwrap();
-        let export_index = nodes
-            .iter()
-            .position(|(_, node)| {
-                node.role() == egui::accesskit::Role::Button
-                    && node.label() == Some("Export\u{2026}")
-            })
-            .unwrap();
-        assert!(import_index < export_index);
+        // Order is asserted spatially, above: Import sits left of Export on a
+        // shared row. This used to also compare their positions in the flat
+        // AccessKit update, but that vector is egui's emission order, not a
+        // reading order — egui 0.35 scatters the two buttons across it while
+        // rendering them in exactly the same place, and this harness's update
+        // carries no parent/child links to read a true reading order from.
     }
 
     #[test]

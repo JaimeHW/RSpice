@@ -58,7 +58,6 @@ fn main() {
     // Configure eframe options
     let options = eframe::NativeOptions {
         viewport,
-        vsync: true,
         // egui anti-aliases analytically (feathered tessellation); hardware
         // MSAA would quadruple fill bandwidth for no visible gain.
         multisampling: 1,
@@ -66,8 +65,9 @@ fn main() {
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             // One queued frame instead of wgpu's default two: a full frame
             // less input-to-photon latency while panning the canvas, with
-            // vsync still pacing presentation.
-            desired_maximum_frame_latency: Some(1),
+            // vsync (AutoVsync) still pacing presentation. egui-wgpu 0.35
+            // names this preset; it is the pair we set by hand before.
+            surface: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY,
             ..Default::default()
         },
         ..Default::default()

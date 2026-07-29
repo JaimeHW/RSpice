@@ -423,7 +423,7 @@ mod tests {
         job.sections
             .iter()
             .filter(|section| section.format.underline.width > 0.0)
-            .map(|section| section.byte_range.clone())
+            .map(|section| section.byte_range.start.0..section.byte_range.end.0)
             .collect()
     }
 

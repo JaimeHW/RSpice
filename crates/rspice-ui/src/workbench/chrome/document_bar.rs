@@ -2,7 +2,7 @@
 //! the shell never fabricates datasets, source files, or verification records.
 
 use egui::containers::menu::MenuButton;
-use egui::{Context, Frame, Layout, Panel, Sense, Vec2};
+use egui::{Context, Frame, Layout, Panel, Sense, Ui, Vec2};
 
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
@@ -22,7 +22,9 @@ const TAB_DIRTY_SIZE: f32 = 6.0;
 const TAB_ACTIVE_EDGE: f32 = 2.0;
 const OVERFLOW_WIDTH: f32 = 31.0;
 
-pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     reconcile_document_registry(&mut app.state);
     let documents = visible_documents(&app.state);
     if !document_strip_visible(app.state.workbench.workspace, documents.len()) {
@@ -34,7 +36,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         .exact_size(layout.document_bar_height)
         .frame(Frame::new().fill(t.color.bg_app))
         .show_separator_line(false)
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let rect = ui.max_rect();
             let overflow_width = if t.metrics.ctl_h >= 44.0 {

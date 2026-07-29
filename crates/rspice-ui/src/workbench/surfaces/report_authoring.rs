@@ -1207,7 +1207,7 @@ fn render_report_block(ui: &mut Ui, block: &crate::results::report_document::Rep
 
 fn virtualized_report_rows(
     ui: &mut Ui,
-    id: impl std::hash::Hash,
+    id: impl std::hash::Hash + std::fmt::Debug,
     row_count: usize,
     mut render_row: impl FnMut(&mut Ui, usize),
 ) {

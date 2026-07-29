@@ -1,6 +1,6 @@
 //! Compact application status with exact engineering context.
 
-use egui::{Align, Context, Frame, Layout, Panel, Sense, Vec2};
+use egui::{Align, Frame, Layout, Panel, Sense, Ui, Vec2};
 
 use crate::state::SchematicGridPitch;
 use crate::ui::theme::{self, FontWeight};
@@ -16,14 +16,16 @@ const STATUS_PADDING_X: f32 = 9.0;
 const STATUS_MARK_GAP: f32 = 5.0;
 const STATUS_FONT_SIZE: f32 = tokens::FS_1;
 
-pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     let t = Tokens::get(ctx);
     let visibility = status_visibility(ctx.content_rect().width());
     let shown = Panel::bottom("workbench.status_bar")
         .exact_size(layout.status_bar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(true)
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let bar_width = ui.available_width();
             let height = ui.available_height();

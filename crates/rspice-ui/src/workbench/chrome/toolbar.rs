@@ -2,28 +2,49 @@
 //! global run state remains visible at the trailing edge.
 
 use egui::containers::menu::MenuButton;
-use egui::{Align, Context, Frame, Layout, Panel, Vec2};
+use egui::{Align, Context, Frame, Layout, Panel, Ui, Vec2};
 
-use crate::state::{SchematicGridPitch, Tool, ViewType, WireRoutingMode};
+use crate::state::{Tool, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
 use super::super::RouteTransitionSource;
-use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
-use crate::workbench::lifecycle::session::SymbolTool;
 use super::super::state::{Drawer, Workspace};
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::lifecycle::session::SymbolTool;
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
-const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 5] = [
-    (Command::SelectTool, WorkbenchIcon::Select, "Select (Esc)"),
+const SELECT_TOOL_LABEL: &str = "Select (Esc)";
+const DESIGN_PLACEMENT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 9] = [
+    (
+        Command::PlaceInstance,
+        WorkbenchIcon::Instance,
+        "Place instance",
+    ),
     (Command::PlaceWire, WorkbenchIcon::Wire, "Draw wire"),
     (Command::PlaceBus, WorkbenchIcon::Bus, "Draw bus"),
-    (Command::PlaceLabel, WorkbenchIcon::Label, "Net label"),
-    (Command::PlaceProbe, WorkbenchIcon::Probe, "Probe signal"),
+    (Command::PlaceBusTap, WorkbenchIcon::BusTap, "Place bus tap"),
+    (
+        Command::PlaceJunction,
+        WorkbenchIcon::Junction,
+        "Place junction",
+    ),
+    (Command::PlaceLabel, WorkbenchIcon::NetLabel, "Net label"),
+    (Command::PlacePin, WorkbenchIcon::Pin, "Place pin or port"),
+    (
+        Command::PlaceProbe,
+        WorkbenchIcon::SchematicProbe,
+        "Probe signal",
+    ),
+    (
+        Command::PlaceText,
+        WorkbenchIcon::Text,
+        "Place text or note",
+    ),
 ];
 
 /// Authoring tools of the symbol document, in the order the editor's
@@ -73,7 +94,9 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 8] 
     ),
 ];
 
-pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     let t = Tokens::get(ctx);
     let viewport_width = ctx.content_rect().width();
     let padding = toolbar_horizontal_padding(viewport_width);
@@ -87,7 +110,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         .exact_size(layout.toolbar_height)
         .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             let rect = ui.max_rect();
             ui.painter().hline(
                 rect.x_range(),
@@ -332,6 +355,7 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         no_project_tools(ui, app, layout);
         return;
     }
+    global_document_tools(ui, app, layout);
     if app.state.workbench.current_route().surface_id()
         == super::super::SurfaceId::VisualizationStudio
     {
@@ -363,6 +387,27 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Workspace::Netlist => netlist_tools(ui, app, layout),
     }
     workspace_focus_tool(ui, app, layout);
+}
+
+/// Save is the one document command with the same meaning in every project
+/// workspace. Keep it at the leading edge so the actionable control and its
+/// dirty-state indication never move when the workspace changes.
+fn global_document_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let dirty = crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state);
+    toolbar_icon_command_selected_as(
+        ui,
+        app,
+        Command::Save,
+        WorkbenchIcon::Save,
+        dirty,
+        if dirty {
+            "Save; unsaved changes"
+        } else {
+            "Save; no unsaved changes"
+        },
+        layout,
+    );
+    context_separator(ui, layout);
 }
 
 /// The upgraded shell keeps focus mode at the end of every project toolbar,
@@ -415,13 +460,31 @@ fn project_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 }
 
 fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    for (command, icon, label) in DESIGN_DIRECT_TOOLBAR_COMMANDS {
+    toolbar_icon_command_selected_as(
+        ui,
+        app,
+        Command::SelectTool,
+        WorkbenchIcon::Select,
+        app.state.schematic.tool == Tool::Select,
+        SELECT_TOOL_LABEL,
+        layout,
+    );
+    context_separator(ui, layout);
+    for (command, icon, label) in DESIGN_PLACEMENT_TOOLBAR_COMMANDS {
         let selected = match command {
-            Command::SelectTool => app.state.schematic.tool == Tool::Select,
+            Command::PlaceInstance => {
+                matches!(app.state.schematic.tool, Tool::Place(kind) if kind != crate::state::ComponentType::Port)
+            }
             Command::PlaceWire => app.state.schematic.tool == Tool::Wire,
             Command::PlaceBus => app.state.schematic.tool == Tool::Bus,
+            Command::PlaceBusTap => app.state.schematic.tool == Tool::BusTap,
+            Command::PlaceJunction => app.state.schematic.tool == Tool::Junction,
             Command::PlaceLabel => app.state.schematic.tool == Tool::Label,
+            Command::PlacePin => {
+                app.state.schematic.tool == Tool::Place(crate::state::ComponentType::Port)
+            }
             Command::PlaceProbe => app.state.schematic.tool == Tool::Probe,
+            Command::PlaceText => app.state.schematic.tool == Tool::DesignNote,
             _ => false,
         };
         toolbar_icon_command_selected_as(ui, app, command, icon, selected, label, layout);
@@ -434,11 +497,22 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Rotate,
         layout,
     );
-    toolbar_icon_command(
+    toolbar_icon_command_selected_as(
         ui,
         app,
         Command::MirrorSelectionHorizontal,
         WorkbenchIcon::Mirror,
+        false,
+        "Mirror horizontal",
+        layout,
+    );
+    toolbar_icon_command_selected_as(
+        ui,
+        app,
+        Command::MirrorSelectionVertical,
+        WorkbenchIcon::MirrorVertical,
+        false,
+        "Mirror vertical",
         layout,
     );
     toolbar_icon_command_selected_as(
@@ -484,6 +558,15 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         layout,
     );
     design_grid_and_snap_menu(ui, app, layout);
+    toolbar_icon_command_selected_as(
+        ui,
+        app,
+        Command::VisibilityOptions,
+        WorkbenchIcon::Visibility,
+        false,
+        "Hierarchy and annotation visibility",
+        layout,
+    );
     toolbar_text_command(
         ui,
         app,
@@ -498,139 +581,56 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
     if !take_projected_tool_slot(ui, layout) {
         return;
     }
-    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
-    let height = layout.toolbar_control_height;
-    let response = ui.add(egui::Button::selectable(grid_visible, "").min_size(Vec2::splat(height)));
+    let grid_style = app.state.ui.grid;
+    let (button_size, grid_visible) = grid_toolbar_button_presentation(grid_style, layout);
+    let description = grid_display_description(grid_style);
+    let response = icon_button(
+        ui,
+        WorkbenchIcon::Grid,
+        description,
+        grid_visible,
+        button_size,
+    );
     if response.clicked() {
         Command::CycleGrid.execute(app);
     }
-    response.context_menu(|ui| design_grid_and_snap_configuration(ui, app));
-    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
-    let t = Tokens::get(ui.ctx());
-    WorkbenchIcon::Grid.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0)),
-        if grid_visible {
-            t.color.accent
-        } else {
-            t.color.text_dim
-        },
-    );
+    response.context_menu(|ui| {
+        let availability = Command::GridSnapRouting.availability(app);
+        let enabled = availability == CommandAvailability::Available;
+        let action = ui.add_enabled(
+            enabled,
+            egui::Button::new("Grid, snap and wire routing\u{2026}"),
+        );
+        let action = match availability {
+            CommandAvailability::Disabled(reason) => action.on_disabled_hover_text(reason),
+            CommandAvailability::Available | CommandAvailability::Hidden => action,
+        };
+        if action.clicked() {
+            Command::GridSnapRouting.execute(app);
+            ui.close();
+        }
+    });
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label("Grid and snap");
-        node.set_description(
-            "Activate to toggle canvas grid and snapping together. Open the context menu to configure display style, snap targets, spacing, and wire routing.",
-        );
+        node.set_label("Cycle grid display");
+        node.set_description(description);
     });
-    response.on_hover_text(
-        "Toggle grid and snap \u{00b7} right-click to configure display, targets, spacing, and routing",
-    );
 }
 
-fn design_grid_and_snap_configuration(ui: &mut egui::Ui, app: &mut RSpiceApp) {
-    ui.set_min_width(236.0);
-    toolbar_popover_heading(ui, "GRID DISPLAY");
-    for style in crate::state::GridStyle::ALL {
-        if toolbar_popover_option(ui, app.state.ui.grid == style, style.label()).clicked() {
-            app.state.ui.set_grid_style(style);
-        }
-    }
-
-    ui.separator();
-    toolbar_popover_heading(ui, "SNAP SPACING");
-    let current_pitch = app.state.schematic.document_policy.grid_pitch;
-    let read_only = app.state.schematic.read_only;
-    for (pitch, label) in [
-        (SchematicGridPitch::Mil50, "50 mil"),
-        (SchematicGridPitch::Mil25, "25 mil"),
-        (SchematicGridPitch::Metric, "Metric"),
-    ] {
-        let response = ui.add_enabled(
-            !read_only,
-            egui::Button::selectable(current_pitch == pitch, label)
-                .min_size(Vec2::new(ui.available_width(), 27.0)),
-        );
-        if response.clicked() && current_pitch != pitch {
-            let changed = app
-                .state
-                .schematic
-                .with_undo("change schematic grid pitch", |doc| {
-                    doc.document_policy.grid_pitch = pitch;
-                    doc.grid_size = pitch.canvas_grid_size();
-                    doc.is_dirty = true;
-                    doc.bump_topology_version();
-                });
-            if changed {
-                app.state.sync_active_schematic_to_workspace();
-            }
-        }
-    }
-    if read_only {
-        ui.weak("Snap spacing is locked for this read-only view.");
-    }
-
-    ui.separator();
-    toolbar_popover_heading(ui, "SNAP TARGETS");
-    let snap = &mut app.state.schematic.snap_engine;
-    ui.checkbox(&mut snap.enabled, "Enable snapping");
-    ui.add_enabled_ui(snap.enabled, |ui| {
-        ui.checkbox(&mut snap.snap_to_terminals, "Terminals");
-        ui.checkbox(&mut snap.snap_to_wire_endpoints, "Wire endpoints");
-        ui.checkbox(&mut snap.snap_to_wire_segments, "Wire segments");
-        ui.checkbox(&mut snap.snap_to_junctions, "Junctions");
-        ui.checkbox(&mut snap.snap_to_grid, "Grid intersections");
-    });
-    app.state.ui.schematic_snap = snap.clone();
-
-    ui.separator();
-    toolbar_popover_heading(ui, "WIRE ROUTING");
-    let current = app.state.schematic.wire_drawing.routing_mode;
-    for (mode, label, selected) in [
-        (
-            WireRoutingMode::HorizontalFirst,
-            "Orthogonal",
-            current.is_orthogonal(),
-        ),
-        (
-            WireRoutingMode::FortyFiveDegree,
-            "45\u{00b0}",
-            current == WireRoutingMode::FortyFiveDegree,
-        ),
-        (
-            WireRoutingMode::Diagonal,
-            "Free",
-            current == WireRoutingMode::Diagonal,
-        ),
-    ] {
-        if toolbar_popover_option(ui, selected, label).clicked() {
-            app.state.schematic.wire_drawing.set_routing_mode(mode);
-            app.state.schematic.bus_drawing.routing_mode = mode;
-            app.state.ui.schematic_routing_mode = mode;
-            app.state.ui.schematic_visibility.wire_routing = match mode {
-                WireRoutingMode::HorizontalFirst | WireRoutingMode::VerticalFirst => {
-                    crate::state::SchematicWireRoutingStyle::Orthogonal
-                }
-                WireRoutingMode::FortyFiveDegree => {
-                    crate::state::SchematicWireRoutingStyle::FortyFiveDegree
-                }
-                WireRoutingMode::Diagonal => crate::state::SchematicWireRoutingStyle::FreeAngle,
-            };
-        }
+fn grid_display_description(style: crate::state::GridStyle) -> &'static str {
+    match style {
+        crate::state::GridStyle::Dots => "Grid display: dots (G) \u{00b7} click for lines",
+        crate::state::GridStyle::Lines => "Grid display: lines (G) \u{00b7} click to hide",
+        crate::state::GridStyle::Off => "Grid display: off (G) \u{00b7} click to show dots",
     }
 }
 
-fn toolbar_popover_heading(ui: &mut egui::Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
-}
-
-fn toolbar_popover_option(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
-    ui.add(
-        egui::Button::selectable(selected, label).min_size(Vec2::new(ui.available_width(), 27.0)),
+fn grid_toolbar_button_presentation(
+    style: crate::state::GridStyle,
+    layout: LayoutSpec,
+) -> (Vec2, bool) {
+    (
+        toolbar_icon_button_size(layout),
+        style != crate::state::GridStyle::Off,
     )
 }
 
@@ -1726,34 +1726,53 @@ mod tests {
     }
 
     #[test]
-    fn desktop_design_toolbar_matches_the_mockup_and_omits_bus_tap() {
+    fn desktop_design_placement_toolbar_matches_the_mockup() {
         assert_eq!(
-            DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(command, _, _)| command),
+            DESIGN_PLACEMENT_TOOLBAR_COMMANDS.map(|(command, _, _)| command),
             [
-                Command::SelectTool,
+                Command::PlaceInstance,
                 Command::PlaceWire,
                 Command::PlaceBus,
+                Command::PlaceBusTap,
+                Command::PlaceJunction,
                 Command::PlaceLabel,
+                Command::PlacePin,
                 Command::PlaceProbe,
+                Command::PlaceText,
             ]
         );
-        assert!(
-            !DESIGN_DIRECT_TOOLBAR_COMMANDS
-                .iter()
-                .any(|(command, _, _)| *command == Command::PlaceBusTap)
+        assert_eq!(
+            DESIGN_PLACEMENT_TOOLBAR_COMMANDS.map(|(_, icon, _)| icon),
+            [
+                WorkbenchIcon::Instance,
+                WorkbenchIcon::Wire,
+                WorkbenchIcon::Bus,
+                WorkbenchIcon::BusTap,
+                WorkbenchIcon::Junction,
+                WorkbenchIcon::NetLabel,
+                WorkbenchIcon::Pin,
+                WorkbenchIcon::SchematicProbe,
+                WorkbenchIcon::Text,
+            ],
+            "schematic placement verbs must keep the distinct mockup glyphs"
         );
     }
 
     #[test]
     fn schematic_tooltips_use_the_upgraded_mockup_copy() {
+        assert_eq!(SELECT_TOOL_LABEL, "Select (Esc)");
         assert_eq!(
-            DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(_, _, label)| label),
+            DESIGN_PLACEMENT_TOOLBAR_COMMANDS.map(|(_, _, label)| label),
             [
-                "Select (Esc)",
+                "Place instance",
                 "Draw wire",
                 "Draw bus",
+                "Place bus tap",
+                "Place junction",
                 "Net label",
+                "Place pin or port",
                 "Probe signal",
+                "Place text or note",
             ]
         );
     }
@@ -1811,6 +1830,27 @@ mod tests {
         let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
         assert_eq!(toolbar_icon_button_size(phone), Vec2::splat(44.0));
         assert_eq!(panel_toggle_size(phone), Vec2::splat(44.0));
+    }
+
+    #[test]
+    fn grid_toolbar_uses_shared_geometry_and_marks_only_visible_styles_active() {
+        let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+        assert_eq!(
+            grid_toolbar_button_presentation(crate::state::GridStyle::Dots, desktop),
+            (Vec2::new(30.0, 29.0), true)
+        );
+        assert_eq!(
+            grid_toolbar_button_presentation(crate::state::GridStyle::Lines, desktop),
+            (Vec2::new(30.0, 29.0), true)
+        );
+        assert_eq!(
+            grid_toolbar_button_presentation(crate::state::GridStyle::Off, desktop),
+            (Vec2::new(30.0, 29.0), false)
+        );
+        assert_eq!(
+            grid_display_description(crate::state::GridStyle::Lines),
+            "Grid display: lines (G) \u{00b7} click to hide"
+        );
     }
 
     #[test]

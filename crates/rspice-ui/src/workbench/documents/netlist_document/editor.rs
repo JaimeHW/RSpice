@@ -171,7 +171,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 };
 
                 if let Some(range) = output.cursor_range {
-                    cursor_line = line_for_char_index(&buffer, range.primary.index);
+                    cursor_line = line_for_char_index(&buffer, range.primary.index.0);
                 }
                 changed = output.response.changed();
 

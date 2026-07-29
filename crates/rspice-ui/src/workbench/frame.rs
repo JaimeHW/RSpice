@@ -49,7 +49,13 @@ fn clear_full_screen_presentation(app: &mut RSpiceApp, request_platform_exit: bo
 }
 
 /// Render one complete workbench frame.
-pub fn show(ctx: &Context, app: &mut RSpiceApp) {
+///
+/// `root` is the frame `Ui` eframe hands to [`eframe::App::ui`]. Panels are
+/// allocated out of it in order: egui subtracts each panel's edge from the
+/// remaining rect, so call order is the layout.
+pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     reconcile_platform_full_screen(app);
     synchronize_activity_stream(ctx, app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
@@ -108,7 +114,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         exit_full_screen_presentation(app);
     }
     if app.state.workbench.full_screen_presentation {
-        show_full_screen_presentation(ctx, app, layout);
+        show_full_screen_presentation(root, app, layout);
         return;
     }
 
@@ -116,38 +122,38 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     // before the document strip and console so both rows remain confined to
     // the center stack exactly as in the mockup grid.
     if layout.show_status_bar {
-        chrome::status_bar::show(ctx, app, layout);
+        chrome::status_bar::show(root, app, layout);
     }
     if layout.show_phone_navigation {
-        chrome::phone_navigation::show(ctx, app, layout);
+        chrome::phone_navigation::show(root, app, layout);
     }
-    chrome::title_bar::show(ctx, app, layout);
-    chrome::toolbar::show(ctx, app, layout);
+    chrome::title_bar::show(root, app, layout);
+    chrome::toolbar::show(root, app, layout);
     // egui allocates same-edge side panels from the outside inward in call
     // order. Reserve the canonical 51 px activity rail first, then place the
     // navigator between that rail and the active document surface.
     if layout.show_activity_rail {
-        chrome::activity_rail::show(ctx, app);
+        chrome::activity_rail::show(root, app);
     }
     if layout.show_navigator_dock {
-        docks::show_navigator(ctx, app, layout);
+        docks::show_navigator(root, app, layout);
     }
     if layout.show_inspector_dock {
-        docks::show_inspector(ctx, app, layout);
+        docks::show_inspector(root, app, layout);
     }
-    chrome::document_bar::show(ctx, app, layout);
-    docks::show_console(ctx, app, layout);
+    chrome::document_bar::show(root, app, layout);
+    docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
     CentralPanel::default()
         .frame(Frame::new().fill(t.color.bg_app))
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             surfaces::show(ui, app);
         });
 
     if layout.has_overlay_drawer {
-        docks::show_drawers(ctx, app, layout);
+        docks::show_drawers(root, app, layout);
     }
 
     // The launcher is a canonical route even though its mockup composition is
@@ -184,26 +190,28 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     apply_platform_full_screen_request(ctx, app);
 }
 
-fn show_full_screen_presentation(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
+fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     let hide_context_panels = app.state.workbench.full_screen_hide_context_panels;
     if !hide_context_panels && layout.show_navigator_dock {
-        docks::show_navigator(ctx, app, layout);
+        docks::show_navigator(root, app, layout);
     }
     if !hide_context_panels && layout.show_inspector_dock {
-        docks::show_inspector(ctx, app, layout);
+        docks::show_inspector(root, app, layout);
     }
-    docks::show_console(ctx, app, layout);
+    docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
     CentralPanel::default()
         .frame(Frame::new().fill(t.color.bg_app))
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             surfaces::show(ui, app);
         });
 
     if !hide_context_panels && layout.has_overlay_drawer {
-        docks::show_drawers(ctx, app, layout);
+        docks::show_drawers(root, app, layout);
     }
 
     let mut exit_requested = false;
@@ -243,7 +251,9 @@ fn show_full_screen_presentation(ctx: &Context, app: &mut RSpiceApp, layout: Lay
 /// Application-global modal owners, notifications, exports, and toasts remain
 /// in the primary viewport. The window still receives the complete workbench
 /// chrome, dock composition, active document, and workspace surface.
-pub(crate) fn show_secondary(ctx: &Context, app: &mut RSpiceApp) {
+pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
+    let ctx = root.ctx().clone();
+    let ctx = &ctx;
     reconcile_platform_full_screen(app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
@@ -266,34 +276,34 @@ pub(crate) fn show_secondary(ctx: &Context, app: &mut RSpiceApp) {
     );
 
     if layout.show_status_bar {
-        chrome::status_bar::show(ctx, app, layout);
+        chrome::status_bar::show(root, app, layout);
     }
     if layout.show_phone_navigation {
-        chrome::phone_navigation::show(ctx, app, layout);
+        chrome::phone_navigation::show(root, app, layout);
     }
-    chrome::title_bar::show(ctx, app, layout);
-    chrome::toolbar::show(ctx, app, layout);
+    chrome::title_bar::show(root, app, layout);
+    chrome::toolbar::show(root, app, layout);
     if layout.show_activity_rail {
-        chrome::activity_rail::show(ctx, app);
+        chrome::activity_rail::show(root, app);
     }
     if layout.show_navigator_dock {
-        docks::show_navigator(ctx, app, layout);
+        docks::show_navigator(root, app, layout);
     }
     if layout.show_inspector_dock {
-        docks::show_inspector(ctx, app, layout);
+        docks::show_inspector(root, app, layout);
     }
-    chrome::document_bar::show(ctx, app, layout);
-    docks::show_console(ctx, app, layout);
+    chrome::document_bar::show(root, app, layout);
+    docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
     CentralPanel::default()
         .frame(Frame::new().fill(t.color.bg_app))
-        .show(ctx, |ui| {
+        .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             surfaces::show(ui, app);
         });
     if layout.has_overlay_drawer {
-        docks::show_drawers(ctx, app, layout);
+        docks::show_drawers(root, app, layout);
     }
     apply_platform_full_screen_request(ctx, app);
 }
