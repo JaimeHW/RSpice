@@ -75,6 +75,30 @@ pub struct PhaseTiming {
     pub elapsed_nanos: u64,
 }
 
+/// Cooperative control surface for long-running compiler pipelines.
+///
+/// Implementations must make [`Self::is_cancelled`] cheap and thread-safe.
+/// Phase callbacks execute on the compiler thread after a phase has completed;
+/// they should not block.
+pub trait PipelineControl: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+
+    fn phase_completed(&self, _timing: PhaseTiming, _metrics: &PipelineMetrics) {}
+}
+
+/// Control object for callers that do not need cancellation or progress.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoPipelineControl;
+
+impl PipelineControl for NoPipelineControl {
+    #[inline(always)]
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+}
+
+static NO_PIPELINE_CONTROL: NoPipelineControl = NoPipelineControl;
+
 impl PhaseTiming {
     pub fn elapsed(&self) -> Duration {
         Duration::from_nanos(self.elapsed_nanos)
@@ -205,19 +229,54 @@ impl fmt::Display for PerformanceBudgetExceeded {
 
 impl std::error::Error for PerformanceBudgetExceeded {}
 
-pub(crate) struct MetricsRecorder {
-    metrics: PipelineMetrics,
-    budget: PerformanceBudget,
+/// A pipeline stopped at a cooperative cancellation checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PipelineCancelled {
+    /// Phase that would have started at the checkpoint.
+    pub phase: PipelinePhase,
 }
 
-impl MetricsRecorder {
+impl fmt::Display for PipelineCancelled {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "pipeline cancelled before phase {}", self.phase)
+    }
+}
+
+impl std::error::Error for PipelineCancelled {}
+
+pub(crate) struct MetricsRecorder<'a> {
+    metrics: PipelineMetrics,
+    budget: PerformanceBudget,
+    control: &'a dyn PipelineControl,
+}
+
+impl MetricsRecorder<'static> {
     pub(crate) fn new(input_bytes: usize, budget: PerformanceBudget) -> Self {
+        Self::with_control(input_bytes, budget, &NO_PIPELINE_CONTROL)
+    }
+}
+
+impl<'a> MetricsRecorder<'a> {
+    pub(crate) fn with_control(
+        input_bytes: usize,
+        budget: PerformanceBudget,
+        control: &'a dyn PipelineControl,
+    ) -> Self {
         Self {
             metrics: PipelineMetrics {
                 input_bytes: usize_to_u64(input_bytes),
                 ..PipelineMetrics::default()
             },
             budget,
+            control,
+        }
+    }
+
+    pub(crate) fn checkpoint(&self, phase: PipelinePhase) -> Result<(), PipelineCancelled> {
+        if self.control.is_cancelled() {
+            Err(PipelineCancelled { phase })
+        } else {
+            Ok(())
         }
     }
 
@@ -227,14 +286,16 @@ impl MetricsRecorder {
         elapsed: Duration,
     ) -> Result<(), PerformanceBudgetExceeded> {
         let elapsed_nanos = duration_nanos(elapsed);
-        self.metrics.phases.push(PhaseTiming {
+        let timing = PhaseTiming {
             phase,
             elapsed_nanos,
-        });
+        };
+        self.metrics.phases.push(timing);
         self.metrics.total_elapsed_nanos = self
             .metrics
             .total_elapsed_nanos
             .saturating_add(elapsed_nanos);
+        self.control.phase_completed(timing, &self.metrics);
         self.budget.validate(&self.metrics)
     }
 
@@ -244,6 +305,10 @@ impl MetricsRecorder {
 
     pub(crate) fn metrics_mut(&mut self) -> &mut PipelineMetrics {
         &mut self.metrics
+    }
+
+    pub(crate) fn control(&self) -> &'a dyn PipelineControl {
+        self.control
     }
 
     pub(crate) fn finish(self) -> PipelineMetrics {

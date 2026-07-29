@@ -60,6 +60,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::metrics::{NoPipelineControl, PipelineCancelled, PipelineControl, PipelinePhase};
+
 use super::cfg::{
     CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp,
     CfgValidationError, CfgValue, CfgValueKind, CfgValueType,
@@ -156,6 +158,16 @@ impl AdFunction {
 /// depends on values computed from itself: the first visit of a header sees
 /// only the entry edge.
 pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<usize>> {
+    lane_liveness_with_control(function, lanes, &NoPipelineControl)
+        .expect("the no-op pipeline control cannot cancel")
+}
+
+fn lane_liveness_with_control(
+    function: &CfgFunction,
+    lanes: &[AdSeed],
+    control: &dyn PipelineControl,
+) -> Result<Vec<HashSet<usize>>, PipelineCancelled> {
+    check_cancelled(control)?;
     let seeds = seed_lanes(function, lanes);
     let mut live: Vec<HashSet<usize>> = vec![HashSet::new(); function.values.len()];
     for (value, lane) in &seeds {
@@ -167,7 +179,10 @@ pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<us
     // iterate, not about the model's dependence on the solution.
     let correction = correction_lane(lanes);
     if let Some(correction) = correction {
-        for value in &function.values {
+        for (index, value) in function.values.iter().enumerate() {
+            if index.is_multiple_of(1024) {
+                check_cancelled(control)?;
+            }
             if matches!(value.kind, CfgValueKind::Limit { .. }) {
                 live[usize::from(value.id)].insert(correction);
             }
@@ -176,10 +191,14 @@ pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<us
 
     // Which edge arguments feed which block parameter, computed once.
     let incoming = incoming_arguments(function);
+    check_cancelled(control)?;
 
     loop {
         let mut changed = false;
-        for value in &function.values {
+        for (ordinal, value) in function.values.iter().enumerate() {
+            if ordinal.is_multiple_of(1024) {
+                check_cancelled(control)?;
+            }
             let index = usize::from(value.id);
             let incoming_lanes: HashSet<usize> = match &value.kind {
                 CfgValueKind::BlockParameter => match incoming.get(&value.id) {
@@ -209,8 +228,9 @@ pub fn lane_liveness(function: &CfgFunction, lanes: &[AdSeed]) -> Vec<HashSet<us
             }
         }
         if !changed {
-            return live;
+            return Ok(live);
         }
+        check_cancelled(control)?;
     }
 }
 
@@ -318,10 +338,35 @@ pub fn differentiate(
     function: &CfgFunction,
     lanes: &[AdSeed],
 ) -> Result<AdFunction, CfgValidationError> {
-    let live = lane_liveness(function, lanes);
-    let mut builder = AdBuilder::new(function, lanes, &live);
-    builder.add_block_parameters();
-    builder.rewrite_blocks();
+    match differentiate_with_control(function, lanes, &NoPipelineControl) {
+        Ok(function) => Ok(function),
+        Err(DifferentiationError::Validation(error)) => Err(error),
+        Err(DifferentiationError::Cancelled(_)) => {
+            unreachable!("the no-op pipeline control cannot cancel")
+        }
+    }
+}
+
+pub(crate) enum DifferentiationError {
+    Validation(CfgValidationError),
+    Cancelled(PipelineCancelled),
+}
+
+pub(crate) fn differentiate_with_control(
+    function: &CfgFunction,
+    lanes: &[AdSeed],
+    control: &dyn PipelineControl,
+) -> Result<AdFunction, DifferentiationError> {
+    let live = lane_liveness_with_control(function, lanes, control)
+        .map_err(DifferentiationError::Cancelled)?;
+    let mut builder =
+        AdBuilder::new(function, lanes, &live, control).map_err(DifferentiationError::Cancelled)?;
+    builder
+        .add_block_parameters(control)
+        .map_err(DifferentiationError::Cancelled)?;
+    builder
+        .rewrite_blocks(control)
+        .map_err(DifferentiationError::Cancelled)?;
 
     let differentiated = CfgFunction {
         entry: function.entry,
@@ -329,7 +374,10 @@ pub fn differentiate(
         values: builder.values,
         shapes: builder.shapes,
     };
-    differentiated.validate()?;
+    check_cancelled(control).map_err(DifferentiationError::Cancelled)?;
+    differentiated
+        .validate()
+        .map_err(DifferentiationError::Validation)?;
     let return_block = differentiated
         .blocks
         .iter()
@@ -343,6 +391,16 @@ pub fn differentiate(
         extracted: HashMap::new(),
         return_block,
     })
+}
+
+fn check_cancelled(control: &dyn PipelineControl) -> Result<(), PipelineCancelled> {
+    if control.is_cancelled() {
+        Err(PipelineCancelled {
+            phase: PipelinePhase::Differentiation,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 struct AdBuilder<'a> {
@@ -379,7 +437,12 @@ struct AdBuilder<'a> {
 }
 
 impl<'a> AdBuilder<'a> {
-    fn new(source: &'a CfgFunction, lanes: &[AdSeed], live: &[HashSet<usize>]) -> Self {
+    fn new(
+        source: &'a CfgFunction,
+        lanes: &[AdSeed],
+        live: &[HashSet<usize>],
+        control: &dyn PipelineControl,
+    ) -> Result<Self, PipelineCancelled> {
         let mut values = source.values.clone();
         let one = ValueId::from(values.len());
         values.push(CfgValue {
@@ -409,6 +472,9 @@ impl<'a> AdBuilder<'a> {
         };
 
         for (index, set) in live.iter().enumerate() {
+            if index.is_multiple_of(1024) {
+                check_cancelled(control)?;
+            }
             if set.is_empty() {
                 continue;
             }
@@ -423,13 +489,16 @@ impl<'a> AdBuilder<'a> {
         // The seeds. A node potential's derivative is one in its own lane, and
         // liveness gives it exactly that lane, so the packed form is a one-wide
         // value holding 1.0.
-        for (value, _) in seed_lanes(source, lanes) {
+        for (ordinal, (value, _)) in seed_lanes(source, lanes).into_iter().enumerate() {
+            if ordinal.is_multiple_of(1024) {
+                check_cancelled(control)?;
+            }
             let shape = builder.target[usize::from(value)].expect("a seed carries its own lane");
             let seed = builder.splat(1.0, shape);
             builder.derivatives[usize::from(value)] = Some(seed);
         }
 
-        builder
+        Ok(builder)
     }
 
     // ---- shapes and constants ---------------------------------------------
@@ -537,8 +606,14 @@ impl<'a> AdBuilder<'a> {
     /// Give every block one derivative parameter per merged value that carries
     /// lanes, so an edge knows how many arguments it owes before any terminator
     /// is rewritten.
-    fn add_block_parameters(&mut self) {
-        for block in &self.source.blocks.clone() {
+    fn add_block_parameters(
+        &mut self,
+        control: &dyn PipelineControl,
+    ) -> Result<(), PipelineCancelled> {
+        for (ordinal, block) in self.source.blocks.clone().iter().enumerate() {
+            if ordinal.is_multiple_of(64) {
+                check_cancelled(control)?;
+            }
             let mut added = Vec::new();
             for (position, param) in block.params.iter().enumerate() {
                 let Some(shape) = self.target[usize::from(*param)] else {
@@ -554,15 +629,27 @@ impl<'a> AdBuilder<'a> {
             }
             self.added_params.insert(block.id, added);
         }
+        Ok(())
     }
 
-    fn rewrite_blocks(&mut self) {
+    fn rewrite_blocks(&mut self, control: &dyn PipelineControl) -> Result<(), PipelineCancelled> {
         // Reverse postorder, so every operand's derivative exists before a rule
         // names it. Values crossing a back edge do not need the ordering: they
         // arrive as block parameters, which were allocated up front.
         for block in reverse_postorder(self.source) {
+            check_cancelled(control)?;
             self.emitted = Vec::with_capacity(self.source.block(block).instructions.len());
-            for instruction in &self.source.block(block).instructions.clone() {
+            for (ordinal, instruction) in self
+                .source
+                .block(block)
+                .instructions
+                .clone()
+                .iter()
+                .enumerate()
+            {
+                if ordinal.is_multiple_of(1024) {
+                    check_cancelled(control)?;
+                }
                 let result = instruction.result;
                 // Read-outs have to land before the instruction that reads them.
                 if let CfgValueKind::Ddx {
@@ -581,6 +668,7 @@ impl<'a> AdBuilder<'a> {
             self.blocks[usize::from(block)].instructions = std::mem::take(&mut self.emitted);
             self.blocks[usize::from(block)].terminator = terminator;
         }
+        Ok(())
     }
 
     /// Turn a `ddx` into the lane it names.

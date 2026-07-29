@@ -13,10 +13,13 @@
 //! drifts, this fails at the call site with the same message the real build
 //! would give.
 
-use rspice_veriloga::rust_backend::{RustTranspileOptions, RustTranspiler, canonical};
-use rspice_veriloga::{PipelinePhase, VerilogACompiler};
+use rspice_veriloga::rust_backend::{
+    RustBackendErrorKind, RustTranspileOptions, RustTranspiler, canonical,
+};
+use rspice_veriloga::{PipelineControl, PipelinePhase, VerilogACompiler};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
 fn a_generated_device_compiles_against_the_runtime_contract() {
@@ -370,6 +373,57 @@ fn transpiler_reports_hot_phases_and_exact_output_size() {
         .sum::<u64>();
     assert_eq!(generated.metrics.generated_rust_bytes, bytes);
     assert_eq!(generated.metrics.generated_rust_lines, lines);
+}
+
+struct ImmediatePipelineCancellation;
+
+impl PipelineControl for ImmediatePipelineCancellation {
+    fn is_cancelled(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn transpiler_honors_cancellation_before_cfg_lowering() {
+    let (name, source) = fixtures()[0];
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap_or_else(|error| panic!("{name}: front end: {error}"));
+    let error = RustTranspiler::new(options())
+        .transpile_measured_with_control(&artifact, &ImmediatePipelineCancellation)
+        .expect_err("immediate cancellation must prevent CFG lowering");
+
+    assert_eq!(error.kind, RustBackendErrorKind::Cancelled);
+    assert!(error.message.contains("cfg_lowering"), "{error}");
+}
+
+struct CancelOnPoll {
+    polls: AtomicUsize,
+    cancel_at: usize,
+}
+
+impl PipelineControl for CancelOnPoll {
+    fn is_cancelled(&self) -> bool {
+        self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.cancel_at
+    }
+}
+
+#[test]
+fn transpiler_polls_for_cancellation_inside_differentiation() {
+    let (name, source) = fixtures()[0];
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap_or_else(|error| panic!("{name}: front end: {error}"));
+    let control = CancelOnPoll {
+        polls: AtomicUsize::new(0),
+        cancel_at: 6,
+    };
+    let error = RustTranspiler::new(options())
+        .transpile_measured_with_control(&artifact, &control)
+        .expect_err("cancellation poll inside differentiation must stop lowering");
+
+    assert_eq!(error.kind, RustBackendErrorKind::Cancelled);
+    assert!(error.message.contains("differentiation"), "{error}");
 }
 
 fn find<'a>(files: &[(&'a str, &'a str)], name: &str, model: &str) -> &'a str {

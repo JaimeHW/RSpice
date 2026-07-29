@@ -640,6 +640,12 @@ fn collect_compile_diagnostics(
             error.to_string(),
             None,
         )),
+        CompileError::Cancelled(_) => diagnostics.push(diagnostic(
+            source,
+            CompileDiagnosticPhase::Input,
+            error.to_string(),
+            None,
+        )),
         CompileError::ModuleSelection(_) => diagnostics.push(diagnostic(
             source,
             CompileDiagnosticPhase::ModuleSelection,

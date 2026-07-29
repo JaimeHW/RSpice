@@ -10,6 +10,7 @@ use std::fmt;
 pub enum RustBackendErrorKind {
     Unsupported,
     PerformanceBudget,
+    Cancelled,
     Internal,
 }
 
@@ -58,6 +59,19 @@ impl RustBackendError {
     ) -> Self {
         Self {
             kind: RustBackendErrorKind::PerformanceBudget,
+            source: source.into(),
+            module: module.into(),
+            message: error.to_string(),
+        }
+    }
+
+    pub fn cancelled(
+        source: impl Into<String>,
+        module: impl Into<String>,
+        error: crate::metrics::PipelineCancelled,
+    ) -> Self {
+        Self {
+            kind: RustBackendErrorKind::Cancelled,
             source: source.into(),
             module: module.into(),
             message: error.to_string(),

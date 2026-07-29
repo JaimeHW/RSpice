@@ -1,9 +1,11 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rspice_veriloga::{
-    CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions, PipelinePhase,
-    RuntimeArtifactIntegrityError, RuntimeQualificationOptions, RuntimeTarget,
-    RuntimeTargetMaturity, RuntimeTargetReadiness, VerilogACompiler, compile_diagnostics,
+    CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions, PhaseTiming,
+    PipelineControl, PipelineMetrics, PipelinePhase, RuntimeArtifactIntegrityError,
+    RuntimeQualificationOptions, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetReadiness,
+    VerilogACompiler, compile_diagnostics,
 };
 
 const SENSOR_BRIDGE_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
@@ -167,6 +169,43 @@ fn runtime_compile_reports_ordered_frontend_phase_metrics() {
             .map(|timing| timing.elapsed_nanos)
             .sum::<u64>()
     );
+}
+
+struct CancelAfterSemantic {
+    cancelled: AtomicBool,
+}
+
+impl PipelineControl for CancelAfterSemantic {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
+    fn phase_completed(&self, timing: PhaseTiming, _metrics: &PipelineMetrics) {
+        if timing.phase == PipelinePhase::Semantic {
+            self.cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+#[test]
+fn runtime_compile_honors_phase_observer_cancellation() {
+    let control = CancelAfterSemantic {
+        cancelled: AtomicBool::new(false),
+    };
+    let error = compiler()
+        .compile_runtime_with_qualifications_and_control(
+            SENSOR_BRIDGE_SOURCE,
+            Some("sensor_bridge"),
+            RuntimeQualificationOptions::NONE,
+            &control,
+        )
+        .expect_err("observer cancellation must stop before bytecode generation");
+
+    assert!(matches!(
+        error,
+        CompileError::Cancelled(cancelled)
+            if cancelled.phase == PipelinePhase::BytecodeGeneration
+    ));
 }
 
 #[test]

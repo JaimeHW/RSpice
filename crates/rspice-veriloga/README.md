@@ -105,6 +105,11 @@ operational evidence and never participate in artifact or cache identities.
 `CompilerOptions::performance_budget` and
 `RustTranspileOptions::performance_budget` can enforce opt-in total or
 per-phase limits; empty budgets are the default.
+The `*_with_control` measured entry points accept a `PipelineControl` for
+cooperative cancellation and progress callbacks. Cancellation is polled at
+phase boundaries and inside the packed-AD and CFG-optimization hot loops, so
+stopping a large compact-model generation does not wait for the entire
+transpile to finish.
 
 Two environment variables also provide diagnostic-only output:
 `RSPICE_DEBUG_PP=1` writes the preprocessed source beside the input file

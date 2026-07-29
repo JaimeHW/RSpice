@@ -64,7 +64,10 @@ pub use names::{RustDeviceNames, sanitize_identifier};
 pub use registry::resolve_generated_registry_model_names;
 
 use crate::canonical_ir::CanonicalIrArtifact;
-use crate::metrics::{Measured, MetricsRecorder, PerformanceBudget, PipelinePhase, usize_to_u64};
+use crate::metrics::{
+    Measured, MetricsRecorder, NoPipelineControl, PerformanceBudget, PipelineControl,
+    PipelinePhase, usize_to_u64,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedRustFile {
@@ -120,9 +123,28 @@ impl RustTranspiler {
         &self,
         artifact: &CanonicalIrArtifact,
     ) -> Result<Measured<GeneratedRustDevice>, RustBackendError> {
-        let mut measurements = MetricsRecorder::new(0, self.options.performance_budget.clone());
+        self.transpile_measured_with_control(artifact, &NoPipelineControl)
+    }
+
+    /// Cancellable, progress-observable form of [`Self::transpile_measured`].
+    pub fn transpile_measured_with_control(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        control: &dyn PipelineControl,
+    ) -> Result<Measured<GeneratedRustDevice>, RustBackendError> {
+        let mut measurements =
+            MetricsRecorder::with_control(0, self.options.performance_budget.clone(), control);
         let mut device =
             canonical::generate_device_measured(artifact, &self.options, &mut measurements)?;
+        measurements
+            .checkpoint(PipelinePhase::CheckpointFinalization)
+            .map_err(|error| {
+                RustBackendError::cancelled(
+                    artifact.metadata.source_package.as_str(),
+                    artifact.mir.module_name.as_str(),
+                    error,
+                )
+            })?;
         let phase_started = web_time::Instant::now();
         state_file::finalize_checkpoint_identity(&mut device)?;
         measurements

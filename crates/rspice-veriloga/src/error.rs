@@ -45,6 +45,10 @@ pub enum CompileError {
     #[error(transparent)]
     PerformanceBudget(#[from] crate::metrics::PerformanceBudgetExceeded),
 
+    /// Compilation was stopped at a cooperative cancellation checkpoint.
+    #[error(transparent)]
+    Cancelled(#[from] crate::metrics::PipelineCancelled),
+
     /// Multiple errors collected during compilation
     #[error("Compilation failed with {} error(s)", .0.len())]
     Multiple(Vec<CompileError>),

@@ -57,15 +57,16 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control};
 use crate::canonical_ir::cfg::{
     CfgBinaryOp, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp, CfgValue, CfgValueKind,
     CfgValueType,
 };
 use crate::canonical_ir::cfg_lower::CfgModel;
+use crate::canonical_ir::cfg_opt::optimize_with_control;
 use crate::canonical_ir::schedule::{InvalidationClass, Stage, schedule, split, worth_splitting};
 use crate::canonical_ir::{
-    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, differentiate,
-    optimize_cfg,
+    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
 };
 use crate::metrics::{MetricsRecorder, PipelinePhase};
 
@@ -97,6 +98,7 @@ pub(crate) fn generate_device_measured(
     );
     let parameter_fields = parameter_field_names(artifact);
 
+    checkpoint_phase(artifact, measurements, PipelinePhase::StampEmission)?;
     let phase_started = web_time::Instant::now();
     let stamp = plan.stamp_file(artifact, options)?;
     record_phase(
@@ -105,6 +107,7 @@ pub(crate) fn generate_device_measured(
         PipelinePhase::StampEmission,
         phase_started.elapsed(),
     )?;
+    checkpoint_phase(artifact, measurements, PipelinePhase::StateEmission)?;
     let phase_started = web_time::Instant::now();
     let state = state_file::generate_state_file_with_extensions(
         artifact,
@@ -121,6 +124,7 @@ pub(crate) fn generate_device_measured(
         PipelinePhase::StateEmission,
         phase_started.elapsed(),
     )?;
+    checkpoint_phase(artifact, measurements, PipelinePhase::NoiseEmission)?;
     let phase_started = web_time::Instant::now();
     let noise = plan.noise_file(artifact, options)?;
     record_phase(
@@ -163,6 +167,20 @@ fn record_phase(
 ) -> Result<(), RustBackendError> {
     measurements.record(phase, elapsed).map_err(|error| {
         RustBackendError::performance_budget(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            error,
+        )
+    })
+}
+
+fn checkpoint_phase(
+    artifact: &CanonicalIrArtifact,
+    measurements: &MetricsRecorder<'_>,
+    phase: PipelinePhase,
+) -> Result<(), RustBackendError> {
+    measurements.checkpoint(phase).map_err(|error| {
+        RustBackendError::cancelled(
             artifact.metadata.source_package.as_str(),
             artifact.mir.module_name.as_str(),
             error,
@@ -266,6 +284,7 @@ impl ModelPlan {
         artifact: &CanonicalIrArtifact,
         measurements: &mut MetricsRecorder,
     ) -> Result<Self, RustBackendError> {
+        checkpoint_phase(artifact, measurements, PipelinePhase::CfgLowering)?;
         let phase_started = web_time::Instant::now();
         let mut cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
             let mut reasons: Vec<String> = diagnostics
@@ -288,6 +307,7 @@ impl ModelPlan {
             phase_started.elapsed(),
         )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::DerivativePreparation)?;
         let phase_started = web_time::Instant::now();
         // In value order, which is the lowering's order, so the numbering is a
         // property of the model rather than of a hash map's iteration.
@@ -355,9 +375,22 @@ impl ModelPlan {
             phase_started.elapsed(),
         )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::Differentiation)?;
         let phase_started = web_time::Instant::now();
-        let mut differentiated = differentiate(&cfg.function, &seeds)
-            .map_err(|error| unsupported(artifact, format!("differentiation: {error}")))?;
+        let mut differentiated =
+            match differentiate_with_control(&cfg.function, &seeds, measurements.control()) {
+                Ok(function) => function,
+                Err(DifferentiationError::Validation(error)) => {
+                    return Err(unsupported(artifact, format!("differentiation: {error}")));
+                }
+                Err(DifferentiationError::Cancelled(error)) => {
+                    return Err(RustBackendError::cancelled(
+                        artifact.metadata.source_package.as_str(),
+                        artifact.mir.module_name.as_str(),
+                        error,
+                    ));
+                }
+            };
         record_phase(
             artifact,
             measurements,
@@ -365,6 +398,7 @@ impl ModelPlan {
             phase_started.elapsed(),
         )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::DerivativeExtraction)?;
         let phase_started = web_time::Instant::now();
         // Every read-out first, and both bodies' worth of them: taking a lane
         // appends an instruction, so a row taken after a simplification would
@@ -387,6 +421,7 @@ impl ModelPlan {
             phase_started.elapsed(),
         )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::NoisePlanning)?;
         let phase_started = web_time::Instant::now();
         // Every read-out is taken, so the function has stopped growing and the
         // noise slice can be cut from it.
@@ -418,6 +453,7 @@ impl ModelPlan {
             .map(|(charge, residual)| charge.unwrap_or(*residual))
             .collect();
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::StampPlanning)?;
         let phase_started = web_time::Instant::now();
         let mut conduction = plan_stamps(artifact, &residuals, &conduction_rows, correction_lane);
         // The reactive matrix stamps no residual, so a charge's correction lane
@@ -442,13 +478,22 @@ impl ModelPlan {
             phase_started.elapsed(),
         )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::CfgOptimization)?;
         let phase_started = web_time::Instant::now();
         // One simplification over both, so what the two matrices share is
         // computed once.
         let mut wanted = conduction.wanted();
         let reactive_wanted = reactive.wanted();
         wanted.extend_from_slice(&reactive_wanted);
-        let (function, mapped) = optimize_cfg(&differentiated.function, &wanted);
+        let (function, mapped) =
+            optimize_with_control(&differentiated.function, &wanted, measurements.control())
+                .map_err(|error| {
+                    RustBackendError::cancelled(
+                        artifact.metadata.source_package.as_str(),
+                        artifact.mir.module_name.as_str(),
+                        error,
+                    )
+                })?;
         conduction.remap(&mapped[..wanted.len() - reactive_wanted.len()]);
         reactive.remap(&mapped[wanted.len() - reactive_wanted.len()..]);
         conduction.drop_zeros(&function);
@@ -460,6 +505,7 @@ impl ModelPlan {
             phase_started.elapsed(),
         )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::Scheduling)?;
         let phase_started = web_time::Instant::now();
         // The output list both stamps read from, conduction first.
         let mut outputs = Vec::new();
