@@ -17,19 +17,19 @@ use crate::native::abi::{
     rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
     rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
-    rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native, rspice_exp,
-    rspice_floor, rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native,
-    rspice_idtmod_state_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
-    rspice_limexp, rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native,
-    rspice_log, rspice_log10, rspice_mod, rspice_native_current_probe_error,
-    rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
-    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
-    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
-    rspice_native_param_given_error, rspice_native_port_connected_error,
-    rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_step_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
+    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_laplace_step_native, rspice_last_crossing_state_native, rspice_limexp,
+    rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log,
+    rspice_log10, rspice_mod, rspice_native_current_probe_error,
+    rspice_native_dynamic_variable_error, rspice_native_integer_shift_count_error,
+    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
+    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
+    rspice_native_loop_limit_error, rspice_native_param_given_error,
+    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
+    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
@@ -644,9 +644,6 @@ impl FunctionCompiler {
             self.emit_dynamic_variable_slot_inline(base, len, lower)?;
         } else {
             self.emit_dynamic_variable_slot_call(base, len, lower)?;
-            self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-            let null_slot = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-            self.early_return_jumps.push(null_slot);
             self.encoder.mov_m64_base_disp32_r64(
                 Gpr::Rsp,
                 INDEXED_ASSIGNMENT_SLOT_PTR_DISP,
@@ -1042,13 +1039,7 @@ impl FunctionCompiler {
 
         if !dynamic_variable_inline_supported(len, lower) {
             let target = XMM_STACK[self.depth - 1];
-            return self.emit_dynamic_variable_helper_call(
-                target,
-                base,
-                len,
-                lower,
-                rspice_dynamic_variable_load_native,
-            );
+            return self.emit_dynamic_variable_helper_call(target, base, len, lower);
         }
 
         let target = XMM_STACK[self.depth - 1];
@@ -1065,9 +1056,7 @@ impl FunctionCompiler {
             for slow_jump in slow_jumps {
                 self.patch_rel32_to_current(slow_jump)?;
             }
-            self.emit_dynamic_variable_load_slow_return_from_register(
-                raw_index, base_disp, len, lower,
-            );
+            self.emit_dynamic_variable_load_slow_return_from_register(raw_index, len, lower);
             self.patch_rel32_to_current(fast_done)?;
             return Ok(());
         }
@@ -1084,15 +1073,15 @@ impl FunctionCompiler {
         for slow_jump in slow_jumps {
             self.patch_rel32_to_current(slow_jump)?;
         }
-        self.emit_dynamic_variable_load_slow_return(base_disp, len, lower);
+        self.emit_dynamic_variable_load_slow_return(len, lower);
         self.patch_rel32_to_current(fast_done)?;
         Ok(())
     }
 
-    fn emit_dynamic_variable_load_slow_return(&mut self, base_disp: i32, len: usize, lower: i64) {
+    fn emit_dynamic_variable_load_slow_return(&mut self, len: usize, lower: i64) {
         self.encoder
             .movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rsp, 0);
-        self.emit_dynamic_variable_load_slow_return_from_xmm0(base_disp, len, lower);
+        self.emit_dynamic_variable_error_call_from_xmm0(len, lower);
         self.encoder.add_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
         let return_after_error = self.encoder.jmp_rel32_placeholder();
         self.early_return_jumps.push(return_after_error);
@@ -1101,35 +1090,25 @@ impl FunctionCompiler {
     fn emit_dynamic_variable_load_slow_return_from_register(
         &mut self,
         raw_index: Xmm,
-        base_disp: i32,
         len: usize,
         lower: i64,
     ) {
         if raw_index != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, raw_index);
         }
-        self.emit_dynamic_variable_load_slow_return_from_xmm0(base_disp, len, lower);
+        self.emit_dynamic_variable_error_call_from_xmm0(len, lower);
         let return_after_error = self.encoder.jmp_rel32_placeholder();
         self.early_return_jumps.push(return_after_error);
     }
 
-    fn emit_dynamic_variable_load_slow_return_from_xmm0(
-        &mut self,
-        base_disp: i32,
-        len: usize,
-        lower: i64,
-    ) {
+    fn emit_dynamic_variable_error_call_from_xmm0(&mut self, len: usize, lower: i64) {
         let frame_bytes = call_frame_bytes_for_slots(0);
         self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder
-            .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
-        if base_disp != 0 {
-            self.encoder
-                .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
-        }
+            .mov_r64_r64(dynamic_variable_ptr_arg_reg(), self.ctx_arg_reg());
         self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
         self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
-        let helper: DynamicVariableHelper = rspice_dynamic_variable_load_native;
+        let helper: DynamicVariableErrorHelper = rspice_native_dynamic_variable_error;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
@@ -1167,33 +1146,19 @@ impl FunctionCompiler {
         for slow_jump in slow_jumps {
             self.patch_rel32_to_current(slow_jump)?;
         }
-        self.emit_dynamic_variable_slot_slow_return(base_disp, len, lower);
+        self.emit_dynamic_variable_slot_slow_return(len, lower);
         self.patch_rel32_to_current(fast_done)?;
         self.depth = 0;
         Ok(())
     }
 
-    fn emit_dynamic_variable_slot_slow_return(&mut self, base_disp: i32, len: usize, lower: i64) {
+    fn emit_dynamic_variable_slot_slow_return(&mut self, len: usize, lower: i64) {
         self.encoder.movsd_xmm_m64_base_disp32(
             Xmm::Xmm0,
             Gpr::Rsp,
             INDEXED_ASSIGNMENT_SLOT_PTR_DISP,
         );
-        let frame_bytes = call_frame_bytes_for_slots(0);
-        self.encoder.sub_rsp_imm32(frame_bytes);
-        self.encoder
-            .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
-        if base_disp != 0 {
-            self.encoder
-                .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
-        }
-        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
-        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
-        let helper: DynamicVariableSlotHelper = rspice_dynamic_variable_slot_native;
-        self.encoder
-            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
-        self.encoder.call_r64(Gpr::Rax);
-        self.encoder.add_rsp_imm32(frame_bytes);
+        self.emit_dynamic_variable_error_call_from_xmm0(len, lower);
         let return_after_error = self.encoder.jmp_rel32_placeholder();
         self.early_return_jumps.push(return_after_error);
     }
@@ -1253,36 +1218,73 @@ impl FunctionCompiler {
         base: usize,
         len: usize,
         lower: i64,
-        helper: DynamicVariableHelper,
     ) -> JitResult<()> {
         debug_assert!(self.uses_helper_calls);
         debug_assert!(xmm_stack_slot(target) < self.depth);
         let base_disp = byte_disp(base)?;
+        let context_slot = self.depth;
 
-        let frame_bytes =
-            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
-                register != target
-            }));
+        let frame_bytes = call_frame_bytes_for_slots(context_slot + 1);
         self.encoder.sub_rsp_imm32(frame_bytes);
-        self.emit_call_frame_spills(self.depth, |_, register| register != target);
+        self.emit_call_frame_spills(self.depth, |_, _| true);
+        self.encoder.mov_m64_base_disp32_r64(
+            Gpr::Rsp,
+            call_spill_disp(context_slot),
+            self.ctx_arg_reg(),
+        );
 
         if target != Xmm::Xmm0 {
             self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
         }
         self.encoder
-            .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
+            .mov_r64_r64(dynamic_variable_ptr_arg_reg(), self.vars_arg_reg());
         if base_disp != 0 {
             self.encoder
-                .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
+                .add_r64_imm32(dynamic_variable_ptr_arg_reg(), base_disp);
         }
         self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
         self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
+        let helper: DynamicVariableSlotHelper = rspice_dynamic_variable_slot_native;
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
 
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let invalid_slot = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+
+        self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::Rax, 0);
+        for (index, register) in XMM_STACK.iter().copied().take(self.depth).enumerate() {
+            if register != target {
+                self.encoder
+                    .movsd_xmm_m64_base_disp32(register, Gpr::Rsp, call_spill_disp(index));
+            }
+        }
+        self.encoder.add_rsp_imm32(frame_bytes);
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(invalid_slot)?;
+        self.encoder.movsd_xmm_m64_base_disp32(
+            Xmm::Xmm0,
+            Gpr::Rsp,
+            call_spill_disp(xmm_stack_slot(target)),
+        );
+        self.encoder.mov_r64_m64_base_disp32(
+            dynamic_variable_ptr_arg_reg(),
+            Gpr::Rsp,
+            call_spill_disp(context_slot),
+        );
+        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
+        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
+        let error_helper: DynamicVariableErrorHelper = rspice_native_dynamic_variable_error;
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, error_helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
         self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
         self.encoder.add_rsp_imm32(frame_bytes);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
+
+        self.patch_rel32_to_current(done)?;
         Ok(())
     }
 
@@ -1305,14 +1307,17 @@ impl FunctionCompiler {
 
         debug_assert!(self.uses_helper_calls);
         let base_disp = byte_disp(base)?;
+        let target = XMM_STACK[0];
 
-        let frame_bytes = call_frame_bytes_for_slots(0);
+        let frame_bytes = call_frame_bytes_for_slots(1);
         self.encoder.sub_rsp_imm32(frame_bytes);
         self.encoder
-            .mov_r64_r64(dynamic_variable_base_arg_reg(), self.vars_arg_reg());
+            .movsd_m64_base_disp32_xmm(Gpr::Rsp, call_spill_disp(0), target);
+        self.encoder
+            .mov_r64_r64(dynamic_variable_ptr_arg_reg(), self.vars_arg_reg());
         if base_disp != 0 {
             self.encoder
-                .add_r64_imm32(dynamic_variable_base_arg_reg(), base_disp);
+                .add_r64_imm32(dynamic_variable_ptr_arg_reg(), base_disp);
         }
         self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
         self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
@@ -1320,7 +1325,28 @@ impl FunctionCompiler {
         self.encoder
             .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
         self.encoder.call_r64(Gpr::Rax);
+
+        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        let invalid_slot = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
         self.encoder.add_rsp_imm32(frame_bytes);
+        let done = self.encoder.jmp_rel32_placeholder();
+
+        self.patch_rel32_to_current(invalid_slot)?;
+        self.encoder
+            .movsd_xmm_m64_base_disp32(Xmm::Xmm0, Gpr::Rsp, call_spill_disp(0));
+        self.encoder
+            .mov_r64_r64(dynamic_variable_ptr_arg_reg(), self.ctx_arg_reg());
+        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
+        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
+        let error_helper: DynamicVariableErrorHelper = rspice_native_dynamic_variable_error;
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, error_helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(frame_bytes);
+        let return_after_error = self.encoder.jmp_rel32_placeholder();
+        self.early_return_jumps.push(return_after_error);
+
+        self.patch_rel32_to_current(done)?;
         self.depth = 0;
         Ok(())
     }
@@ -3003,7 +3029,8 @@ type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
 type OperandContextFilterHelper =
     unsafe extern "C" fn(*const f64, *const crate::native::EvalContext, usize) -> f64;
-type DynamicVariableHelper = unsafe extern "C" fn(f64, *const f64, usize, i64) -> f64;
+type DynamicVariableErrorHelper =
+    extern "C" fn(f64, *const crate::native::EvalContext, usize, i64) -> f64;
 type DynamicVariableSlotHelper = unsafe extern "C" fn(f64, *mut f64, usize, i64) -> *mut f64;
 
 fn assignment_uses_helper_calls(assignment: &NativeAssignment) -> bool {
@@ -3431,7 +3458,7 @@ fn operand_filter_id_arg_reg() -> Gpr {
 }
 
 #[cfg(windows)]
-fn dynamic_variable_base_arg_reg() -> Gpr {
+fn dynamic_variable_ptr_arg_reg() -> Gpr {
     Gpr::Rdx
 }
 
@@ -3446,7 +3473,7 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 }
 
 #[cfg(not(windows))]
-fn dynamic_variable_base_arg_reg() -> Gpr {
+fn dynamic_variable_ptr_arg_reg() -> Gpr {
     Gpr::Rdi
 }
 
@@ -5397,13 +5424,17 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
 
         let vars = [99.0_f64, 2.0, 4.0, 8.0];
-        let ctx = eval_context(&[4.0], &[], &[], &[]);
+        let mut ctx = eval_context(&[4.0], &[], &[], &[]);
         clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let loaded = f(&ctx, vars.as_ptr());
 
         assert_eq!(loaded.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("out-of-range dynamic read must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("out-of-range dynamic read must hard-fail in its dispatch");
+        let _ = take_native_runtime_error();
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve array bounds diagnostic, got: {error}"
@@ -5595,14 +5626,17 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
 
         let vars = [99.0_f64, 2.0, 4.0, 8.0];
-        let ctx = eval_context(&[], &[], &[], &[]);
+        let mut ctx = eval_context(&[], &[], &[], &[]);
         clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let loaded = f(&ctx, vars.as_ptr());
 
         assert_eq!(loaded.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("out-of-range native array read must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("out-of-range native array read must hard-fail in its dispatch");
+        let _ = take_native_runtime_error();
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve bounds diagnostic, got: {error}"
@@ -5887,14 +5921,17 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *mut f64) = unsafe { std::mem::transmute(entry) };
 
         let mut vars = [0.0_f64, 2.0, 4.0, 8.0];
-        let ctx = eval_context(&[], &[], &[], &[]);
+        let mut ctx = eval_context(&[], &[], &[], &[]);
         clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         f(&ctx, vars.as_mut_ptr());
 
         assert_eq!(vars, [0.0, 2.0, 4.0, 8.0]);
-        let error =
-            take_native_runtime_error().expect("out-of-range native indexed write must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("out-of-range native indexed write must hard-fail in its dispatch");
+        let _ = take_native_runtime_error();
         assert!(
             error.contains("array index 4 outside declared bounds [1:3]"),
             "error must preserve array bounds diagnostic, got: {error}"
