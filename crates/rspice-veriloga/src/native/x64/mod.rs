@@ -515,7 +515,13 @@ fn lower_jacobian_program(
             mir,
             equation_id,
             axis,
-            state_slots.apply(limits.with_canonical_table_lookup_slots(&table_lookup_slots)),
+            // Jacobian bytecode carries TableDerivative rather than
+            // TableLookup, so its table id comes from the stamp-value
+            // program. Apply that mapping last: an otherwise-empty state
+            // scan must not replace it with an empty table map.
+            state_slots
+                .apply(limits)
+                .with_canonical_table_lookup_slots(table_lookup_slots),
         );
     }
 
