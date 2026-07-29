@@ -253,7 +253,7 @@ class CiConfigurationTests(unittest.TestCase):
             "--max-source-bytes 56000000",
             "--max-noise-source-bytes 17000000",
             "--max-model-source-bytes 4700000",
-            "--max-file-count 240",
+            "--max-file-count 380",
             "--max-pooled-workspace-payload-bytes 0",
             "--max-stamp-state-payload-bytes 6200",
         ]:

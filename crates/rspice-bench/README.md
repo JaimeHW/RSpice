@@ -65,7 +65,7 @@ metric into a non-zero-exit release budget.
 
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
-| `--generated-root <DIR>` | `crates/rspice-core/src/device/veriloga_generated` | Generated bundle to authenticate and measure |
+| `--generated-root <DIR>` | `crates/rspice-veriloga-models` | Generated bundle to authenticate and measure |
 | `--max-source-bytes <N>` | unset | Maximum total generated-source bytes |
 | `--max-noise-source-bytes <N>` | unset | Maximum source bytes attributable to noise kernels |
 | `--max-model-source-bytes <N>` | unset | Maximum source bytes for any one generated model |

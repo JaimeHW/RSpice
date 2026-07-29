@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const DEFAULT_GENERATED_ROOT: &str = "crates/rspice-core/src/device/veriloga_generated";
+const DEFAULT_GENERATED_ROOT: &str = "crates/rspice-veriloga-models";
 const MANIFEST_FILE_NAME: &str = "manifest.txt";
 
 /// Arguments for the `generated-rust` subcommand.
