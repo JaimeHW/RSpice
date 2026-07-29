@@ -231,3 +231,68 @@ fn module_files_use_sibling_style_not_mod_rs() {
         offenders.join("\n")
     );
 }
+
+/// A glob import may only join a module file to its own submodules.
+///
+/// `use super::*` appears 142 times here, and that is deliberate rather than
+/// lazy. These files are not modules that happen to glob — they are one
+/// module split across files for size, and the glob says exactly that: this
+/// file continues the module above it. The reciprocal (`engine/builder.rs`
+/// globbing `model_resolution::*`) is the same statement from the other end.
+/// Replacing them with explicit lists would tax every move of a helper
+/// between sibling files and tell the reader nothing new.
+///
+/// What does hurt is a glob that crosses into a *foreign* module, because
+/// then a bare name in the file has no visible origin and adding an item over
+/// there can shadow one over here. There are none today. This keeps it that
+/// way.
+#[test]
+fn glob_imports_stay_within_their_own_module() {
+    let root = src_dir();
+    let mut offenders = Vec::new();
+
+    for path in rust_sources(&root) {
+        let display = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        if display.starts_with("device/veriloga_generated/") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let children = declared_submodules(&source);
+
+        for (number, line) in source.lines().enumerate() {
+            let trimmed = line.trim_start();
+            let rest = trimmed
+                .strip_prefix("pub use ")
+                .or_else(|| trimmed.strip_prefix("use "));
+            let Some(rest) = rest else { continue };
+            let Some(path_text) = rest.strip_suffix("::*;") else {
+                continue;
+            };
+            let target = path_text.trim().trim_start_matches("self::");
+            // `super` is a file continuing its parent; a bare identifier that
+            // this file declares as a module is the parent reaching the other
+            // way. Anything else names somewhere it does not own.
+            //
+            // A foreign crate's `prelude` is exempt: `rayon::prelude::*` is
+            // the only way to get `par_iter` into scope, and a module named
+            // `prelude` is a published invitation to glob it. The rule is
+            // about this crate's own module boundaries.
+            if target == "super" || children.contains(target) || target.ends_with("prelude") {
+                continue;
+            }
+            offenders.push(format!("  {display}:{}  {trimmed}", number + 1));
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "glob imports must name `super` or a module this file declares:\n{}",
+        offenders.join("\n")
+    );
+}
