@@ -4034,10 +4034,13 @@ mod tests {
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -6752,10 +6755,13 @@ mod tests {
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -6844,10 +6850,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -6961,10 +6970,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -7076,10 +7088,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -7113,10 +7128,13 @@ mod tests {
             ctx.timestep = 0.25;
             ctx.state_prev = previous_state.as_ptr();
             ctx.state_older = older_state.as_ptr();
+            ctx.state_older_len = older_state.len();
             ctx.state_prev_len = previous_state.len();
             ctx.state_values = state_values.as_mut_ptr();
             ctx.state_derivatives = state_derivatives.as_mut_ptr();
+            ctx.state_derivatives_len = state_derivatives.len();
             ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+            ctx.state_derivatives_prev_len = previous_derivatives.len();
             ctx.state_initialized = state_initialized.as_mut_ptr();
             ctx.state_initialized_len = state_initialized.len();
             ctx.state_values_len = state_values.len();
@@ -7247,10 +7265,13 @@ mod tests {
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
+        ctx.state_older_len = older_state.len();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = state_derivatives.len();
         ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
@@ -11307,8 +11328,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,

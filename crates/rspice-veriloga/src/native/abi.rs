@@ -110,10 +110,16 @@ pub struct EvalContext {
     pub analysis_final_step: u8,
     /// State values from two accepted points ago.
     pub state_older: *const f64,
+    /// Length of `state_older`.
+    pub state_older_len: usize,
     /// Candidate derivative/input values for the current point.
     pub state_derivatives: *mut f64,
+    /// Length of `state_derivatives`.
+    pub state_derivatives_len: usize,
     /// Derivative/input values from the previous accepted point.
     pub state_derivatives_prev: *const f64,
+    /// Length of `state_derivatives_prev`.
+    pub state_derivatives_prev_len: usize,
     /// Current-value coefficient in the solver's derivative formula.
     pub integration_derivative_scale: f64,
     /// Previous-value coefficient in the solver's derivative formula.
@@ -820,6 +826,9 @@ fn invalid_native_integration_context(operator: &str, state_id: usize, detail: &
 unsafe fn native_state_storage_is_valid(ctx: &EvalContext, state_id: usize) -> bool {
     state_id < ctx.state_values_len
         && state_id < ctx.state_prev_len
+        && state_id < ctx.state_older_len
+        && state_id < ctx.state_derivatives_len
+        && state_id < ctx.state_derivatives_prev_len
         && state_id < ctx.state_initialized_len
         && !ctx.state_values.is_null()
         && !ctx.state_prev.is_null()
@@ -1609,12 +1618,12 @@ mod tests {
     use super::{
         EvalContext, clear_native_runtime_error, rspice_above_state_native,
         rspice_absdelay_state_native, rspice_cross_state_native, rspice_current_lookup,
-        rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native,
-        rspice_laplace_step, rspice_laplace_step_native, rspice_last_crossing_state_native,
-        rspice_limit, rspice_limiter_previous_native, rspice_limiter_store_native,
-        rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup,
-        rspice_table_lookup_native, rspice_timer_state_native, rspice_transition_state_native,
-        rspice_zi_step_native, take_native_runtime_error,
+        rspice_ddt_state_native, rspice_dynamic_variable_load_native,
+        rspice_dynamic_variable_slot_native, rspice_laplace_step, rspice_laplace_step_native,
+        rspice_last_crossing_state_native, rspice_limit, rspice_limiter_previous_native,
+        rspice_limiter_store_native, rspice_slew_state_native, rspice_table_derivative_native,
+        rspice_table_lookup, rspice_table_lookup_native, rspice_timer_state_native,
+        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
     };
     use crate::codegen::LookupTable;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -1664,23 +1673,70 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, analysis_initial_step), 312);
         assert_eq!(offset_of!(EvalContext, analysis_final_step), 313);
         assert_eq!(offset_of!(EvalContext, state_older), 320);
-        assert_eq!(offset_of!(EvalContext, state_derivatives), 328);
-        assert_eq!(offset_of!(EvalContext, state_derivatives_prev), 336);
-        assert_eq!(offset_of!(EvalContext, integration_derivative_scale), 344);
+        assert_eq!(offset_of!(EvalContext, state_older_len), 328);
+        assert_eq!(offset_of!(EvalContext, state_derivatives), 336);
+        assert_eq!(offset_of!(EvalContext, state_derivatives_len), 344);
+        assert_eq!(offset_of!(EvalContext, state_derivatives_prev), 352);
+        assert_eq!(offset_of!(EvalContext, state_derivatives_prev_len), 360);
+        assert_eq!(offset_of!(EvalContext, integration_derivative_scale), 368);
         assert_eq!(
             offset_of!(EvalContext, integration_previous_value_scale),
-            352
+            376
         );
-        assert_eq!(offset_of!(EvalContext, integration_older_value_scale), 360);
+        assert_eq!(offset_of!(EvalContext, integration_older_value_scale), 384);
         assert_eq!(
             offset_of!(EvalContext, integration_previous_derivative_scale),
-            368
+            392
         );
-        assert_eq!(offset_of!(EvalContext, integration_active), 376);
-        assert_eq!(offset_of!(EvalContext, limiter_active), 384);
-        assert_eq!(offset_of!(EvalContext, limiting_enabled), 392);
-        assert_eq!(size_of::<EvalContext>(), 400);
+        assert_eq!(offset_of!(EvalContext, integration_active), 400);
+        assert_eq!(offset_of!(EvalContext, limiter_active), 408);
+        assert_eq!(offset_of!(EvalContext, limiting_enabled), 416);
+        assert_eq!(size_of::<EvalContext>(), 424);
         assert_eq!(align_of::<EvalContext>(), 8);
+    }
+
+    #[test]
+    fn integration_helpers_validate_every_history_buffer_length() {
+        let operand = [1.0];
+
+        for missing in ["older", "derivatives", "previous derivatives"] {
+            let previous = [0.0];
+            let older = [0.0];
+            let previous_derivatives = [0.0];
+            let mut values = [0.0];
+            let mut derivatives = [0.0];
+            let mut initialized = [0_u8];
+            let mut ctx = empty_eval_context();
+            ctx.state_prev = previous.as_ptr();
+            ctx.state_prev_len = previous.len();
+            ctx.state_older = older.as_ptr();
+            ctx.state_older_len = older.len();
+            ctx.state_values = values.as_mut_ptr();
+            ctx.state_values_len = values.len();
+            ctx.state_derivatives = derivatives.as_mut_ptr();
+            ctx.state_derivatives_len = derivatives.len();
+            ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+            ctx.state_derivatives_prev_len = previous_derivatives.len();
+            ctx.state_initialized = initialized.as_mut_ptr();
+            ctx.state_initialized_len = initialized.len();
+            match missing {
+                "older" => ctx.state_older_len = 0,
+                "derivatives" => ctx.state_derivatives_len = 0,
+                "previous derivatives" => ctx.state_derivatives_prev_len = 0,
+                _ => unreachable!(),
+            }
+            clear_native_runtime_error();
+
+            let value = unsafe { rspice_ddt_state_native(operand.as_ptr(), &ctx, 0) };
+
+            assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{missing}");
+            let error = take_native_runtime_error()
+                .unwrap_or_else(|| panic!("{missing} length must hard-fail"));
+            assert!(
+                error.contains("ddt") && error.contains("invalid state storage"),
+                "{missing}: unexpected error: {error}"
+            );
+        }
     }
 
     #[test]
@@ -1922,8 +1978,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,
@@ -2636,8 +2695,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,

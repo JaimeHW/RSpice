@@ -2061,8 +2061,11 @@ impl VerilogADevice {
             analysis_initial_step: u8::from(context.analysis_initial_step),
             analysis_final_step: u8::from(context.analysis_final_step),
             state_older: context.state_values_older.as_ptr(),
+            state_older_len: context.state_values_older.len(),
             state_derivatives: context.state_derivatives.as_mut_ptr(),
+            state_derivatives_len: context.state_derivatives.len(),
             state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
+            state_derivatives_prev_len: context.state_derivatives_prev.len(),
             integration_derivative_scale: context.integration.derivative_scale,
             integration_previous_value_scale: context.integration.previous_value_scale,
             integration_older_value_scale: context.integration.older_value_scale,
@@ -2358,6 +2361,21 @@ impl VerilogADevice {
             "prior state-value storage",
             required.state_values_prev,
             context.state_values_prev.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "older state-value storage",
+            required.state_values,
+            context.state_values_older.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "candidate state-derivative storage",
+            required.state_values,
+            context.state_derivatives.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "prior state-derivative storage",
+            required.state_values,
+            context.state_derivatives_prev.len(),
         )?;
         Self::validate_native_runtime_storage_len(
             "state-initialization flag storage",
@@ -4296,6 +4314,45 @@ endmodule
             .expect_err("missing state storage must preflight before native dispatch");
 
         assert_native_hard_fail(err, "state-value storage");
+    }
+
+    #[test]
+    fn native_integration_history_storage_preflights_before_dispatch() {
+        fn populated_context() -> VmContext {
+            let mut context = VmContext::default();
+            context.state_values.resize(1, 0.0);
+            context.state_values_prev.resize(1, 0.0);
+            context.state_values_older.resize(1, 0.0);
+            context.state_derivatives.resize(1, 0.0);
+            context.state_derivatives_prev.resize(1, 0.0);
+            context.state_initialized.resize(1, false);
+            context
+        }
+
+        let required = NativeRequiredStorage {
+            state_values: 1,
+            state_values_prev: 1,
+            state_initialized: 1,
+            ..NativeRequiredStorage::default()
+        };
+
+        let mut context = populated_context();
+        context.state_values_older.clear();
+        let error = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing older state storage must hard-fail before dispatch");
+        assert_native_hard_fail(error, "older state-value storage");
+
+        let mut context = populated_context();
+        context.state_derivatives.clear();
+        let error = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing candidate derivative storage must hard-fail before dispatch");
+        assert_native_hard_fail(error, "candidate state-derivative storage");
+
+        let mut context = populated_context();
+        context.state_derivatives_prev.clear();
+        let error = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing prior derivative storage must hard-fail before dispatch");
+        assert_native_hard_fail(error, "prior state-derivative storage");
     }
 
     #[test]
