@@ -57,7 +57,12 @@ pub enum InvalidationClass {
 }
 
 impl InvalidationClass {
-    pub const ALL: [Self; 4] = [Self::Instance, Self::Temperature, Self::Timestep, Self::Newton];
+    pub const ALL: [Self; 4] = [
+        Self::Instance,
+        Self::Temperature,
+        Self::Timestep,
+        Self::Newton,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -150,7 +155,6 @@ fn raise_loops(function: &CfgFunction, schedule: &mut Schedule) {
                 schedule.values[index] = class;
             }
         }
-
     }
 }
 
@@ -382,8 +386,7 @@ fn propagate(function: &CfgFunction, schedule: &mut Schedule) {
         for (block, sources) in control.iter().enumerate() {
             let mut class = InvalidationClass::Instance;
             for source in sources {
-                if let CfgTerminator::Branch { condition, .. } =
-                    &function.block(*source).terminator
+                if let CfgTerminator::Branch { condition, .. } = &function.block(*source).terminator
                 {
                     class = class.join(values[usize::from(*condition)]);
                 }
@@ -532,7 +535,11 @@ impl std::fmt::Display for SplitError {
                 )
             }
             Self::MalformedStage(class, error, detail) => {
-                write!(f, "the {} stage is malformed: {error}{detail}", class.name())
+                write!(
+                    f,
+                    "the {} stage is malformed: {error}{detail}",
+                    class.name()
+                )
             }
             Self::AmbiguousProjection(class, block, detail) => {
                 write!(
@@ -580,10 +587,10 @@ pub fn split(
     // to save nothing.
     let mut slots: Vec<Option<u32>> = vec![None; function.values.len()];
     let mut next_slot = 0u32;
-    let mut demand = |value: ValueId,
-                      reader: InvalidationClass,
-                      slots: &mut Vec<Option<u32>>,
-                      next_slot: &mut u32|
+    let demand = |value: ValueId,
+                  reader: InvalidationClass,
+                  slots: &mut Vec<Option<u32>>,
+                  next_slot: &mut u32|
      -> Result<(), SplitError> {
         let held = schedule.values[usize::from(value)];
         if held >= reader || super::cfg::is_leaf_kind(&function.value(value).kind) {
@@ -706,8 +713,8 @@ fn build_stage(
     let mut mapped: Vec<Option<ValueId>> = vec![None; function.values.len()];
     let mut values: Vec<CfgValue> = Vec::new();
     let translate = |value: ValueId,
-                         mapped: &mut Vec<Option<ValueId>>,
-                         values: &mut Vec<CfgValue>|
+                     mapped: &mut Vec<Option<ValueId>>,
+                     values: &mut Vec<CfgValue>|
      -> ValueId {
         if let Some(existing) = mapped[usize::from(value)] {
             return existing;
@@ -741,7 +748,13 @@ fn build_stage(
         if !kept_block(block.id) {
             continue;
         }
-        roots.extend(block.params.iter().copied().filter(|param| held(*param) == class));
+        roots.extend(
+            block
+                .params
+                .iter()
+                .copied()
+                .filter(|param| held(*param) == class),
+        );
         roots.extend(
             block
                 .instructions
@@ -777,7 +790,12 @@ fn build_stage(
             CfgTerminator::Return | CfgTerminator::Unset => {}
         }
     }
-    roots.extend(outputs.iter().copied().filter(|output| owns_output(*output)));
+    roots.extend(
+        outputs
+            .iter()
+            .copied()
+            .filter(|output| owns_output(*output)),
+    );
     let mut seen: HashSet<ValueId> = HashSet::new();
     let mut stack: Vec<(ValueId, usize)> = Vec::new();
     for root in roots {
@@ -852,7 +870,11 @@ fn build_stage(
 
         // Arguments are filtered the same way the target filtered its
         // parameters, so the two stay in step.
-        let arguments = |target: BlockId, args: &[ValueId], values: &mut Vec<CfgValue>, mapped: &mut Vec<Option<ValueId>>| -> Vec<ValueId> {
+        let arguments = |target: BlockId,
+                         args: &[ValueId],
+                         values: &mut Vec<CfgValue>,
+                         mapped: &mut Vec<Option<ValueId>>|
+         -> Vec<ValueId> {
             function
                 .block(target)
                 .params
@@ -915,10 +937,16 @@ fn build_stage(
                     // are too. Skip straight to where they reconverge; the join
                     // cannot carry a parameter this stage keeps, because every
                     // argument to it comes from an arm.
-                    let then_landing = onward(*then_target, function, &block_map, exit, class, schedule)?;
-                    let else_landing = onward(*else_target, function, &block_map, exit, class, schedule)?;
+                    let then_landing =
+                        onward(*then_target, function, &block_map, exit, class, schedule)?;
+                    let else_landing =
+                        onward(*else_target, function, &block_map, exit, class, schedule)?;
                     if then_landing != else_landing {
-                        return Err(SplitError::AmbiguousProjection(class, block.id, String::new()));
+                        return Err(SplitError::AmbiguousProjection(
+                            class,
+                            block.id,
+                            String::new(),
+                        ));
                     }
                     CfgTerminator::Jump {
                         target: then_landing,
@@ -950,13 +978,15 @@ fn build_stage(
     // One pass at the end, now that every value this stage names has one.
     let mut unmapped: Option<ValueId> = None;
     for value in &mut values {
-        value.kind.map_operands(|operand| match mapped[usize::from(operand)] {
-            Some(id) => id,
-            None => {
-                unmapped = unmapped.or(Some(operand));
-                operand
-            }
-        });
+        value
+            .kind
+            .map_operands(|operand| match mapped[usize::from(operand)] {
+                Some(id) => id,
+                None => {
+                    unmapped = unmapped.or(Some(operand));
+                    operand
+                }
+            });
     }
     if let Some(operand) = unmapped {
         return Err(SplitError::OperandLeftBehind(class, operand));
@@ -1007,9 +1037,10 @@ fn build_stage(
                 let arrivals: Vec<String> = home
                     .into_iter()
                     .flat_map(|home| {
-                        function.blocks.iter().filter(move |candidate| {
-                            candidate.successors().contains(&home)
-                        })
+                        function
+                            .blocks
+                            .iter()
+                            .filter(move |candidate| candidate.successors().contains(&home))
                     })
                     .map(|source| {
                         format!(
@@ -1159,7 +1190,7 @@ fn compact_values(
 ) -> Vec<CfgValue> {
     let mut keep = vec![false; values.len()];
     let mut stack: Vec<ValueId> = Vec::new();
-    let mut demand = |value: ValueId, keep: &mut Vec<bool>, stack: &mut Vec<ValueId>| {
+    let demand = |value: ValueId, keep: &mut Vec<bool>, stack: &mut Vec<ValueId>| {
         if !keep[usize::from(value)] {
             keep[usize::from(value)] = true;
             stack.push(value);
@@ -1212,9 +1243,8 @@ fn compact_values(
         value.id = ValueId::from(compacted.len());
         compacted.push(value);
     }
-    let translate = |value: ValueId| {
-        renumber[usize::from(value)].expect("everything reachable was kept above")
-    };
+    let translate =
+        |value: ValueId| renumber[usize::from(value)].expect("everything reachable was kept above");
     for value in &mut compacted {
         value.kind.map_operands(translate);
     }
@@ -1715,9 +1745,7 @@ fn intersect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canonical_ir::cfg::{
-        CfgBinaryOp, CfgValueType, CfgVariable, SsaBuilder,
-    };
+    use crate::canonical_ir::cfg::{CfgBinaryOp, CfgValueType, CfgVariable, SsaBuilder};
     use crate::canonical_ir::{NodeId, ParamId, VariableId};
 
     /// Straight-line arithmetic keeps the class of what it reads.
@@ -1727,7 +1755,10 @@ mod tests {
         let entry = builder.create_block();
         builder.seal_block(entry);
 
-        let param = builder.push_leaf(CfgValueType::Real, CfgValueKind::Parameter(ParamId::from(0usize)));
+        let param = builder.push_leaf(
+            CfgValueType::Real,
+            CfgValueKind::Parameter(ParamId::from(0usize)),
+        );
         let temperature = builder.push_leaf(CfgValueType::Real, CfgValueKind::Temperature);
         let potential = builder.push_leaf(
             CfgValueType::Real,
@@ -1785,7 +1816,10 @@ mod tests {
         let skipped = builder.create_block();
         let join = builder.create_block();
 
-        let param = builder.push_leaf(CfgValueType::Real, CfgValueKind::Parameter(ParamId::from(0usize)));
+        let param = builder.push_leaf(
+            CfgValueType::Real,
+            CfgValueKind::Parameter(ParamId::from(0usize)),
+        );
         let zero = builder.push_leaf(CfgValueType::Real, CfgValueKind::RealConstant(0.0));
         let potential = builder.push_leaf(
             CfgValueType::Real,
