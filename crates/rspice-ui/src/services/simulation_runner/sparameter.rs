@@ -14,7 +14,7 @@ use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::ac::AcResult;
-use rspice_core::analysis::advanced::s_param;
+use rspice_core::analysis::s_param;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind, SourceSpec};
 use std::path::Path;
@@ -43,16 +43,6 @@ pub struct SParameterPort {
     pub node_pos: String,
     pub node_neg: String,
     pub z0: Option<Value>,
-}
-
-impl SParameterPort {
-    pub fn single_ended(node_pos: impl Into<String>) -> Self {
-        Self {
-            node_pos: node_pos.into(),
-            node_neg: "0".to_string(),
-            z0: None,
-        }
-    }
 }
 
 /// Explicit configuration for S-parameter execution.
@@ -116,8 +106,6 @@ pub struct SParameterData {
     pub num_ports: usize,
     /// S-parameter matrix traces indexed as [row][col][frequency_index], 0-based.
     pub s: Vec<Vec<Vec<Complex64>>>,
-    /// Per-port reference impedances (ohms).
-    pub z0: Vec<Value>,
 }
 
 /// Run N-port S-parameter analysis by solving Y-parameters from AC source
@@ -238,7 +226,6 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
         frequencies,
         num_ports,
         s,
-        z0: z0_by_port,
     })
 }
 
@@ -351,7 +338,7 @@ mod tests {
     }
 
     /// The conversion itself, and its in-loop cancellation, are covered by
-    /// `rspice_core::analysis::advanced::s_param::network`. What this module
+    /// `rspice_core::analysis::s_param::network`. What this module
     /// still owns is the mapping from that failure onto the service error
     /// type, so that is what is tested here.
     #[test]

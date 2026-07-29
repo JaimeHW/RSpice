@@ -29,11 +29,11 @@ pub enum PacFrequencySweep {
 }
 
 impl PacFrequencySweep {
-    fn to_core(self) -> rspice_core::analysis::advanced::pac::PacSweepType {
+    fn to_core(self) -> rspice_core::analysis::pac::PacSweepType {
         match self {
-            Self::Decade => rspice_core::analysis::advanced::pac::PacSweepType::Decade,
-            Self::Octave => rspice_core::analysis::advanced::pac::PacSweepType::Octave,
-            Self::Linear => rspice_core::analysis::advanced::pac::PacSweepType::Linear,
+            Self::Decade => rspice_core::analysis::pac::PacSweepType::Decade,
+            Self::Octave => rspice_core::analysis::pac::PacSweepType::Octave,
+            Self::Linear => rspice_core::analysis::pac::PacSweepType::Linear,
         }
     }
 }
@@ -130,16 +130,12 @@ impl PacRunConfig {
 pub struct PacData {
     /// Frequency offsets from carrier in Hz.
     pub frequencies: Vec<Value>,
-    /// Sidebands included in spectra.
-    pub sidebands: Vec<i32>,
     /// Spectra: (trace_name, [(frequency_offset_hz, magnitude, phase_deg)])
     pub spectra: Vec<(String, Vec<(Value, Value, Value)>)>,
-    /// Whether solution converged.
-    pub converged: bool,
 }
 
 pub(super) struct PacInternalResult {
-    pub(super) pac_result: rspice_core::analysis::advanced::pac::PacResult,
+    pub(super) pac_result: rspice_core::analysis::pac::PacResult,
     pub(super) output_node_idx: usize,
     pub(super) output_node_name: String,
 }
@@ -167,7 +163,7 @@ fn run_pac_internal_impl(
     operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacInternalResult> {
-    use rspice_core::analysis::advanced::pac::PacConfig;
+    use rspice_core::analysis::pac::PacConfig;
 
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
@@ -338,9 +334,7 @@ fn run_pac_analysis_for_netlist_with_operating_point_abort(
     ensure_not_aborted(abort)?;
     Ok(PacData {
         frequencies,
-        sidebands,
         spectra,
-        converged: true,
     })
 }
 

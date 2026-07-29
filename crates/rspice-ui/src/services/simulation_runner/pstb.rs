@@ -165,58 +165,22 @@ impl PstbRunConfig {
 /// PSTB analysis data.
 #[derive(Debug, Clone)]
 pub struct PstbData {
-    /// Fundamental period in seconds.
-    pub period: Value,
-    /// Fundamental frequency in Hz.
-    pub fundamental_frequency: Value,
-    /// Probe instance used for metadata correlation.
-    pub probe_instance: String,
-    /// Probe branch ordinal in MNA ordering (1-indexed branch numbering).
-    pub probe_branch_ordinal: usize,
-    /// Reactive state index in the PSS/PSTB monodromy matrix (0-indexed).
-    pub probe_state_index: usize,
-    /// Probe-state self-transition term M[i,i] over one period.
-    pub probe_state_self_transition: Value,
-    /// Euclidean norm of the probe-state monodromy column ||M[:,i]||2.
-    pub probe_state_column_norm: Value,
-    /// Euclidean norm of the probe-state monodromy row ||M[i,:]||2.
-    pub probe_state_row_norm: Value,
-    /// Probe-state persistence in dB, computed from |M[i,i]|.
-    pub probe_state_persistence_db: Value,
     /// Mode indices (1-based) for plotting.
     pub mode_indices: Vec<Value>,
     /// Probe-local mode participation (normalized |v_i| contribution per mode).
     pub probe_mode_participation: Vec<Value>,
     /// Floquet multiplier magnitudes.
     pub multiplier_magnitude: Vec<Value>,
-    /// Floquet multiplier phases in degrees.
-    pub multiplier_phase_deg: Vec<Value>,
     /// Mode damping factors in 1/s.
     pub mode_damping: Vec<Value>,
-    /// Mode natural frequencies in Hz.
-    pub mode_frequency_hz: Vec<Value>,
     /// Per-mode stability margin in dB.
     pub stability_margin_db: Vec<Value>,
-    /// Dominant multiplier magnitude.
-    pub dominant_multiplier_magnitude: Value,
-    /// Global minimum stability margin in dB.
-    pub min_stability_margin_db: Value,
-    /// Mode index (1-based) with largest probe participation.
-    pub dominant_probe_mode: usize,
-    /// Largest probe participation value across retained modes.
-    pub dominant_probe_mode_participation: Value,
-    /// Number of unstable modes.
-    pub num_unstable: usize,
-    /// Stability classification string.
-    pub stability_classification: String,
-    /// Whether the periodic orbit is stable.
-    pub is_stable: bool,
 }
 
 fn stability_type_label(
-    stability: rspice_core::analysis::advanced::pstb::StabilityType,
+    stability: rspice_core::analysis::pstb::StabilityType,
 ) -> &'static str {
-    use rspice_core::analysis::advanced::pstb::StabilityType;
+    use rspice_core::analysis::pstb::StabilityType;
     match stability {
         StabilityType::Stable => "Stable",
         StabilityType::UnstableReal => "UnstableReal",
@@ -405,7 +369,7 @@ fn run_pstb_analysis_impl(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
     use rspice_core::analysis::PssConfig;
-    use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
+    use rspice_core::analysis::pstb::{PstbAnalyzer, PstbConfig};
 
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::from)?;
@@ -461,19 +425,6 @@ fn run_pstb_analysis_impl(
         }
         .into());
     }
-
-    let probe_row = &pss_result.monodromy[probe.state_index];
-    let probe_self_transition = sanitize_finite(probe_row[probe.state_index]);
-    let probe_column_norm = sanitize_nonnegative(finite_l2_norm_with_abort(
-        pss_result
-            .monodromy
-            .iter()
-            .map(|row| row[probe.state_index]),
-        abort,
-    )?);
-    let probe_row_norm =
-        sanitize_nonnegative(finite_l2_norm_with_abort(probe_row.iter().copied(), abort)?);
-    let probe_persistence_db = sanitize_db(20.0 * probe_self_transition.abs().max(1e-30).log10());
 
     let pstb_config = PstbConfig::new()
         .with_num_eigenvalues(config.num_multipliers)
@@ -536,29 +487,11 @@ fn run_pstb_analysis_impl(
     ensure_not_aborted(abort)?;
 
     Ok(PstbData {
-        period: pstb_result.period,
-        fundamental_frequency: pstb_result.fundamental_frequency,
-        probe_instance: probe.canonical_name,
-        probe_branch_ordinal: probe.branch_ordinal,
-        probe_state_index: probe.state_index,
-        probe_state_self_transition: probe_self_transition,
-        probe_state_column_norm: probe_column_norm,
-        probe_state_row_norm: probe_row_norm,
-        probe_state_persistence_db: probe_persistence_db,
         mode_indices,
         probe_mode_participation,
         multiplier_magnitude,
-        multiplier_phase_deg,
         mode_damping,
-        mode_frequency_hz,
         stability_margin_db,
-        dominant_multiplier_magnitude: pstb_result.max_multiplier_magnitude,
-        min_stability_margin_db: sanitize_db(pstb_result.min_stability_margin_db),
-        dominant_probe_mode,
-        dominant_probe_mode_participation,
-        num_unstable: pstb_result.num_unstable,
-        stability_classification: stability_type_label(pstb_result.stability).to_string(),
-        is_stable: pstb_result.is_stable(),
     })
 }
 
