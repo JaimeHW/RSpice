@@ -13,8 +13,8 @@
 //! drifts, this fails at the call site with the same message the real build
 //! would give.
 
-use rspice_veriloga::rust_backend::{RustTranspileOptions, canonical};
-use rspice_veriloga::VerilogACompiler;
+use rspice_veriloga::rust_backend::{RustTranspileOptions, RustTranspiler, canonical};
+use rspice_veriloga::{PipelinePhase, VerilogACompiler};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -290,9 +290,10 @@ fn panic_reason(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<String>() {
         return message.clone();
     }
-    payload
-        .downcast_ref::<&str>()
-        .map_or_else(|| "no known payload".to_string(), |message| (*message).to_string())
+    payload.downcast_ref::<&str>().map_or_else(
+        || "no known payload".to_string(),
+        |message| (*message).to_string(),
+    )
 }
 
 fn model_root() -> PathBuf {
@@ -322,7 +323,53 @@ fn stamp_of(source: &str, name: &str) -> String {
 fn options() -> RustTranspileOptions {
     RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
+        ..RustTranspileOptions::default()
     }
+}
+
+#[test]
+fn transpiler_reports_hot_phases_and_exact_output_size() {
+    let (name, source) = fixtures()[0];
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap_or_else(|error| panic!("{name}: front end: {error}"));
+    let generated = RustTranspiler::new(options())
+        .transpile_measured(&artifact)
+        .unwrap_or_else(|error| panic!("{name}: measured generation: {error}"));
+
+    for phase in [
+        PipelinePhase::CfgLowering,
+        PipelinePhase::DerivativePreparation,
+        PipelinePhase::Differentiation,
+        PipelinePhase::DerivativeExtraction,
+        PipelinePhase::NoisePlanning,
+        PipelinePhase::StampPlanning,
+        PipelinePhase::CfgOptimization,
+        PipelinePhase::Scheduling,
+        PipelinePhase::StampEmission,
+        PipelinePhase::StateEmission,
+        PipelinePhase::NoiseEmission,
+        PipelinePhase::CheckpointFinalization,
+    ] {
+        assert!(
+            generated.metrics.has_phase(phase),
+            "missing structured metric for {phase}"
+        );
+    }
+    let bytes = generated
+        .output
+        .files
+        .iter()
+        .map(|file| file.contents.len() as u64)
+        .sum::<u64>();
+    let lines = generated
+        .output
+        .files
+        .iter()
+        .map(|file| file.contents.lines().count() as u64)
+        .sum::<u64>();
+    assert_eq!(generated.metrics.generated_rust_bytes, bytes);
+    assert_eq!(generated.metrics.generated_rust_lines, lines);
 }
 
 fn find<'a>(files: &[(&'a str, &'a str)], name: &str, model: &str) -> &'a str {

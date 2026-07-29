@@ -14,6 +14,7 @@ use thiserror::Error;
 use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType};
 use crate::codegen::CompiledModel;
 use crate::error::CompileError;
+use crate::metrics::PipelineMetrics;
 use crate::rust_backend::{GeneratedRustDevice, RustTranspileOptions, RustTranspiler};
 use crate::source::Span;
 
@@ -30,6 +31,10 @@ pub struct RuntimeCompileReport {
     pub targets: RuntimeTargetQualifications,
     /// Generated Rust source, present only when in-memory transpilation passed.
     pub generated_rust: Option<GeneratedRustDevice>,
+    /// Operational timings and work-size counters. These are not artifact
+    /// identity and are excluded from runtime-contract digests.
+    #[serde(default)]
+    pub metrics: PipelineMetrics,
 }
 
 /// Expensive backend qualifications to perform while constructing a runtime
@@ -77,6 +82,7 @@ impl RuntimeCompileReport {
             abi,
             targets,
             generated_rust,
+            metrics: PipelineMetrics::default(),
         }
     }
 
@@ -547,6 +553,7 @@ pub enum CompileDiagnosticPhase {
     Parser,
     Semantic,
     CodeGeneration,
+    PerformanceBudget,
     ModuleSelection,
 }
 
@@ -626,6 +633,12 @@ fn collect_compile_diagnostics(
             CompileDiagnosticPhase::CodeGeneration,
             error.to_string(),
             error.span,
+        )),
+        CompileError::PerformanceBudget(_) => diagnostics.push(diagnostic(
+            source,
+            CompileDiagnosticPhase::PerformanceBudget,
+            error.to_string(),
+            None,
         )),
         CompileError::ModuleSelection(_) => diagnostics.push(diagnostic(
             source,
