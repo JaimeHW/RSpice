@@ -12,7 +12,7 @@ use rspice_core::register_precompiled_veriloga_model;
 use rspice_core::register_precompiled_veriloga_runtime_with_dependencies;
 use rspice_core::{Engine, Netlist};
 #[cfg(feature = "veriloga-native")]
-use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
+use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind};
 use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::io::Write;
@@ -50,8 +50,7 @@ fn canonical_artifact_with_unsupported_root(
     mir.expressions[root].kind = unsupported;
     hir.contributions[0].expression.kind = "string".into();
     mir.equations[0].expression.kind = "string".into();
-    let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
-    CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect("synthetic canonical artifact has refreshed digests")
 }
 

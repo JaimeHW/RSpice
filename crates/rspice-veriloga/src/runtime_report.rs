@@ -22,7 +22,7 @@ use crate::source::Span;
 pub struct RuntimeCompileReport {
     /// Bytecode-era model consumed by the simulator and portable interpreter.
     pub model: CompiledModel,
-    /// Canonical HIR/MIR/OptIR artifact consumed by qualified backends.
+    /// Canonical HIR/MIR artifact consumed by qualified backends.
     pub canonical_ir: CanonicalIrArtifact,
     /// Stable public simulator ABI derived from the canonical artifact.
     pub abi: RuntimeAbiSummary,
@@ -32,10 +32,45 @@ pub struct RuntimeCompileReport {
     pub generated_rust: Option<GeneratedRustDevice>,
 }
 
+/// Expensive backend qualifications to perform while constructing a runtime
+/// compile report.
+///
+/// Runtime compilation always produces the semantic and bytecode artifacts
+/// needed by the portable simulator. Generated Rust and native machine code
+/// are separate products: constructing either can dominate compilation for a
+/// large compact model, so callers must request them explicitly.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeQualificationOptions {
+    /// Transpile the canonical CFG to generated Rust and retain the source.
+    pub generated_rust: bool,
+    /// Compile the native x86-64 qualification artifact when supported.
+    pub native_x64_jit: bool,
+}
+
+impl RuntimeQualificationOptions {
+    /// No expensive qualification products. This is the runtime/editor
+    /// default.
+    pub const NONE: Self = Self {
+        generated_rust: false,
+        native_x64_jit: false,
+    };
+
+    /// Qualify every optional backend available in this build.
+    pub const ALL: Self = Self {
+        generated_rust: true,
+        native_x64_jit: true,
+    };
+}
+
 impl RuntimeCompileReport {
-    pub(crate) fn from_artifacts(model: CompiledModel, canonical_ir: CanonicalIrArtifact) -> Self {
+    pub(crate) fn from_artifacts(
+        model: CompiledModel,
+        canonical_ir: CanonicalIrArtifact,
+        qualifications: RuntimeQualificationOptions,
+    ) -> Self {
         let abi = RuntimeAbiSummary::from_artifact(&canonical_ir);
-        let (targets, generated_rust) = qualify_runtime_targets(&model, &canonical_ir);
+        let (targets, generated_rust) =
+            qualify_runtime_targets(&model, &canonical_ir, qualifications);
         Self {
             model,
             canonical_ir,
@@ -290,28 +325,39 @@ fn qualification(
 fn qualify_runtime_targets(
     model: &CompiledModel,
     canonical_ir: &CanonicalIrArtifact,
+    options: RuntimeQualificationOptions,
 ) -> (RuntimeTargetQualifications, Option<GeneratedRustDevice>) {
-    let generated_result =
-        RustTranspiler::new(RustTranspileOptions::default()).transpile(canonical_ir);
-    let (generated_qualification, generated_rust) = match generated_result {
-        Ok(device) => (
-            qualification(
-                RuntimeTarget::GeneratedRust,
-                RuntimeTargetReadiness::Available,
-                RuntimeTargetMaturity::QualificationOnly,
-                "qualified with the canonical CFG backend",
+    let (generated_qualification, generated_rust) = if options.generated_rust {
+        match RustTranspiler::new(RustTranspileOptions::default()).transpile(canonical_ir) {
+            Ok(device) => (
+                qualification(
+                    RuntimeTarget::GeneratedRust,
+                    RuntimeTargetReadiness::Available,
+                    RuntimeTargetMaturity::QualificationOnly,
+                    "qualified with the canonical CFG backend",
+                ),
+                Some(device),
             ),
-            Some(device),
-        ),
-        Err(error) => (
+            Err(error) => (
+                qualification(
+                    RuntimeTarget::GeneratedRust,
+                    RuntimeTargetReadiness::Rejected,
+                    RuntimeTargetMaturity::QualificationOnly,
+                    error.to_string(),
+                ),
+                None,
+            ),
+        }
+    } else {
+        (
             qualification(
                 RuntimeTarget::GeneratedRust,
-                RuntimeTargetReadiness::Rejected,
+                RuntimeTargetReadiness::Unavailable,
                 RuntimeTargetMaturity::QualificationOnly,
-                error.to_string(),
+                "generated Rust qualification was not requested",
             ),
             None,
-        ),
+        )
     };
 
     let entries = vec![
@@ -319,7 +365,7 @@ fn qualify_runtime_targets(
             RuntimeTarget::SemanticIr,
             RuntimeTargetReadiness::Available,
             RuntimeTargetMaturity::Production,
-            "canonical HIR/MIR/OptIR validated",
+            "canonical HIR/MIR validated",
         ),
         qualification(
             RuntimeTarget::BytecodeVm,
@@ -327,7 +373,7 @@ fn qualify_runtime_targets(
             RuntimeTargetMaturity::Production,
             "compiled bytecode model available",
         ),
-        qualify_native_x64(model, canonical_ir),
+        qualify_native_x64_if_requested(model, canonical_ir, options.native_x64_jit),
         qualification(
             RuntimeTarget::WasmInterpreter,
             RuntimeTargetReadiness::Available,
@@ -338,6 +384,23 @@ fn qualify_runtime_targets(
     ];
 
     (RuntimeTargetQualifications::new(entries), generated_rust)
+}
+
+fn qualify_native_x64_if_requested(
+    model: &CompiledModel,
+    canonical_ir: &CanonicalIrArtifact,
+    requested: bool,
+) -> RuntimeTargetQualification {
+    if requested {
+        qualify_native_x64(model, canonical_ir)
+    } else {
+        qualification(
+            RuntimeTarget::NativeX64Jit,
+            RuntimeTargetReadiness::Unavailable,
+            RuntimeTargetMaturity::Preview,
+            "native x64 JIT qualification was not requested",
+        )
+    }
 }
 
 #[cfg(all(feature = "native", target_arch = "x86_64"))]

@@ -7,7 +7,7 @@
 
 use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
-use rspice_veriloga::canonical_ir::{HirExprKind, OptModel};
+use rspice_veriloga::canonical_ir::HirExprKind;
 #[cfg(feature = "native-bytecode-contract-tests")]
 use rspice_veriloga::codegen::Instruction;
 use rspice_veriloga::device::VerilogADevice;
@@ -118,8 +118,7 @@ fn canonical_artifact_with_unsupported_root(
     mir.expressions[root].kind = unsupported;
     hir.contributions[0].expression.kind = "string".into();
     mir.equations[0].expression.kind = "string".into();
-    let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
-    CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect("synthetic canonical artifact has refreshed digests")
 }
 
@@ -641,7 +640,10 @@ module native_transcendental_assignment(p, n);
              + tanh(x)
              + asin(x * 0.1)
              + acos(x * 0.1)
-             + atan(x);
+             + atan(x)
+             + asinh(x * 0.1)
+             + acosh(x + 2.0)
+             + atanh(x * 0.1);
         I(p, n) <+ gain * V(p, n);
     end
 endmodule
@@ -2609,6 +2611,103 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_differentiates_runtime_parameter_power_exponent() {
+    let source = r#"
+`include "disciplines.vams"
+module native_runtime_power_exponent(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exponent = 2.5;
+    analog I(p, n) <+ pow(V(p, n), exponent);
+endmodule
+"#;
+    let mut device = canonical_device_from_source("POWEXP1", source);
+    let x = 2.0_f64;
+    let (matrix, _) = stamp_device(&mut device, &[x]);
+    let expected = 2.5 * x.powf(1.5);
+    let actual = matrix.get(&(0, 0)).copied().unwrap_or_default();
+    assert!(
+        (actual - expected).abs() <= 1.0e-12 * expected.abs(),
+        "runtime-exponent Jacobian mismatch: native={actual} expected={expected}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_differentiates_runtime_parameter_power_exponent_twice() {
+    let source = r#"
+`include "disciplines.vams"
+module native_runtime_power_exponent_ddx(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exponent = 2.5;
+    analog I(p, n) <+ ddx(pow(V(p, n), exponent), V(p, n));
+endmodule
+"#;
+    let mut device = canonical_device_from_source("POWEXPDDX1", source);
+    let x = 2.0_f64;
+    let currents = {
+        device.update_voltages(&[x]);
+        device
+            .try_evaluate()
+            .expect("runtime-exponent ddx evaluates natively")
+    };
+    let expected_current = 2.5 * x.powf(1.5);
+    assert!((currents[0] - expected_current).abs() <= 1.0e-12 * expected_current.abs());
+
+    let (matrix, _) = stamp_device(&mut device, &[x]);
+    let expected_jacobian = 2.5 * 1.5 * x.powf(0.5);
+    let actual = matrix.get(&(0, 0)).copied().unwrap_or_default();
+    assert!(
+        (actual - expected_jacobian).abs() <= 1.0e-12 * expected_jacobian.abs(),
+        "runtime-exponent second derivative mismatch: native={actual} expected={expected_jacobian}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_differentiates_solution_dependent_power_exponent_twice() {
+    let source = r#"
+`include "disciplines.vams"
+module native_solution_power_exponent_ddx(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ ddx(
+        pow(V(p, n) + 3.0, 0.5 + 0.1 * V(p, n)),
+        V(p, n));
+endmodule
+"#;
+    let mut device = canonical_device_from_source("POWSOLDDX1", source);
+    let x = 0.75_f64;
+    device.update_voltages(&[x]);
+    let currents = device
+        .try_evaluate()
+        .expect("solution-dependent exponent ddx evaluates natively");
+
+    let base = x + 3.0;
+    let exponent = 0.5 + 0.1 * x;
+    let power = base.powf(exponent);
+    let logarithmic_derivative = 0.1 * base.ln() + exponent / base;
+    let expected_current = power * logarithmic_derivative;
+    assert!(
+        (currents[0] - expected_current).abs() <= 1.0e-11 * expected_current.abs().max(1.0),
+        "solution-dependent exponent derivative mismatch: native={} expected={expected_current}",
+        currents[0]
+    );
+
+    let (matrix, _) = stamp_device(&mut device, &[x]);
+    let logarithmic_second_derivative = 0.2 / base - exponent / base.powi(2);
+    let expected_jacobian =
+        power * (logarithmic_derivative.powi(2) + logarithmic_second_derivative);
+    let actual = matrix.get(&(0, 0)).copied().unwrap_or_default();
+    assert!(
+        (actual - expected_jacobian).abs() <= 1.0e-11 * expected_jacobian.abs().max(1.0),
+        "solution-dependent exponent second derivative mismatch: native={actual} expected={expected_jacobian}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_assignment_fed_ddx_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
@@ -3689,7 +3788,10 @@ fn native_device_executes_transcendental_assignments() {
             + x.tanh()
             + (x * 0.1).asin()
             + (x * 0.1).acos()
-            + x.atan();
+            + x.atan()
+            + (x * 0.1).asinh()
+            + (x + 2.0).acosh()
+            + (x * 0.1).atanh();
         let currents = device
             .try_evaluate()
             .expect("native transcendental assignment evaluation succeeds");

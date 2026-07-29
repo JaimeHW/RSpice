@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use rspice_veriloga::{
     CompileDiagnosticPhase, CompileError, CompileSourcePosition, CompilerOptions,
-    RuntimeArtifactIntegrityError, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetReadiness,
-    VerilogACompiler, compile_diagnostics,
+    RuntimeArtifactIntegrityError, RuntimeQualificationOptions, RuntimeTarget,
+    RuntimeTargetMaturity, RuntimeTargetReadiness, VerilogACompiler, compile_diagnostics,
 };
 
 const SENSOR_BRIDGE_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
@@ -87,30 +87,68 @@ fn target_matrix_is_exhaustive_and_truthful() {
 
     let rust = report.targets.get(RuntimeTarget::GeneratedRust);
     assert_eq!(rust.maturity, RuntimeTargetMaturity::QualificationOnly);
-    assert_eq!(rust.is_available(), report.generated_rust.is_some());
-    if let Some(generated) = &report.generated_rust {
-        assert_eq!(
-            generated.source_digest,
-            report.canonical_ir.metadata.source_digest
-        );
-        assert!(!generated.files.is_empty());
-        assert!(
-            generated
-                .files
-                .iter()
-                .all(|file| !file.relative_path.is_empty() && !file.contents.is_empty())
-        );
-    }
+    assert_eq!(rust.readiness, RuntimeTargetReadiness::Unavailable);
+    assert!(rust.detail.contains("not requested"));
+    assert!(report.generated_rust.is_none());
 
     let native = report.targets.get(RuntimeTarget::NativeX64Jit);
     assert_eq!(native.maturity, RuntimeTargetMaturity::Preview);
-    assert!(!native.detail.is_empty());
+    assert_eq!(native.readiness, RuntimeTargetReadiness::Unavailable);
+    assert!(native.detail.contains("not requested"));
+}
+
+#[test]
+fn optional_backend_qualification_is_explicit() {
+    let report = compiler()
+        .compile_runtime_with_qualifications(
+            SENSOR_BRIDGE_SOURCE,
+            None,
+            RuntimeQualificationOptions::ALL,
+        )
+        .expect("compile and qualify workbench model");
+
+    let rust = report.targets.get(RuntimeTarget::GeneratedRust);
+    assert_eq!(rust.readiness, RuntimeTargetReadiness::Available);
+    let generated = report
+        .generated_rust
+        .as_ref()
+        .expect("requested generated Rust artifact");
+    assert_eq!(
+        generated.source_digest,
+        report.canonical_ir.metadata.source_digest
+    );
+    assert!(!generated.files.is_empty());
+
+    let native = report.targets.get(RuntimeTarget::NativeX64Jit);
     #[cfg(not(feature = "native"))]
     assert_eq!(native.readiness, RuntimeTargetReadiness::Unavailable);
     #[cfg(all(feature = "native", target_arch = "x86_64"))]
     assert_eq!(native.readiness, RuntimeTargetReadiness::Available);
     #[cfg(all(feature = "native", not(target_arch = "x86_64")))]
     assert_eq!(native.readiness, RuntimeTargetReadiness::Unavailable);
+
+    report
+        .validate_integrity()
+        .expect("explicit qualification remains coherent");
+}
+
+#[test]
+fn canonical_artifacts_exclude_removed_scalar_graph() {
+    let runtime = compiler()
+        .compile_runtime(SENSOR_BRIDGE_SOURCE, None)
+        .expect("compile production runtime artifact");
+    let encoded = serde_json::to_value(&runtime.canonical_ir).expect("serialize runtime artifact");
+    let fields = encoded.as_object().expect("runtime artifact object");
+    assert!(!fields.contains_key("opt"));
+    assert!(!fields.contains_key("opt_digest"));
+
+    let canonical = compiler()
+        .compile_canonical_ir(SENSOR_BRIDGE_SOURCE)
+        .expect("compile canonical artifact");
+    let encoded = serde_json::to_value(canonical).expect("serialize canonical artifact");
+    let fields = encoded.as_object().expect("canonical artifact object");
+    assert!(!fields.contains_key("opt"));
+    assert!(!fields.contains_key("opt_digest"));
 }
 
 #[test]
@@ -144,7 +182,11 @@ fn integrity_validation_rejects_abi_and_qualification_drift() {
     );
 
     let mut report = compiler()
-        .compile_runtime(SENSOR_BRIDGE_SOURCE, None)
+        .compile_runtime_with_qualifications(
+            SENSOR_BRIDGE_SOURCE,
+            None,
+            RuntimeQualificationOptions::ALL,
+        )
         .expect("compile workbench model");
     assert!(report.generated_rust.take().is_some());
     assert!(matches!(

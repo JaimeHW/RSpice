@@ -421,6 +421,9 @@ pub enum IrFunction {
     Asin,
     Acos,
     Atan,
+    Asinh,
+    Acosh,
+    Atanh,
     Atan2,
     Floor,
     Ceil,
@@ -2724,6 +2727,58 @@ pub mod autodiff {
                         Box::new(IrExpr::Const(1.0)),
                         Box::new(IrExpr::Binary(
                             BinaryOp::Add,
+                            Box::new(IrExpr::Const(1.0)),
+                            Box::new(IrExpr::Binary(
+                                BinaryOp::Pow,
+                                Box::new(inner.clone()),
+                                Box::new(IrExpr::Const(2.0)),
+                            )),
+                        )),
+                    ),
+                    IrFunction::Asinh => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Call(
+                            IrFunction::Sqrt,
+                            vec![IrExpr::Binary(
+                                BinaryOp::Add,
+                                Box::new(IrExpr::Const(1.0)),
+                                Box::new(IrExpr::Binary(
+                                    BinaryOp::Pow,
+                                    Box::new(inner.clone()),
+                                    Box::new(IrExpr::Const(2.0)),
+                                )),
+                            )],
+                        )),
+                    ),
+                    IrFunction::Acosh => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Mul,
+                            Box::new(IrExpr::Call(
+                                IrFunction::Sqrt,
+                                vec![IrExpr::Binary(
+                                    BinaryOp::Sub,
+                                    Box::new(inner.clone()),
+                                    Box::new(IrExpr::Const(1.0)),
+                                )],
+                            )),
+                            Box::new(IrExpr::Call(
+                                IrFunction::Sqrt,
+                                vec![IrExpr::Binary(
+                                    BinaryOp::Add,
+                                    Box::new(inner.clone()),
+                                    Box::new(IrExpr::Const(1.0)),
+                                )],
+                            )),
+                        )),
+                    ),
+                    IrFunction::Atanh => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Sub,
                             Box::new(IrExpr::Const(1.0)),
                             Box::new(IrExpr::Binary(
                                 BinaryOp::Pow,

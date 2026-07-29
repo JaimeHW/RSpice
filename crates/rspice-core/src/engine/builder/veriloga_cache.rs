@@ -2,9 +2,8 @@ use super::*;
 
 #[cfg(feature = "veriloga")]
 // Bump whenever a persisted runtime artifact or its integrity contract changes.
-// Version 14 invalidates records written before canonical-IR digest validation
-// became a mandatory cache-load boundary.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 14;
+// Version 15 removes the obsolete scalar value graph from runtime artifacts.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 15;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

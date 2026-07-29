@@ -739,7 +739,7 @@ impl<'a> AdBuilder<'a> {
                 let scale = self.idt_scale();
                 Some(self.scale(derivative, scale))
             }
-            // The classic SPICE convention, and the one OptIR pins: what
+            // The classic SPICE convention pinned by the compiler contract: what
             // `$limit` returned takes the *proposed* value's slope. `dL/dv := 1`
             // rather than the limiter body's own derivative.
             //

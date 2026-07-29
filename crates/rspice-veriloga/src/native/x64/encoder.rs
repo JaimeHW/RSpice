@@ -23,6 +23,7 @@ pub(crate) enum Gpr {
     R11,
     R12,
     R13,
+    R14,
 }
 
 #[allow(dead_code)]
@@ -41,6 +42,7 @@ impl Gpr {
             Self::R11 => 11,
             Self::R12 => 12,
             Self::R13 => 13,
+            Self::R14 => 14,
         }
     }
 }
@@ -210,6 +212,19 @@ impl X64Encoder {
         self.emit_rex(false, 0, 0, target.code());
         self.emit_u8(0xFF);
         self.emit_modrm(0b11, 0b010, target.code());
+    }
+
+    /// Emits `call rel32` and returns the displacement field offset.
+    ///
+    /// The caller must patch the returned four-byte field relative to the
+    /// instruction immediately following it. Native image drivers use this
+    /// form to call sibling entry points without materializing absolute
+    /// addresses or consuming a scratch register.
+    pub(crate) fn call_rel32_placeholder(&mut self) -> usize {
+        self.emit_u8(0xE8);
+        let offset = self.position();
+        self.emit_i32(0);
+        offset
     }
 
     pub(crate) fn sub_rsp_imm32(&mut self, value: i32) {
@@ -774,6 +789,16 @@ mod tests {
     }
 
     #[test]
+    fn encodes_extended_callee_saved_push_pop() {
+        let mut encoder = X64Encoder::new();
+
+        encoder.push_r64(Gpr::R14);
+        encoder.pop_r64(Gpr::R14);
+
+        assert_eq!(encoder.into_bytes(), [0x41, 0x56, 0x41, 0x5E]);
+    }
+
+    #[test]
     fn encodes_scalar_f64_register_ops() {
         let mut encoder = X64Encoder::new();
 
@@ -1121,6 +1146,17 @@ mod tests {
     }
 
     #[test]
+    fn encodes_patchable_relative_call() {
+        let mut encoder = X64Encoder::new();
+
+        let displacement = encoder.call_rel32_placeholder();
+        encoder.patch_i32(displacement, -0x1020_3040);
+
+        assert_eq!(displacement, 1);
+        assert_eq!(encoder.into_bytes(), [0xE8, 0xC0, 0xCF, 0xDF, 0xEF]);
+    }
+
+    #[test]
     fn encodes_stack_adjustments_with_short_and_wide_immediates() {
         let mut encoder = X64Encoder::new();
 
@@ -1258,8 +1294,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,
@@ -1267,6 +1306,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         };
 
         let mut encoder = X64Encoder::new();

@@ -250,18 +250,31 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         for budget in [
-            "--max-source-bytes 113000000",
-            "--max-noise-source-bytes 59000000",
-            "--max-model-source-bytes 8800000",
-            "--max-file-count 650",
-            "--max-pooled-workspace-payload-bytes 650000",
+            "--max-source-bytes 56000000",
+            "--max-noise-source-bytes 17000000",
+            "--max-model-source-bytes 4700000",
+            "--max-file-count 240",
+            "--max-pooled-workspace-payload-bytes 0",
             "--max-stamp-state-payload-bytes 6200",
         ]:
             self.assertIn(budget, workflow)
+        self.assertIn("Compile Verilog-A native JIT tests (Linux x64)", workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --features native native:: --no-run",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --release --features native native:: --no-run",
+            workflow,
+        )
         self.assertIn("Test Verilog-A native JIT units (Linux x64)", workflow)
         self.assertRegex(
             workflow,
             r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
+        )
+        self.assertRegex(
+            workflow,
+            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
         )
         self.assertIn("Test Verilog-A native JIT contracts (Linux x64)", workflow)
         self.assertIn(
@@ -279,9 +292,18 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("Smoke Verilog-A native JIT benchmark gate (Linux x64)", workflow)
-        self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
+        self.assertRegex(
             workflow,
+            r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
+            r"--iterations 100000\s+"
+            r"--samples 9\s+"
+            r"--min-dense-speedup 2\.00\s+"
+            r"--min-speedup 1\.10\s+"
+            r"--min-full-stamp-speedup 2\.00\s+"
+            r"--max-native-setup-ms 10\s+"
+            r"--max-native-p95-ns-per-sweep 5000\s+"
+            r"--max-relative-stddev 0\.25\s+"
+            r"--max-native-code-bytes 16384",
         )
         self.assertIn("Test UI library (Linux)", workflow)
         self.assertIn("cargo test --locked -p rspice-ui --lib", workflow)
@@ -314,6 +336,7 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("runs-on: windows-latest", workflow)
+        self.assertIn("Compile Verilog-A native JIT tests", workflow)
         self.assertIn("Verilog-A native JIT unit tests", workflow)
         self.assertIn("Verilog-A native JIT contract tests", workflow)
         self.assertIn("Verilog-A native multiplicity tests", workflow)
@@ -321,6 +344,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertRegex(
             workflow,
             r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
+        )
+        self.assertRegex(
+            workflow,
+            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
         )
         self.assertIn(
             "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
@@ -330,9 +357,56 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1",
             workflow,
         )
-        self.assertIn(
-            "cargo run --locked -p rspice-bench --release -- native-jit --iterations 10000 --samples 7 --min-speedup 1.10",
+        self.assertRegex(
             workflow,
+            r"cargo run --locked -p rspice-bench --release -- native-jit\s+"
+            r"--iterations 100000\s+"
+            r"--samples 9\s+"
+            r"--min-dense-speedup 2\.00\s+"
+            r"--min-speedup 1\.10\s+"
+            r"--min-full-stamp-speedup 2\.00\s+"
+            r"--max-native-setup-ms 10\s+"
+            r"--max-native-p95-ns-per-sweep 5000\s+"
+            r"--max-relative-stddev 0\.25\s+"
+            r"--max-native-code-bytes 16384",
+        )
+
+    def test_macos_intel_ci_executes_native_veriloga_jit(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+
+        self.assertIn("test-macos-x64-native:", workflow)
+        self.assertIn("runs-on: macos-15-intel", workflow)
+        self.assertIn('test "$(uname -m)" = "x86_64"', workflow)
+        self.assertIn("Test Verilog-A native JIT (macOS Intel x64)", workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1",
+            workflow,
+        )
+        self.assertIn("Gate Verilog-A native JIT performance", workflow)
+
+    def test_shipping_frontends_enable_x64_jit_only_on_x86_64(self) -> None:
+        cli_manifest = read_text("crates/rspice-cli/Cargo.toml")
+        ui_manifest = read_text("crates/rspice-ui/Cargo.toml")
+
+        self.assertRegex(
+            cli_manifest,
+            r"""\[target\.'cfg\(target_arch = "x86_64"\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga-native"\]""",
+        )
+        self.assertRegex(
+            cli_manifest,
+            r"""\[target\.'cfg\(not\(target_arch = "x86_64"\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga"\]""",
+        )
+        self.assertRegex(
+            ui_manifest,
+            r"""\[target\.'cfg\(all\(not\(target_arch = "wasm32"\), target_arch = "x86_64"\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga-native"\]""",
+        )
+        self.assertRegex(
+            ui_manifest,
+            r"""\[target\.'cfg\(all\(not\(target_arch = "wasm32"\), not\(target_arch = "x86_64"\)\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga"\]""",
         )
 
     def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:

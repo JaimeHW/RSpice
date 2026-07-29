@@ -19,6 +19,7 @@ use crate::canonical_ir::{
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
@@ -208,12 +209,44 @@ impl CanonicalDerivativeAxis {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeIdentifierSlot {
+    Parameter(usize),
+    Variable(usize),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct NativeIdentifierIndex {
+    slots: HashMap<SmolStr, NativeIdentifierSlot>,
+}
+
+impl NativeIdentifierIndex {
+    pub(crate) fn new(mir: &MirModel, variable_names: &[SmolStr]) -> Self {
+        let mut slots = HashMap::with_capacity(mir.parameters.len() + variable_names.len());
+        for (index, name) in variable_names.iter().enumerate() {
+            slots.insert(name.clone(), NativeIdentifierSlot::Variable(index));
+        }
+        for parameter in &mir.parameters {
+            slots.insert(
+                parameter.name.clone(),
+                NativeIdentifierSlot::Parameter(usize::from(parameter.id)),
+            );
+        }
+        Self { slots }
+    }
+
+    fn get(&self, name: &str) -> Option<NativeIdentifierSlot> {
+        self.slots.get(name).copied()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NativeLoweringLimits<'a> {
     terminal_count: usize,
     internal_node_count: usize,
     parameter_count: usize,
     variable_count: usize,
     variable_names: &'a [SmolStr],
+    identifier_index: Option<&'a NativeIdentifierIndex>,
     branch_unknown_count: usize,
     canonical_branch_unknown_map: &'a [BranchUnknownRuntimeMapping],
     lookup_table_count: usize,
@@ -234,6 +267,7 @@ pub(crate) struct NativeLoweringLimits<'a> {
     canonical_timer_slots: &'a [(ExprId, usize)],
     canonical_limit_slots: &'a [(ExprId, usize)],
     canonical_table_lookup_slots: &'a [(ExprId, usize)],
+    mir_prevalidated: bool,
 }
 
 impl<'a> NativeLoweringLimits<'a> {
@@ -250,6 +284,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count,
             variable_count,
             variable_names: &[],
+            identifier_index: None,
             branch_unknown_count,
             canonical_branch_unknown_map: &[],
             lookup_table_count: 0,
@@ -270,6 +305,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: &[],
             canonical_limit_slots: &[],
             canonical_table_lookup_slots: &[],
+            mir_prevalidated: false,
         }
     }
 
@@ -287,6 +323,83 @@ impl<'a> NativeLoweringLimits<'a> {
         .with_zi_filter_count(model.zi_filters.len())
     }
 
+    pub(crate) fn with_prevalidated_mir(self) -> Self {
+        Self {
+            mir_prevalidated: true,
+            ..self
+        }
+    }
+
+    pub(crate) fn with_identifier_index<'b>(
+        self,
+        identifier_index: &'b NativeIdentifierIndex,
+    ) -> NativeLoweringLimits<'b>
+    where
+        'a: 'b,
+    {
+        NativeLoweringLimits {
+            terminal_count: self.terminal_count,
+            internal_node_count: self.internal_node_count,
+            parameter_count: self.parameter_count,
+            variable_count: self.variable_count,
+            variable_names: self.variable_names,
+            identifier_index: Some(identifier_index),
+            branch_unknown_count: self.branch_unknown_count,
+            canonical_branch_unknown_map: self.canonical_branch_unknown_map,
+            lookup_table_count: self.lookup_table_count,
+            laplace_filter_count: self.laplace_filter_count,
+            zi_filter_count: self.zi_filter_count,
+            available_current_pairs: self.available_current_pairs,
+            prior_current_probes: self.prior_current_probes,
+            canonical_ddt_slots: self.canonical_ddt_slots,
+            canonical_idt_slots: self.canonical_idt_slots,
+            canonical_idtmod_slots: self.canonical_idtmod_slots,
+            canonical_transition_slots: self.canonical_transition_slots,
+            canonical_slew_slots: self.canonical_slew_slots,
+            canonical_absdelay_slots: self.canonical_absdelay_slots,
+            canonical_laplace_slots: self.canonical_laplace_slots,
+            canonical_zi_slots: self.canonical_zi_slots,
+            canonical_cross_slots: self.canonical_cross_slots,
+            canonical_above_slots: self.canonical_above_slots,
+            canonical_timer_slots: self.canonical_timer_slots,
+            canonical_limit_slots: self.canonical_limit_slots,
+            canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
+        }
+    }
+
+    fn validate_mir(self, model: &SmolStr, mir: &MirModel) -> JitResult<()> {
+        if self.mir_prevalidated {
+            return Ok(());
+        }
+        mir.validate()
+            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
+                model: model.clone(),
+                detail: diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| "MIR validation failed".into())
+                    .into(),
+            })
+    }
+
+    fn identifier_slot(self, mir: &MirModel, name: &str) -> Option<NativeIdentifierSlot> {
+        if let Some(index) = self.identifier_index {
+            return index.get(name);
+        }
+        if let Some(parameter) = mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == name)
+        {
+            return Some(NativeIdentifierSlot::Parameter(usize::from(parameter.id)));
+        }
+        self.variable_names
+            .iter()
+            .position(|variable| variable.as_str() == name)
+            .map(NativeIdentifierSlot::Variable)
+    }
+
     pub(crate) fn with_canonical_branch_unknown_map<'b>(
         self,
         canonical_branch_unknown_map: &'b [BranchUnknownRuntimeMapping],
@@ -300,6 +413,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -320,6 +434,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -336,6 +451,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -356,6 +472,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -372,6 +489,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -392,6 +510,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -415,6 +534,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names,
+            identifier_index: None,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -435,6 +555,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -465,6 +586,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -485,6 +607,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -501,6 +624,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -521,6 +645,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -537,6 +662,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -557,6 +683,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -573,6 +700,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -593,6 +721,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -609,6 +738,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -629,6 +759,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -645,6 +776,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -665,6 +797,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -681,6 +814,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -701,6 +835,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -717,6 +852,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -737,6 +873,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -753,6 +890,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -773,6 +911,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -789,6 +928,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -809,6 +949,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -825,6 +966,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -845,6 +987,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -861,6 +1004,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -881,6 +1025,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots,
             canonical_table_lookup_slots: self.canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -897,6 +1042,7 @@ impl<'a> NativeLoweringLimits<'a> {
             parameter_count: self.parameter_count,
             variable_count: self.variable_count,
             variable_names: self.variable_names,
+            identifier_index: self.identifier_index,
             branch_unknown_count: self.branch_unknown_count,
             canonical_branch_unknown_map: self.canonical_branch_unknown_map,
             lookup_table_count: self.lookup_table_count,
@@ -917,6 +1063,7 @@ impl<'a> NativeLoweringLimits<'a> {
             canonical_timer_slots: self.canonical_timer_slots,
             canonical_limit_slots: self.canonical_limit_slots,
             canonical_table_lookup_slots,
+            mir_prevalidated: self.mir_prevalidated,
         }
     }
 
@@ -1035,7 +1182,7 @@ impl CanonicalStateOperator {
         }
     }
 
-    fn bytecode_slot(self, instruction: &Instruction) -> Option<usize> {
+    pub(crate) fn bytecode_slot(self, instruction: &Instruction) -> Option<usize> {
         match (self, instruction) {
             (Self::Ddt, Instruction::DdtState(slot)) | (Self::Idt, Instruction::IdtState(slot)) => {
                 Some(*slot)
@@ -1337,11 +1484,13 @@ pub(crate) fn canonical_state_slots_for_expression(
         return Err(JitError::InvalidCanonicalIr {
             model,
             detail: format!(
-                "canonical expression {expr_id} has {} {} operators but bytecode program has {} {}State slots",
+                "canonical expression {expr_id} has {} {} operators {:?} but bytecode program has {} {}State slots {:?}",
                 canonical_exprs.len(),
                 operator.name(),
+                canonical_exprs,
                 bytecode_slots.len(),
-                operator.name()
+                operator.name(),
+                bytecode_slots,
             )
             .into(),
         });
@@ -2055,6 +2204,9 @@ impl NativeProgram {
                 | Instruction::Asin
                 | Instruction::Acos
                 | Instruction::Atan
+                | Instruction::Asinh
+                | Instruction::Acosh
+                | Instruction::Atanh
                 | Instruction::Floor
                 | Instruction::Ceil => {
                     require_stack(
@@ -2307,15 +2459,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let equation = mir
             .equations
@@ -2378,15 +2522,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
@@ -2424,15 +2560,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
@@ -2471,19 +2599,51 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let mut lowerer =
             MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
         lowerer.lower_second_derivative(expr_id, first, second)?;
+
+        if lowerer.depth != 1 {
+            return Err(stack_error(
+                model.clone(),
+                entry_kind,
+                format!("final stack depth {}, expected 1", lowerer.depth),
+            ));
+        }
+        validate_entry_ops(model.clone(), entry_kind, &lowerer.ops)?;
+        let optimized_max_stack_depth =
+            compute_native_max_stack_depth(model.clone(), entry_kind, &lowerer.ops)?;
+        debug_assert!(optimized_max_stack_depth <= lowerer.max_stack_depth);
+        let branch_unknown_dependencies = collect_branch_unknown_dependencies(&lowerer.ops);
+
+        Ok(Self {
+            ops: lowerer.ops,
+            max_stack_depth: optimized_max_stack_depth,
+            current_pair_dependencies: lowerer.current_pair_dependencies,
+            prior_current_dependencies: lowerer.prior_current_dependencies,
+            branch_unknown_dependencies,
+        })
+    }
+
+    pub(crate) fn from_mir_expression_third_derivative(
+        model: impl Into<SmolStr>,
+        entry_kind: EntryKind,
+        mir: &MirModel,
+        equation_id: EquationId,
+        expr_id: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+        limits: NativeLoweringLimits<'_>,
+    ) -> JitResult<Self> {
+        let model = model.into();
+        limits.validate_mir(&model, mir)?;
+
+        let mut lowerer =
+            MirEquationLowerer::new(model.clone(), entry_kind, mir, equation_id, limits);
+        lowerer.lower_third_derivative(expr_id, first, second, third)?;
 
         if lowerer.depth != 1 {
             return Err(stack_error(
@@ -2516,15 +2676,7 @@ impl NativeProgram {
         limits: NativeLoweringLimits<'_>,
     ) -> JitResult<Self> {
         let model = model.into();
-        mir.validate()
-            .map_err(|diagnostics| JitError::InvalidCanonicalIr {
-                model: model.clone(),
-                detail: diagnostics
-                    .first()
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_else(|| "MIR validation failed".into())
-                    .into(),
-            })?;
+        limits.validate_mir(&model, mir)?;
 
         let equation = mir
             .equations
@@ -2978,6 +3130,30 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_ddx_projection_second_derivative(
+        &mut self,
+        expr: ExprId,
+        probe: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let (pos, neg) = self.ddx_probe_nodes(probe)?;
+        if let Some(pos) = pos {
+            self.lower_third_derivative(expr, CanonicalDerivativeAxis::Node(pos), first, second)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+
+        if let Some(neg) = neg {
+            self.lower_third_derivative(expr, CanonicalDerivativeAxis::Node(neg), first, second)?;
+            self.append_arithmetic("Sub")?;
+            self.push(NativeOp::Const(0.5))?;
+            self.append_arithmetic("Mul")?;
+        }
+
+        Ok(())
+    }
+
     fn ddx_probe_nodes(&self, probe: ExprId) -> JitResult<(Option<NodeId>, Option<NodeId>)> {
         let expression = self.expression(probe)?;
         match &expression.kind {
@@ -3128,6 +3304,122 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
+    fn lower_third_derivative(
+        &mut self,
+        expr_id: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let expression = self.expression(expr_id)?;
+        match &expression.kind {
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::ArrayLiteral { .. }
+            | HirExprKind::NoiseSource { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => self.push(NativeOp::Const(0.0)),
+            HirExprKind::Identifier { name } => {
+                self.lower_identifier_third_derivative(name.as_str(), first, second, third)
+            }
+            HirExprKind::Unary { op, operand } => match op.as_str() {
+                "Pos" => self.lower_third_derivative(*operand, first, second, third),
+                "Neg" => {
+                    self.lower_third_derivative(*operand, first, second, third)?;
+                    self.append_unary(NativeOp::Neg)
+                }
+                "Not" | "BitNot" => self.push(NativeOp::Const(0.0)),
+                _ => Err(self.unsupported(format!("third derivative of unary operator {op}"))),
+            },
+            HirExprKind::Binary { op, left, right } => match op.as_str() {
+                "Add" | "Sub" => {
+                    self.lower_third_derivative(*left, first, second, third)?;
+                    self.lower_third_derivative(*right, first, second, third)?;
+                    self.append_arithmetic(op.as_str())
+                }
+                "Mul" => self.lower_mul_third_derivative(*left, *right, first, second, third),
+                "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd"
+                | "BitOr" | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+                _ => Err(self.unsupported(format!("third derivative of binary operator {op}"))),
+            },
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.lower(*condition)?;
+                self.lower_third_derivative(*then_expr, first, second, third)?;
+                self.lower_third_derivative(*else_expr, first, second, third)?;
+                self.append_ifelse()
+            }
+            HirExprKind::ArrayAccess { array, index } => self.lower_array_access_third_derivative(
+                array.as_str(),
+                *index,
+                first,
+                second,
+                third,
+            ),
+            HirExprKind::SystemFunction { name, .. } | HirExprKind::Call { name, .. } => {
+                Err(self.unsupported(format!("third derivative of intrinsic function '{name}'")))
+            }
+            HirExprKind::AnalogOperator { op } => Err(self.unsupported(format!(
+                "third derivative of analog operator {}",
+                analog_operator_name(op)
+            ))),
+            HirExprKind::Laplace { .. } | HirExprKind::Zi { .. } => {
+                Err(self.unsupported("third derivative of stateful operator"))
+            }
+        }
+    }
+
+    fn lower_mul_third_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        self.lower_third_derivative(left, first, second, third)?;
+        self.lower(right)?;
+        self.append_arithmetic("Mul")?;
+
+        self.lower_second_derivative(left, first, second)?;
+        self.lower_derivative(right, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_second_derivative(left, first, third)?;
+        self.lower_derivative(right, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_derivative(left, first)?;
+        self.lower_second_derivative(right, second, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_second_derivative(left, second, third)?;
+        self.lower_derivative(right, first)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_derivative(left, second)?;
+        self.lower_second_derivative(right, first, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower_derivative(left, third)?;
+        self.lower_second_derivative(right, first, second)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")?;
+
+        self.lower(left)?;
+        self.lower_third_derivative(right, first, second, third)?;
+        self.append_arithmetic("Mul")?;
+        self.append_arithmetic("Add")
+    }
+
     fn expr_derivative_is_zero(
         &self,
         expr_id: ExprId,
@@ -3268,28 +3560,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn identifier_derivative_is_zero(&self, name: &str, wrt: CanonicalDerivativeAxis) -> bool {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return true;
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => true,
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
+                self.limits
+                    .identifier_slot(self.mir, &shadow_name)
+                    .is_none()
+            }
+            None => false,
         }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
-            return !self
-                .limits
-                .variable_names
-                .iter()
-                .any(|variable| variable.as_str() == shadow_name);
-        }
-        false
     }
 
     fn identifier_second_derivative_is_zero(
@@ -3298,29 +3578,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> bool {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return true;
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => true,
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let first_shadow = format!("{name}@{}", first.shadow_suffix());
+                let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
+                self.limits
+                    .identifier_slot(self.mir, &second_shadow)
+                    .is_none()
+            }
+            None => false,
         }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let first_shadow = format!("{name}@{}", first.shadow_suffix());
-            let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
-            return !self
-                .limits
-                .variable_names
-                .iter()
-                .any(|variable| variable.as_str() == second_shadow);
-        }
-        false
     }
 
     fn array_derivative_is_zero(&self, array: &str, wrt: CanonicalDerivativeAxis) -> bool {
@@ -3620,38 +3888,25 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         name: &str,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return self.push(NativeOp::Const(0.0));
-        }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
-            if let Some(shadow_index) = self
-                .limits
-                .variable_names
-                .iter()
-                .position(|variable| variable.as_str() == shadow_name)
-            {
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => self.push(NativeOp::Const(0.0)),
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let shadow_name = format!("{name}@{}", wrt.shadow_suffix());
+                let Some(NativeIdentifierSlot::Variable(shadow_index)) =
+                    self.limits.identifier_slot(self.mir, &shadow_name)
+                else {
+                    return self.push(NativeOp::Const(0.0));
+                };
                 validate_index(
                     self.model.clone(),
                     "canonical variable derivative shadow",
                     shadow_index,
                     self.limits.variable_count,
                 )?;
-                return self.push(NativeOp::LoadVariable(shadow_index));
+                self.push(NativeOp::LoadVariable(shadow_index))
             }
-            return self.push(NativeOp::Const(0.0));
+            None => Err(self.unsupported(format!("ddx derivative of identifier {name}"))),
         }
-        Err(self.unsupported(format!("ddx derivative of identifier {name}")))
     }
 
     fn lower_identifier_second_derivative(
@@ -3660,39 +3915,59 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if self
-            .mir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.name.as_str() == name)
-        {
-            return self.push(NativeOp::Const(0.0));
-        }
-        if self
-            .limits
-            .variable_names
-            .iter()
-            .any(|variable| variable.as_str() == name)
-        {
-            let first_shadow = format!("{name}@{}", first.shadow_suffix());
-            let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
-            if let Some(shadow_index) = self
-                .limits
-                .variable_names
-                .iter()
-                .position(|variable| variable.as_str() == second_shadow)
-            {
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => self.push(NativeOp::Const(0.0)),
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let first_shadow = format!("{name}@{}", first.shadow_suffix());
+                let second_shadow = format!("{first_shadow}@{}", second.shadow_suffix());
+                let Some(NativeIdentifierSlot::Variable(shadow_index)) =
+                    self.limits.identifier_slot(self.mir, &second_shadow)
+                else {
+                    return self.push(NativeOp::Const(0.0));
+                };
                 validate_index(
                     self.model.clone(),
                     "canonical variable second-derivative shadow",
                     shadow_index,
                     self.limits.variable_count,
                 )?;
-                return self.push(NativeOp::LoadVariable(shadow_index));
+                self.push(NativeOp::LoadVariable(shadow_index))
             }
-            return self.push(NativeOp::Const(0.0));
+            None => Err(self.unsupported(format!("second derivative of identifier {name}"))),
         }
-        Err(self.unsupported(format!("second derivative of identifier {name}")))
+    }
+
+    fn lower_identifier_third_derivative(
+        &mut self,
+        name: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(_)) => self.push(NativeOp::Const(0.0)),
+            Some(NativeIdentifierSlot::Variable(_)) => {
+                let shadow_name = format!(
+                    "{name}@{}@{}@{}",
+                    first.shadow_suffix(),
+                    second.shadow_suffix(),
+                    third.shadow_suffix()
+                );
+                let Some(NativeIdentifierSlot::Variable(shadow_index)) =
+                    self.limits.identifier_slot(self.mir, &shadow_name)
+                else {
+                    return self.push(NativeOp::Const(0.0));
+                };
+                validate_index(
+                    self.model.clone(),
+                    "canonical variable third-derivative shadow",
+                    shadow_index,
+                    self.limits.variable_count,
+                )?;
+                self.push(NativeOp::LoadVariable(shadow_index))
+            }
+            None => Err(self.unsupported(format!("third derivative of identifier {name}"))),
+        }
     }
 
     fn lower_branch_access_derivative(
@@ -4080,16 +4355,52 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         right: ExprId,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        let exponent = self
-            .constant_number(right)
-            .ok_or_else(|| self.unsupported("ddx derivative of non-constant power exponent"))?;
-        self.push(NativeOp::Const(exponent))?;
-        self.lower(left)?;
-        self.push(NativeOp::Const(exponent - 1.0))?;
-        self.append_binary_math("Pow")?;
-        self.append_arithmetic("Mul")?;
-        self.lower_derivative(left, wrt)?;
-        self.append_arithmetic("Mul")
+        if let Some(exponent) = self.constant_number(right) {
+            self.push(NativeOp::Const(exponent))?;
+            self.lower(left)?;
+            self.push(NativeOp::Const(exponent - 1.0))?;
+            self.append_binary_math("Pow")?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(left, wrt)?;
+            return self.append_arithmetic("Mul");
+        }
+
+        let left_zero = self.expr_derivative_is_zero(left, wrt)?;
+        let right_zero = self.expr_derivative_is_zero(right, wrt)?;
+        if left_zero && right_zero {
+            return self.push(NativeOp::Const(0.0));
+        }
+
+        let mut emitted = false;
+        // d(a^b)/da * da = b * a^(b-1) * da
+        if !left_zero {
+            self.lower(right)?;
+            self.lower(left)?;
+            self.lower(right)?;
+            self.push(NativeOp::Const(1.0))?;
+            self.append_arithmetic("Sub")?;
+            self.append_binary_math("Pow")?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(left, wrt)?;
+            self.append_arithmetic("Mul")?;
+            emitted = true;
+        }
+
+        // d(a^b)/db * db = a^b * ln(a) * db
+        if !right_zero {
+            self.lower(left)?;
+            self.lower(right)?;
+            self.append_binary_math("Pow")?;
+            self.lower(left)?;
+            self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Log))?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(right, wrt)?;
+            self.append_arithmetic("Mul")?;
+            if emitted {
+                self.append_arithmetic("Add")?;
+            }
+        }
+        Ok(())
     }
 
     fn lower_pow_second_derivative(
@@ -4099,9 +4410,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        let exponent = self
-            .constant_number(right)
-            .ok_or_else(|| self.unsupported("second derivative of non-constant power exponent"))?;
+        let Some(exponent) = self.constant_number(right) else {
+            return self.lower_variable_pow_second_derivative(left, right, first, second);
+        };
         if exponent.to_bits() == 0.0_f64.to_bits() {
             return self.push(NativeOp::Const(0.0));
         }
@@ -4144,6 +4455,186 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         } else {
             self.push(NativeOp::Const(0.0))
         }
+    }
+
+    fn lower_variable_pow_second_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let left_a_zero = self.expr_derivative_is_zero(left, first)?;
+        let left_b_zero = self.expr_derivative_is_zero(left, second)?;
+        let left_ab_zero = self.expr_second_derivative_is_zero(left, first, second)?;
+        let right_a_zero = self.expr_derivative_is_zero(right, first)?;
+        let right_b_zero = self.expr_derivative_is_zero(right, second)?;
+        let right_ab_zero = self.expr_second_derivative_is_zero(right, first, second)?;
+
+        // The common compact-model case is a runtime parameter exponent:
+        // dynamic in value, but independent of every Newton axis. Keep the
+        // literal-exponent formula and substitute the runtime exponent.
+        if right_a_zero && right_b_zero && right_ab_zero {
+            let mut emitted = false;
+            if !(left_a_zero || left_b_zero) {
+                self.lower_derivative(left, first)?;
+                self.lower_derivative(left, second)?;
+                self.append_arithmetic("Mul")?;
+                self.lower(right)?;
+                self.lower(right)?;
+                self.push(NativeOp::Const(1.0))?;
+                self.append_arithmetic("Sub")?;
+                self.append_arithmetic("Mul")?;
+                self.lower(left)?;
+                self.lower(right)?;
+                self.push(NativeOp::Const(2.0))?;
+                self.append_arithmetic("Sub")?;
+                self.append_binary_math("Pow")?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Mul")?;
+                emitted = true;
+            }
+            if !left_ab_zero {
+                self.lower_second_derivative(left, first, second)?;
+                self.lower(right)?;
+                self.lower(left)?;
+                self.lower(right)?;
+                self.push(NativeOp::Const(1.0))?;
+                self.append_arithmetic("Sub")?;
+                self.append_binary_math("Pow")?;
+                self.append_arithmetic("Mul")?;
+                self.append_arithmetic("Mul")?;
+                if emitted {
+                    self.append_arithmetic("Add")?;
+                }
+                emitted = true;
+            }
+            return if emitted {
+                Ok(())
+            } else {
+                self.push(NativeOp::Const(0.0))
+            };
+        }
+
+        let q_first_nonzero = !(left_a_zero && right_a_zero);
+        let q_second_nonzero = !(left_b_zero && right_b_zero);
+        let q_product_nonzero = q_first_nonzero && q_second_nonzero;
+        let q_second_derivative_nonzero = !right_ab_zero
+            || !(right_a_zero || left_b_zero)
+            || !(right_b_zero || left_a_zero)
+            || !left_ab_zero
+            || !(left_a_zero || left_b_zero);
+        if !q_product_nonzero && !q_second_derivative_nonzero {
+            return self.push(NativeOp::Const(0.0));
+        }
+
+        // a^b * (q_a*q_b + q_ab), where
+        // q_x = b_x*ln(a) + b*a_x/a and
+        // q_ab = b_ab*ln(a) + b_a*a_b/a + b_b*a_a/a
+        //        + b*a_ab/a - b*a_a*a_b/a^2.
+        self.lower(left)?;
+        self.lower(right)?;
+        self.append_binary_math("Pow")?;
+
+        let mut factor_emitted = false;
+        if q_product_nonzero {
+            self.lower_pow_log_derivative_factor(left, right, first, left_a_zero, right_a_zero)?;
+            self.lower_pow_log_derivative_factor(left, right, second, left_b_zero, right_b_zero)?;
+            self.append_arithmetic("Mul")?;
+            factor_emitted = true;
+        }
+
+        let mut qab_emitted = false;
+        if !right_ab_zero {
+            self.lower_second_derivative(right, first, second)?;
+            self.lower(left)?;
+            self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Log))?;
+            self.append_arithmetic("Mul")?;
+            qab_emitted = true;
+        }
+        if !(right_a_zero || left_b_zero) {
+            self.lower_derivative(right, first)?;
+            self.lower_derivative(left, second)?;
+            self.append_arithmetic("Mul")?;
+            self.lower(left)?;
+            self.append_arithmetic("Div")?;
+            if qab_emitted {
+                self.append_arithmetic("Add")?;
+            }
+            qab_emitted = true;
+        }
+        if !(right_b_zero || left_a_zero) {
+            self.lower_derivative(right, second)?;
+            self.lower_derivative(left, first)?;
+            self.append_arithmetic("Mul")?;
+            self.lower(left)?;
+            self.append_arithmetic("Div")?;
+            if qab_emitted {
+                self.append_arithmetic("Add")?;
+            }
+            qab_emitted = true;
+        }
+        if !left_ab_zero {
+            self.lower(right)?;
+            self.lower_second_derivative(left, first, second)?;
+            self.append_arithmetic("Mul")?;
+            self.lower(left)?;
+            self.append_arithmetic("Div")?;
+            if qab_emitted {
+                self.append_arithmetic("Add")?;
+            }
+            qab_emitted = true;
+        }
+        if !(left_a_zero || left_b_zero) {
+            self.lower(right)?;
+            self.lower_derivative(left, first)?;
+            self.append_arithmetic("Mul")?;
+            self.lower_derivative(left, second)?;
+            self.append_arithmetic("Mul")?;
+            self.lower(left)?;
+            self.lower(left)?;
+            self.append_arithmetic("Mul")?;
+            self.append_arithmetic("Div")?;
+            self.append_unary(NativeOp::Neg)?;
+            if qab_emitted {
+                self.append_arithmetic("Add")?;
+            }
+            qab_emitted = true;
+        }
+
+        if factor_emitted && qab_emitted {
+            self.append_arithmetic("Add")?;
+        }
+        self.append_arithmetic("Mul")
+    }
+
+    fn lower_pow_log_derivative_factor(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        wrt: CanonicalDerivativeAxis,
+        left_zero: bool,
+        right_zero: bool,
+    ) -> JitResult<()> {
+        let mut emitted = false;
+        if !right_zero {
+            self.lower_derivative(right, wrt)?;
+            self.lower(left)?;
+            self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Log))?;
+            self.append_arithmetic("Mul")?;
+            emitted = true;
+        }
+        if !left_zero {
+            self.lower(right)?;
+            self.lower_derivative(left, wrt)?;
+            self.append_arithmetic("Mul")?;
+            self.lower(left)?;
+            self.append_arithmetic("Div")?;
+            if emitted {
+                self.append_arithmetic("Add")?;
+            }
+        }
+        Ok(())
     }
 
     fn lower_call_derivative(
@@ -4318,7 +4809,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
-            "ddx" => Err(self.unsupported("third derivative of ddx")),
+            "ddx" => {
+                let [expr, probe] = args else {
+                    return Err(self.unsupported(format!(
+                        "analog operator ddx expects two operands, found {}",
+                        args.len()
+                    )));
+                };
+                self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
+            }
             "ddt" | "idt" | "idtmod" => Err(self.unsupported(format!(
                 "second derivative of stateful intrinsic at expression {expr_id}"
             ))),
@@ -5343,7 +5842,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_second_derivative(*expr, first, second)
             }
             HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
-            HirAnalogOperator::Ddx { .. } => Err(self.unsupported("third derivative of ddx")),
+            HirAnalogOperator::Ddx { expr, probe } => {
+                self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
+            }
             HirAnalogOperator::Ddt { .. }
             | HirAnalogOperator::Idt { .. }
             | HirAnalogOperator::IdtMod { .. } => Err(self.unsupported(format!(
@@ -5827,7 +6328,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
         let Some(slot) = self.limits.canonical_ddt_slot(expr_id) else {
             return Err(self.unsupported(format!(
-                "analog operator ddt expression {expr_id} state slot"
+                "analog operator ddt expression {expr_id} state slot (available canonical ddt slots: {:?})",
+                self.limits.canonical_ddt_slots
             )));
         };
         self.lower(args[0])?;
@@ -6708,38 +7210,27 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_identifier(&mut self, name: &str) -> JitResult<()> {
-        if let Some(parameter) = self
-            .mir
-            .parameters
-            .iter()
-            .find(|parameter| parameter.name == name)
-        {
-            let index = usize::from(parameter.id);
-            validate_index(
-                self.model.clone(),
-                "canonical parameter",
-                index,
-                self.limits.parameter_count,
-            )?;
-            return self.push(NativeOp::LoadParam(index));
+        match self.limits.identifier_slot(self.mir, name) {
+            Some(NativeIdentifierSlot::Parameter(index)) => {
+                validate_index(
+                    self.model.clone(),
+                    "canonical parameter",
+                    index,
+                    self.limits.parameter_count,
+                )?;
+                self.push(NativeOp::LoadParam(index))
+            }
+            Some(NativeIdentifierSlot::Variable(index)) => {
+                validate_index(
+                    self.model.clone(),
+                    "canonical variable",
+                    index,
+                    self.limits.variable_count,
+                )?;
+                self.push(NativeOp::LoadVariable(index))
+            }
+            None => Err(self.unsupported(format!("identifier {name}"))),
         }
-
-        if let Some(index) = self
-            .limits
-            .variable_names
-            .iter()
-            .position(|variable| variable.as_str() == name)
-        {
-            validate_index(
-                self.model.clone(),
-                "canonical variable",
-                index,
-                self.limits.variable_count,
-            )?;
-            return self.push(NativeOp::LoadVariable(index));
-        }
-
-        Err(self.unsupported(format!("identifier {name}")))
     }
 
     fn lower_array_access(&mut self, array: &str, index: ExprId) -> JitResult<()> {
@@ -6821,6 +7312,35 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_array_access_third_derivative(
+        &mut self,
+        array: &str,
+        index: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let Some((base, len, lower)) =
+            self.resolve_array_third_derivative_variable_range(array, first, second, third)?
+        else {
+            return self.push(NativeOp::Const(0.0));
+        };
+        validate_range(
+            self.model.clone(),
+            "canonical array third-derivative variable range",
+            base,
+            len,
+            self.limits.variable_count,
+        )?;
+        self.lower(index)?;
+        if lower_constant_dynamic_variable_read(&mut self.ops, base, len, lower) {
+            return Ok(());
+        }
+        self.ops
+            .push(NativeOp::LoadVariableDyn { base, len, lower });
+        Ok(())
+    }
+
     fn resolve_array_derivative_variable_range(
         &self,
         array: &str,
@@ -6839,6 +7359,23 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<Option<(usize, usize, i64)>> {
         let prefix = format!("{array}[");
         let suffix = format!("]@{}@{}", first.shadow_suffix(), second.shadow_suffix());
+        self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
+    }
+
+    fn resolve_array_third_derivative_variable_range(
+        &self,
+        array: &str,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<Option<(usize, usize, i64)>> {
+        let prefix = format!("{array}[");
+        let suffix = format!(
+            "]@{}@{}@{}",
+            first.shadow_suffix(),
+            second.shadow_suffix(),
+            third.shadow_suffix()
+        );
         self.resolve_variable_range_with_affixes(array, &prefix, &suffix)
     }
 
@@ -7760,6 +8297,9 @@ fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
             | Instruction::Asin
             | Instruction::Acos
             | Instruction::Atan
+            | Instruction::Asinh
+            | Instruction::Acosh
+            | Instruction::Atanh
             | Instruction::Floor
             | Instruction::Ceil
     )
@@ -7808,6 +8348,9 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::Asin
             | Instruction::Acos
             | Instruction::Atan
+            | Instruction::Asinh
+            | Instruction::Acosh
+            | Instruction::Atanh
             | Instruction::Atan2
             | Instruction::Floor
             | Instruction::Ceil
@@ -8864,6 +9407,9 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::Asin => "Asin",
         Instruction::Acos => "Acos",
         Instruction::Atan => "Atan",
+        Instruction::Asinh => "Asinh",
+        Instruction::Acosh => "Acosh",
+        Instruction::Atanh => "Atanh",
         Instruction::Atan2 => "Atan2",
         Instruction::Floor => "Floor",
         Instruction::Ceil => "Ceil",
@@ -8956,6 +9502,9 @@ fn unary_math_op(instruction: &Instruction) -> UnaryMathOp {
         Instruction::Asin => UnaryMathOp::Asin,
         Instruction::Acos => UnaryMathOp::Acos,
         Instruction::Atan => UnaryMathOp::Atan,
+        Instruction::Asinh => UnaryMathOp::Asinh,
+        Instruction::Acosh => UnaryMathOp::Acosh,
+        Instruction::Atanh => UnaryMathOp::Atanh,
         Instruction::Floor => UnaryMathOp::Floor,
         Instruction::Ceil => UnaryMathOp::Ceil,
         _ => unreachable!("unary math lowering only accepts supported unary math instructions"),
@@ -9000,7 +9549,9 @@ mod tests {
         NumberLit, PortDirection,
     };
     use crate::canonical_ir::{CanonicalMetadata, HirExprKind, HirModel, MirModel};
-    use crate::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
+    use crate::semantic::{
+        AnalyzedContribution, AnalyzedModule, AnalyzedPort, AnalyzedRegion, SymbolTable,
+    };
     use crate::source::Span;
     use crate::types::ValueType;
     use crate::{CompilerOptions, VerilogACompiler};
@@ -9108,6 +9659,15 @@ mod tests {
 
     fn analyzed_two_terminal_hir(module_name: &str, expression: Expression) -> HirModel {
         let span = Span::dummy();
+        let contribution = AnalyzedContribution {
+            branch: "p,n".into(),
+            declared_branch: None,
+            is_current: true,
+            indirect: false,
+            expression,
+            expr_type: ValueType::Real,
+            span,
+        };
         let analyzed = AnalyzedModule {
             name: module_name.into(),
             ports: vec![
@@ -9130,16 +9690,9 @@ mod tests {
             param_aliases: Vec::new(),
             variables: Vec::new(),
             branches: Vec::new(),
-            contributions: vec![AnalyzedContribution {
-                branch: "p,n".into(),
-                declared_branch: None,
-                is_current: true,
-                indirect: false,
-                expression,
-                expr_type: ValueType::Real,
-                span,
-            }],
+            contributions: vec![contribution.clone()],
             statements: Vec::new(),
+            body: vec![AnalyzedRegion::Contribution(contribution)],
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
             arrays: HashMap::new(),
@@ -10330,7 +10883,7 @@ endmodule
             &[NativeOp::LoadPriorCurrent(0), NativeOp::MulConst(2.0)]
         );
         assert_eq!(program.max_stack_depth(), 1);
-        assert_eq!(program.current_pair_dependencies(), &[]);
+        assert!(program.current_pair_dependencies().is_empty());
         assert_eq!(program.prior_current_dependencies(), &[0]);
     }
 
@@ -12600,6 +13153,9 @@ endmodule
             (Instruction::Asin, UnaryMathOp::Asin),
             (Instruction::Acos, UnaryMathOp::Acos),
             (Instruction::Atan, UnaryMathOp::Atan),
+            (Instruction::Asinh, UnaryMathOp::Asinh),
+            (Instruction::Acosh, UnaryMathOp::Acosh),
+            (Instruction::Atanh, UnaryMathOp::Atanh),
             (Instruction::Floor, UnaryMathOp::Floor),
             (Instruction::Ceil, UnaryMathOp::Ceil),
         ];
@@ -12729,6 +13285,9 @@ endmodule
             ("asin-domain-nan", Instruction::Asin, 2.0, 2.0_f64.asin()),
             ("acos", Instruction::Acos, 0.25, 0.25_f64.acos()),
             ("atan", Instruction::Atan, 0.25, 0.25_f64.atan()),
+            ("asinh", Instruction::Asinh, 0.25, 0.25_f64.asinh()),
+            ("acosh", Instruction::Acosh, 1.25, 1.25_f64.acosh()),
+            ("atanh", Instruction::Atanh, 0.25, 0.25_f64.atanh()),
             ("floor", Instruction::Floor, 3.75, 3.75_f64.floor()),
             (
                 "floor-negative",
@@ -14312,7 +14871,7 @@ endmodule
 
         assert_eq!(lowered.ops(), &[NativeOp::LoadPriorCurrent(7)]);
         assert_eq!(lowered.max_stack_depth(), 1);
-        assert_eq!(lowered.current_pair_dependencies(), &[]);
+        assert!(lowered.current_pair_dependencies().is_empty());
         assert_eq!(lowered.prior_current_dependencies(), &[7]);
     }
 
