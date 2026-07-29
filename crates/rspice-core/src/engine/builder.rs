@@ -6,7 +6,7 @@
 #![allow(clippy::needless_range_loop)]
 use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_value_with_limits};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::device::{JfetChannelModel, MosBodyJunctionModel};
+use crate::device::{Diode, DiodeLevel, JfetChannelModel, MosBodyJunctionModel};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     Element, ElementKind, FlattenerConfig, ParseError, ParseWithAbortError, SourceSpec,
@@ -35,8 +35,8 @@ use std::time::{Duration, Instant};
 mod model_resolution;
 use model_resolution::*;
 pub use model_resolution::{
-    ResolvedResistorParameters,
-    XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
+    ResolvedResistorParameters, XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION,
+    validate_native_xyce_ltra_model_contract,
 };
 mod behavioral;
 mod builtin_models;
@@ -3351,6 +3351,165 @@ mod tests {
         assert_eq!(circuit.resistors.conductances[rs_index], 1.0);
     }
 
+    /// A geometry sitting exactly on a shared bin edge takes the *lower* bin.
+    ///
+    /// ngspice's ranges are inclusive at both ends and it returns the first
+    /// match while walking the model table, so with foundry tables written in
+    /// ascending order the lower bin wins. Selecting by "most specific bin"
+    /// instead quietly picks the upper one and swaps in a different parameter
+    /// set — visible as a few percent of drain current, not as an error.
+    #[test]
+    fn a_geometry_on_a_bin_boundary_takes_the_lower_bin() {
+        let deck = "binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN=0.5u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("binned deck parses");
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("binned deck builds");
+        let [mosfet] = circuit.mosfets.devices.as_slice() else {
+            panic!("expected one mosfet");
+        };
+        assert!(
+            (mosfet.vto - 0.4).abs() < 1e-9,
+            "L on the shared edge must take the lower bin, got VTO={}",
+            mosfet.vto
+        );
+    }
+
+    /// The same netlist built twice must produce the same circuit.
+    ///
+    /// Subcircuit `.param`s calling `agauss` are evaluated during flattening,
+    /// which happens per build. Without rewinding the statistical stream each
+    /// build continues the sequence, so pressing "run" a second time on an
+    /// unchanged deck silently answers differently — which is exactly how the
+    /// GF180MCU corpus behaved, since its device wrappers apply a random
+    /// per-instance `delvto`.
+    #[test]
+    fn rebuilding_one_netlist_redraws_the_same_statistical_values() {
+        let deck = "mismatch reproducibility\n\
+             .subckt biased a b\n\
+             .param offset=agauss(1k, 200, 1)\n\
+             R1 a b 'offset'\n\
+             .ends\n\
+             V1 in 0 1\n\
+             X1 in 0 biased\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+
+        let resistance = |circuit: &CircuitData| -> f64 {
+            let index = circuit
+                .resistors
+                .names
+                .iter()
+                .position(|name| name.to_ascii_uppercase().contains("R1"))
+                .expect("the subcircuit resistor is instantiated");
+            1.0 / circuit.resistors.conductances[index]
+        };
+
+        let first = resistance(&engine.build_circuit(&netlist).expect("first build"));
+        let second = resistance(&engine.build_circuit(&netlist).expect("second build"));
+        let third = resistance(&engine.build_circuit(&netlist).expect("third build"));
+
+        assert_eq!(first, second, "a rebuild must redraw the same sample");
+        assert_eq!(first, third);
+        // The draw is a real statistical sample, not a collapsed nominal: if
+        // this ever equalled 1k exactly the test above would prove nothing.
+        assert!(
+            (first - 1000.0).abs() > 1e-9,
+            "expected an actual agauss draw, got {first}"
+        );
+    }
+
+    /// LEVEL=3 derives AREA and PJ from the drawn rectangle, and must land on
+    /// the same junction an explicit `AREA`/`PJ` instance would.
+    ///
+    /// `W=10u L=10u` is `AREA=100p PJ=40u`, which is the geometry the vendored
+    /// GF180MCU corpus already holds to ngspice — so pinning the equivalence
+    /// here extends that evidence to the geometric path, which no vendored
+    /// deck exercises.
+    #[test]
+    fn level3_width_and_length_derive_the_explicit_area_and_perimeter() {
+        let build = |instance: &str| {
+            let deck = format!(
+                "level3 geometry\n\
+                 V1 in 0 1\n\
+                 D1 in 0 DGEO {instance}\n\
+                 .model DGEO D LEVEL=3 IS=2.2959e-7 JSW=2.1207e-13 N=1.01 CJ=9.6797e-4\n\
+                 .end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("geometric diode deck parses");
+            let circuit = Engine::new(SimulationConfig::default())
+                .build_circuit(&netlist)
+                .expect("geometric diode deck builds");
+            let [diode] = circuit.diodes.devices.as_slice() else {
+                panic!("expected one diode");
+            };
+            diode.clone()
+        };
+
+        let drawn = build("W=10u L=10u");
+        let explicit = build("AREA=100p PJ=40u");
+
+        assert_eq!(drawn.level, DiodeLevel::Geometric);
+        assert!(
+            (drawn.is - explicit.is).abs() <= explicit.is * 1e-12,
+            "derived area {} vs explicit {}",
+            drawn.is,
+            explicit.is
+        );
+        assert!(
+            (drawn.sidewall_perimeter - explicit.sidewall_perimeter).abs() <= 1e-18,
+            "derived perimeter {} vs explicit {}",
+            drawn.sidewall_perimeter,
+            explicit.sidewall_perimeter
+        );
+        assert!((drawn.cj0 - explicit.cj0).abs() <= explicit.cj0 * 1e-12);
+
+        // A LEVEL=1 card takes no geometry from W/L, so it stays unit-area.
+        let legacy_deck = "legacy geometry\n\
+             V1 in 0 1\n\
+             D1 in 0 DLEG W=10u L=10u\n\
+             .model DLEG D IS=2.2959e-7\n\
+             .end\n";
+        let netlist = Netlist::parse(legacy_deck).expect("legacy diode deck parses");
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("legacy diode deck builds");
+        let [legacy] = circuit.diodes.devices.as_slice() else {
+            panic!("expected one diode");
+        };
+        assert!(legacy.is > drawn.is * 1e6, "LEVEL=1 ignores W/L geometry");
+    }
+
+    /// `.options scale` multiplies drawn dimensions, so it enters the derived
+    /// area squared and the derived perimeter linearly.
+    #[test]
+    fn level3_geometry_honours_the_options_scale_factor() {
+        let deck = "scaled level3 geometry\n\
+             .options scale=2\n\
+             V1 in 0 1\n\
+             D1 in 0 DGEO W=10u L=10u\n\
+             .model DGEO D LEVEL=3 IS=2.2959e-7 JSW=2.1207e-13\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("scaled deck parses");
+        assert_eq!(netlist.options.scale, Some(2.0));
+        let circuit = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect("scaled deck builds");
+        let [diode] = circuit.diodes.devices.as_slice() else {
+            panic!("expected one diode");
+        };
+
+        // AREA = (20u)^2 = 400p, PJ = 2*(20u+20u) = 80u.
+        assert!((diode.is - 2.2959e-7 * 400e-12).abs() <= diode.is * 1e-12);
+        assert!((diode.sidewall_perimeter - 80e-6).abs() <= 1e-18);
+    }
+
     struct DiscardingStamper;
 
     impl crate::device::MatrixStamper for DiscardingStamper {
@@ -4293,6 +4452,13 @@ impl Engine {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
+        // One elaboration, one statistical sequence. Subcircuit `.param`s that
+        // call `agauss`/`unif` are evaluated during flattening below, so
+        // without this a netlist built twice draws different mismatch offsets
+        // and the same deck disagrees with itself run to run. Monte-Carlo
+        // sweeps are unaffected: they vary parameters through their own seeded
+        // sampler and re-elaborate per run.
+        netlist.params.restart_statistical_stream();
         let mut startup_validated;
         let netlist = if netlist.startup_directives.is_empty() {
             netlist
@@ -4958,9 +5124,8 @@ impl Engine {
                     // Junction temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; the model TNOM
                     // (or .options tnom) anchors the legacy SPICE scaling.
-                    let tnom_k = crate::constants::celsius_to_kelvin(
-                        netlist.options.tnom.unwrap_or(27.0),
-                    );
+                    let tnom_k =
+                        crate::constants::celsius_to_kelvin(netlist.options.tnom.unwrap_or(27.0));
                     let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
                         crate::constants::celsius_to_kelvin(t)
                     } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
@@ -4971,6 +5136,11 @@ impl Engine {
 
                     // Look up model and apply parameters
                     let (rs_given, cj0_given, sidewall_cj0_given);
+                    // Retained past the branch: the geometric LEVEL=3 card
+                    // carries AREA/PJ defaults and the metal/poly overlap
+                    // dimensions, all of which the instance scaling below
+                    // still needs.
+                    let model_params: HashMap<String, f64>;
                     if let Some(device_model) = find_model_def(netlist, model) {
                         ensure_model_type(
                             "Diode",
@@ -4999,6 +5169,7 @@ impl Engine {
                             .iter()
                             .any(|name| params_map.contains_key(*name));
                         diode = diode.with_model_params(&params_map);
+                        model_params = params_map;
                     } else if let Some(params_map) =
                         builtin_diode_model_map().get(&model.to_uppercase())
                     {
@@ -5010,6 +5181,7 @@ impl Engine {
                             .iter()
                             .any(|name| params_map.contains_key(*name));
                         diode = diode.with_model_params(params_map);
+                        model_params = params_map.clone();
                         log::debug!(
                             "Applied embedded diode fallback model '{}' to {}",
                             model,
@@ -5045,10 +5217,54 @@ impl Engine {
                     // junction multipliers for the lumped junction (ngspice
                     // DIOload semantics): currents and depletion charge scale
                     // up, series resistance scales down.
-                    let area = instance_param(instance_params, &["AREA"]).unwrap_or(1.0);
+                    //
+                    // The defaults come off the model card, not from 1.0/0.0:
+                    // LEVEL=3 foundry cards routinely carry their own AREA and
+                    // PJ so an instance can be written bare. ngspice takes the
+                    // model's values only when the instance gives neither a
+                    // dimension nor an explicit override — a W/L instance
+                    // derives its own geometry and must not inherit a second
+                    // area on top of it.
                     let mult = instance_param(instance_params, &["M", "MULT"]).unwrap_or(1.0);
-                    let sidewall_perimeter =
-                        instance_param(instance_params, &["PJ"]).unwrap_or(0.0);
+                    let width = instance_param(instance_params, &["W"]);
+                    let length = instance_param(instance_params, &["L"]);
+                    let dimensioned = width.is_some() || length.is_some();
+                    let scale = netlist
+                        .options
+                        .scale
+                        .filter(|value| value.is_finite() && *value > 0.0)
+                        .unwrap_or(1.0);
+
+                    let geometric = matches!(diode.level, DiodeLevel::Geometric);
+                    let derived = match (geometric, width, length) {
+                        (true, Some(width), Some(length)) => {
+                            Some(Diode::geometric_area_and_perimeter(
+                                width,
+                                length,
+                                mult,
+                                diode_model_param(&model_params, "XW").unwrap_or(0.0),
+                                scale,
+                            ))
+                        }
+                        _ => None,
+                    };
+
+                    let area = instance_param(instance_params, &["AREA"])
+                        .or(derived.map(|(area, _)| area))
+                        .or_else(|| {
+                            (!dimensioned)
+                                .then(|| diode_model_param(&model_params, "AREA"))
+                                .flatten()
+                        })
+                        .unwrap_or(1.0);
+                    let sidewall_perimeter = instance_param(instance_params, &["PJ", "PERIM"])
+                        .or(derived.map(|(_, perimeter)| perimeter))
+                        .or_else(|| {
+                            (!dimensioned)
+                                .then(|| diode_model_param(&model_params, "PJ"))
+                                .flatten()
+                        })
+                        .unwrap_or(0.0);
                     if !area.is_finite() || area <= 0.0 {
                         return Err(SimulationError::Circuit(format!(
                             "Diode '{}' has invalid AREA={} (must be finite and > 0)",
@@ -5067,12 +5283,31 @@ impl Engine {
                             element.name, sidewall_perimeter
                         )));
                     }
-                    let junction_scale = area * mult;
-                    if junction_scale != 1.0 {
-                        diode.apply_junction_scaling(junction_scale);
-                    }
+                    diode.apply_instance_scaling(area, mult);
                     diode.set_sidewall_perimeter(sidewall_perimeter * mult);
                     diode.multiplicity = mult;
+                    if geometric {
+                        // Metal and poly overlap capacitance. Every dimension
+                        // may be given per-instance or defaulted from the
+                        // model card; the oxide thicknesses are model-only.
+                        let instance_or_model = |names: &[&str], model_name: &str| -> f64 {
+                            instance_param(instance_params, names)
+                                .or_else(|| diode_model_param(&model_params, model_name))
+                                .unwrap_or(0.0)
+                        };
+                        diode.set_overlap_capacitance(
+                            mult,
+                            instance_or_model(&["WM"], "WM"),
+                            instance_or_model(&["LM"], "LM"),
+                            instance_or_model(&["WP"], "WP"),
+                            instance_or_model(&["LP"], "LP"),
+                            diode_model_param(&model_params, "XOM").unwrap_or(1e4),
+                            diode_model_param(&model_params, "XOI").unwrap_or(1e4),
+                            diode_model_param(&model_params, "XM").unwrap_or(0.0),
+                            diode_model_param(&model_params, "XP").unwrap_or(0.0),
+                            scale,
+                        );
+                    }
                     diode.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
                     if self.config.spice_dialect == SpiceDialect::Xyce {
                         diode.set_temperature_xyce_7(temp_k, tnom_k);
@@ -6613,9 +6848,7 @@ impl Engine {
                             )));
                         }
                         sw.set_expression_context(
-                            crate::constants::kelvin_to_celsius(
-                                self.config.temperature,
-                            ),
+                            crate::constants::kelvin_to_celsius(self.config.temperature),
                             self.config.convergence_config.junction_gmin_target,
                             netlist.params.expression_dialect(),
                         );

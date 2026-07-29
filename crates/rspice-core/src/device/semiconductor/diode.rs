@@ -19,6 +19,165 @@ const MAX_EXP_ARG: Value = 100.0;
 // which is observable in cold, low-Is Level=2 sweeps.
 const BREAKDOWN_EXP_ARG_MAX: Value = 100.0;
 
+/// Oxide permittivity used by the LEVEL=3 metal/poly overlap capacitances
+/// (ngspice const.h `CONSTepsSiO2`).
+const EPS_SIO2: Value = 3.4531479969e-11;
+
+/// Which diode formulation a `.model` card selected.
+///
+/// ngspice implements LEVEL 1 and 3 in the same `dio` device and rejects
+/// LEVEL 2; Xyce implements 1 and 2 and has no LEVEL 3. RSpice carries all
+/// three because its conformance corpora include decks from both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiodeLevel {
+    /// Legacy SPICE junction diode (no LEVEL, LEVEL=0, or LEVEL=1).
+    Legacy,
+    /// Xyce/PSpice LEVEL=2, which differs in its junction-temperature law.
+    Pspice,
+    /// ngspice LEVEL=3: the geometric foundry diode.
+    ///
+    /// Same evaluator as `Legacy` — the parameters that foundry cards lean on
+    /// (JSW, CJP, JTUN, TLEV/TLEVC) are level-independent in ngspice. Only
+    /// three behaviours actually branch on the level: W/L derives AREA and PJ,
+    /// the breakdown knee current scales with area rather than multiplicity
+    /// alone, and metal/poly overlap capacitances exist at all.
+    Geometric,
+}
+
+impl DiodeLevel {
+    /// Classify a numeric `LEVEL=` selector. Unknown levels are rejected
+    /// earlier by `validate_diode_model_level`.
+    fn from_selector(level: Value) -> Self {
+        if !level.is_finite() {
+            return Self::Legacy;
+        }
+        if (level - 2.0).abs() <= 1.0e-9 {
+            Self::Pspice
+        } else if (level - 3.0).abs() <= 1.0e-9 {
+            Self::Geometric
+        } else {
+            Self::Legacy
+        }
+    }
+}
+
+/// HSPICE-style temperature-equation coefficients (ngspice `dio` TLEV/TLEVC).
+///
+/// `tlev` selects the saturation-current and breakdown-voltage laws; `tlevc`
+/// selects the junction-potential and depletion-capacitance laws. The two are
+/// independent, and foundry cards routinely set `TLEVC=1` to replace the
+/// bandgap-derived capacitance shift with measured linear coefficients.
+#[derive(Debug, Clone, Copy)]
+pub struct DiodeTemperatureModel {
+    /// Saturation-current / breakdown temperature-equation selector.
+    pub tlev: u8,
+    /// Junction-capacitance / potential temperature-equation selector.
+    pub tlevc: u8,
+    /// First bandgap correction factor (TLEV=2 only).
+    pub gap1: Value,
+    /// Second bandgap correction factor (TLEV=2 only).
+    pub gap2: Value,
+    /// Breakdown-voltage temperature coefficient (ngspice TCV).
+    pub tcv: Value,
+    /// Whether TCV was authored, selecting the ngspice breakdown law.
+    pub tcv_given: bool,
+    /// Bottom junction-potential temperature coefficient (TLEVC=1).
+    pub tpb: Value,
+    /// Sidewall junction-potential temperature coefficient (TLEVC=1).
+    pub tphp: Value,
+    /// Bottom junction-capacitance temperature coefficient (TLEVC=1).
+    pub cta: Value,
+    /// Sidewall junction-capacitance temperature coefficient (TLEVC=1).
+    pub ctp: Value,
+    /// Series-resistance linear temperature coefficient (TRS/TRS1).
+    pub trs1: Value,
+    /// Series-resistance quadratic temperature coefficient (TRS2).
+    pub trs2: Value,
+    /// Grading-coefficient linear temperature coefficient (TM1).
+    pub tm1: Value,
+    /// Grading-coefficient quadratic temperature coefficient (TM2).
+    pub tm2: Value,
+    /// Transit-time linear temperature coefficient (TTT1).
+    pub ttt1: Value,
+    /// Transit-time quadratic temperature coefficient (TTT2).
+    pub ttt2: Value,
+}
+
+impl Default for DiodeTemperatureModel {
+    fn default() -> Self {
+        Self {
+            tlev: 0,
+            tlevc: 0,
+            gap1: 7.02e-4,
+            gap2: 1108.0,
+            tcv: 0.0,
+            tcv_given: false,
+            tpb: 0.0,
+            tphp: 0.0,
+            cta: 0.0,
+            ctp: 0.0,
+            trs1: 0.0,
+            trs2: 0.0,
+            tm1: 0.0,
+            tm2: 0.0,
+            ttt1: 0.0,
+            ttt2: 0.0,
+        }
+    }
+}
+
+impl DiodeTemperatureModel {
+    /// The `1 + c1·dt + c2·dt²` polynomial ngspice applies to RS, MJ and TT.
+    fn quadratic_factor(first: Value, second: Value, delta_t: Value) -> Value {
+        let factor = 1.0 + first * delta_t + second * delta_t * delta_t;
+        if factor.is_finite() && factor > 0.0 {
+            factor
+        } else {
+            1.0
+        }
+    }
+}
+
+/// Band-to-band tunneling branch (ngspice `dio` JTUN/JTUNSW family).
+///
+/// This is the reverse-bias mechanism foundry junction diodes are actually
+/// characterised on. For the GF180MCU PDK it outranks avalanche breakdown by
+/// an order of magnitude — at −12.13 V an `np_3p3` sources 1.61 A of tunneling
+/// current against 0.19 A of breakdown current — so a diode that models
+/// breakdown but not tunneling is not merely imprecise in reverse, it is
+/// wrong by orders of magnitude.
+#[derive(Debug, Clone, Copy)]
+pub struct DiodeTunneling {
+    /// Bottom tunneling saturation current, scaled by AREA (JTUN).
+    pub bottom: Value,
+    /// Sidewall tunneling saturation current, scaled by PJ (JTUNSW).
+    pub sidewall: Value,
+    /// Whether JTUN was authored; ngspice gates the branch on this.
+    pub bottom_given: bool,
+    /// Whether JTUNSW was authored.
+    pub sidewall_given: bool,
+    /// Tunneling emission coefficient (NTUN).
+    pub emission: Value,
+    /// Tunneling saturation-current temperature exponent (XTITUN).
+    pub exponent: Value,
+    /// Bandgap correction applied to the tunneling temperature law (KEG).
+    pub bandgap_factor: Value,
+}
+
+impl Default for DiodeTunneling {
+    fn default() -> Self {
+        Self {
+            bottom: 0.0,
+            sidewall: 0.0,
+            bottom_given: false,
+            sidewall_given: false,
+            emission: 30.0,
+            exponent: 3.0,
+            bandgap_factor: 1.0,
+        }
+    }
+}
+
 /// Pre-computed stamp indices for O(1) matrix access (2-terminal device)
 #[derive(Debug, Clone, Default)]
 pub struct DiodeIndices {
@@ -89,22 +248,40 @@ pub struct Diode {
     pub breakdown_emission_coefficient: Value,
     /// Whether NBV was explicitly given on the model card.
     pub breakdown_emission_given: bool,
+    /// Sidewall high-injection knee current (IKP).
+    pub sidewall_knee_current: Value,
+    /// Band-to-band tunneling branch (JTUN/JTUNSW/NTUN/XTITUN/KEG).
+    pub tunneling: DiodeTunneling,
+    /// Bias-independent metal and poly overlap capacitance (LEVEL=3
+    /// CMETAL + CPOLY), already scaled by the instance multiplicity.
+    pub overlap_capacitance: Value,
 
     // Temperature parameters
     /// Saturation-current temperature exponent (XTI)
     pub xti: Value,
     /// Activation energy in eV (EG)
     pub eg: Value,
-    /// Model nominal temperature override in Celsius (TNOM)
+    /// Model nominal temperature override in Celsius (TNOM/TREF)
     pub tnom_c: Option<Value>,
-    /// Select the PSpice-compatible Xyce/HSPICE LEVEL=2 junction-temperature law.
-    pub pspice_level2: bool,
-    /// Select Xyce 7.10's legacy `DeviceSupport::pnjlim` limiter.
+    /// Which formulation the `.model` card's LEVEL selector chose.
+    pub level: DiodeLevel,
+    /// HSPICE-style TLEV/TLEVC temperature-equation coefficients.
+    pub temperature_model: DiodeTemperatureModel,
+    /// Evaluate as Xyce's native diode rather than ngspice's.
     ///
-    /// Xyce's native diode uses the original limiter, while ngspice uses the
-    /// later negative-voltage-safe `DEVpnjlim` variant.  This is a dialect
-    /// property of the native diode evaluator, not a test-specific behavior.
-    xyce_legacy_pnjlim: bool,
+    /// The two references genuinely disagree about this device, so the flag
+    /// selects between them rather than tuning a tolerance:
+    ///
+    /// - **Iteration limiter.** Xyce keeps the original
+    ///   `DeviceSupport::pnjlim`; ngspice uses the later negative-voltage-safe
+    ///   `DEVpnjlim`.
+    /// - **Sidewall without NS.** Xyce merges `JSW·PJ` into the bottom
+    ///   saturation current (`Isat = Isat + IsatSW`), so it shares the
+    ///   high-injection knee and the breakdown region. ngspice keeps it a
+    ///   separate current that skips both.
+    /// - **Breakdown matching.** Xyce solves the knee against the bottom
+    ///   saturation current alone; ngspice solves it against `totalSatCur`.
+    xyce_dialect: bool,
     /// Linear temperature coefficient for the reverse breakdown voltage
     /// (Xyce TBV1, in 1/C).
     pub tbv1: Value,
@@ -227,13 +404,17 @@ impl Diode {
             sidewall_fc: 0.5,
             breakdown_emission_coefficient: 1.752,
             breakdown_emission_given: false,
+            sidewall_knee_current: 0.0,
+            tunneling: DiodeTunneling::default(),
+            overlap_capacitance: 0.0,
 
             // SPICE temperature defaults
             xti: 3.0,
             eg: 1.11,
             tnom_c: None,
-            pspice_level2: false,
-            xyce_legacy_pnjlim: false,
+            level: DiodeLevel::Legacy,
+            temperature_model: DiodeTemperatureModel::default(),
+            xyce_dialect: false,
             tbv1: 0.0,
             tbv2: 0.0,
 
@@ -273,14 +454,11 @@ impl Diode {
     fn limited_linearization(&self, vd_raw: Value) -> (Value, Value, Value) {
         let vte = self.n * self.vt;
         let vcrit = vte
-            * (vte
-                / (std::f64::consts::SQRT_2
-                    * self.effective_bottom_saturation_current().max(1e-300)))
-            .ln();
+            * (vte / (std::f64::consts::SQRT_2 * self.vcrit_saturation_current().max(1e-300))).ln();
 
         let limit_junction =
             |candidate: Value, previous: Value, thermal: Value, critical: Value| {
-                if self.xyce_legacy_pnjlim {
+                if self.xyce_dialect {
                     Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
                 } else {
                     crate::device::veriloga_generated::limiting::pnjlim_new(
@@ -289,7 +467,11 @@ impl Diode {
                 }
             };
 
-        let (vd, limited) = if let Some(bv) = self.bv.filter(|bv| bv.is_finite() && *bv > 0.0) {
+        // Pivoted on the *matched* breakdown voltage, which is what both
+        // ngspice (`here->DIOtBrkdwnV`) and the evaluator above use. Limiting
+        // around the raw card value instead would fold the junction about a
+        // different point than the branch it is protecting.
+        let (vd, limited) = if let Some(bv) = self.active_breakdown_voltage() {
             let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
             if vd_raw < 0.0_f64.min(-bv + 10.0 * vtebrk) {
                 let transformed = -(vd_raw + bv);
@@ -410,9 +592,10 @@ impl Diode {
 
     /// Set model parameters from a HashMap (for .MODEL statement parsing)
     pub fn with_model_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
-        self.pspice_level2 = params
+        self.level = params
             .get("LEVEL")
-            .is_some_and(|level| level.is_finite() && (*level - 2.0).abs() <= 1.0e-9);
+            .copied()
+            .map_or(DiodeLevel::Legacy, DiodeLevel::from_selector);
         if let Some(&v) = params.get("IS").or_else(|| params.get("JS")) {
             self.is = v;
         }
@@ -436,13 +619,25 @@ impl Diode {
         {
             self.af = v;
         }
-        if let Some(&v) = params.get("BV").or_else(|| params.get("VB"))
+        if let Some(&v) = params
+            .get("BV")
+            .or_else(|| params.get("VB"))
+            .or_else(|| params.get("VRB"))
+            .or_else(|| params.get("VAR"))
             && v.is_finite()
-            && v > 0.0
+            && v >= 0.0
         {
+            // Presence, not positivity. Both ngspice (`DIObreakdownVoltageGiven`)
+            // and Xyce (`BVGiven`) gate the breakdown branch on whether the card
+            // named BV at all, and `BV=0` is a real, distinct setting rather
+            // than a way to disable breakdown: the matching loop then solves for
+            // a *negative* effective breakdown voltage, which puts every reverse
+            // bias inside the breakdown exponential. GF180MCU's `nwp_3p3` relies
+            // on exactly this — at −12.13 V it draws 5.65 A with `bv=0` against
+            // 81 µA with BV omitted.
             self.bv = Some(v);
         }
-        if let Some(&v) = params.get("IBV")
+        if let Some(&v) = params.get("IBV").or_else(|| params.get("IB"))
             && v.is_finite()
             && v > 0.0
         {
@@ -473,10 +668,10 @@ impl Diode {
         {
             self.cj0 = v;
         }
-        if let Some(&v) = params.get("VJ") {
+        if let Some(&v) = params.get("VJ").or_else(|| params.get("PB")) {
             self.vj = v;
         }
-        if let Some(&v) = params.get("M") {
+        if let Some(&v) = params.get("M").or_else(|| params.get("MJ")) {
             self.m = v;
         }
         if let Some(&v) = params.get("TT") {
@@ -488,12 +683,15 @@ impl Diode {
         {
             self.fc = v;
         }
-        if let Some(&v) = params.get("JSW")
+        if let Some(&v) = params.get("JSW").or_else(|| params.get("ISW"))
             && v.is_finite()
             && v >= 0.0
         {
             self.sidewall_saturation_current = v;
             self.sidewall_current_given = true;
+        }
+        if let Some(&v) = params.get("IKP") {
+            self.sidewall_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
         }
         if let Some(&v) = params.get("NS")
             && v.is_finite()
@@ -525,7 +723,7 @@ impl Diode {
         {
             self.sidewall_fc = v;
         }
-        if let Some(&v) = params.get("NBV")
+        if let Some(&v) = params.get("NBV").or_else(|| params.get("NZ"))
             && v.is_finite()
             && v > 0.0
         {
@@ -538,9 +736,129 @@ impl Diode {
         if let Some(&v) = params.get("EG") {
             self.eg = v;
         }
-        if let Some(&v) = params.get("TNOM") {
+        if let Some(&v) = params.get("TNOM").or_else(|| params.get("TREF")) {
             self.tnom_c = Some(v);
         }
+
+        // Band-to-band tunneling (JTUN/JTUNSW/NTUN/XTITUN/KEG). ngspice gates
+        // each branch on the density having been authored rather than on it
+        // being non-zero, so an explicit `jtun=0` still selects the branch and
+        // contributes nothing — which is the same answer, but keeps the
+        // "given" flags meaning what the card said.
+        if let Some(&v) = params.get("JTUN")
+            && v.is_finite()
+        {
+            self.tunneling.bottom = v;
+            self.tunneling.bottom_given = true;
+        }
+        if let Some(&v) = params.get("JTUNSW")
+            && v.is_finite()
+        {
+            self.tunneling.sidewall = v;
+            self.tunneling.sidewall_given = true;
+        }
+        if let Some(&v) = params.get("NTUN")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.tunneling.emission = v;
+        }
+        if let Some(&v) = params.get("XTITUN")
+            && v.is_finite()
+        {
+            self.tunneling.exponent = v;
+        }
+        if let Some(&v) = params.get("KEG")
+            && v.is_finite()
+        {
+            self.tunneling.bandgap_factor = v;
+        }
+
+        // TLEV/TLEVC temperature-equation family.
+        if let Some(&v) = params.get("TLEV")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.temperature_model.tlev = v.round() as u8;
+        }
+        if let Some(&v) = params.get("TLEVC")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.temperature_model.tlevc = v.round() as u8;
+        }
+        if let Some(&v) = params.get("GAP1")
+            && v.is_finite()
+        {
+            self.temperature_model.gap1 = v;
+        }
+        if let Some(&v) = params.get("GAP2")
+            && v.is_finite()
+        {
+            self.temperature_model.gap2 = v;
+        }
+        // TCV selects ngspice's breakdown law; TBV1/TBV2 below select Xyce's.
+        // They are deliberately separate rather than aliased: ngspice's `tbv1`
+        // is a synonym for TCV and enters as `BV·(1 − TCV·dt)`, while Xyce's
+        // TBV1 enters as `BV·(1 + TBV1·dt)`. Folding them together would flip
+        // the sign of every card that names the other dialect's parameter.
+        if let Some(&v) = params.get("TCV")
+            && v.is_finite()
+        {
+            self.temperature_model.tcv = v;
+            self.temperature_model.tcv_given = true;
+        }
+        if let Some(&v) = params.get("TPB").or_else(|| params.get("TVJ"))
+            && v.is_finite()
+        {
+            self.temperature_model.tpb = v;
+        }
+        if let Some(&v) = params.get("TPHP")
+            && v.is_finite()
+        {
+            self.temperature_model.tphp = v;
+        }
+        if let Some(&v) = params.get("CTA").or_else(|| params.get("CTC"))
+            && v.is_finite()
+        {
+            self.temperature_model.cta = v;
+        }
+        if let Some(&v) = params.get("CTP")
+            && v.is_finite()
+        {
+            self.temperature_model.ctp = v;
+        }
+        if let Some(&v) = params.get("TRS").or_else(|| params.get("TRS1"))
+            && v.is_finite()
+        {
+            self.temperature_model.trs1 = v;
+        }
+        if let Some(&v) = params.get("TRS2")
+            && v.is_finite()
+        {
+            self.temperature_model.trs2 = v;
+        }
+        if let Some(&v) = params.get("TM1")
+            && v.is_finite()
+        {
+            self.temperature_model.tm1 = v;
+        }
+        if let Some(&v) = params.get("TM2")
+            && v.is_finite()
+        {
+            self.temperature_model.tm2 = v;
+        }
+        if let Some(&v) = params.get("TTT1")
+            && v.is_finite()
+        {
+            self.temperature_model.ttt1 = v;
+        }
+        if let Some(&v) = params.get("TTT2")
+            && v.is_finite()
+        {
+            self.temperature_model.ttt2 = v;
+        }
+
         if let Some(&v) = params.get("TBV1")
             && v.is_finite()
         {
@@ -553,6 +871,12 @@ impl Diode {
         }
         if !self.breakdown_emission_given {
             self.breakdown_emission_coefficient = self.n;
+        }
+        // ngspice defaults the activation energy against TLEV, not against the
+        // level: the TLEV=2 bandgap law is written around 1.16 eV while the
+        // TLEV 0/1 laws are written around 1.11 eV.
+        if !params.contains_key("EG") && self.temperature_model.tlev == 2 {
+            self.eg = 1.16;
         }
         self
     }
@@ -629,7 +953,7 @@ impl Diode {
     /// Xyce 7.10's diode model calls the historical `DeviceSupport::pnjlim`
     /// routine.  Other dialects retain ngspice's `pnjlim_new` behavior.
     pub fn set_xyce_compatibility(&mut self, enabled: bool) {
-        self.xyce_legacy_pnjlim = enabled;
+        self.xyce_dialect = enabled;
     }
 
     /// Evaluate the junction limiter for a candidate without mutating the
@@ -641,13 +965,10 @@ impl Diode {
     pub(crate) fn limited_junction_voltage_for(&self, vd_raw: Value) -> Value {
         let vte = self.n * self.vt;
         let vcrit = vte
-            * (vte
-                / (std::f64::consts::SQRT_2
-                    * self.effective_bottom_saturation_current().max(1e-300)))
-            .ln();
+            * (vte / (std::f64::consts::SQRT_2 * self.vcrit_saturation_current().max(1e-300))).ln();
         let limit_junction =
             |candidate: Value, previous: Value, thermal: Value, critical: Value| {
-                if self.xyce_legacy_pnjlim {
+                if self.xyce_dialect {
                     Self::limit_xyce_pnjlim(candidate, previous, thermal, critical)
                 } else {
                     crate::device::veriloga_generated::limiting::pnjlim_new(
@@ -655,7 +976,7 @@ impl Diode {
                     )
                 }
             };
-        if let Some(bv) = self.bv.filter(|bv| bv.is_finite() && *bv > 0.0) {
+        if let Some(bv) = self.active_breakdown_voltage() {
             let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
             if vd_raw < 0.0_f64.min(-bv + 10.0 * vtebrk) {
                 let transformed = -(vd_raw + bv);
@@ -679,7 +1000,7 @@ impl Diode {
     /// raw companion voltage used by their existing transient contract.
     #[inline]
     pub(crate) fn transient_charge_voltage(&self, vd_raw: Value) -> Value {
-        if self.xyce_legacy_pnjlim {
+        if self.xyce_dialect {
             self.limited_junction_voltage_for(vd_raw)
         } else {
             vd_raw
@@ -703,10 +1024,25 @@ impl Diode {
 
         let vt = k_over_q * temp;
         let vtnom = k_over_q * tnom;
+        let delta_t = temp - tnom;
+        let log_t_ratio = (temp / tnom).ln();
+        let temperature = self.temperature_model;
 
-        // Silicon bandgap at both temperatures (TLEV 0/1 form).
-        let egfet = 1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0);
-        let egfet1 = 1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0);
+        // Silicon bandgap at both temperatures. TLEV 0 and 1 pin the classic
+        // 1.16 eV / 7.02e-4 / 1108 silicon fit; TLEV 2 lets the card supply
+        // its own activation energy and correction factors through EG, GAP1
+        // and GAP2.
+        let (egfet, egfet1) = if temperature.tlev == 2 {
+            (
+                self.eg - (temperature.gap1 * temp * temp) / (temp + temperature.gap2),
+                self.eg - (temperature.gap1 * tnom * tnom) / (tnom + temperature.gap2),
+            )
+        } else {
+            (
+                1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0),
+                1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0),
+            )
+        };
         let fact1 = tnom / REFTEMP;
         let fact2 = temp / REFTEMP;
         // ngspice's CHARGE*arg terms, folded through k/q so everything
@@ -716,31 +1052,107 @@ impl Diode {
         let pbfact = -2.0 * vt * (1.5 * fact2.ln() + arg);
         let pbfact1 = -2.0 * vtnom * (1.5 * fact1.ln() + arg1);
 
-        // IS(T) = IS * exp(((T/TNOM)-1)*EG/(N*vt) + (XTI/N)*ln(T/TNOM))
-        let vte = self.n * vt;
-        let is_factor = (((temp / tnom) - 1.0) * self.eg / vte
-            + (self.xti / self.n) * (temp / tnom).ln())
-        .exp();
-        if is_factor.is_finite() && is_factor > 0.0 {
-            self.is *= is_factor;
+        // Saturation-current scaling, per emission coefficient.
+        //
+        // TLEV 0/1: IS(T) = IS·exp(((T/TNOM)−1)·EG/(N·vt) + (XTI/N)·ln(T/TNOM))
+        // TLEV 2:   IS(T) = IS·exp(EG(TNOM)/(N·vtnom) − EG(T)/(N·vt)
+        //                          + (XTI/N)·ln(T/TNOM))
+        //
+        // The two agree to first order but diverge across a wide temperature
+        // span, which is exactly the span a foundry corner sweep covers.
+        let saturation_factor = |emission: Value, exponent: Value| -> Value {
+            let emission = emission.max(EPSMIN);
+            let thermal = emission * vt;
+            let factor = if temperature.tlev == 2 {
+                (egfet1 / (emission * vtnom) - egfet / thermal
+                    + (exponent / emission) * log_t_ratio)
+                    .exp()
+            } else {
+                (((temp / tnom) - 1.0) * self.eg / thermal + (exponent / emission) * log_t_ratio)
+                    .exp()
+            };
+            if factor.is_finite() && factor > 0.0 {
+                factor
+            } else {
+                1.0
+            }
+        };
+
+        self.is *= saturation_factor(self.n, self.xti);
+        self.sidewall_saturation_current *=
+            saturation_factor(self.sidewall_emission_coefficient, self.xti);
+        self.recombination_saturation_current *=
+            saturation_factor(self.recombination_emission_coefficient, self.xti);
+
+        // Tunneling saturation currents ride the same law, but scaled by the
+        // KEG bandgap correction and their own XTITUN exponent. GF180MCU's
+        // cards carry XTITUN between −12 and −46, so this term moves the
+        // reverse branch by orders of magnitude across a corner sweep — it is
+        // not a second-order correction.
+        let tunnel_factor = {
+            let emission = self.tunneling.emission.max(EPSMIN);
+            let thermal = emission * vt;
+            let keg = self.tunneling.bandgap_factor;
+            let factor = if temperature.tlev == 2 {
+                (keg * egfet1 / (emission * vtnom) - keg * egfet / thermal
+                    + (self.tunneling.exponent / emission) * log_t_ratio)
+                    .exp()
+            } else {
+                (((temp / tnom) - 1.0) * keg * self.eg / thermal
+                    + (self.tunneling.exponent / emission) * log_t_ratio)
+                    .exp()
+            };
+            if factor.is_finite() && factor > 0.0 {
+                factor
+            } else {
+                1.0
+            }
+        };
+        self.tunneling.bottom *= tunnel_factor;
+        self.tunneling.sidewall *= tunnel_factor;
+
+        // Grading coefficient, transit time and series resistance all take
+        // the same `1 + c1·dt + c2·dt²` polynomial.
+        self.m *=
+            DiodeTemperatureModel::quadratic_factor(temperature.tm1, temperature.tm2, delta_t);
+        self.tt *=
+            DiodeTemperatureModel::quadratic_factor(temperature.ttt1, temperature.ttt2, delta_t);
+        if self.rs > 0.0 {
+            self.rs *= DiodeTemperatureModel::quadratic_factor(
+                temperature.trs1,
+                temperature.trs2,
+                delta_t,
+            );
         }
-        let ns = self.sidewall_emission_coefficient.max(EPSMIN);
-        let sidewall_factor = (((temp / tnom) - 1.0) * self.eg / (ns * vt)
-            + (self.xti / ns) * (temp / tnom).ln())
-        .exp();
-        if sidewall_factor.is_finite() && sidewall_factor > 0.0 {
-            self.sidewall_saturation_current *= sidewall_factor;
-        }
-        let nr = self.recombination_emission_coefficient.max(EPSMIN);
-        let recombination_factor = (((temp / tnom) - 1.0) * self.eg / (nr * vt)
-            + (self.xti / nr) * (temp / tnom).ln())
-        .exp();
-        if recombination_factor.is_finite() && recombination_factor > 0.0 {
-            self.recombination_saturation_current *= recombination_factor;
+
+        // TLEVC=1 replaces the bandgap-derived junction shift with the
+        // measured linear coefficients TPB/CTA (bottom) and TPHP/CTP
+        // (sidewall), referred to the 27 C SPICE reference rather than to
+        // TNOM. Foundry cards overwhelmingly use this form.
+        if temperature.tlevc == 1 {
+            if self.vj > 0.0 {
+                let t_jct_pot = self.vj - temperature.tpb * (temp - REFTEMP);
+                let cj = self.cj0 * (1.0 + temperature.cta * (temp - REFTEMP));
+                if t_jct_pot.is_finite() && t_jct_pot > 0.0 && cj.is_finite() && cj >= 0.0 {
+                    self.vj = t_jct_pot;
+                    self.cj0 = cj;
+                }
+            }
+            if self.sidewall_vj > 0.0 {
+                let t_jct_pot = self.sidewall_vj - temperature.tphp * (temp - REFTEMP);
+                let cj = self.sidewall_cj0 * (1.0 + temperature.ctp * (temp - REFTEMP));
+                if t_jct_pot.is_finite() && t_jct_pot > 0.0 && cj.is_finite() && cj >= 0.0 {
+                    self.sidewall_vj = t_jct_pot;
+                    self.sidewall_cj0 = cj;
+                }
+            }
+            self.vt = vt;
+            self.temperature_breakdown_voltage = self.matched_breakdown_voltage(delta_t);
+            return;
         }
 
         // VJ(T) and CJ0(T), TLEVC=0 bandgap mapping.
-        if self.pspice_level2 && self.vj > 0.0 {
+        if self.level == DiodeLevel::Pspice && self.vj > 0.0 {
             // Xyce's LEVEL=2 branch is the PSpice temperature law. Keep this
             // profile explicit: it differs materially from the SPICE3 law
             // when TNOM is not the 27 C reference temperature.
@@ -795,16 +1207,34 @@ impl Diode {
         }
 
         self.vt = vt;
-        self.temperature_breakdown_voltage = self.bv.and_then(|bv| {
-            let delta_t = temp - tnom;
-            let temperature_factor = 1.0 + delta_t * (self.tbv1 + self.tbv2 * delta_t);
-            let temperature_bv = bv * temperature_factor;
-            temperature_bv
-                .is_finite()
-                .then_some(temperature_bv)
-                .filter(|value| *value > 0.0)
-                .and_then(|value| self.xbv_matched_breakdown_voltage(value))
-        });
+        self.temperature_breakdown_voltage = self.matched_breakdown_voltage(delta_t);
+    }
+
+    /// Temperature-shifted breakdown voltage, run through the forward/reverse
+    /// matching loop.
+    ///
+    /// Two shift laws live here because two dialects spell the coefficient
+    /// differently. ngspice's TCV subtracts (`BV − TCV·dt`) at TLEV=0 and
+    /// scales (`BV·(1 − TCV·dt)`) otherwise; Xyce's TBV1/TBV2 scale with the
+    /// opposite sign (`BV·(1 + TBV1·dt + TBV2·dt²)`). A card that names TCV
+    /// gets ngspice's; anything else gets Xyce's, which degenerates to no
+    /// shift when TBV1 and TBV2 are absent.
+    fn matched_breakdown_voltage(&self, delta_t: Value) -> Option<Value> {
+        let bv = self.bv?;
+        let shifted = if self.temperature_model.tcv_given {
+            if self.temperature_model.tlev == 0 {
+                bv - self.temperature_model.tcv * delta_t
+            } else {
+                bv * (1.0 - self.temperature_model.tcv * delta_t)
+            }
+        } else {
+            bv * (1.0 + delta_t * (self.tbv1 + self.tbv2 * delta_t))
+        };
+        shifted
+            .is_finite()
+            .then_some(shifted)
+            .filter(|value| *value >= 0.0)
+            .and_then(|value| self.xbv_matched_breakdown_voltage(value))
     }
 
     /// Cached operating-point values from the last accepted Newton solution:
@@ -815,19 +1245,30 @@ impl Diode {
         (self.prev_vd, id, gd, cd)
     }
 
-    /// Apply a parallel-junction scale factor (instance `AREA` × `M`).
+    /// Apply the instance's area and multiplicity to every area-referred
+    /// quantity (ngspice's `DIOarea` × `DIOm` handling).
     ///
-    /// Saturation and breakdown-knee currents and the zero-bias depletion
-    /// capacitance scale with the number of parallel junctions; series
-    /// resistance scales inversely. Mirrors ngspice's AREA/M handling for
-    /// the lumped diode.
-    pub fn apply_junction_scaling(&mut self, scale: Value) {
+    /// Saturation, tunneling and knee currents and the zero-bias depletion
+    /// capacitance scale with the junction area; series resistance scales
+    /// inversely.
+    ///
+    /// The breakdown knee current is the one place the LEVEL matters:
+    /// `diotemp.c` scales IBV by multiplicity alone at LEVEL=1 and by area ×
+    /// multiplicity at LEVEL=3. IBV feeds the forward/reverse matching loop
+    /// that sets the effective breakdown voltage, so getting this wrong moves
+    /// the knee rather than just its height.
+    pub fn apply_instance_scaling(&mut self, area: Value, multiplicity: Value) {
+        let scale = area * multiplicity;
         self.junction_scale *= scale;
         self.is *= scale;
-        self.ibv *= scale;
+        self.ibv *= match self.level {
+            DiodeLevel::Geometric => scale,
+            DiodeLevel::Legacy | DiodeLevel::Pspice => multiplicity,
+        };
         self.forward_knee_current *= scale;
         self.reverse_knee_current *= scale;
         self.recombination_saturation_current *= scale;
+        self.tunneling.bottom *= scale;
         self.cj0 *= scale;
         if self.rs > 0.0 {
             self.rs /= scale;
@@ -885,7 +1326,90 @@ impl Diode {
             qd += self.tt * id;
             capd += self.tt * gd;
         }
+
+        // LEVEL=3 metal and poly overlap capacitance: bias-independent, so it
+        // contributes a linear charge and a constant capacitance.
+        if self.overlap_capacitance > 0.0 {
+            qd += self.overlap_capacitance * vd;
+            capd += self.overlap_capacitance;
+        }
         (qd, capd)
+    }
+
+    /// Resolve the LEVEL=3 geometric instance parameters into the AREA and PJ
+    /// factors the rest of the model is written against.
+    ///
+    /// ngspice derives both from the drawn rectangle when the instance gives
+    /// `W` and `L`: `AREA = (W+XW)·(L+XW)·M·scale²` and
+    /// `PJ = 2·((W+XW)+(L+XW))·M·scale`. Note that `M` lands here *and* again
+    /// in the per-instance scaling, so a W/L-specified LEVEL=3 diode with
+    /// `M>1` scales its area by `M²`. That is what ngspice-46 computes
+    /// (`diosetup.c` folds `DIOm` into `DIOarea`, and `diotemp.c` multiplies
+    /// by `DIOm` a second time), and the conformance corpora are pinned to it,
+    /// so it is reproduced deliberately rather than quietly corrected.
+    ///
+    /// Returns `(area, perimeter)` — both still un-multiplied by `M`, which
+    /// `apply_instance_scaling` and `set_sidewall_perimeter` apply.
+    pub fn geometric_area_and_perimeter(
+        width: Value,
+        length: Value,
+        multiplicity: Value,
+        mask_offset: Value,
+        scale: Value,
+    ) -> (Value, Value) {
+        let w = width + mask_offset;
+        let l = length + mask_offset;
+        (
+            w * l * multiplicity * scale * scale,
+            2.0 * (w + l) * multiplicity * scale,
+        )
+    }
+
+    /// Set the LEVEL=3 metal and poly overlap capacitances.
+    ///
+    /// `CMETAL = eps_SiO2/XOM · M · (WM·scale + XM) · (LM·scale + XM)` and the
+    /// same shape for poly through `XOI`/`XP`. Both are plain parallel-plate
+    /// overlaps between the diode's routing and the bulk, so they add a fixed
+    /// capacitance rather than a junction one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_overlap_capacitance(
+        &mut self,
+        multiplicity: Value,
+        width_metal: Value,
+        length_metal: Value,
+        width_poly: Value,
+        length_poly: Value,
+        metal_oxide_thickness: Value,
+        poly_oxide_thickness: Value,
+        metal_mask_offset: Value,
+        poly_mask_offset: Value,
+        scale: Value,
+    ) {
+        let plate = |width: Value, length: Value, thickness: Value, offset: Value| -> Value {
+            if !(thickness.is_finite() && thickness > 0.0) {
+                return 0.0;
+            }
+            let value = EPS_SIO2 / thickness
+                * multiplicity
+                * (width * scale + offset)
+                * (length * scale + offset);
+            if value.is_finite() && value > 0.0 {
+                value
+            } else {
+                0.0
+            }
+        };
+        self.overlap_capacitance = plate(
+            width_metal,
+            length_metal,
+            metal_oxide_thickness,
+            metal_mask_offset,
+        ) + plate(
+            width_poly,
+            length_poly,
+            poly_oxide_thickness,
+            poly_mask_offset,
+        );
     }
 
     /// Calculate junction capacitance: Cj = CJ0 / (1 - Vd/VJ)^M
@@ -1001,32 +1525,163 @@ impl Diode {
     /// junction voltage. That distinction matters for high-injection limiting
     /// and for the sidewall current shape.
     fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        let (forward_i, forward_g) = self.bottom_current_and_conductance(vd);
+        // Bottom junction: exponential + recombination + tunneling, then the
+        // IKF/IKR high-injection knee. ngspice applies the knee to the bottom
+        // branch alone, after every bottom mechanism has been summed.
+        let (mut bottom_i, mut bottom_g) =
+            self.exponential_current_and_conductance(vd, self.bottom_saturation_current(), self.n);
         let (recombination_i, recombination_g) = self.recombination_current_and_conductance(vd);
-        let (sidewall_i, sidewall_g) = self.separate_sidewall_current_and_conductance(vd);
+        bottom_i += recombination_i;
+        bottom_g += recombination_g;
+        if self.tunneling.bottom_given {
+            let (tunnel_i, tunnel_g) =
+                self.tunnel_current_and_conductance(vd, self.tunnel_bottom());
+            bottom_i += tunnel_i;
+            bottom_g += tunnel_g;
+        }
+        let (bottom_i, bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
+
+        // Sidewall junction: its own exponential plus sidewall tunneling,
+        // then the IKP knee.
+        let (mut sidewall_i, mut sidewall_g) = self.sidewall_current_and_conductance(vd);
+        if self.tunneling.sidewall_given {
+            let (tunnel_i, tunnel_g) =
+                self.tunnel_current_and_conductance(vd, self.tunnel_sidewall());
+            sidewall_i += tunnel_i;
+            sidewall_g += tunnel_g;
+        }
+        let (sidewall_i, sidewall_g) = Self::apply_forward_knee(
+            sidewall_i,
+            sidewall_g,
+            self.sidewall_knee_current * self.sidewall_perimeter,
+        );
+
+        (bottom_i + sidewall_i, bottom_g + sidewall_g)
+    }
+
+    /// Sidewall junction current, whether or not the card gave it its own
+    /// emission coefficient.
+    ///
+    /// JSW alone puts the sidewall on the bottom junction's characteristic —
+    /// same emission voltage, same region boundaries — but it stays a
+    /// *separate* current, because ngspice applies the IKF/IKR knee to the
+    /// bottom branch only. Folding JSW into IS instead would drag the
+    /// sidewall through high-injection limiting that ngspice never applies to
+    /// it. JSW with NS gives the sidewall its own characteristic outright.
+    ///
+    /// A shared-characteristic sidewall has no breakdown region. In
+    /// `dioload.c` the breakdown arm evaluates it from `vdsw`, which is
+    /// declared `vdsw = 0.0` and only ever assigned when the model gives a
+    /// separate sidewall resistance RSW — so without RSW the sidewall
+    /// breakdown term is `exp(-BV/vtebrk)`, which underflows to zero. The
+    /// author's intent was plainly the common voltage `vd`; the slip is
+    /// reproduced anyway, because foundry cards are *extracted against this
+    /// implementation*. GF180MCU's JSW and BV were fitted to curves in which
+    /// the sidewall does not break down, so evaluating the physically
+    /// intended equation with those parameters would overstate the knee by
+    /// exactly `(IS + JSW·PJ)/IS` — 3.6x on the corpus's high-perimeter
+    /// geometries. Matching the equations the parameters were measured with
+    /// is what makes the parameters mean anything.
+    fn sidewall_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        if !self.sidewall_current_given {
+            return (0.0, 0.0);
+        }
+        let isat = self.sidewall_saturation_current * self.sidewall_perimeter;
+        if self.sidewall_emission_given {
+            return self.junction_branch(vd, isat, self.sidewall_emission_coefficient, true);
+        }
+        if self.xyce_dialect {
+            // Already merged into the bottom junction; see
+            // `bottom_saturation_current`.
+            return (0.0, 0.0);
+        }
+        self.junction_branch(vd, isat, self.n, false)
+    }
+
+    /// Saturation current driving the bottom junction's exponential.
+    ///
+    /// Xyce merges a characteristic-less sidewall in here so it shares the
+    /// bottom's high-injection knee and breakdown region; ngspice keeps it
+    /// separate.
+    fn bottom_saturation_current(&self) -> Value {
+        if self.xyce_dialect {
+            self.is + self.merged_sidewall_saturation_current()
+        } else {
+            self.is
+        }
+    }
+
+    /// The sidewall saturation current Xyce folds onto the bottom junction:
+    /// non-zero only when JSW was given without its own NS.
+    fn merged_sidewall_saturation_current(&self) -> Value {
+        if self.sidewall_current_given && !self.sidewall_emission_given {
+            self.sidewall_saturation_current * self.sidewall_perimeter
+        } else {
+            0.0
+        }
+    }
+
+    /// Saturation current the junction limiter's `Vcrit` is written against.
+    fn vcrit_saturation_current(&self) -> Value {
+        if self.xyce_dialect {
+            self.bottom_saturation_current()
+        } else {
+            self.total_saturation_current()
+        }
+    }
+
+    /// Saturation current the breakdown-matching loop is written against.
+    ///
+    /// ngspice matches against `totalSatCur`; Xyce matches against the bottom
+    /// `tSatCur` alone, even when it has merged the sidewall into the current
+    /// it actually evaluates.
+    fn matching_saturation_current(&self) -> Value {
+        if self.xyce_dialect {
+            self.is
+        } else {
+            self.total_saturation_current()
+        }
+    }
+
+    /// Temperature-scaled bottom tunneling saturation current.
+    fn tunnel_bottom(&self) -> Value {
+        self.tunneling.bottom
+    }
+
+    /// Temperature-scaled sidewall tunneling saturation current, referred to
+    /// the instance perimeter.
+    fn tunnel_sidewall(&self) -> Value {
+        self.tunneling.sidewall * self.sidewall_perimeter
+    }
+
+    /// Band-to-band tunneling: `−Jtun·(exp(−vd/(NTUN·vt)) − 1)`.
+    ///
+    /// Reverse-biased, so the exponent grows as `vd` falls. The conductance is
+    /// the exact derivative, `+Jtun·exp(−vd/(NTUN·vt))/(NTUN·vt)`, which stays
+    /// positive: tunneling makes the junction *more* conductive in reverse,
+    /// which is the whole point of the mechanism.
+    fn tunnel_current_and_conductance(&self, vd: Value, saturation: Value) -> (Value, Value) {
+        if !(saturation.is_finite() && saturation != 0.0) {
+            return (0.0, 0.0);
+        }
+        let thermal = self.tunneling.emission.max(EPSMIN) * self.vt;
+        if !(thermal.is_finite() && thermal > 0.0) {
+            return (0.0, 0.0);
+        }
+        let (exponential, derivative) = Self::limited_exp(-vd / thermal, MAX_EXP_ARG);
         (
-            forward_i + recombination_i + sidewall_i,
-            forward_g + recombination_g + sidewall_g,
+            -saturation * (exponential - 1.0),
+            saturation * derivative / thermal,
         )
     }
 
-    fn bottom_current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        let isat = self.effective_bottom_saturation_current();
-        let (current, conductance) = self.exponential_current_and_conductance(vd, isat, self.n);
-        self.apply_high_injection_knee(vd, current, conductance)
-    }
-
-    fn separate_sidewall_current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        if !(self.sidewall_current_given && self.sidewall_emission_given) {
-            return (0.0, 0.0);
-        }
-
-        let isat = self.sidewall_saturation_current * self.sidewall_perimeter;
-        self.exponential_current_and_conductance(vd, isat, self.sidewall_emission_coefficient)
-    }
-
-    fn effective_bottom_saturation_current(&self) -> Value {
-        let sidewall = if self.sidewall_current_given && !self.sidewall_emission_given {
+    /// Total saturation current across both junctions.
+    ///
+    /// ngspice's `totalSatCur`: the quantity `Vcrit` and the breakdown-voltage
+    /// matching loop are both written against, regardless of whether the
+    /// sidewall carries its own emission coefficient.
+    fn total_saturation_current(&self) -> Value {
+        let sidewall = if self.sidewall_current_given {
             self.sidewall_saturation_current * self.sidewall_perimeter
         } else {
             0.0
@@ -1085,6 +1740,23 @@ impl Diode {
         isat: Value,
         emission_coefficient: Value,
     ) -> (Value, Value) {
+        self.junction_branch(vd, isat, emission_coefficient, true)
+    }
+
+    /// Forward / reverse / breakdown junction branches for one exponential.
+    ///
+    /// `breakdown` selects whether this junction has a breakdown region at
+    /// all. When it does not, biases past `-BV` produce nothing rather than
+    /// continuing the reverse formula — see
+    /// `sidewall_current_and_conductance` for why one junction ends up
+    /// without one.
+    fn junction_branch(
+        &self,
+        vd: Value,
+        isat: Value,
+        emission_coefficient: Value,
+        breakdown: bool,
+    ) -> (Value, Value) {
         if !(isat.is_finite() && isat > 0.0 && emission_coefficient.is_finite()) {
             return (0.0, 0.0);
         }
@@ -1098,6 +1770,9 @@ impl Diode {
         if let Some(brkdwn_v) = self.active_breakdown_voltage()
             && vd < -brkdwn_v
         {
+            if !breakdown {
+                return (0.0, 0.0);
+            }
             let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
             let (e, de_darg) = Self::limited_exp(-(brkdwn_v + vd) / vtebrk, BREAKDOWN_EXP_ARG_MAX);
             return (-isat * e, (isat / vtebrk) * de_darg);
@@ -1108,16 +1783,22 @@ impl Diode {
         (-isat * (1.0 + arg), isat * 3.0 * arg / vd)
     }
 
+    /// The breakdown voltage the reverse branch is actually written against.
+    ///
+    /// May be negative: the matching loop solves for the voltage at which the
+    /// forward and reverse regions meet, and a card with a small BV and a
+    /// comparatively large IBV drives that meeting point below zero. When it
+    /// does, `vd < -brkdwn_v` is satisfied everywhere in reverse, which is the
+    /// intended reading — the junction has no ordinary reverse region left.
     fn active_breakdown_voltage(&self) -> Option<Value> {
         if let Some(brkdwn_v) = self.temperature_breakdown_voltage
             && brkdwn_v.is_finite()
-            && brkdwn_v > 0.0
         {
             return Some(brkdwn_v);
         }
 
         self.bv.and_then(|bv| {
-            if bv.is_finite() && bv > 0.0 {
+            if bv.is_finite() && bv >= 0.0 {
                 self.xbv_matched_breakdown_voltage(bv).or(Some(bv))
             } else {
                 None
@@ -1127,11 +1808,11 @@ impl Diode {
 
     fn xbv_matched_breakdown_voltage(&self, bv: Value) -> Option<Value> {
         let vt = self.vt;
-        let isat = self.is.max(1e-300);
+        let isat = self.matching_saturation_current().max(1e-300);
         let cbv = self.ibv;
         let nbv = self.breakdown_emission_coefficient.max(EPSMIN);
         if !(bv.is_finite()
-            && bv > 0.0
+            && bv >= 0.0
             && vt.is_finite()
             && vt > 0.0
             && cbv.is_finite()
@@ -1154,11 +1835,7 @@ impl Diode {
                 break;
             }
         }
-        if xbv.is_finite() && xbv > 0.0 {
-            Some(xbv)
-        } else {
-            Some(bv)
-        }
+        if xbv.is_finite() { Some(xbv) } else { Some(bv) }
     }
 
     fn limited_exp(arg: Value, max_arg: Value) -> (Value, Value) {
@@ -1332,6 +2009,308 @@ mod tests {
         d.cj0 = 2e-12;
         d.m = 0.4;
         d
+    }
+
+    /// GF180MCU's `np_3p3`, the card that drove the LEVEL=3 work.
+    ///
+    /// Values are the `typical` corner of `sm141064.ngspice` with the corner
+    /// multipliers folded in, so the numbers here are the ones ngspice-46
+    /// evaluates for the vendored `np_3p3_typical_*` cases.
+    fn gf180_np_3p3() -> std::collections::HashMap<String, Value> {
+        [
+            ("LEVEL", 3.0),
+            ("TREF", 25.0),
+            ("IS", 2.2959e-7),
+            ("JSW", 2.1207e-13),
+            ("IK", 300000.0),
+            ("BV", 11.0),
+            ("IBV", 0.001),
+            ("N", 1.01),
+            ("RS", 2e-10),
+            ("JTUN", 1.1223e-5),
+            ("JTUNSW", 6.4125e-12),
+            ("NTUN", 10.0),
+            ("CJ", 0.00096797),
+            ("CJP", 1.5663e-10),
+            ("PB", 0.70172),
+            ("PHP", 0.8062),
+            ("MJ", 0.32071),
+            ("MJSW", 0.1),
+            ("TLEV", 1.0),
+            ("TLEVC", 1.0),
+            ("TRS", 4.5778e-5),
+            ("XTI", 3.0),
+            ("XTITUN", -25.0),
+            ("CTA", 0.0009438),
+            ("CTP", 0.00060474),
+            ("EG", 1.17),
+            ("TPB", 0.0018129),
+            ("TPHP", 5e-5),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value))
+        .collect()
+    }
+
+    /// A GF180MCU diode as the builder assembles it: model card, then the
+    /// instance's `AREA=100p PJ=40u`, then temperature.
+    fn gf180_instance(params: &std::collections::HashMap<String, Value>) -> Diode {
+        let mut d = Diode::spice_defaults("dn1".to_string(), 1, 0).with_model_params(params);
+        d.apply_instance_scaling(100e-12, 1.0);
+        d.set_sidewall_perimeter(40e-6);
+        d.set_temperature(REFTEMP, REFTEMP);
+        d
+    }
+
+    #[test]
+    fn level_three_selects_the_geometric_model() {
+        let d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&gf180_np_3p3());
+        assert_eq!(d.level, DiodeLevel::Geometric);
+    }
+
+    /// The parameter aliases foundry cards actually use. Each of these
+    /// silently defaulted before LEVEL=3 support, which is worse than
+    /// rejecting the card: `PB` and `MJ` alone would leave every junction at
+    /// `VJ=1.0, M=0.5`.
+    #[test]
+    fn foundry_parameter_aliases_reach_their_canonical_fields() {
+        let params: std::collections::HashMap<String, Value> = [
+            ("PB", 0.70172),
+            ("MJ", 0.32071),
+            ("TREF", 25.0),
+            ("ISW", 3.5e-13),
+            ("IB", 2e-3),
+            ("NZ", 1.4),
+            ("VRB", 7.5),
+            ("CTC", 1.5e-3),
+            ("TVJ", 2.5e-3),
+            ("TRS1", 4e-5),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value))
+        .collect();
+        let d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+
+        assert_eq!(d.vj, 0.70172);
+        assert_eq!(d.m, 0.32071);
+        assert_eq!(d.tnom_c, Some(25.0));
+        assert_eq!(d.sidewall_saturation_current, 3.5e-13);
+        assert!(d.sidewall_current_given);
+        assert_eq!(d.ibv, 2e-3);
+        assert_eq!(d.breakdown_emission_coefficient, 1.4);
+        assert!(d.breakdown_emission_given);
+        assert_eq!(d.bv, Some(7.5));
+        assert_eq!(d.temperature_model.cta, 1.5e-3);
+        assert_eq!(d.temperature_model.tpb, 2.5e-3);
+        assert_eq!(d.temperature_model.trs1, 4e-5);
+    }
+
+    /// Tunneling is the dominant reverse mechanism in a foundry junction
+    /// diode, not a correction to it.
+    ///
+    /// Measured against ngspice-46 on this exact card: at −12.13 V an
+    /// `np_3p3` sources 1.61 A with JTUN present and 0.19 A with it removed.
+    /// The junction voltage here is well short of that, because the deck's
+    /// 2 Ω series resistance absorbs most of the applied bias — so the test
+    /// pins the ratio rather than an absolute current.
+    #[test]
+    fn tunneling_dominates_the_reverse_branch() {
+        let with_tunneling = gf180_instance(&gf180_np_3p3());
+        let mut without = gf180_np_3p3();
+        without.remove("JTUN");
+        without.remove("JTUNSW");
+        let without_tunneling = gf180_instance(&without);
+
+        let vd = -8.0;
+        let tunneling = with_tunneling.current(vd).abs();
+        let plain = without_tunneling.current(vd).abs();
+
+        assert!(
+            tunneling > plain * 1e3,
+            "tunneling must dominate: {tunneling:e} vs {plain:e}"
+        );
+    }
+
+    /// `BV=0` is a setting, not an absence.
+    ///
+    /// ngspice and Xyce both gate breakdown on whether the card named BV. With
+    /// `BV=0` the matching loop solves for a negative effective breakdown
+    /// voltage, so `vd < -tBrkdwnV` holds everywhere in reverse and the whole
+    /// region becomes the breakdown exponential. GF180MCU's `nwp_3p3` depends
+    /// on it: ngspice-46 gives 5.65 A at −12.13 V with `bv=0` against 81 µA
+    /// with BV omitted.
+    #[test]
+    fn zero_breakdown_voltage_is_given_rather_than_absent() {
+        let mut params = gf180_np_3p3();
+        params.insert("BV".to_string(), 0.0);
+        let zero_bv = gf180_instance(&params);
+
+        params.remove("BV");
+        let no_bv = gf180_instance(&params);
+
+        assert_eq!(zero_bv.bv, Some(0.0));
+        assert_eq!(no_bv.bv, None);
+        let matched = zero_bv
+            .active_breakdown_voltage()
+            .expect("BV=0 still yields a matched breakdown voltage");
+        assert!(
+            matched < 0.0,
+            "matching a zero breakdown voltage lands below zero, got {matched}"
+        );
+        assert!(
+            zero_bv.current(-2.0).abs() > no_bv.current(-2.0).abs() * 1e3,
+            "BV=0 must open the breakdown branch across the whole reverse region"
+        );
+    }
+
+    /// ngspice evaluates a characteristic-less sidewall from `vdsw`, which it
+    /// only assigns when RSW is given — so the sidewall contributes nothing in
+    /// breakdown. Reproduced deliberately; see
+    /// `sidewall_current_and_conductance`.
+    #[test]
+    fn ngspice_sidewall_without_ns_has_no_breakdown_region() {
+        let d = gf180_instance(&gf180_np_3p3());
+        let brkdwn = d
+            .active_breakdown_voltage()
+            .expect("card gives BV, so a matched voltage exists");
+        let deep = -(brkdwn + 1.0);
+
+        let (sidewall_i, sidewall_g) = d.sidewall_current_and_conductance(deep);
+        assert_eq!((sidewall_i, sidewall_g), (0.0, 0.0));
+
+        // Still present either side of the breakdown knee.
+        assert!(d.sidewall_current_and_conductance(0.4).0 > 0.0);
+        assert!(d.sidewall_current_and_conductance(-1.0).0 < 0.0);
+    }
+
+    /// Xyce takes the opposite route on the same card: `Isat = Isat + IsatSW`
+    /// merges the sidewall into the bottom junction, so it shares the knee and
+    /// the breakdown region rather than skipping both.
+    #[test]
+    fn xyce_merges_a_characteristic_less_sidewall_into_the_bottom_junction() {
+        let mut d = gf180_instance(&gf180_np_3p3());
+        d.set_xyce_compatibility(true);
+
+        assert_eq!(d.sidewall_current_and_conductance(0.4), (0.0, 0.0));
+        assert!(
+            d.bottom_saturation_current() > d.is,
+            "Xyce folds JSW·PJ into the bottom saturation current"
+        );
+        // ngspice keeps them apart, so the same card splits differently.
+        d.set_xyce_compatibility(false);
+        assert_eq!(d.bottom_saturation_current(), d.is);
+        assert!(d.sidewall_current_and_conductance(0.4).0 > 0.0);
+    }
+
+    /// TLEVC=1 replaces the bandgap-derived junction shift with measured
+    /// linear coefficients, referred to 27 C rather than to TNOM.
+    #[test]
+    fn tlevc_one_uses_the_measured_linear_capacitance_law() {
+        let params = gf180_np_3p3();
+        let mut d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        let (cj0, vj, sidewall_cj0, sidewall_vj) = (d.cj0, d.vj, d.sidewall_cj0, d.sidewall_vj);
+        let temp = 273.15 + 125.0;
+        d.set_temperature(temp, REFTEMP);
+
+        let dt = temp - REFTEMP;
+        assert!((d.cj0 - cj0 * (1.0 + 0.0009438 * dt)).abs() <= cj0 * 1e-12);
+        assert!((d.vj - (vj - 0.0018129 * dt)).abs() <= vj * 1e-12);
+        assert!((d.sidewall_cj0 - sidewall_cj0 * (1.0 + 0.00060474 * dt)).abs() <= 1e-24);
+        assert!((d.sidewall_vj - (sidewall_vj - 5e-5 * dt)).abs() <= sidewall_vj * 1e-12);
+    }
+
+    /// TRS moves the series resistance, and the GF180MCU decks are sensitive
+    /// to it: the reverse branch runs at amps through a 2 Ω series path, so a
+    /// 0.3% shift in RS moves the junction bias enough to matter.
+    #[test]
+    fn trs_scales_series_resistance_against_tnom() {
+        let mut params = gf180_np_3p3();
+        params.insert("RS".to_string(), 4.0);
+        let mut d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        let temp = 273.15 - 40.0;
+        d.set_temperature(temp, 273.15 + 25.0);
+
+        let dt = temp - (273.15 + 25.0);
+        assert!((d.rs - 4.0 * (1.0 + 4.5778e-5 * dt)).abs() <= 1e-12);
+        assert!(d.rs < 4.0, "a cold junction lowers RS on a positive TRS");
+    }
+
+    /// The tunneling saturation current rides its own XTITUN exponent and KEG
+    /// bandgap correction, not the junction's XTI.
+    #[test]
+    fn tunneling_temperature_law_uses_xtitun_and_keg() {
+        let params = gf180_np_3p3();
+        let mut d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        let (jtun, tnom) = (d.tunneling.bottom, 273.15 + 25.0);
+        let temp = 273.15 + 125.0;
+        d.set_temperature(temp, tnom);
+
+        let vtt = 10.0 * KOVERQ * temp;
+        let expected =
+            jtun * (((temp / tnom) - 1.0) * 1.17 / vtt + (-25.0 / 10.0) * (temp / tnom).ln()).exp();
+        assert!(
+            (d.tunneling.bottom - expected).abs() <= expected * 1e-12,
+            "{} vs {expected}",
+            d.tunneling.bottom
+        );
+    }
+
+    /// LEVEL=1 scales the breakdown knee current by multiplicity alone;
+    /// LEVEL=3 scales it by area as well. IBV feeds the matching loop, so this
+    /// moves the knee rather than just its height.
+    #[test]
+    fn breakdown_knee_current_scales_by_area_only_at_level_three() {
+        let scale_ibv = |level: Value| {
+            let params: std::collections::HashMap<String, Value> =
+                [("LEVEL", level), ("IBV", 1e-3), ("BV", 10.0)]
+                    .into_iter()
+                    .map(|(name, value)| (name.to_string(), value))
+                    .collect();
+            let mut d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+            d.apply_instance_scaling(4.0, 3.0);
+            d.ibv
+        };
+
+        assert!((scale_ibv(1.0) - 1e-3 * 3.0).abs() <= 1e-18);
+        assert!((scale_ibv(3.0) - 1e-3 * 12.0).abs() <= 1e-18);
+    }
+
+    /// LEVEL=3 derives AREA and PJ from the drawn rectangle. The multiplicity
+    /// appears here and again in the instance scaling, which is what
+    /// ngspice-46 computes; see `geometric_area_and_perimeter`.
+    #[test]
+    fn geometric_area_and_perimeter_come_from_the_drawn_rectangle() {
+        let (area, perimeter) = Diode::geometric_area_and_perimeter(2e-6, 5e-6, 2.0, 1e-7, 1.0);
+        let (w, l) = (2e-6 + 1e-7, 5e-6 + 1e-7);
+        assert!((area - w * l * 2.0).abs() <= area * 1e-12);
+        assert!((perimeter - 2.0 * (w + l) * 2.0).abs() <= perimeter * 1e-12);
+
+        // `.options scale` multiplies each dimension, so it enters area squared.
+        let (scaled_area, scaled_perimeter) =
+            Diode::geometric_area_and_perimeter(2e-6, 5e-6, 2.0, 1e-7, 2.0);
+        assert!((scaled_area - area * 4.0).abs() <= scaled_area * 1e-12);
+        assert!((scaled_perimeter - perimeter * 2.0).abs() <= scaled_perimeter * 1e-12);
+    }
+
+    /// The LEVEL=3 metal and poly overlaps are plain parallel plates, so they
+    /// add a bias-independent capacitance on top of the junction's.
+    #[test]
+    fn overlap_capacitance_is_bias_independent() {
+        let mut d = test_diode();
+        d.set_temperature(REFTEMP, REFTEMP);
+        let (bare_near, bare_far) = (d.junction_capacitance(-1.0), d.junction_capacitance(-3.0));
+
+        // XOM is divided in raw, as ngspice does; a thin oxide keeps the
+        // overlap comparable to the junction capacitance so the difference
+        // below is well conditioned in f64.
+        d.set_overlap_capacitance(1.0, 3e-6, 4e-6, 0.0, 0.0, 1e-4, 1e-4, 0.0, 0.0, 1.0);
+        let expected = EPS_SIO2 / 1e-4 * 3e-6 * 4e-6;
+        assert!((d.overlap_capacitance - expected).abs() <= expected * 1e-12);
+
+        // The same increment at both biases: the overlap does not deplete.
+        let tolerance = bare_near * 1e-12;
+        assert!((d.junction_capacitance(-1.0) - bare_near - expected).abs() <= tolerance);
+        assert!((d.junction_capacitance(-3.0) - bare_far - expected).abs() <= tolerance);
     }
 
     #[test]
