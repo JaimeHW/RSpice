@@ -33,33 +33,37 @@ use crate::native::abi::{
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
-use crate::native::{JitError, JitResult};
+use crate::native::{EvalContext, JitError, JitResult};
 
 const MODEL: &str = "native-x64";
-const VOLTAGES_OFFSET: i32 = 0;
-const INTERNAL_VOLTAGES_OFFSET: i32 = 8;
-const PARAMS_OFFSET: i32 = 16;
-const BRANCH_CURRENTS_OFFSET: i32 = 24;
-const BRANCH_CURRENTS_LEN_OFFSET: i32 = 32;
-const CURRENTS_OFFSET: i32 = 40;
-const CURRENTS_LEN_OFFSET: i32 = 48;
-const PORT_CONNECTED_OFFSET: i32 = 64;
-const PORT_CONNECTED_LEN_OFFSET: i32 = 72;
-const TEMPERATURE_OFFSET: i32 = 80;
-const TIME_OFFSET: i32 = 88;
-const STATE_VALUES_OFFSET: i32 = 112;
-const STATE_INITIALIZED_OFFSET: i32 = 120;
-const STATE_INITIALIZED_LEN_OFFSET: i32 = 128;
-const LOOKUP_TABLES_OFFSET: i32 = 136;
-const LOOKUP_TABLES_LEN_OFFSET: i32 = 144;
-const PARAM_GIVEN_OFFSET: i32 = 168;
-const PARAM_GIVEN_LEN_OFFSET: i32 = 176;
-const BRANCH_UNKNOWNS_OFFSET: i32 = 184;
-const ANALYSIS_TYPE_OFFSET: i32 = 192;
-const MFACTOR_OFFSET: i32 = 200;
-const STATE_VALUES_LEN_OFFSET: i32 = 296;
-const ANALYSIS_INITIAL_STEP_OFFSET: i32 = 312;
-const ANALYSIS_FINAL_STEP_OFFSET: i32 = 313;
+const VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, voltages) as i32;
+const INTERNAL_VOLTAGES_OFFSET: i32 = std::mem::offset_of!(EvalContext, internal_voltages) as i32;
+const PARAMS_OFFSET: i32 = std::mem::offset_of!(EvalContext, params) as i32;
+const BRANCH_CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_currents) as i32;
+const BRANCH_CURRENTS_LEN_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, branch_currents_len) as i32;
+const CURRENTS_OFFSET: i32 = std::mem::offset_of!(EvalContext, currents) as i32;
+const CURRENTS_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, currents_len) as i32;
+const PORT_CONNECTED_OFFSET: i32 = std::mem::offset_of!(EvalContext, port_connected) as i32;
+const PORT_CONNECTED_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, port_connected_len) as i32;
+const TEMPERATURE_OFFSET: i32 = std::mem::offset_of!(EvalContext, temperature) as i32;
+const TIME_OFFSET: i32 = std::mem::offset_of!(EvalContext, time) as i32;
+const STATE_VALUES_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values) as i32;
+const STATE_INITIALIZED_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_initialized) as i32;
+const STATE_INITIALIZED_LEN_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, state_initialized_len) as i32;
+const LOOKUP_TABLES_OFFSET: i32 = std::mem::offset_of!(EvalContext, lookup_tables) as i32;
+const LOOKUP_TABLES_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, lookup_tables_len) as i32;
+const PARAM_GIVEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given) as i32;
+const PARAM_GIVEN_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given_len) as i32;
+const BRANCH_UNKNOWNS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_unknowns) as i32;
+const ANALYSIS_TYPE_OFFSET: i32 = std::mem::offset_of!(EvalContext, analysis_type) as i32;
+const MFACTOR_OFFSET: i32 = std::mem::offset_of!(EvalContext, multiplicity) as i32;
+const STATE_VALUES_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values_len) as i32;
+const ANALYSIS_INITIAL_STEP_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, analysis_initial_step) as i32;
+const ANALYSIS_FINAL_STEP_OFFSET: i32 =
+    std::mem::offset_of!(EvalContext, analysis_final_step) as i32;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const LITERAL_POOL_ALIGNMENT: usize = WORD_BYTES;
 const VECTOR_LITERAL_ALIGNMENT: usize = 16;
