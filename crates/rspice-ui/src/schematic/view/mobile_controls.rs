@@ -315,10 +315,13 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
+            |root| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| show(ctx, &mut app, ui.max_rect()));
+                    .show(root, |ui| {
+                        let ctx = ui.ctx().clone();
+                        show(&ctx, &mut app, ui.max_rect());
+                    });
             },
         );
         let nodes = output

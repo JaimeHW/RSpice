@@ -1733,8 +1733,8 @@ mod tests {
             });
 
             let mut key_still_available = true;
-            let _ = ctx.run_ui(context_key_input(key), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = ctx.run_ui(context_key_input(key), |root| {
+                egui::CentralPanel::default().show(root, |ui| {
                     render_context_contents(
                         ui,
                         &mut state,
@@ -1743,7 +1743,7 @@ mod tests {
                         false,
                     );
                     key_still_available =
-                        ctx.input_mut(|input| input.consume_key(Modifiers::NONE, key));
+                        ui.ctx().input_mut(|input| input.consume_key(Modifiers::NONE, key));
                 });
             });
 

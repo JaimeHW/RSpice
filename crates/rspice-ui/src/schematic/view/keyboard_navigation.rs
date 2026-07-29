@@ -661,8 +661,8 @@ mod tests {
         focus_canvas: bool,
     ) -> (bool, bool) {
         let mut outcome = (false, false);
-        let _ = ctx.run_ui(key_input(key, modifiers), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = ctx.run_ui(key_input(key, modifiers), |root| {
+            egui::CentralPanel::default().show(root, |ui| {
                 // accessibility-pointer-shim: test-only canvas focus harness.
                 let response = ui.interact(
                     ui.max_rect(),
@@ -676,7 +676,8 @@ mod tests {
                 }
                 let symbol_context = SchematicSymbolContext::from_state(state);
                 let handled = handle_keyboard_object_navigation(&response, state, &symbol_context);
-                let key_still_available = ctx.input_mut(|input| input.consume_key(modifiers, key));
+                let key_still_available =
+                    ui.ctx().input_mut(|input| input.consume_key(modifiers, key));
                 outcome = (handled, key_still_available);
             });
         });

@@ -177,20 +177,6 @@ pub struct PstbData {
     pub stability_margin_db: Vec<Value>,
 }
 
-fn stability_type_label(
-    stability: rspice_core::analysis::pstb::StabilityType,
-) -> &'static str {
-    use rspice_core::analysis::pstb::StabilityType;
-    match stability {
-        StabilityType::Stable => "Stable",
-        StabilityType::UnstableReal => "UnstableReal",
-        StabilityType::UnstableComplex => "UnstableComplex",
-        StabilityType::PeriodDoubling => "PeriodDoubling",
-        StabilityType::NeimarkSacker => "NeimarkSacker",
-        StabilityType::SaddleNode => "SaddleNode",
-        StabilityType::Marginal => "Marginal",
-    }
-}
 
 fn sanitize_db(value: Value) -> Value {
     if value.is_finite() {

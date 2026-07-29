@@ -122,8 +122,7 @@ pub(crate) use dialogs::state::{
     DesignNoteDialogState, DesignNoteObjectPropertiesDraft, DocumentationShapeDialogState,
     DocumentationShapeObjectPropertiesDraft, EngineeringTableDialogPage,
     EngineeringTableDialogState, EngineeringTableExportFormat, EngineeringTableExportScope,
-    FullScreenPanels, FullScreenScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
-    GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
+    FullScreenPanels, FullScreenScope, HelpCenterPage, HierarchyDescendEditMode,
     HierarchyParentContext, MoveSelectionDialogState, NamedNetObjectPropertiesDraft,
     NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState, NewWindowInitialContent,
     ObjectPropertiesDraft, PinPortDialogState, RenameSelectionTarget, ReplaceInstanceOpen,
@@ -145,7 +144,6 @@ pub(crate) use schematic::named_net::{
 
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
 pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
-pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 pub(crate) use dialogs::hierarchy::create::{
     create_hierarchy_available, open_create_hierarchy_dialog,
 };
@@ -607,7 +605,6 @@ impl RSpiceApp {
         self.render_command_palette(ctx);
         self.render_bus_tap_dialog(ctx);
         self.render_net_label_dialog(ctx);
-        self.render_grid_snap_routing_dialog(ctx);
         self.render_schematic_visibility_dialog(ctx);
         self.render_descend_hierarchy_dialog(ctx);
         self.render_engineering_table_dialog(ctx);

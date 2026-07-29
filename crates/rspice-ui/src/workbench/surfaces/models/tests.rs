@@ -241,22 +241,29 @@ fn parent_scrolled_summary_uses_natural_height_instead_of_nesting_scrollbars() {
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(430.0, 260.0),
+                    egui::vec2(620.0, 260.0),
                 )),
                 ..Default::default()
             },
             |root| {
                 egui::CentralPanel::default().show(root, |ui| {
-                    let long = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
+                    let long: String = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
+                    let long: String = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
                     let left = [
                         ("Resolved bindings", long.clone()),
                         ("Unresolved bindings", long.clone()),
                         ("Missing non-TT section", long.clone()),
+                        ("Stale section digest", long.clone()),
+                        ("Unbound corner", long.clone()),
+                        ("Shadowed library", long.clone()),
                     ];
                     let right = [
                         ("Temperature", long.clone()),
                         ("Supply factor", long.clone()),
-                        ("PDK search paths", long),
+                        ("PDK search paths", long.clone()),
+                        ("Section policy", long.clone()),
+                        ("Corner set", long.clone()),
+                        ("Binding authority", long.clone()),
                     ];
                     consumed = Some(
                         summary_cards(

@@ -760,6 +760,7 @@ const fn diagnostic_phase_label(phase: CompileDiagnosticPhase) -> &'static str {
         CompileDiagnosticPhase::Semantic => "semantic analysis",
         CompileDiagnosticPhase::CodeGeneration => "code generation",
         CompileDiagnosticPhase::ModuleSelection => "module selection",
+        CompileDiagnosticPhase::PerformanceBudget => "performance budget",
     }
 }
 

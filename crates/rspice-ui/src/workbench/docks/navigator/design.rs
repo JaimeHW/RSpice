@@ -35,7 +35,6 @@ const PRIMITIVE_GROUPS: [(&str, &[&str]); 4] = [
     ("Mixed signal / XSPICE", &["Behavioral (XSPICE)"]),
 ];
 const PANEL_TABS_PADDING_X: f32 = 8.0;
-const HIERARCHY_PATH_LINE_HEIGHT: f32 = 17.0;
 
 fn nav_row_indented(
     ui: &mut Ui,
@@ -127,7 +126,7 @@ fn tabs(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.id().with(("design-panel-tab", 1)),
     ];
     let content_rect = panel_tabs_content_rect(rect);
-    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let font = theme::sans(tokens::FS_1, FontWeight::Medium);
     let desired_widths = entries.map(|(_, label)| {
         ui.painter()
             .layout_no_wrap(label.to_owned(), font.clone(), t.color.text)
@@ -166,7 +165,7 @@ fn tabs(ui: &mut Ui, app: &mut RSpiceApp) {
             tab_rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
-            theme::sans(tokens::FS_1, FontWeight::Regular),
+            theme::sans(tokens::FS_1, FontWeight::Medium),
             if selected {
                 t.color.text
             } else {
@@ -227,25 +226,7 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
 }
 
 fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    ScrollArea::vertical()
-        .id_salt("workbench.design.navigator")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            navigator_search(ui, app);
-            hierarchy_path(ui, app);
-            for section in DESIGN_NAVIGATOR_SECTION_ORDER {
-                match section {
-                    DesignNavigatorSection::Instances => instance_section(ui, app),
-                    DesignNavigatorSection::Ports => port_section(ui, app),
-                    DesignNavigatorSection::Nets => net_section(ui, app),
-                    DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
-                }
-            }
-        });
-}
-
-fn hierarchy_path(ui: &mut Ui, app: &mut RSpiceApp) {
+    navigator_search(ui, app);
     let (ancestors, current, can_ascend) = navigator_path(&app.state.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
@@ -256,21 +237,29 @@ fn hierarchy_path(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.set_width(ui.available_width().max(1.0));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 3.0;
+                let ancestor_text = egui::RichText::new(&ancestors)
+                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_dim);
                 if can_ascend {
-                    let response = hierarchy_path_ancestor(ui, &ancestors);
-                    let keyboard_activated = response.has_focus()
-                        && ui.input_mut(|input| {
-                            input.consume_key(Modifiers::NONE, Key::Enter)
-                                || input.consume_key(Modifiers::NONE, Key::Space)
-                        });
-                    if response.clicked() || keyboard_activated {
+                    let response = ui
+                        .add(egui::Button::new(ancestor_text).frame(false))
+                        .on_hover_text("Ascend to the parent sheet");
+                    if response.clicked() {
                         ascend = true;
                     }
                 } else {
-                    hierarchy_path_label(ui, &ancestors, FontWeight::Regular, t.color.text_dim);
+                    ui.label(ancestor_text);
                 }
-                hierarchy_path_label(ui, "/", FontWeight::Regular, t.color.text_faint);
-                hierarchy_path_label(ui, &current, FontWeight::Medium, t.color.text);
+                ui.label(
+                    egui::RichText::new("/")
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
+                ui.label(
+                    egui::RichText::new(&current)
+                        .font(theme::mono(tokens::FS_1, FontWeight::Medium))
+                        .color(t.color.text),
+                );
             });
         });
     ui.painter().hline(
@@ -281,107 +270,19 @@ fn hierarchy_path(ui: &mut Ui, app: &mut RSpiceApp) {
     if ascend {
         Command::AscendHierarchy.execute(app);
     }
-}
 
-fn hierarchy_path_ancestor(ui: &mut Ui, text: &str) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let font = theme::mono(tokens::FS_1, FontWeight::Regular);
-    let galley = hierarchy_path_galley(
-        ui,
-        text,
-        font.clone(),
-        t.color.text_dim,
-        ui.available_width(),
-    );
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(
-            galley.size().x,
-            galley.size().y.max(HIERARCHY_PATH_LINE_HEIGHT),
-        ),
-        egui::Sense::click(),
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            "Ascend to the parent sheet",
-        )
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Button);
-        node.set_label("Ascend to the parent sheet");
-    });
-    let emphasized = response.hovered() || response.has_focus();
-    let tone = if emphasized {
-        t.color.accent
-    } else {
-        t.color.text_dim
-    };
-    ui.painter().galley(
-        egui::pos2(rect.left(), rect.center().y - galley.size().y * 0.5),
-        galley,
-        tone,
-    );
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 1.0,
-        egui::Stroke::new(
-            1.0,
-            if emphasized {
-                t.color.accent
-            } else {
-                t.color.border_strong
-            },
-        ),
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_text("Ascend to the parent sheet")
-}
-
-fn hierarchy_path_label(
-    ui: &mut Ui,
-    text: &str,
-    weight: FontWeight,
-    tone: egui::Color32,
-) -> Response {
-    let font = theme::mono(tokens::FS_1, weight);
-    let galley = hierarchy_path_galley(ui, text, font, tone, ui.available_width());
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(
-            galley.size().x,
-            galley.size().y.max(HIERARCHY_PATH_LINE_HEIGHT),
-        ),
-        egui::Sense::hover(),
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text.to_owned())
-    });
-    ui.painter().galley(
-        egui::pos2(rect.left(), rect.center().y - galley.size().y * 0.5),
-        galley,
-        tone,
-    );
-    response
-}
-
-fn hierarchy_path_galley(
-    ui: &Ui,
-    text: &str,
-    font: egui::FontId,
-    tone: egui::Color32,
-    max_width: f32,
-) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::single_section(
-        text.to_owned(),
-        egui::TextFormat {
-            font_id: font,
-            color: tone,
-            ..Default::default()
-        },
-    );
-    job.wrap.max_width = max_width.max(1.0);
-    job.wrap.break_anywhere = true;
-    ui.fonts_mut(|fonts| fonts.layout_job(job))
+    ScrollArea::vertical()
+        .id_salt("workbench.design.navigator")
+        .show(ui, |ui| {
+            for section in DESIGN_NAVIGATOR_SECTION_ORDER {
+                match section {
+                    DesignNavigatorSection::Instances => instance_section(ui, app),
+                    DesignNavigatorSection::Ports => port_section(ui, app),
+                    DesignNavigatorSection::Nets => net_section(ui, app),
+                    DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
+                }
+            }
+        });
 }
 
 fn navigator_path(workspace: &crate::state::ProjectWorkspace) -> (String, String, bool) {
@@ -1119,8 +1020,7 @@ fn navigator_net_selection_matches(app: &RSpiceApp, net: &DesignNet) -> bool {
         && concrete.bus_taps.is_empty()
         && concrete.net_labels.is_empty()
         && concrete.design_notes.is_empty()
-        && concrete.documentation_shapes.is_empty()
-        && concrete.probes.is_empty();
+        && concrete.documentation_shapes.is_empty();
     no_other_classes
         && concrete.wires.iter().copied().collect::<HashSet<_>>()
             == wire_ids.iter().copied().collect()
@@ -1245,21 +1145,16 @@ fn raw_probe_target(expression: &str) -> Option<RawProbeTarget<'_>> {
 }
 
 fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
+    shelf_search(ui, app);
+    let query = normalized(&app.state.workbench.placement_query);
+    let visible_matches = component_shelf_match_count(app, &query);
     let mut primitive = None;
     let mut cell = None;
-    let editable = component_shelf_editable(app);
     ScrollArea::vertical()
         .id_salt("workbench.design.component_shelf")
-        .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            shelf_search(ui, app);
-            let query = normalized(&app.state.workbench.placement_query);
-            let visible_matches = component_shelf_match_count(app, &query);
-            let pinned_selection = pinned(ui, app, editable);
-            let catalog_selection = primitive_catalog(ui, app, editable);
-            primitive = pinned_selection.or(catalog_selection);
-            cell = project_library(ui, app, editable);
+            primitive = pinned(ui, app).or_else(|| primitive_catalog(ui, app));
+            cell = project_library(ui, app);
             if !query.is_empty() && visible_matches == 0 {
                 empty_navigator_row(ui, "No component or cell matches this filter");
             }
@@ -1269,10 +1164,6 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     } else if let Some(binding) = cell {
         arm_cell(app, binding, ui.ctx());
     }
-}
-
-fn component_shelf_editable(app: &RSpiceApp) -> bool {
-    !app.state.schematic_edit_read_only()
 }
 
 fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
@@ -1362,7 +1253,7 @@ fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
     );
 }
 
-fn pinned(ui: &mut Ui, app: &RSpiceApp, editable: bool) -> Option<ComponentType> {
+fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     let query = normalized(&app.state.workbench.placement_query);
     if !query.is_empty() {
         return None;
@@ -1397,19 +1288,13 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp, editable: bool) -> Option<ComponentType>
                             (ComponentType::Capacitor, "C"),
                             (ComponentType::Ground, "⏚"),
                         ] {
-                            let response = ui
-                                .add_enabled_ui(editable, |ui| {
-                                    place_chip(
-                                        ui,
-                                        kind,
-                                        glyph,
-                                        app.state.schematic.tool == Tool::Place(kind),
-                                    )
-                                })
-                                .inner;
-                            if editable
-                                && let Some(payload) = SchematicShelfDragPayload::primitive(kind)
-                            {
+                            let response = place_chip(
+                                ui,
+                                kind,
+                                glyph,
+                                app.state.schematic.tool == Tool::Place(kind),
+                            );
+                            if let Some(payload) = SchematicShelfDragPayload::primitive(kind) {
                                 response.dnd_set_drag_payload(payload);
                             }
                             if response.clicked() {
@@ -1424,7 +1309,6 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp, editable: bool) -> Option<ComponentType>
 
 fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> Response {
     let t = Tokens::get(ui.ctx());
-    let enabled = ui.is_enabled();
     let label = kind.display_name();
     let label_galley = ui.painter().layout_no_wrap(
         label.to_owned(),
@@ -1444,9 +1328,7 @@ fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> 
             format!("Arm {label} placement"),
         )
     });
-    let fill = if !enabled {
-        t.color.bg_inset
-    } else if selected {
+    let fill = if selected {
         t.color.bg_active
     } else if response.hovered() {
         t.color.bg_hover
@@ -1459,7 +1341,7 @@ fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> 
         fill,
         egui::Stroke::new(
             1.0,
-            if enabled && (selected || response.hovered()) {
+            if selected || response.hovered() {
                 t.color.border_strong
             } else {
                 t.color.border
@@ -1475,26 +1357,14 @@ fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> 
         // The bundled engineering faces are not required to carry the
         // Unicode earth-ground glyph. Paint the same three-bar mark as vector
         // geometry so the pinned shelf never degrades to a tofu box.
-        WorkbenchIcon::Supply.paint(
-            ui.painter(),
-            glyph_rect,
-            if enabled {
-                t.color.symbol
-            } else {
-                t.color.text_faint
-            },
-        );
+        WorkbenchIcon::Supply.paint(ui.painter(), glyph_rect, t.color.symbol);
     } else {
         ui.painter().text(
             glyph_rect.center(),
             egui::Align2::CENTER_CENTER,
             glyph,
             theme::mono(tokens::FS_0, FontWeight::Medium),
-            if enabled {
-                t.color.symbol
-            } else {
-                t.color.text_faint
-            },
+            t.color.symbol,
         );
     }
     ui.painter().galley(
@@ -1503,26 +1373,20 @@ fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> 
             rect.center().y - label_galley.size().y * 0.5,
         ),
         label_galley,
-        if !enabled {
-            t.color.text_faint
-        } else if selected {
+        if selected {
             t.color.text
         } else {
             t.color.text_dim
         },
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
-    if enabled {
-        response.on_hover_text(format!(
-            "Click to arm {} placement or drag it onto the sheet",
-            kind.display_name()
-        ))
-    } else {
-        response.on_disabled_hover_text("The active schematic is read-only")
-    }
+    response.on_hover_text(format!(
+        "Click to arm {} placement or drag it onto the sheet",
+        kind.display_name()
+    ))
 }
 
-fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp, editable: bool) -> Option<ComponentType> {
+fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     let query = normalized(&app.state.workbench.placement_query);
     let mut armed = None;
     let visible_count = PRIMITIVE_GROUPS
@@ -1554,11 +1418,11 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp, editable: bool) -> Option<Com
                 group,
                 entries.len(),
             ) {
-                armed = primitive_rows(ui, app, &entries, 2, editable).or(armed);
+                armed = primitive_rows(ui, app, &entries, 2).or(armed);
             }
         } else {
             shelf_section_header(ui, group, Some(&entries.len().to_string()));
-            armed = primitive_rows(ui, app, &entries, 0, editable).or(armed);
+            armed = primitive_rows(ui, app, &entries, 0).or(armed);
         }
     }
     armed
@@ -1569,36 +1433,23 @@ fn primitive_rows(
     app: &RSpiceApp,
     entries: &[ComponentPaletteEntry],
     level: usize,
-    editable: bool,
 ) -> Option<ComponentType> {
     let mut armed = None;
     for entry in entries {
-        let response = ui
-            .add_enabled_ui(editable, |ui| {
-                schematic_nav_row_indented_drag_response(
-                    ui,
-                    WorkbenchIcon::Design,
-                    entry.label,
-                    app.state.schematic.tool == Tool::Place(entry.kind),
-                    Some(entry.kind.spice_prefix()),
-                    level,
-                    false,
-                    false,
-                    false,
-                )
-            })
-            .inner;
-        if editable && let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind) {
+        let response = schematic_nav_row_indented_drag_response(
+            ui,
+            WorkbenchIcon::Design,
+            entry.label,
+            app.state.schematic.tool == Tool::Place(entry.kind),
+            Some(entry.kind.spice_prefix()),
+            level,
+            false,
+            false,
+            false,
+        );
+        if let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind) {
             response.dnd_set_drag_payload(payload);
         }
-        let response = if editable {
-            response.on_hover_text(format!(
-                "Click to arm {} placement or drag it onto the sheet",
-                entry.kind.display_name()
-            ))
-        } else {
-            response.on_disabled_hover_text("The active schematic is read-only")
-        };
         if response.clicked() {
             armed = Some(entry.kind);
         }
@@ -1606,7 +1457,7 @@ fn primitive_rows(
     armed
 }
 
-fn project_library(ui: &mut Ui, app: &RSpiceApp, editable: bool) -> Option<LibraryCellInstance> {
+fn project_library(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> {
     let query = normalized(&app.state.workbench.placement_query);
     let mut grouped = BTreeMap::<String, Vec<CellCandidate>>::new();
     for candidate in cell_candidates(app) {
@@ -1634,22 +1485,17 @@ fn project_library(ui: &mut Ui, app: &RSpiceApp, editable: bool) -> Option<Libra
                 &library,
                 cells.len(),
             ) {
-                armed = cell_rows(ui, &cells, 2, editable).or_else(|| armed.take());
+                armed = cell_rows(ui, &cells, 2).or_else(|| armed.take());
             }
         } else {
             shelf_section_header(ui, &library, Some(&cells.len().to_string()));
-            armed = cell_rows(ui, &cells, 0, editable).or(armed);
+            armed = cell_rows(ui, &cells, 0).or(armed);
         }
     }
     armed
 }
 
-fn cell_rows(
-    ui: &mut Ui,
-    cells: &[CellCandidate],
-    level: usize,
-    editable: bool,
-) -> Option<LibraryCellInstance> {
+fn cell_rows(ui: &mut Ui, cells: &[CellCandidate], level: usize) -> Option<LibraryCellInstance> {
     let mut armed = None;
     for candidate in cells {
         let meta = if candidate.ready {
@@ -1658,7 +1504,7 @@ fn cell_rows(
             candidate.unavailable_reason.as_str()
         };
         let clicked = ui
-            .add_enabled_ui(candidate.ready && editable, |ui| {
+            .add_enabled_ui(candidate.ready, |ui| {
                 if candidate.ready {
                     let payload =
                         SchematicShelfDragPayload::library_cell(candidate.binding.clone());
@@ -1673,17 +1519,11 @@ fn cell_rows(
                         false,
                         false,
                     );
-                    if editable {
-                        response.dnd_set_drag_payload(payload);
-                        response.clone().on_hover_text(format!(
-                            "Click to arm {}/{} or drag it onto the sheet",
-                            candidate.library, candidate.cell
-                        ));
-                    } else {
-                        response
-                            .clone()
-                            .on_disabled_hover_text("The active schematic is read-only");
-                    }
+                    response.dnd_set_drag_payload(payload);
+                    response.clone().on_hover_text(format!(
+                        "Click to arm {}/{} or drag it onto the sheet",
+                        candidate.library, candidate.cell
+                    ));
                     response.clicked()
                 } else {
                     nav_row_indented(
@@ -1787,9 +1627,6 @@ fn cell_candidates(app: &RSpiceApp) -> Vec<CellCandidate> {
 }
 
 fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
-    if app.state.deny_read_only_edit() {
-        return;
-    }
     if kind == ComponentType::Port {
         crate::workbench::commands::vocabulary::Command::PlacePin.execute(app);
         return;
@@ -1805,9 +1642,6 @@ fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) 
 }
 
 fn arm_cell(app: &mut RSpiceApp, binding: LibraryCellInstance, ctx: &egui::Context) {
-    if app.state.deny_read_only_edit() {
-        return;
-    }
     let label = format!("{}/{}", binding.library, binding.cell);
     app.state.schematic.pending_library_cell = Some(binding);
     app.state
@@ -1909,34 +1743,6 @@ mod tests {
         assert_eq!(ancestors, "/ user / top");
         assert_eq!(current, "XAFE · afe_core");
         assert!(can_ascend);
-    }
-
-    #[test]
-    fn hierarchy_path_uses_a_stable_text_line_box_instead_of_control_height() {
-        assert_eq!(HIERARCHY_PATH_LINE_HEIGHT, 17.0);
-        assert!(HIERARCHY_PATH_LINE_HEIGHT < 28.0);
-    }
-
-    #[test]
-    fn hierarchy_path_breaks_long_engineering_names_inside_the_dock() {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut galley_size = egui::Vec2::ZERO;
-        let _ = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                galley_size = hierarchy_path_galley(
-                    ui,
-                    "/ vendor_library_with_a_deliberately_long_unbroken_name",
-                    theme::mono(tokens::FS_1, FontWeight::Regular),
-                    egui::Color32::WHITE,
-                    84.0,
-                )
-                .size();
-            });
-        });
-
-        assert!(galley_size.x <= 84.0 + f32::EPSILON);
-        assert!(galley_size.y > HIERARCHY_PATH_LINE_HEIGHT);
     }
 
     #[test]
@@ -2061,29 +1867,6 @@ mod tests {
     }
 
     #[test]
-    fn component_shelf_uses_the_central_schematic_edit_authority() {
-        let mut app = RSpiceApp::test_instance();
-        assert!(component_shelf_editable(&app));
-
-        app.state.schematic.read_only = true;
-        assert!(!component_shelf_editable(&app));
-
-        app.state.schematic.read_only = false;
-        app.state.workbench.hierarchy_reference_read_only = true;
-        assert!(!component_shelf_editable(&app));
-
-        app.state.workbench.hierarchy_reference_read_only = false;
-        app.state.workbench.safe_mode.activate(
-            crate::workbench::state::LocalSafeModeOptions {
-                open_project_read_only: true,
-                ..Default::default()
-            },
-            String::new(),
-        );
-        assert!(!component_shelf_editable(&app));
-    }
-
-    #[test]
     fn palette_placement_cancels_every_unfinished_conductor_route() {
         let mut app = RSpiceApp::test_instance();
         app.state
@@ -2102,23 +1885,6 @@ mod tests {
         );
         assert!(!app.state.schematic.wire_drawing.active);
         assert!(!app.state.schematic.bus_drawing.active);
-    }
-
-    #[test]
-    fn palette_placement_cannot_arm_inside_a_read_only_hierarchy_reference() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.hierarchy_reference_read_only = true;
-
-        arm_primitive(&mut app, ComponentType::Resistor, &egui::Context::default());
-        assert_eq!(app.state.schematic.tool, Tool::Select);
-
-        arm_cell(
-            &mut app,
-            LibraryCellInstance::new("vendor", "precision_amp", "schematic"),
-            &egui::Context::default(),
-        );
-        assert_eq!(app.state.schematic.tool, Tool::Select);
-        assert!(app.state.schematic.pending_library_cell.is_none());
     }
 
     #[test]
