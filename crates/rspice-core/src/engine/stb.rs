@@ -240,7 +240,7 @@ mod tests {
              RIN in 0 1k\n\
              .END\n",
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )

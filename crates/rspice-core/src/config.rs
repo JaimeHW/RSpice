@@ -108,6 +108,21 @@ pub enum SimulationConfigError {
     },
 }
 
+/// Dialect-specific expression-function semantics.
+///
+/// Beside [`SpiceDialect`] rather than in `netlist`, because the expression VM
+/// and the power operator decide semantics from it — `log(x)` is natural log
+/// in ngspice and base-10 in Xyce — and they sit below the parser that used to
+/// own the enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExpressionDialect {
+    /// ngspice-compatible expression functions: `log(x)` is natural log.
+    #[default]
+    Ngspice,
+    /// Xyce-compatible expression functions: `log(x)` is base-10 log.
+    Xyce,
+}
+
 /// Broad SPICE compatibility policy for internal device-model selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpiceDialect {

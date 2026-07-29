@@ -2,7 +2,7 @@
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 /// Boltzmann over charge with ngspice-46's CODATA constants
 /// (const.h: CONSTboltz / CHARGE).
@@ -251,7 +251,7 @@ pub struct Diode {
     /// Sidewall high-injection knee current (IKP).
     pub sidewall_knee_current: Value,
     /// Band-to-band tunneling branch (JTUN/JTUNSW/NTUN/XTITUN/KEG).
-    pub tunneling: DiodeTunneling,
+    pub(crate) tunneling: DiodeTunneling,
     /// Bias-independent metal and poly overlap capacitance (LEVEL=3
     /// CMETAL + CPOLY), already scaled by the instance multiplicity.
     pub overlap_capacitance: Value,
@@ -266,7 +266,7 @@ pub struct Diode {
     /// Which formulation the `.model` card's LEVEL selector chose.
     pub level: DiodeLevel,
     /// HSPICE-style TLEV/TLEVC temperature-equation coefficients.
-    pub temperature_model: DiodeTemperatureModel,
+    pub(crate) temperature_model: DiodeTemperatureModel,
     /// Evaluate as Xyce's native diode rather than ngspice's.
     ///
     /// The two references genuinely disagree about this device, so the flag

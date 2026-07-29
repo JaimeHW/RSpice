@@ -72,7 +72,7 @@ impl ParsedNetlistSourceMap {
         let mut builder = SourceMapBuilder::default();
         builder.scan(
             source,
-            netlist.params.expression_dialect() != super::ExpressionDialect::Xyce,
+            netlist.params.expression_dialect() != crate::config::ExpressionDialect::Xyce,
         );
         builder.into_map()
     }

@@ -40,7 +40,7 @@
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use crate::numerics::integration::CompanionCoefficients;
 use crate::device::traits::{DynamicDevice, MatrixStamper};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // Coupling Coefficient

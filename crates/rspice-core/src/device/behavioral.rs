@@ -10,7 +10,7 @@ use crate::expr::{
     normalize_expression_boundary, parse_expression_strict, real_pow_with_derivative,
     resolve_file_lookup_functions_with_limits,
 };
-use crate::netlist::ExpressionDialect;
+use crate::config::ExpressionDialect;
 use crate::solver::StaticMatrix;
 use std::path::Path;
 

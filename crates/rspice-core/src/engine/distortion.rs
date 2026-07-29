@@ -764,7 +764,7 @@ mod tests {
              R1 out 0 {RUNTIME_R}\n\
              .END\n",
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..crate::netlist::NetlistParseOptions::default()
             },
         )

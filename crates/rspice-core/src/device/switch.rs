@@ -38,7 +38,7 @@ use super::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
 };
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // Switch State
@@ -1127,7 +1127,7 @@ pub struct GenericSwitch {
     time_breakpoints: Vec<Value>,
     temperature: Value,
     gmin: Value,
-    expression_dialect: crate::netlist::ExpressionDialect,
+    expression_dialect: crate::config::ExpressionDialect,
 
     /// On resistance
     pub ron: Value,
@@ -1192,7 +1192,7 @@ impl GenericSwitch {
                 crate::constants::TEMP_REFERENCE,
             ),
             gmin: crate::constants::GMIN,
-            expression_dialect: crate::netlist::ExpressionDialect::Ngspice,
+            expression_dialect: crate::config::ExpressionDialect::Ngspice,
             ron: 1.0,
             roff: 1.0e6,
             on: 1.0,
@@ -1589,7 +1589,7 @@ impl GenericSwitch {
         &mut self,
         temperature: Value,
         gmin: Value,
-        expression_dialect: crate::netlist::ExpressionDialect,
+        expression_dialect: crate::config::ExpressionDialect,
     ) {
         self.temperature = temperature;
         self.gmin = gmin;
@@ -1957,7 +1957,7 @@ impl GenericSwitch {
 #[cfg(test)]
 mod tests {
     use crate::device::traits::NonlinearDevice;
-    use crate::netlist::ExpressionDialect;
+    use crate::config::ExpressionDialect;
 
     use super::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 

@@ -8,7 +8,7 @@
 
 use super::mosfet::MosType;
 use crate::Value;
-use crate::circuit::NodeId;
+use crate::NodeId;
 use crate::device::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use std::collections::HashMap;
 

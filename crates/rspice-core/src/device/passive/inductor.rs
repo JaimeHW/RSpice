@@ -1,7 +1,7 @@
 //! Inductor device model
 
 use crate::device::traits::{DynamicDevice, MatrixStamper};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 /// Inductor with companion model for transient analysis
 #[derive(Debug, Clone)]

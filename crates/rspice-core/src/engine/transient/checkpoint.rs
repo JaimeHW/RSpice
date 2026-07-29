@@ -3220,7 +3220,7 @@ mod tests {
 
         let xyce_options = crate::netlist::NetlistParseOptions {
             statistical_mode: crate::netlist::StatisticalParamMode::Sample,
-            expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+            expression_dialect: crate::config::ExpressionDialect::Xyce,
             parameter_redefinition_policy: crate::netlist::ParameterRedefinitionPolicy::UseLast,
             ..crate::netlist::NetlistParseOptions::default()
         };

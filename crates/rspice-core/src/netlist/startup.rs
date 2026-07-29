@@ -1,7 +1,8 @@
 //! Semantic validation and typed diagnostics for `.IC`/`.NODESET` cards.
+use crate::config::ExpressionDialect;
 
 use super::{
-    ExpressionDialect, InitialCondition, Netlist, NodeSet, ParseDiagnostic, ParseError,
+    InitialCondition, Netlist, NodeSet, ParseDiagnostic, ParseError,
     ParseWithAbortError, StartupDiagnostic, StartupDiagnosticCode, StartupDirectiveConflictError,
     StartupDirectiveDisposition, StartupDirectiveKind, StartupDirectiveRecord,
     StartupDirectiveScope, collect_output_node_namespace_from_elements_with_abort,

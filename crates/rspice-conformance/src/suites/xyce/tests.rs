@@ -5596,7 +5596,7 @@ fn node_lookup_candidates_follow_effective_ground_policy() {
     );
 
     let xyce_options = rspice_core::netlist::NetlistParseOptions {
-        expression_dialect: rspice_core::netlist::ExpressionDialect::Xyce,
+        expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
         ..Default::default()
     };
     let xyce = Netlist::parse_with_options("Xyce ordinary GND\nR1 GND 0 1k\n.END\n", xyce_options)

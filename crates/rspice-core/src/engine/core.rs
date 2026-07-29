@@ -931,7 +931,7 @@ C1 mid b 1u
             .expect("permissive-mode circuit builds");
         netlist
             .params
-            .set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+            .set_expression_dialect(crate::config::ExpressionDialect::Xyce);
 
         assert!(
             engine

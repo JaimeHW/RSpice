@@ -740,7 +740,7 @@ impl Engine {
             source += ag0 * branch.d_external[col] * external[col];
         }
 
-        let mut stamp_row = |row: crate::circuit::NodeId, sign: Value| {
+        let mut stamp_row = |row: crate::NodeId, sign: Value| {
             if row == 0 {
                 return;
             }

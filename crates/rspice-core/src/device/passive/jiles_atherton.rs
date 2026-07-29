@@ -47,7 +47,7 @@
 use crate::device::traits::{
     DynamicDevice, MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice,
 };
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 use std::f64::consts::PI;
 
 //=============================================================================

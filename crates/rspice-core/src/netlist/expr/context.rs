@@ -2,7 +2,7 @@
 //!
 //! [`ParamContext`] resolves parameter names, holds user-defined
 //! [`FunctionDef`]s, and carries the settings that change how expressions
-//! evaluate: the [`ExpressionDialect`], the
+//! evaluate: the [`crate::config::ExpressionDialect`], the
 //! [`ParameterRedefinitionPolicy`] applied when a name is defined twice, and
 //! the [`StatisticalParamMode`] governing `GAUSS`/`UNIF`/`RAND`.
 //!
@@ -10,6 +10,7 @@
 //! RNG, so a Monte Carlo or corner run reproduces exactly given the same
 //! seed ([`DEFAULT_RANDOM_SEED`] unless overridden).
 
+use crate::config::ExpressionDialect;
 use super::*;
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -164,21 +165,6 @@ pub enum ParameterRedefinitionPolicy {
 impl Default for ParameterRedefinitionPolicy {
     fn default() -> Self {
         Self::UseLast
-    }
-}
-
-/// Dialect-specific expression-function semantics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExpressionDialect {
-    /// ngspice-compatible expression functions: `log(x)` is natural log.
-    Ngspice,
-    /// Xyce-compatible expression functions: `log(x)` is base-10 log.
-    Xyce,
-}
-
-impl Default for ExpressionDialect {
-    fn default() -> Self {
-        Self::Ngspice
     }
 }
 

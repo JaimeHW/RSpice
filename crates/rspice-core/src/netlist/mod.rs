@@ -11,6 +11,7 @@
 //! - Analysis commands (.OP, .DC, .AC, .DISTO, .TRAN, .NOISE, .PZ, .SENS, .FOUR, .STEP, .MC, .TEMP)
 //! - File inclusion (.INCLUDE, .LIB)
 //! - Subcircuits with parameter passing
+use crate::config::ExpressionDialect;
 
 mod add_resistors;
 mod ast;
@@ -38,7 +39,7 @@ pub use add_resistors::*;
 pub use ast::*;
 pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
 pub use expr::{
-    ExpressionDialect, ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
+    ParamContext, ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
 };
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,

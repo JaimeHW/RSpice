@@ -2351,7 +2351,7 @@ pub(super) fn parse_meas_command(
                     stream.advance();
                     expr
                 }
-                _ if params.expression_dialect() == crate::netlist::ExpressionDialect::Xyce => {
+                _ if params.expression_dialect() == crate::config::ExpressionDialect::Xyce => {
                     collect_measure_equation_expression(stream, line_num)?
                 }
                 other => {
@@ -2365,7 +2365,7 @@ pub(super) fn parse_meas_command(
                 }
             };
             if measure_type_key == "EQN"
-                || params.expression_dialect() == crate::netlist::ExpressionDialect::Xyce
+                || params.expression_dialect() == crate::config::ExpressionDialect::Xyce
             {
                 let (from, to, td) = parse_measure_equation_options(stream, line_num, params)?;
                 MeasureType::Equation {
@@ -5019,7 +5019,7 @@ mod tests {
              .PRINT DC V($) V(//)\n\
              .END\n",
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..Default::default()
             },
         )

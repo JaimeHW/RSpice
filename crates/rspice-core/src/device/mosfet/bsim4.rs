@@ -21,7 +21,7 @@
 //! ```
 
 use crate::Value;
-use crate::circuit::NodeId;
+use crate::NodeId;
 use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
 
 /// Material constants specific to this model.

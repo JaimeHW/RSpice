@@ -1,7 +1,7 @@
 //! Voltage and current source models
 
 use super::traits::{LinearDevice, MatrixStamper};
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 /// Independent voltage source
 #[derive(Debug, Clone)]

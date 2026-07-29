@@ -5,6 +5,7 @@
 //! reproduce the identical draw sequence on every platform and run.
 
 use super::*;
+use crate::config::ExpressionDialect;
 
 fn eval_with(ctx: &ParamContext, input: &str) -> Value {
     eval_expression(input, ctx).unwrap_or_else(|e| panic!("eval `{input}` failed: {e}"))
@@ -922,7 +923,7 @@ fn log_function_follows_expression_dialect() {
     assert!((eval_with(&ctx, "ln(100)") - 100.0_f64.ln()).abs() < 1.0e-14);
     assert!((eval_with(&ctx, "log10(100)") - 2.0).abs() < 1.0e-14);
 
-    ctx.set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+    ctx.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
     assert!((eval_with(&ctx, "log(100)") - 2.0).abs() < 1.0e-14);
     assert!((eval_with(&ctx, "ln(100)") - 100.0_f64.ln()).abs() < 1.0e-14);
     assert!((eval_with(&ctx, "log10(100)") - 2.0).abs() < 1.0e-14);
@@ -933,7 +934,7 @@ fn xyce_expression_boundary_normalizes_non_finite_results() {
     let mut ctx = ParamContext::new();
     assert_eq!(eval_with(&ctx, "log(0)"), Value::NEG_INFINITY);
 
-    ctx.set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+    ctx.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
     assert_eq!(eval_with(&ctx, "log(0)"), -1.0e50);
     assert_eq!(eval_with(&ctx, "-log(0)"), 1.0e50);
     assert_eq!(eval_with(&ctx, "exp(1000)"), 1.0e50);
@@ -959,7 +960,7 @@ fn xyce_hyperbolic_functions_follow_expression_dialect() {
     assert!(eval_with(&ctx, "atanh(1)").is_infinite());
     assert_eq!(eval_with(&ctx, "tanh(21)"), 21.0_f64.tanh());
 
-    ctx.set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+    ctx.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
 
     let upper_saturated_atanh = (1.0 - 1.0e-12_f64).atanh();
     let lower_saturated_atanh = (1.0e-12_f64 - 1.0).atanh();

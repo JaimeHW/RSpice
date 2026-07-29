@@ -3515,13 +3515,13 @@ mod tests {
     impl crate::device::MatrixStamper for DiscardingStamper {
         fn stamp(
             &mut self,
-            _row: crate::circuit::NodeId,
-            _col: crate::circuit::NodeId,
+            _row: crate::NodeId,
+            _col: crate::NodeId,
             _value: crate::Value,
         ) {
         }
 
-        fn stamp_rhs(&mut self, _index: crate::circuit::NodeId, _value: crate::Value) {}
+        fn stamp_rhs(&mut self, _index: crate::NodeId, _value: crate::Value) {}
     }
 
     fn built_bsim3_equation_set(
@@ -3641,7 +3641,7 @@ mod tests {
         let netlist = Netlist::parse_with_options(
             "resolved behavioral GMIN\nB1 out 0 V={GMIN}\n.END\n",
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..Default::default()
             },
         )
@@ -3672,7 +3672,7 @@ mod tests {
              .ENDS\n\
              .END\n",
             crate::netlist::NetlistParseOptions {
-                expression_dialect: crate::netlist::ExpressionDialect::Xyce,
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
                 ..Default::default()
             },
         )

@@ -5,6 +5,7 @@
 //! - PULSE/SIN/PWL/EXP source specifications with parentheses
 //! - .PARAM statements with expression evaluation
 //! - Subcircuit definitions and instances
+use crate::config::ExpressionDialect;
 
 use super::expr::{eval_expression, eval_expression_complex, prepare_behavioral_expression};
 use super::include::{ExpandedSource, ExpandedSourceItem};
@@ -20,7 +21,7 @@ use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, DataTable, DeviceInitialConditionDirective,
     DeviceInitialConditionEntry, DeviceInitialConditionError, DeviceInitialConditionSource,
-    Element, ElementKind, ExpressionDialect, FftAnalysis, FftFormat, FftOutput, FftWindow,
+    Element, ElementKind, FftAnalysis, FftFormat, FftOutput, FftWindow,
     FreqVariation, InitialCondition, JfetType, LinAnalysis, MesfetType,
     MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, ModelDef, MonteCarloCommand,
     MonteCarloDistribution, MosType, Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind,
@@ -966,7 +967,8 @@ fn replace_ground_fields_with_abort(
 mod replaceground_lexical_tests {
     use super::{NetlistParseOptions, apply_root_preprocessing, replace_ground_fields};
     use crate::abort_signal::NoAbort;
-    use crate::netlist::{ExpressionDialect, Netlist, ParseError, ParseWithAbortError, SaveSignal};
+    use crate::config::ExpressionDialect;
+    use crate::netlist::{Netlist, ParseError, ParseWithAbortError, SaveSignal};
 
     fn temporary_include_deck(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let unique = std::time::SystemTime::now()
@@ -1211,7 +1213,8 @@ mod replaceground_lexical_tests {
 #[cfg(test)]
 mod removeunused_tests {
     use super::{NetlistParseOptions, apply_remove_unused_policy_with_abort};
-    use crate::netlist::{ExpressionDialect, Netlist, ParseError, RemoveUnusedDeviceType};
+    use crate::config::ExpressionDialect;
+    use crate::netlist::{Netlist, ParseError, RemoveUnusedDeviceType};
 
     fn xyce_options() -> NetlistParseOptions {
         NetlistParseOptions {

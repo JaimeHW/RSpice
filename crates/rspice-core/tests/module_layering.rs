@@ -161,17 +161,11 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // `crate::config` at rank 3, below everything that reads them, so the
     // twenty-seven references that made those three edges are downward.
     //
-    // What remains of `circuit -> engine`, `solver -> engine` and
-    // `device -> engine` is a different edge: five constructions of
-    // `SimulationError` and one of `Engine`. Lower layers building the
-    // orchestrator's error type is a real inversion, but it is an error-type
-    // question rather than a configuration one, and it belongs with Phase 8's
-    // look at what `circuit` and `device` owe each other.
-    ("device", "engine", 1),
-    // `expr::parser` naming `netlist::ExpressionDialect` to build a test
-    // context. `ExpressionDialect` is the one dialect enum still in `netlist`;
-    // it follows `SpiceDialect` into `config` when the parser settles.
-    ("expr", "netlist", 1),
+    // `expr -> netlist` is retired too: it was `ExpressionDialect`, the last
+    // dialect enum left in `netlist`, which the VM and the power operator both
+    // read to decide whether `log(x)` is natural or base 10. It followed
+    // `SpiceDialect` into `config`.
+    //
     // ---------------------------------------------------------------------
     // Phase 6 — one module per analysis.
     //
@@ -192,11 +186,19 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // it is a change to `rspice-veriloga-gen`, not a change to this crate.
     ("netlist", "device", 1),
     // ---------------------------------------------------------------------
-    // Phase 8 — device layer.
+    // Phase 8 — device layer. Both edges retired.
     //
-    // Devices reaching into circuit storage. Retired by the `circuit::assembly`
-    // consolidation, which gives devices a stamp target instead of the store.
-    ("device", "circuit", 4),
+    // `device -> circuit` was never devices reaching into circuit storage, as
+    // this list claimed while the counter under-reported it at four. It was
+    // thirty-eight files importing `NodeId`, an alias to `usize`. It sits
+    // beside `Value` at the crate root now: shared vocabulary, named by every
+    // layer and owned by none.
+    //
+    // `device -> engine` was one `#[ignore]`d probe in `transmission_line`
+    // that built an `Engine` to print where an LTRA trajectory drifts from an
+    // ngspice oracle. It asserted nothing, so it could not fail and could not
+    // protect anything; the asserting replay test beside it keeps both
+    // fixtures.
 ];
 
 fn src_dir() -> PathBuf {
@@ -261,6 +263,75 @@ fn strip_line_comments(source: &str) -> String {
         .join("\n")
 }
 
+/// Rewrite `crate::{a, b::c}` into `crate::a crate::b::c`.
+///
+/// The counter below matches the literal prefix `crate::<module>`, so a
+/// grouped import hides every member but the first behind a brace. That is
+/// not a rare spelling: `use crate::{Value, circuit::NodeId};` was how
+/// thirty-four of the thirty-eight device references to `NodeId` stayed
+/// invisible while the edge showed a count of four.
+fn expand_grouped_paths(source: &str) -> String {
+    const OPEN: &str = "crate::{";
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(index) = rest.find(OPEN) {
+        out.push_str(&rest[..index]);
+        let after = &rest[index + OPEN.len()..];
+        let mut depth = 1usize;
+        let mut end = None;
+        for (offset, ch) in after.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // An unbalanced brace means this is not an import we can expand;
+        // emit the opener verbatim so the literal match still applies.
+        let Some(end) = end else {
+            out.push_str(OPEN);
+            rest = after;
+            continue;
+        };
+        let (group, remainder) = after.split_at(end);
+        let mut depth = 0usize;
+        let mut member = String::new();
+        let flush = |member: &mut String, out: &mut String| {
+            let trimmed = member.trim();
+            if !trimmed.is_empty() {
+                out.push_str("crate::");
+                out.push_str(trimmed);
+                out.push(' ');
+            }
+            member.clear();
+        };
+        for ch in group.chars() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    member.push(ch);
+                }
+                '}' => {
+                    depth -= 1;
+                    member.push(ch);
+                }
+                ',' if depth == 0 => flush(&mut member, &mut out),
+                _ => member.push(ch),
+            }
+        }
+        flush(&mut member, &mut out);
+        rest = &remainder[1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn count_occurrences(haystack: &str, needle: &str) -> usize {
     if needle.is_empty() {
         return 0;
@@ -295,7 +366,7 @@ fn edge_counts() -> BTreeMap<(String, String), usize> {
         };
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
-        let code = strip_line_comments(&source);
+        let code = expand_grouped_paths(&strip_line_comments(&source));
         for to in &modules {
             if *to == from {
                 continue;

@@ -1,6 +1,6 @@
 //! Device behavior traits
 
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 /// SPICE-style tolerances used to accept or reject a nonlinear Newton step.
 #[derive(Debug, Clone, Copy, PartialEq)]

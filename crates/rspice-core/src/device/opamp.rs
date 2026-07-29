@@ -8,7 +8,7 @@
 //! - Input bias current
 //! - Common-mode rejection
 
-use crate::{Value, circuit::NodeId};
+use crate::{NodeId, Value};
 
 //=============================================================================
 // OpAmp Model Parameters
