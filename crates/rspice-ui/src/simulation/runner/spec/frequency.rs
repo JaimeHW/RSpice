@@ -464,11 +464,11 @@ fn run_stb(
     })
 }
 
-fn stb_sweep_type(sweep: FrequencySweep) -> rspice_core::analysis::advanced::stb::StbSweepType {
+fn stb_sweep_type(sweep: FrequencySweep) -> rspice_core::analysis::stb::StbSweepType {
     match sweep {
-        FrequencySweep::Decade => rspice_core::analysis::advanced::stb::StbSweepType::Decade,
-        FrequencySweep::Octave => rspice_core::analysis::advanced::stb::StbSweepType::Octave,
-        FrequencySweep::Linear => rspice_core::analysis::advanced::stb::StbSweepType::Linear,
+        FrequencySweep::Decade => rspice_core::analysis::stb::StbSweepType::Decade,
+        FrequencySweep::Octave => rspice_core::analysis::stb::StbSweepType::Octave,
+        FrequencySweep::Linear => rspice_core::analysis::stb::StbSweepType::Linear,
     }
 }
 

@@ -11,18 +11,13 @@
 //! for the `native-bytecode-contract-tests` feature.
 
 pub(crate) mod codegen;
+mod driver;
 pub mod encoder;
 
 use super::expr::{
     BranchUnknownRuntimeMapping, CanonicalDerivativeAxis, CanonicalStateOperator, EntryKind,
-    NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
-    canonical_above_slots_for_equation, canonical_absdelay_slots_for_equation,
-    canonical_cross_slots_for_equation, canonical_ddt_slots_for_equation,
-    canonical_idt_slots_for_equation, canonical_idtmod_slots_for_equation,
-    canonical_laplace_slots_for_equation, canonical_limit_slots_for_equation,
-    canonical_slew_slots_for_equation, canonical_state_slots_for_expression,
-    canonical_table_lookup_slots_for_equation, canonical_timer_slots_for_equation,
-    canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
+    NativeIdentifierIndex, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+    canonical_state_slots_for_expression, canonical_table_lookup_slots_for_equation,
     constant_dynamic_variable_slot, native_op_stack_effect,
 };
 use super::model::{
@@ -71,22 +66,50 @@ fn compile_model_inner(
         Some(mir) => canonical_branch_unknown_runtime_map(model, mir)?,
         None => Vec::new(),
     };
+    let identifier_index =
+        canonical_mir.map(|mir| NativeIdentifierIndex::new(mir, &model.variable_names));
     let base_limits = NativeLoweringLimits::for_model(model)
         .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
+    let base_limits = match &identifier_index {
+        Some(identifier_index) => base_limits.with_identifier_index(identifier_index),
+        None => base_limits,
+    };
+    let base_limits = if canonical_mir.is_some() {
+        base_limits.with_prevalidated_mir()
+    } else {
+        base_limits
+    };
     let canonical_noise_plan = match canonical_mir {
         Some(mir) => Some(build_canonical_noise_plan(model, mir)?),
         None => None,
     };
+    let mut assignment_prior_current_probes = Vec::new();
+    if canonical_mir.is_some() {
+        for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+            {
+                push_completed_current_probe_aliases(
+                    &mut assignment_prior_current_probes,
+                    stamp_index,
+                    pos,
+                    neg,
+                    model.num_terminals,
+                );
+            }
+        }
+    }
 
     let mut image = Vec::new();
     let mut entry_starts = Vec::new();
-    let (assignment, assignment_dependencies) = append_assignment_entry(
-        model,
-        canonical_artifact,
-        base_limits,
-        &mut image,
-        &mut entry_starts,
-    )?;
+    let (assignment, post_assignment, assignment_dependencies, post_assignment_dependencies) =
+        append_assignment_entries(
+            model,
+            canonical_artifact,
+            base_limits.with_prior_current_probes(&assignment_prior_current_probes),
+            &mut image,
+            &mut entry_starts,
+        )?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
     for (parameter_index, parameter) in model.parameters.iter().enumerate() {
@@ -194,6 +217,15 @@ fn compile_model_inner(
         let jacobian_limits = base_limits
             .with_available_current_pairs(&jacobian_current_pairs)
             .with_prior_current_probes(&jacobian_prior_current_probes);
+        let jacobian_table_lookup_slots = match canonical_mir {
+            Some(mir) => canonical_table_lookup_slots_for_equation(
+                model.name.clone(),
+                mir,
+                canonical_equation_id(model, stamp_index)?,
+                &stamp.value_program,
+            )?,
+            None => Vec::new(),
+        };
 
         let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
         let mut stamp_jacobian_current_dependencies =
@@ -207,9 +239,9 @@ fn compile_model_inner(
                 model,
                 canonical_mir,
                 stamp_index,
-                &stamp.value_program,
                 jacobian,
                 jacobian_limits,
+                &jacobian_table_lookup_slots,
             )?;
             stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
             stamp_jacobian_prior_current_dependencies
@@ -230,10 +262,18 @@ fn compile_model_inner(
             Vec::with_capacity(stamp.reactive_jacobians.len());
         let mut stamp_reactive_jacobian_branch_unknown_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
+        let canonical_reactive_mir = match canonical_mir {
+            Some(mir) if !stamp.reactive_jacobians.is_empty() => Some(canonical_reactive_mir(
+                model,
+                mir,
+                canonical_equation_id(model, stamp_index)?,
+            )?),
+            _ => None,
+        };
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = lower_reactive_jacobian_program(
                 model,
-                canonical_mir,
+                canonical_reactive_mir.as_ref(),
                 stamp_index,
                 reactive_jacobian,
                 base_limits,
@@ -325,8 +365,38 @@ fn compile_model_inner(
         noise_exponents.push(exponent_entry);
     }
 
+    let published_current_pairs = model
+        .stamp_programs
+        .iter()
+        .map(|stamp| {
+            let Some((pos, neg)) = (stamp.branch_ordinal.is_none())
+                .then(|| infer_current_terminal_pair(stamp))
+                .flatten()
+            else {
+                return Ok(None);
+            };
+            let forward = terminal_pair_current_index(pos, neg, model.num_terminals)
+                .ok_or_else(|| current_pair_unavailable(model, pos, neg))?;
+            let reverse = terminal_pair_current_index(neg, pos, model.num_terminals)
+                .ok_or_else(|| current_pair_unavailable(model, neg, pos))?;
+            Ok(Some((forward, reverse)))
+        })
+        .collect::<JitResult<Vec<_>>>()?;
+
+    let stamp_kernel = align_image_for_entry(&mut image, &mut entry_starts);
+    let stamp_kernel_bytes = driver::compile_stamp_kernel(
+        stamp_kernel.as_usize(),
+        assignment,
+        &stamp_values,
+        &jacobians,
+        &published_current_pairs,
+    )?;
+    image.extend_from_slice(&stamp_kernel_bytes);
+
     let entries = NativeEntryOffsets {
         assignment,
+        post_assignment,
+        stamp_kernel: Some(stamp_kernel),
         parameter_defaults,
         static_conditions,
         stamp_values,
@@ -339,6 +409,9 @@ fn compile_model_inner(
         assignment_current_pairs: assignment_dependencies.current_pairs,
         assignment_prior_currents: assignment_dependencies.prior_currents,
         assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
+        post_assignment_current_pairs: post_assignment_dependencies.current_pairs,
+        post_assignment_prior_currents: post_assignment_dependencies.prior_currents,
+        post_assignment_branch_unknowns: post_assignment_dependencies.branch_unknowns,
         static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
         stamp_values: stamp_value_current_dependencies,
         stamp_value_prior_currents: stamp_value_prior_current_dependencies,
@@ -423,18 +496,18 @@ fn lower_jacobian_program(
     model: &CompiledModel,
     canonical_mir: Option<&MirModel>,
     stamp_index: usize,
-    stamp_value_program: &BytecodeProgram,
     jacobian: &JacobianEntry,
     limits: NativeLoweringLimits<'_>,
+    table_lookup_slots: &[(ExprId, usize)],
 ) -> JitResult<NativeProgram> {
     if let Some(mir) = canonical_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
         let axis = canonical_derivative_axis_for_column(model, mir, &jacobian.col_axis)?;
-        let table_lookup_slots = canonical_table_lookup_slots_for_equation(
-            model.name.clone(),
+        let state_slots = CanonicalExpressionStateSlots::for_equation(
+            model,
             mir,
             equation_id,
-            stamp_value_program,
+            &jacobian.program,
         )?;
         return NativeProgram::from_mir_derivative(
             model.name.clone(),
@@ -442,7 +515,7 @@ fn lower_jacobian_program(
             mir,
             equation_id,
             axis,
-            limits.with_canonical_table_lookup_slots(&table_lookup_slots),
+            state_slots.apply(limits.with_canonical_table_lookup_slots(&table_lookup_slots)),
         );
     }
 
@@ -456,25 +529,25 @@ fn lower_jacobian_program(
 
 fn lower_reactive_jacobian_program(
     model: &CompiledModel,
-    canonical_mir: Option<&MirModel>,
+    canonical_reactive_mir: Option<&MirModel>,
     stamp_index: usize,
     reactive_jacobian: &JacobianEntry,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<NativeProgram> {
-    if let Some(mir) = canonical_mir {
+    if let Some(reactive_mir) = canonical_reactive_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
-        let axis = canonical_derivative_axis_for_column(model, mir, &reactive_jacobian.col_axis)?;
-        let reactive_mir = canonical_reactive_mir(model, mir, equation_id)?;
+        let axis =
+            canonical_derivative_axis_for_column(model, reactive_mir, &reactive_jacobian.col_axis)?;
         let table_lookup_slots = canonical_table_lookup_slots_for_equation(
             model.name.clone(),
-            &reactive_mir,
+            reactive_mir,
             equation_id,
             &reactive_jacobian.program,
         )?;
         return NativeProgram::from_mir_derivative(
             model.name.clone(),
             EntryKind::ReactiveJacobian,
-            &reactive_mir,
+            reactive_mir,
             equation_id,
             axis,
             limits.with_canonical_table_lookup_slots(&table_lookup_slots),
@@ -2889,103 +2962,14 @@ fn lower_stamp_value_program(
                 detail: format!("stamp index {stamp_index} exceeds canonical equation id range")
                     .into(),
             })?;
-        let ddt_slots = canonical_ddt_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let idt_slots = canonical_idt_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let idtmod_slots = canonical_idtmod_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let transition_slots = canonical_transition_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let slew_slots = canonical_slew_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let absdelay_slots = canonical_absdelay_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let laplace_slots = canonical_laplace_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let zi_slots = canonical_zi_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let cross_slots = canonical_cross_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let above_slots = canonical_above_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let timer_slots = canonical_timer_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let limit_slots = canonical_limit_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
-        let table_lookup_slots = canonical_table_lookup_slots_for_equation(
-            model.name.clone(),
-            mir,
-            equation_id,
-            bytecode_program,
-        )?;
+        let state_slots =
+            CanonicalExpressionStateSlots::for_equation(model, mir, equation_id, bytecode_program)?;
         return NativeProgram::from_mir_equation(
             model.name.clone(),
             EntryKind::StampValue,
             mir,
             equation_id,
-            limits
-                .with_canonical_ddt_slots(&ddt_slots)
-                .with_canonical_idt_slots(&idt_slots)
-                .with_canonical_idtmod_slots(&idtmod_slots)
-                .with_canonical_transition_slots(&transition_slots)
-                .with_canonical_slew_slots(&slew_slots)
-                .with_canonical_absdelay_slots(&absdelay_slots)
-                .with_canonical_laplace_slots(&laplace_slots)
-                .with_canonical_zi_slots(&zi_slots)
-                .with_canonical_cross_slots(&cross_slots)
-                .with_canonical_above_slots(&above_slots)
-                .with_canonical_timer_slots(&timer_slots)
-                .with_canonical_limit_slots(&limit_slots)
-                .with_canonical_table_lookup_slots(&table_lookup_slots),
+            state_slots.apply(limits),
         );
     }
 
@@ -3004,36 +2988,155 @@ struct AssignmentDependencies {
     branch_unknowns: Vec<usize>,
 }
 
-fn append_assignment_entry(
+fn append_assignment_entries(
     model: &CompiledModel,
     canonical_artifact: Option<&CanonicalIrArtifact>,
     limits: NativeLoweringLimits<'_>,
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
-) -> JitResult<(CodeOffset, AssignmentDependencies)> {
-    let assignments = match canonical_artifact {
+) -> JitResult<(
+    CodeOffset,
+    Option<CodeOffset>,
+    AssignmentDependencies,
+    AssignmentDependencies,
+)> {
+    let (assignments, post_assignments) = match canonical_artifact {
         Some(artifact) => {
-            lower_live_canonical_assignment_statements(model, &artifact.hir, &artifact.mir, limits)?
+            let assignments = lower_live_canonical_assignment_statements(
+                model,
+                &artifact.hir,
+                &artifact.mir,
+                limits,
+            )?;
+            split_canonical_assignment_phases(model, &artifact.mir, assignments, limits)?
         }
         None => {
             let live_assignment_steps = live_native_assignment_steps(model);
-            live_assignment_steps
+            let assignments = live_assignment_steps
                 .iter()
                 .map(|step| lower_assignment_step_with_limits(model, step, limits))
-                .collect::<JitResult<Vec<_>>>()?
+                .collect::<JitResult<Vec<_>>>()?;
+            (assignments, Vec::new())
         }
     };
-    let mut dependencies = AssignmentDependencies::default();
-    collect_assignment_dependencies(&assignments, &mut dependencies);
+    let (assignment, assignment_dependencies) =
+        append_assignment_pass(&assignments, image, entry_starts)?;
+    let (post_assignment, post_assignment_dependencies) = if post_assignments.is_empty() {
+        (None, AssignmentDependencies::default())
+    } else {
+        let (entry, dependencies) = append_assignment_pass(&post_assignments, image, entry_starts)?;
+        (Some(entry), dependencies)
+    };
+    Ok((
+        assignment,
+        post_assignment,
+        assignment_dependencies,
+        post_assignment_dependencies,
+    ))
+}
 
+fn append_assignment_pass(
+    assignments: &[NativeAssignment],
+    image: &mut Vec<u8>,
+    entry_starts: &mut Vec<CodeOffset>,
+) -> JitResult<(CodeOffset, AssignmentDependencies)> {
+    let mut dependencies = AssignmentDependencies::default();
+    collect_assignment_dependencies(assignments, &mut dependencies);
     let bytes = if assignments.is_empty() {
         vec![0xC3]
     } else {
-        codegen::compile_assignment_pass_function(&assignments)?
+        codegen::compile_assignment_pass_function(assignments)?
     };
     let offset = align_image_for_entry(image, entry_starts);
     image.extend_from_slice(&bytes);
     Ok((offset, dependencies))
+}
+
+fn split_canonical_assignment_phases(
+    model: &CompiledModel,
+    mir: &MirModel,
+    mut assignments: Vec<NativeAssignment>,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<(Vec<NativeAssignment>, Vec<NativeAssignment>)> {
+    let Some(split_index) = assignments
+        .iter()
+        .position(native_assignment_reads_contribution_current)
+    else {
+        return Ok((assignments, Vec::new()));
+    };
+
+    let post_assignments = assignments.split_off(split_index);
+    let mut post_targets = vec![false; model.num_variables];
+    mark_native_assignment_targets(&post_assignments, &mut post_targets);
+
+    let mut pre_current_roots = vec![false; model.num_variables];
+    mark_canonical_entry_variable_roots(model, mir, limits, false, &mut pre_current_roots)?;
+    propagate_live_assignment_slots(model, &mut pre_current_roots);
+
+    if let Some(slot) = post_targets
+        .iter()
+        .zip(&pre_current_roots)
+        .position(|(post, required)| *post && *required)
+    {
+        let name = model
+            .variable_names
+            .get(slot)
+            .map(SmolStr::as_str)
+            .unwrap_or("<unnamed>");
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "assignment variable '{name}' (slot {slot}) depends on a contribution current but is required before contribution-current evaluation"
+            )
+            .into(),
+        });
+    }
+
+    Ok((assignments, post_assignments))
+}
+
+fn native_assignment_reads_contribution_current(assignment: &NativeAssignment) -> bool {
+    match assignment {
+        NativeAssignment::Direct { program, .. } => {
+            native_program_reads_contribution_current(program)
+        }
+        NativeAssignment::Indexed { index, value, .. } => {
+            native_program_reads_contribution_current(index)
+                || native_program_reads_contribution_current(value)
+        }
+        NativeAssignment::Loop { condition, body } => {
+            native_program_reads_contribution_current(condition)
+                || body
+                    .iter()
+                    .any(native_assignment_reads_contribution_current)
+        }
+    }
+}
+
+fn native_program_reads_contribution_current(program: &NativeProgram) -> bool {
+    !program.current_pair_dependencies().is_empty()
+        || !program.prior_current_dependencies().is_empty()
+}
+
+fn mark_native_assignment_targets(assignments: &[NativeAssignment], targets: &mut [bool]) {
+    for assignment in assignments {
+        match assignment {
+            NativeAssignment::Direct { var_index, .. } => {
+                if let Some(target) = targets.get_mut(*var_index) {
+                    *target = true;
+                }
+            }
+            NativeAssignment::Indexed { base, len, .. } => {
+                let end = base.saturating_add(*len).min(targets.len());
+                for target in targets.iter_mut().take(end).skip(*base) {
+                    *target = true;
+                }
+            }
+            NativeAssignment::Loop { body, .. } => {
+                mark_native_assignment_targets(body, targets);
+            }
+        }
+    }
 }
 
 fn collect_assignment_dependencies(
@@ -3100,7 +3203,7 @@ fn live_canonical_assignment_slots(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<bool>> {
     let mut live = native_observable_assignment_roots(model);
-    mark_canonical_entry_variable_roots(model, mir, limits, &mut live)?;
+    mark_canonical_entry_variable_roots(model, mir, limits, true, &mut live)?;
     propagate_live_assignment_slots(model, &mut live);
     Ok(live)
 }
@@ -3119,6 +3222,76 @@ struct AssignmentShadowIndex {
     scalar: HashMap<String, Vec<ScalarDerivativeShadow>>,
     arrays: HashMap<String, Vec<ArrayDerivativeShadow>>,
     malformed_arrays: HashMap<String, Vec<MalformedArrayDerivativeShadow>>,
+}
+
+#[derive(Default)]
+struct AssignmentProgramCursor<'a> {
+    scalar: HashMap<usize, Vec<&'a BytecodeProgram>>,
+    scalar_next: HashMap<usize, usize>,
+    indexed: HashMap<(usize, usize, i64), Vec<(&'a BytecodeProgram, &'a BytecodeProgram)>>,
+    indexed_next: HashMap<(usize, usize, i64), usize>,
+}
+
+impl<'a> AssignmentProgramCursor<'a> {
+    fn for_steps(steps: &'a [AssignmentStep]) -> Self {
+        let mut cursor = Self::default();
+        cursor.collect_steps(steps);
+        cursor
+    }
+
+    fn collect_steps(&mut self, steps: &'a [AssignmentStep]) {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    self.scalar
+                        .entry(assignment.var_index)
+                        .or_default()
+                        .push(&assignment.program);
+                }
+                AssignmentStep::AssignIndexed {
+                    base,
+                    len,
+                    lower,
+                    index,
+                    value,
+                } => {
+                    self.indexed
+                        .entry((*base, *len, *lower))
+                        .or_default()
+                        .push((index, value));
+                }
+                AssignmentStep::Loop { body, .. } => self.collect_steps(body),
+            }
+        }
+    }
+
+    fn next_scalar(&mut self, var_index: usize) -> Option<&'a BytecodeProgram> {
+        let next = self.scalar_next.entry(var_index).or_default();
+        let program = self
+            .scalar
+            .get(&var_index)
+            .and_then(|programs| programs.get(*next))
+            .copied();
+        *next += usize::from(program.is_some());
+        program
+    }
+
+    fn next_indexed(
+        &mut self,
+        base: usize,
+        len: usize,
+        lower: i64,
+    ) -> Option<(&'a BytecodeProgram, &'a BytecodeProgram)> {
+        let key = (base, len, lower);
+        let next = self.indexed_next.entry(key).or_default();
+        let programs = self
+            .indexed
+            .get(&key)
+            .and_then(|programs| programs.get(*next))
+            .copied();
+        *next += usize::from(programs.is_some());
+        programs
+    }
 }
 
 struct ScalarDerivativeShadow {
@@ -3329,6 +3502,7 @@ fn lower_live_canonical_assignment_statements(
 ) -> JitResult<Vec<NativeAssignment>> {
     let live = live_canonical_assignment_slots(model, mir, limits)?;
     let shadow_index = AssignmentShadowIndex::for_model(model)?;
+    let mut program_cursor = AssignmentProgramCursor::for_steps(&model.assignment_steps);
     lower_canonical_assignment_statements(
         model,
         hir,
@@ -3336,6 +3510,7 @@ fn lower_live_canonical_assignment_statements(
         &hir.statements,
         &live,
         &shadow_index,
+        &mut program_cursor,
         limits,
     )
 }
@@ -3347,6 +3522,7 @@ fn lower_canonical_assignment_statements(
     statements: &[HirStatement],
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let mut assignments = Vec::new();
@@ -3358,6 +3534,7 @@ fn lower_canonical_assignment_statements(
             statement,
             live,
             shadow_index,
+            program_cursor,
             limits,
         )?);
     }
@@ -3371,12 +3548,20 @@ fn lower_canonical_assignment_statement(
     statement: &HirStatement,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     match statement {
-        HirStatement::Assignment(assignment) => {
-            lower_canonical_assignment(model, hir, mir, assignment, live, shadow_index, limits)
-        }
+        HirStatement::Assignment(assignment) => lower_canonical_assignment(
+            model,
+            hir,
+            mir,
+            assignment,
+            live,
+            shadow_index,
+            program_cursor,
+            limits,
+        ),
         HirStatement::Loop(loop_statement) => lower_canonical_assignment_loop(
             model,
             hir,
@@ -3384,6 +3569,7 @@ fn lower_canonical_assignment_statement(
             loop_statement,
             live,
             shadow_index,
+            program_cursor,
             limits,
         ),
     }
@@ -3396,6 +3582,7 @@ fn lower_canonical_assignment(
     assignment: &HirAssignment,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     if let Some(index) = &assignment.index {
@@ -3407,12 +3594,13 @@ fn lower_canonical_assignment(
             index.id,
             live,
             shadow_index,
+            program_cursor,
             limits,
         );
     }
 
     let var_index = validate_canonical_scalar_assignment_target(model, assignment)?;
-    let bytecode_program = find_scalar_assignment_program(&model.assignment_steps, var_index);
+    let bytecode_program = program_cursor.next_scalar(var_index);
     let mut assignments = canonical_scalar_shadow_assignments(
         model,
         mir,
@@ -3453,9 +3641,11 @@ fn lower_canonical_indexed_assignment(
     index_expr: ExprId,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let (base, len, lower) = canonical_assignment_array_range(model, hir, assignment)?;
+    let bytecode_programs = program_cursor.next_indexed(base, len, lower);
     let mut assignments = canonical_array_shadow_assignments(
         model,
         mir,
@@ -3465,6 +3655,7 @@ fn lower_canonical_indexed_assignment(
         lower,
         index_expr,
         assignment.expr.id,
+        bytecode_programs,
         live,
         shadow_index,
         limits,
@@ -3473,16 +3664,14 @@ fn lower_canonical_indexed_assignment(
         return Ok(assignments);
     }
     let (index_program, value_program) =
-        find_indexed_assignment_programs(&model.assignment_steps, base, len, lower).ok_or_else(
-            || JitError::InvalidCanonicalIr {
-                model: model.name.clone(),
-                detail: format!(
-                    "canonical indexed assignment '{}' has no matching compiled assignment program",
-                    assignment.target_name
-                )
-                .into(),
-            },
-        )?;
+        bytecode_programs.ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical indexed assignment '{}' has no matching compiled assignment program",
+                assignment.target_name
+            )
+            .into(),
+        })?;
     let index = lower_canonical_assignment_expression_program(
         model,
         mir,
@@ -3523,6 +3712,7 @@ fn lower_canonical_assignment_loop(
     loop_statement: &HirLoop,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
+    program_cursor: &mut AssignmentProgramCursor<'_>,
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let body = lower_canonical_assignment_statements(
@@ -3532,6 +3722,7 @@ fn lower_canonical_assignment_loop(
         &loop_statement.body,
         live,
         shadow_index,
+        program_cursor,
         limits,
     )?;
     if body.is_empty() {
@@ -3597,6 +3788,7 @@ fn canonical_array_shadow_assignments(
     source_lower: i64,
     index_expr: ExprId,
     value_expr: ExprId,
+    bytecode_programs: Option<(&BytecodeProgram, &BytecodeProgram)>,
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
     limits: NativeLoweringLimits<'_>,
@@ -3655,15 +3847,14 @@ fn canonical_array_shadow_assignments(
             continue;
         }
         let (index_program, value_program) =
-            find_indexed_assignment_programs(&model.assignment_steps, source_base, source_len, source_lower)
-                .ok_or_else(|| JitError::InvalidCanonicalIr {
-                    model: model.name.clone(),
-                    detail: format!(
-                        "canonical indexed assignment '{array_name}' derivative shadow '{}' has no matching compiled assignment program",
-                        shadow.suffix
-                    )
-                    .into(),
-                })?;
+            bytecode_programs.ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{array_name}' derivative shadow '{}' has no matching compiled assignment program",
+                    shadow.suffix
+                )
+                .into(),
+            })?;
         let index = lower_canonical_assignment_expression_program(
             model,
             mir,
@@ -3719,6 +3910,7 @@ fn lower_canonical_assignment_expression_program(
     )
 }
 
+#[derive(Default)]
 struct CanonicalExpressionStateSlots {
     ddt: Vec<(ExprId, usize)>,
     idt: Vec<(ExprId, usize)>,
@@ -3736,12 +3928,51 @@ struct CanonicalExpressionStateSlots {
 }
 
 impl CanonicalExpressionStateSlots {
+    const OPERATORS: [CanonicalStateOperator; 13] = [
+        CanonicalStateOperator::Ddt,
+        CanonicalStateOperator::Idt,
+        CanonicalStateOperator::IdtMod,
+        CanonicalStateOperator::Transition,
+        CanonicalStateOperator::Slew,
+        CanonicalStateOperator::Absdelay,
+        CanonicalStateOperator::Laplace,
+        CanonicalStateOperator::Zi,
+        CanonicalStateOperator::Cross,
+        CanonicalStateOperator::Above,
+        CanonicalStateOperator::Timer,
+        CanonicalStateOperator::Limit,
+        CanonicalStateOperator::TableLookup,
+    ];
+
+    fn for_equation(
+        model: &CompiledModel,
+        mir: &MirModel,
+        equation_id: EquationId,
+        bytecode_program: &BytecodeProgram,
+    ) -> JitResult<Self> {
+        let equation = mir.equations.get(usize::from(equation_id)).ok_or_else(|| {
+            JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("canonical equation {equation_id} is outside MIR equation arena")
+                    .into(),
+            }
+        })?;
+        Self::for_expression(model, mir, equation.expression.id, bytecode_program)
+    }
+
     fn for_expression(
         model: &CompiledModel,
         mir: &MirModel,
         expr_id: ExprId,
         bytecode_program: &BytecodeProgram,
     ) -> JitResult<Self> {
+        if !bytecode_program.instructions.iter().any(|instruction| {
+            Self::OPERATORS
+                .iter()
+                .any(|operator| operator.bytecode_slot(instruction).is_some())
+        }) {
+            return Ok(Self::default());
+        }
         let collect = |operator| {
             canonical_state_slots_for_expression(
                 model.name.clone(),
@@ -3784,54 +4015,6 @@ impl CanonicalExpressionStateSlots {
             .with_canonical_limit_slots(&self.limit)
             .with_canonical_table_lookup_slots(&self.table_lookup)
     }
-}
-
-fn find_scalar_assignment_program(
-    steps: &[AssignmentStep],
-    var_index: usize,
-) -> Option<&BytecodeProgram> {
-    for step in steps {
-        match step {
-            AssignmentStep::Assign(assignment) if assignment.var_index == var_index => {
-                return Some(&assignment.program);
-            }
-            AssignmentStep::Loop { body, .. } => {
-                if let Some(program) = find_scalar_assignment_program(body, var_index) {
-                    return Some(program);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn find_indexed_assignment_programs(
-    steps: &[AssignmentStep],
-    base: usize,
-    len: usize,
-    lower: i64,
-) -> Option<(&BytecodeProgram, &BytecodeProgram)> {
-    for step in steps {
-        match step {
-            AssignmentStep::AssignIndexed {
-                base: step_base,
-                len: step_len,
-                lower: step_lower,
-                index,
-                value,
-            } if *step_base == base && *step_len == len && *step_lower == lower => {
-                return Some((index, value));
-            }
-            AssignmentStep::Loop { body, .. } => {
-                if let Some(programs) = find_indexed_assignment_programs(body, base, len, lower) {
-                    return Some(programs);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 fn trace_assignment_program_stack(model: &CompiledModel, label: &str, program: &NativeProgram) {
@@ -3891,6 +4074,17 @@ fn lower_canonical_shadow_program(
             expr_id,
             *first,
             *second,
+            limits,
+        ),
+        [first, second, third] => NativeProgram::from_mir_expression_third_derivative(
+            model.name.clone(),
+            EntryKind::Assignment,
+            mir,
+            EquationId::new(0),
+            expr_id,
+            *first,
+            *second,
+            *third,
             limits,
         ),
         _ => Err(JitError::InvalidCanonicalIr {
@@ -4049,6 +4243,7 @@ fn mark_canonical_entry_variable_roots(
     model: &CompiledModel,
     mir: &MirModel,
     limits: NativeLoweringLimits<'_>,
+    include_noise: bool,
     live: &mut [bool],
 ) -> JitResult<()> {
     let canonical_noise_plan = if model.noise_sources.is_empty() {
@@ -4102,23 +4297,32 @@ fn mark_canonical_entry_variable_roots(
         let jacobian_limits = limits
             .with_available_current_pairs(&jacobian_current_pairs)
             .with_prior_current_probes(&jacobian_prior_current_probes);
+        let jacobian_table_lookup_slots = canonical_table_lookup_slots_for_equation(
+            model.name.clone(),
+            mir,
+            canonical_equation_id(model, stamp_index)?,
+            &stamp.value_program,
+        )?;
 
         for jacobian in &stamp.jacobian_programs {
             let program = lower_jacobian_program(
                 model,
                 Some(mir),
                 stamp_index,
-                &stamp.value_program,
                 jacobian,
                 jacobian_limits,
+                &jacobian_table_lookup_slots,
             )?;
             mark_native_program_variable_reads(&program, live);
         }
 
+        let reactive_mir = (!stamp.reactive_jacobians.is_empty())
+            .then(|| canonical_reactive_mir(model, mir, canonical_equation_id(model, stamp_index)?))
+            .transpose()?;
         for reactive_jacobian in &stamp.reactive_jacobians {
             let program = lower_reactive_jacobian_program(
                 model,
-                Some(mir),
+                reactive_mir.as_ref(),
                 stamp_index,
                 reactive_jacobian,
                 limits,
@@ -4142,30 +4346,32 @@ fn mark_canonical_entry_variable_roots(
         }
     }
 
-    let noise_limits = limits
-        .with_available_current_pairs(&available_current_pairs)
-        .with_prior_current_probes(&prior_current_probes);
-    for (source_index, source) in model.noise_sources.iter().enumerate() {
-        let psd_program = lower_noise_psd_program(
-            model,
-            canonical_noise_plan.as_ref(),
-            source_index,
-            source,
-            &source.psd_program,
-            noise_limits,
-        )?;
-        mark_native_program_variable_reads(&psd_program, live);
-
-        if let Some(program) = &source.exponent_program {
-            let exponent_program = lower_noise_exponent_program(
+    if include_noise {
+        let noise_limits = limits
+            .with_available_current_pairs(&available_current_pairs)
+            .with_prior_current_probes(&prior_current_probes);
+        for (source_index, source) in model.noise_sources.iter().enumerate() {
+            let psd_program = lower_noise_psd_program(
                 model,
                 canonical_noise_plan.as_ref(),
                 source_index,
                 source,
-                program,
+                &source.psd_program,
                 noise_limits,
             )?;
-            mark_native_program_variable_reads(&exponent_program, live);
+            mark_native_program_variable_reads(&psd_program, live);
+
+            if let Some(program) = &source.exponent_program {
+                let exponent_program = lower_noise_exponent_program(
+                    model,
+                    canonical_noise_plan.as_ref(),
+                    source_index,
+                    source,
+                    program,
+                    noise_limits,
+                )?;
+                mark_native_program_variable_reads(&exponent_program, live);
+            }
         }
     }
 
@@ -4511,6 +4717,56 @@ fn push_prior_current_probe_aliases(
     }
 }
 
+fn push_completed_current_probe_aliases(
+    probes: &mut Vec<PriorCurrentProbe>,
+    current_index: usize,
+    pos: usize,
+    neg: usize,
+    terminal_count: usize,
+) {
+    push_prior_current_probe_aliases(probes, current_index, pos, neg);
+    if pos < terminal_count {
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos,
+                neg: CURRENT_PAIR_GROUND,
+                current_index,
+                inverted: false,
+            },
+        );
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: CURRENT_PAIR_GROUND,
+                neg: pos,
+                current_index,
+                inverted: true,
+            },
+        );
+    }
+    if neg < terminal_count {
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: neg,
+                neg: CURRENT_PAIR_GROUND,
+                current_index,
+                inverted: true,
+            },
+        );
+        push_prior_current_probe_alias(
+            probes,
+            PriorCurrentProbe {
+                pos: CURRENT_PAIR_GROUND,
+                neg,
+                current_index,
+                inverted: false,
+            },
+        );
+    }
+}
+
 fn push_prior_current_probe_alias(probes: &mut Vec<PriorCurrentProbe>, probe: PriorCurrentProbe) {
     if !probes.contains(&probe) {
         probes.push(probe);
@@ -4569,26 +4825,30 @@ fn format_current_endpoint(endpoint: usize) -> String {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        NativeModel, compile_model_with_canonical_ir, live_native_assignment_steps,
-        lower_assignment_step, lower_static_condition_program, native_assignment_roots,
-        validate_compiled_entry_shape,
+        NativeModel, canonical_branch_unknown_runtime_map, compile_model_with_canonical_ir,
+        live_canonical_assignment_slots, live_native_assignment_steps, lower_assignment_step,
+        lower_static_condition_program, native_assignment_roots, validate_compiled_entry_shape,
     };
+    use crate::canonical_ir::hir::HirRegion;
     use crate::canonical_ir::{
         BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
-        MirEquationKind, NodeId, OptModel,
+        MirEquationKind, NodeId,
     };
     use crate::codegen::{
         AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, JacobianEntry,
         StampIndex, StampProgram,
     };
     use crate::device::VerilogADevice;
+    use crate::native::EvalContext;
     use crate::native::expr::{
-        EntryKind, NativeLoweringLimits, NativeOp, NativeProgram, PriorCurrentProbe,
+        CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
+        PriorCurrentProbe,
     };
-    use crate::native::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets};
+    use crate::native::model::{
+        CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeStampKernelIo,
+    };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
-    use crate::native::{EvalContext, clear_native_runtime_error, take_native_runtime_error};
     use crate::vm::{Vm, VmContext};
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
@@ -4612,8 +4872,7 @@ mod tests {
         mir.expressions[root].kind = unsupported;
         hir.contributions[0].expression.kind = "string".into();
         mir.equations[0].expression.kind = "string".into();
-        let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        CanonicalIrArtifact::from_parts(metadata, hir, mir)
             .expect("synthetic canonical artifact has refreshed digests")
     }
 
@@ -4621,8 +4880,7 @@ mod tests {
         let CanonicalIrArtifact {
             metadata, hir, mir, ..
         } = artifact;
-        let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+        CanonicalIrArtifact::from_parts(metadata, hir, mir)
             .expect("synthetic canonical artifact has refreshed digests")
     }
 
@@ -4700,6 +4958,109 @@ endmodule
                 .run_stamp_value(0, &ctx, std::ptr::null())
                 .expect("stamp value entry"),
             (voltages[0] - voltages[1]) / params[0]
+        );
+
+        let mut currents = vec![0.0; model.stamp_programs.len()];
+        let current_axis_width = model.num_terminals + 1;
+        let mut branch_currents = vec![0.0; current_axis_width * current_axis_width];
+        let jacobian_count = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum();
+        let mut fused_jacobians = vec![0.0; jacobian_count];
+        let mut variables = vec![0.0; model.num_variables];
+        let mut fused_ctx = eval_context(&params, &voltages);
+        fused_ctx.branch_currents = branch_currents.as_mut_ptr();
+        fused_ctx.branch_currents_len = branch_currents.len();
+        fused_ctx.currents = currents.as_mut_ptr();
+        fused_ctx.currents_len = currents.len();
+        let active = [1_u8];
+        let io = NativeStampKernelIo {
+            program_active: active.as_ptr(),
+            jacobians: fused_jacobians.as_mut_ptr(),
+        };
+        assert!(native.run_stamp_kernel(&fused_ctx, variables.as_mut_ptr(), &io));
+        assert_eq!(currents[0], (voltages[0] - voltages[1]) / params[0]);
+        let expected_jacobians = (0..model.stamp_programs[0].jacobian_programs.len())
+            .map(|entry| {
+                native
+                    .run_jacobian(0, entry, &fused_ctx, variables.as_ptr())
+                    .expect("Jacobian entry")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fused_jacobians, expected_jacobians);
+    }
+
+    #[test]
+    fn fused_stamp_kernel_aborts_before_publishing_after_assignment_failure() {
+        let source = r#"
+module native_fused_abort(p, n);
+  inout p, n;
+  electrical p, n;
+  integer idx;
+  real values[0:0];
+  analog begin
+    idx = V(p, n);
+    values[idx] = 1.0;
+    I(p, n) <+ values[0] + 3.0 * V(p, n);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("compile failing fused stamp fixture");
+
+        let voltages = [2.0_f64, 0.0_f64];
+        let mut variables = vec![0.0; native.num_variables.max(1)];
+        let mut currents = vec![-101.0; model.stamp_programs.len()];
+        let current_axis_width = model.num_terminals + 1;
+        let mut branch_currents = vec![-303.0; current_axis_width * current_axis_width];
+        let jacobian_count = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum();
+        assert!(
+            jacobian_count > 0,
+            "fixture must contain later Jacobian work"
+        );
+        let mut jacobians = vec![-202.0; jacobian_count];
+        let mut ctx = eval_context(&[], &voltages);
+        ctx.branch_currents = branch_currents.as_mut_ptr();
+        ctx.branch_currents_len = branch_currents.len();
+        ctx.currents = currents.as_mut_ptr();
+        ctx.currents_len = currents.len();
+        let active = vec![1_u8; model.stamp_programs.len()];
+        let io = NativeStampKernelIo {
+            program_active: active.as_ptr(),
+            jacobians: jacobians.as_mut_ptr(),
+        };
+
+        assert!(native.run_stamp_kernel(&ctx, variables.as_mut_ptr(), &io));
+
+        let error = ctx
+            .take_runtime_error()
+            .expect("failing assignment must abort the fused driver");
+        assert!(
+            error.contains("array index 2 outside declared bounds [0:0]"),
+            "unexpected fused-driver diagnostic: {error}"
+        );
+        assert!(
+            currents.iter().all(|value| *value == -101.0),
+            "the driver must not publish a contribution after assignment failure"
+        );
+        assert!(
+            jacobians.iter().all(|value| *value == -202.0),
+            "the driver must not publish a Jacobian after assignment failure"
+        );
+        assert!(
+            branch_currents.iter().all(|value| *value == -303.0),
+            "the driver must not publish terminal-pair currents after assignment failure"
         );
     }
 
@@ -4784,6 +5145,11 @@ endmodule
 
         artifact.hir.contributions[0].branch = "n,p".into();
         artifact.hir.contributions[0].declared_branch = None;
+        let HirRegion::Contribution(region) = &mut artifact.hir.body[0] else {
+            panic!("fixture root must remain a contribution");
+        };
+        region.branch = "n,p".into();
+        region.declared_branch = None;
         artifact.mir.equations[0].branch.label = "n,p".into();
         artifact.mir.equations[0].branch.declared_name = None;
         artifact.mir.equations[0].branch.pos_node = Some(NodeId::new(1));
@@ -4819,6 +5185,10 @@ endmodule
             .expect("compile canonical IR");
 
         artifact.hir.contributions[0].kind = HirContributionKind::Potential;
+        let HirRegion::Contribution(region) = &mut artifact.hir.body[0] else {
+            panic!("fixture root must remain a contribution");
+        };
+        region.kind = HirContributionKind::Potential;
         artifact.mir.equations[0].kind = MirEquationKind::Potential;
         let equation = artifact.mir.equations[0].clone();
         artifact.mir.branch_unknowns = vec![MirBranchUnknown {
@@ -5286,7 +5656,7 @@ endmodule
         let ctx = eval_context(&[], &voltages);
         let mut vars = vec![0.0_f64; native.num_variables.max(1)];
         native.run_assignments(&ctx, vars.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
             panic!("native canonical assignment failed: {error}");
         }
 
@@ -5344,6 +5714,200 @@ endmodule
             |axis| matches!(axis, ColumnAxis::Node(1)),
             -2.0,
             "canonical_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn canonical_repeated_assignment_uses_matching_state_program_occurrence() {
+        let source = r#"
+module native_canonical_repeated_assignment_state(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = V(p, n);
+    x = ddt(V(p, n));
+    I(p, n) <+ x;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let x_index = model
+            .variable_names
+            .iter()
+            .position(|name| name == "x")
+            .expect("fixture has x variable");
+        let x_programs = model
+            .assignment_steps
+            .iter()
+            .filter_map(|step| match step {
+                AssignmentStep::Assign(assignment) if assignment.var_index == x_index => {
+                    Some(&assignment.program)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(x_programs.len(), 2, "fixture repeats the x assignment");
+        assert!(
+            !x_programs[0]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::DdtState(_))),
+            "first x assignment must not own a ddt slot"
+        );
+        assert!(
+            x_programs[1]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::DdtState(_))),
+            "second x assignment must own the ddt slot"
+        );
+
+        compile_model_with_canonical_ir(&model, &artifact)
+            .expect("repeated canonical assignments pair state slots by occurrence");
+    }
+
+    #[test]
+    fn canonical_jacobian_maps_state_slots_used_by_product_rule() {
+        let source = r#"
+module native_canonical_jacobian_state_product(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ V(p, n) * ddt(V(p, n) * V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model.stamp_programs[0]
+                .jacobian_programs
+                .iter()
+                .flat_map(|jacobian| &jacobian.program.instructions)
+                .any(|instruction| matches!(instruction, Instruction::DdtState(_))),
+            "product-rule Jacobian must read the ddt value state"
+        );
+
+        compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical Jacobian maps bytecode state slots before MIR lowering");
+    }
+
+    #[test]
+    fn canonical_guarded_assignment_current_probe_compiles_with_structural_dependency() {
+        let source = r#"
+`include "disciplines.vams"
+module native_canonical_guarded_assignment_current(p, n);
+  inout p, n;
+  electrical p, n;
+  real operating_current;
+  analog begin
+    if (analysis("static"))
+      operating_current = I(<p>);
+    I(p, n) <+ V(p, n);
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical guarded assignment current compiles");
+        assert_eq!(
+            native.assignment_current_pairs().len(),
+            0,
+            "pre-current assignments must not read the terminal-current cache"
+        );
+        assert_eq!(native.plan_stats().assignment_entry_points, 2);
+        assert_eq!(
+            native.post_assignment_prior_currents(),
+            &[0],
+            "the post-current assignment reads the exact contribution slot"
+        );
+    }
+
+    #[test]
+    fn canonical_post_current_assignments_preserve_source_order() {
+        let source = r#"
+module native_canonical_post_current_order(p, n);
+  inout p, n;
+  electrical p, n;
+  real before, sensed, after;
+  analog begin
+    before = 1.0;
+    I(p, n) <+ V(p, n);
+    sensed = I(p, n) + before;
+    before = 2.0;
+    after = sensed + before;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("post-current assignment phases compile");
+        let variable = |name: &str| {
+            model
+                .variable_names
+                .iter()
+                .position(|candidate| candidate == name)
+                .unwrap_or_else(|| panic!("fixture has {name} variable"))
+        };
+        let before = variable("before");
+        let sensed = variable("sensed");
+        let after = variable("after");
+        let currents = [3.0_f64];
+        let mut ctx = eval_context(&[], &[0.0, 0.0]);
+        ctx.currents = currents.as_ptr();
+        ctx.currents_len = currents.len();
+        let mut variables = vec![0.0_f64; native.num_variables.max(1)];
+
+        native.run_assignments(&ctx, variables.as_mut_ptr());
+        assert_eq!(variables[before].to_bits(), 1.0_f64.to_bits());
+        assert_eq!(variables[sensed].to_bits(), 0.0_f64.to_bits());
+
+        assert!(native.run_post_assignments(&ctx, variables.as_mut_ptr()));
+        assert_eq!(variables[sensed].to_bits(), 4.0_f64.to_bits());
+        assert_eq!(variables[before].to_bits(), 2.0_f64.to_bits());
+        assert_eq!(variables[after].to_bits(), 6.0_f64.to_bits());
+    }
+
+    #[test]
+    fn canonical_current_dependent_stamp_assignment_is_rejected_as_a_cycle() {
+        let source = r#"
+module native_canonical_current_assignment_cycle(p, n);
+  inout p, n;
+  electrical p, n;
+  real sensed;
+  analog begin
+    sensed = I(p, n);
+    I(p, n) <+ sensed;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("current-dependent stamp assignment must be rejected");
+
+        let message = error.to_string();
+        assert!(message.contains("sensed"), "{message}");
+        assert!(
+            message.contains("required before contribution-current evaluation"),
+            "{message}"
         );
     }
 
@@ -5442,6 +6006,48 @@ endmodule
     }
 
     #[test]
+    fn canonical_ddx_second_derivative_lowers_third_order_product_rule() {
+        let source = r#"
+module native_canonical_ddx_third_product(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(
+      V(p, n) * V(p, n) * V(p, n) * V(p, n),
+      V(p, n));
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let expression = artifact.mir.equations[0].expression.id;
+        let axis = CanonicalDerivativeAxis::Node(NodeId::from(0));
+        let program = NativeProgram::from_mir_expression_second_derivative(
+            "native_canonical_ddx_third_product",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            expression,
+            axis,
+            axis,
+            NativeLoweringLimits::new(2, 0, 0, 0, 0),
+        )
+        .expect("lower second derivative of ddx through a third-order product rule");
+        let bytes =
+            super::codegen::compile_value_function(&program).expect("compile derivative leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate derivative leaf");
+        let entry = memory.ptr_at(0).expect("derivative entry");
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[2.0, 0.0]);
+
+        assert_close(
+            "canonical ddx third-order product derivative",
+            48.0,
+            function(&ctx, std::ptr::null()),
+        );
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_lowers_assignment_fed_ddx_jacobians_from_mir() {
         let source = r#"
 module native_canonical_assignment_ddx_jacobian(p, n);
@@ -5473,9 +6079,9 @@ endmodule
         context.voltages[1] = 0.0;
         resolve_native_parameter_defaults(&model, &native, &mut context);
         let ctx = eval_context_from_vm_context(&mut context);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, context.variables.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
             panic!("native assignment failed before assignment-fed ddx Jacobian: {error}");
         }
         let ctx = eval_context_from_vm_context(&mut context);
@@ -5547,9 +6153,9 @@ endmodule
         context.voltages[1] = 0.0;
         resolve_native_parameter_defaults(&model, &native, &mut context);
         let ctx = eval_context_from_vm_context(&mut context);
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, context.variables.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
+        if let Some(error) = ctx.take_runtime_error() {
             panic!("native assignment failed before array-fed ddx Jacobian: {error}");
         }
         let ctx = eval_context_from_vm_context(&mut context);
@@ -5714,9 +6320,14 @@ endmodule
         context.voltages[1] = 0.0;
         context.voltages[2] = 0.2;
         resolve_native_parameter_defaults(&model, &native, &mut context);
-        let oracle_stats =
-            assert_native_matches_bytecode_finite_entries(&model, &native, context, "generated")
-                .expect("generated-model native values match bytecode oracle");
+        let oracle_stats = assert_native_matches_bytecode_finite_entries(
+            &model,
+            &artifact,
+            &native,
+            context,
+            "generated",
+        )
+        .expect("generated-model native values match bytecode oracle");
         assert!(
             oracle_stats.variables >= 7
                 && oracle_stats.stamps >= 6
@@ -6300,6 +6911,9 @@ endmodule
         eprintln!("native-x64-shipped-microbench iterations={iterations} samples={samples}");
 
         for (name, path, module) in cases {
+            if !shipped_model_filter_allows(name) {
+                continue;
+            }
             run_shipped_model_microbench_case(name, &path, module, iterations, samples);
         }
     }
@@ -6374,9 +6988,33 @@ endmodule
                 Some("bsimsoi"),
             ),
             (
+                "bsimsoi461",
+                shipped_veriloga_model_path(&["bsimsoi_4.6.1", "vacode", "bsimsoi.va"]),
+                Some("bsimsoi_va"),
+            ),
+            (
                 "bsimsoi100",
                 shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
                 Some("bsimsoi"),
+            ),
+            (
+                "l_utsoi102",
+                shipped_cmc_model_path(&[
+                    "L_UTSOI_102.9.0_code_package",
+                    "vacode",
+                    "L_UTSOI_102.va",
+                ]),
+                Some("l_utsoi"),
+            ),
+            (
+                "hisimhv",
+                shipped_cmc_model_path(&[
+                    "HiSIM_HV_2.5.1_Release_20230209",
+                    "HiSIM_HV_2.5.1_VA-Code",
+                    "hisimhv_va",
+                    "hisimhv.va",
+                ]),
+                Some("hisimhv_va"),
             ),
             (
                 "hisimsoi",
@@ -6473,9 +7111,33 @@ endmodule
                 Some("bsimsoi"),
             ),
             (
+                "bsimsoi461",
+                shipped_veriloga_model_path(&["bsimsoi_4.6.1", "vacode", "bsimsoi.va"]),
+                Some("bsimsoi_va"),
+            ),
+            (
                 "bsimsoi100",
                 shipped_cmc_model_path(&["BSIM_SOI_100.1.1_09152025", "code", "bsimsoi.va"]),
                 Some("bsimsoi"),
+            ),
+            (
+                "l_utsoi102",
+                shipped_cmc_model_path(&[
+                    "L_UTSOI_102.9.0_code_package",
+                    "vacode",
+                    "L_UTSOI_102.va",
+                ]),
+                Some("l_utsoi"),
+            ),
+            (
+                "hisimhv",
+                shipped_cmc_model_path(&[
+                    "HiSIM_HV_2.5.1_Release_20230209",
+                    "HiSIM_HV_2.5.1_VA-Code",
+                    "hisimhv_va",
+                    "hisimhv.va",
+                ]),
+                Some("hisimhv_va"),
             ),
             (
                 "hisimsoi",
@@ -6769,6 +7431,8 @@ endmodule
         let offset = CodeOffset::new(0);
         let entries = NativeEntryOffsets {
             assignment: offset,
+            post_assignment: None,
+            stamp_kernel: None,
             parameter_defaults: model
                 .parameters
                 .iter()
@@ -6801,6 +7465,9 @@ endmodule
             assignment_current_pairs: Vec::new(),
             assignment_prior_currents: Vec::new(),
             assignment_branch_unknowns: Vec::new(),
+            post_assignment_current_pairs: Vec::new(),
+            post_assignment_prior_currents: Vec::new(),
+            post_assignment_branch_unknowns: Vec::new(),
             static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
             stamp_values: vec![Vec::new(); entries.stamp_values.len()],
             stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
@@ -6922,6 +7589,23 @@ endmodule
         sample_ns_per_sweep.sort_by(|left, right| left.total_cmp(right));
         let min_ns_per_sweep = sample_ns_per_sweep[0];
         let median_ns_per_sweep = sample_ns_per_sweep[sample_ns_per_sweep.len() / 2];
+        let p95_index = ((sample_ns_per_sweep.len() as f64 * 0.95).ceil() as usize)
+            .saturating_sub(1)
+            .min(sample_ns_per_sweep.len() - 1);
+        let p95_ns_per_sweep = sample_ns_per_sweep[p95_index];
+        let mean_ns_per_sweep =
+            sample_ns_per_sweep.iter().sum::<f64>() / sample_ns_per_sweep.len() as f64;
+        let standard_deviation = (sample_ns_per_sweep
+            .iter()
+            .map(|sample| {
+                let delta = sample - mean_ns_per_sweep;
+                delta * delta
+            })
+            .sum::<f64>()
+            / sample_ns_per_sweep.len() as f64)
+            .sqrt();
+        let relative_standard_deviation =
+            standard_deviation / mean_ns_per_sweep.max(f64::MIN_POSITIVE);
         let checksum = std::hint::black_box(checksum);
         assert!(
             checksum.is_finite(),
@@ -6929,9 +7613,11 @@ endmodule
         );
         let stats = native.plan_stats();
         eprintln!(
-            "native-x64-shipped-microbench model={name} compile_ms={:.3} native_compile_ms={:.3} dependencies={} params={} vars={} assignments={} stamps={} jacobians={} reactive_jacobians={} min_ns_per_sweep={min_ns_per_sweep:.3} median_ns_per_sweep={median_ns_per_sweep:.3} checksum={checksum:.17e}",
+            "native-x64-shipped-microbench model={name} compile_ms={:.3} native_compile_ms={:.3} code_bytes={} entry_points={} dependencies={} params={} vars={} assignments={} stamps={} jacobians={} reactive_jacobians={} min_ns_per_sweep={min_ns_per_sweep:.3} median_ns_per_sweep={median_ns_per_sweep:.3} p95_ns_per_sweep={p95_ns_per_sweep:.3} relative_standard_deviation={relative_standard_deviation:.6} checksum={checksum:.17e}",
             compile_elapsed.as_secs_f64() * 1000.0,
             native_compile_elapsed.as_secs_f64() * 1000.0,
+            native.code_size_bytes(),
+            stats.total_entry_points(),
             runtime.dependencies.len(),
             runtime.model.parameters.len(),
             runtime.model.num_variables,
@@ -6961,9 +7647,14 @@ endmodule
         let mut context = native_model_benchmark_context(&runtime.model, name);
         resolve_native_parameter_defaults(&runtime.model, &native, &mut context);
 
-        let stats =
-            assert_native_matches_bytecode_finite_entries(&runtime.model, &native, context, name)
-                .unwrap_or_else(|error| panic!("{name}: finite native oracle failed: {error}"));
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .unwrap_or_else(|error| panic!("{name}: finite native oracle failed: {error}"));
         eprintln!(
             "native-x64-shipped-oracle model={name} variables={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={}",
             stats.variables,
@@ -6976,6 +7667,7 @@ endmodule
 
     fn run_shipped_model_device_probe(name: &str, path: &Path, module: Option<&str>) {
         shipped_probe_trace(name, "compile-runtime:start");
+        let frontend_start = web_time::Instant::now();
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let runtime = compiler
             .compile_file_runtime_with_metadata(path, module)
@@ -6985,7 +7677,9 @@ endmodule
                     path.display()
                 )
             });
+        let frontend_elapsed = frontend_start.elapsed();
         shipped_probe_trace(name, "native-device:start");
+        let native_start = web_time::Instant::now();
         let model = std::sync::Arc::new(runtime.model.clone());
         let nodes = (1..=model.num_terminals).collect::<Vec<_>>();
         let mut device = VerilogADevice::try_new_with_canonical_ir(
@@ -6997,10 +7691,16 @@ endmodule
         .unwrap_or_else(|error| {
             panic!("{name}: shipped device native construction failed: {error}")
         });
+        let native_elapsed = native_start.elapsed();
         assert!(
             device.is_using_native(),
             "{name}: shipped device must use native code"
         );
+        if matches!(name, "hicuml0" | "hicuml2") {
+            device
+                .try_set_analysis_type(2)
+                .unwrap_or_else(|error| panic!("{name}: set transient analysis: {error}"));
+        }
         shipped_probe_trace(name, "native-device:ready");
 
         let terminal_count = model.num_terminals;
@@ -7020,12 +7720,38 @@ endmodule
         for (terminal, node) in nodes.iter().copied().enumerate() {
             solution[node - 1] = shipped_device_terminal_bias(name, terminal);
         }
+        let canonical_internal_nodes = runtime
+            .canonical_ir
+            .mir
+            .nodes
+            .iter()
+            .filter(|node| !node.is_external)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            canonical_internal_nodes.len(),
+            device.num_internal_nodes(),
+            "{name}: canonical and runtime internal-node counts must match"
+        );
+        for (ordinal, node) in canonical_internal_nodes.into_iter().enumerate() {
+            if let Some(value) = shipped_device_internal_bias(name, node.name.as_str()) {
+                solution[terminal_count + ordinal] = value;
+            }
+        }
 
         device
             .try_update_all_voltages(&solution)
             .unwrap_or_else(|error| {
                 panic!("{name}: shipped device voltage update failed: {error}")
             });
+        device
+            .try_set_analysis_step(true, false)
+            .unwrap_or_else(|error| panic!("{name}: enter initial analysis step: {error}"));
+        device.try_evaluate().unwrap_or_else(|error| {
+            panic!("{name}: shipped device native initial-step evaluation failed: {error}")
+        });
+        device
+            .try_set_analysis_step(false, false)
+            .unwrap_or_else(|error| panic!("{name}: leave initial analysis step: {error}"));
         shipped_probe_trace(name, "evaluate:start");
         let currents = device.try_evaluate().unwrap_or_else(|error| {
             panic!("{name}: shipped device native evaluate failed: {error}")
@@ -7100,7 +7826,9 @@ endmodule
         );
 
         eprintln!(
-            "native-x64-shipped-device model={name} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
+            "native-x64-shipped-device model={name} frontend_ms={:.3} native_ms={:.3} native_chunks={} finite_currents={} matrix_entries={} rhs_entries={} reactive_entries={} matrix_l1={matrix_l1:.17e} rhs_l1={rhs_l1:.17e} reactive_l1={reactive_l1:.17e}",
+            frontend_elapsed.as_secs_f64() * 1000.0,
+            native_elapsed.as_secs_f64() * 1000.0,
             device.native_chunk_count(),
             finite_currents,
             matrix_entries,
@@ -7140,7 +7868,11 @@ endmodule
             "r3_cmc" => [0.1, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "diode_cmc" => [0.7, 0.0, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
             "vbic13_4t" => [0.2, 0.75, 0.0, 0.0].get(terminal).copied().unwrap_or(0.0),
-            "bsimimg" | "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
+            "bsimimg" => [0.15, 0.7, 0.05, -0.05, 0.01]
+                .get(terminal)
+                .copied()
+                .unwrap_or(0.0),
+            "hisimsoi" => [0.05, 0.7, 0.0, 0.0, 0.0, 0.0]
                 .get(terminal)
                 .copied()
                 .unwrap_or(0.0),
@@ -7169,6 +7901,24 @@ endmodule
         }
     }
 
+    fn shipped_device_internal_bias(name: &str, node: &str) -> Option<f64> {
+        match (name, node.to_ascii_lowercase().as_str()) {
+            ("bsimcmg", "di" | "di1" | "di2") => Some(shipped_device_terminal_bias(name, 0)),
+            ("bsimcmg", "si" | "si1") => Some(shipped_device_terminal_bias(name, 2)),
+            ("bsimcmg", "ge" | "gi" | "gint" | "gints" | "gintd") => {
+                Some(shipped_device_terminal_bias(name, 1))
+            }
+            ("bsimimg", "di") => Some(shipped_device_terminal_bias(name, 0)),
+            ("bsimimg", "si") => Some(shipped_device_terminal_bias(name, 2)),
+            ("bsimimg", "ge" | "gi") => Some(shipped_device_terminal_bias(name, 1)),
+            ("vbic13_4t", "cx" | "ci") => Some(shipped_device_terminal_bias(name, 0)),
+            ("vbic13_4t", "bx" | "bi" | "bp") => Some(shipped_device_terminal_bias(name, 1)),
+            ("vbic13_4t", "ei") => Some(shipped_device_terminal_bias(name, 2)),
+            ("vbic13_4t", "si") => Some(shipped_device_terminal_bias(name, 3)),
+            _ => None,
+        }
+    }
+
     #[derive(Default)]
     struct FiniteOracleStats {
         variables: usize,
@@ -7178,19 +7928,42 @@ endmodule
         skipped_nonfinite: usize,
     }
 
+    fn require_clean_native_context(
+        ctx: &EvalContext,
+        stage: impl std::fmt::Display,
+    ) -> Result<(), String> {
+        if let Some(error) = ctx.take_runtime_error() {
+            return Err(format!("native runtime error during {stage}: {error}"));
+        }
+        Ok(())
+    }
+
     fn assert_native_matches_bytecode_finite_entries(
         model: &CompiledModel,
+        artifact: &CanonicalIrArtifact,
         native: &NativeModel,
         base_context: VmContext,
         name: &str,
     ) -> Result<FiniteOracleStats, String> {
+        let canonical_branch_unknown_map =
+            canonical_branch_unknown_runtime_map(model, &artifact.mir)
+                .map_err(|error| error.to_string())?;
+        let limits = NativeLoweringLimits::for_model(model)
+            .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
+        let live_variables = live_canonical_assignment_slots(model, &artifact.mir, limits)
+            .map_err(|error| error.to_string())?;
         let mut bytecode_context = base_context.clone();
         bytecode_context.clear_currents();
         bytecode_context
             .currents
             .resize(model.stamp_programs.len(), 0.0);
         let mut vm = Vm::new(&mut bytecode_context);
-        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+        let (pre_current_assignment_steps, post_current_targets) =
+            split_bytecode_assignment_steps_at_completed_current(
+                &model.assignment_steps,
+                model.num_variables,
+            );
+        execute_bytecode_assignment_steps(&mut vm, &pre_current_assignment_steps)
             .map_err(|error| error.to_string())?;
 
         let mut native_context = base_context;
@@ -7198,18 +7971,24 @@ endmodule
         native_context
             .currents
             .resize(model.stamp_programs.len(), 0.0);
-        clear_native_runtime_error();
         let mut ctx = eval_context_from_vm_context(&mut native_context);
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, native_context.variables.as_mut_ptr());
-        if let Some(error) = take_native_runtime_error() {
-            return Err(format!("native runtime error during assignments: {error}"));
-        }
+        require_clean_native_context(&ctx, "assignments")?;
 
         let mut stats = FiniteOracleStats::default();
-        for index in 0..model.num_variables {
+        for (index, is_live) in live_variables.iter().copied().enumerate() {
+            if !is_live || post_current_targets.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            let variable_name = model
+                .variable_names
+                .get(index)
+                .map(|name| name.as_str())
+                .unwrap_or("<unnamed>");
             assert_close_or_skip_nonfinite(
                 name,
-                format!("variable {index}"),
+                format!("variable {index} ({variable_name})"),
                 vm.context.variables[index],
                 native_context.variables[index],
                 &mut stats.variables,
@@ -7225,6 +8004,10 @@ endmodule
                 let actual = native
                     .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
                     .ok_or_else(|| format!("missing native static condition {stamp_index}"))?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("static condition {stamp_index} oracle"),
+                )?;
                 assert_finite_close(
                     name,
                     format!("static_condition {stamp_index}"),
@@ -7238,10 +8021,14 @@ endmodule
 
             let native_active = if stamp.static_condition.is_some() {
                 ctx = eval_context_from_vm_context(&mut native_context);
-                native
+                let active = native
                     .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
-                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?
-                    != 0.0
+                    .ok_or_else(|| format!("missing native static condition {stamp_index}"))?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("static condition {stamp_index} activity"),
+                )?;
+                active != 0.0
             } else {
                 true
             };
@@ -7270,6 +8057,7 @@ endmodule
             let actual = native
                 .run_stamp_value(stamp_index, &ctx, native_context.variables.as_ptr())
                 .ok_or_else(|| format!("missing native stamp-value entry {stamp_index}"))?;
+            require_clean_native_context(&ctx, format!("stamp {stamp_index}"))?;
             assert_close_or_skip_nonfinite(
                 name,
                 format!("stamp {stamp_index}"),
@@ -7312,6 +8100,10 @@ endmodule
                     .ok_or_else(|| {
                         format!("missing native Jacobian entry {stamp_index}.{entry_index}")
                     })?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("Jacobian {stamp_index}.{entry_index}"),
+                )?;
                 assert_close_or_skip_nonfinite(
                     name,
                     format!("jacobian {stamp_index}.{entry_index}"),
@@ -7339,6 +8131,10 @@ endmodule
                             "missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
                         )
                     })?;
+                require_clean_native_context(
+                    &ctx,
+                    format!("reactive Jacobian {stamp_index}.{entry_index}"),
+                )?;
                 assert_close_or_skip_nonfinite(
                     name,
                     format!("reactive_jacobian {stamp_index}.{entry_index}"),
@@ -7357,11 +8153,6 @@ endmodule
             );
         }
 
-        if let Some(error) = take_native_runtime_error() {
-            return Err(format!(
-                "native runtime error during finite oracle: {error}"
-            ));
-        }
         Ok(stats)
     }
 
@@ -7485,21 +8276,29 @@ endmodule
         name: &str,
         nonfinite_reference: &NonFiniteReference,
     ) -> f64 {
-        clear_native_runtime_error();
         context.clear_currents();
         context.currents.resize(model.stamp_programs.len(), 0.0);
 
         let mut ctx = eval_context_from_vm_context(context);
+        ctx.clear_runtime_error();
         native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        require_clean_native_context(&ctx, format!("{name} assignments"))
+            .unwrap_or_else(|error| panic!("{error}"));
 
         let mut checksum = 0.0_f64;
         for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
             ctx = eval_context_from_vm_context(context);
             if let Some(active) =
                 native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
-                && active == 0.0
             {
-                continue;
+                require_clean_native_context(
+                    &ctx,
+                    format!("{name} static condition {stamp_index}"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
+                if active == 0.0 {
+                    continue;
+                }
             }
 
             ctx = eval_context_from_vm_context(context);
@@ -7508,6 +8307,8 @@ endmodule
                 .unwrap_or_else(|| {
                     panic!("{name}: missing native stamp-value entry {stamp_index}")
                 });
+            require_clean_native_context(&ctx, format!("{name} stamp {stamp_index}"))
+                .unwrap_or_else(|error| panic!("{error}"));
             if !value.is_finite() {
                 assert!(
                     nonfinite_reference.stamps.contains(&stamp_index),
@@ -7530,6 +8331,11 @@ endmodule
                     .unwrap_or_else(|| {
                         panic!("{name}: missing native Jacobian entry {stamp_index}.{entry_index}")
                     });
+                require_clean_native_context(
+                    &ctx,
+                    format!("{name} Jacobian {stamp_index}.{entry_index}"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
                 if !value.is_finite() {
                     assert!(
                         nonfinite_reference
@@ -7556,6 +8362,11 @@ endmodule
                             "{name}: missing native reactive-Jacobian entry {stamp_index}.{entry_index}"
                         )
                     });
+                require_clean_native_context(
+                    &ctx,
+                    format!("{name} reactive Jacobian {stamp_index}.{entry_index}"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
                 if !value.is_finite() {
                     assert!(
                         nonfinite_reference
@@ -7569,9 +8380,6 @@ endmodule
             }
         }
 
-        if let Some(error) = take_native_runtime_error() {
-            panic!("{name}: native runtime error during shipped-model sweep: {error}");
-        }
         checksum
     }
 
@@ -7773,6 +8581,62 @@ endmodule
         Ok(())
     }
 
+    fn split_bytecode_assignment_steps_at_completed_current(
+        steps: &[AssignmentStep],
+        num_variables: usize,
+    ) -> (Vec<AssignmentStep>, Vec<bool>) {
+        let split = steps
+            .iter()
+            .position(bytecode_assignment_step_reads_current)
+            .unwrap_or(steps.len());
+        let mut post_targets = vec![false; num_variables];
+        mark_bytecode_assignment_targets(&steps[split..], &mut post_targets);
+        (steps[..split].to_vec(), post_targets)
+    }
+
+    fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
+        match step {
+            AssignmentStep::Assign(assignment) => {
+                bytecode_program_reads_current(&assignment.program)
+            }
+            AssignmentStep::AssignIndexed { index, value, .. } => {
+                bytecode_program_reads_current(index) || bytecode_program_reads_current(value)
+            }
+            AssignmentStep::Loop { condition, body } => {
+                bytecode_program_reads_current(condition)
+                    || body.iter().any(bytecode_assignment_step_reads_current)
+            }
+        }
+    }
+
+    fn bytecode_program_reads_current(program: &BytecodeProgram) -> bool {
+        program
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
+    }
+
+    fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
+        for step in steps {
+            match step {
+                AssignmentStep::Assign(assignment) => {
+                    if let Some(target) = targets.get_mut(assignment.var_index) {
+                        *target = true;
+                    }
+                }
+                AssignmentStep::AssignIndexed { base, len, .. } => {
+                    let end = base.saturating_add(*len).min(targets.len());
+                    for target in targets.iter_mut().take(end).skip(*base) {
+                        *target = true;
+                    }
+                }
+                AssignmentStep::Loop { body, .. } => {
+                    mark_bytecode_assignment_targets(body, targets);
+                }
+            }
+        }
+    }
+
     fn preallocate_native_benchmark_context(context: &mut VmContext, model: &CompiledModel) {
         let mut max_state = None;
         let mut max_delay_buffer = None;
@@ -7960,8 +8824,11 @@ endmodule
             analysis_initial_step: u8::from(context.analysis_initial_step),
             analysis_final_step: u8::from(context.analysis_final_step),
             state_older: context.state_values_older.as_ptr(),
+            state_older_len: context.state_values_older.len(),
             state_derivatives: context.state_derivatives.as_mut_ptr(),
+            state_derivatives_len: context.state_derivatives.len(),
             state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
+            state_derivatives_prev_len: context.state_derivatives_prev.len(),
             integration_derivative_scale: context.integration.derivative_scale,
             integration_previous_value_scale: context.integration.previous_value_scale,
             integration_older_value_scale: context.integration.older_value_scale,
@@ -7969,6 +8836,7 @@ endmodule
             integration_active: u8::from(context.integration.active),
             limiter_active: &mut context.limiter_active,
             limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
+            runtime_status: Default::default(),
         }
     }
 
@@ -8283,8 +9151,11 @@ endmodule
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,
@@ -8292,6 +9163,7 @@ endmodule
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         }
     }
 }

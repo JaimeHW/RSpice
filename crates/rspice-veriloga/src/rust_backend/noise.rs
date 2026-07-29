@@ -518,7 +518,7 @@ fn emit_noise_statements(
                         ),
                     ));
                 }
-                // Canonical OptIR treats an unfiltered initial-step assignment
+                // Canonical lowering treats an unfiltered initial-step assignment
                 // as the instance-static initializer for its target. Replaying
                 // the selected initializer here reconstructs that persisted
                 // value without spuriously leaving the local at zero.

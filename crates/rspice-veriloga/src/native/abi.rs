@@ -5,18 +5,65 @@
 //! are the `extern "C"` helpers it calls for anything not worth emitting
 //! inline — transcendental math and the stateful operators.
 //!
-//! Errors cannot propagate across this boundary as a `Result`, so a helper
-//! that fails records the reason in a thread-local that the caller drains
-//! after the compiled entry point returns. Every entry point must therefore
-//! clear the slot before running and check it after, or a stale failure would
-//! be attributed to the wrong evaluation.
+//! Errors cannot propagate across this boundary as a `Result`, so helpers
+//! publish the first failure into the active [`EvalContext`]. This keeps
+//! nested and parallel dispatches isolated without thread-local state.
 //!
 //! This is an internal contract between this crate's compiler and its own
 //! generated code, not a stable ABI. It may change with any release.
 
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 
-use crate::vm::terminal_pair_current_index;
+/// Per-dispatch failure state owned by one [`EvalContext`].
+///
+/// JIT code reads only `failed`; Rust helpers own the diagnostic payload.
+/// The status is intentionally not `Sync`: one evaluation frame may be used
+/// by only one native dispatch at a time.
+#[repr(C)]
+pub struct NativeRuntimeStatus {
+    failed: UnsafeCell<u8>,
+    message: UnsafeCell<Option<String>>,
+}
+
+impl Default for NativeRuntimeStatus {
+    fn default() -> Self {
+        Self {
+            failed: UnsafeCell::new(0),
+            message: UnsafeCell::new(None),
+        }
+    }
+}
+
+impl NativeRuntimeStatus {
+    fn record(&self, message: impl Into<String>) {
+        // Safety: EvalContext's contract requires exclusive dispatch access.
+        // Helpers execute synchronously on that dispatching thread.
+        unsafe {
+            let slot = &mut *self.message.get();
+            if slot.is_none() {
+                *slot = Some(message.into());
+                *self.failed.get() = 1;
+            }
+        }
+    }
+
+    pub(crate) fn take(&self) -> Option<String> {
+        // Safety: the dispatch contract grants exclusive access while the
+        // status is cleared or drained.
+        unsafe {
+            *self.failed.get() = 0;
+            (&mut *self.message.get()).take()
+        }
+    }
+
+    pub(crate) fn clear(&self) {
+        let _ = self.take();
+    }
+
+    pub(crate) fn failed_offset() -> usize {
+        std::mem::offset_of!(Self, failed)
+    }
+}
 
 /// Evaluation context passed to JIT-compiled functions.
 #[repr(C)]
@@ -110,10 +157,16 @@ pub struct EvalContext {
     pub analysis_final_step: u8,
     /// State values from two accepted points ago.
     pub state_older: *const f64,
+    /// Length of `state_older`.
+    pub state_older_len: usize,
     /// Candidate derivative/input values for the current point.
     pub state_derivatives: *mut f64,
+    /// Length of `state_derivatives`.
+    pub state_derivatives_len: usize,
     /// Derivative/input values from the previous accepted point.
     pub state_derivatives_prev: *const f64,
+    /// Length of `state_derivatives_prev`.
+    pub state_derivatives_prev_len: usize,
     /// Current-value coefficient in the solver's derivative formula.
     pub integration_derivative_scale: f64,
     /// Previous-value coefficient in the solver's derivative formula.
@@ -130,67 +183,81 @@ pub struct EvalContext {
     /// Nonzero only for limited Newton assembly. Probe and small-signal
     /// evaluation bypass limiter history entirely.
     pub limiting_enabled: u8,
+    /// Failure state for this dispatch. This must not be shared by concurrent
+    /// native calls.
+    #[doc(hidden)]
+    pub runtime_status: NativeRuntimeStatus,
 }
 
-thread_local! {
-    static NATIVE_RUNTIME_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+impl EvalContext {
+    pub(crate) fn clear_runtime_error(&self) {
+        self.runtime_status.clear();
+    }
+
+    pub(crate) fn take_runtime_error(&self) -> Option<String> {
+        self.runtime_status.take()
+    }
+
+    pub(crate) fn record_runtime_error(&self, message: impl Into<String>) {
+        self.runtime_status.record(message);
+    }
 }
 
-pub(crate) fn clear_native_runtime_error() {
-    NATIVE_RUNTIME_ERROR.with(|slot| {
-        slot.borrow_mut().take();
-    });
+fn set_native_context_error(ctx: &EvalContext, message: impl Into<String>) {
+    ctx.record_runtime_error(message);
 }
 
-pub(crate) fn take_native_runtime_error() -> Option<String> {
-    NATIVE_RUNTIME_ERROR.with(|slot| slot.borrow_mut().take())
-}
-
-fn set_native_runtime_error(message: impl Into<String>) {
-    NATIVE_RUNTIME_ERROR.with(|slot| {
-        let mut error = slot.borrow_mut();
-        if error.is_none() {
-            *error = Some(message.into());
-        }
-    });
+fn set_native_context_error_ptr(ctx: *const EvalContext, message: impl Into<String>) {
+    // SAFETY: A non-null pointer comes from the active native entry point.
+    if let Some(ctx) = unsafe { ctx.as_ref() } {
+        set_native_context_error(ctx, message);
+    }
 }
 
 #[unsafe(export_name = "rspice_native_loop_limit_error")]
-pub extern "C" fn rspice_native_loop_limit_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_loop_limit_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native runtime loop iteration limit exceeded; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_integer_shift_count_error")]
-pub extern "C" fn rspice_native_integer_shift_count_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_integer_shift_count_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native integer shift count outside valid range [0:63]; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_values_error")]
-pub extern "C" fn rspice_native_limit_state_values_error() {
-    set_native_runtime_error("native limit state missing state storage; no interpreter fallback");
+pub extern "C" fn rspice_native_limit_state_values_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
+        "native limit state missing state storage; no interpreter fallback",
+    );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_values_bounds_error")]
-pub extern "C" fn rspice_native_limit_state_values_bounds_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_limit_state_values_bounds_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native limit state index outside state storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_initialized_error")]
-pub extern "C" fn rspice_native_limit_state_initialized_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_limit_state_initialized_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native limit state missing initialization flag storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_bounds_error")]
-pub extern "C" fn rspice_native_limit_state_bounds_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_limit_state_bounds_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native limit state index outside initialization flag storage; no interpreter fallback",
     );
 }
@@ -200,24 +267,36 @@ unsafe fn native_limiter_storage(
     state_id: usize,
 ) -> Option<(*mut f64, *mut u8)> {
     if ctx.is_null() {
-        rspice_native_limit_state_values_error();
+        rspice_native_limit_state_values_error(ctx);
         return None;
     }
     let ctx = unsafe { &*ctx };
     if ctx.state_values.is_null() {
-        rspice_native_limit_state_values_error();
+        set_native_context_error(
+            ctx,
+            "native limit state missing state storage; no interpreter fallback",
+        );
         return None;
     }
     if state_id >= ctx.state_values_len {
-        rspice_native_limit_state_values_bounds_error();
+        set_native_context_error(
+            ctx,
+            "native limit state index outside state storage; no interpreter fallback",
+        );
         return None;
     }
     if ctx.state_initialized.is_null() {
-        rspice_native_limit_state_initialized_error();
+        set_native_context_error(
+            ctx,
+            "native limit state missing initialization flag storage; no interpreter fallback",
+        );
         return None;
     }
     if state_id >= ctx.state_initialized_len {
-        rspice_native_limit_state_bounds_error();
+        set_native_context_error(
+            ctx,
+            "native limit state index outside initialization flag storage; no interpreter fallback",
+        );
         return None;
     }
     Some((unsafe { ctx.state_values.add(state_id) }, unsafe {
@@ -239,7 +318,7 @@ pub unsafe extern "C" fn rspice_limiter_previous_native(
     state_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        rspice_native_limit_state_values_error();
+        rspice_native_limit_state_values_error(ctx);
         return 0.0;
     }
     if unsafe { (*ctx).limiting_enabled } == 0 {
@@ -272,25 +351,28 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
     ctx: *const EvalContext,
     state_id: usize,
 ) -> f64 {
+    if ctx.is_null() {
+        rspice_native_limit_state_values_error(ctx);
+        return 0.0;
+    }
+    let context = unsafe { &*ctx };
     if operands.is_null() {
-        set_native_runtime_error(
+        set_native_context_error(
+            context,
             "native named limiter candidate publish missing operands; no interpreter fallback",
         );
         return 0.0;
     }
-    if ctx.is_null() {
-        rspice_native_limit_state_values_error();
-        return 0.0;
-    }
 
     let proposed = unsafe { *operands };
-    if unsafe { (*ctx).limiting_enabled } == 0 {
+    if context.limiting_enabled == 0 {
         return proposed;
     }
 
-    let limiter_active = unsafe { (*ctx).limiter_active };
+    let limiter_active = context.limiter_active;
     if limiter_active.is_null() {
-        set_native_runtime_error(
+        set_native_context_error(
+            context,
             "native named limiter missing convergence storage; no interpreter fallback",
         );
         return 0.0;
@@ -308,111 +390,82 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
     candidate
 }
 
-#[unsafe(export_name = "rspice_native_state_values_error")]
-pub extern "C" fn rspice_native_state_values_error() {
-    set_native_runtime_error(
-        "native state operator missing state storage; no interpreter fallback",
-    );
-}
-
-#[unsafe(export_name = "rspice_native_state_values_bounds_error")]
-pub extern "C" fn rspice_native_state_values_bounds_error() {
-    set_native_runtime_error(
-        "native state operator index outside state storage; no interpreter fallback",
-    );
-}
-
-#[unsafe(export_name = "rspice_native_state_prev_bounds_error")]
-pub extern "C" fn rspice_native_state_prev_bounds_error() {
-    set_native_runtime_error(
-        "native state operator index outside prior-state storage; no interpreter fallback",
-    );
-}
-
 #[unsafe(export_name = "rspice_native_current_probe_error")]
-pub extern "C" fn rspice_native_current_probe_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_current_probe_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native current probe missing terminal-pair current storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_prior_current_error")]
-pub extern "C" fn rspice_native_prior_current_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_prior_current_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native prior current load missing contribution current storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_param_given_error")]
-pub extern "C" fn rspice_native_param_given_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_param_given_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native param_given load missing parameter-given storage; no interpreter fallback",
     );
 }
 
 #[unsafe(export_name = "rspice_native_port_connected_error")]
-pub extern "C" fn rspice_native_port_connected_error() {
-    set_native_runtime_error(
+pub extern "C" fn rspice_native_port_connected_error(ctx: *const EvalContext) {
+    set_native_context_error_ptr(
+        ctx,
         "native port_connected load missing connection-flag storage; no interpreter fallback",
     );
-}
-
-/// External helper function for table lookup interpolation.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers.
-#[unsafe(export_name = "rspice_table_lookup")]
-pub unsafe extern "C" fn rspice_table_lookup(
-    tables_ptr: *const crate::codegen::LookupTable,
-    tables_len: usize,
-    table_id: usize,
-    input: f64,
-) -> f64 {
-    if tables_ptr.is_null() {
-        set_native_runtime_error(format!(
-            "native legacy table lookup helper missing table storage for table {table_id}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-    if table_id >= tables_len {
-        set_native_runtime_error(format!(
-            "native legacy table lookup helper table {table_id} outside table length {tables_len}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-
-    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
-    tables[table_id].interpolate(input)
 }
 
 /// External helper function for native x64 table lookup interpolation.
 ///
 /// Argument order is chosen for x64 helper-call codegen: scalar input in XMM0,
-/// followed by table metadata in integer argument registers.
+/// followed by the dispatch context and table ID in integer argument registers.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers.
 #[unsafe(export_name = "rspice_table_lookup_native")]
 pub unsafe extern "C" fn rspice_table_lookup_native(
     input: f64,
-    tables_ptr: *const crate::codegen::LookupTable,
-    tables_len: usize,
+    ctx: *const EvalContext,
     table_id: usize,
 ) -> f64 {
-    if tables_ptr.is_null() {
-        set_native_runtime_error(format!(
-            "native table lookup helper missing table storage for table {table_id}; no interpreter fallback"
-        ));
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            format!(
+                "native table lookup helper missing EvalContext for table {table_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
-    if table_id >= tables_len {
-        set_native_runtime_error(format!(
-            "native table lookup helper table {table_id} outside table length {tables_len}; no interpreter fallback"
-        ));
+    let ctx = unsafe { &*ctx };
+    if ctx.lookup_tables.is_null() {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table lookup helper missing table storage for table {table_id}; no interpreter fallback"
+            ),
+        );
+        return 0.0;
+    }
+    if table_id >= ctx.lookup_tables_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table lookup helper table {table_id} outside table length {}; no interpreter fallback",
+                ctx.lookup_tables_len
+            ),
+        );
         return 0.0;
     }
 
-    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
+    let tables = unsafe { std::slice::from_raw_parts(ctx.lookup_tables, ctx.lookup_tables_len) };
     tables[table_id].interpolate(input)
 }
 
@@ -423,74 +476,41 @@ pub unsafe extern "C" fn rspice_table_lookup_native(
 #[unsafe(export_name = "rspice_table_derivative_native")]
 pub unsafe extern "C" fn rspice_table_derivative_native(
     input: f64,
-    tables_ptr: *const crate::codegen::LookupTable,
-    tables_len: usize,
+    ctx: *const EvalContext,
     table_id: usize,
 ) -> f64 {
-    if tables_ptr.is_null() {
-        set_native_runtime_error(format!(
-            "native table derivative helper missing table storage for table {table_id}; no interpreter fallback"
-        ));
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            format!(
+                "native table derivative helper missing EvalContext for table {table_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
-    if table_id >= tables_len {
-        set_native_runtime_error(format!(
-            "native table derivative helper table {table_id} outside table length {tables_len}; no interpreter fallback"
-        ));
+    let ctx = unsafe { &*ctx };
+    if ctx.lookup_tables.is_null() {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table derivative helper missing table storage for table {table_id}; no interpreter fallback"
+            ),
+        );
+        return 0.0;
+    }
+    if table_id >= ctx.lookup_tables_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table derivative helper table {table_id} outside table length {}; no interpreter fallback",
+                ctx.lookup_tables_len
+            ),
+        );
         return 0.0;
     }
 
-    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
+    let tables = unsafe { std::slice::from_raw_parts(ctx.lookup_tables, ctx.lookup_tables_len) };
     tables[table_id].derivative(input)
-}
-
-/// External helper function for $limit operation.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers.
-#[unsafe(export_name = "rspice_limit")]
-pub unsafe extern "C" fn rspice_limit(
-    state_values: *mut f64,
-    state_initialized: *mut u8,
-    state_initialized_len: usize,
-    state_idx: usize,
-    new_value: f64,
-    step_limit: f64,
-) -> f64 {
-    if state_values.is_null() {
-        set_native_runtime_error(
-            "native legacy limit helper missing state storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-    if state_initialized.is_null() {
-        set_native_runtime_error(
-            "native legacy limit helper missing initialization flag storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-    if state_idx >= state_initialized_len {
-        set_native_runtime_error(
-            "native legacy limit helper state index outside initialization flag storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-
-    let initialized = unsafe { *state_initialized.add(state_idx) != 0 };
-    let limited = if initialized {
-        let prev_value = unsafe { *state_values.add(state_idx) };
-        let delta = new_value - prev_value;
-        let limited_delta = delta.clamp(-step_limit, step_limit);
-        prev_value + limited_delta
-    } else {
-        new_value
-    };
-
-    unsafe {
-        *state_values.add(state_idx) = limited;
-        *state_initialized.add(state_idx) = 1;
-    }
-    limited
 }
 
 /// External helper function for idtmod wrapping.
@@ -658,70 +678,6 @@ pub extern "C" fn rspice_mod(left: f64, right: f64) -> f64 {
     left % right
 }
 
-/// External helper function for Verilog-A left shift.
-#[unsafe(export_name = "rspice_shl")]
-pub extern "C" fn rspice_shl(left: f64, right: f64) -> f64 {
-    ((left as i64) << (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A arithmetic right shift.
-#[unsafe(export_name = "rspice_shr")]
-pub extern "C" fn rspice_shr(left: f64, right: f64) -> f64 {
-    ((left as i64) >> (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A bitwise and.
-#[unsafe(export_name = "rspice_bitand")]
-pub extern "C" fn rspice_bitand(left: f64, right: f64) -> f64 {
-    ((left as i64) & (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A bitwise or.
-#[unsafe(export_name = "rspice_bitor")]
-pub extern "C" fn rspice_bitor(left: f64, right: f64) -> f64 {
-    ((left as i64) | (right as i64)) as f64
-}
-
-/// External helper function for Verilog-A bitwise xor.
-#[unsafe(export_name = "rspice_bitxor")]
-pub extern "C" fn rspice_bitxor(left: f64, right: f64) -> f64 {
-    ((left as i64) ^ (right as i64)) as f64
-}
-
-/// External helper function for Laplace state-space filter step.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers.
-#[unsafe(export_name = "rspice_laplace_step")]
-pub unsafe extern "C" fn rspice_laplace_step(
-    filters_ptr: *mut crate::laplace::StateSpaceFilter,
-    filters_len: usize,
-    filter_id: usize,
-    input: f64,
-    timestep: f64,
-) -> f64 {
-    if filters_ptr.is_null() {
-        set_native_runtime_error(format!(
-            "native legacy Laplace helper missing filter storage for filter {filter_id}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-    if filter_id >= filters_len {
-        set_native_runtime_error(format!(
-            "native legacy Laplace helper filter {filter_id} outside filter table length {filters_len}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-
-    let filters = unsafe { std::slice::from_raw_parts_mut(filters_ptr, filters_len) };
-
-    if timestep <= 0.0 {
-        return filters[filter_id].dc_output(input);
-    }
-
-    filters[filter_id].step(input, timestep)
-}
-
 /// External helper function for native x64 Laplace state-space filter
 /// evaluation.
 ///
@@ -740,7 +696,8 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
     filter_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error(
+        set_native_context_error_ptr(
+            ctx,
             "native Laplace helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
@@ -748,16 +705,22 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 
     let ctx = unsafe { &*ctx };
     if ctx.laplace_filters.is_null() {
-        set_native_runtime_error(format!(
-            "native Laplace helper missing filter storage for filter {filter_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native Laplace helper missing filter storage for filter {filter_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if filter_id >= ctx.laplace_filters_len {
-        set_native_runtime_error(format!(
-            "native Laplace helper filter {filter_id} outside filter table length {}; no interpreter fallback",
-            ctx.laplace_filters_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native Laplace helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+                ctx.laplace_filters_len
+            ),
+        );
         return 0.0;
     }
 
@@ -787,22 +750,31 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     filter_id: usize,
 ) -> f64 {
     if ctx.is_null() {
-        set_native_runtime_error("native zi helper missing EvalContext; no interpreter fallback");
+        set_native_context_error_ptr(
+            ctx,
+            "native zi helper missing EvalContext; no interpreter fallback",
+        );
         return 0.0;
     }
 
     let ctx = unsafe { &*ctx };
     if ctx.zi_filters.is_null() {
-        set_native_runtime_error(format!(
-            "native zi helper missing filter storage for filter {filter_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native zi helper missing filter storage for filter {filter_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if filter_id >= ctx.zi_filters_len {
-        set_native_runtime_error(format!(
-            "native zi helper filter {filter_id} outside filter table length {}; no interpreter fallback",
-            ctx.zi_filters_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native zi helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+                ctx.zi_filters_len
+            ),
+        );
         return 0.0;
     }
 
@@ -810,16 +782,23 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     filters[filter_id].eval(input, ctx.time, ctx.analysis_type == 2)
 }
 
-fn invalid_native_integration_context(operator: &str, state_id: usize, detail: &str) -> f64 {
-    set_native_runtime_error(format!(
-        "native {operator} state {state_id} {detail}; no interpreter fallback"
-    ));
+fn invalid_native_integration_context(
+    ctx: *const EvalContext,
+    operator: &str,
+    state_id: usize,
+    detail: &str,
+) -> f64 {
+    let message = format!("native {operator} state {state_id} {detail}; no interpreter fallback");
+    set_native_context_error_ptr(ctx, message);
     0.0
 }
 
 unsafe fn native_state_storage_is_valid(ctx: &EvalContext, state_id: usize) -> bool {
     state_id < ctx.state_values_len
         && state_id < ctx.state_prev_len
+        && state_id < ctx.state_older_len
+        && state_id < ctx.state_derivatives_len
+        && state_id < ctx.state_derivatives_prev_len
         && state_id < ctx.state_initialized_len
         && !ctx.state_values.is_null()
         && !ctx.state_prev.is_null()
@@ -840,11 +819,21 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
     state_id: usize,
 ) -> f64 {
     if operands.is_null() || ctx.is_null() {
-        return invalid_native_integration_context("ddt", state_id, "missing operands or context");
+        return invalid_native_integration_context(
+            ctx,
+            "ddt",
+            state_id,
+            "missing operands or context",
+        );
     }
     let ctx = unsafe { &*ctx };
     if !unsafe { native_state_storage_is_valid(ctx, state_id) } {
-        return invalid_native_integration_context("ddt", state_id, "has invalid state storage");
+        return invalid_native_integration_context(
+            ctx,
+            "ddt",
+            state_id,
+            "has invalid state storage",
+        );
     }
 
     let value = unsafe { *operands };
@@ -892,6 +881,7 @@ pub unsafe extern "C" fn rspice_ddt_jacobian_native(
 ) -> f64 {
     if operands.is_null() || ctx.is_null() {
         return invalid_native_integration_context(
+            ctx,
             "ddt Jacobian",
             0,
             "missing operands or context",
@@ -914,6 +904,7 @@ unsafe fn rspice_integral_state_native(
     let operator = if wrapped { "idtmod" } else { "idt" };
     if operands.is_null() || ctx.is_null() {
         return invalid_native_integration_context(
+            ctx,
             operator,
             state_id,
             "missing operands or context",
@@ -921,7 +912,12 @@ unsafe fn rspice_integral_state_native(
     }
     let ctx = unsafe { &*ctx };
     if !unsafe { native_state_storage_is_valid(ctx, state_id) } {
-        return invalid_native_integration_context(operator, state_id, "has invalid state storage");
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "has invalid state storage",
+        );
     }
     let operands = unsafe { std::slice::from_raw_parts(operands, if wrapped { 4 } else { 2 }) };
     let input = operands[0];
@@ -1002,6 +998,7 @@ pub unsafe extern "C" fn rspice_idt_jacobian_native(
 ) -> f64 {
     if operands.is_null() || ctx.is_null() {
         return invalid_native_integration_context(
+            ctx,
             "idt Jacobian",
             0,
             "missing operands or context",
@@ -1027,14 +1024,22 @@ pub unsafe extern "C" fn rspice_timer_state_native(
     ctx: *const EvalContext,
     _timer_id: usize,
 ) -> f64 {
-    if operands.is_null() || ctx.is_null() {
-        set_native_runtime_error(
-            "native timer helper missing operands or EvalContext; no interpreter fallback",
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native timer helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native timer helper missing operands; no interpreter fallback",
         );
         return 0.0;
     }
 
-    let ctx = unsafe { &*ctx };
     let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
     let (result, next_event) = crate::vm::timer_event_evaluation(
         operands[0],
@@ -1071,15 +1076,18 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     ctx: *const EvalContext,
     filter_id: usize,
 ) -> f64 {
-    if operands.is_null() {
-        set_native_runtime_error(
-            "native transition helper missing operands; no interpreter fallback",
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native transition helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
     }
-    if ctx.is_null() {
-        set_native_runtime_error(
-            "native transition helper missing EvalContext; no interpreter fallback",
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native transition helper missing operands; no interpreter fallback",
         );
         return 0.0;
     }
@@ -1089,23 +1097,27 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     let delay = operands[1];
     let rise_time = operands[2];
     let fall_time = operands[3];
-    let ctx = unsafe { &*ctx };
-
     if ctx.analysis_type != 2 {
         return input;
     }
 
     if ctx.transition_filters.is_null() {
-        set_native_runtime_error(format!(
-            "native transition helper missing filter storage for filter {filter_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native transition helper missing filter storage for filter {filter_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if filter_id >= ctx.transition_filters_len {
-        set_native_runtime_error(format!(
-            "native transition helper filter {filter_id} outside filter table length {}; no interpreter fallback",
-            ctx.transition_filters_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native transition helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+                ctx.transition_filters_len
+            ),
+        );
         return 0.0;
     }
 
@@ -1138,12 +1150,19 @@ pub unsafe extern "C" fn rspice_slew_state_native(
     ctx: *const EvalContext,
     filter_id: usize,
 ) -> f64 {
-    if operands.is_null() {
-        set_native_runtime_error("native slew helper missing operands; no interpreter fallback");
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native slew helper missing EvalContext; no interpreter fallback",
+        );
         return 0.0;
     }
-    if ctx.is_null() {
-        set_native_runtime_error("native slew helper missing EvalContext; no interpreter fallback");
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native slew helper missing operands; no interpreter fallback",
+        );
         return 0.0;
     }
 
@@ -1151,23 +1170,27 @@ pub unsafe extern "C" fn rspice_slew_state_native(
     let input = operands[0];
     let max_pos_slew = operands[1];
     let max_neg_slew = operands[2];
-    let ctx = unsafe { &*ctx };
-
     if ctx.analysis_type != 2 {
         return input;
     }
 
     if ctx.slew_filters.is_null() {
-        set_native_runtime_error(format!(
-            "native slew helper missing filter storage for filter {filter_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native slew helper missing filter storage for filter {filter_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if filter_id >= ctx.slew_filters_len {
-        set_native_runtime_error(format!(
-            "native slew helper filter {filter_id} outside filter table length {}; no interpreter fallback",
-            ctx.slew_filters_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native slew helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+                ctx.slew_filters_len
+            ),
+        );
         return 0.0;
     }
 
@@ -1203,15 +1226,18 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
     ctx: *const EvalContext,
     buffer_id: usize,
 ) -> f64 {
-    if operands.is_null() {
-        set_native_runtime_error(
-            "native absdelay helper missing operands; no interpreter fallback",
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native absdelay helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
     }
-    if ctx.is_null() {
-        set_native_runtime_error(
-            "native absdelay helper missing EvalContext; no interpreter fallback",
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native absdelay helper missing operands; no interpreter fallback",
         );
         return 0.0;
     }
@@ -1219,23 +1245,27 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
     let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
     let input = operands[0];
     let delay_time = operands[1];
-    let ctx = unsafe { &*ctx };
-
     if ctx.analysis_type != 2 {
         return input;
     }
 
     if ctx.delay_buffers.is_null() {
-        set_native_runtime_error(format!(
-            "native absdelay helper missing delay-buffer storage for buffer {buffer_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native absdelay helper missing delay-buffer storage for buffer {buffer_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if buffer_id >= ctx.delay_buffers_len {
-        set_native_runtime_error(format!(
-            "native absdelay helper buffer {buffer_id} outside delay-buffer table length {}; no interpreter fallback",
-            ctx.delay_buffers_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native absdelay helper buffer {buffer_id} outside delay-buffer table length {}; no interpreter fallback",
+                ctx.delay_buffers_len
+            ),
+        );
         return 0.0;
     }
 
@@ -1262,13 +1292,18 @@ pub unsafe extern "C" fn rspice_cross_state_native(
     ctx: *const EvalContext,
     detector_id: usize,
 ) -> f64 {
-    if operands.is_null() {
-        set_native_runtime_error("native cross helper missing operands; no interpreter fallback");
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native cross helper missing EvalContext; no interpreter fallback",
+        );
         return 0.0;
     }
-    if ctx.is_null() {
-        set_native_runtime_error(
-            "native cross helper missing EvalContext; no interpreter fallback",
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native cross helper missing operands; no interpreter fallback",
         );
         return 0.0;
     }
@@ -1286,19 +1321,23 @@ pub unsafe extern "C" fn rspice_cross_state_native(
     } else {
         0
     };
-    let ctx = unsafe { &*ctx };
-
     if ctx.cross_detectors.is_null() {
-        set_native_runtime_error(format!(
-            "native cross helper missing detector storage for detector {detector_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native cross helper missing detector storage for detector {detector_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if detector_id >= ctx.cross_detectors_len {
-        set_native_runtime_error(format!(
-            "native cross helper detector {detector_id} outside detector table length {}; no interpreter fallback",
-            ctx.cross_detectors_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native cross helper detector {detector_id} outside detector table length {}; no interpreter fallback",
+                ctx.cross_detectors_len
+            ),
+        );
         return 0.0;
     }
 
@@ -1325,30 +1364,40 @@ pub unsafe extern "C" fn rspice_above_state_native(
     ctx: *const EvalContext,
     detector_id: usize,
 ) -> f64 {
-    if operands.is_null() {
-        set_native_runtime_error("native above helper missing operands; no interpreter fallback");
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native above helper missing EvalContext; no interpreter fallback",
+        );
         return 0.0;
     }
-    if ctx.is_null() {
-        set_native_runtime_error(
-            "native above helper missing EvalContext; no interpreter fallback",
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native above helper missing operands; no interpreter fallback",
         );
         return 0.0;
     }
 
     let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
-    let ctx = unsafe { &*ctx };
     if ctx.cross_detectors.is_null() {
-        set_native_runtime_error(format!(
-            "native above helper missing detector storage for detector {detector_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native above helper missing detector storage for detector {detector_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if detector_id >= ctx.cross_detectors_len {
-        set_native_runtime_error(format!(
-            "native above helper detector {detector_id} outside detector table length {}; no interpreter fallback",
-            ctx.cross_detectors_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native above helper detector {detector_id} outside detector table length {}; no interpreter fallback",
+                ctx.cross_detectors_len
+            ),
+        );
         return 0.0;
     }
 
@@ -1374,15 +1423,18 @@ pub unsafe extern "C" fn rspice_last_crossing_state_native(
     ctx: *const EvalContext,
     detector_id: usize,
 ) -> f64 {
-    if operands.is_null() {
-        set_native_runtime_error(
-            "native last_crossing helper missing operands; no interpreter fallback",
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native last_crossing helper missing EvalContext; no interpreter fallback",
         );
         return 0.0;
     }
-    if ctx.is_null() {
-        set_native_runtime_error(
-            "native last_crossing helper missing EvalContext; no interpreter fallback",
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native last_crossing helper missing operands; no interpreter fallback",
         );
         return 0.0;
     }
@@ -1395,18 +1447,23 @@ pub unsafe extern "C" fn rspice_last_crossing_state_native(
     } else {
         0
     };
-    let ctx = unsafe { &*ctx };
     if ctx.cross_detectors.is_null() {
-        set_native_runtime_error(format!(
-            "native last_crossing helper missing detector storage for detector {detector_id}; no interpreter fallback"
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native last_crossing helper missing detector storage for detector {detector_id}; no interpreter fallback"
+            ),
+        );
         return 0.0;
     }
     if detector_id >= ctx.cross_detectors_len {
-        set_native_runtime_error(format!(
-            "native last_crossing helper detector {detector_id} outside detector table length {}; no interpreter fallback",
-            ctx.cross_detectors_len
-        ));
+        set_native_context_error(
+            ctx,
+            format!(
+                "native last_crossing helper detector {detector_id} outside detector table length {}; no interpreter fallback",
+                ctx.cross_detectors_len
+            ),
+        );
         return 0.0;
     }
 
@@ -1420,59 +1477,13 @@ pub unsafe extern "C" fn rspice_last_crossing_state_native(
     }
 }
 
-/// External helper function for native x64 runtime-indexed variable reads.
+/// Resolve a native x64 runtime-indexed variable slot.
 ///
-/// `base_ptr` points at the first element of the array variable run. The helper
-/// preserves VM `array_slot` semantics: round the floating index, apply the
-/// declared lower bound, and hard-fail through the native runtime error channel
-/// when the index is out of range.
+/// This resolver is deliberately side-effect free. A null return means the
+/// generated caller must publish a dispatch-local diagnostic before returning.
 ///
 /// # Safety
-/// This function is called from JIT-compiled code with a valid pointer to the
-/// first array element and a compile-time-validated element count.
-#[unsafe(export_name = "rspice_dynamic_variable_load_native")]
-pub unsafe extern "C" fn rspice_dynamic_variable_load_native(
-    raw_index: f64,
-    base_ptr: *const f64,
-    len: usize,
-    lower: i64,
-) -> f64 {
-    if base_ptr.is_null() {
-        set_native_runtime_error(
-            "native dynamic array read missing variable storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-    if len == 0 {
-        set_native_runtime_error(
-            "native dynamic array read has zero-length storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-    let Ok(len_i64) = i64::try_from(len) else {
-        set_native_runtime_error(
-            "native dynamic array read length exceeds native bounds range; no interpreter fallback",
-        );
-        return 0.0;
-    };
-
-    let Some(offset) =
-        dynamic_variable_offset(raw_index, len_i64, lower, "native dynamic array read")
-    else {
-        return 0.0;
-    };
-
-    unsafe { *base_ptr.add(offset) }
-}
-
-/// External helper function for native x64 runtime-indexed variable writes.
-///
-/// Returns a pointer to the selected array slot. A null return means the helper
-/// recorded a native runtime error and the JIT caller must not store.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with a valid pointer to the
-/// first array element and a compile-time-validated element count.
+/// A non-null `base_ptr` must point to at least `len` contiguous `f64` values.
 #[unsafe(export_name = "rspice_dynamic_variable_slot_native")]
 pub unsafe extern "C" fn rspice_dynamic_variable_slot_native(
     raw_index: f64,
@@ -1480,52 +1491,62 @@ pub unsafe extern "C" fn rspice_dynamic_variable_slot_native(
     len: usize,
     lower: i64,
 ) -> *mut f64 {
-    if base_ptr.is_null() {
-        set_native_runtime_error(
-            "native indexed assignment missing variable storage; no interpreter fallback",
-        );
-        return std::ptr::null_mut();
-    }
-    if len == 0 {
-        set_native_runtime_error(
-            "native indexed assignment has zero-length storage; no interpreter fallback",
-        );
+    if base_ptr.is_null() || len == 0 {
         return std::ptr::null_mut();
     }
     let Ok(len_i64) = i64::try_from(len) else {
-        set_native_runtime_error(
-            "native indexed assignment length exceeds native bounds range; no interpreter fallback",
-        );
         return std::ptr::null_mut();
     };
 
-    let Some(offset) =
-        dynamic_variable_offset(raw_index, len_i64, lower, "native indexed assignment")
-    else {
+    let Some(offset) = dynamic_variable_offset(raw_index, len_i64, lower) else {
         return std::ptr::null_mut();
     };
 
     unsafe { base_ptr.add(offset) }
 }
 
-fn dynamic_variable_offset(
+/// Publish a runtime-indexed variable failure to the active dispatch.
+///
+/// The argument layout matches the slot resolver except that the first integer
+/// argument is the dispatch context rather than the variable base pointer.
+#[unsafe(export_name = "rspice_native_dynamic_variable_error")]
+pub extern "C" fn rspice_native_dynamic_variable_error(
     raw_index: f64,
-    len_i64: i64,
+    ctx: *const EvalContext,
+    len: usize,
     lower: i64,
-    context: &str,
-) -> Option<usize> {
+) -> f64 {
+    let message = if len == 0 {
+        "native dynamic variable access has zero-length storage; no interpreter fallback".into()
+    } else if let Ok(len_i64) = i64::try_from(len) {
+        if let Some(index) = rounded_i64_without_saturation(raw_index) {
+            let offset = index.checked_sub(lower);
+            if offset.is_some_and(|offset| offset >= 0 && offset < len_i64) {
+                "native dynamic variable access missing variable storage; no interpreter fallback"
+                    .into()
+            } else {
+                dynamic_variable_bounds_error(index, lower, len_i64)
+            }
+        } else {
+            dynamic_variable_bounds_error(raw_index, lower, len_i64)
+        }
+    } else {
+        "native dynamic variable length exceeds native bounds range; no interpreter fallback".into()
+    };
+    set_native_context_error_ptr(ctx, message);
+    0.0
+}
+
+fn dynamic_variable_offset(raw_index: f64, len_i64: i64, lower: i64) -> Option<usize> {
     let Some(index) = rounded_i64_without_saturation(raw_index) else {
-        set_dynamic_variable_bounds_error(context, raw_index, lower, len_i64);
         return None;
     };
 
     let Some(offset) = index.checked_sub(lower) else {
-        set_dynamic_variable_bounds_error(context, index, lower, len_i64);
         return None;
     };
 
     if offset < 0 || offset >= len_i64 {
-        set_dynamic_variable_bounds_error(context, index, lower, len_i64);
         return None;
     }
 
@@ -1547,74 +1568,27 @@ fn rounded_i64_without_saturation(value: f64) -> Option<i64> {
     Some(rounded as i64)
 }
 
-fn set_dynamic_variable_bounds_error(
-    context: &str,
+fn dynamic_variable_bounds_error(
     index: impl std::fmt::Display,
     lower: i64,
     len_i64: i64,
-) {
+) -> String {
     let upper = lower.saturating_add(len_i64).saturating_sub(1);
-    set_native_runtime_error(format!(
-        "{context}: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
-    ));
-}
-
-/// External helper function for PushCurrent terminal-pair lookup.
-///
-/// # Safety
-/// This function is called from JIT-compiled code with valid pointers and lengths.
-#[unsafe(export_name = "rspice_current_lookup")]
-pub unsafe extern "C" fn rspice_current_lookup(
-    branch_currents_ptr: *const f64,
-    branch_currents_len: usize,
-    _currents_ptr: *const f64,
-    _currents_len: usize,
-    num_terminals: usize,
-    pos: usize,
-    neg: usize,
-) -> f64 {
-    if branch_currents_ptr.is_null() {
-        set_native_runtime_error(
-            "native legacy current helper missing terminal-pair current storage; no interpreter fallback",
-        );
-        return 0.0;
-    }
-
-    let Some(idx) = terminal_pair_current_index(pos, neg, num_terminals) else {
-        set_native_runtime_error(format!(
-            "native legacy current helper terminal pair {pos},{neg} outside terminal count {num_terminals}; no interpreter fallback"
-        ));
-        return 0.0;
-    };
-    if idx >= branch_currents_len {
-        set_native_runtime_error(format!(
-            "native legacy current helper terminal pair index {idx} outside current storage length {branch_currents_len}; no interpreter fallback"
-        ));
-        return 0.0;
-    }
-
-    let value = unsafe { *branch_currents_ptr.add(idx) };
-    if value.is_finite() {
-        return value;
-    }
-
-    set_native_runtime_error(
-        "native legacy current helper read non-finite terminal-pair current; no interpreter fallback",
-    );
-    0.0
+    format!(
+        "native dynamic variable access: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
+    )
 }
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        EvalContext, clear_native_runtime_error, rspice_above_state_native,
-        rspice_absdelay_state_native, rspice_cross_state_native, rspice_current_lookup,
-        rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native,
-        rspice_laplace_step, rspice_laplace_step_native, rspice_last_crossing_state_native,
-        rspice_limit, rspice_limiter_previous_native, rspice_limiter_store_native,
-        rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup,
-        rspice_table_lookup_native, rspice_timer_state_native, rspice_transition_state_native,
-        rspice_zi_step_native, take_native_runtime_error,
+        EvalContext, NativeRuntimeStatus, rspice_above_state_native, rspice_absdelay_state_native,
+        rspice_cross_state_native, rspice_ddt_state_native, rspice_dynamic_variable_slot_native,
+        rspice_laplace_step_native, rspice_last_crossing_state_native,
+        rspice_limiter_previous_native, rspice_limiter_store_native,
+        rspice_native_dynamic_variable_error, rspice_slew_state_native,
+        rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
+        rspice_transition_state_native, rspice_zi_step_native,
     };
     use crate::codegen::LookupTable;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -1664,30 +1638,84 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, analysis_initial_step), 312);
         assert_eq!(offset_of!(EvalContext, analysis_final_step), 313);
         assert_eq!(offset_of!(EvalContext, state_older), 320);
-        assert_eq!(offset_of!(EvalContext, state_derivatives), 328);
-        assert_eq!(offset_of!(EvalContext, state_derivatives_prev), 336);
-        assert_eq!(offset_of!(EvalContext, integration_derivative_scale), 344);
+        assert_eq!(offset_of!(EvalContext, state_older_len), 328);
+        assert_eq!(offset_of!(EvalContext, state_derivatives), 336);
+        assert_eq!(offset_of!(EvalContext, state_derivatives_len), 344);
+        assert_eq!(offset_of!(EvalContext, state_derivatives_prev), 352);
+        assert_eq!(offset_of!(EvalContext, state_derivatives_prev_len), 360);
+        assert_eq!(offset_of!(EvalContext, integration_derivative_scale), 368);
         assert_eq!(
             offset_of!(EvalContext, integration_previous_value_scale),
-            352
+            376
         );
-        assert_eq!(offset_of!(EvalContext, integration_older_value_scale), 360);
+        assert_eq!(offset_of!(EvalContext, integration_older_value_scale), 384);
         assert_eq!(
             offset_of!(EvalContext, integration_previous_derivative_scale),
-            368
+            392
         );
-        assert_eq!(offset_of!(EvalContext, integration_active), 376);
-        assert_eq!(offset_of!(EvalContext, limiter_active), 384);
-        assert_eq!(offset_of!(EvalContext, limiting_enabled), 392);
-        assert_eq!(size_of::<EvalContext>(), 400);
+        assert_eq!(offset_of!(EvalContext, integration_active), 400);
+        assert_eq!(offset_of!(EvalContext, limiter_active), 408);
+        assert_eq!(offset_of!(EvalContext, limiting_enabled), 416);
+        assert_eq!(offset_of!(EvalContext, runtime_status), 424);
+        assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
+        assert_eq!(
+            NativeRuntimeStatus::failed_offset(),
+            offset_of!(NativeRuntimeStatus, failed)
+        );
+        assert_eq!(size_of::<EvalContext>(), 456);
         assert_eq!(align_of::<EvalContext>(), 8);
+    }
+
+    #[test]
+    fn integration_helpers_validate_every_history_buffer_length() {
+        let operand = [1.0];
+
+        for missing in ["older", "derivatives", "previous derivatives"] {
+            let previous = [0.0];
+            let older = [0.0];
+            let previous_derivatives = [0.0];
+            let mut values = [0.0];
+            let mut derivatives = [0.0];
+            let mut initialized = [0_u8];
+            let mut ctx = empty_eval_context();
+            ctx.state_prev = previous.as_ptr();
+            ctx.state_prev_len = previous.len();
+            ctx.state_older = older.as_ptr();
+            ctx.state_older_len = older.len();
+            ctx.state_values = values.as_mut_ptr();
+            ctx.state_values_len = values.len();
+            ctx.state_derivatives = derivatives.as_mut_ptr();
+            ctx.state_derivatives_len = derivatives.len();
+            ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+            ctx.state_derivatives_prev_len = previous_derivatives.len();
+            ctx.state_initialized = initialized.as_mut_ptr();
+            ctx.state_initialized_len = initialized.len();
+            match missing {
+                "older" => ctx.state_older_len = 0,
+                "derivatives" => ctx.state_derivatives_len = 0,
+                "previous derivatives" => ctx.state_derivatives_prev_len = 0,
+                _ => unreachable!(),
+            }
+            ctx.clear_runtime_error();
+
+            let value = unsafe { rspice_ddt_state_native(operand.as_ptr(), &ctx, 0) };
+
+            assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{missing}");
+            let error = ctx
+                .take_runtime_error()
+                .unwrap_or_else(|| panic!("{missing} length must hard-fail"));
+            assert!(
+                error.contains("ddt") && error.contains("invalid state storage"),
+                "{missing}: unexpected error: {error}"
+            );
+        }
     }
 
     #[test]
     fn named_limiter_helpers_bypass_state_outside_limited_newton() {
         let mut ctx = empty_eval_context();
         ctx.limiting_enabled = 0;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         assert_eq!(
             unsafe { rspice_limiter_previous_native(3.5, &ctx, usize::MAX) }.to_bits(),
@@ -1699,7 +1727,7 @@ mod tests {
             3.5_f64.to_bits()
         );
         assert!(
-            take_native_runtime_error().is_none(),
+            ctx.take_runtime_error().is_none(),
             "probe and small-signal limiter bypass must not require state storage"
         );
     }
@@ -1737,7 +1765,7 @@ mod tests {
             4.0_f64.to_bits()
         );
         assert_eq!(limiter_active, 0);
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -1746,53 +1774,21 @@ mod tests {
             (
                 "lookup",
                 rspice_table_lookup_native
-                    as unsafe extern "C" fn(f64, *const LookupTable, usize, usize) -> f64,
+                    as unsafe extern "C" fn(f64, *const EvalContext, usize) -> f64,
             ),
             ("derivative", rspice_table_derivative_native),
         ] {
-            clear_native_runtime_error();
-            let value = unsafe { helper(1.0, std::ptr::null(), 0, 0) };
+            let ctx = empty_eval_context();
+            ctx.clear_runtime_error();
+            let value = unsafe { helper(1.0, &ctx, 0) };
             assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error()
+            let error = ctx
+                .take_runtime_error()
                 .unwrap_or_else(|| panic!("{name} missing table storage must hard-fail"));
             assert!(error.contains("table"), "{name}: {error}");
             assert!(error.contains("table storage"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
         }
-    }
-
-    #[test]
-    fn legacy_helpers_record_runtime_error_for_invalid_metadata() {
-        clear_native_runtime_error();
-        let value = unsafe { rspice_table_lookup(std::ptr::null(), 0, 0, 1.0) };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy table");
-
-        let mut initialized = [0_u8];
-        clear_native_runtime_error();
-        let value = unsafe {
-            rspice_limit(
-                std::ptr::null_mut(),
-                initialized.as_mut_ptr(),
-                initialized.len(),
-                0,
-                2.0,
-                0.5,
-            )
-        };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy limit");
-
-        clear_native_runtime_error();
-        let value = unsafe { rspice_laplace_step(std::ptr::null_mut(), 0, 0, 1.0, 1.0e-9) };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy Laplace");
-
-        clear_native_runtime_error();
-        let value =
-            unsafe { rspice_current_lookup(std::ptr::null(), 0, std::ptr::null(), 0, 2, 0, 1) };
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        assert_runtime_error_contains("legacy current");
     }
 
     #[test]
@@ -1802,14 +1798,18 @@ mod tests {
             (
                 "lookup",
                 rspice_table_lookup_native
-                    as unsafe extern "C" fn(f64, *const LookupTable, usize, usize) -> f64,
+                    as unsafe extern "C" fn(f64, *const EvalContext, usize) -> f64,
             ),
             ("derivative", rspice_table_derivative_native),
         ] {
-            clear_native_runtime_error();
-            let value = unsafe { helper(1.0, table.as_ptr(), table.len(), 1) };
+            let mut ctx = empty_eval_context();
+            ctx.lookup_tables = table.as_ptr();
+            ctx.lookup_tables_len = table.len();
+            ctx.clear_runtime_error();
+            let value = unsafe { helper(1.0, &ctx, 1) };
             assert_eq!(value.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error()
+            let error = ctx
+                .take_runtime_error()
                 .unwrap_or_else(|| panic!("{name} out-of-range table id must hard-fail"));
             assert!(error.contains("table"), "{name}: {error}");
             assert!(error.contains("outside table length"), "{name}: {error}");
@@ -1818,40 +1818,36 @@ mod tests {
     }
 
     #[test]
-    fn laplace_native_helper_records_runtime_error_for_invalid_context() {
-        clear_native_runtime_error();
+    fn native_helper_records_failure_in_its_evaluation_context() {
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
-        let value = unsafe { rspice_laplace_step_native(1.25, std::ptr::null(), 0) };
+        let value = unsafe { rspice_laplace_step_native(1.25, &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
-            .expect("invalid native Laplace context must record a runtime error");
+        let error = ctx
+            .take_runtime_error()
+            .expect("native helper must publish failure to its dispatch context");
+        assert!(error.contains("Laplace") && error.contains("filter storage"));
         assert!(
-            error.contains("Laplace") && error.contains("EvalContext"),
-            "error must identify the invalid Laplace context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-        assert!(
-            take_native_runtime_error().is_none(),
-            "runtime error retrieval must clear the thread-local slot"
+            ctx.take_runtime_error().is_none(),
+            "dispatch error retrieval must clear the context status"
         );
     }
 
     #[test]
-    fn zi_native_helper_records_runtime_error_for_invalid_context() {
-        clear_native_runtime_error();
+    fn zi_native_helper_records_runtime_error_for_missing_storage() {
+        let ctx = empty_eval_context();
 
-        let value = unsafe { rspice_zi_step_native(1.25, std::ptr::null(), 0) };
+        let value = unsafe { rspice_zi_step_native(1.25, &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native zi context must record an error");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing native zi storage must record an error");
         assert!(
-            error.contains("zi") && error.contains("EvalContext"),
-            "error must identify the invalid zi context, got: {error}"
+            error.contains("zi") && error.contains("filter storage"),
+            "error must identify the missing zi storage, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
@@ -1860,23 +1856,8 @@ mod tests {
     }
 
     #[test]
-    fn timer_native_helper_matches_vm_events_and_reports_invalid_context() {
-        clear_native_runtime_error();
+    fn timer_native_helper_matches_vm_events() {
         let periodic = [1.0, 0.5, 0.0, 1.0];
-
-        let value = unsafe { rspice_timer_state_native(periodic.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native timer context must record an error");
-        assert!(
-            error.contains("timer") && error.contains("EvalContext"),
-            "error must identify the invalid timer context, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
 
         let mut timer_bound = f64::INFINITY;
         let mut ctx = EvalContext {
@@ -1922,8 +1903,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,
@@ -1931,6 +1915,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         };
 
         assert_eq!(
@@ -1982,34 +1967,18 @@ mod tests {
 
     #[test]
     fn transition_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 0.2, 0.4, 0.4];
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
-        let missing_operands =
-            unsafe { rspice_transition_state_native(std::ptr::null(), std::ptr::null(), 0) };
+        let missing_operands = unsafe { rspice_transition_state_native(std::ptr::null(), &ctx, 0) };
 
         assert_eq!(missing_operands.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
+        let error = ctx
+            .take_runtime_error()
             .expect("invalid native transition operands must record an error");
         assert!(
             error.contains("transition") && error.contains("operands"),
             "error must identify the invalid transition operands, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_transition_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
-            .expect("invalid native transition context must record an error");
-        assert!(
-            error.contains("transition") && error.contains("EvalContext"),
-            "error must identify the invalid transition context, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
@@ -2021,12 +1990,12 @@ mod tests {
     fn transition_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 0.2, 0.4, 0.4];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 7) };
 
         assert_eq!(value.to_bits(), 1.25_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2034,12 +2003,14 @@ mod tests {
         let operands = [1.0, 0.2, 0.4, 0.4];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing transition storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing transition storage must hard-fail");
         assert!(
             error.contains("transition") && error.contains("filter storage"),
             "error must identify missing transition storage, got: {error}"
@@ -2058,7 +2029,7 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.transition_filters = filters.as_mut_ptr();
         ctx.transition_filters_len = filters.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 1.0;
         assert_eq!(
@@ -2075,39 +2046,23 @@ mod tests {
         ctx.time = 1.6;
         let done = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((done - 1.0).abs() < 1.0e-12, "done transition: {done}");
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
     fn slew_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 2.0, 2.0];
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
-        let missing_operands =
-            unsafe { rspice_slew_state_native(std::ptr::null(), std::ptr::null(), 0) };
+        let missing_operands = unsafe { rspice_slew_state_native(std::ptr::null(), &ctx, 0) };
 
         assert_eq!(missing_operands.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native slew operands must record an error");
+        let error = ctx
+            .take_runtime_error()
+            .expect("invalid native slew operands must record an error");
         assert!(
             error.contains("slew") && error.contains("operands"),
             "error must identify the invalid slew operands, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_slew_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native slew context must record an error");
-        assert!(
-            error.contains("slew") && error.contains("EvalContext"),
-            "error must identify the invalid slew context, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
@@ -2119,12 +2074,12 @@ mod tests {
     fn slew_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 2.0, 2.0];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 7) };
 
         assert_eq!(value.to_bits(), 1.25_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2132,12 +2087,14 @@ mod tests {
         let operands = [1.0, 2.0, 2.0];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing slew storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing slew storage must hard-fail");
         assert!(
             error.contains("slew") && error.contains("filter storage"),
             "error must identify missing slew storage, got: {error}"
@@ -2156,7 +2113,7 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.slew_filters = filters.as_mut_ptr();
         ctx.slew_filters_len = filters.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 0.0;
         assert_eq!(
@@ -2173,39 +2130,23 @@ mod tests {
         ctx.time = 1.0;
         let done = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((done - 2.0).abs() < 1.0e-12, "done slew: {done}");
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
     fn absdelay_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 0.5];
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
-        let missing_operands =
-            unsafe { rspice_absdelay_state_native(std::ptr::null(), std::ptr::null(), 0) };
+        let missing_operands = unsafe { rspice_absdelay_state_native(std::ptr::null(), &ctx, 0) };
 
         assert_eq!(missing_operands.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
+        let error = ctx
+            .take_runtime_error()
             .expect("invalid native absdelay operands must record an error");
         assert!(
             error.contains("absdelay") && error.contains("operands"),
             "error must identify the invalid absdelay operands, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_absdelay_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
-            .expect("invalid native absdelay context must record an error");
-        assert!(
-            error.contains("absdelay") && error.contains("EvalContext"),
-            "error must identify the invalid absdelay context, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
@@ -2217,12 +2158,12 @@ mod tests {
     fn absdelay_native_helper_passes_input_through_outside_transient() {
         let operands = [1.25, 0.5];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 7) };
 
         assert_eq!(value.to_bits(), 1.25_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2230,12 +2171,14 @@ mod tests {
         let operands = [1.0, 0.5];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing absdelay storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing absdelay storage must hard-fail");
         assert!(
             error.contains("absdelay") && error.contains("delay-buffer storage"),
             "error must identify missing absdelay storage, got: {error}"
@@ -2254,7 +2197,7 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.delay_buffers = buffers.as_mut_ptr();
         ctx.delay_buffers_len = buffers.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 0.0;
         assert_eq!(
@@ -2284,39 +2227,23 @@ mod tests {
             (interpolated - 2.0).abs() < 1.0e-12,
             "interpolated delay: {interpolated}"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
     fn cross_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 1.0, 0.0, 0.0, 1.0];
-        clear_native_runtime_error();
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
 
-        let missing_operands =
-            unsafe { rspice_cross_state_native(std::ptr::null(), std::ptr::null(), 0) };
+        let missing_operands = unsafe { rspice_cross_state_native(std::ptr::null(), &ctx, 0) };
 
         assert_eq!(missing_operands.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error()
+        let error = ctx
+            .take_runtime_error()
             .expect("invalid native cross operands must record an error");
         assert!(
             error.contains("cross") && error.contains("operands"),
             "error must identify the invalid cross operands, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-
-        clear_native_runtime_error();
-        let missing_ctx =
-            unsafe { rspice_cross_state_native(operands.as_ptr(), std::ptr::null(), 0) };
-
-        assert_eq!(missing_ctx.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("invalid native cross context must record an error");
-        assert!(
-            error.contains("cross") && error.contains("EvalContext"),
-            "error must identify the invalid cross context, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
@@ -2328,12 +2255,14 @@ mod tests {
     fn cross_native_helper_hard_fails_missing_detector_storage() {
         let operands = [1.0, 1.0, 0.0, 0.0, 1.0];
         let ctx = empty_eval_context();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         let value = unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
-        let error = take_native_runtime_error().expect("missing cross storage must hard-fail");
+        let error = ctx
+            .take_runtime_error()
+            .expect("missing cross storage must hard-fail");
         assert!(
             error.contains("cross") && error.contains("detector storage"),
             "error must identify missing cross storage, got: {error}"
@@ -2351,7 +2280,7 @@ mod tests {
         let mut ctx = empty_eval_context();
         ctx.cross_detectors = detectors.as_mut_ptr();
         ctx.cross_detectors_len = detectors.len();
-        clear_native_runtime_error();
+        ctx.clear_runtime_error();
 
         ctx.time = 0.0;
         assert_eq!(
@@ -2396,7 +2325,7 @@ mod tests {
             1.0_f64.to_bits(),
             "falling edge should obey negative direction"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2434,7 +2363,7 @@ mod tests {
             1.0_f64.to_bits(),
             "subsequent rising crossings must trigger above"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2463,91 +2392,24 @@ mod tests {
             0.5_f64.to_bits(),
             "native Newton reevaluation must be idempotent"
         );
-        assert!(take_native_runtime_error().is_none());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
-    fn dynamic_variable_helper_loads_rounded_index_and_reports_bounds_errors() {
-        let values = [2.0, 4.0, 8.0];
-        clear_native_runtime_error();
-
-        let loaded =
-            unsafe { rspice_dynamic_variable_load_native(2.49, values.as_ptr(), values.len(), 1) };
-
-        assert_eq!(loaded.to_bits(), 4.0_f64.to_bits());
-        assert!(take_native_runtime_error().is_none());
-
-        let out_of_range =
-            unsafe { rspice_dynamic_variable_load_native(4.0, values.as_ptr(), values.len(), 1) };
-
-        assert_eq!(out_of_range.to_bits(), 0.0_f64.to_bits());
-        let error =
-            take_native_runtime_error().expect("out-of-range native array read must hard-fail");
-        assert!(
-            error.contains("array index 4 outside declared bounds [1:3]"),
-            "error must preserve array bounds diagnostic, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
-    }
-
-    #[test]
-    fn dynamic_variable_helper_rejects_unsafe_indexes_without_aliasing_storage() {
-        for (name, raw_index, lower) in [
-            ("nan", f64::NAN, 0),
-            ("infinity", f64::INFINITY, 0),
-            ("huge finite", 1.0e300, i64::MAX),
-        ] {
-            let values = [2.0];
-            clear_native_runtime_error();
-
-            let loaded = unsafe {
-                rspice_dynamic_variable_load_native(raw_index, values.as_ptr(), 1, lower)
-            };
-
-            assert_eq!(loaded.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error()
-                .unwrap_or_else(|| panic!("{name}: unsafe native array read must hard-fail"));
-            assert!(
-                error.contains("outside declared bounds"),
-                "{name}: error must preserve array bounds diagnostic, got: {error}"
-            );
-            assert!(
-                error.contains("no interpreter fallback"),
-                "{name}: error must preserve the native hard-fail contract, got: {error}"
-            );
-        }
-    }
-
-    #[test]
-    fn dynamic_variable_slot_helper_returns_rounded_slot_and_reports_bounds_errors() {
+    fn dynamic_variable_slot_resolver_returns_rounded_slot_without_side_effects() {
         let mut values = [2.0, 4.0, 8.0];
-        clear_native_runtime_error();
 
         let slot = unsafe {
             rspice_dynamic_variable_slot_native(2.49, values.as_mut_ptr(), values.len(), 1)
         };
 
         assert_eq!(slot, unsafe { values.as_mut_ptr().add(1) });
-        assert!(take_native_runtime_error().is_none());
 
         let slot = unsafe {
             rspice_dynamic_variable_slot_native(4.0, values.as_mut_ptr(), values.len(), 1)
         };
 
         assert!(slot.is_null());
-        let error =
-            take_native_runtime_error().expect("out-of-range native indexed write must hard-fail");
-        assert!(
-            error.contains("array index 4 outside declared bounds [1:3]"),
-            "error must preserve array bounds diagnostic, got: {error}"
-        );
-        assert!(
-            error.contains("no interpreter fallback"),
-            "error must preserve the native hard-fail contract, got: {error}"
-        );
     }
 
     #[test]
@@ -2558,7 +2420,6 @@ mod tests {
             ("huge finite", 1.0e300, i64::MAX),
         ] {
             let mut values = [2.0];
-            clear_native_runtime_error();
 
             let slot = unsafe {
                 rspice_dynamic_variable_slot_native(raw_index, values.as_mut_ptr(), 1, lower)
@@ -2566,29 +2427,111 @@ mod tests {
 
             assert!(slot.is_null(), "{name}");
             assert_eq!(values[0].to_bits(), 2.0_f64.to_bits(), "{name}");
-            let error = take_native_runtime_error()
-                .unwrap_or_else(|| panic!("{name}: unsafe native indexed write must hard-fail"));
-            assert!(
-                error.contains("outside declared bounds"),
-                "{name}: error must preserve array bounds diagnostic, got: {error}"
-            );
-            assert!(
-                error.contains("no interpreter fallback"),
-                "{name}: error must preserve the native hard-fail contract, got: {error}"
-            );
         }
     }
 
-    fn assert_runtime_error_contains(feature: &str) {
-        let error =
-            take_native_runtime_error().unwrap_or_else(|| panic!("{feature} must hard-fail"));
+    #[test]
+    fn dynamic_variable_error_helper_reports_into_its_dispatch_context() {
+        let ctx = empty_eval_context();
+        ctx.clear_runtime_error();
+
+        let value = rspice_native_dynamic_variable_error(4.0, &ctx, 3, 1);
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = ctx
+            .take_runtime_error()
+            .expect("dynamic variable failure must publish to its dispatch");
         assert!(
-            error.contains(feature),
-            "error must identify {feature}, got: {error}"
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "error must preserve array bounds diagnostic, got: {error}"
         );
         assert!(
             error.contains("no interpreter fallback"),
             "error must preserve the native hard-fail contract, got: {error}"
+        );
+    }
+
+    #[test]
+    fn native_runtime_errors_are_isolated_between_contexts_on_one_thread() {
+        let failed_ctx = empty_eval_context();
+        let clean_ctx = empty_eval_context();
+
+        let value = rspice_native_dynamic_variable_error(4.0, &failed_ctx, 3, 1);
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert!(
+            clean_ctx.take_runtime_error().is_none(),
+            "a failure must not leak into another evaluation context"
+        );
+        let error = failed_ctx
+            .take_runtime_error()
+            .expect("the failing context must retain its own diagnostic");
+        assert!(
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "unexpected failing-context diagnostic: {error}"
+        );
+        assert!(
+            clean_ctx.take_runtime_error().is_none(),
+            "draining the failing context must not alter a clean context"
+        );
+    }
+
+    #[test]
+    fn native_runtime_errors_are_isolated_across_parallel_dispatches() {
+        let (dynamic_error, laplace_error, clean_error) = std::thread::scope(|scope| {
+            let dynamic = scope.spawn(|| {
+                let ctx = empty_eval_context();
+                rspice_native_dynamic_variable_error(8.0, &ctx, 8, 0);
+                ctx.take_runtime_error()
+                    .expect("dynamic-index dispatch must retain its diagnostic")
+            });
+            let laplace = scope.spawn(|| {
+                let ctx = empty_eval_context();
+                unsafe { rspice_laplace_step_native(1.0, &ctx, 0) };
+                ctx.take_runtime_error()
+                    .expect("Laplace dispatch must retain its diagnostic")
+            });
+            let clean = scope.spawn(|| {
+                let ctx = empty_eval_context();
+                unsafe { rspice_limiter_previous_native(2.5, &ctx, usize::MAX) };
+                ctx.take_runtime_error()
+            });
+            (
+                dynamic.join().expect("dynamic-index dispatch joins"),
+                laplace.join().expect("Laplace dispatch joins"),
+                clean.join().expect("clean dispatch joins"),
+            )
+        });
+
+        assert!(
+            dynamic_error.contains("array index 8 outside declared bounds [0:7]"),
+            "unexpected dynamic-index diagnostic: {dynamic_error}"
+        );
+        assert!(
+            laplace_error.contains("Laplace") && laplace_error.contains("filter storage"),
+            "unexpected Laplace diagnostic: {laplace_error}"
+        );
+        assert!(
+            clean_error.is_none(),
+            "parallel failures must not contaminate a successful dispatch"
+        );
+    }
+
+    #[test]
+    fn native_runtime_context_recovers_after_error_is_drained() {
+        let ctx = empty_eval_context();
+        rspice_native_dynamic_variable_error(4.0, &ctx, 3, 1);
+        assert!(
+            ctx.take_runtime_error().is_some(),
+            "fixture must begin with a native runtime failure"
+        );
+
+        let value = unsafe { rspice_limiter_previous_native(2.5, &ctx, usize::MAX) };
+
+        assert_eq!(value.to_bits(), 2.5_f64.to_bits());
+        assert!(
+            ctx.take_runtime_error().is_none(),
+            "a successful next dispatch must remain clean after the prior error is drained"
         );
     }
 
@@ -2636,8 +2579,11 @@ mod tests {
             analysis_initial_step: 0,
             analysis_final_step: 0,
             state_older: std::ptr::null(),
+            state_older_len: 0,
             state_derivatives: std::ptr::null_mut(),
+            state_derivatives_len: 0,
             state_derivatives_prev: std::ptr::null(),
+            state_derivatives_prev_len: 0,
             integration_derivative_scale: 0.0,
             integration_previous_value_scale: 0.0,
             integration_older_value_scale: 0.0,
@@ -2645,6 +2591,7 @@ mod tests {
             integration_active: 0,
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
+            runtime_status: Default::default(),
         }
     }
 }
