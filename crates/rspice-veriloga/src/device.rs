@@ -1957,6 +1957,8 @@ impl VerilogADevice {
                 vm.context.set_branch_current(pos, neg, value);
             }
         }
+        #[cfg(feature = "native")]
+        Self::run_post_assignment_pass(&mut vm, &self.model, native)?;
 
         Ok(currents)
     }
@@ -2498,6 +2500,47 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Execute assignments that consume the completed contribution-current
+    /// vector. These entries are never run while contribution slots are still
+    /// being populated.
+    #[cfg(feature = "native")]
+    fn run_post_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        native: &NativeModel,
+    ) -> Result<(), VmError> {
+        if native.plan_stats().assignment_entry_points == 1 {
+            return Ok(());
+        }
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
+        }
+        Self::validate_native_storage(vm.context, native)?;
+        Self::validate_native_current_pairs(
+            vm.context,
+            native.num_terminals,
+            native.post_assignment_current_pairs(),
+        )?;
+        Self::validate_native_prior_currents(vm.context, native.post_assignment_prior_currents())?;
+        Self::validate_native_branch_unknowns(
+            vm.context,
+            native.post_assignment_branch_unknowns(),
+        )?;
+        let ctx = Self::eval_context_from(vm.context);
+        let vars_ptr = vm.context.variables.as_mut_ptr();
+        clear_native_runtime_error();
+        if !native.run_post_assignments(&ctx, vars_ptr) {
+            return Err(VmError::NativeJit(
+                "native JIT image is missing its post-current assignment entry; no interpreter fallback"
+                    .into(),
+            ));
+        }
+        if let Some(error) = take_native_runtime_error() {
+            return Err(VmError::NativeJit(error));
+        }
+        Ok(())
+    }
+
     /// Execute the assignment pass through the bytecode interpreter.
     #[cfg(not(feature = "native"))]
     fn run_assignment_pass(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
@@ -2724,6 +2767,8 @@ impl VerilogADevice {
                 });
             }
         }
+        #[cfg(feature = "native")]
+        Self::run_post_assignment_pass(&mut vm, model, native)?;
 
         Ok(entries)
     }
@@ -2925,6 +2970,10 @@ impl VerilogADevice {
             }
             jacobian_base += program.jacobian_programs.len();
         }
+        {
+            let mut vm = Vm::new(&mut self.context);
+            Self::run_post_assignment_pass(&mut vm, model, native)?;
+        }
 
         let m = self.context.multiplicity;
         self.stamp_structural_branches(&mut matrix_add, m);
@@ -3091,6 +3140,7 @@ impl VerilogADevice {
                 .copied()
                 .unwrap_or(true)
             {
+                vm.context.currents.push(0.0);
                 continue;
             }
 
@@ -3192,6 +3242,8 @@ impl VerilogADevice {
                 }
             }
         }
+        #[cfg(feature = "native")]
+        Self::run_post_assignment_pass(&mut vm, model, native)?;
         Ok(())
     }
 
@@ -3234,6 +3286,7 @@ impl VerilogADevice {
         let mut vm = Vm::new(context);
         Self::run_assignment_pass(&mut vm, model, native)?;
         Self::populate_noise_current_probe_cache(&mut vm, model, program_active, native)?;
+        Self::run_post_assignment_pass(&mut vm, model, native)?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -3811,6 +3864,105 @@ endmodule
                 .expect("canonical builder device evaluates"),
             vec![2.0]
         );
+    }
+
+    #[test]
+    fn native_device_runs_completed_current_assignments_on_all_value_paths() {
+        let source = r#"
+`include "disciplines.vams"
+module completed_current_assignment_paths(p, n);
+    inout p, n;
+    electrical p, n, x;
+    real sensed, reverse, port_n;
+    analog begin
+        I(x, n) <+ 2.0 * V(p, n);
+        I(x, n) <+ 1.0;
+        sensed = I(x, n);
+        reverse = I(n, x);
+        port_n = I(<n>);
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile completed-current device model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile completed-current canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("POSTCURRENT1", model, &artifact, &[1, 0])
+                .expect("build completed-current native device");
+        let solution = [2.0_f64, 0.0_f64];
+        device
+            .try_update_all_voltages(&solution)
+            .expect("update terminal and internal voltages");
+
+        let assert_outputs = |device: &VerilogADevice| {
+            assert_eq!(device.variable("sensed"), Some(5.0));
+            assert_eq!(device.variable("reverse"), Some(-5.0));
+            assert_eq!(device.variable("port_n"), Some(-5.0));
+        };
+
+        assert_eq!(
+            device.try_evaluate().expect("native device evaluation"),
+            vec![4.0, 1.0]
+        );
+        assert_outputs(&device);
+
+        device
+            .try_compute_jacobian()
+            .expect("native standalone Jacobian evaluation");
+        assert_outputs(&device);
+
+        device
+            .try_stamp(&solution, |_, _, _| {}, |_, _| {})
+            .expect("native fused stamp evaluation");
+        assert_outputs(&device);
+
+        assert!(
+            device
+                .try_noise_sources(&solution)
+                .expect("native noise operating-point evaluation")
+                .is_empty()
+        );
+        assert_outputs(&device);
+    }
+
+    #[test]
+    fn native_scalar_stamp_preserves_inactive_contribution_current_slots() {
+        let source = r#"
+`include "disciplines.vams"
+module inactive_prior_current_slot(p, n);
+    inout p, n;
+    electrical p, n, x;
+    parameter integer enabled = 0;
+    real sensed;
+    analog begin
+        if (enabled)
+            I(x, n) <+ 10.0;
+        I(x, n) <+ I(x, n) + 1.0;
+        sensed = I(x, n);
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler
+            .compile(source)
+            .expect("compile inactive prior-current model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile inactive prior-current canonical IR");
+        let mut device =
+            VerilogADevice::try_new_with_canonical_ir("INACTIVEPRIOR1", model, &artifact, &[1, 0])
+                .expect("build inactive prior-current native device");
+
+        device
+            .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
+            .expect("scalar stamp retains the inactive contribution slot");
+
+        assert_eq!(device.context.currents, vec![0.0, 1.0]);
+        assert_eq!(device.variable("sensed"), Some(1.0));
     }
 
     #[test]
