@@ -13,10 +13,13 @@
 //! drifts, this fails at the call site with the same message the real build
 //! would give.
 
-use rspice_veriloga::rust_backend::{RustTranspileOptions, canonical};
-use rspice_veriloga::VerilogACompiler;
+use rspice_veriloga::rust_backend::{
+    RustBackendErrorKind, RustTranspileOptions, RustTranspiler, canonical,
+};
+use rspice_veriloga::{PipelineControl, PipelinePhase, VerilogACompiler};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
 fn a_generated_device_compiles_against_the_runtime_contract() {
@@ -83,6 +86,201 @@ endmodule
     assert!(
         stamp.contains("stamp_current_sparse_local::<2, 0>"),
         "each branch of the divider reaches exactly two nodes; stamp.rs was:\n{stamp}"
+    );
+}
+
+#[test]
+fn generated_stages_follow_model_and_instance_parameter_scope() {
+    let source = r#"
+module scoped_stage(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real model_gain = 2.0;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    real model_shape, geometry;
+    analog begin
+        model_shape = model_gain * model_gain;
+        model_shape = model_shape * model_shape + 3.0 * model_gain;
+        geometry = width * width;
+        geometry = geometry * geometry * model_shape;
+        I(p, n) <+ geometry * V(p, n);
+    end
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("front end");
+    let device = canonical::generate_device(&artifact, &options()).expect("generation");
+    let files: Vec<(&str, &str)> = device
+        .files
+        .iter()
+        .map(|file| (file.relative_path.as_str(), file.contents.as_str()))
+        .collect();
+    let state = find(&files, "state.rs", "scoped stage");
+    let stamp = find(&files, "stamp.rs", "scoped stage");
+    let noise = find(&files, "noise.rs", "scoped stage");
+
+    assert!(stamp.contains("fn canonical_model_stage"));
+    assert!(stamp.contains("fn canonical_instance_stage"));
+    assert!(stamp.contains("self.canonical_model_stage(ctx);"));
+    assert!(stamp.contains("self.canonical_instance_stage(ctx);"));
+    assert!(stamp.contains("static CANONICAL_MODEL_CACHE"));
+    assert!(stamp.contains("canonical_model_cache_lookup"));
+    assert!(stamp.contains("canonical_model_cache_intern"));
+    assert!(state.contains("pub(crate) type CanonicalModelValues"));
+    assert!(state.contains("Option<std::sync::Arc<CanonicalModelValues>>"));
+    assert!(state.contains("pub(crate) const PARAMETER_MODEL_FLAGS: [bool; 2]"));
+    assert!(state.contains("true, false"));
+    assert!(state.contains("if PARAMETER_MODEL_FLAGS[index]"));
+    assert!(state.contains("self.canonical_model_values = None;"));
+    assert!(state.contains("let changed = self.multiplicity.to_bits()"));
+    assert!(state.contains("self.canonical_instance_valid = false;"));
+
+    if let Err(report) = compile("scoped stage", state, stamp, noise) {
+        panic!("scoped stage: generated device does not compile:\n{report}");
+    }
+    if let Err(report) = run_shared_model_cache("scoped stage cache", state, stamp, noise) {
+        panic!("scoped stage: shared model cache failed:\n{report}");
+    }
+}
+
+#[test]
+fn repeated_static_hot_guards_are_specialized_with_a_source_size_cap() {
+    let source = repeated_structure_source();
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("front end");
+    let device = canonical::generate_device(&artifact, &options()).expect("generation");
+    let files: Vec<(&str, &str)> = device
+        .files
+        .iter()
+        .map(|file| (file.relative_path.as_str(), file.contents.as_str()))
+        .collect();
+    let state = find(&files, "state.rs", "repeated structure");
+    let stamp = find(&files, "stamp.rs", "repeated structure");
+    let noise = find(&files, "noise.rs", "repeated structure");
+
+    assert!(
+        stamp.contains("Bounded structural specialization: one dispatch replaces 3"),
+        "three uses of one cached model condition should become one bounded dispatch; \
+         stamp bytes={}, relevant lines:\n{}",
+        stamp.len(),
+        stamp
+            .lines()
+            .filter(|line| line.contains("if ") || line.contains("staged["))
+            .take(40)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(
+        stamp.contains("if staged[") && stamp.contains("canonical_structural_output_0"),
+        "the specialized variants must rejoin through explicit scalar outputs"
+    );
+    if let Err(report) = compile("repeated structure", state, stamp, noise) {
+        panic!("repeated structure: generated specialization does not compile:\n{report}");
+    }
+    if let Err(report) = run_structural_variants("repeated structure runtime", state, stamp, noise) {
+        panic!("repeated structure: generated specialization changed behavior:\n{report}");
+    }
+}
+
+fn repeated_structure_source() -> String {
+    let mut coefficient_work = String::new();
+    for index in 0..80 {
+        coefficient_work.push_str(&format!(
+            "        coefficient = coefficient * 1.0000001 + {}.0e-12;\n",
+            index + 1
+        ));
+    }
+    let mut guarded_work = String::new();
+    for branch in 0..3 {
+        guarded_work.push_str("        if (mode > 0.0) begin\n");
+        for index in 0..80 {
+            guarded_work.push_str(&format!(
+                "            current = current + coefficient * V(p, n) * {}.0e-9;\n",
+                branch * 80 + index + 1
+            ));
+        }
+        guarded_work.push_str("        end\n");
+    }
+    format!(
+        "module repeated_structure(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         \x20   parameter real mode = 1.0;\n\
+         \x20   real coefficient, current;\n\
+         \x20   analog begin\n\
+         \x20       coefficient = mode + 1.0;\n\
+         {coefficient_work}\
+         \x20       current = 0.0;\n\
+         {guarded_work}\
+         \x20       I(p, n) <+ current;\n\
+         \x20   end\n\
+         endmodule\n"
+    )
+}
+
+#[test]
+fn structural_specialization_rejects_source_growth_over_two_percent() {
+    let mut coefficient_work = String::new();
+    for index in 0..80 {
+        coefficient_work.push_str(&format!(
+            "        coefficient = coefficient * 1.0000001 + {}.0e-12;\n",
+            index + 1
+        ));
+    }
+    let mut common_work = String::new();
+    for index in 0..240 {
+        common_work.push_str(&format!(
+            "        current = current + coefficient * V(p, n) * {}.0e-9;\n",
+            index + 1
+        ));
+    }
+    let source = format!(
+        "module rejected_structure(p, n);\n\
+         \x20   inout p, n;\n\
+         \x20   electrical p, n;\n\
+         \x20   parameter real mode = 1.0;\n\
+         \x20   real coefficient, current;\n\
+         \x20   analog begin\n\
+         \x20       coefficient = mode + 1.0;\n\
+         {coefficient_work}\
+         \x20       current = 0.0;\n\
+         {common_work}\
+         \x20       if (mode > 0.0) current = current + V(p, n) * 1.0e-12;\n\
+         \x20       if (mode > 0.0) current = current + V(p, n) * 2.0e-12;\n\
+         \x20       if (mode > 0.0) current = current + V(p, n) * 3.0e-12;\n\
+         \x20       I(p, n) <+ current;\n\
+         \x20   end\n\
+         endmodule\n"
+    );
+
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .expect("front end");
+    let stamp = canonical::generate_device(&artifact, &options())
+        .expect("generation")
+        .files
+        .into_iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp.rs")
+        .contents;
+
+    assert!(
+        stamp.contains("fn canonical_model_stage"),
+        "the parameter prologue must be split so its repeated condition is cacheable"
+    );
+    assert!(
+        !stamp.contains("Bounded structural specialization"),
+        "duplicating the large common Newton path would violate the 2% source-size cap"
+    );
+    assert!(
+        stamp
+            .lines()
+            .filter(|line| line.trim_start().starts_with("if v"))
+            .count()
+            >= 3,
+        "the rejected candidate must retain its three ordinary branches"
     );
 }
 
@@ -290,9 +488,10 @@ fn panic_reason(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<String>() {
         return message.clone();
     }
-    payload
-        .downcast_ref::<&str>()
-        .map_or_else(|| "no known payload".to_string(), |message| (*message).to_string())
+    payload.downcast_ref::<&str>().map_or_else(
+        || "no known payload".to_string(),
+        |message| (*message).to_string(),
+    )
 }
 
 fn model_root() -> PathBuf {
@@ -322,7 +521,153 @@ fn stamp_of(source: &str, name: &str) -> String {
 fn options() -> RustTranspileOptions {
     RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
+        ..RustTranspileOptions::default()
     }
+}
+
+#[test]
+fn transpiler_reports_hot_phases_and_exact_output_size() {
+    let (name, source) = fixtures()[0];
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap_or_else(|error| panic!("{name}: front end: {error}"));
+    let generated = RustTranspiler::new(options())
+        .transpile_measured(&artifact)
+        .unwrap_or_else(|error| panic!("{name}: measured generation: {error}"));
+
+    for phase in [
+        PipelinePhase::CfgLowering,
+        PipelinePhase::DerivativePreparation,
+        PipelinePhase::Differentiation,
+        PipelinePhase::DerivativeExtraction,
+        PipelinePhase::NoisePlanning,
+        PipelinePhase::StampPlanning,
+        PipelinePhase::CfgOptimization,
+        PipelinePhase::Scheduling,
+        PipelinePhase::StampEmission,
+        PipelinePhase::StateEmission,
+        PipelinePhase::NoiseEmission,
+        PipelinePhase::CheckpointFinalization,
+    ] {
+        assert!(
+            generated.metrics.has_phase(phase),
+            "missing structured metric for {phase}"
+        );
+    }
+    let bytes = generated
+        .output
+        .files
+        .iter()
+        .map(|file| file.contents.len() as u64)
+        .sum::<u64>();
+    let lines = generated
+        .output
+        .files
+        .iter()
+        .map(|file| file.contents.lines().count() as u64)
+        .sum::<u64>();
+    assert_eq!(generated.metrics.generated_rust_bytes, bytes);
+    assert_eq!(generated.metrics.generated_rust_lines, lines);
+}
+
+struct ImmediatePipelineCancellation;
+
+impl PipelineControl for ImmediatePipelineCancellation {
+    fn is_cancelled(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn transpiler_honors_cancellation_before_cfg_lowering() {
+    let (name, source) = fixtures()[0];
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap_or_else(|error| panic!("{name}: front end: {error}"));
+    let error = RustTranspiler::new(options())
+        .transpile_measured_with_control(&artifact, &ImmediatePipelineCancellation)
+        .expect_err("immediate cancellation must prevent CFG lowering");
+
+    assert_eq!(error.kind, RustBackendErrorKind::Cancelled);
+    assert!(error.message.contains("cfg_lowering"), "{error}");
+}
+
+struct CancelOnPoll {
+    polls: AtomicUsize,
+    cancel_at: usize,
+}
+
+impl PipelineControl for CancelOnPoll {
+    fn is_cancelled(&self) -> bool {
+        self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.cancel_at
+    }
+}
+
+#[test]
+fn transpiler_polls_for_cancellation_inside_differentiation() {
+    let (name, source) = fixtures()[0];
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap_or_else(|error| panic!("{name}: front end: {error}"));
+    let control = CancelOnPoll {
+        polls: AtomicUsize::new(0),
+        cancel_at: 6,
+    };
+    let error = RustTranspiler::new(options())
+        .transpile_measured_with_control(&artifact, &control)
+        .expect_err("cancellation poll inside differentiation must stop lowering");
+
+    assert_eq!(error.kind, RustBackendErrorKind::Cancelled);
+    assert!(error.message.contains("differentiation"), "{error}");
+}
+
+struct CancelInsideStructuralSpecialization {
+    scheduling_complete: AtomicBool,
+    polls_after_scheduling: AtomicUsize,
+}
+
+impl PipelineControl for CancelInsideStructuralSpecialization {
+    fn is_cancelled(&self) -> bool {
+        if !self.scheduling_complete.load(Ordering::Relaxed) {
+            return false;
+        }
+        // The first poll is the StampEmission boundary. Let it enter, then
+        // cancel at the first poll in the variant's CFG optimization.
+        self.polls_after_scheduling
+            .fetch_add(1, Ordering::Relaxed)
+            >= 1
+    }
+
+    fn phase_completed(
+        &self,
+        timing: rspice_veriloga::PhaseTiming,
+        _metrics: &rspice_veriloga::PipelineMetrics,
+    ) {
+        if timing.phase == PipelinePhase::Scheduling {
+            self.scheduling_complete.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+#[test]
+fn structural_specialization_propagates_cancellation() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&repeated_structure_source())
+        .expect("front end");
+    let control = CancelInsideStructuralSpecialization {
+        scheduling_complete: AtomicBool::new(false),
+        polls_after_scheduling: AtomicUsize::new(0),
+    };
+    let error = RustTranspiler::new(options())
+        .transpile_measured_with_control(&artifact, &control)
+        .expect_err("the variant optimizer must honor cancellation");
+
+    assert_eq!(error.kind, RustBackendErrorKind::Cancelled);
+    assert!(error.message.contains("cfg_optimization"), "{error}");
+    assert!(
+        control.polls_after_scheduling.load(Ordering::Relaxed) >= 2,
+        "the cancellation must occur after stamp emission began"
+    );
 }
 
 fn find<'a>(files: &[(&'a str, &'a str)], name: &str, model: &str) -> &'a str {
@@ -365,6 +710,141 @@ fn compile(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), Stri
         return Ok(());
     }
     Err(String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
+fn run_shared_model_cache(
+    name: &str,
+    state: &str,
+    stamp: &str,
+    noise: &str,
+) -> Result<(), String> {
+    let root = scratch().join(name.replace(' ', "_"));
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let main = root.join("main.rs");
+    std::fs::write(
+        &main,
+        format!(
+            "{RUNTIME_STUB}\npub mod device {{\n\
+             pub mod state {{\n{}\n}}\n\
+             pub mod stamp {{\n{}\n}}\n\
+             pub mod noise {{\n{}\n}}\n}}\n\
+             fn main() {{\n\
+             \x20   let mut first = device::state::Instance::new(&[0, 1]);\n\
+             \x20   let mut second = device::state::Instance::new(&[0, 1]);\n\
+             \x20   first.set_parameter(\"width\", 1.0e-6).unwrap();\n\
+             \x20   second.set_parameter(\"width\", 2.0e-6).unwrap();\n\
+             \x20   let voltages = [0.25, 0.0];\n\
+             \x20   let ctx = runtime::GeneratedEvalContext {{ voltages: &voltages, temperature: 300.15 }};\n\
+             \x20   let mut stamper = runtime::GeneratedStamper::default();\n\
+             \x20   first.stamp(&ctx, &mut stamper);\n\
+             \x20   second.stamp(&ctx, &mut stamper);\n\
+             \x20   let first_card = first.canonical_model_values.as_ref().unwrap();\n\
+             \x20   let second_card = second.canonical_model_values.as_ref().unwrap();\n\
+             \x20   assert!(std::sync::Arc::ptr_eq(first_card, second_card));\n\
+             \x20   first.set_parameter(\"model_gain\", 4.0).unwrap();\n\
+             \x20   first.stamp(&ctx, &mut stamper);\n\
+             \x20   let changed_card = first.canonical_model_values.as_ref().unwrap();\n\
+             \x20   assert!(!std::sync::Arc::ptr_eq(changed_card, second_card));\n\
+             }}\n",
+            indent(state),
+            indent(stamp),
+            indent(noise)
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+
+    let binary = root.join(format!(
+        "shared_model_cache{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    let output = Command::new("rustc")
+        .arg("--edition=2024")
+        .arg("-A")
+        .arg("warnings")
+        .arg("-o")
+        .arg(&binary)
+        .arg(&main)
+        .output()
+        .map_err(|error| format!("could not run rustc: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let output = Command::new(&binary)
+        .output()
+        .map_err(|error| format!("could not run generated cache probe: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
+fn run_structural_variants(
+    name: &str,
+    state: &str,
+    stamp: &str,
+    noise: &str,
+) -> Result<(), String> {
+    let root = scratch().join(name.replace(' ', "_"));
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let main = root.join("main.rs");
+    std::fs::write(
+        &main,
+        format!(
+            "{RUNTIME_STUB}\npub mod device {{\n\
+             pub mod state {{\n{}\n}}\n\
+             pub mod stamp {{\n{}\n}}\n\
+             pub mod noise {{\n{}\n}}\n}}\n\
+             fn evaluate(instance: &mut device::state::Instance, mode: f64) -> f64 {{\n\
+             \x20   instance.set_parameter(\"mode\", mode).unwrap();\n\
+             \x20   let voltages = [0.25, 0.0];\n\
+             \x20   let ctx = runtime::GeneratedEvalContext {{ voltages: &voltages, temperature: 300.15 }};\n\
+             \x20   let mut sink = [0.0];\n\
+             \x20   let mut stamper = runtime::GeneratedStamper {{ sink: Some(&mut sink) }};\n\
+             \x20   instance.stamp(&ctx, &mut stamper);\n\
+             \x20   sink[0]\n\
+             }}\n\
+             fn main() {{\n\
+             \x20   let mut instance = device::state::Instance::new(&[0, 1]);\n\
+             \x20   let enabled = evaluate(&mut instance, 1.0);\n\
+             \x20   let disabled = evaluate(&mut instance, -1.0);\n\
+             \x20   let enabled_again = evaluate(&mut instance, 1.0);\n\
+             \x20   assert!(enabled.is_finite() && enabled > 0.0, \"{{enabled}}\");\n\
+             \x20   assert_eq!(disabled.to_bits(), 0.0f64.to_bits());\n\
+             \x20   assert_eq!(enabled_again.to_bits(), enabled.to_bits());\n\
+             }}\n",
+            indent(state),
+            indent(stamp),
+            indent(noise)
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+
+    let binary = root.join(format!(
+        "structural_variants{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    let output = Command::new("rustc")
+        .arg("--edition=2024")
+        .arg("-O")
+        .arg("-A")
+        .arg("warnings")
+        .arg("-o")
+        .arg(&binary)
+        .arg(&main)
+        .output()
+        .map_err(|error| format!("could not run rustc: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let output = Command::new(&binary)
+        .output()
+        .map_err(|error| format!("could not run generated specialization probe: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
 }
 
 /// One generated file, as a module beside its siblings.
@@ -692,6 +1172,11 @@ pub mod runtime {
             _branch_derivatives: [Value; BRANCH_COUNT],
             _scale: Value,
         ) {
+            if let Some(sink) = self.sink.as_deref_mut()
+                && let Some(first) = sink.first_mut()
+            {
+                *first += _value;
+            }
         }
 
         pub fn stamp_potential_branch_local(

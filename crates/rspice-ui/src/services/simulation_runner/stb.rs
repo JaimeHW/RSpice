@@ -128,7 +128,7 @@ pub fn run_stb_analysis_with_source_path_and_abort(
         probe,
         start_freq,
         stop_freq,
-        rspice_core::analysis::advanced::stb::StbSweepType::Decade,
+        rspice_core::analysis::stb::StbSweepType::Decade,
         points_per_decade,
         source_path,
         abort,
@@ -149,12 +149,12 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     probe: &str,
     start_freq: Value,
     stop_freq: Value,
-    sweep_type: rspice_core::analysis::advanced::stb::StbSweepType,
+    sweep_type: rspice_core::analysis::stb::StbSweepType,
     points_per_decade: usize,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<StbData> {
-    use rspice_core::analysis::advanced::stb::StbConfig;
+    use rspice_core::analysis::stb::StbConfig;
 
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     ensure_not_aborted(abort)?;

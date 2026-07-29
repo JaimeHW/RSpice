@@ -214,9 +214,9 @@ pub struct PstbData {
 }
 
 fn stability_type_label(
-    stability: rspice_core::analysis::advanced::pstb::StabilityType,
+    stability: rspice_core::analysis::pstb::StabilityType,
 ) -> &'static str {
-    use rspice_core::analysis::advanced::pstb::StabilityType;
+    use rspice_core::analysis::pstb::StabilityType;
     match stability {
         StabilityType::Stable => "Stable",
         StabilityType::UnstableReal => "UnstableReal",
@@ -405,7 +405,7 @@ fn run_pstb_analysis_impl(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
     use rspice_core::analysis::PssConfig;
-    use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
+    use rspice_core::analysis::pstb::{PstbAnalyzer, PstbConfig};
 
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::from)?;

@@ -51,15 +51,17 @@ mod veriloga_cache;
 #[cfg(feature = "veriloga")]
 pub use veriloga_cache::{
     ProjectVerilogARuntimeRegistration, VerilogACacheEntry, VerilogACachePruneReport,
-    VerilogACacheStats, clear_veriloga_cache, prune_veriloga_cache,
+    VerilogACacheStats, VerilogACacheTelemetry, clear_veriloga_cache, prune_veriloga_cache,
     register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
     register_precompiled_veriloga_runtime_with_dependencies,
     register_project_veriloga_runtime_for_session, register_project_veriloga_runtimes_for_session,
     register_project_veriloga_runtimes_for_session_with_limits, veriloga_cache_entries,
-    veriloga_cache_stats,
+    veriloga_cache_stats, veriloga_cache_telemetry,
 };
 #[cfg(feature = "veriloga")]
-use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga_with_limits};
+use veriloga_cache::{
+    normalize_model_key, resolve_cached_or_compile_veriloga_with_limits_and_abort,
+};
 
 mod model_policy;
 use model_policy::*;
@@ -4622,9 +4624,10 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let entry = resolve_cached_or_compile_veriloga_with_limits(
+                let entry = resolve_cached_or_compile_veriloga_with_limits_and_abort(
                     &include.file_path,
                     self.config.resource_limits,
+                    abort,
                 )?;
                 let model = std::sync::Arc::clone(&entry.model);
 

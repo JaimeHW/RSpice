@@ -19,14 +19,14 @@ pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatin
         .iter()
         .map(|time| (2.0 * std::f64::consts::PI * time).sin())
         .collect();
-    let result = rspice_core::analysis::advanced::pss::PssResult {
+    let result = rspice_core::analysis::pss::PssResult {
         period: 1.0,
         frequency: 1.0,
         iterations: 2,
         residual_norm: 1.0e-10,
         time,
         waveforms: vec![
-            rspice_core::analysis::advanced::pss::PeriodicWaveform::from_values(waveform),
+            rspice_core::analysis::pss::PeriodicWaveform::from_values(waveform),
         ],
         node_names: vec!["out".to_owned()],
         period_detected: false,

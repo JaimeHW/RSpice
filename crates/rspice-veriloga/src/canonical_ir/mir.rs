@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
+use crate::semantic::ParameterScope;
+
 use super::hir::{
     CanonicalValueType, HirAnalogOperator, HirContributionKind, HirExprKind, HirExprRef,
     HirExpression, HirModel, HirParamRange,
@@ -48,6 +50,7 @@ pub struct MirNode {
 pub struct MirParameterSlot {
     pub id: ParamId,
     pub name: SmolStr,
+    pub scope: ParameterScope,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
     pub default_expr: Option<HirExprRef>,
@@ -146,6 +149,7 @@ impl MirModel {
             .map(|parameter| MirParameterSlot {
                 id: parameter.id,
                 name: parameter.name.clone(),
+                scope: parameter.scope,
                 value_type: parameter.value_type,
                 default: parameter.default,
                 default_expr: parameter.default_expr.clone(),

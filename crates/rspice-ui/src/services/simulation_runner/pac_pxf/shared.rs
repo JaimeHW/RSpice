@@ -18,7 +18,7 @@ pub(super) fn normalize_pac_node_name(raw: &str) -> String {
 }
 
 pub(super) fn resolve_pac_output_node_with_abort(
-    result: &rspice_core::analysis::advanced::pac::PacResult,
+    result: &rspice_core::analysis::pac::PacResult,
     requested: &str,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Option<usize>> {

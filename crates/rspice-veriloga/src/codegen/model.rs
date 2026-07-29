@@ -363,6 +363,9 @@ pub enum Instruction {
     Asin,
     Acos,
     Atan,
+    Asinh,
+    Acosh,
+    Atanh,
     Atan2, // 2-argument arctangent(y, x)
     /// Rounding functions
     Floor,

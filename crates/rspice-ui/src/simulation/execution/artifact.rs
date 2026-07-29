@@ -1474,7 +1474,7 @@ impl ResolvedExecutionDependencies {
                         for waveform in metadata.waveforms {
                             node_names.push(waveform.node_name);
                             waveforms.push(
-                                rspice_core::analysis::advanced::pss::PeriodicWaveform::from_values(
+                                rspice_core::analysis::pss::PeriodicWaveform::from_values(
                                     take_transfer_buffer(&mut buffers, waveform.values)?,
                                 ),
                             );
@@ -1512,7 +1512,7 @@ impl ResolvedExecutionDependencies {
                         )?;
                         let shooting_state =
                             take_transfer_buffer(&mut buffers, metadata.shooting_state)?;
-                        let result = rspice_core::analysis::advanced::pss::PssResult {
+                        let result = rspice_core::analysis::pss::PssResult {
                             period: metadata.result_period,
                             frequency: metadata.result_frequency,
                             iterations: metadata.result_iterations,
@@ -1867,14 +1867,14 @@ mod tests {
             .iter()
             .map(|time| (2.0 * std::f64::consts::PI * time).sin())
             .collect::<Vec<_>>();
-        let result = rspice_core::analysis::advanced::pss::PssResult {
+        let result = rspice_core::analysis::pss::PssResult {
             period: 1.0,
             frequency: 1.0,
             iterations: 3,
             residual_norm: 1.0e-10,
             time: time.clone(),
             waveforms: vec![
-                rspice_core::analysis::advanced::pss::PeriodicWaveform::from_values(values.clone()),
+                rspice_core::analysis::pss::PeriodicWaveform::from_values(values.clone()),
             ],
             node_names: vec!["out".to_owned()],
             period_detected: false,

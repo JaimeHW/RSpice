@@ -34,11 +34,11 @@ pub enum PxfFrequencySweep {
 }
 
 impl PxfFrequencySweep {
-    fn to_core(self) -> rspice_core::analysis::advanced::pxf::PxfSweepType {
+    fn to_core(self) -> rspice_core::analysis::pxf::PxfSweepType {
         match self {
-            Self::Decade => rspice_core::analysis::advanced::pxf::PxfSweepType::Decade,
-            Self::Octave => rspice_core::analysis::advanced::pxf::PxfSweepType::Octave,
-            Self::Linear => rspice_core::analysis::advanced::pxf::PxfSweepType::Linear,
+            Self::Decade => rspice_core::analysis::pxf::PxfSweepType::Decade,
+            Self::Octave => rspice_core::analysis::pxf::PxfSweepType::Octave,
+            Self::Linear => rspice_core::analysis::pxf::PxfSweepType::Linear,
         }
     }
 }
@@ -241,7 +241,7 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
     operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
-    use rspice_core::analysis::advanced::pxf::PxfConfig;
+    use rspice_core::analysis::pxf::PxfConfig;
 
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
@@ -389,13 +389,13 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
 }
 
 fn analyze_conversion_matrix_with_abort(
-    config: &rspice_core::analysis::advanced::pxf::PxfConfig,
+    config: &rspice_core::analysis::pxf::PxfConfig,
     frequencies: &[Value],
     conversion_matrix: &[Vec<Vec<Complex64>>],
     fundamental_frequency: Value,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<rspice_core::analysis::advanced::pxf::PxfResult> {
-    use rspice_core::analysis::advanced::pxf::{PxfResult, TransferPoint};
+) -> ServiceRunResult<rspice_core::analysis::pxf::PxfResult> {
+    use rspice_core::analysis::pxf::{PxfResult, TransferPoint};
 
     ensure_not_aborted(abort)?;
     if frequencies.is_empty() {
@@ -447,7 +447,7 @@ fn analyze_conversion_matrix_with_abort(
 }
 
 fn compute_pxf_metrics_with_abort(
-    result: &mut rspice_core::analysis::advanced::pxf::PxfResult,
+    result: &mut rspice_core::analysis::pxf::PxfResult,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<()> {
     let mut peak: Option<(Value, Value)> = None;
@@ -502,7 +502,7 @@ fn compute_pxf_metrics_with_abort(
 }
 
 fn pxf_group_delay_with_abort(
-    points: &[rspice_core::analysis::advanced::pxf::TransferPoint],
+    points: &[rspice_core::analysis::pxf::TransferPoint],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<(Value, Value)>> {
     let mut group_delay = Vec::with_capacity(points.len().saturating_sub(1));
@@ -577,7 +577,7 @@ mod tests {
     #[test]
     fn pxf_conversion_honors_in_loop_abort() {
         const POINTS: usize = 130;
-        let mut config = rspice_core::analysis::advanced::pxf::PxfConfig::new();
+        let mut config = rspice_core::analysis::pxf::PxfConfig::new();
         config.input_sideband = 0;
         config.output_sideband = 0;
         let frequencies = (1..=POINTS).map(|point| point as Value).collect::<Vec<_>>();

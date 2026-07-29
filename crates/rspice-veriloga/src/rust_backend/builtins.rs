@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
+use crate::metrics::PipelinePhase;
 use crate::{CompilerOptions, VerilogACompiler};
 
 use super::{
@@ -1061,19 +1062,28 @@ fn generate_device_work_item(
             ),
         );
     }
-    let device = transpiler.transpile(&compiled.artifact)?;
+    let generated = transpiler.transpile_measured(&compiled.artifact)?;
     if progress {
+        let metrics = &generated.metrics;
         log_generation_progress(
             progress_lock,
             format!(
-                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} (transpile {:.2?}, total {:.2?})",
+                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} \
+                 (transpile {:.2?}, schedule {:.2?}, static guards {}/{} over {} Newton values, \
+                 {} bytes, total {:.2?})",
                 relative_source.display(),
                 item.module,
                 transpile_started.elapsed(),
+                metrics.phase_elapsed(PipelinePhase::Scheduling),
+                metrics.model_structural_guard_count,
+                metrics.instance_structural_guard_count,
+                metrics.structural_guard_newton_values,
+                metrics.generated_rust_bytes,
                 started.elapsed()
             ),
         );
     }
+    let device = generated.output;
 
     Ok(GeneratedBuiltinModule { index, device })
 }

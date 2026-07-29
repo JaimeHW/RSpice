@@ -1,6 +1,6 @@
 //! Lowering the structured HIR body into a [`CfgFunction`].
 //!
-//! This is the pass that replaces guard flattening. Where the OptIR lowering
+//! This is the pass that preserves structured guards. Where the former scalar lowering
 //! reconstructs "the value a variable had before this `if`" by searching an
 //! assignment history, this one asks the SSA builder — which knows, exactly,
 //! because it never threw the block structure away.

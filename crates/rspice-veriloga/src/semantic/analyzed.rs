@@ -4,6 +4,7 @@ use super::SymbolTable;
 use crate::ast::{Expression, ParamType, PortDirection, SourceFile, VarType};
 use crate::source::Span;
 use crate::types::{ParameterRange as TypedParameterRange, ValueType};
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
@@ -126,6 +127,8 @@ pub struct AnalyzedPort {
 #[derive(Debug, Clone)]
 pub struct AnalyzedParameter {
     pub name: SmolStr,
+    /// Whether the source declares shared model-card or per-device storage.
+    pub scope: ParameterScope,
     pub param_type: ParamType,
     pub value_type: ValueType,
     /// Constant default value, when the default expression folds to a constant
@@ -133,6 +136,28 @@ pub struct AnalyzedParameter {
     /// Full default expression (may reference previously declared parameters)
     pub default_expr: Option<Expression>,
     pub range: Option<TypedParameterRange>,
+}
+
+/// Storage and preprocessing scope requested by a Verilog-A parameter.
+///
+/// CMC compact models mark geometry and per-device switches with
+/// `(* type="instance" *)`. Unmarked parameters are model-card parameters,
+/// matching the convention used by the published CMC model corpus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterScope {
+    #[default]
+    Model,
+    Instance,
+}
+
+impl ParameterScope {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Instance => "instance",
+        }
+    }
 }
 
 /// Analyzed parameter alias (aliasparam): an alternate instance-facing
