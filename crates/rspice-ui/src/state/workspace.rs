@@ -20,7 +20,10 @@ pub(crate) use saved_output::validate_raw_probe;
 pub use design_intent::*;
 pub use project_descriptor::*;
 pub use hierarchy::*;
-pub use materialize::*;
+// The glob is crate-private: `materialize` is `pub(super)` throughout except
+// the one binding lookup two workbench surfaces reach by path.
+use materialize::*;
+pub(crate) use materialize::project_veriloga_binding_for_view;
 
 pub use saved_output::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,

@@ -8,7 +8,9 @@ mod qualification_run;
 mod release_candidate;
 
 pub(crate) use qualification_run::*;
-pub(crate) use release_candidate::*;
+// Crate-private: `release_candidate` exposes only `pub(super)` helpers, which
+// the sibling modules reach through `use super::*`.
+use release_candidate::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
