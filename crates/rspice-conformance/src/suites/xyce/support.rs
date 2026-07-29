@@ -2199,6 +2199,7 @@ impl XyceTestRunner {
             device_try_to_compact,
             hb_num_frequencies,
             nonlinear_continuation,
+            scale: _,
         } = options;
         reltol.is_none()
             && abstol.is_none()

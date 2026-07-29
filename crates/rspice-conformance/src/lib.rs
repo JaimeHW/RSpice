@@ -22,24 +22,42 @@
 //! ## Corpora
 //!
 //! Deck corpora are vendored at the workspace root, not inside this crate:
-//! `tests/ngspice/` and `tests/xyce/`. They are shared data with their own
-//! licensing and provenance files, and they outlive any one runner.
+//! `tests/ngspice/`, `tests/xyce/`, `tests/gf180mcu/`, `tests/iscas85/`, and
+//! `tests/paranoia/`.
+//! They are shared data with their own licensing and provenance files, and
+//! they outlive any one runner. Each carries an `RSPICE-VENDORING.md`
+//! recording what was trimmed and why; `tests/paranoia/`'s in particular
+//! records third-party proprietary device models that upstream redistributes
+//! and RSpice must not.
 //!
 //! ## Suites
 //!
 //! - [`suites::ngspice`] — the ngspice conformance corpus
 //! - [`suites::xyce`] — the Xyce conformance corpus
+//! - [`suites::gf180mcu`] — a released foundry PDK (GlobalFoundries 180nm)
+//!   evaluated against per-case ngspice references
+//! - [`suites::execution`] — the corpora that carry no reference data:
+//!   ISCAS85 for scale, the ngspice examples for dialect breadth
 //! - `suites::veriloga` — the generated Verilog-A built-ins, behind
 //!   `veriloga-builtins-base`
 //!
-//! The first two compare RSpice against *another simulator's* published
-//! output. The Verilog-A suite is a different instrument and is kept
-//! distinct on purpose: it compares each generated device against RSpice's
-//! own captured stamps, plus a finite-difference oracle that shares no code
-//! with the chain rule under test. Snapshot and independent mathematics
-//! rather than external conformance — which is the right tool when the thing
-//! under test is a code generator, since there is no second simulator
+//! Three different instruments, and it is worth being precise about which
+//! answers what. The first two compare RSpice against *another simulator's*
+//! published output. The Verilog-A suite compares each generated device
+//! against RSpice's own captured stamps plus a finite-difference oracle that
+//! shares no code with the chain rule under test — snapshot and independent
+//! mathematics rather than external conformance, which is the right tool when
+//! the thing under test is a code generator and there is no second simulator
 //! computing the same Jacobian to ask.
+//!
+//! [`suites::execution`] is the weakest of the four and says so: its corpora
+//! ship no reference data, so it can only establish that a deck loaded, built,
+//! and either ran or refused cleanly. It earns its place because the decks
+//! themselves are unlike the others — a reference suite's decks are, by
+//! construction, ones their authors could already simulate, while these are
+//! real circuits reaching for whatever dialect corner they happened to need.
+//! Every failure there is a named gap in ingestion, device coverage, or solver
+//! robustness.
 //!
 //! `rspice-core` now contains no validation harness at all, which
 //! `tools/ci/test_ci_configuration.py` also asserts.
