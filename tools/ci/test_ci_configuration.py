@@ -371,6 +371,44 @@ class CiConfigurationTests(unittest.TestCase):
             r"--max-native-code-bytes 16384",
         )
 
+    def test_macos_intel_ci_executes_native_veriloga_jit(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+
+        self.assertIn("test-macos-x64-native:", workflow)
+        self.assertIn("runs-on: macos-15-intel", workflow)
+        self.assertIn('test "$(uname -m)" = "x86_64"', workflow)
+        self.assertIn("Test Verilog-A native JIT (macOS Intel x64)", workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1",
+            workflow,
+        )
+        self.assertIn("Gate Verilog-A native JIT performance", workflow)
+
+    def test_shipping_frontends_enable_x64_jit_only_on_x86_64(self) -> None:
+        cli_manifest = read_text("crates/rspice-cli/Cargo.toml")
+        ui_manifest = read_text("crates/rspice-ui/Cargo.toml")
+
+        self.assertRegex(
+            cli_manifest,
+            r"""\[target\.'cfg\(target_arch = "x86_64"\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga-native"\]""",
+        )
+        self.assertRegex(
+            cli_manifest,
+            r"""\[target\.'cfg\(not\(target_arch = "x86_64"\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga"\]""",
+        )
+        self.assertRegex(
+            ui_manifest,
+            r"""\[target\.'cfg\(all\(not\(target_arch = "wasm32"\), target_arch = "x86_64"\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga-native"\]""",
+        )
+        self.assertRegex(
+            ui_manifest,
+            r"""\[target\.'cfg\(all\(not\(target_arch = "wasm32"\), not\(target_arch = "x86_64"\)\)\)'\.dependencies\][\s\S]*?rspice-core\s*=\s*\{[^}]*features\s*=\s*\["veriloga"\]""",
+        )
+
     def test_wasm_ci_checks_ui_and_bindings_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
 
