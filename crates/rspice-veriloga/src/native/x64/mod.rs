@@ -4963,6 +4963,8 @@ endmodule
         );
 
         let mut currents = vec![0.0; model.stamp_programs.len()];
+        let current_axis_width = model.num_terminals + 1;
+        let mut branch_currents = vec![0.0; current_axis_width * current_axis_width];
         let jacobian_count = model
             .stamp_programs
             .iter()
@@ -4971,6 +4973,8 @@ endmodule
         let mut fused_jacobians = vec![0.0; jacobian_count];
         let mut variables = vec![0.0; model.num_variables];
         let mut fused_ctx = eval_context(&params, &voltages);
+        fused_ctx.branch_currents = branch_currents.as_mut_ptr();
+        fused_ctx.branch_currents_len = branch_currents.len();
         fused_ctx.currents = currents.as_mut_ptr();
         fused_ctx.currents_len = currents.len();
         let active = [1_u8];
