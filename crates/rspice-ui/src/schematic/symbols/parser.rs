@@ -67,7 +67,6 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
         return Ok(Symbol {
             name: String::new(),
             paths,
-            pins: Vec::new(),
             bounds: vb,
             view_box: vb,
             // Default target dimensions - overridden by load_embedded.
@@ -174,7 +173,6 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
     Ok(Symbol {
         name: String::new(),
         paths,
-        pins: Vec::new(),
         bounds: final_bounds,
         view_box: vb,
         // Default target dimensions - will be overridden by load_embedded for known components

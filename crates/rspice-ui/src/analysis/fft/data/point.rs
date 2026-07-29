@@ -43,15 +43,4 @@ impl FftPoint {
         }
     }
 
-    /// Magnitude in dBm (reference 1mW into 50Ω)
-    pub fn magnitude_dbm(&self, z0: f64) -> f64 {
-        if self.magnitude <= 0.0 {
-            f64::NEG_INFINITY
-        } else {
-            let z0 = if z0.is_finite() && z0 > 0.0 { z0 } else { 50.0 };
-            let power_mw = (self.magnitude * self.magnitude) / z0 * 1000.0;
-            10.0 * power_mw.log10()
-        }
-    }
-
 }

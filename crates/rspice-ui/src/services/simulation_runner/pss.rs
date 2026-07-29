@@ -22,8 +22,6 @@ use std::sync::Arc;
 /// PSS analysis data
 #[derive(Debug, Clone)]
 pub struct PssData {
-    /// Fundamental period found (seconds)
-    pub period: Value,
     /// Fundamental frequency (Hz)
     pub frequency: Value,
     /// Time points within one period
@@ -32,10 +30,6 @@ pub struct PssData {
     pub waveforms: Vec<(String, Vec<Value>)>,
     /// Harmonic content: (node_name, [(frequency, magnitude, phase_deg)])
     pub harmonics: Vec<(String, Vec<(Value, Value, Value)>)>,
-    /// Whether solution converged
-    pub converged: bool,
-    /// Number of cycles to reach steady state
-    pub settling_cycles: usize,
     /// Exact converged shooting state for dependent periodic analyses.
     pub operating_point: Arc<rspice_core::engine::PssOperatingPoint>,
 }
@@ -289,13 +283,10 @@ fn run_pss_analysis_internal(
 
     ensure_not_aborted(abort)?;
     Ok(PssData {
-        period,
         frequency,
         time,
         waveforms,
         harmonics,
-        converged: true,
-        settling_cycles: config.tstab_periods,
         operating_point: Arc::new(operating_point),
     })
 }

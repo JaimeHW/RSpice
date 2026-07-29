@@ -388,8 +388,6 @@ pub enum DialogInitialFocus {
     Close,
     /// Focus the primary footer action.
     Primary,
-    /// Focus the optional secondary footer action.
-    Secondary,
     /// Focus the optional ghost footer action.
     Ghost,
 }
@@ -416,7 +414,6 @@ impl DialogRenderedFocus {
             DialogInitialFocus::BodyControl => self.body,
             DialogInitialFocus::Close => self.close,
             DialogInitialFocus::Primary => self.primary,
-            DialogInitialFocus::Secondary => self.secondary,
             DialogInitialFocus::Ghost => self.ghost,
         }
     }

@@ -28,30 +28,6 @@ pub struct SymbolPath {
 }
 
 // ============================================================================
-// Symbol Pin Definitions
-// ============================================================================
-
-/// Direction a pin faces for wire attachment
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PinDirection {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-/// A connection point on a symbol
-#[derive(Debug, Clone)]
-pub struct SymbolPin {
-    /// Pin name (e.g., "1", "2", "G", "D", "S")
-    pub name: String,
-    /// Position relative to symbol center (in normalized coords)
-    pub position: (f32, f32),
-    /// Direction the pin faces (for wire routing)
-    pub direction: PinDirection,
-}
-
-// ============================================================================
 // Symbol Definition
 // ============================================================================
 
@@ -62,8 +38,6 @@ pub struct Symbol {
     pub name: String,
     /// All paths that make up this symbol
     pub paths: Vec<SymbolPath>,
-    /// Connection points
-    pub pins: Vec<SymbolPin>,
     /// Bounding box (min_x, min_y, max_x, max_y) in normalized coords
     pub bounds: (f32, f32, f32, f32),
     /// Original SVG viewBox for scaling

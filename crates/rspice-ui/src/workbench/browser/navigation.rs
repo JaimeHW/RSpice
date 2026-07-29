@@ -370,6 +370,8 @@ pub enum BrowserNavigationError {
     NonCanonicalRouteOrder,
     #[error(transparent)]
     SurfaceRoute(#[from] SurfaceRouteParseError),
+    /// Raised only by the wasm32 history module below, so a native build
+    /// reports it as never constructed. It is not dead.
     #[error("browser navigation session is not initialized")]
     BrowserSessionUnavailable,
     #[error("invalid RSpice browser history state: {0}")]
@@ -382,6 +384,7 @@ pub enum BrowserNavigationError {
     HistoryTraversalInterrupted,
     #[error("browser history route does not match the active RSpice task")]
     HistoryRouteMismatch,
+    /// Also wasm32-only; see [`Self::BrowserSessionUnavailable`].
     #[error("browser navigation API failed: {0}")]
     BrowserApi(String),
 }

@@ -71,12 +71,7 @@ impl SimulationController {
                 continue;
             }
 
-            let response = crate::analysis::bode::data::FrequencyResponse::from_complex_arrays(
-                frequencies,
-                &waveform.y_values,
-                imag,
-            );
-            bode_data.add_response(response);
+            bode_data.add_response();
 
             let nyquist_curve = crate::analysis::nyquist::data::NyquistData::from_arrays(
                 &name,

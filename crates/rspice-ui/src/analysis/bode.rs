@@ -17,7 +17,7 @@
 pub(crate) mod data;
 pub(crate) mod state;
 
-pub use data::{BodeData, FrequencyResponse};
+pub use data::BodeData;
 pub use state::BodePlotState;
 
 // =============================================================================

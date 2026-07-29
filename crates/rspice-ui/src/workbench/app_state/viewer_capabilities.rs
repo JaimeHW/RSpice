@@ -204,8 +204,8 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::analysis::{
-        BodeData, EyeData, EyeTrace, FftData, FrequencyResponse, HistogramBuilder, NyquistData,
-        PoleZeroData, WindowFunction,
+        BodeData, EyeData, EyeTrace, FftData, HistogramBuilder, NyquistData, PoleZeroData,
+        WindowFunction,
     };
     use crate::diagnostics::{LogSeverity, LogSource};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
@@ -223,11 +223,7 @@ mod tests {
             .load_histogram(HistogramBuilder::new().build(&[1.0, 2.0, 3.0]));
 
         let mut bode = BodeData::new();
-        bode.add_response(FrequencyResponse::from_arrays(
-            &[1.0, 10.0],
-            &[1.0, 0.1],
-            &[0.0, -1.0],
-        ));
+        bode.add_response();
         state.analysis.bode_plot_state.load_data(bode);
 
         state

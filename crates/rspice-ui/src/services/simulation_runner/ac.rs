@@ -22,33 +22,9 @@ pub struct AcData {
     pub frequencies: Vec<Value>,
     /// Node responses: (node_name, complex values)
     pub responses: Vec<(String, Vec<Complex64>)>,
-    /// Number of frequency points
-    pub num_points: usize,
 }
 
 impl AcData {
-    /// Get magnitude in dB for a response
-    pub fn magnitude_db(&self, response_idx: usize) -> Vec<Value> {
-        self.responses
-            .get(response_idx)
-            .map(|(_, vals)| vals.iter().map(|c| 20.0 * c.norm().log10()).collect())
-            .unwrap_or_default()
-    }
-
-    /// Get phase in degrees for a response
-    pub fn phase_deg(&self, response_idx: usize) -> Vec<Value> {
-        self.responses
-            .get(response_idx)
-            .map(|(_, vals)| vals.iter().map(|c| c.arg().to_degrees()).collect())
-            .unwrap_or_default()
-    }
-
-    /// Create from engine AcResult vector
-    pub fn from_results(results: Vec<AcResult>) -> Self {
-        Self::from_results_with_abort(results, &NoAbort)
-            .expect("NoAbort cannot cancel AC result conversion")
-    }
-
     /// Create from engine results with cooperative cancellation during result
     /// transposition.
     pub fn from_results_with_abort(
@@ -61,7 +37,6 @@ impl AcData {
             poll_periodically(abort, point_idx)?;
             frequencies.push(result.frequency);
         }
-        let num_points = frequencies.len();
 
         let mut responses = Vec::new();
         if let Some(first_result) = results.first() {
@@ -84,7 +59,6 @@ impl AcData {
         Ok(Self {
             frequencies,
             responses,
-            num_points,
         })
     }
 }

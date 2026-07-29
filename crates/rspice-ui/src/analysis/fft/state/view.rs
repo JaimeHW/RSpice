@@ -1,6 +1,6 @@
 //! FFT plot view state: axis ranges, zoom, and cursor position.
 
-use super::super::data::{FftData, FftPoint};
+use super::super::data::FftPoint;
 use super::super::window::WindowFunction;
 use super::*;
 
@@ -11,16 +11,8 @@ impl FftState {
             if self.freq_auto
                 && let Some((min, max)) = data.frequency_range()
             {
-                match self.freq_scale {
-                    FrequencyScale::Linear => {
-                        self.freq_min = min;
-                        self.freq_max = max;
-                    }
-                    FrequencyScale::Log => {
-                        self.freq_min = first_positive_frequency(data).unwrap_or(1e-12);
-                        self.freq_max = max.max(self.freq_min * 1.01);
-                    }
-                }
+                self.freq_min = min;
+                self.freq_max = max;
             }
 
             if self.mag_auto {
@@ -39,37 +31,17 @@ impl FftState {
                 if has_finite {
                     let span = (max_value - min_value).abs();
                     let padding = if span > 0.0 { span * 0.1 } else { 1.0 };
-
-                    match self.mag_scale {
-                        MagnitudeScale::Linear => {
-                            self.mag_min = (min_value - padding).max(0.0);
-                            self.mag_max = (max_value + padding).max(self.mag_min + 1e-9);
-                        }
-                        MagnitudeScale::DB | MagnitudeScale::DBm | MagnitudeScale::DBc => {
-                            self.mag_min = (min_value - padding).floor().max(-300.0);
-                            self.mag_max = (max_value + padding).ceil().min(120.0);
-                        }
-                    }
+                    self.mag_min = (min_value - padding).floor().max(-300.0);
+                    self.mag_max = (max_value + padding).ceil().min(120.0);
                 }
             }
         }
     }
 
-    /// Convert a spectrum point to currently selected display magnitude.
+    /// Display magnitude for a spectrum point. The viewer plots dB on a linear
+    /// frequency axis; there is no control to select another scale.
     pub fn display_magnitude(&self, point: &FftPoint) -> f64 {
-        match self.mag_scale {
-            MagnitudeScale::DB => point.magnitude_db(),
-            MagnitudeScale::DBm => point.magnitude_dbm(self.z0),
-            MagnitudeScale::Linear => point.magnitude,
-            MagnitudeScale::DBc => {
-                let fundamental_db = self
-                    .analysis
-                    .as_ref()
-                    .and_then(|analysis| analysis.fundamental_db)
-                    .unwrap_or(0.0);
-                point.magnitude_db() - fundamental_db
-            }
-        }
+        point.magnitude_db()
     }
 
     /// Set window function
@@ -92,9 +64,3 @@ impl FftState {
     }
 }
 
-fn first_positive_frequency(data: &FftData) -> Option<f64> {
-    data.points
-        .iter()
-        .map(|p| p.frequency)
-        .find(|freq| freq.is_finite() && *freq > 0.0)
-}

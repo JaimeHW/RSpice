@@ -1,7 +1,7 @@
 //! Tree rows — the list/tree row used across hierarchy trees, cell lists,
 //! signal browsers and run history.
 
-use std::ops::Range;
+
 
 use egui::{Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
@@ -28,9 +28,7 @@ pub struct TreeRow<'a> {
     indent: u8,
     selected: bool,
     mono_label: bool,
-    dim: bool,
     height: Option<f32>,
-    highlight_query: Option<&'a str>,
 }
 
 impl<'a> TreeRow<'a> {
@@ -45,9 +43,7 @@ impl<'a> TreeRow<'a> {
             indent: 0,
             selected: false,
             mono_label: false,
-            dim: false,
             height: None,
-            highlight_query: None,
         }
     }
 
@@ -93,22 +89,9 @@ impl<'a> TreeRow<'a> {
         self
     }
 
-    /// Render as a ghost row (faint label, no hover brightening) — peeked
-    /// master contents that are visible but not editable from here.
-    pub fn dim(mut self) -> Self {
-        self.dim = true;
-        self
-    }
-
     /// Override the row height (defaults to the density row height).
     pub fn height(mut self, height: f32) -> Self {
         self.height = Some(height);
-        self
-    }
-
-    /// Highlight ASCII case-insensitive matches in the label and metadata.
-    pub fn highlight_query(mut self, query: impl Into<Option<&'a str>>) -> Self {
-        self.highlight_query = query.into().filter(|query| !query.is_empty());
         self
     }
 
@@ -193,9 +176,7 @@ impl<'a> TreeRow<'a> {
             );
         }
 
-        let text_color = if self.dim {
-            c.text_faint
-        } else if self.selected {
+        let text_color = if self.selected {
             c.text
         } else {
             mix(c.text_dim, c.text, hover)
@@ -267,20 +248,12 @@ impl<'a> TreeRow<'a> {
         } else {
             theme::sans(tokens::FS_1, FontWeight::Regular)
         };
-        let highlight_bg = egui::Color32::from_rgba_unmultiplied(
-            c.accent.r(),
-            c.accent.g(),
-            c.accent.b(),
-            if self.dim { 26 } else { 54 },
-        );
         let meta_galley = self.meta.map(|m| {
             ui.fonts_mut(|f| {
-                f.layout_job(highlighted_singleline_job(
-                    m,
+                f.layout_job(egui::text::LayoutJob::simple_singleline(
+                    m.to_owned(),
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     egui::Color32::PLACEHOLDER,
-                    highlight_bg,
-                    self.highlight_query,
                 ))
             })
         });
@@ -293,12 +266,10 @@ impl<'a> TreeRow<'a> {
         // spilling onto a second line corrupts the list rhythm. The full
         // name surfaces as a tooltip instead.
         let label_galley = ui.fonts_mut(|f| {
-            let mut job = highlighted_singleline_job(
-                self.label,
+            let mut job = egui::text::LayoutJob::simple_singleline(
+                self.label.to_owned(),
                 label_font,
                 egui::Color32::PLACEHOLDER,
-                highlight_bg,
-                self.highlight_query,
             );
             job.wrap = egui::text::TextWrapping::truncate_at_width(
                 (rect.right() - 6.0 - meta_w - x).max(8.0),
@@ -336,69 +307,6 @@ impl<'a> TreeRow<'a> {
     }
 }
 
-fn highlighted_singleline_job(
-    text: &str,
-    font_id: egui::FontId,
-    color: egui::Color32,
-    highlight_bg: egui::Color32,
-    query: Option<&str>,
-) -> egui::text::LayoutJob {
-    let ranges = query.map_or_else(Vec::new, |query| highlight_match_ranges(text, query));
-    if ranges.is_empty() {
-        return egui::text::LayoutJob::simple_singleline(text.to_owned(), font_id, color);
-    }
-
-    let normal = egui::text::TextFormat::simple(font_id, color);
-    let highlight = egui::text::TextFormat {
-        background: highlight_bg,
-        ..normal.clone()
-    };
-    let mut job = egui::text::LayoutJob {
-        break_on_newline: false,
-        ..Default::default()
-    };
-    let mut cursor = 0;
-    for range in ranges {
-        if cursor < range.start {
-            job.append(&text[cursor..range.start], 0.0, normal.clone());
-        }
-        job.append(&text[range.clone()], 0.0, highlight.clone());
-        cursor = range.end;
-    }
-    if cursor < text.len() {
-        job.append(&text[cursor..], 0.0, normal);
-    }
-    job
-}
-
-fn highlight_match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
-    let needle = query.as_bytes();
-    if needle.is_empty() || !needle.iter().all(u8::is_ascii) {
-        return Vec::new();
-    }
-
-    let haystack = text.as_bytes();
-    if needle.len() > haystack.len() {
-        return Vec::new();
-    }
-
-    let mut ranges = Vec::new();
-    let mut start = 0;
-    while start + needle.len() <= haystack.len() {
-        let matched = haystack[start..start + needle.len()]
-            .iter()
-            .zip(needle.iter())
-            .all(|(hay, needle)| hay.eq_ignore_ascii_case(needle));
-        if matched {
-            ranges.push(start..start + needle.len());
-            start += needle.len();
-        } else {
-            start += 1;
-        }
-    }
-    ranges
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,26 +324,6 @@ mod tests {
         .accesskit_update
         .expect("AccessKit tree update")
         .nodes
-    }
-
-    #[test]
-    fn highlight_ranges_match_case_insensitive_ascii() {
-        assert_eq!(highlight_match_ranges("VDD_net", "dd"), vec![1..3]);
-    }
-
-    #[test]
-    fn highlight_ranges_include_multiple_occurrences() {
-        assert_eq!(highlight_match_ranges("abababa", "aba"), vec![0..3, 4..7]);
-    }
-
-    #[test]
-    fn highlight_ranges_are_empty_for_empty_query() {
-        assert!(highlight_match_ranges("VDD_net", "").is_empty());
-    }
-
-    #[test]
-    fn highlight_ranges_are_empty_when_no_match() {
-        assert!(highlight_match_ranges("VDD_net", "clk").is_empty());
     }
 
     #[test]
