@@ -75,8 +75,10 @@ fn xyce_generic_switch_hysteresis_matches_gswitch_oracle() {
                 .end\n";
 
     let netlist = Netlist::parse(deck).expect("Xyce generic SWITCH hysteresis deck parses");
+    let (grid, step_sizes) = xyce_gswitch_hyst_reference_schedule();
     let config = SimulationConfig {
-        locked_time_grid: Some(Arc::new(xyce_gswitch_hyst_reference_time_grid())),
+        locked_time_grid: Some(Arc::new(grid)),
+        locked_time_step_sizes: Some(Arc::new(step_sizes)),
         ..Default::default()
     };
     let tran = Engine::new(config)
@@ -103,19 +105,37 @@ fn xyce_generic_switch_hysteresis_matches_gswitch_oracle() {
     }
 }
 
-fn xyce_gswitch_hyst_reference_time_grid() -> Vec<f64> {
+/// The Xyce accepted-step sequence for `gswitchHyst1.cir`, and the step sizes
+/// that produced it.
+///
+/// A `.prn` table records the points Xyce accepted, so the differences between
+/// consecutive rows *are* its step sizes. Supplying them matters: the engine
+/// reads `locked_time_step_sizes` as the caller's claim that this grid is an
+/// accepted-step sequence rather than a sampling of one, and only then does it
+/// refuse to subdivide. The generic switch needs that refusal — it reads its
+/// hysteresis band from the store vector two accepted points back, so an extra
+/// point between two reference samples silently selects the wrong band.
+fn xyce_gswitch_hyst_reference_schedule() -> (Vec<f64>, Vec<f64>) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/xyce/OutputData/GSWITCH/gswitchHyst1.cir.prn");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
-    text.lines()
+    let grid: Vec<f64> = text
+        .lines()
         .skip(1)
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             fields.next()?;
             fields.next()?.parse::<f64>().ok()
         })
-        .collect()
+        .collect();
+    let mut steps = Vec::with_capacity(grid.len());
+    let mut previous = 0.0;
+    for &point in &grid {
+        steps.push(point - previous);
+        previous = point;
+    }
+    (grid, steps)
 }
 
 fn interpolate(time: &[f64], values: &[f64], target: f64) -> f64 {
