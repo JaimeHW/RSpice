@@ -14,7 +14,9 @@ mod results;
 mod semantic;
 
 pub use documents::*;
-pub use geometry::*;
+// Crate-private: `geometry` exposes only `pub(super)` helpers, which the
+// sibling modules reach through `use super::*`.
+use geometry::*;
 pub use prepared::*;
 pub use results::*;
 pub use semantic::*;
@@ -206,15 +208,6 @@ pub struct ReportHardcopySource<'a> {
     pub scope: HardcopyScope,
 }
 
-pub enum HardcopySourceCandidate<'a> {
-    Schematic(SchematicHardcopySource<'a>),
-    Symbol(SymbolHardcopySource<'a>),
-    VisualizationPane(VisualizationPaneHardcopySource<'a>),
-    Plot(PlotHardcopySource<'a>),
-    Report(ReportHardcopySource<'a>),
-    Unsupported { source_key: String, reason: String },
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetainedHardcopySourceAvailability {
     Available,
@@ -225,26 +218,6 @@ impl RetainedHardcopySourceAvailability {
     #[must_use]
     pub const fn is_available(&self) -> bool {
         matches!(self, Self::Available)
-    }
-
-    #[must_use]
-    pub fn reason(&self) -> Option<&str> {
-        match self {
-            Self::Available => None,
-            Self::Unavailable { reason } => Some(reason),
-        }
-    }
-}
-impl HardcopySourceCandidate<'_> {
-    fn source_key(&self) -> &str {
-        match self {
-            Self::Schematic(source) => &source.identity.source_key,
-            Self::Symbol(source) => &source.identity.source_key,
-            Self::VisualizationPane(source) => &source.source_key,
-            Self::Plot(source) => &source.source_key,
-            Self::Report(source) => &source.source_key,
-            Self::Unsupported { source_key, .. } => source_key,
-        }
     }
 }
 
@@ -1106,40 +1079,6 @@ fn report_app_availability(document: &ReportDocument) -> RetainedHardcopySourceA
         }
     }
     RetainedHardcopySourceAvailability::Available
-}
-
-/// Resolve exactly one candidate matching the application-owned active key.
-/// Missing, duplicated, and explicitly unsupported authorities are rejected;
-/// this prevents a background tab or stale retained result from being printed
-/// merely because it happens to be available.
-pub fn resolve_active_hardcopy_source<'a>(
-    active_source_key: &str,
-    candidates: impl IntoIterator<Item = HardcopySourceCandidate<'a>>,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    validate_label("active source key", active_source_key, SOURCE_KEY_LIMIT)?;
-    let mut matching = candidates
-        .into_iter()
-        .filter(|candidate| candidate.source_key() == active_source_key);
-    let candidate = matching
-        .next()
-        .ok_or_else(|| HardcopySourceError::SourceNotRetained(active_source_key.to_owned()))?;
-    if matching.next().is_some() {
-        return Err(HardcopySourceError::AmbiguousActiveSource(
-            active_source_key.to_owned(),
-        ));
-    }
-    match candidate {
-        HardcopySourceCandidate::Schematic(source) => resolve_schematic_source(source),
-        HardcopySourceCandidate::Symbol(source) => resolve_symbol_source(source),
-        HardcopySourceCandidate::VisualizationPane(source) => {
-            resolve_visualization_pane_source(source)
-        }
-        HardcopySourceCandidate::Plot(source) => resolve_plot_source(source),
-        HardcopySourceCandidate::Report(source) => resolve_report_source(source),
-        HardcopySourceCandidate::Unsupported { reason, .. } => {
-            Err(HardcopySourceError::UnsupportedDocument(reason))
-        }
-    }
 }
 
 /// Resolve the one application document that owns the current route.

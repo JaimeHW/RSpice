@@ -105,28 +105,6 @@ fn opaque_rgb8_png(width: u32, height: u32) -> Vec<u8> {
 }
 
 #[test]
-fn resolver_fails_closed_for_missing_and_ambiguous_active_authority() {
-    let error = resolve_active_hardcopy_source("doc", Vec::new()).unwrap_err();
-    assert!(matches!(error, HardcopySourceError::SourceNotRetained(_)));
-
-    let candidates = vec![
-        HardcopySourceCandidate::Unsupported {
-            source_key: "doc".to_owned(),
-            reason: "one".to_owned(),
-        },
-        HardcopySourceCandidate::Unsupported {
-            source_key: "doc".to_owned(),
-            reason: "two".to_owned(),
-        },
-    ];
-    let error = resolve_active_hardcopy_source("doc", candidates).unwrap_err();
-    assert!(matches!(
-        error,
-        HardcopySourceError::AmbiguousActiveSource(_)
-    ));
-}
-
-#[test]
 fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
     let mut schematic = SchematicState::default();
     schematic

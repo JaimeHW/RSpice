@@ -133,14 +133,6 @@ impl HardcopyPreviewPage {
         &self.rgba
     }
 
-    /// True when this non-authoritative preview has the explicitly requested
-    /// print-safe gamut simulation applied. Publication and printer bytes are
-    /// never transformed by this preview-only option.
-    #[must_use]
-    pub const fn soft_proof_applied(&self) -> bool {
-        self.soft_proof_applied
-    }
-
     #[must_use]
     pub const fn digest(&self) -> ContentDigest {
         self.digest
@@ -444,11 +436,6 @@ impl PrinterRasterPage {
     }
 
     #[must_use]
-    pub fn coordinate(&self) -> &str {
-        &self.coordinate
-    }
-
-    #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
@@ -466,11 +453,6 @@ impl PrinterRasterPage {
     #[must_use]
     pub fn rgba(&self) -> &[u8] {
         &self.rgba
-    }
-
-    #[must_use]
-    pub const fn digest(&self) -> ContentDigest {
-        self.digest
     }
 }
 
@@ -509,11 +491,6 @@ impl RenderedHardcopyPart {
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
-    }
-
-    #[must_use]
-    pub const fn digest(&self) -> ContentDigest {
-        self.digest
     }
 
     #[must_use]

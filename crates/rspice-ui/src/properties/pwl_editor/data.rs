@@ -4,7 +4,7 @@
 //! increasing, so the point list enforces ordering rather than leaving a
 //! non-monotonic source to be rejected by the engine.
 
-use crate::quantity::{format_engineering_value, parse_engineering_value};
+use crate::quantity::parse_engineering_value;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -28,16 +28,6 @@ impl PwlPoint {
     /// Create origin point (0, 0).
     pub fn origin() -> Self {
         Self::new(0.0, 0.0)
-    }
-
-    /// Format time with engineering notation.
-    pub fn time_string(&self) -> String {
-        format!("{} s", format_engineering_value(self.time))
-    }
-
-    /// Format value with engineering notation and unit.
-    pub fn value_string(&self, unit: &str) -> String {
-        format!("{} {}", format_engineering_value(self.value), unit)
     }
 
     /// Validate that time is non-negative.
@@ -127,11 +117,6 @@ pub struct PwlData {
 }
 
 impl PwlData {
-    /// Create empty PWL data.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Create PWL data with initial points.
     pub fn with_points(points: Vec<PwlPoint>) -> Self {
         let mut data = Self {
@@ -270,22 +255,10 @@ impl PwlData {
         &self.points
     }
 
-    /// Get mutable points slice.
-    pub fn points_mut(&mut self) -> &mut Vec<PwlPoint> {
-        &mut self.points
-    }
-
     /// Add a new point (will be sorted by time).
     pub fn add_point(&mut self, point: PwlPoint) {
         self.points.push(point);
         self.sort_by_time();
-    }
-
-    /// Insert a point at the given index.
-    pub fn insert_point(&mut self, index: usize, point: PwlPoint) {
-        if index <= self.points.len() {
-            self.points.insert(index, point);
-        }
     }
 
     /// Remove a point at the given index.
@@ -297,13 +270,6 @@ impl PwlData {
         }
     }
 
-    /// Update a point at the given index.
-    pub fn update_point(&mut self, index: usize, point: PwlPoint) {
-        if index < self.points.len() {
-            self.points[index] = point;
-        }
-    }
-
     /// Sort points by time.
     pub fn sort_by_time(&mut self) {
         self.points.sort_by(|a, b| {
@@ -311,11 +277,6 @@ impl PwlData {
                 .partial_cmp(&b.time)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-    }
-
-    /// Clear all points.
-    pub fn clear(&mut self) {
-        self.points.clear();
     }
 
     /// Get time range (min, max).
@@ -346,75 +307,6 @@ impl PwlData {
         Some((min, max))
     }
 
-    /// Interpolate value at a given time.
-    pub fn interpolate(&self, t: f64) -> Option<f64> {
-        if self.points.is_empty() {
-            return None;
-        }
-
-        let t = t - self.delay;
-        if t < 0.0 {
-            return Some(self.points.first()?.value);
-        }
-
-        let t = if self.repeat {
-            if let Some((_, max)) = self.time_range() {
-                if max > 0.0 { t % max } else { t }
-            } else {
-                t
-            }
-        } else {
-            t
-        };
-
-        if t <= self.points[0].time {
-            return Some(self.points[0].value);
-        }
-
-        if t >= self.points.last()?.time {
-            return Some(self.points.last()?.value);
-        }
-
-        for i in 1..self.points.len() {
-            if t <= self.points[i].time {
-                let p0 = &self.points[i - 1];
-                let p1 = &self.points[i];
-                let dt = p1.time - p0.time;
-                if dt.abs() < 1e-18 {
-                    return Some(p0.value);
-                }
-                let alpha = (t - p0.time) / dt;
-                return Some(p0.value + alpha * (p1.value - p0.value));
-            }
-        }
-
-        Some(self.points.last()?.value)
-    }
-
-    /// Generate standard pulse waveform.
-    pub fn pulse(v_low: f64, v_high: f64, period: f64, duty: f64, rise: f64, fall: f64) -> Self {
-        let pw = period * duty;
-        let points = vec![
-            PwlPoint::new(0.0, v_low),
-            PwlPoint::new(rise, v_high),
-            PwlPoint::new(rise + pw, v_high),
-            PwlPoint::new(rise + pw + fall, v_low),
-            PwlPoint::new(period, v_low),
-        ];
-        Self {
-            points,
-            repeat: true,
-            delay: 0.0,
-        }
-    }
-
-    /// Generate ramp waveform.
-    pub fn ramp(v_start: f64, v_end: f64, t_rise: f64) -> Self {
-        Self::with_points(vec![
-            PwlPoint::new(0.0, v_start),
-            PwlPoint::new(t_rise, v_end),
-        ])
-    }
 }
 
 /// Format a value with engineering notation for SPICE compatibility.

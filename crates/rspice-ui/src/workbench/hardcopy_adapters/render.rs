@@ -193,13 +193,6 @@ impl HardcopyPublicationTimestamp {
             .utc_offset_minute(0)
     }
 
-    #[must_use]
-    pub fn to_utc_display(self) -> String {
-        format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
-            self.year, self.month, self.day, self.hour, self.minute, self.second
-        )
-    }
 }
 
 const fn days_in_month(year: u16, month: u8) -> Option<u8> {
@@ -263,15 +256,6 @@ impl HardcopySceneMetadata {
         self.publication_timestamp = Some(value);
     }
 
-    pub fn set_authors(&mut self, authors: Vec<String>) -> Result<(), HardcopyRenderError> {
-        let previous = std::mem::replace(&mut self.authors, authors);
-        if let Err(error) = self.validate() {
-            self.authors = previous;
-            return Err(error);
-        }
-        Ok(())
-    }
-
     pub fn set_header_lines(&mut self, lines: Vec<String>) -> Result<(), HardcopyRenderError> {
         let previous = std::mem::replace(&mut self.header_lines, lines);
         if let Err(error) = self.validate() {
@@ -313,10 +297,6 @@ impl HardcopySceneMetadata {
         &self.title
     }
 
-    #[must_use]
-    pub fn publication_timestamp(&self) -> Option<HardcopyPublicationTimestamp> {
-        self.publication_timestamp
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -709,23 +689,8 @@ impl HardcopyScene {
     }
 
     #[must_use]
-    pub const fn extent(&self) -> ContentExtent {
-        self.extent
-    }
-
-    #[must_use]
-    pub const fn metadata(&self) -> &HardcopySceneMetadata {
-        &self.metadata
-    }
-
-    #[must_use]
     pub fn primitives(&self) -> &[ScenePrimitive] {
         &self.primitives
-    }
-
-    #[must_use]
-    pub fn legend(&self) -> &[LegendEntry] {
-        &self.legend
     }
 }
 

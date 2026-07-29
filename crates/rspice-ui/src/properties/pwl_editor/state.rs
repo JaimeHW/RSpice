@@ -33,14 +33,6 @@ pub struct PwlEditorState {
 }
 
 impl PwlEditorState {
-    /// Create new editor state.
-    pub fn new() -> Self {
-        Self {
-            value_unit: "V".to_string(),
-            ..Default::default()
-        }
-    }
-
     /// Initialize from PWL data string.
     pub fn from_string(s: &str, value_unit: &str) -> Self {
         match PwlData::parse(s) {

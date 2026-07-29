@@ -6,8 +6,7 @@
 use crate::properties::model_browser::ModelBrowserState;
 use crate::properties::pwl_editor::PwlEditorState;
 use crate::state::property_types::{
-    DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
-    VisibilityCondition,
+    PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
 };
 use crate::state::{Component, ComponentType};
 use std::collections::{HashMap, HashSet};
@@ -159,16 +158,9 @@ pub enum TabbedDialogResult {
     Applied,
     /// User clicked Cancel - changes discarded
     Cancelled,
-    /// User clicked Revert - restore original values
-    Reverted,
 }
 
 impl TabbedPropertyDialogState {
-    /// Create a new dialog state
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Open the dialog for a specific component.
     ///
     /// Populates the dialog with the component's property sheet and current values.
@@ -288,11 +280,6 @@ impl TabbedPropertyDialogState {
         self.model_browser = ModelBrowserState::default();
     }
 
-    /// Cancel editing and close the dialog
-    pub fn cancel(&mut self) {
-        self.close();
-    }
-
     /// Guard a dirty close. The first attempt changes the footer to an
     /// explicit discard action; the second confirms and clears every child
     /// workflow owned by this editor.
@@ -304,19 +291,6 @@ impl TabbedPropertyDialogState {
             self.close();
             true
         }
-    }
-
-    /// Mark the current values as applied while staying open: the draft
-    /// becomes the new baseline.
-    pub fn mark_applied(&mut self) {
-        self.original_values = self.values.clone();
-        self.original_numeric_text_drafts = self.numeric_text_drafts.clone();
-        self.modified.clear();
-        self.validation_errors.clear();
-        self.numeric_draft_errors.clear();
-        self.global_error = None;
-        self.discard_confirm = false;
-        self.prepared_commit.clear();
     }
 
     /// Mark only the fields from a partial commit as the new baseline. Draft
@@ -596,71 +570,6 @@ impl TabbedPropertyDialogState {
     fn refresh_validation_summary(&mut self) {
         self.global_error = (!self.validation_errors.is_empty())
             .then(|| format!("{} validation error(s)", self.validation_errors.len()));
-    }
-
-    /// Get the list of tabs
-    pub fn get_tabs(&self) -> &[TabInfo] {
-        &self.tabs
-    }
-
-    /// Get properties for a specific tab/category.
-    ///
-    /// Returns property names that belong to the given category.
-    pub fn get_properties_for_tab<'a>(
-        &self,
-        tab_name: &str,
-        sheet: &'a PropertySheet,
-    ) -> Vec<&'a PropertyDefinition> {
-        let mut props: Vec<_> = sheet
-            .iter()
-            .filter(|def| def.category == tab_name)
-            .filter(|def| self.should_show_property(def))
-            .collect();
-
-        props.sort_by_key(|def| def.display_order);
-        props
-    }
-
-    /// Check if a property should be shown based on display mode and visibility
-    pub fn should_show_property(&self, def: &PropertyDefinition) -> bool {
-        match def.display_mode {
-            DisplayMode::Hidden => return false,
-            DisplayMode::Advanced if !self.show_advanced => return false,
-            _ => {}
-        }
-
-        match &def.visibility_condition {
-            VisibilityCondition::Always => true,
-            VisibilityCondition::WhenNonDefault => self
-                .values
-                .get(&def.name)
-                .map(|value| value != &def.default_value)
-                .unwrap_or(false),
-            VisibilityCondition::WhenPropertyEquals { property, value } => self
-                .values
-                .get(property)
-                .map(|prop_value| prop_value.display_string() == *value)
-                .unwrap_or(false),
-            VisibilityCondition::WhenPropertySet(property) => {
-                if let Some(prop_value) = self.values.get(property) {
-                    match prop_value {
-                        PropertyValue::String(s) => !s.is_empty(),
-                        PropertyValue::Number { value, .. } => !value.is_nan(),
-                        _ => true,
-                    }
-                } else {
-                    false
-                }
-            }
-        }
-    }
-
-    /// Check if a value differs from its default
-    pub fn is_non_default(&self, def: &PropertyDefinition) -> bool {
-        self.values
-            .get(&def.name)
-            .map(|v| v != &def.default_value)
-            .unwrap_or(false)
     }
 
     /// Update modified counts for tabs

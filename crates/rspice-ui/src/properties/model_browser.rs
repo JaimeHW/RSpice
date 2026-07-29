@@ -19,7 +19,6 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, TreeRow, chip, kv_row};
 use egui::{Context, ScrollArea, Ui};
-use std::collections::HashSet;
 
 // =============================================================================
 // Model Browser State
@@ -38,10 +37,6 @@ pub struct ModelBrowserState {
     pub selected_library: Option<String>,
     /// Currently selected model name.
     pub selected_model: Option<String>,
-    /// Expanded library nodes in tree view.
-    pub expanded_libraries: HashSet<String>,
-    /// Target component type (to filter compatible models).
-    pub target_type: Option<ModelType>,
     /// Selected corner for the library.
     pub selected_corner: Option<String>,
     /// Browse-only mode (no Apply button, just viewing)
@@ -49,34 +44,9 @@ pub struct ModelBrowserState {
 }
 
 impl ModelBrowserState {
-    /// Create a new browser state.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Open the browser dialog.
-    pub fn open(&mut self) {
-        self.open = true;
-        self.clear_selection();
-    }
-
-    /// Open with a target type filter.
-    pub fn open_for_type(&mut self, target: ModelType) {
-        self.open = true;
-        self.target_type = Some(target);
-        self.type_filter = Some(target);
-        self.clear_selection();
-    }
-
     /// Close the dialog.
     pub fn close(&mut self) {
         self.open = false;
-    }
-
-    /// Clear the current selection.
-    pub fn clear_selection(&mut self) {
-        self.selected_library = None;
-        self.selected_model = None;
     }
 
     /// Select a library.
@@ -89,28 +59,6 @@ impl ModelBrowserState {
     pub fn select_model(&mut self, library: &str, model: &str) {
         self.selected_library = Some(library.to_string());
         self.selected_model = Some(model.to_string());
-    }
-
-    /// Toggle library expansion in tree.
-    pub fn toggle_library(&mut self, name: &str) {
-        if self.expanded_libraries.contains(name) {
-            self.expanded_libraries.remove(name);
-        } else {
-            self.expanded_libraries.insert(name.to_string());
-        }
-    }
-
-    /// Check if a library is expanded.
-    pub fn is_expanded(&self, name: &str) -> bool {
-        self.expanded_libraries.contains(name)
-    }
-
-    /// Get the full model reference string (library:model).
-    pub fn get_model_reference(&self) -> Option<String> {
-        match (&self.selected_library, &self.selected_model) {
-            (Some(lib), Some(model)) => Some(format!("{}:{}", lib, model)),
-            _ => None,
-        }
     }
 
     /// Filter models based on search text and type filter.

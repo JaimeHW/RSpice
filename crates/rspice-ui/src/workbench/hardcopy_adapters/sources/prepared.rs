@@ -31,21 +31,6 @@ impl RetainedHardcopySourceDescriptor {
         self.allowed_scopes.contains(scope)
     }
 
-    #[must_use]
-    pub fn unavailable_scope_reason(&self, scope: &HardcopyScope) -> Option<&'static str> {
-        if self.supports_scope(scope) {
-            return None;
-        }
-        Some(match scope {
-            HardcopyScope::AllSheetsOrPanes => {
-                "no authenticated ordered aggregate of sheets or panes is retained"
-            }
-            HardcopyScope::NamedPrintSet(_) => {
-                "the project has no source-owning named print-set domain"
-            }
-            _ => "the selected retained source does not support this scope",
-        })
-    }
 }
 
 /// Owned, `Send`-safe retained-source snapshot prepared on the UI thread

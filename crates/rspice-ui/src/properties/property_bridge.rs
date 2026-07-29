@@ -77,37 +77,6 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
     }
 }
 
-/// Returns the display name for a component's value field based on type.
-///
-/// Used for UI labels and netlist generation.
-pub fn get_value_display_name(kind: ComponentType) -> &'static str {
-    match kind {
-        ComponentType::Resistor => "Resistance",
-        ComponentType::Capacitor => "Capacitance",
-        ComponentType::Inductor => "Inductance",
-        ComponentType::Transformer => "Primary Inductance",
-        ComponentType::CoupledInductor => "Coupling Coefficient",
-        ComponentType::VoltageSource => "DC Voltage",
-        ComponentType::VoltageSourceAc => "AC Magnitude",
-        ComponentType::VoltageSourcePulse => "Initial Voltage",
-        ComponentType::VoltageSourceSin => "DC Offset",
-        ComponentType::CurrentSource => "DC Current",
-        ComponentType::CurrentSourceAc => "AC Magnitude",
-        ComponentType::CurrentSourcePulse => "Initial Current",
-        ComponentType::CurrentSourceSin => "DC Offset",
-        ComponentType::Diode => "Saturation Current",
-        ComponentType::Nmos | ComponentType::Pmos => "Width",
-        ComponentType::NpnBjt | ComponentType::PnpBjt => "Saturation Current",
-        ComponentType::Vcvs | ComponentType::Cccs => "Gain",
-        ComponentType::Vccs => "Transconductance",
-        ComponentType::Ccvs => "Transresistance",
-        ComponentType::Ground => "Name",
-        ComponentType::Port => "Port name",
-        // Catch-all for any other component types
-        _ => "Value",
-    }
-}
-
 
 /// Formats a key-value HashMap into a SPICE-format parameter string.
 ///
