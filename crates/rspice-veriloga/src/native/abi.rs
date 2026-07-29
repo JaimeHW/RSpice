@@ -2451,6 +2451,90 @@ mod tests {
         );
     }
 
+    #[test]
+    fn native_runtime_errors_are_isolated_between_contexts_on_one_thread() {
+        let failed_ctx = empty_eval_context();
+        let clean_ctx = empty_eval_context();
+
+        let value = rspice_native_dynamic_variable_error(4.0, &failed_ctx, 3, 1);
+
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert!(
+            clean_ctx.take_runtime_error().is_none(),
+            "a failure must not leak into another evaluation context"
+        );
+        let error = failed_ctx
+            .take_runtime_error()
+            .expect("the failing context must retain its own diagnostic");
+        assert!(
+            error.contains("array index 4 outside declared bounds [1:3]"),
+            "unexpected failing-context diagnostic: {error}"
+        );
+        assert!(
+            clean_ctx.take_runtime_error().is_none(),
+            "draining the failing context must not alter a clean context"
+        );
+    }
+
+    #[test]
+    fn native_runtime_errors_are_isolated_across_parallel_dispatches() {
+        let (dynamic_error, laplace_error, clean_error) = std::thread::scope(|scope| {
+            let dynamic = scope.spawn(|| {
+                let ctx = empty_eval_context();
+                rspice_native_dynamic_variable_error(8.0, &ctx, 8, 0);
+                ctx.take_runtime_error()
+                    .expect("dynamic-index dispatch must retain its diagnostic")
+            });
+            let laplace = scope.spawn(|| {
+                let ctx = empty_eval_context();
+                unsafe { rspice_laplace_step_native(1.0, &ctx, 0) };
+                ctx.take_runtime_error()
+                    .expect("Laplace dispatch must retain its diagnostic")
+            });
+            let clean = scope.spawn(|| {
+                let ctx = empty_eval_context();
+                unsafe { rspice_limiter_previous_native(2.5, &ctx, usize::MAX) };
+                ctx.take_runtime_error()
+            });
+            (
+                dynamic.join().expect("dynamic-index dispatch joins"),
+                laplace.join().expect("Laplace dispatch joins"),
+                clean.join().expect("clean dispatch joins"),
+            )
+        });
+
+        assert!(
+            dynamic_error.contains("array index 8 outside declared bounds [0:7]"),
+            "unexpected dynamic-index diagnostic: {dynamic_error}"
+        );
+        assert!(
+            laplace_error.contains("Laplace") && laplace_error.contains("filter storage"),
+            "unexpected Laplace diagnostic: {laplace_error}"
+        );
+        assert!(
+            clean_error.is_none(),
+            "parallel failures must not contaminate a successful dispatch"
+        );
+    }
+
+    #[test]
+    fn native_runtime_context_recovers_after_error_is_drained() {
+        let ctx = empty_eval_context();
+        rspice_native_dynamic_variable_error(4.0, &ctx, 3, 1);
+        assert!(
+            ctx.take_runtime_error().is_some(),
+            "fixture must begin with a native runtime failure"
+        );
+
+        let value = unsafe { rspice_limiter_previous_native(2.5, &ctx, usize::MAX) };
+
+        assert_eq!(value.to_bits(), 2.5_f64.to_bits());
+        assert!(
+            ctx.take_runtime_error().is_none(),
+            "a successful next dispatch must remain clean after the prior error is drained"
+        );
+    }
+
     fn empty_eval_context() -> EvalContext {
         EvalContext {
             voltages: std::ptr::null(),
