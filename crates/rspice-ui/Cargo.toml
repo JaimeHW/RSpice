@@ -110,11 +110,18 @@ lopdf = { version = "0.44", default-features = false }
 # not currently publish its AccessKit tree to the DOM.
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
 
-# Default features on: faer-parallel/parallel/simd so the desktop app gets
-# the same fast solver paths as the CLI (incl. the Verilog-A JIT).
-rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga-native"] }
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), target_arch = "x86_64"))'.dependencies]
+# Default features keep the desktop solver's parallel/SIMD paths. The native
+# Verilog-A JIT is selected only on the architecture its encoder targets.
+rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_arch = "x86_64")))'.dependencies]
+# Apple Silicon and ARM mobile/tablet builds keep Verilog-A functional through
+# the bytecode engine until an AArch64 native backend is qualified.
+rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }

@@ -33,16 +33,18 @@
 //! computes, which is what makes the interpreter a usable oracle for this
 //! output.
 //!
-//! ## Derivatives are arrays, and that is where the size went
+//! ## Derivatives are scalar-or-packed, and that is where the size went
 //!
-//! A packed derivative emits as the `Lanes<N>` newtype from [`RUNTIME_PRELUDE`]
-//! over the lanes its shape names, and the elementwise rules emit as `a + b` and
-//! `a * s` — one line each, whatever `N` is. That is the whole reason the IR
-//! packs: a scalarised derivative costs a line per lane, and the wide MOSFETs
-//! carry a hundred thousand of them. The newtype exists so those lines are
-//! operators rather than calls, which is worth another third of the bytes;
-//! `rustc` promotes the small fixed array inside it to registers, so none of
-//! this is a loop at run time.
+//! A one-lane derivative emits as plain `f64`; wider derivatives use the
+//! `Lanes<N>` newtype from [`RUNTIME_PRELUDE`] over the lanes their shape names.
+//! The elementwise rules emit as `a + b` and `a * s` — one line each, whatever
+//! `N` is. That is the whole reason the IR packs: fully scalarised derivatives
+//! cost a line per lane, and the wide MOSFETs carry a hundred thousand of them.
+//! The one-lane exception removes an otherwise pointless array wrapper without
+//! multiplying any expression. The newtype exists so wider lines are operators
+//! rather than calls, which is worth another third of the bytes; `rustc`
+//! promotes the small fixed array inside it to registers, so none of this is a
+//! loop at run time.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write;
@@ -329,10 +331,18 @@ impl Emitter<'_> {
         // thousands of values.
         let mut reader_of: Vec<Option<ValueId>> = vec![None; self.function.values.len()];
         for value in &self.function.values {
-            // A widen names its operand once per lane of the result, so
-            // substituting an expression into it would emit that expression N
-            // times. Counting it twice keeps it bound.
-            let weight = usize::from(matches!(value.kind, CfgValueKind::LaneWiden { .. })) + 1;
+            // A widen names each held source lane once. Substituting a
+            // multi-lane expression into it would therefore emit that
+            // expression repeatedly; a scalar source still appears only once
+            // and remains safe to inline.
+            let repeated_widen = match value.kind {
+                CfgValueKind::LaneWiden { input } => self
+                    .function
+                    .lanes_of(input)
+                    .is_some_and(|lanes| lanes.len() > 1),
+                _ => false,
+            };
+            let weight = usize::from(repeated_widen) + 1;
             for operand in value.kind.operands() {
                 uses[usize::from(operand)] += weight;
                 reader_of[usize::from(operand)] = Some(value.id);
@@ -619,13 +629,7 @@ impl Emitter<'_> {
     fn capture_declarations(&self) -> String {
         let mut out = String::new();
         for value in self.captured.keys() {
-            let (declared_type, initial) = match self.function.lanes_of(*value) {
-                Some(lanes) => (
-                    format!("Lanes<{}>", lanes.len()),
-                    format!("Lanes([0.0; {}])", lanes.len()),
-                ),
-                None => ("f64".to_string(), "0.0".to_string()),
-            };
+            let (declared_type, initial) = self.type_and_zero(*value);
             let _ = writeln!(
                 out,
                 "    let mut out{}: {declared_type} = {initial};",
@@ -699,13 +703,7 @@ impl Emitter<'_> {
 
     fn declare_mutable(&mut self, value: ValueId, depth: usize) {
         if self.declared.insert(value) {
-            let (declared_type, initial) = match self.function.lanes_of(value) {
-                Some(lanes) => (
-                    format!("Lanes<{}>", lanes.len()),
-                    format!("Lanes([0.0; {}])", lanes.len()),
-                ),
-                None => ("f64".to_string(), "0.0".to_string()),
-            };
+            let (declared_type, initial) = self.type_and_zero(value);
             self.line(
                 depth,
                 &format!(
@@ -718,8 +716,18 @@ impl Emitter<'_> {
 
     fn type_name(&self, value: ValueId) -> String {
         match self.function.lanes_of(value) {
-            Some(lanes) => format!("Lanes<{}>", lanes.len()),
-            None => "f64".to_string(),
+            Some(lanes) if lanes.len() > 1 => format!("Lanes<{}>", lanes.len()),
+            Some(_) | None => "f64".to_string(),
+        }
+    }
+
+    fn type_and_zero(&self, value: ValueId) -> (String, String) {
+        match self.function.lanes_of(value) {
+            Some(lanes) if lanes.len() > 1 => (
+                format!("Lanes<{}>", lanes.len()),
+                format!("Lanes([0.0; {}])", lanes.len()),
+            ),
+            Some(_) | None => ("f64".to_string(), "0.0".to_string()),
         }
     }
 
@@ -821,24 +829,34 @@ impl Emitter<'_> {
             }
             CfgValueKind::LaneSplat(constant) => {
                 let width = self.function.lanes_of(value).map_or(0, <[u32]>::len);
-                format!("Lanes([{}; {width}])", real_literal(*constant))
+                if width == 1 {
+                    real_literal(*constant)
+                } else {
+                    format!("Lanes([{}; {width}])", real_literal(*constant))
+                }
             }
             // The one packed form that is written out rather than called: which
             // lane lands where is a per-value permutation, not an operation.
             CfgValueKind::LaneWiden { input } => {
                 let source = self.function.lanes_of(*input).unwrap_or(&[]);
-                let name = self.operand(*input);
                 let elements: Vec<String> = self
                     .function
                     .lanes_of(value)
                     .unwrap_or(&[])
                     .iter()
                     .map(|lane| match source.iter().position(|held| held == lane) {
-                        Some(position) => format!("{name}[{position}]"),
+                        Some(position) => self.lane_element(*input, position),
                         None => "0.0".to_string(),
                     })
                     .collect();
-                format!("Lanes([{}])", elements.join(", "))
+                if elements.len() == 1 {
+                    elements
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| "0.0".to_string())
+                } else {
+                    format!("Lanes([{}])", elements.join(", "))
+                }
             }
             CfgValueKind::LaneBinary { op, left, right } => {
                 let symbol = if matches!(op, CfgBinaryOp::Sub) { "-" } else { "+" };
@@ -858,10 +876,23 @@ impl Emitter<'_> {
             }
             CfgValueKind::LaneExtract { input, lane } => {
                 let position = self.function.lane_position(*input, *lane).unwrap_or(0);
-                format!("{}[{position}]", self.operand(*input))
+                self.lane_element(*input, position)
             }
             CfgValueKind::Staged { slot } => format!("{}[{slot}]", bindings.staged),
         })
+    }
+
+    fn lane_element(&self, value: ValueId, position: usize) -> String {
+        let operand = self.operand(value);
+        if self
+            .function
+            .lanes_of(value)
+            .is_some_and(|lanes| lanes.len() == 1)
+        {
+            operand
+        } else {
+            format!("{operand}[{position}]")
+        }
     }
 }
 

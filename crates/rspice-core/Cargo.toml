@@ -16,7 +16,11 @@ rust-version.workspace = true
 default = ["faer-parallel", "parallel", "simd"]
 wasm = ["wasm-bindgen", "getrandom/js"]
 parallel = ["rayon", "portable-atomic"]
-faer-parallel = ["faer/rayon"]
+faer-parallel = [
+    "faer/rayon",
+    "rspice-matrix/faer-parallel",
+    "rspice-veriloga-runtime/faer-parallel",
+]
 ffi = ["libloading"]
 veriloga = [
     "dep:rspice-veriloga",
@@ -138,6 +142,8 @@ num-complex.workspace = true
 libm = "0.2"
 rustfft.workspace = true
 rustc-hash.workspace = true
+rspice-matrix.workspace = true
+rspice-veriloga-runtime.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 blake3 = "1.5"

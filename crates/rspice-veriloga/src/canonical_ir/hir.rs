@@ -20,7 +20,7 @@ use crate::ast::{
     AnalogOperator, BranchAccess, CrossDirection, Expression, LaplaceKind, LimiterArgument,
     NoiseSource, PortDirection, ZiKind,
 };
-use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement};
+use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement, ParameterScope};
 use crate::types::{ParameterRange, ValueType};
 
 use super::{
@@ -320,6 +320,7 @@ pub struct HirPort {
 pub struct HirParameter {
     pub id: ParamId,
     pub name: SmolStr,
+    pub scope: ParameterScope,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
     pub default_expr: Option<HirExprRef>,
@@ -469,6 +470,7 @@ impl HirModel {
             .map(|(index, parameter)| HirParameter {
                 id: ParamId::from(index),
                 name: parameter.name.clone(),
+                scope: parameter.scope,
                 value_type: CanonicalValueType::from(parameter.value_type),
                 default: parameter.default,
                 default_expr: parameter

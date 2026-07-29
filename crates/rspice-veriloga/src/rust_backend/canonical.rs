@@ -54,19 +54,24 @@
 //! computed something else would be worse than one that is not generated: the
 //! caller falls back to a tier, which is what the tiers are still there for.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
+use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control};
 use crate::canonical_ir::cfg::{
     CfgBinaryOp, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp, CfgValue, CfgValueKind,
     CfgValueType,
 };
 use crate::canonical_ir::cfg_lower::CfgModel;
-use crate::canonical_ir::schedule::{InvalidationClass, Stage, schedule, split, worth_splitting};
-use crate::canonical_ir::{
-    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, differentiate,
-    optimize_cfg,
+use crate::canonical_ir::cfg_opt::optimize_with_control;
+use crate::canonical_ir::schedule::{
+    InvalidationClass, Stage, schedule_with_parameter_scopes, split, structural_guards,
+    worth_splitting,
 };
+use crate::canonical_ir::{
+    AdSeed, BlockId, CanonicalIrArtifact, ExprId, MirEquationKind, ValueId, optimize_cfg,
+};
+use crate::metrics::{MetricsRecorder, PipelineCancelled, PipelineControl, PipelinePhase};
 
 use super::emit::{EmitBindings, RUNTIME_PRELUDE, emit_body};
 use super::expr::parameter_field_names;
@@ -78,7 +83,16 @@ pub fn generate_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
-    let plan = ModelPlan::build(artifact)?;
+    let mut measurements = MetricsRecorder::new(0, options.performance_budget.clone());
+    generate_device_measured(artifact, options, &mut measurements)
+}
+
+pub(crate) fn generate_device_measured(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+    measurements: &mut MetricsRecorder,
+) -> Result<GeneratedRustDevice, RustBackendError> {
+    let plan = ModelPlan::build(artifact, measurements)?;
 
     let names = RustDeviceNames::new(
         artifact.metadata.source_package.as_str(),
@@ -87,7 +101,17 @@ pub fn generate_device(
     );
     let parameter_fields = parameter_field_names(artifact);
 
-    let stamp = plan.stamp_file(artifact, options)?;
+    checkpoint_phase(artifact, measurements, PipelinePhase::StampEmission)?;
+    let phase_started = web_time::Instant::now();
+    let stamp = plan.stamp_file(artifact, options, measurements.control())?;
+    record_phase(
+        artifact,
+        measurements,
+        PipelinePhase::StampEmission,
+        phase_started.elapsed(),
+    )?;
+    checkpoint_phase(artifact, measurements, PipelinePhase::StateEmission)?;
+    let phase_started = web_time::Instant::now();
     let state = state_file::generate_state_file_with_extensions(
         artifact,
         options,
@@ -95,7 +119,22 @@ pub fn generate_device(
         plan.ddt_slots.len(),
         plan.idt_slots.len(),
         artifact.mir.branch_unknowns.len(),
-        &plan.state_extensions(),
+        &plan.state_extensions(artifact),
+    )?;
+    record_phase(
+        artifact,
+        measurements,
+        PipelinePhase::StateEmission,
+        phase_started.elapsed(),
+    )?;
+    checkpoint_phase(artifact, measurements, PipelinePhase::NoiseEmission)?;
+    let phase_started = web_time::Instant::now();
+    let noise = plan.noise_file(artifact, options)?;
+    record_phase(
+        artifact,
+        measurements,
+        PipelinePhase::NoiseEmission,
+        phase_started.elapsed(),
     )?;
 
     let files = vec![
@@ -111,7 +150,7 @@ pub fn generate_device(
             relative_path: "stamp.rs".to_string(),
             contents: stamp,
         },
-        plan.noise_file(artifact, options)?,
+        noise,
     ];
 
     Ok(GeneratedRustDevice {
@@ -120,6 +159,35 @@ pub fn generate_device(
         folder_name: names.folder,
         source_digest: artifact.metadata.source_digest.to_string(),
         files,
+    })
+}
+
+fn record_phase(
+    artifact: &CanonicalIrArtifact,
+    measurements: &mut MetricsRecorder,
+    phase: PipelinePhase,
+    elapsed: std::time::Duration,
+) -> Result<(), RustBackendError> {
+    measurements.record(phase, elapsed).map_err(|error| {
+        RustBackendError::performance_budget(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            error,
+        )
+    })
+}
+
+fn checkpoint_phase(
+    artifact: &CanonicalIrArtifact,
+    measurements: &MetricsRecorder<'_>,
+    phase: PipelinePhase,
+) -> Result<(), RustBackendError> {
+    measurements.checkpoint(phase).map_err(|error| {
+        RustBackendError::cancelled(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            error,
+        )
     })
 }
 
@@ -215,7 +283,12 @@ struct ModelPlan {
 }
 
 impl ModelPlan {
-    fn build(artifact: &CanonicalIrArtifact) -> Result<Self, RustBackendError> {
+    fn build(
+        artifact: &CanonicalIrArtifact,
+        measurements: &mut MetricsRecorder,
+    ) -> Result<Self, RustBackendError> {
+        checkpoint_phase(artifact, measurements, PipelinePhase::CfgLowering)?;
+        let phase_started = web_time::Instant::now();
         let mut cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
             let mut reasons: Vec<String> = diagnostics
                 .iter()
@@ -230,7 +303,15 @@ impl ModelPlan {
             )
         })?;
         reject_unsupported_kinds(artifact, &cfg.function)?;
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::CfgLowering,
+            phase_started.elapsed(),
+        )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::DerivativePreparation)?;
+        let phase_started = web_time::Instant::now();
         // In value order, which is the lowering's order, so the numbering is a
         // property of the model rather than of a hash map's iteration.
         let mut ddt_slots: HashMap<ExprId, usize> = HashMap::new();
@@ -290,10 +371,38 @@ impl ModelPlan {
         cfg.function
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::DerivativePreparation,
+            phase_started.elapsed(),
+        )?;
 
-        let mut differentiated = differentiate(&cfg.function, &seeds)
-            .map_err(|error| unsupported(artifact, format!("differentiation: {error}")))?;
+        checkpoint_phase(artifact, measurements, PipelinePhase::Differentiation)?;
+        let phase_started = web_time::Instant::now();
+        let mut differentiated =
+            match differentiate_with_control(&cfg.function, &seeds, measurements.control()) {
+                Ok(function) => function,
+                Err(DifferentiationError::Validation(error)) => {
+                    return Err(unsupported(artifact, format!("differentiation: {error}")));
+                }
+                Err(DifferentiationError::Cancelled(error)) => {
+                    return Err(RustBackendError::cancelled(
+                        artifact.metadata.source_package.as_str(),
+                        artifact.mir.module_name.as_str(),
+                        error,
+                    ));
+                }
+            };
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::Differentiation,
+            phase_started.elapsed(),
+        )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::DerivativeExtraction)?;
+        let phase_started = web_time::Instant::now();
         // Every read-out first, and both bodies' worth of them: taking a lane
         // appends an instruction, so a row taken after a simplification would
         // name values the simplified function does not have.
@@ -308,7 +417,15 @@ impl ModelPlan {
                 None => Vec::new(),
             })
             .collect();
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::DerivativeExtraction,
+            phase_started.elapsed(),
+        )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::NoisePlanning)?;
+        let phase_started = web_time::Instant::now();
         // Every read-out is taken, so the function has stopped growing and the
         // noise slice can be cut from it.
         //
@@ -322,6 +439,12 @@ impl ModelPlan {
         // because the AD pass leaves bookkeeping the magnitudes can reach.
         let noise = plan_noise(artifact, &cfg, &cfg.function)
             .or_else(|| plan_noise(artifact, &cfg, &differentiated.function));
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::NoisePlanning,
+            phase_started.elapsed(),
+        )?;
 
         // A contribution with no `ddt` stores no charge. Its row is kept and
         // emptied rather than dropped, so both row lists stay parallel to
@@ -333,6 +456,8 @@ impl ModelPlan {
             .map(|(charge, residual)| charge.unwrap_or(*residual))
             .collect();
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::StampPlanning)?;
+        let phase_started = web_time::Instant::now();
         let mut conduction = plan_stamps(artifact, &residuals, &conduction_rows, correction_lane);
         // The reactive matrix stamps no residual, so a charge's correction lane
         // has nothing to correct: it is split out and dropped rather than
@@ -349,24 +474,95 @@ impl ModelPlan {
         if !charged {
             reactive.rows.clear();
         }
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::StampPlanning,
+            phase_started.elapsed(),
+        )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::CfgOptimization)?;
+        let phase_started = web_time::Instant::now();
         // One simplification over both, so what the two matrices share is
         // computed once.
         let mut wanted = conduction.wanted();
         let reactive_wanted = reactive.wanted();
         wanted.extend_from_slice(&reactive_wanted);
-        let (function, mapped) = optimize_cfg(&differentiated.function, &wanted);
+        let (function, mapped) =
+            optimize_with_control(&differentiated.function, &wanted, measurements.control())
+                .map_err(|error| {
+                    RustBackendError::cancelled(
+                        artifact.metadata.source_package.as_str(),
+                        artifact.mir.module_name.as_str(),
+                        error,
+                    )
+                })?;
         conduction.remap(&mapped[..wanted.len() - reactive_wanted.len()]);
         reactive.remap(&mapped[wanted.len() - reactive_wanted.len()..]);
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
+        let mut scalar_derivatives = 0usize;
+        let mut packed_derivatives = 0usize;
+        let mut lane_entries = 0usize;
+        let mut max_width = 0usize;
+        for value in &function.values {
+            let Some(lanes) = function.lanes_of(value.id) else {
+                continue;
+            };
+            if lanes.len() == 1 {
+                scalar_derivatives += 1;
+            } else {
+                packed_derivatives += 1;
+            }
+            lane_entries = lane_entries.saturating_add(lanes.len());
+            max_width = max_width.max(lanes.len());
+        }
+        let metrics = measurements.metrics_mut();
+        metrics.derivative_seed_count = crate::metrics::usize_to_u64(seeds.len());
+        metrics.scalar_derivative_value_count =
+            crate::metrics::usize_to_u64(scalar_derivatives);
+        metrics.packed_derivative_value_count =
+            crate::metrics::usize_to_u64(packed_derivatives);
+        metrics.derivative_lane_entry_count = crate::metrics::usize_to_u64(lane_entries);
+        metrics.max_derivative_width = crate::metrics::usize_to_u64(max_width);
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::CfgOptimization,
+            phase_started.elapsed(),
+        )?;
 
+        checkpoint_phase(artifact, measurements, PipelinePhase::Scheduling)?;
+        let phase_started = web_time::Instant::now();
         // The output list both stamps read from, conduction first.
         let mut outputs = Vec::new();
         let conduction = Stamps::place(conduction, &mut outputs);
         let reactive = Stamps::place(reactive, &mut outputs);
 
-        let schedule = schedule(&function);
+        let parameter_scopes: Vec<_> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.scope)
+            .collect();
+        let schedule = schedule_with_parameter_scopes(&function, &parameter_scopes);
+        let structural_guards = structural_guards(&function, &schedule, &parameter_scopes);
+        measurements.metrics_mut().model_structural_guard_count = crate::metrics::usize_to_u64(
+            structural_guards
+                .iter()
+                .filter(|guard| guard.class == InvalidationClass::Model)
+                .count(),
+        );
+        measurements.metrics_mut().instance_structural_guard_count = crate::metrics::usize_to_u64(
+            structural_guards
+                .iter()
+                .filter(|guard| guard.class == InvalidationClass::Instance)
+                .count(),
+        );
+        measurements.metrics_mut().structural_guard_newton_values =
+            structural_guards.iter().fold(0_u64, |total, guard| {
+                total.saturating_add(crate::metrics::usize_to_u64(guard.newton_values))
+            });
         let stages = split(&function, &schedule, &outputs)
             .map_err(|error| unsupported(artifact, format!("invalidation split: {error}")))?;
         let (stages, slots) = if worth_splitting(&function, &stages) {
@@ -393,6 +589,12 @@ impl ModelPlan {
                     .map(|unknown| usize::from(unknown.id))
             })
             .collect();
+        record_phase(
+            artifact,
+            measurements,
+            PipelinePhase::Scheduling,
+            phase_started.elapsed(),
+        )?;
 
         Ok(Self {
             function,
@@ -451,7 +653,10 @@ fn plan_noise(
             .iter()
             .find(|lowered| lowered.contribution == contribution && lowered.ordinal == ordinal)?;
 
-        let table_width = source.table.as_ref().map_or(0, |table| table.operands.len());
+        let table_width = source
+            .table
+            .as_ref()
+            .map_or(0, |table| table.operands.len());
         if lowered.kind != source.kind
             || lowered.exponent.is_some() != source.exponent.is_some()
             || lowered.table.len() != table_width
@@ -628,10 +833,7 @@ impl Stamps {
 
     /// How many cached values the reactive stamp reads.
     fn width(&self) -> usize {
-        self.rows
-            .iter()
-            .map(|row| 1 + row.derivatives.len())
-            .sum()
+        self.rows.iter().map(|row| 1 + row.derivatives.len()).sum()
     }
 }
 
@@ -640,31 +842,49 @@ impl ModelPlan {
         &self,
         artifact: &CanonicalIrArtifact,
         options: &RustTranspileOptions,
-
+        control: &dyn PipelineControl,
     ) -> Result<String, RustBackendError> {
         let mut out = String::new();
         out.push_str(
             "#![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]\n\n",
         );
+        if self.model_stage().is_some() {
+            out.push_str(
+                "use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};\n",
+            );
+        } else {
+            out.push_str("use super::state::Instance;\n");
+        }
         let _ = writeln!(
             out,
-            "use super::state::Instance;\nuse {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};",
+            "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};",
             options.runtime_path
         );
+        if self.model_stage().is_some() {
+            out.push_str(
+                "use std::collections::HashMap;\n\
+                 use std::sync::{Arc, Mutex, OnceLock, Weak};\n",
+            );
+        }
         out.push_str(RUNTIME_PRELUDE);
         out.push_str(EVAL_DDT);
         if !self.idt_slots.is_empty() {
             out.push_str(EVAL_IDT);
         }
+        if self.model_stage().is_some() {
+            self.emit_model_cache_support(&mut out);
+        }
         out.push_str("impl Instance {\n");
 
         for stage in &self.stages {
-            if stage.class == InvalidationClass::Newton {
+            if stage.class == InvalidationClass::Newton
+                || (stage.class == InvalidationClass::Model && stage.exports.is_empty())
+            {
                 continue;
             }
             self.emit_cached_stage(artifact, stage, &mut out)?;
         }
-        self.emit_stamp(artifact, &mut out)?;
+        self.emit_stamp(artifact, control, &mut out)?;
         self.emit_stamp_reactive(&mut out)?;
 
         out.push_str("}\n");
@@ -680,6 +900,9 @@ impl ModelPlan {
 
         out: &mut String,
     ) -> Result<(), RustBackendError> {
+        if stage.class == InvalidationClass::Model {
+            return self.emit_model_stage(artifact, stage, out);
+        }
         let name = stage_fn_name(stage.class);
         let produced: Vec<ValueId> = stage.exports.iter().map(|(_, value)| *value).collect();
         let (body, names) = emit_body(&stage.function, &produced, &bindings())
@@ -698,8 +921,9 @@ impl ModelPlan {
                  \x20           && self.canonical_thermal_voltage == thermal_voltage\n\
                  \x20       {\n            return;\n        }\n",
             ),
-            InvalidationClass::Instance => out
-                .push_str("        if self.canonical_instance_valid {\n            return;\n        }\n"),
+            InvalidationClass::Instance => out.push_str(
+                "        if self.canonical_instance_valid {\n            return;\n        }\n",
+            ),
             // Nothing tells `stamp` that a new timestep began, so this one is
             // recomputed rather than cached.
             _ => {}
@@ -741,10 +965,121 @@ impl ModelPlan {
         Ok(())
     }
 
+    fn model_stage(&self) -> Option<&Stage> {
+        self.stages
+            .iter()
+            .find(|stage| stage.class == InvalidationClass::Model && !stage.exports.is_empty())
+    }
+
+    fn emit_model_cache_support(&self, out: &mut String) {
+        out.push_str(
+            "\nstatic CANONICAL_MODEL_CACHE: OnceLock<Mutex<HashMap<Box<[u64]>, \
+             Weak<CanonicalModelValues>>>> = OnceLock::new();\n\n\
+             fn canonical_model_cache() -> &'static Mutex<HashMap<Box<[u64]>, \
+             Weak<CanonicalModelValues>>> {\n\
+             \x20   CANONICAL_MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))\n\
+             }\n\n\
+             fn canonical_model_cache_lookup(key: &[u64]) -> Option<Arc<CanonicalModelValues>> {\n\
+             \x20   let mut cache = canonical_model_cache()\n\
+             \x20       .lock()\n\
+             \x20       .unwrap_or_else(|poisoned| poisoned.into_inner());\n\
+             \x20   let found = cache.get(key).and_then(Weak::upgrade);\n\
+             \x20   if found.is_none() {\n\
+             \x20       cache.remove(key);\n\
+             \x20   }\n\
+             \x20   found\n\
+             }\n\n\
+             fn canonical_model_cache_intern(\n\
+             \x20   key: Box<[u64]>,\n\
+             \x20   candidate: Arc<CanonicalModelValues>,\n\
+             ) -> Arc<CanonicalModelValues> {\n\
+             \x20   let mut cache = canonical_model_cache()\n\
+             \x20       .lock()\n\
+             \x20       .unwrap_or_else(|poisoned| poisoned.into_inner());\n\
+             \x20   if let Some(existing) = cache.get(key.as_ref()).and_then(Weak::upgrade) {\n\
+             \x20       return existing;\n\
+             \x20   }\n\
+             \x20   cache.retain(|_, values| values.strong_count() > 0);\n\
+             \x20   cache.insert(key, Arc::downgrade(&candidate));\n\
+             \x20   candidate\n\
+             }\n\n",
+        );
+    }
+
+    fn emit_model_stage(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        stage: &Stage,
+        out: &mut String,
+    ) -> Result<(), RustBackendError> {
+        let produced: Vec<ValueId> = stage.exports.iter().map(|(_, value)| *value).collect();
+        let (body, names) = emit_body(&stage.function, &produced, &bindings())
+            .map_err(|error| unsupported(artifact, format!("canonical_model_stage: {error}")))?;
+
+        let model_key_words = artifact
+            .mir
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.scope == crate::semantic::ParameterScope::Model)
+            .count()
+            .saturating_mul(2);
+        let _ = writeln!(
+            out,
+            "    fn canonical_model_key(&self) -> Box<[u64]> {{\n\
+             \x20       let mut key = Vec::with_capacity({model_key_words});"
+        );
+        out.push_str(
+            "        for index in 0..Self::PARAMETER_COUNT {\n\
+             \x20           if PARAMETER_MODEL_FLAGS[index] {\n\
+             \x20               key.push(self.params.values[index].to_bits());\n\
+             \x20               key.push(u64::from(self.param_given[index]));\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       key.into_boxed_slice()\n\
+             \x20   }\n\n\
+             \x20   fn canonical_install_model_values(&mut self, values: \
+             Arc<CanonicalModelValues>) {\n",
+        );
+        for (index, (slot, _)) in stage.exports.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "        self.canonical_staged[{slot}] = values[{index}];"
+            );
+        }
+        out.push_str(
+            "        self.canonical_model_values = Some(values);\n\
+             \x20   }\n\n\
+             \x20   fn canonical_model_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {\n\
+             \x20       if self.canonical_model_values.is_some() {\n\
+             \x20           return;\n\
+             \x20       }\n\
+             \x20       let key = self.canonical_model_key();\n\
+             \x20       if let Some(values) = canonical_model_cache_lookup(key.as_ref()) {\n\
+             \x20           self.canonical_install_model_values(values);\n\
+             \x20           return;\n\
+             \x20       }\n\
+             \x20       let produced: CanonicalModelValues = {\n",
+        );
+        self.emit_prologue(artifact, &stage.function, 3, out)?;
+        out.push_str(&indent(&body, 3));
+        if produced.is_empty() {
+            out.push_str("            [0.0]\n");
+        } else {
+            let _ = writeln!(out, "            [{}]", names.join(", "));
+        }
+        out.push_str(
+            "        };\n\
+             \x20       let values = canonical_model_cache_intern(key, Arc::new(produced));\n\
+             \x20       self.canonical_install_model_values(values);\n\
+             \x20   }\n\n",
+        );
+        Ok(())
+    }
+
     fn emit_stamp(
         &self,
         artifact: &CanonicalIrArtifact,
-
+        control: &dyn PipelineControl,
         out: &mut String,
     ) -> Result<(), RustBackendError> {
         out.push_str(
@@ -760,7 +1095,9 @@ impl ModelPlan {
             );
         }
         for stage in &self.stages {
-            if stage.class == InvalidationClass::Newton {
+            if stage.class == InvalidationClass::Newton
+                || (stage.class == InvalidationClass::Model && stage.exports.is_empty())
+            {
                 continue;
             }
             let _ = writeln!(out, "        self.{}(ctx);", stage_fn_name(stage.class));
@@ -771,7 +1108,7 @@ impl ModelPlan {
             .iter()
             .find(|stage| stage.class == InvalidationClass::Newton);
         let function = newton.map_or(&self.function, |stage| &stage.function);
-        let (body, values) = self.newton_outputs(artifact, newton)?;
+        let (body, values) = self.newton_outputs(artifact, newton, control)?;
         self.emit_prologue(artifact, function, 2, out)?;
         out.push_str(&indent(&body, 2));
 
@@ -1096,7 +1433,9 @@ impl ModelPlan {
             );
         }
         if wants.limit_previous {
-            out.push_str("        let limit_previous = |_operator: usize, proposed: f64| proposed;\n");
+            out.push_str(
+                "        let limit_previous = |_operator: usize, proposed: f64| proposed;\n",
+            );
         }
     }
 
@@ -1116,14 +1455,11 @@ impl ModelPlan {
         &self,
         artifact: &CanonicalIrArtifact,
         newton: Option<&Stage>,
+        control: &dyn PipelineControl,
     ) -> Result<(String, Vec<String>), RustBackendError> {
         let Some(newton) = newton else {
-            let (body, names) = emit_body(
-                &self.function,
-                &self.outputs,
-                &bindings(),
-            )
-            .map_err(|error| unsupported(artifact, format!("body: {error}")))?;
+            let (body, names) = emit_body(&self.function, &self.outputs, &bindings())
+                .map_err(|error| unsupported(artifact, format!("body: {error}")))?;
             return Ok((body, names));
         };
 
@@ -1133,12 +1469,26 @@ impl ModelPlan {
             .enumerate()
             .filter_map(|(index, value)| value.map(|value| (index, value)))
             .collect();
-        let (body, names) = emit_body(
+        let owned_values: Vec<ValueId> = owned.iter().map(|(_, value)| *value).collect();
+        let (body, names) = emit_body(&newton.function, &owned_values, &bindings())
+            .map_err(|error| unsupported(artifact, format!("newton stage: {error}")))?;
+        let (body, names) = specialize_repeated_static_guards(
             &newton.function,
-            &owned.iter().map(|(_, value)| *value).collect::<Vec<_>>(),
-            &bindings(),
+            &owned_values,
+            body,
+            names,
+            control,
         )
-        .map_err(|error| unsupported(artifact, format!("newton stage: {error}")))?;
+        .map_err(|error| match error {
+            StructuralSpecializationError::Emit(error) => {
+                unsupported(artifact, format!("specialized newton stage: {error}"))
+            }
+            StructuralSpecializationError::Cancelled(error) => RustBackendError::cancelled(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                error,
+            ),
+        })?;
 
         let mut values = vec![String::new(); self.outputs.len()];
         for ((index, _), name) in owned.iter().zip(names) {
@@ -1580,7 +1930,7 @@ impl ModelPlan {
         })
     }
 
-    fn state_extensions(&self) -> state_file::StateFileExtensions {
+    fn state_extensions(&self, artifact: &CanonicalIrArtifact) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions::default();
         self.push_limit_state_fields(&mut extensions);
         if self.slots > 0 || self.reactive.width() > 0 {
@@ -1612,6 +1962,23 @@ impl ModelPlan {
             return extensions;
         }
         let slots = self.slots;
+        let shared_model_stage = self.model_stage();
+        if let Some(model) = shared_model_stage {
+            let width = model.exports.len().max(1);
+            let _ = writeln!(
+                extensions.support_types,
+                "pub(crate) type CanonicalModelValues = [f64; {width}];"
+            );
+            extensions
+                .instance_fields
+                .push_str("    pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,\n");
+            extensions
+                .clone_fields
+                .push_str("            canonical_model_values: self.canonical_model_values.clone(),\n");
+            extensions
+                .new_initializers
+                .push_str("            canonical_model_values: None,\n");
+        }
         let _ = write!(
             extensions.instance_fields,
             "    pub(crate) canonical_staged: Box<[f64; {slots}]>,\n\
@@ -1634,10 +2001,24 @@ impl ModelPlan {
              \x20           canonical_temperature: 0.0,\n\
              \x20           canonical_thermal_voltage: 0.0,\n",
         );
-        // A parameter write invalidates both caches, because a parameter is
-        // read by every class.
+        // Model-card writes invalidate every coarser stage. Per-device geometry
+        // cannot affect the model stage, because the schedule proves that
+        // boundary from the source parameter attributes.
+        if shared_model_stage.is_some() {
+            extensions.set_parameter_hook.push_str(
+                "if PARAMETER_MODEL_FLAGS[index] {\n    self.canonical_model_values = None;\n}\n",
+            );
+        }
         extensions.set_parameter_hook.push_str(
-            "self.canonical_instance_valid = false;\nself.canonical_temperature_valid = false;\n",
+            "self.canonical_instance_valid = false;\n\
+             self.canonical_temperature_valid = false;\n",
+        );
+        if artifact.mir.parameters.is_empty() {
+            extensions.set_parameter_hook.clear();
+        }
+        extensions.set_multiplicity_hook.push_str(
+            "self.canonical_instance_valid = false;\n\
+             self.canonical_temperature_valid = false;\n",
         );
         extensions
     }
@@ -1722,6 +2103,357 @@ impl ModelPlan {
              \x20       self.canonical_limit.initialized.copy_from_slice(&state.limiter_initialized);\n\
              \x20       self.canonical_limit.active = false;\n",
         );
+    }
+}
+
+enum StructuralSpecializationError {
+    Emit(super::emit::EmitError),
+    Cancelled(PipelineCancelled),
+}
+
+/// Replace repeated reads of one cached model/instance condition with one
+/// dispatch into two complete hot paths.
+///
+/// This is intentionally not a combinatorial specializer. One condition gives
+/// exactly two variants, both outcomes are present, and source growth is capped
+/// before the result is accepted. Conditions controlling loops are excluded:
+/// turning a loop test into a constant changes the structured shape the emitter
+/// relies on and can turn a terminating parameter-bounded loop into an
+/// unbounded one.
+fn specialize_repeated_static_guards(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    baseline_body: String,
+    baseline_names: Vec<String>,
+    control: &dyn PipelineControl,
+) -> Result<(String, Vec<String>), StructuralSpecializationError> {
+    const MIN_REPEATED_BRANCHES: usize = 3;
+    const MIN_BODY_BYTES: usize = 8 * 1024;
+    const MAX_CANDIDATES: usize = 3;
+    const MAX_SOURCE_GROWTH_PERCENT: usize = 2;
+
+    if baseline_body.len() < MIN_BODY_BYTES
+        || outputs
+            .iter()
+            .any(|output| function.lanes_of(*output).is_some())
+    {
+        return Ok((baseline_body, baseline_names));
+    }
+
+    #[derive(Default)]
+    struct Candidate {
+        branches: usize,
+        controls_loop: bool,
+    }
+
+    let loop_headers = cfg_loop_headers(function);
+    let mut by_slot: HashMap<u32, Candidate> = HashMap::new();
+    for block in &function.blocks {
+        let CfgTerminator::Branch { condition, .. } = block.terminator else {
+            continue;
+        };
+        let CfgValueKind::Staged { slot } = function.value(condition).kind else {
+            continue;
+        };
+        let candidate = by_slot.entry(slot).or_default();
+        candidate.branches = candidate.branches.saturating_add(1);
+        candidate.controls_loop |= loop_headers.contains(&block.id);
+    }
+
+    let mut candidates: Vec<(u32, usize)> = by_slot
+        .into_iter()
+        .filter_map(|(slot, candidate)| {
+            (!candidate.controls_loop && candidate.branches >= MIN_REPEATED_BRANCHES)
+                .then_some((slot, candidate.branches))
+        })
+        .collect();
+    candidates.sort_unstable_by(|(left_slot, left_branches), (right_slot, right_branches)| {
+        right_branches
+            .cmp(left_branches)
+            .then_with(|| left_slot.cmp(right_slot))
+    });
+
+    let byte_limit = baseline_body
+        .len()
+        .saturating_add(
+            baseline_body
+                .len()
+                .saturating_mul(MAX_SOURCE_GROWTH_PERCENT)
+                / 100,
+        );
+    for (slot, branches) in candidates.into_iter().take(MAX_CANDIDATES) {
+        let (true_body, true_names) =
+            emit_static_guard_variant(function, outputs, slot, true, control)?;
+        let (false_body, false_names) =
+            emit_static_guard_variant(function, outputs, slot, false, control)?;
+        let specialized = render_static_guard_variants(
+            slot,
+            branches,
+            &true_body,
+            &true_names,
+            &false_body,
+            &false_names,
+        );
+        if specialized.len() <= byte_limit {
+            let names = (0..outputs.len())
+                .map(|index| format!("canonical_structural_output_{index}"))
+                .collect();
+            return Ok((specialized, names));
+        }
+    }
+
+    Ok((baseline_body, baseline_names))
+}
+
+fn emit_static_guard_variant(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    slot: u32,
+    outcome: bool,
+    control: &dyn PipelineControl,
+) -> Result<(String, Vec<String>), StructuralSpecializationError> {
+    let mut specialized = function.clone();
+    let conditions: HashSet<ValueId> = specialized
+        .values
+        .iter()
+        .filter_map(|value| {
+            matches!(value.kind, CfgValueKind::Staged { slot: held } if held == slot)
+                .then_some(value.id)
+        })
+        .collect();
+    for block in &mut specialized.blocks {
+        let CfgTerminator::Branch {
+            condition,
+            then_target,
+            then_args,
+            else_target,
+            else_args,
+        } = block.terminator.clone()
+        else {
+            continue;
+        };
+        if !conditions.contains(&condition) {
+            continue;
+        }
+        block.terminator = if outcome {
+            CfgTerminator::Jump {
+                target: then_target,
+                args: then_args,
+            }
+        } else {
+            CfgTerminator::Jump {
+                target: else_target,
+                args: else_args,
+            }
+        };
+    }
+    retain_reachable_blocks(&mut specialized);
+    let mut outputs = outputs.to_vec();
+    collapse_single_predecessor_parameters(&mut specialized, &mut outputs);
+    let (specialized, outputs) =
+        optimize_with_control(&specialized, &outputs, control)
+            .map_err(StructuralSpecializationError::Cancelled)?;
+    emit_body(&specialized, &outputs, &bindings()).map_err(StructuralSpecializationError::Emit)
+}
+
+fn render_static_guard_variants(
+    slot: u32,
+    branches: usize,
+    true_body: &str,
+    true_names: &[String],
+    false_body: &str,
+    false_names: &[String],
+) -> String {
+    debug_assert_eq!(true_names.len(), false_names.len());
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "    // Bounded structural specialization: one dispatch replaces {branches} \
+         repeated static branches without growing this body by more than 2%."
+    );
+    for index in 0..true_names.len() {
+        let _ = writeln!(out, "    let canonical_structural_output_{index}: f64;");
+    }
+    let _ = writeln!(out, "    if staged[{slot}] != 0.0 {{");
+    out.push_str(&indent(true_body, 1));
+    for (index, name) in true_names.iter().enumerate() {
+        let _ = writeln!(out, "        canonical_structural_output_{index} = {name};");
+    }
+    out.push_str("    } else {\n");
+    out.push_str(&indent(false_body, 1));
+    for (index, name) in false_names.iter().enumerate() {
+        let _ = writeln!(out, "        canonical_structural_output_{index} = {name};");
+    }
+    out.push_str("    }\n");
+    out
+}
+
+fn cfg_loop_headers(function: &CfgFunction) -> HashSet<BlockId> {
+    let mut headers = HashSet::new();
+    let mut state: HashMap<BlockId, u8> = HashMap::new();
+    let mut stack = vec![(function.entry, 0usize)];
+    state.insert(function.entry, 1);
+    while let Some((block, index)) = stack.pop() {
+        let successors = function.block(block).successors();
+        if index < successors.len() {
+            stack.push((block, index + 1));
+            let successor = successors[index];
+            match state.get(&successor) {
+                Some(1) => {
+                    headers.insert(successor);
+                }
+                Some(_) => {}
+                None => {
+                    state.insert(successor, 1);
+                    stack.push((successor, 0));
+                }
+            }
+        } else {
+            state.insert(block, 2);
+        }
+    }
+    headers
+}
+
+fn retain_reachable_blocks(function: &mut CfgFunction) {
+    let mut reachable = HashSet::from([function.entry]);
+    let mut pending = vec![function.entry];
+    while let Some(block) = pending.pop() {
+        for successor in function.block(block).successors() {
+            if reachable.insert(successor) {
+                pending.push(successor);
+            }
+        }
+    }
+
+    let mut remap = vec![None; function.blocks.len()];
+    let mut blocks = Vec::with_capacity(reachable.len());
+    for block in &function.blocks {
+        if !reachable.contains(&block.id) {
+            continue;
+        }
+        remap[usize::from(block.id)] = Some(BlockId::from(blocks.len()));
+        blocks.push(block.clone());
+    }
+    for block in &mut blocks {
+        block.id = remap[usize::from(block.id)].expect("a reachable block is remapped");
+        match &mut block.terminator {
+            CfgTerminator::Jump { target, .. } => {
+                *target = remap[usize::from(*target)].expect("a reachable target is remapped");
+            }
+            CfgTerminator::Branch {
+                then_target,
+                else_target,
+                ..
+            } => {
+                *then_target =
+                    remap[usize::from(*then_target)].expect("a reachable target is remapped");
+                *else_target =
+                    remap[usize::from(*else_target)].expect("a reachable target is remapped");
+            }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
+    }
+    function.entry = remap[usize::from(function.entry)].expect("the entry is reachable");
+    function.blocks = blocks;
+}
+
+fn collapse_single_predecessor_parameters(function: &mut CfgFunction, outputs: &mut [ValueId]) {
+    let mut incoming = vec![0usize; function.blocks.len()];
+    for block in &function.blocks {
+        for successor in block.successors() {
+            incoming[usize::from(successor)] = incoming[usize::from(successor)].saturating_add(1);
+        }
+    }
+    let collapsible: HashSet<BlockId> = function
+        .blocks
+        .iter()
+        .filter(|block| !block.params.is_empty() && incoming[usize::from(block.id)] == 1)
+        .map(|block| block.id)
+        .collect();
+    if collapsible.is_empty() {
+        return;
+    }
+
+    let mut replacement = vec![None; function.values.len()];
+    for source in &function.blocks {
+        match &source.terminator {
+            CfgTerminator::Jump { target, args } if collapsible.contains(target) => {
+                for (param, argument) in function.block(*target).params.iter().zip(args) {
+                    replacement[usize::from(*param)] = Some(*argument);
+                }
+            }
+            CfgTerminator::Branch {
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+                ..
+            } => {
+                for (target, args) in [
+                    (*then_target, then_args.as_slice()),
+                    (*else_target, else_args.as_slice()),
+                ] {
+                    if collapsible.contains(&target) {
+                        for (param, argument) in function.block(target).params.iter().zip(args) {
+                            replacement[usize::from(*param)] = Some(*argument);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let resolve = |mut value: ValueId| {
+        for _ in 0..replacement.len() {
+            match replacement[usize::from(value)] {
+                Some(next) if next != value => value = next,
+                _ => break,
+            }
+        }
+        value
+    };
+
+    for value in &mut function.values {
+        value.kind.map_operands(&resolve);
+    }
+    for output in outputs {
+        *output = resolve(*output);
+    }
+    for block in &mut function.blocks {
+        if collapsible.contains(&block.id) {
+            block.params.clear();
+        }
+        match &mut block.terminator {
+            CfgTerminator::Jump { target, args } => {
+                if collapsible.contains(target) {
+                    args.clear();
+                } else {
+                    for argument in args {
+                        *argument = resolve(*argument);
+                    }
+                }
+            }
+            CfgTerminator::Branch {
+                condition,
+                then_target,
+                then_args,
+                else_target,
+                else_args,
+            } => {
+                *condition = resolve(*condition);
+                for (target, args) in [(*then_target, then_args), (*else_target, else_args)] {
+                    if collapsible.contains(&target) {
+                        args.clear();
+                    } else {
+                        for argument in args {
+                            *argument = resolve(*argument);
+                        }
+                    }
+                }
+            }
+            CfgTerminator::Return | CfgTerminator::Unset => {}
+        }
     }
 }
 
@@ -1821,7 +2553,11 @@ fn apply_insertions(function: &mut CfgFunction, insertions: &[(ValueId, ValueId)
             let anchor = instruction.result;
             rebuilt.push(instruction);
             if let Some(values) = after.get(&anchor) {
-                rebuilt.extend(values.iter().map(|result| CfgInstruction { result: *result }));
+                rebuilt.extend(
+                    values
+                        .iter()
+                        .map(|result| CfgInstruction { result: *result }),
+                );
             }
         }
         block.instructions = rebuilt;
@@ -2118,7 +2854,8 @@ fn materialise_charge(
             }
             let parameter = push_value(function, CfgValueType::Real, CfgValueKind::BlockParameter);
             function.blocks[usize::from(*block)].params.push(parameter);
-            for ((source, slot), argument) in edges_into(function, *block).into_iter().zip(arguments)
+            for ((source, slot), argument) in
+                edges_into(function, *block).into_iter().zip(arguments)
             {
                 edge_arguments_mut(function, source, slot).push(argument);
             }
@@ -2189,10 +2926,7 @@ fn edge_arguments_mut(
     source: BlockId,
     slot: EdgeSlot,
 ) -> &mut Vec<ValueId> {
-    match (
-        &mut function.blocks[usize::from(source)].terminator,
-        slot,
-    ) {
+    match (&mut function.blocks[usize::from(source)].terminator, slot) {
         (CfgTerminator::Jump { args, .. }, EdgeSlot::Jump) => args,
         (CfgTerminator::Branch { then_args, .. }, EdgeSlot::Then) => then_args,
         (CfgTerminator::Branch { else_args, .. }, EdgeSlot::Else) => else_args,
@@ -2216,14 +2950,14 @@ fn zero_constant(function: &mut CfgFunction) -> ValueId {
     {
         return existing.id;
     }
-    push_value(function, CfgValueType::Real, CfgValueKind::RealConstant(0.0))
+    push_value(
+        function,
+        CfgValueType::Real,
+        CfgValueKind::RealConstant(0.0),
+    )
 }
 
-fn push_value(
-    function: &mut CfgFunction,
-    value_type: CfgValueType,
-    kind: CfgValueKind,
-) -> ValueId {
+fn push_value(function: &mut CfgFunction, value_type: CfgValueType, kind: CfgValueKind) -> ValueId {
     let id = ValueId::from(function.values.len());
     function.values.push(CfgValue {
         id,
@@ -2261,6 +2995,7 @@ fn reject_unsupported_kinds(
 
 fn stage_fn_name(class: InvalidationClass) -> &'static str {
     match class {
+        InvalidationClass::Model => "canonical_model_stage",
         InvalidationClass::Instance => "canonical_instance_stage",
         InvalidationClass::Temperature => "canonical_temperature_stage",
         InvalidationClass::Timestep => "canonical_timestep_stage",

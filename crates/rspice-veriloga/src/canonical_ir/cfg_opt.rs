@@ -31,6 +31,8 @@
 
 use std::collections::HashMap;
 
+use crate::metrics::{NoPipelineControl, PipelineCancelled, PipelineControl, PipelinePhase};
+
 use super::cfg::{
     CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgTerminator, CfgUnaryOp, CfgValue,
     CfgValueKind, CfgValueType, is_leaf_kind,
@@ -67,6 +69,16 @@ const MAX_ROUNDS: usize = 8;
 /// Values are renumbered, so ids taken beforehand do not survive; the returned
 /// vector is the only correct way to keep hold of one.
 pub fn optimize(function: &CfgFunction, outputs: &[ValueId]) -> (CfgFunction, Vec<ValueId>) {
+    optimize_with_control(function, outputs, &NoPipelineControl)
+        .expect("the no-op pipeline control cannot cancel")
+}
+
+pub(crate) fn optimize_with_control(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    control: &dyn PipelineControl,
+) -> Result<(CfgFunction, Vec<ValueId>), PipelineCancelled> {
+    check_cancelled(control)?;
     let mut optimizer = Optimizer {
         entry: function.entry,
         values: function.values.clone(),
@@ -77,17 +89,21 @@ pub fn optimize(function: &CfgFunction, outputs: &[ValueId]) -> (CfgFunction, Ve
     };
 
     for _ in 0..MAX_ROUNDS {
-        let mut changed = optimizer.simplify();
+        check_cancelled(control)?;
+        let mut changed = optimizer.simplify(control)?;
         optimizer.apply_replacements();
-        changed |= optimizer.eliminate_common_subexpressions();
+        check_cancelled(control)?;
+        changed |= optimizer.eliminate_common_subexpressions(control)?;
         optimizer.apply_replacements();
         if !changed {
             break;
         }
     }
+    check_cancelled(control)?;
     optimizer.eliminate_dead_code();
+    check_cancelled(control)?;
 
-    (
+    Ok((
         CfgFunction {
             entry: optimizer.entry,
             blocks: optimizer.blocks,
@@ -95,7 +111,17 @@ pub fn optimize(function: &CfgFunction, outputs: &[ValueId]) -> (CfgFunction, Ve
             shapes: optimizer.shapes,
         },
         optimizer.outputs,
-    )
+    ))
+}
+
+fn check_cancelled(control: &dyn PipelineControl) -> Result<(), PipelineCancelled> {
+    if control.is_cancelled() {
+        Err(PipelineCancelled {
+            phase: PipelinePhase::CfgOptimization,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 struct Optimizer {
@@ -115,12 +141,16 @@ impl Optimizer {
     ///
     /// Rebuilds each block's instruction list because a power lowering may need
     /// temporaries, which have to land before the instruction that reads them.
-    fn simplify(&mut self) -> bool {
+    fn simplify(&mut self, control: &dyn PipelineControl) -> Result<bool, PipelineCancelled> {
         let mut changed = false;
         for index in 0..self.blocks.len() {
+            check_cancelled(control)?;
             let instructions = std::mem::take(&mut self.blocks[index].instructions);
             let mut rewritten = Vec::with_capacity(instructions.len());
-            for instruction in instructions {
+            for (ordinal, instruction) in instructions.into_iter().enumerate() {
+                if ordinal.is_multiple_of(1024) {
+                    check_cancelled(control)?;
+                }
                 let result = instruction.result;
                 if self.replacement[usize::from(result)].is_some() {
                     // Already redirected by an earlier round; the sweep drops it.
@@ -164,7 +194,7 @@ impl Optimizer {
                 .instructions
                 .retain(|instruction| !is_leaf_kind(&values[usize::from(instruction.result)].kind));
         }
-        changed
+        Ok(changed)
     }
 
     /// The constant a value evaluates to, when every operand is one.
@@ -313,14 +343,25 @@ impl Optimizer {
     }
 
     /// Merge values that compute the same thing, where one dominates the other.
-    fn eliminate_common_subexpressions(&mut self) -> bool {
+    fn eliminate_common_subexpressions(
+        &mut self,
+        control: &dyn PipelineControl,
+    ) -> Result<bool, PipelineCancelled> {
         let dominators = self.dominators();
         let order = reverse_postorder(&self.blocks, self.entry);
 
         let mut seen: HashMap<CseKey, Vec<(BlockId, ValueId)>> = HashMap::new();
         let mut changed = false;
         for block in order {
-            for instruction in &self.blocks[usize::from(block)].instructions {
+            check_cancelled(control)?;
+            for (ordinal, instruction) in self.blocks[usize::from(block)]
+                .instructions
+                .iter()
+                .enumerate()
+            {
+                if ordinal.is_multiple_of(1024) {
+                    check_cancelled(control)?;
+                }
                 let result = instruction.result;
                 if self.replacement[usize::from(result)].is_some() {
                     continue;
@@ -341,7 +382,7 @@ impl Optimizer {
                 }
             }
         }
-        changed
+        Ok(changed)
     }
 
     /// A value's identity for elimination, or `None` if it must not be merged.

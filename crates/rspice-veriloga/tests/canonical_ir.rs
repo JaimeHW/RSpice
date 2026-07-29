@@ -7,20 +7,20 @@ use rspice_veriloga::ast::{
 };
 use rspice_veriloga::canonical_ir::{
     BranchId, BranchUnknownId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId,
-    PortId, ScheduleId, SourceId, StateId, ValueId, VariableId,
+    PortId, SourceId, StateId, VariableId,
 };
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, CanonicalMetadata, CanonicalNoiseSourceKind, CompilerPhase,
-    DerivativeLane, DerivativeLaneKind, DiagnosticSeverity, HirAnalogOperator, HirContributionKind,
-    HirExprKind, HirExprRef, HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirStatement,
-    InvalidationClass, IrDiagnostic, MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot,
-    OptBinaryOp, OptDerivative, OptEvalInputs, OptModel, OptOp, OptSchedule, OptUnaryOp, OptValue,
-    OptValueKind, OptValueType, SourceSpanRef, StableDigest,
+    DiagnosticSeverity, HirAnalogOperator, HirContributionKind, HirExprKind, HirExprRef,
+    HirLaplaceKind, HirLimiterArgument, HirLoop, HirModel, HirStatement, IrDiagnostic,
+    MirAnalysisDomain, MirEquationKind, MirModel, MirStateSlot, SourceSpanRef, StableDigest,
 };
 use rspice_veriloga::semantic::{AnalyzedContribution, AnalyzedModule, AnalyzedPort, SymbolTable};
 use rspice_veriloga::source::Span;
 use rspice_veriloga::types::ValueType;
-use rspice_veriloga::{Lexer, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler};
+use rspice_veriloga::{
+    Lexer, ParameterScope, Parser, SemanticAnalyzer, SourceMap, VerilogACompiler,
+};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -451,38 +451,6 @@ fn assert_mir_validation_message(mir: &MirModel, expected_substring: &str) {
     );
 }
 
-fn opt_validation_messages(opt: &OptModel) -> Vec<String> {
-    opt.validate()
-        .expect_err("malformed OptIR must fail validation")
-        .into_iter()
-        .map(|diagnostic| diagnostic.message)
-        .collect()
-}
-
-fn assert_opt_validation_message(opt: &OptModel, expected_substring: &str) {
-    let messages = opt_validation_messages(opt);
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains(expected_substring)),
-        "expected diagnostic containing {expected_substring:?}, got {messages:?}"
-    );
-}
-
-fn set_newton_ops(opt: &mut OptModel, ops: Vec<OptOp>) {
-    opt.schedules
-        .retain(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration);
-    for (index, schedule) in opt.schedules.iter_mut().enumerate() {
-        schedule.id = ScheduleId::from(index);
-    }
-    let newton = opt
-        .schedules
-        .iter_mut()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    newton.ops = ops;
-}
-
 fn lower_tiny_resistor_mir() -> MirModel {
     let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
@@ -560,262 +528,21 @@ endmodule
     assert!(arguments.contains(&HirLimiterArgument::Proposed));
     assert!(arguments.contains(&HirLimiterArgument::Previous));
 
-    let mir = MirModel::from_hir(&hir).expect("lower limiter MIR");
-    let opt = OptModel::from_hir_and_mir(&hir, &mir).expect("lower limiter OptIR");
-    opt.validate().expect("valid limiter OptIR");
-    let previous_values = opt
-        .values
-        .iter()
-        .filter(|value| matches!(value.kind, OptValueKind::LimitPrevious { .. }))
-        .count();
-    let limits: Vec<_> = opt
-        .values
-        .iter()
-        .filter(|value| matches!(value.kind, OptValueKind::Limit { .. }))
-        .collect();
-    assert_eq!(previous_values, 1);
-    assert_eq!(limits.len(), 1);
-
-    assert!(limits[0].derivatives.iter().any(|derivative| {
-        derivative.lane.kind == DerivativeLaneKind::LimiterCorrection && derivative.lane.index == 0
-    }));
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: Vec::new(),
-            node_potentials: vec![0.2, -0.1],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate first limiter iteration");
-    assert_eq!(
-        snapshot.derivative(limits[0].id, DerivativeLane::node(NodeId::new(0))),
-        Some(-1.0)
-    );
-    assert_eq!(
-        snapshot.derivative(limits[0].id, DerivativeLane::node(NodeId::new(1))),
-        Some(1.0)
-    );
-    assert_eq!(
-        snapshot.derivative(limits[0].id, DerivativeLane::limiter_correction()),
-        Some(0.0)
-    );
-}
-
-#[test]
-fn opt_custom_limit_preserves_probe_jacobian_and_affine_correction() {
-    let source = r#"
-module affine_limit(p, n);
-    inout p, n;
-    electrical p, n;
-    analog function real force_value;
-        input proposed, previous, forced;
-        real proposed, previous, forced;
-        begin
-            force_value = forced;
-        end
-    endfunction
-    analog I(p, n) <+ $limit(V(p, n), "force_value", 0.1);
-endmodule
-"#;
-    let (_, _, _, opt) = lower_fixture_parts(source, "affine_limit");
-    let limit = opt
-        .values
-        .iter()
-        .find(|value| matches!(value.kind, OptValueKind::Limit { .. }))
-        .expect("limit value");
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: Vec::new(),
-            node_potentials: vec![0.5, 0.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate affine limiter");
-
-    assert_eq!(snapshot.real(limit.id), Some(0.1));
-    assert_eq!(
-        snapshot.derivative(limit.id, DerivativeLane::node(NodeId::new(0))),
-        Some(1.0),
-        "limiter candidate body must not replace the proposed probe Jacobian"
-    );
-    assert_eq!(
-        snapshot.derivative(limit.id, DerivativeLane::node(NodeId::new(1))),
-        Some(-1.0)
-    );
-    assert_eq!(
-        snapshot.derivative(limit.id, DerivativeLane::limiter_correction()),
-        Some(-0.4),
-        "affine correction must anchor Newton linearization at the limited value"
-    );
-}
-
-#[test]
-fn primal_lowering_omits_the_derivative_expansion() {
-    // Enough nonlinearity that the chain rule has real work to do: every
-    // operand of the product carries a node derivative, so the scalarized
-    // graph has to materialize a value per lane per intermediate.
-    let source = r#"
-module primal_only(p, n);
-    inout p, n;
-    electrical p, n;
-    analog begin
-        real u, w;
-        u = exp(V(p, n) * 3.0) + V(p, n) * V(p, n);
-        w = u / (1.0 + u * u);
-        I(p, n) <+ w * V(p, n);
-    end
-endmodule
-"#;
-    let analyzed = analyze_fixture(source, "primal_only").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", source);
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let mir = MirModel::from_hir(&hir).expect("lower MIR");
-
-    let scalarized = OptModel::from_hir_and_mir(&hir, &mir).expect("lower scalarized OptIR");
-    let primal = OptModel::primal_from_hir_and_mir(&hir, &mir).expect("lower primal OptIR");
-
-    assert!(
-        primal
-            .values
-            .iter()
-            .all(|value| value.derivatives.is_empty()),
-        "primal lowering must not expand the chain rule into the value graph"
-    );
-    assert!(
-        scalarized
-            .values
-            .iter()
-            .any(|value| !value.derivatives.is_empty()),
-        "scalarized lowering is the control and must still carry derivatives"
-    );
-    assert!(
-        primal.values.len() < scalarized.values.len(),
-        "primal graph should be the smaller of the two: {} vs {}",
-        primal.values.len(),
-        scalarized.values.len()
-    );
+    MirModel::from_hir(&hir).expect("lower limiter MIR");
 }
 
 fn lower_fixture_parts(
     source: &'static str,
     module_name: &str,
-) -> (CanonicalMetadata, HirModel, MirModel, OptModel) {
+) -> (CanonicalMetadata, HirModel, MirModel) {
     let analyzed = analyze_fixture(source, module_name).expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", source);
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
     let mir = MirModel::from_hir(&hir).expect("lower MIR");
-    let opt = OptModel::from_hir_and_mir(&hir, &mir).expect("lower OptIR");
-
-    (metadata, hir, mir, opt)
+    (metadata, hir, mir)
 }
-
-fn equation_scalar_root(opt: &OptModel, equation: EquationId) -> ValueId {
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let position = newton
-        .ops
-        .iter()
-        .position(
-            |op| matches!(op, OptOp::EvaluateEquation { equation: found } if *found == equation),
-        )
-        .expect("equation evaluation");
-    newton.ops[..position]
-        .iter()
-        .rev()
-        .find_map(|op| match op {
-            OptOp::ComputeValue { value } => Some(*value),
-            OptOp::EvaluateEquation { .. } => None,
-        })
-        .expect("equation scalar root")
-}
-
-fn initial_step_assignment_source(body: &str) -> String {
-    format!(
-        r#"
-module initial_step_assignment(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter real gain = 2.0;
-    real seed;
-    analog begin
-        {body}
-        I(p, n) <+ seed * V(p, n);
-    end
-endmodule
-"#
-    )
-}
-
-fn evaluate_initial_step_assignment(source: &str) -> f64 {
-    let opt = lower_initial_step_assignment(source);
-    let root = equation_scalar_root(&opt, EquationId::new(0));
-    opt.evaluate(&OptEvalInputs {
-        parameters: vec![2.0],
-        node_potentials: vec![3.0, 0.0],
-        branch_flows: Vec::new(),
-    })
-    .expect("evaluate initial-step graph")
-    .real(root)
-    .expect("real equation root")
-}
-
-fn lower_initial_step_assignment(source: &str) -> OptModel {
-    let analyzed = analyze_fixture(source, "initial_step_assignment").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", source);
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let mir = MirModel::from_hir(&hir).expect("lower MIR");
-    OptModel::from_hir_and_mir(&hir, &mir).expect("lower OptIR")
-}
-
-fn value_depends_on_initial_step(opt: &OptModel, value: ValueId) -> bool {
-    fn visit(
-        opt: &OptModel,
-        value: ValueId,
-        seen: &mut std::collections::HashSet<ValueId>,
-    ) -> bool {
-        if !seen.insert(value) {
-            return false;
-        }
-        match &opt.values[usize::from(value)].kind {
-            OptValueKind::Analysis { query } => query == "__rspice_initial_step",
-            OptValueKind::Ddx { value, .. }
-            | OptValueKind::Ddt { input: value, .. }
-            | OptValueKind::Unary { input: value, .. } => visit(opt, *value, seen),
-            OptValueKind::Binary { left, right, .. } => {
-                visit(opt, *left, seen) || visit(opt, *right, seen)
-            }
-            OptValueKind::Select {
-                condition,
-                then_value,
-                else_value,
-            } => {
-                visit(opt, *condition, seen)
-                    || visit(opt, *then_value, seen)
-                    || visit(opt, *else_value, seen)
-            }
-            OptValueKind::CountedSum {
-                count,
-                initial,
-                term,
-                ..
-            } => visit(opt, *count, seen) || visit(opt, *initial, seen) || visit(opt, *term, seen),
-            _ => false,
-        }
-    }
-    visit(opt, value, &mut std::collections::HashSet::new())
-}
-
-fn lower_tiny_resistor_parts() -> (CanonicalMetadata, HirModel, MirModel, OptModel) {
+fn lower_tiny_resistor_parts() -> (CanonicalMetadata, HirModel, MirModel) {
     lower_fixture_parts(tiny_resistor_source(), "tiny_res")
-}
-
-fn lower_internal_node_mir() -> MirModel {
-    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    MirModel::from_hir(&hir).expect("lower MIR")
 }
 
 fn contribution_branch_access_id(hir: &HirModel) -> ExprId {
@@ -884,93 +611,6 @@ endmodule
 "#
 }
 
-fn integer_parameter_loop_accumulator_source() -> &'static str {
-    r#"
-module integer_parameter_loop_accum(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter integer nf = 4 from [0:inf);
-    integer i;
-    real acc;
-    analog begin
-        i = 0;
-        acc = 0.0;
-        while (i < nf) begin
-            acc = acc + V(p, n);
-            i = i + 1;
-        end
-        I(p, n) <+ acc;
-    end
-endmodule
-"#
-}
-
-fn mixed_dynamic_assignment_source() -> &'static str {
-    r#"
-module mixed_dynamic_assignment(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter real c = 1e-12 from [0:inf);
-    real x, q;
-    analog begin
-        x = V(p, n) + 3.0;
-        I(p, n) <+ x;
-        q = c * V(p, n);
-        I(p, n) <+ ddt(q);
-    end
-endmodule
-"#
-}
-
-fn temperature_static_gain_source() -> &'static str {
-    r#"
-module temperature_static_gain(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter real alpha = 1.0e-3;
-    parameter real tnom = 300.15;
-    real tc;
-    analog begin
-        tc = 1.0 + alpha * ($temperature - tnom);
-        I(p, n) <+ V(p, n) / tc;
-    end
-endmodule
-"#
-}
-
-fn chunked_dynamic_assignment_source(count: usize) -> String {
-    assert!(count > 0);
-    let mut source = String::from(
-        r#"
-module chunked_dynamic_assignments(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter real c = 1e-12 from [0:inf);
-"#,
-    );
-    for index in 0..count {
-        source.push_str(&format!("    real x{index};\n"));
-    }
-    source.push_str(
-        r#"    real q;
-    analog begin
-        x0 = V(p, n);
-"#,
-    );
-    for index in 1..count {
-        source.push_str(&format!("        x{index} = x{} + 1.0;\n", index - 1));
-    }
-    source.push_str(&format!("        I(p, n) <+ x{};\n", count - 1));
-    source.push_str(
-        r#"        q = c * V(p, n);
-        I(p, n) <+ ddt(q);
-    end
-endmodule
-"#,
-    );
-    source
-}
-
 fn internal_node_source() -> &'static str {
     r#"
 module has_mid(p, n);
@@ -981,130 +621,6 @@ module has_mid(p, n);
         I(p, mid) <+ V(p, mid);
         I(mid, n) <+ V(mid, n);
     end
-endmodule
-"#
-}
-
-fn multiply_by_one_source() -> &'static str {
-    r#"
-module mul_one(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ V(p, n) * 1.0;
-endmodule
-"#
-}
-
-fn algebraic_identity_source() -> &'static str {
-    r#"
-module algebraic_identity(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ (((V(p, n) + 0.0) - 0.0) * -1.0) / -1.0;
-endmodule
-"#
-}
-
-fn commutative_reuse_source() -> &'static str {
-    r#"
-module commutative_reuse(p, n);
-    inout p, n;
-    electrical p, n;
-    analog begin
-        I(p, n) <+ V(p, n) + 2.0;
-        I(p, n) <+ 2.0 + V(p, n);
-    end
-endmodule
-"#
-}
-
-fn constant_arithmetic_source() -> &'static str {
-    r#"
-module const_arith(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ (2.0 + 3.0) * V(p, n);
-endmodule
-"#
-}
-
-fn negative_constant_gain_source() -> &'static str {
-    r#"
-module neg_const_gain(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ -1.0 * V(p, n);
-endmodule
-"#
-}
-
-fn sine_current_source() -> &'static str {
-    r#"
-module sin_i(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ sin(V(p, n));
-endmodule
-"#
-}
-
-fn ddx_current_source() -> &'static str {
-    r#"
-module ddx_current(p, n);
-    inout p, n;
-    electrical p, n;
-    real cap;
-    analog begin
-        cap = ddx(V(p, n) * V(p, n), V(p, n));
-        I(p, n) <+ cap * V(p, n);
-    end
-endmodule
-"#
-}
-
-fn thermal_named_potential_source() -> &'static str {
-    r#"
-module thermal_named_potential(p, n, t);
-    inout p, n, t;
-    electrical p, n;
-    thermal t;
-    branch (t) th;
-    analog I(p, n) <+ Temp(th);
-endmodule
-"#
-}
-
-fn thermal_ddx_source() -> &'static str {
-    r#"
-module thermal_ddx(p, n, t);
-    inout p, n, t;
-    electrical p, n;
-    thermal t;
-    real dtemp;
-    analog begin
-        dtemp = ddx(Temp(t) * Temp(t), Temp(t));
-        I(p, n) <+ dtemp;
-    end
-endmodule
-"#
-}
-
-fn atan_current_source() -> &'static str {
-    r#"
-module atan_i(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ atan(V(p, n));
-endmodule
-"#
-}
-
-fn asinh_current_source() -> &'static str {
-    r#"
-module asinh_i(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ asinh(V(p, n));
 endmodule
 "#
 }
@@ -1462,7 +978,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 5);
+    assert_eq!(metadata.schema_version, 6);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -1609,1620 +1125,119 @@ fn mir_lowering_makes_contributions_explicit_equations() {
 }
 
 #[test]
-fn opt_lowering_builds_newton_schedule_from_mir_equations() {
-    let mir = lower_tiny_resistor_mir();
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
-
-    assert_eq!(opt.module_name.as_str(), "tiny_res");
-
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-
-    assert_eq!(
-        newton.ops.last(),
-        Some(&OptOp::EvaluateEquation {
-            equation: EquationId::new(0)
-        })
-    );
-    assert!(opt.validate().is_ok());
-}
-
-#[test]
-fn opt_lowering_builds_scalar_graph_for_tiny_resistor_expression() {
-    let mir = lower_tiny_resistor_mir();
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
-
-    assert!(opt.values.len() >= 5);
-    assert_eq!(
-        opt.values[0].kind,
-        OptValueKind::NodePotential {
-            node: NodeId::new(0)
-        }
-    );
-    assert_eq!(
-        opt.values[1].kind,
-        OptValueKind::NodePotential {
-            node: NodeId::new(1)
-        }
-    );
-    assert_eq!(
-        opt.values[2].kind,
-        OptValueKind::Binary {
-            op: OptBinaryOp::Sub,
-            left: ValueId::new(0),
-            right: ValueId::new(1),
-        }
-    );
-    assert_eq!(
-        opt.values[3].kind,
-        OptValueKind::Parameter {
-            parameter: ParamId::new(0)
-        }
-    );
-    assert_eq!(
-        opt.values[4].kind,
-        OptValueKind::Binary {
-            op: OptBinaryOp::Div,
-            left: ValueId::new(2),
-            right: ValueId::new(3),
-        }
-    );
-
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    assert_eq!(
-        newton.ops,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(4)
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0)
-            }
-        ]
-    );
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![1000.0],
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate lowered graph");
-    assert_eq!(snapshot.real(ValueId::new(4)), Some(0.003));
-}
-
-#[test]
-fn opt_lowering_adds_sparse_derivatives_for_tiny_resistor_expression() {
-    let mir = lower_tiny_resistor_mir();
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
-
-    let root = ValueId::new(4);
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![1000.0],
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate lowered graph");
-
-    assert_eq!(
-        snapshot.derivative(root, DerivativeLane::node(NodeId::new(0))),
-        Some(0.001)
-    );
-    assert_eq!(
-        snapshot.derivative(root, DerivativeLane::node(NodeId::new(1))),
-        Some(-0.001)
-    );
-}
-
-#[test]
-fn opt_lowering_reuses_common_scalar_values_across_equations() {
-    let mir = lower_internal_node_mir();
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
-
-    let mid_potential_count = opt
-        .values
-        .iter()
-        .filter(|value| {
-            value.kind
-                == OptValueKind::NodePotential {
-                    node: NodeId::new(2),
-                }
-        })
-        .count();
-
-    assert_eq!(mid_potential_count, 1);
-}
-
-#[test]
-fn opt_lowering_resolves_straight_line_scalar_assignment() {
-    let (_, _, _, opt) = lower_fixture_parts(scalar_assignment_source(), "scalar_assign");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("assignment-fed current should have a scalar root: {newton:?}");
-    };
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: Vec::new(),
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate assignment-fed scalar graph");
-
-    assert_eq!(snapshot.real(*root), Some(3.0));
-    assert!(
-        opt.values
-            .iter()
-            .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
-        "assignment-fed scalar graph should not fall back to legacy equation values: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_scalarizes_ddx_projection_current() {
-    let (_, _, _, opt) = lower_fixture_parts(ddx_current_source(), "ddx_current");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("ddx current should have a scalar root: {newton:?}");
-    };
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: Vec::new(),
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate ddx scalar graph");
-
-    assert_eq!(snapshot.real(*root), Some(18.0));
-    assert_eq!(
-        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(0))),
-        Some(6.0)
-    );
-    assert_eq!(
-        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(1))),
-        Some(-6.0)
-    );
-    assert!(
-        opt.values
-            .iter()
-            .any(|value| matches!(value.kind, OptValueKind::Ddx { .. })),
-        "ddx projection should stay in scalar OptIR: {:?}",
-        opt.values
-    );
-    assert!(
-        opt.values
-            .iter()
-            .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
-        "ddx current should not fall back to legacy equation values: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_scalarizes_named_thermal_potential_access() {
-    let (_, _, _, opt) =
-        lower_fixture_parts(thermal_named_potential_source(), "thermal_named_potential");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("thermal potential current should have a scalar root: {newton:?}");
-    };
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: Vec::new(),
-            node_potentials: vec![0.0, 0.0, 12.5],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate thermal potential scalar graph");
-
-    assert_eq!(snapshot.real(*root), Some(12.5));
-}
-
-#[test]
-fn opt_lowering_scalarizes_thermal_ddx_probe() {
-    let (_, _, _, opt) = lower_fixture_parts(thermal_ddx_source(), "thermal_ddx");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("thermal ddx current should have a scalar root: {newton:?}");
-    };
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: Vec::new(),
-            node_potentials: vec![0.0, 0.0, 7.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate thermal ddx scalar graph");
-
-    assert_eq!(snapshot.real(*root), Some(14.0));
-    assert!(
-        opt.values
-            .iter()
-            .any(|value| matches!(value.kind, OptValueKind::Ddx { .. })),
-        "thermal ddx projection should stay in scalar OptIR: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_scalarizes_nonnegative_integer_parameter_counted_accumulator_loop() {
-    let (_, _, _, opt) = lower_fixture_parts(
-        integer_parameter_loop_accumulator_source(),
-        "integer_parameter_loop_accum",
-    );
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("integer parameter counted loop should have a scalar root: {newton:?}");
-    };
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![4.0],
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate integer counted loop scalar graph");
-
-    assert_eq!(snapshot.real(*root), Some(12.0));
-    assert_eq!(
-        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(0))),
-        Some(4.0)
-    );
-    assert_eq!(
-        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(1))),
-        Some(-4.0)
-    );
-    assert!(
-        opt.values
-            .iter()
-            .all(|value| !matches!(value.kind, OptValueKind::EquationValue { .. })),
-        "integer counted loop should not fall back to legacy equation values: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_keeps_assignment_fed_static_roots_in_dynamic_models() {
-    let (_, _, _, opt) = lower_fixture_parts(
-        mixed_dynamic_assignment_source(),
-        "mixed_dynamic_assignment",
-    );
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("assignment-fed static current should have a scalar root: {newton:?}");
-    };
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![1.0e-12],
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate mixed dynamic scalar graph");
-
-    assert_eq!(snapshot.real(*root), Some(6.0));
-    assert_eq!(
-        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(0))),
-        Some(1.0)
-    );
-    assert_eq!(
-        snapshot.derivative(*root, DerivativeLane::node(NodeId::new(1))),
-        Some(-1.0)
-    );
-}
-
-#[test]
-fn opt_lowering_keeps_ddt_operand_roots_in_dynamic_models() {
-    let (_, _, _, opt) = lower_fixture_parts(
-        mixed_dynamic_assignment_source(),
-        "mixed_dynamic_assignment",
-    );
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-
-    assert!(
-        matches!(newton.ops.as_slice(), [
-            OptOp::ComputeValue { .. },
-            OptOp::EvaluateEquation { equation: eq0 },
-            OptOp::ComputeValue { .. },
-            OptOp::EvaluateEquation { equation: eq1 },
-        ] if *eq0 == EquationId::new(0) && *eq1 == EquationId::new(1)),
-        "static and ddt equations should both have scalar roots: {newton:?}"
-    );
-}
-
-#[test]
-fn opt_lowering_schedules_temperature_dependent_derivatives_as_temperature_static() {
-    let (_, _, _, opt) =
-        lower_fixture_parts(temperature_static_gain_source(), "temperature_static_gain");
-    let temperature_static = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::TemperatureStatic)
-        .expect("TemperatureStatic schedule");
-    let temperature_values: std::collections::HashSet<_> = temperature_static
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            OptOp::ComputeValue { value } => Some(*value),
-            OptOp::EvaluateEquation { .. } => None,
-        })
-        .collect();
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("temperature-static gain current should have a scalar root: {newton:?}");
-    };
-    let root_value = &opt.values[usize::from(*root)];
-
-    assert_eq!(root_value.derivatives.len(), 2, "{root_value:?}");
-    for derivative in &root_value.derivatives {
-        assert!(
-            temperature_values.contains(&derivative.value),
-            "derivative {:?} should be computed in TemperatureStatic schedule {:?}",
-            derivative,
-            temperature_static
-        );
-    }
-    assert!(
-        newton.ops.iter().all(|op| match op {
-            OptOp::ComputeValue { value } => root_value
-                .derivatives
-                .iter()
-                .all(|derivative| derivative.value != *value),
-            OptOp::EvaluateEquation { .. } => true,
-        }),
-        "Newton schedule should not compute temperature-static derivatives: {newton:?}"
-    );
-}
-
-#[test]
-fn opt_lowering_folds_single_pure_unfiltered_initial_step_initialization() {
-    let source = initial_step_assignment_source("@(initial_step) seed = gain;");
-    assert_eq!(evaluate_initial_step_assignment(&source), 6.0);
-}
-
-#[test]
-fn opt_lowering_folds_temperature_static_unfiltered_initial_step_initialization() {
-    let source = initial_step_assignment_source("@(initial_step) seed = $temperature;");
-    let opt = lower_initial_step_assignment(&source);
-    let root = equation_scalar_root(&opt, EquationId::new(0));
-    assert!(!value_depends_on_initial_step(&opt, root));
-    assert!(
-        opt.schedules
-            .iter()
-            .any(|schedule| schedule.invalidation == InvalidationClass::TemperatureStatic)
-    );
-}
-
-#[test]
-fn opt_lowering_propagates_live_simparam_initial_step_alias() {
-    let source =
-        initial_step_assignment_source("@(initial_step) seed = $simparam(\"gain_scale\", gain);");
-    let opt = lower_initial_step_assignment(&source);
-    let root = equation_scalar_root(&opt, EquationId::new(0));
-    assert!(!value_depends_on_initial_step(&opt, root));
-    assert!(opt.values.iter().any(|value| matches!(
-        &value.kind,
-        OptValueKind::SimParam { name, .. } if name == "gain_scale"
-    )));
-    assert_eq!(
-        opt.evaluate(&OptEvalInputs {
-            parameters: vec![2.0],
-            node_potentials: vec![3.0, 0.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate live simparam fallback")
-        .real(root),
-        Some(6.0)
-    );
-}
-
-#[test]
-fn opt_lowering_keeps_state_dependent_simparam_fallback_guarded() {
-    let source = initial_step_assignment_source(
-        "@(initial_step) seed = $simparam(\"stateful_fallback\", V(p, n));",
-    );
-    let opt = lower_initial_step_assignment(&source);
-    assert!(value_depends_on_initial_step(
-        &opt,
-        equation_scalar_root(&opt, EquationId::new(0))
-    ));
-}
-
-#[test]
-fn opt_lowering_folds_mutually_exclusive_pure_assignments_in_one_initial_step_event() {
-    let source = initial_step_assignment_source(
-        "@(initial_step) begin if (gain > 1.0) seed = gain; else seed = 1.0; end",
-    );
-    assert_eq!(evaluate_initial_step_assignment(&source), 6.0);
-}
-
-#[test]
-fn opt_lowering_folds_parameter_given_polarity_selection_in_one_initial_step_event() {
-    let source = r#"
-module initial_step_assignment(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter real gain = 2.0;
-    parameter integer npn = 0;
-    parameter integer pnp = 0;
-    parameter integer type = 1;
-    real seed;
-    analog begin
-        @(initial_step) begin
-            if ($param_given(npn)) seed = 1.0;
-            else if ($param_given(pnp)) seed = -1.0;
-            else if ($param_given(type)) seed = type;
-            else seed = 1.0;
-        end
-        I(p, n) <+ seed * gain * V(p, n);
-    end
-endmodule
-"#;
-    let opt = lower_initial_step_assignment(source);
-    let root = equation_scalar_root(&opt, EquationId::new(0));
-    assert!(!value_depends_on_initial_step(&opt, root));
-    assert_eq!(
-        opt.evaluate(&OptEvalInputs {
-            parameters: vec![2.0, 0.0, 0.0, -1.0],
-            node_potentials: vec![3.0, 0.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate polarity selection")
-        .real(root),
-        Some(6.0)
-    );
-}
-
-#[test]
-fn opt_lowering_folds_sequential_pure_assignments_in_one_initial_step_event() {
-    let source =
-        initial_step_assignment_source("@(initial_step) begin seed = gain; seed = gain + 1.0; end");
-    assert_eq!(evaluate_initial_step_assignment(&source), 9.0);
-}
-
-#[test]
-fn opt_lowering_keeps_filtered_initial_step_assignment_guarded() {
-    let source = initial_step_assignment_source("@(initial_step(\"tran\")) seed = gain;");
-    let opt = lower_initial_step_assignment(&source);
-    assert!(value_depends_on_initial_step(
-        &opt,
-        equation_scalar_root(&opt, EquationId::new(0))
-    ));
-}
-
-#[test]
-fn opt_lowering_keeps_node_dependent_initial_step_assignment_guarded() {
-    let source = initial_step_assignment_source("@(initial_step) seed = V(p, n);");
-    let opt = lower_initial_step_assignment(&source);
-    assert!(value_depends_on_initial_step(
-        &opt,
-        equation_scalar_root(&opt, EquationId::new(0))
-    ));
-}
-
-#[test]
-fn opt_lowering_keeps_time_dependent_initial_step_assignment_guarded() {
-    let source = initial_step_assignment_source("@(initial_step) seed = $abstime + gain;");
-    let opt = lower_initial_step_assignment(&source);
-    assert!(value_depends_on_initial_step(
-        &opt,
-        equation_scalar_root(&opt, EquationId::new(0))
-    ));
-}
-
-#[test]
-fn opt_lowering_keeps_self_dependent_initial_step_assignment_guarded() {
-    let source = initial_step_assignment_source("@(initial_step) seed = seed + gain;");
-    let opt = lower_initial_step_assignment(&source);
-    assert!(value_depends_on_initial_step(
-        &opt,
-        equation_scalar_root(&opt, EquationId::new(0))
-    ));
-}
-
-#[test]
-fn opt_lowering_keeps_writes_from_separate_initial_step_events_guarded() {
-    let source = initial_step_assignment_source(
-        "@(initial_step) seed = gain; @(initial_step) seed = gain + 1.0;",
-    );
-    let opt = lower_initial_step_assignment(&source);
-    assert!(value_depends_on_initial_step(
-        &opt,
-        equation_scalar_root(&opt, EquationId::new(0))
-    ));
-}
-
-#[test]
-fn opt_lowering_keeps_mixed_unconditional_and_initial_step_writes_guarded() {
-    let source = initial_step_assignment_source("seed = gain + 1.0; @(initial_step) seed = gain;");
-    let opt = lower_initial_step_assignment(&source);
-    assert!(value_depends_on_initial_step(
-        &opt,
-        equation_scalar_root(&opt, EquationId::new(0))
-    ));
-}
-
-#[test]
-fn opt_lowering_keeps_large_assignment_chain_roots_in_dynamic_models() {
-    let source = chunked_dynamic_assignment_source(320);
-    let analyzed =
-        analyze_fixture(&source, "chunked_dynamic_assignments").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", &source);
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let mir = MirModel::from_hir(&hir).expect("lower MIR");
-    let opt = OptModel::from_hir_and_mir(&hir, &mir).expect("lower OptIR");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-
-    let Some(OptOp::ComputeValue { .. }) = newton.ops.first() else {
-        panic!("large assignment-fed static current should have a scalar root: {newton:?}");
-    };
-}
-
-#[test]
-fn opt_lowering_adds_sparse_derivatives_for_sine_current() {
-    let (_, _, _, opt) = lower_fixture_parts(sine_current_source(), "sin_i");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("sine current should have a scalar root: {newton:?}");
-    };
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: Vec::new(),
-            node_potentials: vec![0.75, 0.25],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate sine scalar graph");
-    let expected_value = 0.5_f64.sin();
-    let expected_derivative = 0.5_f64.cos();
-
-    assert!((snapshot.real(*root).expect("root value") - expected_value).abs() < 1.0e-15);
-    assert!(
-        (snapshot
-            .derivative(*root, DerivativeLane::node(NodeId::new(0)))
-            .expect("positive node derivative")
-            - expected_derivative)
-            .abs()
-            < 1.0e-15
-    );
-    assert!(
-        (snapshot
-            .derivative(*root, DerivativeLane::node(NodeId::new(1)))
-            .expect("negative node derivative")
-            + expected_derivative)
-            .abs()
-            < 1.0e-15
-    );
-}
-
-#[test]
-fn opt_lowering_adds_sparse_derivatives_for_inverse_math_currents() {
-    let cases = [
-        (
-            atan_current_source(),
-            "atan_i",
-            0.5_f64.atan(),
-            1.0 / (1.0 + 0.5_f64 * 0.5_f64),
-        ),
-        (
-            asinh_current_source(),
-            "asinh_i",
-            0.5_f64.asinh(),
-            1.0 / (1.0 + 0.5_f64 * 0.5_f64).sqrt(),
-        ),
-    ];
-
-    for (source, module, expected_value, expected_derivative) in cases {
-        let (_, _, _, opt) = lower_fixture_parts(source, module);
-        let newton = opt
-            .schedules
-            .iter()
-            .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-            .expect("NewtonIteration schedule");
-        let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-            panic!("inverse math current should have a scalar root: {newton:?}");
-        };
-
-        let snapshot = opt
-            .evaluate(&OptEvalInputs {
-                parameters: Vec::new(),
-                node_potentials: vec![0.75, 0.25],
-                branch_flows: Vec::new(),
-            })
-            .expect("evaluate inverse math scalar graph");
-
-        assert!((snapshot.real(*root).expect("root value") - expected_value).abs() < 1.0e-15);
-        assert!(
-            (snapshot
-                .derivative(*root, DerivativeLane::node(NodeId::new(0)))
-                .expect("positive node derivative")
-                - expected_derivative)
-                .abs()
-                < 1.0e-15
-        );
-        assert!(
-            (snapshot
-                .derivative(*root, DerivativeLane::node(NodeId::new(1)))
-                .expect("negative node derivative")
-                + expected_derivative)
-                .abs()
-                < 1.0e-15
-        );
-    }
-}
-
-#[test]
-fn opt_lowering_strength_reduces_multiply_by_one() {
-    let (_, _, _, opt) = lower_fixture_parts(multiply_by_one_source(), "mul_one");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-
-    assert_eq!(
-        newton.ops.first(),
-        Some(&OptOp::ComputeValue {
-            value: ValueId::new(2)
-        })
-    );
-    assert!(
-        opt.values.iter().all(|value| {
-            !matches!(
-                value.kind,
-                OptValueKind::Binary {
-                    op: OptBinaryOp::Mul,
-                    ..
-                }
-            )
-        }),
-        "multiply by one should not remain in scalar OptIR: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_simplifies_scalar_algebraic_identities() {
-    let (_, _, _, opt) = lower_fixture_parts(algebraic_identity_source(), "algebraic_identity");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("identity expression should have a scalar root: {newton:?}");
-    };
-
-    assert_eq!(
-        *root,
-        ValueId::new(2),
-        "identity chain should simplify to the existing branch potential: {:?}",
-        opt.values
-    );
-    assert!(
-        opt.values.iter().all(|value| {
-            if value.id == *root {
-                return true;
-            }
-            !matches!(
-                value.kind,
-                OptValueKind::Binary {
-                    op: OptBinaryOp::Add | OptBinaryOp::Sub | OptBinaryOp::Mul | OptBinaryOp::Div,
-                    ..
-                } | OptValueKind::Unary {
-                    op: OptUnaryOp::Neg,
-                    ..
-                }
-            )
-        }),
-        "scalar algebraic identities should not remain in OptIR: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_reuses_commutative_scalar_binary_values() {
-    let (_, _, _, opt) = lower_fixture_parts(commutative_reuse_source(), "commutative_reuse");
-
-    let add_count = opt
-        .values
-        .iter()
-        .filter(|value| {
-            matches!(
-                value.kind,
-                OptValueKind::Binary {
-                    op: OptBinaryOp::Add,
-                    ..
-                }
-            )
-        })
-        .count();
-
-    assert_eq!(
-        add_count, 1,
-        "operand-order equivalent additions should CSE to one OptIR value: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_constant_folds_real_arithmetic() {
-    let (_, _, _, opt) = lower_fixture_parts(constant_arithmetic_source(), "const_arith");
-
-    assert!(
-        opt.values
-            .iter()
-            .any(|value| value.kind == OptValueKind::RealConstant(5.0)),
-        "constant arithmetic should fold to one scalar value: {:?}",
-        opt.values
-    );
-    assert!(
-        opt.values.iter().all(|value| {
-            !matches!(
-                value.kind,
-                OptValueKind::Binary {
-                    op: OptBinaryOp::Add,
-                    left,
-                    right,
-                } if matches!(
-                    (&opt.values[usize::from(left)].kind, &opt.values[usize::from(right)].kind),
-                    (OptValueKind::RealConstant(_), OptValueKind::RealConstant(_))
-                )
-            )
-        }),
-        "constant-only additions should not remain in scalar OptIR: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_lowering_eliminates_dead_folded_constant_operands() {
-    let (_, _, _, opt) = lower_fixture_parts(constant_arithmetic_source(), "const_arith");
-
-    assert!(
-        opt.values.iter().all(|value| {
-            !matches!(
-                value.kind,
-                OptValueKind::RealConstant(value) if value == 2.0 || value == 3.0
-            )
-        }),
-        "folded constant operands should not remain live in scalar OptIR: {:?}",
-        opt.values
-    );
-    assert!(opt.validate().is_ok());
-}
-
-#[test]
-fn opt_lowering_constant_folds_unary_negation() {
-    let (_, _, _, opt) = lower_fixture_parts(negative_constant_gain_source(), "neg_const_gain");
-
-    assert!(
-        opt.values
-            .iter()
-            .any(|value| value.kind == OptValueKind::RealConstant(-1.0)),
-        "negative literal should fold to one scalar value: {:?}",
-        opt.values
-    );
-    assert!(
-        opt.values.iter().all(|value| {
-            !matches!(
-                value.kind,
-                OptValueKind::Unary {
-                    op: OptUnaryOp::Neg,
-                    input,
-                } if matches!(opt.values[usize::from(input)].kind, OptValueKind::RealConstant(_))
-            )
-        }),
-        "constant unary negation should not remain in scalar OptIR: {:?}",
-        opt.values
-    );
-}
-
-#[test]
-fn opt_validation_rejects_missing_newton_schedule() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.schedules
-        .retain(|schedule| schedule.invalidation != InvalidationClass::NewtonIteration);
-
-    assert_opt_validation_message(&opt, "exactly one NewtonIteration schedule");
-}
-
-#[test]
-fn opt_validation_rejects_non_dense_schedule_id() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.schedules[0].id = ScheduleId::new(9);
-
-    assert_opt_validation_message(&opt, "OptIR schedule IDs must be dense");
-}
-
-#[test]
-fn opt_validation_rejects_non_dense_value_id() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values.push(OptValue {
-        id: ValueId::new(1),
-        value_type: OptValueType::Real,
-        kind: OptValueKind::RealConstant(1.0),
-        derivatives: Vec::new(),
-    });
-
-    assert_opt_validation_message(&opt, "OptIR value IDs must be dense");
-}
-
-#[test]
-fn opt_validation_accepts_scalar_value_graph() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: vec![OptDerivative {
-                lane: DerivativeLane::node(NodeId::new(0)),
-                value: ValueId::new(2),
-            }],
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Parameter {
-                parameter: ParamId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(2),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(1.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(3),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Div,
-                left: ValueId::new(0),
-                right: ValueId::new(1),
-            },
-            derivatives: vec![OptDerivative {
-                lane: DerivativeLane {
-                    kind: DerivativeLaneKind::Node,
-                    index: 0,
-                },
-                value: ValueId::new(2),
-            }],
-        },
-    ];
-
-    set_newton_ops(
-        &mut opt,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(3),
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0),
-            },
-        ],
-    );
-
-    assert!(opt.validate().is_ok());
-}
-
-#[test]
-fn opt_validation_rejects_scalar_operand_out_of_range() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![OptValue {
-        id: ValueId::new(0),
-        value_type: OptValueType::Real,
-        kind: OptValueKind::Unary {
-            op: OptUnaryOp::Neg,
-            input: ValueId::new(9),
-        },
-        derivatives: Vec::new(),
-    }];
-    set_newton_ops(
-        &mut opt,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(0),
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0),
-            },
-        ],
-    );
-
-    assert_opt_validation_message(&opt, "operand ValueId(9) is out of range");
-}
-
-#[test]
-fn opt_validation_rejects_forward_scalar_operand() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Unary {
-                op: OptUnaryOp::Neg,
-                input: ValueId::new(1),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(1.0),
-            derivatives: Vec::new(),
-        },
-    ];
-
-    assert_opt_validation_message(&opt, "violates scalar value topological order");
-}
-
-#[test]
-fn opt_validation_rejects_duplicate_derivative_lanes() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(1.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: vec![
-                OptDerivative {
-                    lane: DerivativeLane::node(NodeId::new(0)),
-                    value: ValueId::new(0),
-                },
-                OptDerivative {
-                    lane: DerivativeLane::node(NodeId::new(0)),
-                    value: ValueId::new(0),
-                },
-            ],
-        },
-    ];
-
-    assert_opt_validation_message(&opt, "duplicate derivative lane");
-}
-
-#[test]
-fn opt_validation_rejects_out_of_range_derivative_lane() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(1.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: vec![OptDerivative {
-                lane: DerivativeLane::node(NodeId::new(opt.node_count)),
-                value: ValueId::new(0),
-            }],
-        },
-    ];
-
-    assert_opt_validation_message(&opt, "derivative lane");
-    assert_opt_validation_message(&opt, "out of range");
-}
-
-#[test]
-fn opt_validation_rejects_unsorted_derivative_lanes() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(1.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: vec![
-                OptDerivative {
-                    lane: DerivativeLane::node(NodeId::new(1)),
-                    value: ValueId::new(0),
-                },
-                OptDerivative {
-                    lane: DerivativeLane::node(NodeId::new(0)),
-                    value: ValueId::new(0),
-                },
-            ],
-        },
-    ];
-
-    assert_opt_validation_message(&opt, "derivative lanes must be sorted");
-}
-
-#[test]
-fn opt_validation_rejects_schedule_value_out_of_range() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.schedules[1].ops.insert(
-        0,
-        OptOp::ComputeValue {
-            value: ValueId::new(42),
-        },
-    );
-
-    assert_opt_validation_message(&opt, "ComputeValue ValueId(42) is out of range");
-}
-
-#[test]
-fn opt_reference_evaluator_evaluates_scalar_value_graph() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(1),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(2),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Sub,
-                left: ValueId::new(0),
-                right: ValueId::new(1),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(3),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Parameter {
-                parameter: ParamId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(4),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Div,
-                left: ValueId::new(2),
-                right: ValueId::new(3),
-            },
-            derivatives: Vec::new(),
-        },
-    ];
-    set_newton_ops(
-        &mut opt,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(4),
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0),
-            },
-        ],
-    );
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![1000.0],
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate OptIR");
-
-    assert_eq!(snapshot.real(ValueId::new(4)).expect("real value"), 0.003);
-}
-
-#[test]
-fn opt_reference_evaluator_exposes_sparse_derivative_values() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(1.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: vec![OptDerivative {
-                lane: DerivativeLane::node(NodeId::new(0)),
-                value: ValueId::new(0),
-            }],
-        },
-    ];
-    set_newton_ops(
-        &mut opt,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(1),
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0),
-            },
-        ],
-    );
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![1000.0],
-            node_potentials: vec![5.0, 2.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate OptIR");
-
-    assert_eq!(
-        snapshot.derivative(ValueId::new(1), DerivativeLane::node(NodeId::new(0))),
-        Some(1.0)
-    );
-    assert_eq!(
-        snapshot.derivative(ValueId::new(1), DerivativeLane::node(NodeId::new(1))),
-        None
-    );
-}
-
-#[test]
-fn opt_reference_evaluator_evaluates_diode_like_expression() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.parameter_count = 2;
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Parameter {
-                parameter: ParamId::new(1),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(2),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Div,
-                left: ValueId::new(0),
-                right: ValueId::new(1),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(3),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Unary {
-                op: OptUnaryOp::Exp,
-                input: ValueId::new(2),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(4),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(1.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(5),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Sub,
-                left: ValueId::new(3),
-                right: ValueId::new(4),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(6),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Parameter {
-                parameter: ParamId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(7),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Mul,
-                left: ValueId::new(6),
-                right: ValueId::new(5),
-            },
-            derivatives: Vec::new(),
-        },
-    ];
-    set_newton_ops(
-        &mut opt,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(7),
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0),
-            },
-        ],
-    );
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![1.0e-12, 0.026],
-            node_potentials: vec![0.026, 0.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate OptIR");
-
-    let expected = 1.0e-12 * (std::f64::consts::E - 1.0);
-    let actual = snapshot.real(ValueId::new(7)).expect("diode current");
-    assert!((actual - expected).abs() < 1.0e-24);
-}
-
-#[test]
-fn opt_reference_evaluator_evaluates_conditional_select() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(0.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(2),
-            value_type: OptValueType::Boolean,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Gt,
-                left: ValueId::new(0),
-                right: ValueId::new(1),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(3),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(10.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(4),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::RealConstant(-10.0),
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(5),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Select {
-                condition: ValueId::new(2),
-                then_value: ValueId::new(3),
-                else_value: ValueId::new(4),
-            },
-            derivatives: Vec::new(),
-        },
-    ];
-    set_newton_ops(
-        &mut opt,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(5),
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0),
-            },
-        ],
-    );
-
-    let snapshot = opt
-        .evaluate(&OptEvalInputs {
-            parameters: vec![1000.0],
-            node_potentials: vec![5.0, 0.0],
-            branch_flows: Vec::new(),
-        })
-        .expect("evaluate OptIR");
-
-    assert_eq!(snapshot.boolean(ValueId::new(2)), Some(true));
-    assert_eq!(snapshot.real(ValueId::new(5)), Some(10.0));
-}
-
-#[test]
-fn opt_validation_rejects_schedules_out_of_invalidation_order() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.schedules.swap(0, 1);
-    opt.schedules[0].id = ScheduleId::new(0);
-    opt.schedules[1].id = ScheduleId::new(1);
-
-    assert_opt_validation_message(&opt, "schedule order");
-}
-
-#[test]
-fn opt_validation_rejects_equation_op_out_of_range() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    let newton = opt
-        .schedules
-        .iter_mut()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    newton.ops[0] = OptOp::EvaluateEquation {
-        equation: EquationId::new(opt.equation_count),
-    };
-
-    assert_opt_validation_message(&opt, "is out of range for 1 equations");
-}
-
-#[test]
-fn opt_validation_rejects_duplicate_equation_op_in_schedule() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    let newton = opt
-        .schedules
-        .iter_mut()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    newton.ops.push(OptOp::EvaluateEquation {
-        equation: EquationId::new(0),
-    });
-
-    assert_opt_validation_message(&opt, "duplicate equation EquationId(0)");
-}
-
-#[test]
-fn opt_validation_rejects_duplicate_invalidation_schedule() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.schedules.push(OptSchedule {
-        id: ScheduleId::from(opt.schedules.len()),
-        invalidation: InvalidationClass::InstanceStatic,
-        ops: Vec::new(),
-    });
-
-    assert_opt_validation_message(&opt, "duplicate schedule for invalidation InstanceStatic");
-}
-
-#[test]
-fn opt_validation_rejects_empty_module_name() {
-    let mir = lower_tiny_resistor_mir();
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    opt.module_name = "".into();
-
-    assert_opt_validation_message(&opt, "OptIR module name must not be empty");
-}
-
-#[test]
-fn opt_lowering_adds_instance_static_schedule_before_newton_for_parameters() {
-    let mir = lower_tiny_resistor_mir();
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
-
-    assert_eq!(opt.schedules.len(), 2);
-    assert_eq!(
-        opt.schedules[0].invalidation,
-        InvalidationClass::InstanceStatic
-    );
-    assert_eq!(
-        opt.schedules[1].invalidation,
-        InvalidationClass::NewtonIteration
-    );
-}
-
-#[test]
-fn opt_lowering_schedules_parameter_dependent_derivatives_as_instance_static() {
-    let (_, _, _, opt) = lower_tiny_resistor_parts();
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let Some(OptOp::ComputeValue { value: root }) = newton.ops.first() else {
-        panic!("tiny resistor should have a scalar root: {newton:?}");
-    };
-    let positive_derivative = opt.values[usize::from(*root)]
-        .derivatives
-        .iter()
-        .find(|derivative| derivative.lane == DerivativeLane::node(NodeId::new(0)))
-        .expect("positive terminal derivative")
-        .value;
-    let instance_static = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::InstanceStatic)
-        .expect("InstanceStatic schedule");
-
-    assert!(
-        instance_static.ops.contains(&OptOp::ComputeValue {
-            value: positive_derivative
-        }),
-        "expected derivative {positive_derivative} in InstanceStatic schedule: {instance_static:?}"
-    );
-    assert!(
-        !newton.ops.contains(&OptOp::ComputeValue {
-            value: positive_derivative
-        }),
-        "parameter-only derivative should not be scheduled in Newton: {newton:?}"
-    );
-}
-
-#[test]
-fn opt_lowering_omits_instance_static_schedule_without_parameters() {
-    let mir = lower_internal_node_mir();
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
-
-    assert!(
-        opt.schedules
-            .iter()
-            .all(|schedule| schedule.invalidation != InvalidationClass::InstanceStatic)
-    );
-    assert_eq!(opt.schedules.len(), 1);
-    assert_eq!(
-        opt.schedules[0].invalidation,
-        InvalidationClass::NewtonIteration
-    );
-    assert!(opt.validate().is_ok());
-}
-
-#[test]
-fn opt_lowering_preserves_multi_equation_order_in_newton_schedule() {
-    let mir = lower_internal_node_mir();
-    let opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    let newton = opt
-        .schedules
-        .iter()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-
-    assert_eq!(
-        newton.ops,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(2)
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0)
-            },
-            OptOp::ComputeValue {
-                value: ValueId::new(4)
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(1)
-            }
-        ]
-    );
-    assert!(opt.validate().is_ok());
-}
-
-#[test]
 fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
-    let (metadata, hir, mir, opt) = lower_tiny_resistor_parts();
+    let (metadata, hir, mir) = lower_tiny_resistor_parts();
 
-    let artifact =
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build artifact");
+    let artifact = CanonicalIrArtifact::from_parts(metadata, hir, mir).expect("build artifact");
     let first = artifact.dump_text();
     let second = artifact.dump_text();
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=5"));
+    assert!(first.contains("schema_version=6"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("compiler_version="));
     assert!(first.contains("hir_digest="));
     assert!(first.contains("mir_digest="));
-    assert!(first.contains("opt_digest="));
     assert!(first.contains("hir module=tiny_res ports=2 parameters=1 contributions=1"));
     assert!(first.contains("mir nodes=2 equations=1"));
-    assert!(first.contains("opt schedules=2"));
+}
+
+#[test]
+fn canonical_ir_preserves_verilog_declared_parameter_scope() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module scoped_parameters(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real model_gain = 2.0;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    (* TYPE = "MODEL" *) parameter real explicit_model = 3.0;
+    analog I(p, n) <+ model_gain * width * explicit_model * V(p, n);
+endmodule
+"#,
+        )
+        .expect("parameter scopes compile");
+
+    let expected = [
+        ParameterScope::Model,
+        ParameterScope::Instance,
+        ParameterScope::Model,
+    ];
+    assert_eq!(
+        artifact
+            .hir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.scope)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(
+        artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.scope)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(artifact.validate().is_ok());
+}
+
+#[test]
+fn model_parameter_scope_rejects_instance_dependencies() {
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module invalid_scope(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "instance" *) parameter real width = 1.0e-6;
+    parameter real model_gain = width * 2.0;
+    analog I(p, n) <+ model_gain * V(p, n);
+endmodule
+"#,
+        )
+        .expect_err("shared model-card preprocessing cannot read per-instance geometry");
+    assert!(
+        error
+            .to_string()
+            .contains("model parameter 'model_gain' cannot depend on an instance parameter"),
+        "{error}"
+    );
+}
+
+#[test]
+fn parameter_scope_rejects_unknown_type_attributes() {
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module invalid_type(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "global" *) parameter real gain = 1.0;
+    analog I(p, n) <+ gain * V(p, n);
+endmodule
+"#,
+        )
+        .expect_err("unknown parameter storage scope must not be guessed");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported type attribute \"global\""),
+        "{error}"
+    );
 }
 
 #[test]
 fn artifact_validation_rejects_mismatched_module_names() {
-    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
     mir.module_name = "other_module".into();
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect_err("module name mismatch must fail");
 
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -3232,35 +1247,11 @@ fn artifact_validation_rejects_mismatched_module_names() {
 }
 
 #[test]
-fn artifact_validation_rejects_mismatched_opt_equation_count() {
-    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
-    opt.equation_count = 2;
-    let newton = opt
-        .schedules
-        .iter_mut()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    newton.ops.push(OptOp::EvaluateEquation {
-        equation: EquationId::new(1),
-    });
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect_err("OptIR equation count mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic
-                .message
-                .contains("OptIR equation count 2 must match MIR equation count 1")
-    }));
-}
-
-#[test]
 fn artifact_validation_rejects_metadata_feature_flag_mismatch() {
-    let (mut metadata, hir, mir, opt) = lower_tiny_resistor_parts();
+    let (mut metadata, hir, mir) = lower_tiny_resistor_parts();
     metadata.feature_flags.push("artifact-only".into());
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect_err("metadata feature flags mismatch must fail");
 
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -3270,10 +1261,10 @@ fn artifact_validation_rejects_metadata_feature_flag_mismatch() {
 
 #[test]
 fn artifact_validation_rejects_hir_mir_parameter_mismatch() {
-    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
     mir.parameters[0].name = "conductance".into();
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect_err("HIR/MIR parameter mismatch must fail");
 
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -3283,10 +1274,10 @@ fn artifact_validation_rejects_hir_mir_parameter_mismatch() {
 
 #[test]
 fn artifact_validation_rejects_hir_mir_equation_expression_mismatch() {
-    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
     mir.equations[0].expression.span.end += 1;
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect_err("MIR equation expression mismatch must fail");
 
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -3297,12 +1288,12 @@ fn artifact_validation_rejects_hir_mir_equation_expression_mismatch() {
 
 #[test]
 fn artifact_validation_rejects_hir_mir_ground_node_mismatch() {
-    let (metadata, hir, mut mir, opt) = lower_fixture_parts(ground_alias_source(), "ground_alias");
+    let (metadata, hir, mut mir) = lower_fixture_parts(ground_alias_source(), "ground_alias");
     assert!(mir.validate().is_ok());
     mir.ground_nodes = vec!["different_ground".into()];
     assert!(mir.validate().is_ok());
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
+    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect_err("HIR/MIR ground node mismatch must fail");
 
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -3311,127 +1302,12 @@ fn artifact_validation_rejects_hir_mir_ground_node_mismatch() {
 }
 
 #[test]
-fn artifact_validation_rejects_newton_schedule_mismatch() {
-    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let mir = MirModel::from_hir(&hir).expect("lower MIR");
-    let mut opt = OptModel::from_mir(&mir).expect("lower OptIR");
-    let newton = opt
-        .schedules
-        .iter_mut()
-        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .expect("NewtonIteration schedule");
-    let equation_op_positions: Vec<_> = newton
-        .ops
-        .iter()
-        .enumerate()
-        .filter_map(|(index, op)| match op {
-            OptOp::EvaluateEquation { .. } => Some(index),
-            OptOp::ComputeValue { .. } => None,
-        })
-        .collect();
-    newton
-        .ops
-        .swap(equation_op_positions[0], equation_op_positions[1]);
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect_err("Newton schedule mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic.message.contains("NewtonIteration op 0")
-    }));
-}
-
-#[test]
-fn artifact_validation_accepts_opt_without_legacy_instance_schedule() {
-    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
-    opt.schedules
-        .retain(|schedule| schedule.invalidation != InvalidationClass::InstanceStatic);
-    opt.schedules[0].id = ScheduleId::new(0);
-    assert!(opt.validate().is_ok());
-
-    let artifact = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect("OptIR without legacy instance schedule");
-
-    assert!(artifact.validate().is_ok());
-}
-
-#[test]
-fn artifact_validation_accepts_scalar_opt_values_and_compute_ops() {
-    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
-    opt.values = vec![
-        OptValue {
-            id: ValueId::new(0),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::NodePotential {
-                node: NodeId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(1),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Parameter {
-                parameter: ParamId::new(0),
-            },
-            derivatives: Vec::new(),
-        },
-        OptValue {
-            id: ValueId::new(2),
-            value_type: OptValueType::Real,
-            kind: OptValueKind::Binary {
-                op: OptBinaryOp::Div,
-                left: ValueId::new(0),
-                right: ValueId::new(1),
-            },
-            derivatives: Vec::new(),
-        },
-    ];
-    set_newton_ops(
-        &mut opt,
-        vec![
-            OptOp::ComputeValue {
-                value: ValueId::new(2),
-            },
-            OptOp::EvaluateEquation {
-                equation: EquationId::new(0),
-            },
-        ],
-    );
-    assert!(opt.validate().is_ok());
-
-    let artifact =
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("scalar OptIR artifact");
-
-    assert!(artifact.validate().is_ok());
-}
-
-#[test]
-fn artifact_validation_rejects_mismatched_opt_topology_counts() {
-    let (metadata, hir, mir, mut opt) = lower_tiny_resistor_parts();
-    opt.node_count += 1;
-    assert!(opt.validate().is_ok());
-
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect_err("OptIR topology count mismatch must fail");
-
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic
-                .message
-                .contains("OptIR node count 3 must match MIR node count 2")
-    }));
-}
-
-#[test]
 fn artifact_validation_rejects_invalid_child_ir() {
-    let (metadata, hir, mut mir, opt) = lower_tiny_resistor_parts();
+    let (metadata, hir, mut mir) = lower_tiny_resistor_parts();
     mir.equations[0].active_domains.clear();
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect_err("invalid MIR must fail");
+    let diagnostics =
+        CanonicalIrArtifact::from_parts(metadata, hir, mir).expect_err("invalid MIR must fail");
 
     assert!(
         diagnostics
@@ -3442,9 +1318,8 @@ fn artifact_validation_rejects_invalid_child_ir() {
 
 #[test]
 fn artifact_validate_rejects_stale_digest_and_dump_recomputes_digest() {
-    let (metadata, hir, mir, opt) = lower_tiny_resistor_parts();
-    let mut artifact =
-        CanonicalIrArtifact::from_parts(metadata, hir, mir, opt).expect("build artifact");
+    let (metadata, hir, mir) = lower_tiny_resistor_parts();
+    let mut artifact = CanonicalIrArtifact::from_parts(metadata, hir, mir).expect("build artifact");
     let expected_digest = artifact.hir_digest.clone();
     artifact.hir_digest = "bogus".into();
 
@@ -3460,19 +1335,17 @@ fn artifact_validate_rejects_stale_digest_and_dump_recomputes_digest() {
 
 #[test]
 fn artifact_digest_encoding_distinguishes_delimited_alias_lists() {
-    let (metadata, mut hir, _, _) = lower_tiny_resistor_parts();
+    let (metadata, mut hir, _) = lower_tiny_resistor_parts();
     hir.parameters[0].aliases = vec!["a,b".into()];
     let mir = MirModel::from_hir(&hir).expect("lower comma alias MIR");
-    let opt = OptModel::from_mir(&mir).expect("lower comma alias OptIR");
-    let comma_alias = CanonicalIrArtifact::from_parts(metadata.clone(), hir, mir, opt)
+    let comma_alias = CanonicalIrArtifact::from_parts(metadata.clone(), hir, mir)
         .expect("build comma alias artifact");
 
-    let (_, mut hir, _, _) = lower_tiny_resistor_parts();
+    let (_, mut hir, _) = lower_tiny_resistor_parts();
     hir.parameters[0].aliases = vec!["a".into(), "b".into()];
     let mir = MirModel::from_hir(&hir).expect("lower split alias MIR");
-    let opt = OptModel::from_mir(&mir).expect("lower split alias OptIR");
-    let split_alias = CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
-        .expect("build split alias artifact");
+    let split_alias =
+        CanonicalIrArtifact::from_parts(metadata, hir, mir).expect("build split alias artifact");
 
     assert_ne!(comma_alias.hir_digest, split_alias.hir_digest);
     assert_ne!(comma_alias.mir_digest, split_alias.mir_digest);
@@ -3480,32 +1353,16 @@ fn artifact_digest_encoding_distinguishes_delimited_alias_lists() {
 
 #[test]
 fn artifact_digests_distinguish_same_count_ir_content() {
-    let (metadata, hir, mir, opt) = lower_tiny_resistor_parts();
-    let baseline =
-        CanonicalIrArtifact::from_parts(metadata.clone(), hir.clone(), mir.clone(), opt.clone())
-            .expect("build baseline artifact");
+    let (metadata, hir, mir) = lower_tiny_resistor_parts();
+    let baseline = CanonicalIrArtifact::from_parts(metadata.clone(), hir.clone(), mir.clone())
+        .expect("build baseline artifact");
     let mut changed_hir = hir;
     changed_hir.ports[0].direction = "output".into();
-    let changed = CanonicalIrArtifact::from_parts(metadata, changed_hir, mir, opt)
+    let changed = CanonicalIrArtifact::from_parts(metadata, changed_hir, mir)
         .expect("build changed artifact");
 
     assert_ne!(baseline.hir_digest, changed.hir_digest);
     assert_eq!(baseline.mir_digest, changed.mir_digest);
-    assert_eq!(baseline.opt_digest, changed.opt_digest);
-}
-
-#[test]
-fn opt_lowering_rejects_invalid_mir_before_building_schedules() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.module_name = "".into();
-
-    let diagnostics = OptModel::from_mir(&mir).expect_err("invalid MIR must fail before OptIR");
-
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.phase == CompilerPhase::MirValidation)
-    );
 }
 
 #[test]
@@ -3690,8 +1547,7 @@ fn mir_lowering_promotes_potential_contributions_to_branch_unknowns() {
 
 #[test]
 fn mir_validation_rejects_non_dense_branch_unknown_id() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     mir.branch_unknowns[0].id = BranchUnknownId::new(7);
 
     assert_mir_validation_message(&mir, "MIR branch unknown IDs must be dense");
@@ -3699,8 +1555,7 @@ fn mir_validation_rejects_non_dense_branch_unknown_id() {
 
 #[test]
 fn mir_validation_rejects_duplicate_branch_unknown_equation() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     let mut duplicate = mir.branch_unknowns[0].clone();
     duplicate.id = BranchUnknownId::new(1);
     mir.branch_unknowns.push(duplicate);
@@ -3710,8 +1565,7 @@ fn mir_validation_rejects_duplicate_branch_unknown_equation() {
 
 #[test]
 fn mir_validation_rejects_branch_unknown_for_non_potential_equation() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     mir.equations[0].kind = MirEquationKind::Current;
 
     assert_mir_validation_message(
@@ -3722,8 +1576,7 @@ fn mir_validation_rejects_branch_unknown_for_non_potential_equation() {
 
 #[test]
 fn mir_validation_rejects_branch_unknown_equation_table_mismatch() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     mir.equations[0].id = EquationId::new(7);
 
     assert_mir_validation_message(
@@ -3734,8 +1587,7 @@ fn mir_validation_rejects_branch_unknown_equation_table_mismatch() {
 
 #[test]
 fn mir_validation_rejects_branch_unknown_declared_name_mismatch() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     mir.branch_unknowns[0].declared_name = Some("other".into());
 
     assert_mir_validation_message(
@@ -3746,8 +1598,7 @@ fn mir_validation_rejects_branch_unknown_declared_name_mismatch() {
 
 #[test]
 fn mir_validation_rejects_branch_unknown_endpoint_mismatch() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     mir.branch_unknowns[0].neg_node = None;
 
     assert_mir_validation_message(
@@ -3758,8 +1609,7 @@ fn mir_validation_rejects_branch_unknown_endpoint_mismatch() {
 
 #[test]
 fn mir_validation_rejects_branch_unknown_pos_node_out_of_range() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     mir.branch_unknowns[0].pos_node = Some(NodeId::new(99));
 
     assert_mir_validation_message(
@@ -3770,8 +1620,7 @@ fn mir_validation_rejects_branch_unknown_pos_node_out_of_range() {
 
 #[test]
 fn mir_validation_rejects_branch_unknown_without_concrete_endpoint() {
-    let (_, _, mut mir, _) =
-        lower_fixture_parts(named_branch_potential_source(), "branch_potential");
+    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
     mir.branch_unknowns[0].pos_node = None;
     mir.branch_unknowns[0].neg_node = None;
 

@@ -333,7 +333,7 @@ fn ac_branch_waveform_name(result: &rspice_core::analysis::AcResult, branch_idx:
 #[cfg(test)]
 mod tests {
     use rspice_core::abort_signal::NoAbort;
-    use rspice_core::analysis::advanced::NoiseContribution;
+    use rspice_core::analysis::NoiseContribution;
     use rspice_core::analysis::{NoiseSourceIdentity, NoiseSourceType};
 
     use super::*;

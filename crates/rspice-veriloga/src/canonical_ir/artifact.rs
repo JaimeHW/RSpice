@@ -1,7 +1,7 @@
 //! The sealed canonical IR artifact handed to backends.
 //!
-//! [`CanonicalIrArtifact`] carries all three levels — HIR, MIR, OptIR — plus
-//! the noise plan and source metadata, with a content digest per level. The
+//! [`CanonicalIrArtifact`] carries HIR, MIR, the canonical noise plan, and
+//! source metadata, with a content digest per semantic level. The
 //! digests are what let a backend, a cache, or a runtime report assert it is
 //! looking at the same compilation the front end produced, so the levels
 //! travel together and are validated as a unit rather than separately.
@@ -15,10 +15,9 @@ use super::{
     CanonicalMetadata, CanonicalValueType, CompilerPhase, HirAnalogOperator, HirArray,
     HirAssignment, HirBranch, HirContribution, HirContributionKind, HirCrossDirection, HirExprKind,
     HirExprRef, HirExpression, HirInternalNode, HirLaplaceKind, HirLoop, HirModel, HirParamRange,
-    HirParameter, HirPort, HirStatement, HirVariable, HirZiKind, InvalidationClass, IrDiagnostic,
-    IrValidationResult, MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation,
-    MirEquationKind, MirModel, MirNode, MirParameterSlot, MirStateSlot, OptModel, OptOp,
-    OptSchedule, OptValue, OptValueType, SourceSpanRef, StableDigest,
+    HirParameter, HirPort, HirStatement, HirVariable, HirZiKind, IrDiagnostic, IrValidationResult,
+    MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation, MirEquationKind,
+    MirModel, MirNode, MirParameterSlot, MirStateSlot, SourceSpanRef, StableDigest,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,12 +25,10 @@ pub struct CanonicalIrArtifact {
     pub metadata: CanonicalMetadata,
     pub hir_digest: SmolStr,
     pub mir_digest: SmolStr,
-    pub opt_digest: SmolStr,
     #[serde(default)]
     pub noise_sources: CanonicalNoiseSourcePlan,
     pub hir: HirModel,
     pub mir: MirModel,
-    pub opt: OptModel,
 }
 
 impl CanonicalIrArtifact {
@@ -39,48 +36,39 @@ impl CanonicalIrArtifact {
         metadata: CanonicalMetadata,
         hir: HirModel,
         mut mir: MirModel,
-        opt: OptModel,
     ) -> Result<Self, Vec<IrDiagnostic>> {
         let mut hir = hir;
         let noise_sources = CanonicalNoiseSourcePlan::from_hir_and_mir(&mut hir, &mut mir)?;
-        Self::from_parts_with_noise_plan(metadata, hir, mir, opt, noise_sources)
+        Self::from_parts_with_noise_plan(metadata, hir, mir, noise_sources)
     }
 
     pub fn from_parts_with_noise_plan(
         metadata: CanonicalMetadata,
         hir: HirModel,
         mir: MirModel,
-        opt: OptModel,
         noise_sources: CanonicalNoiseSourcePlan,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        let diagnostics = validate_parts(&metadata, &hir, &mir, &opt, &noise_sources);
+        let diagnostics = validate_parts(&metadata, &hir, &mir, &noise_sources);
         if !diagnostics.is_empty() {
             return Err(diagnostics);
         }
 
-        let (hir_digest, mir_digest, opt_digest) = phase_digests(&hir, &mir, &opt);
+        let (hir_digest, mir_digest) = phase_digests(&hir, &mir);
 
         Ok(Self {
             metadata,
             hir_digest,
             mir_digest,
-            opt_digest,
             noise_sources,
             hir,
             mir,
-            opt,
         })
     }
 
     pub fn validate(&self) -> IrValidationResult {
-        let mut diagnostics = validate_parts(
-            &self.metadata,
-            &self.hir,
-            &self.mir,
-            &self.opt,
-            &self.noise_sources,
-        );
-        let (hir_digest, mir_digest, opt_digest) = phase_digests(&self.hir, &self.mir, &self.opt);
+        let mut diagnostics =
+            validate_parts(&self.metadata, &self.hir, &self.mir, &self.noise_sources);
+        let (hir_digest, mir_digest) = phase_digests(&self.hir, &self.mir);
 
         if self.hir_digest != hir_digest {
             diagnostics.push(artifact_error(format!(
@@ -94,13 +82,6 @@ impl CanonicalIrArtifact {
                 self.mir_digest, mir_digest
             )));
         }
-        if self.opt_digest != opt_digest {
-            diagnostics.push(artifact_error(format!(
-                "stored opt_digest '{}' is stale; expected '{}'",
-                self.opt_digest, opt_digest
-            )));
-        }
-
         if diagnostics.is_empty() {
             Ok(())
         } else {
@@ -110,7 +91,7 @@ impl CanonicalIrArtifact {
 
     pub fn dump_text(&self) -> String {
         let mut out = String::new();
-        let (hir_digest, mir_digest, opt_digest) = phase_digests(&self.hir, &self.mir, &self.opt);
+        let (hir_digest, mir_digest) = phase_digests(&self.hir, &self.mir);
 
         writeln!(out, "canonical-veriloga-ir").expect("write to string");
         writeln!(out, "schema_version={}", self.metadata.schema_version).expect("write to string");
@@ -120,7 +101,6 @@ impl CanonicalIrArtifact {
             .expect("write to string");
         writeln!(out, "hir_digest={}", hir_digest).expect("write to string");
         writeln!(out, "mir_digest={}", mir_digest).expect("write to string");
-        writeln!(out, "opt_digest={}", opt_digest).expect("write to string");
         writeln!(
             out,
             "hir module={} ports={} parameters={} contributions={}",
@@ -137,14 +117,6 @@ impl CanonicalIrArtifact {
             self.mir.equations.len()
         )
         .expect("write to string");
-        writeln!(
-            out,
-            "opt schedules={} values={} equation_count={}",
-            self.opt.schedules.len(),
-            self.opt.values.len(),
-            self.opt.equation_count
-        )
-        .expect("write to string");
         writeln!(out, "noise sources={}", self.noise_sources.sources.len())
             .expect("write to string");
         out
@@ -155,7 +127,6 @@ fn validate_parts(
     metadata: &CanonicalMetadata,
     hir: &HirModel,
     mir: &MirModel,
-    opt: &OptModel,
     noise_sources: &CanonicalNoiseSourcePlan,
 ) -> Vec<IrDiagnostic> {
     let mut diagnostics = Vec::new();
@@ -166,12 +137,9 @@ fn validate_parts(
     if let Err(mut child) = mir.validate() {
         diagnostics.append(&mut child);
     }
-    if let Err(mut child) = opt.validate() {
-        diagnostics.append(&mut child);
-    }
     diagnostics.extend(noise_sources.diagnostics(hir, mir));
 
-    diagnostics.extend(artifact_diagnostics(metadata, hir, mir, opt));
+    diagnostics.extend(artifact_diagnostics(metadata, hir, mir));
     diagnostics
 }
 
@@ -179,7 +147,6 @@ fn artifact_diagnostics(
     metadata: &CanonicalMetadata,
     hir: &HirModel,
     mir: &MirModel,
-    opt: &OptModel,
 ) -> Vec<IrDiagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -219,22 +186,12 @@ fn artifact_diagnostics(
         )));
     }
 
-    if hir.module_name != mir.module_name || hir.module_name != opt.module_name {
+    if hir.module_name != mir.module_name {
         diagnostics.push(artifact_error(format!(
-            "HIR/MIR/OptIR module names must match: hir='{}' mir='{}' opt='{}'",
-            hir.module_name, mir.module_name, opt.module_name
+            "HIR/MIR module names must match: hir='{}' mir='{}'",
+            hir.module_name, mir.module_name
         )));
     }
-
-    let mir_equation_count =
-        u32::try_from(mir.equations.len()).expect("MIR equation count exceeds u32::MAX");
-    if opt.equation_count != mir_equation_count {
-        diagnostics.push(artifact_error(format!(
-            "OptIR equation count {} must match MIR equation count {}",
-            opt.equation_count, mir_equation_count
-        )));
-    }
-    validate_mir_opt_topology_counts(&mut diagnostics, mir, opt);
 
     validate_hir_mir_nodes(&mut diagnostics, hir, mir);
     validate_hir_mir_ground_nodes(&mut diagnostics, hir, mir);
@@ -243,48 +200,8 @@ fn artifact_diagnostics(
     validate_hir_mir_branches(&mut diagnostics, hir, mir);
     validate_hir_mir_expressions(&mut diagnostics, hir, mir);
     validate_hir_mir_contributions(&mut diagnostics, hir, mir);
-    validate_mir_opt_newton_schedule(&mut diagnostics, mir, opt);
 
     diagnostics
-}
-
-fn validate_mir_opt_topology_counts(
-    diagnostics: &mut Vec<IrDiagnostic>,
-    mir: &MirModel,
-    opt: &OptModel,
-) {
-    let mir_node_count = u32::try_from(mir.nodes.len()).expect("MIR node count exceeds u32::MAX");
-    let mir_parameter_count =
-        u32::try_from(mir.parameters.len()).expect("MIR parameter count exceeds u32::MAX");
-    let mir_branch_count =
-        u32::try_from(mir.branches.len()).expect("MIR branch count exceeds u32::MAX");
-    let mir_branch_unknown_count = u32::try_from(mir.branch_unknowns.len())
-        .expect("MIR branch unknown count exceeds u32::MAX");
-
-    if opt.node_count != mir_node_count {
-        diagnostics.push(artifact_error(format!(
-            "OptIR node count {} must match MIR node count {}",
-            opt.node_count, mir_node_count
-        )));
-    }
-    if opt.parameter_count != mir_parameter_count {
-        diagnostics.push(artifact_error(format!(
-            "OptIR parameter count {} must match MIR parameter count {}",
-            opt.parameter_count, mir_parameter_count
-        )));
-    }
-    if opt.branch_count != mir_branch_count {
-        diagnostics.push(artifact_error(format!(
-            "OptIR branch count {} must match MIR branch count {}",
-            opt.branch_count, mir_branch_count
-        )));
-    }
-    if opt.branch_unknown_count != mir_branch_unknown_count {
-        diagnostics.push(artifact_error(format!(
-            "OptIR branch unknown count {} must match MIR branch unknown count {}",
-            opt.branch_unknown_count, mir_branch_unknown_count
-        )));
-    }
 }
 
 fn validate_hir_mir_nodes(diagnostics: &mut Vec<IrDiagnostic>, hir: &HirModel, mir: &MirModel) {
@@ -382,6 +299,7 @@ fn validate_hir_mir_parameters(
     {
         if hir_parameter.id != mir_parameter.id
             || hir_parameter.name != mir_parameter.name
+            || hir_parameter.scope != mir_parameter.scope
             || hir_parameter.value_type != mir_parameter.value_type
             || hir_parameter.default != mir_parameter.default
             || hir_parameter.default_expr != mir_parameter.default_expr
@@ -510,65 +428,6 @@ fn validate_hir_mir_contributions(
     }
 }
 
-fn validate_mir_opt_newton_schedule(
-    diagnostics: &mut Vec<IrDiagnostic>,
-    mir: &MirModel,
-    opt: &OptModel,
-) {
-    let newton_schedules: Vec<_> = opt
-        .schedules
-        .iter()
-        .filter(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
-        .collect();
-
-    let Some(schedule) = newton_schedules.first().copied() else {
-        diagnostics.push(artifact_error(
-            "OptIR must contain one NewtonIteration schedule for artifact consistency",
-        ));
-        return;
-    };
-
-    if newton_schedules.len() != 1 {
-        diagnostics.push(artifact_error(format!(
-            "OptIR must contain exactly one NewtonIteration schedule for artifact consistency, found {}",
-            newton_schedules.len()
-        )));
-    }
-
-    let equation_ops: Vec<_> = schedule
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            OptOp::EvaluateEquation { equation } => Some(*equation),
-            OptOp::ComputeValue { .. } => None,
-        })
-        .collect();
-
-    if equation_ops.len() != mir.equations.len() {
-        diagnostics.push(artifact_error(format!(
-            "OptIR NewtonIteration op count {} must match MIR equation count {}",
-            equation_ops.len(),
-            mir.equations.len()
-        )));
-    }
-
-    for (index, equation) in mir.equations.iter().enumerate() {
-        match equation_ops.get(index) {
-            Some(found) if *found == equation.id => {}
-            Some(found) => diagnostics.push(artifact_error(format!(
-                "OptIR NewtonIteration op {} must evaluate MIR equation {}, found {}",
-                index,
-                equation.id,
-                opt_op_label(&OptOp::EvaluateEquation { equation: *found })
-            ))),
-            None => diagnostics.push(artifact_error(format!(
-                "OptIR NewtonIteration missing op {} for MIR equation {}",
-                index, equation.id
-            ))),
-        }
-    }
-}
-
 fn resolve_hir_endpoint(name: &SmolStr, hir: &HirModel, mir: &MirModel) -> Option<super::NodeId> {
     if is_ground_name(name, hir) {
         return None;
@@ -668,11 +527,10 @@ fn digest_text(text: &str) -> SmolStr {
     StableDigest::from_text(text).as_hex().into()
 }
 
-fn phase_digests(hir: &HirModel, mir: &MirModel, opt: &OptModel) -> (SmolStr, SmolStr, SmolStr) {
+fn phase_digests(hir: &HirModel, mir: &MirModel) -> (SmolStr, SmolStr) {
     (
         digest_text(&hir_summary(hir)),
         digest_text(&mir_summary(mir)),
-        digest_text(&opt_summary(opt)),
     )
 }
 
@@ -746,20 +604,6 @@ fn mir_summary(mir: &MirModel) -> String {
     out
 }
 
-fn opt_summary(opt: &OptModel) -> String {
-    let mut out = String::new();
-    writeln!(out, "opt").expect("write to string");
-    writeln!(out, "module_name={}", enc_str(&opt.module_name)).expect("write to string");
-    writeln!(out, "equation_count={}", opt.equation_count).expect("write to string");
-    for value in &opt.values {
-        write_opt_value(&mut out, value);
-    }
-    for schedule in &opt.schedules {
-        write_opt_schedule(&mut out, schedule);
-    }
-    out
-}
-
 fn write_hir_port(out: &mut String, port: &HirPort) {
     writeln!(
         out,
@@ -777,9 +621,10 @@ fn write_hir_port(out: &mut String, port: &HirPort) {
 fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
     writeln!(
         out,
-        "parameter id={} name={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} scope={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
+        parameter.scope.name(),
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
@@ -929,9 +774,10 @@ fn write_mir_node(out: &mut String, node: &MirNode) {
 fn write_mir_parameter(out: &mut String, parameter: &MirParameterSlot) {
     writeln!(
         out,
-        "parameter id={} name={} type={} default={} default_expr={} range={} aliases={}",
+        "parameter id={} name={} scope={} type={} default={} default_expr={} range={} aliases={}",
         parameter.id.index(),
         enc_str(&parameter.name),
+        parameter.scope.name(),
         value_type_label(parameter.value_type),
         option_f64(parameter.default),
         expr_ref_label(parameter.default_expr.as_ref()),
@@ -989,27 +835,6 @@ fn write_mir_equation(out: &mut String, equation: &MirEquation) {
         expr_ref_label(Some(&equation.expression)),
         join_domains(&equation.active_domains),
         span_label(equation.span)
-    )
-    .expect("write to string");
-}
-
-fn write_opt_value(out: &mut String, value: &OptValue) {
-    writeln!(
-        out,
-        "value id={} type={}",
-        value.id.index(),
-        opt_value_type_label(value.value_type)
-    )
-    .expect("write to string");
-}
-
-fn write_opt_schedule(out: &mut String, schedule: &OptSchedule) {
-    writeln!(
-        out,
-        "schedule id={} invalidation={} ops={}",
-        schedule.id.index(),
-        invalidation_label(schedule.invalidation),
-        enc_list(schedule.ops.iter().map(opt_op_label).collect())
     )
     .expect("write to string");
 }
@@ -1450,36 +1275,5 @@ fn equation_kind_label(kind: MirEquationKind) -> &'static str {
         MirEquationKind::Current => "current",
         MirEquationKind::Potential => "potential",
         MirEquationKind::Indirect => "indirect",
-    }
-}
-
-fn opt_value_type_label(value_type: OptValueType) -> &'static str {
-    match value_type {
-        OptValueType::Real => "real",
-        OptValueType::Boolean => "boolean",
-    }
-}
-
-fn invalidation_label(invalidation: InvalidationClass) -> &'static str {
-    match invalidation {
-        InvalidationClass::InstanceStatic => "instance_static",
-        InvalidationClass::TemperatureStatic => "temperature_static",
-        InvalidationClass::TimestepStatic => "timestep_static",
-        InvalidationClass::OperatingPointStatic => "operating_point_static",
-        InvalidationClass::NewtonIteration => "newton_iteration",
-        InvalidationClass::AcFrequency => "ac_frequency",
-        InvalidationClass::NoiseFrequency => "noise_frequency",
-        InvalidationClass::OperatingPointReport => "operating_point_report",
-    }
-}
-
-fn opt_op_label(op: &OptOp) -> String {
-    match op {
-        OptOp::ComputeValue { value } => {
-            format!("compute_value:{}", value.index())
-        }
-        OptOp::EvaluateEquation { equation } => {
-            format!("evaluate_equation:{}", equation.index())
-        }
     }
 }

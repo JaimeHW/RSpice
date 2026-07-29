@@ -3,42 +3,24 @@
 pub mod arc_length;
 pub mod convergence;
 pub mod damping;
-pub mod klu;
 mod newton;
-mod sparse;
-pub(crate) use sparse::klu_backend_enabled;
+pub(crate) use rspice_matrix::klu_backend_enabled;
+pub use rspice_matrix::{
+    ComplexMatrix, CscIndex, SolverError, SparseLuSolver, StaticMatrix, TripletMatrix, solve_sparse,
+};
+
+/// Compatibility path for the solver benchmark and downstream diagnostics.
+pub mod klu {
+    pub use rspice_matrix::KluSolver;
+}
 
 pub use arc_length::{ArcLengthConfig, ArcLengthContinuation, ArcLengthResult, ArcLengthState};
 pub use damping::{DampingController, DampingStatistics, DampingStrategy};
 pub use convergence::{PseudoTransient, SourceStepper};
 pub use newton::*;
-pub use sparse::*;
 
 use crate::Value;
 use std::collections::HashMap;
-use thiserror::Error;
-
-/// Solver errors
-#[derive(Debug, Error)]
-pub enum SolverError {
-    #[error("Matrix is singular or near-singular")]
-    SingularMatrix,
-
-    #[error("Failed to converge after {0} iterations")]
-    ConvergenceFailed(usize),
-
-    #[error("Numerical overflow detected")]
-    Overflow,
-
-    #[error("Invalid circuit configuration: {0}")]
-    InvalidCircuit(String),
-
-    #[error("Stored pivot sequence is numerically inadequate for the new values")]
-    PivotGrowth,
-
-    #[error("Sparse solve failed its backward-error check ({0:.3e})")]
-    InaccurateSolution(Value),
-}
 
 /// Simulation result containing node voltages and branch currents
 #[derive(Debug, Clone)]

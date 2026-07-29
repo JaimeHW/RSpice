@@ -161,6 +161,26 @@ jobs:
         run: >-
           cargo test --locked --release -p rspice-veriloga --test cfg_derivatives
           the_whole_corpus_matches_complex_step -- --ignored --nocapture
+      - name: Shipped models execute through the native x64 device route
+        # These probes parse and compile every shipped CMC Verilog-A source,
+        # construct the production VerilogADevice, and reject any interpreter
+        # fallback. They are release-only and ignored by ordinary cargo test.
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked --release -p rspice-veriloga --features native --lib
+          native_x64_shipped_model_devices_run_without_interpreter_fallback
+          -- --ignored --nocapture --test-threads=1
+      - name: Shipped native x64 finite entries match bytecode
+        # Independent backend agreement over every finite current, charge, and
+        # Jacobian entry catches native lowering errors that merely-finite
+        # smoke tests cannot detect.
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked --release -p rspice-veriloga --features native --lib
+          native_x64_shipped_model_finite_entries_match_bytecode_reference
+          -- --ignored --nocapture --test-threads=1
 
   release-build:
     name: Release build (${{ matrix.os }})

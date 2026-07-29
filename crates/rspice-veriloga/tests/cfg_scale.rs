@@ -39,22 +39,23 @@ const QUICK_MODELS: &[(&str, &str, &str)] = &[
 
 /// Ceilings on emitted bytes, measured. Lower them when the number drops.
 const QUICK_CEILINGS: &[(&str, usize)] = &[
-    // Measured 2026-07-27, with a little headroom. The checked-in generated
-    // source for the same models is 322,283 and 3,931,173 bytes.
+    // Measured 2026-07-29, with 3-6% headroom. The checked-in generated source
+    // also includes device ABI and metadata around these emitted bodies.
     //
     // Both dropped again when derivative lanes were packed — r3_cmc 157,737 ->
-    // 103,911, DIODE_CMC 559,701 -> 483,095. DIODE_CMC gains least of the
-    // corpus and deserves the note: its live lane sets are two wide, so there is
-    // almost nothing for packing to fold, and its bulk is primal code from 530
-    // source conditionals rather than Jacobian.
-    ("r3_cmc", 120_000),
-    ("DIODE_CMC", 520_000),
+    // 103,911, DIODE_CMC 559,701 -> 483,095. Invalidation staging and scalar
+    // emission for one-lane shapes then brought them to 86,467 and 406,176.
+    // DIODE_CMC gains least from scalar lanes: most of its live sets are two
+    // wide, and its bulk is primal code from 530 source conditionals.
+    ("r3_cmc", 90_000),
+    ("DIODE_CMC", 420_000),
     // Was 6,260,006 while the function inliner still folded a branching body
     // into `guard ? value : previous`; 83,023 once it inlines as statements,
     // and 41,066 once lanes are packed, against 78,303 from the tier being
-    // replaced. The ceiling is deliberately tight: this model is the corpus's
-    // canary for that class of blow-up.
-    ("EPFL_HEMT_10a", 50_000),
+    // replaced. Current staged scalar-or-packed emission is 42,395. The
+    // ceiling is deliberately tight: this model is the corpus's canary for
+    // that class of blow-up.
+    ("EPFL_HEMT_10a", 45_000),
 ];
 
 #[test]
@@ -134,7 +135,7 @@ struct Report {
     /// Values per invalidation class, coarsest first. What the per-class split
     /// has to work with: everything outside the last column is work a Newton
     /// iteration should never repeat.
-    classes: [usize; 4],
+    classes: [usize; 5],
     /// `(class, emitted bytes, cached values)` per stage.
     stage_bytes: Vec<(&'static str, usize, usize)>,
     emitted_bytes: usize,
@@ -153,7 +154,8 @@ impl Report {
         eprintln!(
             "{:>24}  {:>2} nodes  {:>3} eqs  hir {:>7}  {:>5} ifs  {:>6} assigns  \
              cfg {:>7}  +ad {:>8}  opt {:>7}  \
-             {:>5} blocks  inst {:>7} temp {:>6} step {:>5} newt {:>7} ({:>4.1}% newton)  \
+             {:>5} blocks  model {:>7} inst {:>7} temp {:>6} step {:>5} newt {:>7} \
+             ({:>4.1}% newton)  \
              {:>9} bytes   front {:>6}ms  lower {:>5}ms  ad {:>5}ms  \
              opt {:>6}ms  emit {:>5}ms",
             self.module,
@@ -170,7 +172,8 @@ impl Report {
             self.classes[1],
             self.classes[2],
             self.classes[3],
-            100.0 * self.classes[3] as f64 / self.classes.iter().sum::<usize>().max(1) as f64,
+            self.classes[4],
+            100.0 * self.classes[4] as f64 / self.classes.iter().sum::<usize>().max(1) as f64,
             self.emitted_bytes,
             self.front_end_ms,
             self.lower_ms,

@@ -290,7 +290,7 @@ impl CfgValueKind {
         }
     }
 
-    pub(super) fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
+    pub(crate) fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
             Self::Unary { input, .. }
             | Self::Ddt { input, .. }

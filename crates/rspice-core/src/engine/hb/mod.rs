@@ -20,7 +20,7 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::advanced::harmonic_balance::HbFft;
+use crate::analysis::harmonic_balance::HbFft;
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
 use crate::netlist::SourceSpec;

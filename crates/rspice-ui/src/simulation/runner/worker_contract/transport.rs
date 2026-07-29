@@ -614,7 +614,7 @@ impl WorkerPssOperatingPointTransport {
         for waveform in self.result_waveforms {
             node_names.push(waveform.node_name);
             waveforms.push(
-                rspice_core::analysis::advanced::pss::PeriodicWaveform::from_values(
+                rspice_core::analysis::pss::PeriodicWaveform::from_values(
                     waveform.values.into_vec(buffers)?,
                 ),
             );
@@ -635,7 +635,7 @@ impl WorkerPssOperatingPointTransport {
             .map(|row| row.into_vec(buffers))
             .collect::<Result<Vec<_>, _>>()?;
         let shooting_state = self.shooting_state.into_vec(buffers)?;
-        let result = rspice_core::analysis::advanced::pss::PssResult {
+        let result = rspice_core::analysis::pss::PssResult {
             period: self.result_period,
             frequency: self.result_frequency,
             iterations: self.result_iterations,

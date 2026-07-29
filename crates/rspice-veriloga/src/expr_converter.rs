@@ -772,6 +772,9 @@ impl<'a> ExprConverter<'a> {
             "asin" => IrFunction::Asin,
             "acos" => IrFunction::Acos,
             "atan" => IrFunction::Atan,
+            "asinh" => IrFunction::Asinh,
+            "acosh" => IrFunction::Acosh,
+            "atanh" => IrFunction::Atanh,
             "atan2" => IrFunction::Atan2,
             "floor" => IrFunction::Floor,
             "ceil" => IrFunction::Ceil,
@@ -803,62 +806,6 @@ impl<'a> ExprConverter<'a> {
                 let y_sq = IrExpr::Binary(BinaryOp::Mul, Box::new(y.clone()), Box::new(y));
                 let sum = IrExpr::Binary(BinaryOp::Add, Box::new(x_sq), Box::new(y_sq));
                 return Ok(IrExpr::Call(IrFunction::Sqrt, vec![sum]));
-            }
-            "asinh" => {
-                // asinh(x) = ln(x + sqrt(x^2 + 1))
-                if call.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "asinh requires an argument".into(),
-                    ))
-                    .into());
-                }
-                let x = self.convert(&call.args[0])?;
-                let x_sq = IrExpr::Binary(BinaryOp::Mul, Box::new(x.clone()), Box::new(x.clone()));
-                let sum =
-                    IrExpr::Binary(BinaryOp::Add, Box::new(x_sq), Box::new(IrExpr::Const(1.0)));
-                let sqrt_part = IrExpr::Call(IrFunction::Sqrt, vec![sum]);
-                let arg = IrExpr::Binary(BinaryOp::Add, Box::new(x), Box::new(sqrt_part));
-                return Ok(IrExpr::Call(IrFunction::Log, vec![arg]));
-            }
-            "acosh" => {
-                // acosh(x) = ln(x + sqrt(x^2 - 1))
-                if call.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "acosh requires an argument".into(),
-                    ))
-                    .into());
-                }
-                let x = self.convert(&call.args[0])?;
-                let x_sq = IrExpr::Binary(BinaryOp::Mul, Box::new(x.clone()), Box::new(x.clone()));
-                let diff =
-                    IrExpr::Binary(BinaryOp::Sub, Box::new(x_sq), Box::new(IrExpr::Const(1.0)));
-                let sqrt_part = IrExpr::Call(IrFunction::Sqrt, vec![diff]);
-                let arg = IrExpr::Binary(BinaryOp::Add, Box::new(x), Box::new(sqrt_part));
-                return Ok(IrExpr::Call(IrFunction::Log, vec![arg]));
-            }
-            "atanh" => {
-                // atanh(x) = 0.5 * ln((1+x)/(1-x))
-                if call.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "atanh requires an argument".into(),
-                    ))
-                    .into());
-                }
-                let x = self.convert(&call.args[0])?;
-                let one_plus = IrExpr::Binary(
-                    BinaryOp::Add,
-                    Box::new(IrExpr::Const(1.0)),
-                    Box::new(x.clone()),
-                );
-                let one_minus =
-                    IrExpr::Binary(BinaryOp::Sub, Box::new(IrExpr::Const(1.0)), Box::new(x));
-                let ratio = IrExpr::Binary(BinaryOp::Div, Box::new(one_plus), Box::new(one_minus));
-                let ln_ratio = IrExpr::Call(IrFunction::Log, vec![ratio]);
-                return Ok(IrExpr::Binary(
-                    BinaryOp::Mul,
-                    Box::new(IrExpr::Const(0.5)),
-                    Box::new(ln_ratio),
-                ));
             }
             // Analog operators, noise sources, filters, and event functions
             // arrive as plain calls; route them to their IR forms.
