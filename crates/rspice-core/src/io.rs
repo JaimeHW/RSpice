@@ -27,7 +27,7 @@ pub use ltspice_raw::{
 pub use raw_export::{
     RawExporter, RawFormat, RawVariable, VariableType, export_dc_sweep, export_transient,
 };
-pub use waveform_stream::{StreamingWaveformReader, StreamingWaveformWriter, WaveformStreamError};
+pub use waveform_stream::{StreamingWaveformWriter, WaveformStreamError};
 
 // `ltspice_raw` also names a `RawVariable`: the descriptor parsed out of a
 // file's header, as opposed to the one handed to the exporter on the way out.
