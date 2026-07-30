@@ -72,7 +72,6 @@ enum ContextAction {
     PageSetup,
     FitDrawingSheet,
     FitSchematicContent,
-    DrawingSheetLayers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +85,6 @@ enum ContextIcon {
     Waveform,
     File,
     Fit,
-    Layers,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -172,12 +170,6 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         icon: ContextIcon::Fit,
         label: "Fit schematic content",
         shortcut_command: Some(Command::FitSchematicContent),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::DrawingSheetLayers,
-        icon: ContextIcon::Layers,
-        label: "Drawing-sheet layers\u{2026}",
-        shortcut_command: Some(Command::DrawingSheetLayers),
     }),
 ];
 
@@ -1081,8 +1073,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::PageSetup
         | ContextAction::FitDrawingSheet
-        | ContextAction::FitSchematicContent
-        | ContextAction::DrawingSheetLayers => (true, ""),
+        | ContextAction::FitSchematicContent => (true, ""),
     }
 }
 
@@ -1130,9 +1121,6 @@ fn execute_context_action(
         ContextAction::FitSchematicContent => {
             state.schematic.needs_fit = true;
             state.schematic.needs_drawing_sheet_fit = false;
-        }
-        ContextAction::DrawingSheetLayers => {
-            crate::workbench::app::open_drawing_sheet_layers_dialog(state);
         }
     }
     ui.close();
@@ -1537,7 +1525,6 @@ impl ContextIcon {
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
             Self::File => WorkbenchIcon::File.paint(painter, rect, color),
             Self::Fit => WorkbenchIcon::ZoomFit.paint(painter, rect, color),
-            Self::Layers => WorkbenchIcon::Layers.paint(painter, rect, color),
         }
     }
 }

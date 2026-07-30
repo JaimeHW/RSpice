@@ -1441,8 +1441,6 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     ] {
         command_item(ui, app, command);
     }
-    command_item(ui, app, Command::GridSnapRouting);
-    command_item(ui, app, Command::VisibilityOptions);
     menu_separator(ui);
     command_item_as(
         ui,
