@@ -93,7 +93,6 @@ impl HardcopySourceSetMember {
         Ok(member)
     }
 
-
     fn validate(&self) -> Result<(), HardcopySourceError> {
         validate_label("source-set member key", &self.source_key, SOURCE_KEY_LIMIT)?;
         validate_label(
@@ -307,7 +306,6 @@ struct HardcopySourceSetDigestMaterial<'a> {
     members: &'a [HardcopySourceSetMember],
 }
 
-
 pub(crate) fn canonical_digest<T: Serialize>(
     domain: &[u8],
     value: &T,
@@ -390,6 +388,10 @@ pub enum HardcopySourceError {
     UnsupportedScope(HardcopyScope),
     #[error("the requested selection is empty")]
     EmptySelection,
+    #[error(
+        "probe markers are not publishable hardcopy objects; deselect every probe or publish the owning waveform instead"
+    )]
+    ProbeSelectionUnsupported,
     #[error("the selected hardcopy source contains no publishable content")]
     EmptyContent,
     #[error(

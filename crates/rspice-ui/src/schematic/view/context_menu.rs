@@ -69,6 +69,10 @@ enum ContextAction {
     Delete,
     Probe,
     OperatingPoint,
+    PageSetup,
+    FitDrawingSheet,
+    FitSchematicContent,
+    DrawingSheetLayers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +84,9 @@ enum ContextIcon {
     Trash,
     Probe,
     Waveform,
+    File,
+    Fit,
+    Layers,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -146,6 +153,31 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         icon: ContextIcon::Waveform,
         label: "Open operating point",
         shortcut_command: Some(Command::ResultViewer(ResultViewer::Op)),
+    }),
+    ContextEntry::Separator,
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::PageSetup,
+        icon: ContextIcon::File,
+        label: "Page setup\u{2026}",
+        shortcut_command: Some(Command::PageSetup),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::FitDrawingSheet,
+        icon: ContextIcon::Fit,
+        label: "Fit drawing sheet",
+        shortcut_command: Some(Command::ZoomFit),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::FitSchematicContent,
+        icon: ContextIcon::Fit,
+        label: "Fit schematic content",
+        shortcut_command: Some(Command::FitSchematicContent),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::DrawingSheetLayers,
+        icon: ContextIcon::Layers,
+        label: "Drawing-sheet layers\u{2026}",
+        shortcut_command: Some(Command::DrawingSheetLayers),
     }),
 ];
 
@@ -362,6 +394,12 @@ fn select_pointer_target(
             }
             ContextTarget::Canvas
         }
+        PointerTarget::Probe(id) => {
+            if !state.schematic.selection.has_probe(id) {
+                state.schematic.selection.select_only_probe(id);
+            }
+            ContextTarget::Canvas
+        }
         PointerTarget::NetLabel(id) => {
             if !state.schematic.selection.has_net_label(id) {
                 state.schematic.selection.select_only_net_label(id);
@@ -431,6 +469,11 @@ fn keyboard_target(
     viewport: &Viewport,
     fallback_screen_pos: egui::Pos2,
 ) -> (ContextTarget, Point) {
+    if let Some(id) = state.schematic.selection.single_probe()
+        && let Some(probe) = state.schematic.probes.iter().find(|item| item.id == id)
+    {
+        return (ContextTarget::Canvas, probe.position);
+    }
     if let Some(id) = state.schematic.selection.single_bus_tap()
         && let Some(tap) = state.schematic.bus_taps.iter().find(|item| item.id == id)
     {
@@ -490,7 +533,7 @@ fn render_context_contents(
     let summary = selection_summary(state, target);
     menu_header(ui, &summary);
 
-    let mut rows = Vec::with_capacity(8);
+    let mut rows = Vec::with_capacity(CONTEXT_ENTRIES.len());
     let mut keyboard_or_pointer_action = None;
     for entry in CONTEXT_ENTRIES {
         match *entry {
@@ -550,7 +593,8 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.bus_taps.len()
         + selection.net_labels.len()
         + selection.design_notes.len()
-        + selection.documentation_shapes.len();
+        + selection.documentation_shapes.len()
+        + selection.probes.len();
     let path = format!("/{}", state.workspace.active_view.display_path());
     if count > 1 {
         return format!("{count} selected objects · {path}");
@@ -606,6 +650,11 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
             "{} \u{b7} drawing / documentation \u{b7} {path}",
             shape.kind().label()
         );
+    }
+    if let Some(id) = selection.single_probe()
+        && let Some(probe) = state.schematic.probes.iter().find(|probe| probe.id == id)
+    {
+        return format!("probe \u{b7} {} \u{b7} {path}", probe.reference);
     }
     let target = selection
         .single_component()
@@ -912,6 +961,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         .documentation_shapes
         .iter()
         .any(|shape| selection.has_documentation_shape(shape.id));
+    let has_live_probe = state
+        .schematic
+        .probes
+        .iter()
+        .any(|probe| selection.has_probe(probe.id));
     let has_copyable_object = has_live_component
         || has_live_wire
         || has_live_junction
@@ -919,7 +973,8 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_bus_tap
         || has_live_net_label
         || has_live_design_note
-        || has_live_documentation_shape;
+        || has_live_documentation_shape
+        || has_live_probe;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
@@ -958,7 +1013,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
                 .documentation_shapes
                 .iter()
                 .any(|shape| shape.id == *id)
-        });
+        })
+        && selection
+            .probes
+            .iter()
+            .all(|id| state.schematic.probes.iter().any(|probe| probe.id == *id));
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
             .schematic
@@ -980,7 +1039,8 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_bus_tap
         || has_live_net_label
         || has_live_design_note
-        || has_live_documentation_shape)
+        || has_live_documentation_shape
+        || has_live_probe)
         && all_whole_object_ids_are_live
         && all_junctions_are_live
         && !has_wire_sub_object;
@@ -989,11 +1049,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && all_junctions_are_live
         && !has_wire_sub_object;
     let has_component = has_live_component;
-    let writable = !state.schematic.read_only && !state.active_view_read_only();
+    let writable = !state.schematic_edit_read_only();
     match action {
         ContextAction::Properties => (
             crate::workbench::app::selected_object_properties_available(state),
-            "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
+            "Select one inspectable component, bus, bus tap, net label, design note, documentation shape, or probe",
         ),
         ContextAction::Rotate | ContextAction::Mirror => (
             writable && has_component,
@@ -1001,15 +1061,15 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Copy => (
             copyable_objects_only,
-            "Select at least one component, wire, bus, tap, junction, net label, design note, or documentation shape",
+            "Select at least one component, wire, bus, tap, junction, net label, design note, documentation shape, or probe",
         ),
         ContextAction::Duplicate => (
             writable && duplicable_objects_only,
-            "Select at least one editable component, wire, bus, tap, net label, design note, or documentation shape",
+            "Select at least one editable component, wire, bus, tap, net label, design note, documentation shape, or probe",
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, wire, bus, tap, junction, net label, or design note",
+            "Select at least one editable component, wire, bus, tap, junction, net label, design note, documentation shape, or probe",
         ),
         ContextAction::Probe => (
             writable,
@@ -1019,6 +1079,10 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
         ),
+        ContextAction::PageSetup
+        | ContextAction::FitDrawingSheet
+        | ContextAction::FitSchematicContent
+        | ContextAction::DrawingSheetLayers => (true, ""),
     }
 }
 
@@ -1056,6 +1120,20 @@ fn execute_context_action(
         }
         ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
+        ContextAction::PageSetup => {
+            crate::workbench::app::open_drawing_sheet_setup_for_state(state);
+        }
+        ContextAction::FitDrawingSheet => {
+            state.schematic.needs_drawing_sheet_fit = true;
+            state.schematic.needs_fit = false;
+        }
+        ContextAction::FitSchematicContent => {
+            state.schematic.needs_fit = true;
+            state.schematic.needs_drawing_sheet_fit = false;
+        }
+        ContextAction::DrawingSheetLayers => {
+            crate::workbench::app::open_drawing_sheet_layers_dialog(state);
+        }
     }
     ui.close();
 }
@@ -1387,7 +1465,7 @@ fn apply_delete_request(state: &mut AppState, request: DeleteSelectionRequest) {
         ));
         return;
     }
-    if state.schematic.read_only {
+    if state.schematic_edit_read_only() {
         state.push_user_message(ConsoleMessage::warning(
             "The schematic became read-only; nothing was deleted.".to_owned(),
         ));
@@ -1457,6 +1535,9 @@ impl ContextIcon {
             Self::Trash => Icon::Trash.paint(painter, rect, color),
             Self::Probe => WorkbenchIcon::Probe.paint(painter, rect, color),
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
+            Self::File => WorkbenchIcon::File.paint(painter, rect, color),
+            Self::Fit => WorkbenchIcon::ZoomFit.paint(painter, rect, color),
+            Self::Layers => WorkbenchIcon::Layers.paint(painter, rect, color),
         }
     }
 }

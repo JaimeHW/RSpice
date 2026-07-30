@@ -222,6 +222,10 @@ const SAVE_ALL: &[ShortcutBinding] = &[primary(
     chord(Key::S, true, false, true, "Ctrl+Shift+S"),
     ALL,
 )];
+const PAGE_SETUP: &[ShortcutBinding] = &[primary(
+    chord(Key::P, true, true, true, "Ctrl+Shift+Alt+P"),
+    ALL,
+)];
 const CLOSE_DOCUMENT: &[ShortcutBinding] = &[
     primary(chord(Key::W, true, false, false, "Ctrl+W"), DESKTOP),
     alternate(
@@ -239,7 +243,7 @@ const PRINT_HARDCOPY: &[ShortcutBinding] = &[
 ];
 const EXPORT_ACTIVE_VIEW: &[ShortcutBinding] = &[
     primary(chord(Key::P, true, false, true, "Ctrl+Shift+P"), DESKTOP),
-    alternate(chord(Key::P, true, true, true, "Ctrl+Alt+Shift+P"), HOST),
+    alternate(chord(Key::E, true, true, true, "Ctrl+Alt+Shift+E"), HOST),
 ];
 const EXIT: &[ShortcutBinding] = &[primary(
     chord(Key::F4, false, true, false, "Alt+F4"),
@@ -280,6 +284,8 @@ const ZOOM_IN: &[ShortcutBinding] = &[
 ];
 const ZOOM_OUT: &[ShortcutBinding] = &[primary(chord(Key::Minus, false, false, false, "−"), ALL)];
 const ZOOM_FIT: &[ShortcutBinding] = &[primary(chord(Key::F, false, false, false, "F"), ALL)];
+const FIT_SCHEMATIC_CONTENT: &[ShortcutBinding] =
+    &[primary(chord(Key::F, false, false, true, "Shift+F"), ALL)];
 const GRID: &[ShortcutBinding] = &[primary(chord(Key::G, false, false, false, "G"), ALL)];
 const FULL_SCREEN: &[ShortcutBinding] = &[
     primary(chord(Key::F11, false, false, false, "F11"), DESKTOP),
@@ -443,6 +449,8 @@ impl Command {
                 | Self::ExportWaveformsCsv
                 | Self::ExportNetlist(_)
                 | Self::PageSetup
+                | Self::SheetFormatManager
+                | Self::CustomSheetSizes
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::FindInDesign
@@ -509,6 +517,8 @@ impl Command {
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::PageSetup
+                | Self::SheetFormatManager
+                | Self::CustomSheetSizes
                 | Self::PrintHardcopy
                 | Self::ExportActiveView
                 | Self::CheckAndSave
@@ -569,6 +579,7 @@ impl Command {
             | Self::ZoomIn
             | Self::ZoomOut
             | Self::ZoomFit
+            | Self::FitSchematicContent
             | Self::ZoomOneToOne
             | Self::SelectTool => ShortcutContext::EditContext,
             Self::FindInDesign
@@ -596,6 +607,11 @@ impl Command {
             Self::AscendHierarchy
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
+            | Self::PageSetup
+            | Self::SheetFormatManager
+            | Self::CustomSheetSizes
+            | Self::GridSnapRouting
+            | Self::DrawingSheetLayers
             | Self::VisibilityOptions
             | Self::RunChecks
             | Self::CheckAndSave
@@ -655,7 +671,8 @@ impl Command {
             Self::SaveAll => SAVE_ALL,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::CloseProject => CLOSE_PROJECT,
-            Self::PageSetup => NONE,
+            Self::PageSetup => PAGE_SETUP,
+            Self::SheetFormatManager | Self::CustomSheetSizes => NONE,
             Self::PrintHardcopy => PRINT_HARDCOPY,
             Self::ExportActiveView => EXPORT_ACTIVE_VIEW,
             Self::Exit => EXIT,
@@ -674,7 +691,10 @@ impl Command {
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,
             Self::ZoomFit => ZOOM_FIT,
+            Self::FitSchematicContent => FIT_SCHEMATIC_CONTENT,
             Self::CycleGrid => GRID,
+            Self::GridSnapRouting => NONE,
+            Self::DrawingSheetLayers => NONE,
             Self::VisibilityOptions => NONE,
             Self::ToggleFullScreen => FULL_SCREEN,
             Self::EngineeringTableView => ENGINEERING_TABLE_VIEW,
@@ -806,7 +826,7 @@ impl Command {
             Self::RevisionHistory => "open a schematic project",
             Self::Paste => "clipboard has no compatible content",
             Self::RenameSelection => "select one editable component, net label, or declared bus",
-            Self::ObjectProperties => "select one editable object",
+            Self::ObjectProperties => "select one inspectable object",
             Self::AscendHierarchy => "already at top hierarchy",
             Self::DescendHierarchy | Self::DescendHierarchyDirect => {
                 "select one hierarchical instance"

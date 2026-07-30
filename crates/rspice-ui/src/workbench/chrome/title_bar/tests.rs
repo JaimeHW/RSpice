@@ -392,6 +392,18 @@ fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
 }
 
 #[test]
+fn file_menu_exposes_the_canonical_drawing_sheet_workflows_in_order() {
+    assert_eq!(
+        DRAWING_SHEET_FILE_COMMANDS,
+        [
+            Command::PageSetup,
+            Command::SheetFormatManager,
+            Command::CustomSheetSizes,
+        ]
+    );
+}
+
+#[test]
 fn application_menu_height_is_viewport_bounded() {
     assert_eq!(menu_popup_height_for_viewport(900.0), 560.0);
     assert_eq!(menu_popup_height_for_viewport(600.0), 536.0);

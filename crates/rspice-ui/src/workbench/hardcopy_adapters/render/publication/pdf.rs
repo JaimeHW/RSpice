@@ -515,13 +515,24 @@ pub(super) fn draw_pdf_primitive(
             size,
             color,
             anchor,
+            rotation,
         } => {
             let (x, y) = transform.point(*origin);
+            let x = coordinate_to_points(x);
+            let y = coordinate_to_points(y);
+            let rotation_degrees = match rotation {
+                SceneTextRotation::Upright => None,
+                SceneTextRotation::Clockwise90 => Some(90.0),
+                SceneTextRotation::CounterClockwise90 => Some(-90.0),
+            };
+            if let Some(degrees) = rotation_degrees {
+                surface.push_transform(&Transform::from_rotate_at(degrees, x, y));
+            }
             draw_pdf_text(
                 surface,
                 fonts.get(*font),
-                coordinate_to_points(x),
-                coordinate_to_points(y),
+                x,
+                y,
                 coordinate_to_points(transform.length(*size)),
                 text,
                 resolve_color(plan, *color),
@@ -529,6 +540,20 @@ pub(super) fn draw_pdf_primitive(
                 !plan.setup().render().fonts().preserve_searchable_text(),
                 NormalizedF32::ONE,
             );
+            if rotation_degrees.is_some() {
+                surface.pop();
+            }
+        }
+        ScenePrimitive::ClippedGroup {
+            source_origin,
+            destination_origin,
+            primitives,
+            ..
+        } => {
+            let transform = transform.remap(*source_origin, *destination_origin);
+            for primitive in primitives {
+                draw_pdf_primitive(surface, fonts, plan, transform, primitive)?;
+            }
         }
     }
     Ok(())

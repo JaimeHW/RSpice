@@ -9,21 +9,21 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 mod design_intent;
-mod plan_data;
-mod project_descriptor;
 mod hierarchy;
 mod materialize;
 mod open_documents;
+mod plan_data;
+mod project_descriptor;
 mod saved_output;
 
-pub(crate) use saved_output::validate_raw_probe;
 pub use design_intent::*;
-pub use project_descriptor::*;
 pub use hierarchy::*;
+pub use project_descriptor::*;
+pub(crate) use saved_output::validate_raw_probe;
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
 // the one binding lookup two workbench surfaces reach by path.
-use materialize::*;
 pub(crate) use materialize::project_veriloga_binding_for_view;
+use materialize::*;
 
 pub use saved_output::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
@@ -208,7 +208,6 @@ impl CellViewRef {
     }
 }
 
-
 /// One immutable, exact-path executable binding consumed by hierarchical
 /// netlist generation.  The placed schematic binding is deliberately not
 /// retained as execution authority: `materialized_binding` is rebuilt from
@@ -372,7 +371,6 @@ pub enum ConfigurationExecutionPlanError {
     DesignManagement(String),
 }
 
-
 /// One open view tab in the workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenCellView {
@@ -419,6 +417,8 @@ pub enum SimulationConfigurationError {
     InvalidPlotExportPresetOwnership { message: String },
     #[error("project hardcopy source-set catalog is invalid: {message}")]
     InvalidHardcopySourceSetCatalog { message: String },
+    #[error("project hardcopy receipt ledger is invalid: {message}")]
+    InvalidHardcopyReceiptLedger { message: String },
     #[error("report_documents[{index}] is invalid: {message}")]
     InvalidReportDocument { index: usize, message: String },
     #[error("report document identity {document_id} is duplicated")]
@@ -828,6 +828,12 @@ pub struct ProjectWorkspace {
     /// and transient preview state are intentionally not persisted here.
     #[serde(default)]
     pub hardcopy_setups: crate::hardcopy::HardcopySetupStore,
+    /// Bounded, digest-sealed outcome history for print and export
+    /// publications. Failures and cancellations are retained alongside
+    /// successful artifacts so project evidence never implies more than the
+    /// platform actually accepted.
+    #[serde(default)]
+    pub hardcopy_receipts: crate::hardcopy::HardcopyReceiptLedger,
     /// Reusable print-mapping sets owned by this project. Personal portable
     /// presets are persisted by `UserPreferences`; document mappings remain
     /// embedded in `hardcopy_setups` for reproducible publication.
@@ -896,6 +902,9 @@ pub struct ProjectWorkspace {
     /// Runtime dirty projection for committed per-document page setups.
     #[serde(default, skip)]
     pub hardcopy_setups_dirty: bool,
+    /// Runtime dirty projection for the durable hardcopy outcome ledger.
+    #[serde(default, skip)]
+    pub hardcopy_receipts_dirty: bool,
     /// Runtime dirty projection for reusable project-owned print mappings.
     #[serde(default, skip)]
     pub project_print_mappings_dirty: bool,
@@ -925,6 +934,7 @@ impl Default for ProjectWorkspace {
             plot_export_presets:
                 crate::results::plot_export_preset::PlotExportPresetCatalog::default(),
             hardcopy_setups: crate::hardcopy::HardcopySetupStore::default(),
+            hardcopy_receipts: crate::hardcopy::HardcopyReceiptLedger::default(),
             project_print_mappings: crate::hardcopy::PrintMappingPresetCatalog::new(
                 crate::hardcopy::PrintMappingCatalogOwner::Project,
             ),
@@ -941,6 +951,7 @@ impl Default for ProjectWorkspace {
             project_metadata_dirty: false,
             report_documents_dirty: false,
             hardcopy_setups_dirty: false,
+            hardcopy_receipts_dirty: false,
             project_print_mappings_dirty: false,
             hardcopy_source_sets_dirty: false,
         }
@@ -1044,6 +1055,11 @@ impl ProjectWorkspace {
                 message: error.to_string(),
             }
         })?;
+        self.hardcopy_receipts.validate().map_err(|error| {
+            SimulationConfigurationError::InvalidHardcopyReceiptLedger {
+                message: error.to_string(),
+            }
+        })?;
         let mut report_document_ids = std::collections::HashSet::new();
         for (index, document) in self.report_documents.iter().enumerate() {
             document.validate().map_err(|error| {
@@ -1066,9 +1082,7 @@ impl ProjectWorkspace {
             }
         })?;
         if let Some(document) = &self.netlist_document {
-            if document.ownership()
-                == crate::state::DocumentOwnership::Generated
-            {
+            if document.ownership() == crate::state::DocumentOwnership::Generated {
                 return Err(
                     SimulationConfigurationError::InvalidNetlistDocumentProjection {
                         message: "project-owned netlist document cannot have generated ownership"
@@ -1232,9 +1246,7 @@ impl ProjectWorkspace {
         }
         Ok(())
     }
-
 }
-
 
 #[cfg(test)]
 mod tests;

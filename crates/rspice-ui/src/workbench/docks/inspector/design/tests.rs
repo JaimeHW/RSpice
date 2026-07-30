@@ -7,7 +7,9 @@
 
 use super::*;
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
-use crate::state::{Cell, Library, LibraryCellInstance, Point, PortDirection, View, ViewType};
+use crate::state::{
+    Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
+};
 
 fn state_with_two_components() -> AppState {
     let mut state = AppState::default();
@@ -99,6 +101,20 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
     assert_eq!(subject(&state, &[]), DesignSubject::Component(ids[0]));
 
     state.schematic.selection.select_component(ids[1]);
+    assert_eq!(subject(&state, &[]), DesignSubject::Multi);
+}
+
+#[test]
+fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
+    let mut state = AppState::default();
+    state.schematic.probes.push(
+        SchematicProbe::new(73, Point::new(10, 20), "V(out)", Some("V(out)".to_owned())).unwrap(),
+    );
+    state.schematic.selection.select_only_probe(73);
+
+    assert_eq!(subject(&state, &[]), DesignSubject::Probe(73));
+
+    state.schematic.selection.select_wire(9);
     assert_eq!(subject(&state, &[]), DesignSubject::Multi);
 }
 
@@ -819,4 +835,36 @@ fn operating_point_summary_matches_the_upgraded_inset_contract() {
     assert_eq!(OP_SUMMARY_MARGIN_X, 8.0);
     assert_eq!(OP_SUMMARY_PADDING, 9.0);
     assert_eq!(OP_SUMMARY_ROW_H, 22.0);
+}
+
+#[test]
+fn drawing_sheet_inspector_uses_resolved_geometry_and_canonical_labels() {
+    let state = AppState::default();
+    let sheet = ActiveDrawingSheet::resolve(&state);
+
+    assert_eq!(
+        drawing_sheet_source_label(sheet.format.inheritance),
+        "inherited · project default"
+    );
+    assert_eq!(sheet.format_label(), "ISO A4 landscape");
+    assert_eq!(
+        sheet.format.display_unit.format_size_um(
+            sheet.geometry.physical.paper.width_um,
+            sheet.geometry.physical.paper.height_um
+        ),
+        "297 × 210 mm"
+    );
+    assert_eq!(
+        drawing_sheet_margins_label(&sheet.format),
+        "10 · 10 · 10 · 20 mm"
+    );
+    assert_eq!(
+        drawing_sheet_border_label(&sheet),
+        "standard border with zones · 4 × 4 zones"
+    );
+    assert_eq!(
+        drawing_sheet_title_block_label(&sheet),
+        "RSpice compact · bottom right"
+    );
+    assert_eq!(sheet.page_label, "1 of 1");
 }

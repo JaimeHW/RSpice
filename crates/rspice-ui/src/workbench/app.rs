@@ -92,6 +92,21 @@ pub(crate) use dialogs::design_management::{
     DesignManagementDialogState, open_design_management_dialog,
 };
 
+pub(crate) use dialogs::drawing_sheet_defaults::{
+    DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
+};
+pub(crate) use dialogs::drawing_sheet_presets::{
+    DrawingSheetPresetDialogsState, capture_personal_preset_into_project,
+    open_custom_sheet_size_library,
+};
+pub(crate) use dialogs::drawing_sheet_setup::{
+    DrawingSheetSetupState, drawing_sheet_setup_available, open_drawing_sheet_setup,
+    open_drawing_sheet_setup_for_state, open_drawing_sheet_setup_with_preset,
+};
+pub(crate) use dialogs::drawing_sheet_support::{
+    DrawingSheetSupportState, open_sheet_format_manager, open_title_block_fields,
+};
+
 pub(crate) use dialogs::connectivity_manager::{
     ConnectivityManagerDialogState, open_connectivity_manager,
 };
@@ -144,6 +159,8 @@ pub(crate) use schematic::named_net::{
 };
 
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
+pub(crate) use dialogs::drawing_sheet_layers::open_drawing_sheet_layers_dialog;
+pub(crate) use dialogs::drawing_sheet_overflow::open_drawing_sheet_overflow_review;
 pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
 pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 pub(crate) use dialogs::hierarchy::create::{
@@ -158,12 +175,9 @@ pub(crate) use dialogs::view_operations::{
 };
 pub(crate) use dialogs::window_session::open_window_workflow;
 
-
-
 pub(crate) use actions::property_edit::{
     open_property_editor, open_selected_object_properties, selected_object_properties_available,
 };
-
 
 pub(crate) use dialogs::placement::net_label::open_net_label_placement;
 pub(crate) use dialogs::selection::array::{
@@ -188,10 +202,6 @@ pub(crate) use dialogs::visibility_options::open_schematic_visibility_options;
 pub(crate) use dialogs::selection::rename::{
     open_selected_object_rename, rename_selection_available,
 };
-
-
-
-
 
 // =============================================================================
 // Main Application
@@ -218,9 +228,11 @@ pub struct RSpiceApp {
     /// Simulation controller for running analyses
     pub(crate) simulation_controller: crate::simulation::SimulationController,
     /// File workflow IO backend (native in production, injectable in tests).
-    pub(crate) file_workflow_io: Box<dyn crate::workbench::workflows::file_workflow::FileWorkflowIo>,
+    pub(crate) file_workflow_io:
+        Box<dyn crate::workbench::workflows::file_workflow::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
-    pub(crate) export_workflow_io: Box<dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo>,
+    pub(crate) export_workflow_io:
+        Box<dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo>,
 }
 
 fn configure_platform_input_contract(ctx: &Context) {
@@ -277,8 +289,12 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::workbench::workflows::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::workbench::workflows::export_workflow::NativeExportWorkflowIo),
+            file_workflow_io: Box::new(
+                crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
+            ),
+            export_workflow_io: Box::new(
+                crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+            ),
         }
     }
 
@@ -362,8 +378,12 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::workbench::workflows::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::workbench::workflows::export_workflow::NativeExportWorkflowIo),
+            file_workflow_io: Box::new(
+                crate::workbench::workflows::file_workflow::NativeFileWorkflowIo,
+            ),
+            export_workflow_io: Box::new(
+                crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+            ),
         }
     }
 
@@ -401,19 +421,27 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::file_import::register_text_import_repaint_context(ctx);
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::lifecycle::project_lifecycle::poll_browser_binding_restore(&mut self.state);
+        crate::workbench::lifecycle::project_lifecycle::poll_browser_binding_restore(
+            &mut self.state,
+        );
         #[cfg(target_arch = "wasm32")]
-        if crate::workbench::workflows::project_workflow::poll_browser_project_import(&mut self.state) {
+        if crate::workbench::workflows::project_workflow::poll_browser_project_import(
+            &mut self.state,
+        ) {
             self.restore_workspace_after_project_load();
         }
         #[cfg(target_arch = "wasm32")]
         if let Some(event) =
-            crate::workbench::workflows::project_workflow::poll_browser_project_save(&mut self.state)
+            crate::workbench::workflows::project_workflow::poll_browser_project_save(
+                &mut self.state,
+            )
         {
             self.handle_save_continuation_event(event);
         }
         #[cfg(target_arch = "wasm32")]
-        if crate::workbench::workflows::file_workflow::poll_browser_schematic_import(&mut self.state) {
+        if crate::workbench::workflows::file_workflow::poll_browser_schematic_import(
+            &mut self.state,
+        ) {
             self.state.clear_transient_specialized_viewer_data();
         }
         #[cfg(target_arch = "wasm32")]
@@ -608,6 +636,8 @@ impl RSpiceApp {
         self.render_bus_tap_dialog(ctx);
         self.render_net_label_dialog(ctx);
         self.render_grid_snap_routing_dialog(ctx);
+        self.render_drawing_sheet_layers_dialog(ctx);
+        self.render_drawing_sheet_overflow_dialog(ctx);
         self.render_schematic_visibility_dialog(ctx);
         self.render_descend_hierarchy_dialog(ctx);
         self.render_engineering_table_dialog(ctx);
@@ -629,6 +659,10 @@ impl RSpiceApp {
         self.render_create_model_bound_symbol_dialog(ctx);
         self.render_symbol_definition_dialogs(ctx);
         self.render_configuration_sets_dialog(ctx);
+        self.render_drawing_sheet_setup_dialog(ctx);
+        self.render_drawing_sheet_defaults_dialog(ctx);
+        self.render_drawing_sheet_preset_dialogs(ctx);
+        self.render_drawing_sheet_support_dialogs(ctx);
         self.render_hardcopy_dialog(ctx);
         self.render_object_properties_dialog(ctx);
         self.render_rename_selection_dialog(ctx);
@@ -870,7 +904,9 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
 
 #[cfg(target_arch = "wasm32")]
 fn recover_browser_history_at_active_task(state: &mut AppState) {
-    use crate::workbench::browser::navigation::{ensure_popstate_listener, restart_history_session};
+    use crate::workbench::browser::navigation::{
+        ensure_popstate_listener, restart_history_session,
+    };
 
     state.workbench.clear_browser_history_effects();
     let canonical = state.workbench.current_route();

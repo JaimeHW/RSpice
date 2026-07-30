@@ -21,8 +21,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::hardcopy::{
     CancellationPhase, DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan,
-    OutputFormat, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry, RenderTarget,
-    ResolvedOrientation,
+    OutputFormat, PaperSize, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry,
+    RenderTarget, ResolvedOrientation,
 };
 use crate::product::ContentDigest;
 #[cfg(target_arch = "wasm32")]
@@ -480,7 +480,6 @@ impl PrinterDiscoveryReport {
     pub fn printers(&self) -> &[PrinterCatalogEntry] {
         &self.printers
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -589,6 +588,10 @@ pub enum HardcopyPrintError {
     PrinterCapabilitiesChanged,
     #[error("printer does not support the planned paper dimensions")]
     UnsupportedPaper,
+    #[error(
+        "the selected native printer cannot switch physical media or orientation between authored sheets in one job"
+    )]
+    MixedAuthoredMediaUnsupported,
     #[error("selected printer paper identity {0:?} is invalid or unavailable")]
     UnsupportedPaperIdentity(String),
     #[error("planned printable ink lies outside the selected driver printable rectangle")]
@@ -675,6 +678,7 @@ impl HardcopyPrintError {
             | Self::SpoolCleanupFailed { .. } => (HardcopyFailureCode::DeviceUnavailable, true),
             Self::PrinterCapabilitiesChanged
             | Self::UnsupportedPaper
+            | Self::MixedAuthoredMediaUnsupported
             | Self::UnsupportedPaperIdentity(_)
             | Self::PlannedInkOutsidePrintableArea
             | Self::UnsupportedMediaSource(_)
@@ -742,6 +746,16 @@ fn resolve_job_settings(
     job: &PrinterJobSettings,
     capabilities: &PrinterCapabilitySnapshot,
 ) -> Result<ResolvedNativePrinterJob, HardcopyPrintError> {
+    if let PaperSize::MatchAuthoredSheets(media) = plan.setup().physical_page().paper()
+        && media.first().is_some_and(|first| {
+            media
+                .iter()
+                .skip(1)
+                .any(|entry| entry.dimensions() != first.dimensions())
+        })
+    {
+        return Err(HardcopyPrintError::MixedAuthoredMediaUnsupported);
+    }
     let (paper_width, paper_height) = plan.setup().physical_page().paper().portrait_dimensions();
     let selected_paper_id = job.selected_paper_id().parse::<i16>().map_err(|_| {
         HardcopyPrintError::UnsupportedPaperIdentity(job.selected_paper_id().to_owned())

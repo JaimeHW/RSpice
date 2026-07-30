@@ -194,13 +194,67 @@ pub(super) fn schematic_bounds(
         );
     }
     for shape in &schematic.documentation_shapes {
-        shape
-            .geometry
-            .points()
-            .into_iter()
-            .for_each(|point| bounds.include(point));
+        // Documentation arcs can sweep well beyond their three authored
+        // control points. Use the shape authority's exact circular-extrema
+        // bounds so hardcopy Ask/Extend decisions and authenticated renderer
+        // bounds agree with the geometry that is actually emitted.
+        let (minimum, maximum) = shape.bounds();
+        bounds.include(minimum);
+        bounds.include(maximum);
     }
     bounds.finish(SCHEMATIC_EDGE_ALLOWANCE_UNITS)
+}
+
+pub(crate) fn authored_sheet_bounds(
+    format: &SchematicSheetFormat,
+) -> Result<SemanticBounds, HardcopySourceError> {
+    let origin_x = SCHEMATIC_SHEET_ORIGIN_X_UNITS
+        .checked_mul(SCHEMATIC_UNIT_UM)
+        .ok_or(HardcopySourceError::CoordinateOverflow)?;
+    let origin_y = SCHEMATIC_SHEET_ORIGIN_Y_UNITS
+        .checked_mul(SCHEMATIC_UNIT_UM)
+        .ok_or(HardcopySourceError::CoordinateOverflow)?;
+    let geometry = format
+        .geometry()
+        .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+    // Authored-sheet clipping is governed by the physical paper edge. Bleed
+    // is export artwork outside that edge and must never make off-sheet
+    // schematic content appear to be on the authored sheet.
+    let paper = geometry.paper;
+    let minimum_x = origin_x
+        .checked_add(paper.x_um)
+        .ok_or(HardcopySourceError::CoordinateOverflow)?;
+    let minimum_y = origin_y
+        .checked_add(paper.y_um)
+        .ok_or(HardcopySourceError::CoordinateOverflow)?;
+    let width_um =
+        i64::try_from(paper.width_um).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+    let height_um =
+        i64::try_from(paper.height_um).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+    SemanticBounds::try_new(
+        SemanticPoint::new(minimum_x, minimum_y),
+        SemanticPoint::new(
+            minimum_x
+                .checked_add(width_um)
+                .ok_or(HardcopySourceError::CoordinateOverflow)?,
+            minimum_y
+                .checked_add(height_um)
+                .ok_or(HardcopySourceError::CoordinateOverflow)?,
+        ),
+    )
+}
+
+pub(super) fn union_bounds(first: SemanticBounds, second: SemanticBounds) -> SemanticBounds {
+    SemanticBounds {
+        minimum: SemanticPoint::new(
+            first.minimum.x_um.min(second.minimum.x_um),
+            first.minimum.y_um.min(second.minimum.y_um),
+        ),
+        maximum: SemanticPoint::new(
+            first.maximum.x_um.max(second.maximum.x_um),
+            first.maximum.y_um.max(second.maximum.y_um),
+        ),
+    }
 }
 
 pub(super) fn symbol_bounds(
@@ -282,6 +336,59 @@ pub(super) fn map_result_coordinate(
         return Err(HardcopySourceError::CoordinateOverflow);
     }
     Ok(mapped.round() as i64)
+}
+
+#[cfg(test)]
+mod drawing_sheet_geometry_tests {
+    use super::*;
+    use crate::state::DocumentationShapeGeometry;
+
+    #[test]
+    fn authored_sheet_bounds_stop_at_paper_even_when_bleed_is_configured() {
+        let format = SchematicSheetFormat::default()
+            .try_update(|draft| draft.bleed_um = 5_000)
+            .unwrap();
+        let bounds = authored_sheet_bounds(&format).unwrap();
+        let (width_um, height_um) = format.oriented_dimensions_um();
+        assert_eq!(bounds.maximum.x_um - bounds.minimum.x_um, width_um as i64);
+        assert_eq!(bounds.maximum.y_um - bounds.minimum.y_um, height_um as i64);
+    }
+
+    #[test]
+    fn schematic_bounds_include_major_arc_cardinal_extrema() {
+        let arc = DocumentationShape::new(
+            1,
+            DocumentationShapeGeometry::Arc {
+                start: Point::new(10, 0),
+                through: Point::new(0, -10),
+                end: Point::new(0, 10),
+            },
+        )
+        .unwrap();
+        let schematic = SemanticSchematic {
+            view_path: "library/cell/schematic".to_owned(),
+            drawing_sheet: None,
+            drawing_sheet_title_values: std::collections::BTreeMap::new(),
+            grid_pitch_units: 10,
+            components: Vec::new(),
+            wires: Vec::new(),
+            buses: Vec::new(),
+            bus_taps: Vec::new(),
+            junctions: Vec::new(),
+            net_labels: Vec::new(),
+            design_notes: Vec::new(),
+            documentation_shapes: vec![arc],
+        };
+        let bounds = schematic_bounds(&schematic).unwrap();
+        assert_eq!(
+            bounds.minimum.x_um,
+            (-10 - SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
+        );
+        assert_eq!(
+            bounds.maximum.x_um,
+            (10 + SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
+        );
+    }
 }
 
 pub(super) fn clipped_plot_paths(

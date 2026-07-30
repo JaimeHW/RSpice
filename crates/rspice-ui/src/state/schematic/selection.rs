@@ -75,6 +75,7 @@ impl SchematicSelectionFilter {
         if !self.annotations {
             selection.design_notes.clear();
             selection.documentation_shapes.clear();
+            selection.probes.clear();
         }
     }
 }
@@ -321,6 +322,10 @@ pub struct Selection {
     /// Selected non-electrical documentation-shape stable IDs.
     #[serde(default)]
     pub documentation_shapes: HashSet<u64>,
+
+    /// Selected non-electrical probe-marker stable IDs.
+    #[serde(default)]
+    pub probes: HashSet<u64>,
 }
 
 impl Selection {
@@ -341,6 +346,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
     }
 
     /// Get total number of selected items
@@ -355,6 +361,7 @@ impl Selection {
             + self.net_labels.len()
             + self.design_notes.len()
             + self.documentation_shapes.len()
+            + self.probes.len()
     }
 
     /// Clear all selections
@@ -369,6 +376,7 @@ impl Selection {
         self.net_labels.clear();
         self.design_notes.clear();
         self.documentation_shapes.clear();
+        self.probes.clear();
     }
 
     // =========================================================================
@@ -417,6 +425,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
         {
             self.components.iter().next().copied()
         } else {
@@ -470,6 +479,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
         {
             self.wires.iter().next().copied()
         } else {
@@ -521,6 +531,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
         {
             Some(&self.wire_segments[0])
         } else {
@@ -572,6 +583,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
         {
             Some(&self.wire_vertices[0])
         } else {
@@ -618,6 +630,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
         {
             Some(self.junctions[0].pos)
         } else {
@@ -793,6 +806,39 @@ impl Selection {
     }
 
     // =========================================================================
+    // Probe-Marker Selection
+    // =========================================================================
+
+    pub fn has_probe(&self, id: u64) -> bool {
+        self.probes.contains(&id)
+    }
+
+    pub fn select_probe(&mut self, id: u64) {
+        self.probes.insert(id);
+    }
+
+    pub fn deselect_probe(&mut self, id: u64) {
+        self.probes.remove(&id);
+    }
+
+    pub fn toggle_probe(&mut self, id: u64) {
+        if !self.probes.remove(&id) {
+            self.probes.insert(id);
+        }
+    }
+
+    pub fn select_only_probe(&mut self, id: u64) {
+        self.clear();
+        self.probes.insert(id);
+    }
+
+    pub fn single_probe(&self) -> Option<u64> {
+        (self.probes.len() == 1 && self.count() == 1)
+            .then(|| self.probes.iter().next().copied())
+            .flatten()
+    }
+
+    // =========================================================================
     // Query Methods
     // =========================================================================
 
@@ -813,6 +859,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
     }
 
     /// Check if only wires are selected (no components or other items)
@@ -827,6 +874,7 @@ impl Selection {
             && self.net_labels.is_empty()
             && self.design_notes.is_empty()
             && self.documentation_shapes.is_empty()
+            && self.probes.is_empty()
     }
 
     /// Check if any wire-related items are selected
@@ -938,5 +986,39 @@ mod tests {
         let selection: Selection = serde_json::from_value(value).unwrap();
 
         assert!(selection.net_labels.is_empty());
+    }
+
+    #[test]
+    fn probe_selection_is_exclusive_and_participates_in_annotation_filtering() {
+        let mut selection = Selection::new();
+        selection.select_only_probe(73);
+
+        assert!(selection.has_probe(73));
+        assert_eq!(selection.single_probe(), Some(73));
+        assert_eq!(selection.count(), 1);
+
+        selection.select_component(9);
+        assert_eq!(selection.single_probe(), None);
+
+        SchematicSelectionFilter {
+            instances: true,
+            wires: true,
+            labels: true,
+            annotations: false,
+        }
+        .retain_matching(&mut selection);
+
+        assert!(!selection.has_probe(73));
+        assert!(selection.has_component(9));
+    }
+
+    #[test]
+    fn legacy_selection_without_probe_ids_deserializes_empty() {
+        let mut value = serde_json::to_value(Selection::default()).unwrap();
+        value.as_object_mut().unwrap().remove("probes");
+
+        let selection: Selection = serde_json::from_value(value).unwrap();
+
+        assert!(selection.probes.is_empty());
     }
 }

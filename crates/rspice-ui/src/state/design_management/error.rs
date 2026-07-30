@@ -52,6 +52,8 @@ pub enum DesignManagementError {
     ActiveSelectionRequired(&'static str),
     #[error("the active {0} cannot be removed")]
     ActiveRemoval(&'static str),
+    #[error("drawing sheet preset {identity} is used by {count} authored sheet(s)")]
+    DrawingSheetPresetInUse { identity: String, count: usize },
     #[error("{0} has no semantic changes")]
     NoChanges(&'static str),
     #[error("{field} value {value:?} is empty, padded, or contains control characters")]

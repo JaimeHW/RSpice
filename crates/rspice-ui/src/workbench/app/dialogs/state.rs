@@ -345,8 +345,10 @@ pub(crate) struct TechnologyAttachmentDialogState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectCheckpointRecoveryState {
     pub(crate) project_id: Option<String>,
-    pub(crate) checkpoints: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
-    pub(crate) quarantined: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointQuarantine>,
+    pub(crate) checkpoints:
+        Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
+    pub(crate) quarantined:
+        Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointQuarantine>,
     pub(crate) error: Option<String>,
     pub(crate) initialized: bool,
     #[cfg(target_arch = "wasm32")]
@@ -511,6 +513,107 @@ impl NetLabelPlacementDialogState {
 /// The draft is device-local presentation state. Apply publishes all seven
 /// controls atomically; Cancel discards them without touching schematic
 /// history, topology, project serialization, or retained result data.
+/// Governed snap-spacing choices shown by the upgraded schematic toolbar
+/// transaction. `Free` disables snapping without replacing the document's
+/// retained pitch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum GridSnapSpacingChoice {
+    #[default]
+    Free,
+    Mil25,
+    Mil50,
+    Metric,
+}
+
+impl GridSnapSpacingChoice {
+    pub(crate) const ALL: [Self; 4] = [Self::Free, Self::Mil25, Self::Mil50, Self::Metric];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Free => "Free",
+            Self::Mil25 => "25 mil",
+            Self::Mil50 => "50 mil",
+            Self::Metric => "Metric \u{00b7} 0.5 mm",
+        }
+    }
+
+    pub(crate) const fn pitch(self) -> Option<crate::state::SchematicGridPitch> {
+        match self {
+            Self::Free => None,
+            Self::Mil25 => Some(crate::state::SchematicGridPitch::Mil25),
+            Self::Mil50 => Some(crate::state::SchematicGridPitch::Mil50),
+            Self::Metric => Some(crate::state::SchematicGridPitch::Metric),
+        }
+    }
+
+    pub(crate) const fn from_pitch(pitch: crate::state::SchematicGridPitch) -> Self {
+        match pitch {
+            crate::state::SchematicGridPitch::Mil25 => Self::Mil25,
+            crate::state::SchematicGridPitch::Mil50 => Self::Mil50,
+            crate::state::SchematicGridPitch::Metric => Self::Metric,
+        }
+    }
+}
+
+/// Complete isolated candidate published by Grid, snap and wire routing.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GridSnapRoutingDraft {
+    pub(crate) grid_style: crate::state::GridStyle,
+    pub(crate) snap_spacing: GridSnapSpacingChoice,
+    pub(crate) snap_engine: crate::state::SnapEngine,
+    pub(crate) wire_routing: crate::state::WireRoutingMode,
+}
+
+impl Default for GridSnapRoutingDraft {
+    fn default() -> Self {
+        Self {
+            grid_style: crate::state::GridStyle::Dots,
+            snap_spacing: GridSnapSpacingChoice::Mil50,
+            snap_engine: crate::state::SnapEngine::default(),
+            wire_routing: crate::state::WireRoutingMode::HorizontalFirst,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GridSnapRoutingFocusTarget {
+    SnapSpacing,
+    SnapTargets,
+}
+
+/// Application-modal transactional owner for the schematic canvas settings
+/// popover. The original and draft are kept separately so Cancel is exact.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GridSnapRoutingDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: GridSnapRoutingDraft,
+    pub(crate) original: GridSnapRoutingDraft,
+    pub(crate) authority: Option<SchematicEditAuthority>,
+    pub(crate) validation_error: Option<String>,
+    pub(crate) focus_target: Option<GridSnapRoutingFocusTarget>,
+}
+
+impl GridSnapRoutingDialogState {
+    pub(crate) fn open(&mut self, draft: GridSnapRoutingDraft, authority: SchematicEditAuthority) {
+        *self = Self {
+            open: true,
+            original: draft.clone(),
+            draft,
+            authority: Some(authority),
+            validation_error: None,
+            focus_target: None,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn dirty(&self) -> bool {
+        self.open && self.draft != self.original
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SchematicVisibilityDialogState {
     pub(crate) open: bool,
@@ -524,6 +627,31 @@ impl SchematicVisibilityDialogState {
             open: true,
             draft: policy,
             original: policy,
+        };
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+
+    pub(crate) fn dirty(&self) -> bool {
+        self.open && self.draft != self.original
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DrawingSheetLayersDialogState {
+    pub(crate) open: bool,
+    pub(crate) draft: crate::state::DrawingSheetLayerVisibility,
+    pub(crate) original: crate::state::DrawingSheetLayerVisibility,
+}
+
+impl DrawingSheetLayersDialogState {
+    pub(crate) fn open(&mut self, layers: crate::state::DrawingSheetLayerVisibility) {
+        *self = Self {
+            open: true,
+            draft: layers,
+            original: layers,
         };
     }
 
@@ -1152,7 +1280,8 @@ pub(crate) struct CheckAndSaveDialogState {
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_transaction: Option<crate::workbench::lifecycle::project_lifecycle::TransactionId>,
+    pub(crate) pending_transaction:
+        Option<crate::workbench::lifecycle::project_lifecycle::TransactionId>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
     #[cfg(target_arch = "wasm32")]
@@ -1964,6 +2093,19 @@ pub struct DialogState {
     /// `ProjectWorkspace::hardcopy_setups`.
     pub(crate) hardcopy: crate::workbench::app::HardcopyDialogState,
 
+    /// Permanent authored drawing-sheet transaction for schematic and
+    /// testbench documents. It never contains printer or export-media state.
+    pub(crate) drawing_sheet_setup: crate::workbench::app::DrawingSheetSetupState,
+
+    /// Project and personal defaults for future authored drawing sheets.
+    pub(crate) drawing_sheet_defaults: crate::workbench::app::DrawingSheetDefaultsDialogState,
+
+    /// Custom drawing-sheet size library, editor, and portable JSON transfer.
+    pub(crate) drawing_sheet_presets: crate::workbench::app::DrawingSheetPresetDialogsState,
+
+    /// Document-wide authored-sheet reconciliation and title-field editing.
+    pub(crate) drawing_sheet_support: crate::workbench::app::DrawingSheetSupportState,
+
     /// Read-only resolved policy review owned by Preferences.
     pub(crate) managed_preference_policy_open: bool,
 
@@ -1995,6 +2137,18 @@ pub struct DialogState {
 
     /// Device-local hierarchy and annotation visibility transaction.
     pub(crate) schematic_visibility: SchematicVisibilityDialogState,
+
+    /// Device-local construction-layer visibility around the permanent paper
+    /// edge. These choices never modify project-owned drawing-sheet setup.
+    pub(crate) drawing_sheet_layers: DrawingSheetLayersDialogState,
+
+    /// Live advisory review of printable objects outside the authored drawing
+    /// area or overlapping the title block.
+    pub(crate) drawing_sheet_overflow_open: bool,
+
+    /// Transactional grid display, exact snapping, and conductor-routing
+    /// configuration.
+    pub(crate) grid_snap_routing: GridSnapRoutingDialogState,
 
     /// Explicit menu-owned hierarchy edit-context transaction.
     pub(crate) descend_hierarchy: DescendHierarchyDialogState,
@@ -2111,6 +2265,10 @@ impl DialogState {
             || self.waveform_calculator_dialog
             || self.preferences_open
             || self.hardcopy.open
+            || self.drawing_sheet_setup.open
+            || self.drawing_sheet_defaults.open
+            || self.drawing_sheet_presets.any_open()
+            || self.drawing_sheet_support.any_open()
             || self.managed_preference_policy_open
             || self.workspace_layout_manager.open
             || self.shortcut_portability.application_modal_open()
@@ -2120,6 +2278,9 @@ impl DialogState {
             || self.bus_tap.open
             || self.net_label_placement.open
             || self.schematic_visibility.open
+            || self.drawing_sheet_layers.open
+            || self.drawing_sheet_overflow_open
+            || self.grid_snap_routing.open
             || self.engineering_table.open
             || self.pin_port.open
             || self.design_note.open
@@ -2181,6 +2342,9 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.waveform_calculator_dialog = true);
         assert_blocks_shortcuts(|dialogs| dialogs.engineering_table.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_setup.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_support.manager.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_support.title_fields.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs
@@ -2195,6 +2359,9 @@ mod tests {
         assert_blocks_shortcuts(|dialogs| dialogs.bus_tap.open());
         assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);
         assert_blocks_shortcuts(|dialogs| dialogs.schematic_visibility.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_layers.open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_overflow_open = true);
+        assert_blocks_shortcuts(|dialogs| dialogs.grid_snap_routing.open = true);
         assert_blocks_shortcuts(|dialogs| {
             dialogs.pin_port.open(
                 "BIAS_EN".to_owned(),

@@ -136,7 +136,7 @@ impl RSpiceApp {
             return;
         }
 
-        if self.state.schematic.read_only && command_edits_schematic(command) {
+        if self.state.schematic_edit_read_only() && command_edits_schematic(command) {
             self.state.deny_read_only_edit();
             return;
         }
@@ -354,11 +354,9 @@ impl RSpiceApp {
             ShortcutCommand::ToggleLinkedCursors => {
                 self.state.ui.results.toggle_linked_cursors();
             }
-            ShortcutCommand::ZoomFit => {
-                self.state.schematic.zoom = 1.0;
-                self.state.schematic.pan = (0.0, 0.0);
-                self.state.schematic.needs_fit = false;
-            }
+            ShortcutCommand::ZoomFit
+            | ShortcutCommand::FitSchematicContent
+            | ShortcutCommand::DrawingSheetLayers => command.execute(self),
             ShortcutCommand::ZoomOneToOne => {
                 self.state.schematic.zoom = 1.0;
             }
@@ -1083,31 +1081,7 @@ impl RSpiceApp {
 /// Copy and Select All are reads; tools that only inspect (select, probe)
 /// and navigation stay live.
 fn command_edits_schematic(command: ShortcutCommand) -> bool {
-    matches!(
-        command,
-        ShortcutCommand::Undo
-            | ShortcutCommand::Redo
-            | ShortcutCommand::Paste
-            | ShortcutCommand::Cut
-            | ShortcutCommand::Delete
-            | ShortcutCommand::PlaceWire
-            | ShortcutCommand::PlaceBus
-            | ShortcutCommand::PlaceBusTap
-            | ShortcutCommand::PlacePin
-            | ShortcutCommand::PlaceText
-            | ShortcutCommand::PlaceShape
-            | ShortcutCommand::MoveSelection
-            | ShortcutCommand::StretchSelection
-            | ShortcutCommand::ArraySelection
-            | ShortcutCommand::ReplaceInstance
-            | ShortcutCommand::PlaceJunction
-            | ShortcutCommand::PlaceLabel
-            | ShortcutCommand::Place(_)
-            | ShortcutCommand::RotateSelection
-            | ShortcutCommand::MirrorSelectionHorizontal
-            | ShortcutCommand::MirrorSelectionVertical
-            | ShortcutCommand::ObjectProperties
-    )
+    crate::workbench::commands::command_edits_schematic(command)
 }
 
 #[cfg(test)]

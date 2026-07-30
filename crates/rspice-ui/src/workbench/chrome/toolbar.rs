@@ -10,12 +10,12 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
 use super::super::RouteTransitionSource;
-use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use super::super::layout::LayoutSpec;
-use crate::workbench::lifecycle::session::SymbolTool;
 use super::super::state::{Drawer, Workspace};
+use crate::workbench::commands::CommandAvailability;
+use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::lifecycle::session::SymbolTool;
 
 const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
 const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 5] = [
@@ -482,7 +482,7 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Command::ZoomFit,
         WorkbenchIcon::ZoomFit,
         false,
-        "Zoom to fit",
+        "Fit drawing sheet",
         layout,
     );
     design_grid_and_snap_menu(ui, app, layout);

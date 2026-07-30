@@ -5,11 +5,12 @@
 //! plan so the dialog cannot preview one layout and emit another.
 
 use crate::hardcopy::{
-    ActiveHardcopySource, BackgroundMode, Bleed, ColorMapping, ContentExtent, CustomPaper,
-    DecorationSetup, FontPolicy, HardcopyError, HardcopyPlan, HardcopyReceipt, HardcopySetup,
-    Length, LengthUnit, Orientation, OutputFormat, PageMargins, PaperSize, PhysicalPageSetup,
-    PrintMappingSaveScope, PrintMappingTable, PrinterJobSettings, RenderSetup, RenderTarget,
-    ScaleMode, StandardPaper, TilingMode, TilingSetup, Watermark,
+    ActiveHardcopySource, AuthoredSheetMedia, BackgroundMode, Bleed, ColorMapping, ContentExtent,
+    CustomPaper, DecorationSetup, FontPolicy, HardcopyError, HardcopyPlan, HardcopyReceipt,
+    HardcopySetup, Length, LengthUnit, Orientation, OutputFormat, OutsideSheetContentPolicy,
+    PageMargins, PaperSize, PhysicalPageSetup, PrintMappingSaveScope, PrintMappingTable,
+    PrinterJobSettings, RenderSetup, RenderTarget, ScaleMode, SchematicHardcopyExtent,
+    SchematicHardcopySetup, StandardPaper, TilingMode, TilingSetup, Watermark,
 };
 #[cfg(test)]
 use crate::hardcopy::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
@@ -45,6 +46,12 @@ pub(crate) enum HardcopyDialogError {
     MissingPrinterCapabilities,
     #[error("{field} must be an unsigned integer from 1 through 65535")]
     InvalidUnsignedInteger { field: &'static str },
+    #[error(
+        "schematic content crosses the authored drawing sheet; choose Clip to authored drawing sheet or Extend output to include content"
+    )]
+    OutsideSheetContentDecisionRequired,
+    #[error("could not validate schematic drawing-sheet output: {0}")]
+    SchematicOutputSource(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +82,7 @@ impl HardcopyWorkflow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PaperDraft {
     Standard(StandardPaper),
+    MatchAuthoredSheets,
     Custom {
         name: String,
         width: String,
@@ -86,6 +94,7 @@ impl PaperDraft {
     fn from_paper(paper: &PaperSize, unit: LengthUnit) -> Self {
         match paper {
             PaperSize::Standard(paper) => Self::Standard(*paper),
+            PaperSize::MatchAuthoredSheets(_) => Self::MatchAuthoredSheets,
             PaperSize::Custom(custom) => {
                 let (width, height) = custom.dimensions();
                 Self::Custom {
@@ -97,9 +106,18 @@ impl PaperDraft {
         }
     }
 
-    fn build(&self, unit: LengthUnit) -> Result<PaperSize, HardcopyError> {
+    fn build(
+        &self,
+        unit: LengthUnit,
+        authored_media: Option<Vec<AuthoredSheetMedia>>,
+    ) -> Result<PaperSize, HardcopyError> {
         match self {
             Self::Standard(paper) => Ok(PaperSize::Standard(*paper)),
+            Self::MatchAuthoredSheets => authored_media.map(PaperSize::MatchAuthoredSheets).ok_or(
+                HardcopyError::InvalidAuthoredSheetMedia(
+                    "the selected source has no governed authored drawing sheets",
+                ),
+            ),
             Self::Custom {
                 name,
                 width,
@@ -119,7 +137,8 @@ pub(crate) enum HardcopySubflowSnapshot {
     Printer {
         printer_id: String,
         printer_job: Option<PrinterJobSettings>,
-        printer_capabilities: Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
+        printer_capabilities:
+            Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
         paper: PaperDraft,
     },
     CustomPaper {
@@ -134,13 +153,28 @@ pub(crate) enum HardcopySubflowSnapshot {
         overlap: String,
         printer_id: String,
         printer_job: Option<PrinterJobSettings>,
-        printer_capabilities: Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
+        printer_capabilities:
+            Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
     },
     PrintMapping {
         print_mapping: PrintMappingTable,
         mapping_scope_draft: PrintMappingSaveScope,
         mapping_name_draft: String,
     },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GovernedSheetPageAuthority {
+    pub(crate) cell_view_key: String,
+    pub(crate) catalog_revision: u64,
+    pub(crate) sheet_id: crate::state::SheetId,
+    pub(crate) sheet_revision: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SchematicPageSetupAuthority {
+    pub(crate) edit: crate::workbench::app::SchematicEditAuthority,
+    pub(crate) governed_sheet: Option<GovernedSheetPageAuthority>,
 }
 
 /// Runtime-only dialog draft. Source identity and content revision are sealed
@@ -155,6 +189,7 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) source: Option<ActiveHardcopySource>,
     pub(crate) content_extent: Option<ContentExtent>,
     pub(crate) resolved_document: Option<std::sync::Arc<ResolvedHardcopyDocument>>,
+    pub(crate) schematic_page_authority: Option<SchematicPageSetupAuthority>,
     pub(crate) source_candidates:
         Vec<crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
     pub(crate) paper: PaperDraft,
@@ -172,9 +207,18 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) manual_rows: String,
     pub(crate) overlap: String,
     pub(crate) registration_marks: bool,
+    pub(crate) schematic_extent: SchematicHardcopyExtent,
+    pub(crate) outside_sheet_content: OutsideSheetContentPolicy,
+    pub(crate) crop_marks: bool,
+    pub(crate) include_sheet_paper: bool,
+    pub(crate) include_sheet_border: bool,
+    pub(crate) include_sheet_title_block: bool,
+    pub(crate) include_sheet_zones: bool,
+    pub(crate) include_schematic_grid: bool,
     pub(crate) printer_id: String,
     pub(crate) printer_job: Option<PrinterJobSettings>,
-    pub(crate) printer_report: Option<crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport>,
+    pub(crate) printer_report:
+        Option<crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport>,
     pub(crate) printer_capabilities:
         Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
     pub(crate) printer_discovery_busy: bool,
@@ -248,6 +292,7 @@ impl HardcopyDialogState {
         let tiling = setup.tiling();
         let render = setup.render();
         let decorations = setup.decorations();
+        let schematic = setup.schematic();
         let custom_scale_percent = match setup.scale() {
             ScaleMode::CustomPercent { hundredths_percent } => format_percent(hundredths_percent),
             _ => "100".to_owned(),
@@ -271,6 +316,7 @@ impl HardcopyDialogState {
             source: None,
             content_extent: None,
             resolved_document: None,
+            schematic_page_authority: None,
             source_candidates: Vec::new(),
             paper: PaperDraft::from_paper(physical.paper(), display_unit),
             display_unit,
@@ -296,6 +342,14 @@ impl HardcopyDialogState {
             },
             overlap: format_length(tiling.overlap(), display_unit),
             registration_marks: tiling.registration_marks_and_coordinates(),
+            schematic_extent: schematic.extent(),
+            outside_sheet_content: schematic.outside_content(),
+            crop_marks: schematic.crop_marks(),
+            include_sheet_paper: schematic.includes_paper(),
+            include_sheet_border: schematic.includes_border(),
+            include_sheet_title_block: schematic.includes_title_block(),
+            include_sheet_zones: schematic.includes_zones(),
+            include_schematic_grid: schematic.includes_grid(),
             printer_id,
             printer_job,
             printer_report: None,
@@ -329,7 +383,8 @@ impl HardcopyDialogState {
             metadata: None,
             body_scroll_offset: 0.0,
             busy: false,
-            cancellation: crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken::default(),
+            cancellation:
+                crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken::default(),
             last_receipt: None,
             error: None,
         }
@@ -350,13 +405,15 @@ impl HardcopyDialogState {
         draft.source = Some(source);
         draft.content_extent = Some(extent);
         draft.resolved_document = None;
+        draft.schematic_page_authority = None;
         draft.source_candidates.clear();
         draft.preview = None;
         draft.preview_adjacent = None;
         draft.metadata = None;
         draft.body_scroll_offset = 0.0;
         draft.busy = false;
-        draft.cancellation = crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken::default();
+        draft.cancellation =
+            crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken::default();
         if workflow == HardcopyWorkflow::Print {
             draft.format = runtime_print_format();
         } else if workflow == HardcopyWorkflow::Export
@@ -404,6 +461,7 @@ impl HardcopyDialogState {
         self.source = None;
         self.content_extent = None;
         self.resolved_document = None;
+        self.schematic_page_authority = None;
         self.source_candidates.clear();
         self.error = None;
         self.busy = false;
@@ -578,7 +636,7 @@ impl HardcopyDialogState {
                 Length::parse_decimal(width, current)?,
                 Length::parse_decimal(height, current)?,
             )),
-            PaperDraft::Standard(_) => None,
+            PaperDraft::Standard(_) | PaperDraft::MatchAuthoredSheets => None,
         };
 
         self.display_unit = unit;
@@ -606,6 +664,7 @@ impl HardcopyDialogState {
         &self,
         print_mapping: &PrintMappingTable,
     ) -> Result<HardcopySetup, HardcopyDialogError> {
+        self.validate_schematic_output_contract()?;
         let parse = |value: &str| Length::parse_decimal(value, self.display_unit);
         let bleed = match parse(&self.bleed)? {
             Length::ZERO => Bleed::None,
@@ -631,9 +690,24 @@ impl HardcopyDialogState {
         } else {
             RenderTarget::ExportArtifact
         };
-        Ok(HardcopySetup::try_new(
+        let authored_media = if matches!(self.paper, PaperDraft::MatchAuthoredSheets) {
+            Some(
+                self.resolved_document
+                    .as_ref()
+                    .ok_or(HardcopyDialogError::SchematicOutputSource(
+                        "the selected source has not resolved".to_owned(),
+                    ))?
+                    .authored_sheet_output_media()
+                    .map_err(|error| {
+                        HardcopyDialogError::SchematicOutputSource(error.to_string())
+                    })?,
+            )
+        } else {
+            None
+        };
+        Ok(HardcopySetup::try_new_with_schematic(
             PhysicalPageSetup::try_new(
-                self.paper.build(self.display_unit)?,
+                self.paper.build(self.display_unit, authored_media)?,
                 PageMargins {
                     top: parse(&self.margin_top)?,
                     right: parse(&self.margin_right)?,
@@ -659,36 +733,74 @@ impl HardcopyDialogState {
                 self.include_provenance,
                 self.watermark.clone(),
             )?,
+            SchematicHardcopySetup::new(
+                self.schematic_extent,
+                self.outside_sheet_content,
+                self.crop_marks,
+                self.include_sheet_paper,
+                self.include_sheet_border,
+                self.include_sheet_title_block,
+                self.include_sheet_zones,
+                self.include_schematic_grid,
+            ),
             print_mapping.clone(),
         )?)
     }
 
+    fn validate_schematic_output_contract(&self) -> Result<(), HardcopyDialogError> {
+        let Some(document) = self.resolved_document.as_ref() else {
+            return Ok(());
+        };
+        let Some(has_outside_content) = document
+            .schematic_drawing_sheet_has_outside_content()
+            .map_err(|error| HardcopyDialogError::SchematicOutputSource(error.to_string()))?
+        else {
+            return Ok(());
+        };
+        if self.schematic_extent == SchematicHardcopyExtent::CompleteSchematicContent {
+            return Ok(());
+        }
+        if has_outside_content && self.outside_sheet_content == OutsideSheetContentPolicy::Ask {
+            return Err(HardcopyDialogError::OutsideSheetContentDecisionRequired);
+        }
+        Ok(())
+    }
+
     pub(crate) fn refresh_preview(&mut self) {
         self.invalidate_preview_raster();
-        let sections = self.resolved_document.as_ref().map_or_else(
-            || Ok(Vec::new()),
-            |document| {
-                document
-                    .hardcopy_sections()
-                    .map_err(|error| error.to_string())
-            },
-        );
         let plan = self
             .source
             .clone()
             .zip(self.content_extent)
             .ok_or_else(|| "The active document has no hardcopy adapter.".to_owned())
-            .and_then(|(source, extent)| {
+            .and_then(|(source, fallback_extent)| {
                 self.build_setup()
                     .map_err(|error| error.to_string())
-                    .and_then(|setup| match sections {
-                        Ok(sections) if !sections.is_empty() => {
-                            HardcopyPlan::compile_with_sections(source, setup, extent, sections)
-                                .map_err(|error| error.to_string())
+                    .and_then(|setup| {
+                        let extent = self.resolved_document.as_ref().map_or_else(
+                            || Ok(fallback_extent),
+                            |document| {
+                                document
+                                    .content_extent_for_setup(setup.schematic())
+                                    .map_err(|error| error.to_string())
+                            },
+                        )?;
+                        let sections = self.resolved_document.as_ref().map_or_else(
+                            || Ok(Vec::new()),
+                            |document| {
+                                document
+                                    .hardcopy_sections_for_setup(setup.schematic())
+                                    .map_err(|error| error.to_string())
+                            },
+                        )?;
+                        match sections {
+                            sections if !sections.is_empty() => {
+                                HardcopyPlan::compile_with_sections(source, setup, extent, sections)
+                                    .map_err(|error| error.to_string())
+                            }
+                            _ => HardcopyPlan::compile(source, setup, extent)
+                                .map_err(|error| error.to_string()),
                         }
-                        Ok(_) => HardcopyPlan::compile(source, setup, extent)
-                            .map_err(|error| error.to_string()),
-                        Err(error) => Err(error),
                     })
             });
         match plan {
@@ -1041,6 +1153,13 @@ mod tests {
         assert_eq!(draft.next_source_resolution_generation(), 1);
         assert_eq!(draft.next_source_resolution_generation(), 2);
         assert_eq!(draft.next_source_resolution_generation(), 3);
+    }
+
+    #[test]
+    fn outside_sheet_decision_error_names_both_valid_publication_choices() {
+        let message = HardcopyDialogError::OutsideSheetContentDecisionRequired.to_string();
+        assert!(message.contains("Clip"));
+        assert!(message.contains("Extend"));
     }
 
     #[test]

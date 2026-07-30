@@ -8,10 +8,10 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
-use crate::workbench::app_state::AppState;
 use crate::state::{
     Component, ComponentType, Point, ResolvedCellSymbol, SchematicState, SymbolResolver,
 };
+use crate::workbench::app_state::AppState;
 
 use super::symbols::SymbolLibrary;
 
@@ -22,6 +22,7 @@ mod coordinates;
 mod design_notes;
 mod documentation_shapes;
 mod drawing;
+pub(crate) mod drawing_sheet;
 mod grid;
 mod interaction;
 mod keyboard_navigation;
@@ -40,6 +41,7 @@ mod viewport;
 pub(crate) mod violations;
 
 use self::coordinates::viewport_from_state;
+use self::drawing_sheet::ActiveDrawingSheet;
 use self::interaction::handle_tool_interactions;
 use self::keyboard_navigation::handle_keyboard_object_navigation;
 use self::navigation::handle_viewport_navigation;
@@ -50,7 +52,9 @@ use self::shelf_drag::{
     ShelfDropOutcome, can_accept_shelf_drop, commit_shelf_drop, handle_placement_transform_keys,
 };
 
-pub(crate) use self::interaction::toggle_probe_with_feedback;
+pub(crate) use self::interaction::{
+    ensure_probe_visible_with_feedback, toggle_probe_with_feedback,
+};
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 pub(crate) use self::scene::wrapped_signal_name;
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet;
@@ -427,6 +431,19 @@ impl SchematicSymbolContext {
             }
         }
 
+        for probe in &schematic.probes {
+            let (min, max) = probe.world_bounds();
+            let matches = if enclosed_only {
+                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
+            } else {
+                rects_intersect(min, max, min_x, min_y, max_x, max_y)
+            };
+            if matches && !schematic.selection.has_probe(probe.id) {
+                schematic.selection.select_probe(probe.id);
+                count += 1;
+            }
+        }
+
         count
     }
 }
@@ -671,11 +688,11 @@ fn schematic_keyboard_navigation_has_objects(state: &AppState) -> bool {
                 || !state.schematic.buses.is_empty()
                 || !state.schematic.bus_taps.is_empty()
                 || !state.schematic.junctions.is_empty()))
-        || (filter.labels
-            && (!state.schematic.net_labels.is_empty() || !state.schematic.probes.is_empty()))
+        || (filter.labels && !state.schematic.net_labels.is_empty())
         || (filter.annotations
             && (!state.schematic.design_notes.is_empty()
-                || !state.schematic.documentation_shapes.is_empty()))
+                || !state.schematic.documentation_shapes.is_empty()
+                || !state.schematic.probes.is_empty()))
 }
 
 fn schematic_keyboard_focus_label(
@@ -806,7 +823,6 @@ pub(crate) fn select_signal_conductor(
     Ok(net)
 }
 
-
 /// Render the schematic view (central canvas)
 pub fn render_schematic_view(
     ui: &mut Ui,
@@ -815,8 +831,17 @@ pub fn render_schematic_view(
 ) {
     let available = ui.available_rect_before_wrap();
     let mut symbol_context = SchematicSymbolContext::from_state(state);
+    let drawing_sheet = ActiveDrawingSheet::resolve(state);
 
-    if state.schematic.needs_fit {
+    if state.schematic.needs_drawing_sheet_fit {
+        state.schematic.needs_drawing_sheet_fit = false;
+        state.schematic.needs_fit = false;
+        drawing_sheet.geometry.fit_view(
+            &mut state.schematic,
+            available.width() as f64,
+            available.height() as f64,
+        );
+    } else if state.schematic.needs_fit {
         state.schematic.needs_fit = false;
         let bounds = symbol_context.content_bounds(&state.schematic);
         state.schematic.zoom_to_fit_bounds(
@@ -938,6 +963,7 @@ pub fn render_schematic_view(
         state,
         symbol_library,
         &symbol_context,
+        &drawing_sheet,
     );
     draw_interaction_previews(
         &painter,
@@ -960,7 +986,6 @@ pub fn render_schematic_view(
             symbol_library,
         );
     }
-
     // Report the cursor position in grid units; the workbench status bar shows it.
     let to_grid_units = |pos: egui::Pos2, state: &AppState| {
         let grid = f64::from(state.schematic.grid_size.max(1));

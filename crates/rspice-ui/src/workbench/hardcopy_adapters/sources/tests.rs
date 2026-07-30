@@ -118,6 +118,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -134,6 +135,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -153,6 +155,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -197,6 +200,11 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         .assign_objects(catalog.revision(), second_id, [22])
         .unwrap();
 
+    let mut project_settings = crate::state::DrawingSheetProjectSettings::default();
+    project_settings.title_block_field_values.insert(
+        DrawingSheetTitleFieldId::Organization,
+        "RSpice Engineering".to_owned(),
+    );
     let base_identity = identity("governed-schematic");
     let second = resolve_schematic_source(SchematicHardcopySource {
         identity: schematic_sheet_identity(&base_identity, catalog.find(second_id).unwrap())
@@ -206,6 +214,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         symbol_resolver: None,
         sheet_catalog: Some(&catalog),
         sheet_id: Some(second_id),
+        project_title_block_field_values: Some(&project_settings.title_block_field_values),
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -220,6 +229,17 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
             .collect::<Vec<_>>(),
         [22]
     );
+    assert_eq!(
+        second_semantic.drawing_sheet.as_ref(),
+        Some(catalog.find(second_id).unwrap().page_format())
+    );
+    assert_eq!(
+        second_semantic
+            .drawing_sheet_title_values
+            .get(&DrawingSheetTitleFieldId::Organization)
+            .map(String::as_str),
+        Some("RSpice Engineering")
+    );
 
     let all = resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
         identity: base_identity,
@@ -227,6 +247,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         expected_topology_version: schematic.topology_version(),
         symbol_resolver: None,
         sheet_catalog: &catalog,
+        project_title_block_field_values: &project_settings.title_block_field_values,
     })
     .unwrap();
     let HardcopySemanticDocument::Aggregate(aggregate) = all.semantic_document() else {
@@ -256,6 +277,35 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
             expected_wire,
             "sheet {index} must contain only its own assigned wire"
         );
+        assert_eq!(
+            sheet.drawing_sheet.as_ref(),
+            Some(catalog.sheets()[index].page_format())
+        );
+        assert_eq!(
+            sheet
+                .drawing_sheet_title_values
+                .get(&DrawingSheetTitleFieldId::Page)
+                .map(String::as_str),
+            Some(match index {
+                0 => "1 / 3",
+                1 => "2 / 3",
+                _ => "3 / 3",
+            })
+        );
+        assert_eq!(
+            sheet
+                .drawing_sheet_title_values
+                .get(&DrawingSheetTitleFieldId::Format)
+                .map(String::as_str),
+            Some(catalog.sheets()[index].page_format().authored_size.label())
+        );
+        assert_eq!(
+            sheet
+                .drawing_sheet_title_values
+                .get(&DrawingSheetTitleFieldId::Organization)
+                .map(String::as_str),
+            Some("RSpice Engineering")
+        );
         assert_eq!(aggregate.children[index].page_break_before, index != 0);
     }
     assert_eq!(
@@ -265,7 +315,16 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
             .unwrap()
             .width()
             .micrometres(),
-        BLANK_SCHEMATIC_SHEET_WIDTH_UM as u64
+        297_000
+    );
+    assert_eq!(
+        aggregate.children[2]
+            .local_bounds
+            .content_extent()
+            .unwrap()
+            .height()
+            .micrometres(),
+        210_000
     );
     assert_eq!(all.hardcopy_sections().unwrap().len(), 3);
 
@@ -353,6 +412,7 @@ fn schematic_selection_exports_only_selected_durable_objects() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_title_block_field_values: None,
         scope: HardcopyScope::Selection,
     })
     .unwrap();
@@ -402,6 +462,7 @@ fn authored_cell_symbol_is_frozen_into_the_semantic_source() {
         symbol_resolver: Some(&resolver),
         sheet_catalog: None,
         sheet_id: None,
+        project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -428,10 +489,54 @@ fn stale_schematic_authority_is_rejected_before_digesting() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap_err();
     assert!(matches!(error, HardcopySourceError::StaleSchematic { .. }));
+}
+
+#[test]
+fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
+    let mut schematic = SchematicState::default();
+    schematic.probes.push(
+        crate::state::SchematicProbe::new(
+            91,
+            Point::new(20, 30),
+            "V(out)",
+            Some("V(out)".to_owned()),
+        )
+        .unwrap(),
+    );
+    schematic.selection.select_only_probe(91);
+    let probes_before = schematic.probes.clone();
+    let selection_before = schematic.selection.clone();
+    let topology_before = schematic.topology_version();
+    let dirty_before = schematic.is_dirty;
+    let undo_before = schematic.can_undo();
+
+    let error = resolve_schematic_source(SchematicHardcopySource {
+        identity: identity("schematic"),
+        schematic: &schematic,
+        expected_topology_version: schematic.topology_version(),
+        symbol_resolver: None,
+        sheet_catalog: None,
+        sheet_id: None,
+        project_title_block_field_values: None,
+        scope: HardcopyScope::Selection,
+    })
+    .unwrap_err();
+
+    assert_eq!(error, HardcopySourceError::ProbeSelectionUnsupported);
+    assert_eq!(
+        error.to_string(),
+        "probe markers are not publishable hardcopy objects; deselect every probe or publish the owning waveform instead"
+    );
+    assert_eq!(schematic.probes, probes_before);
+    assert_eq!(schematic.selection, selection_before);
+    assert_eq!(schematic.topology_version(), topology_before);
+    assert_eq!(schematic.is_dirty, dirty_before);
+    assert_eq!(schematic.can_undo(), undo_before);
 }
 
 #[test]

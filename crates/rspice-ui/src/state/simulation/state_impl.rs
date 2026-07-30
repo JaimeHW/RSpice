@@ -92,67 +92,16 @@ impl SimulationState {
     /// - Net name matching (e.g., "V(N001)" matches "N001")
     /// - N00X to numeric mapping (e.g., "V(N001)" matches "V(1)")
     pub fn toggle_waveform_visibility(&mut self, probe_name: &str) -> bool {
-        // Try exact match first
-        for wf in &mut self.waveforms {
-            if wf.name.eq_ignore_ascii_case(probe_name) {
-                wf.visible = !wf.visible;
-                log::info!(
-                    "Toggled waveform '{}' visibility to {}",
-                    wf.name,
-                    wf.visible
-                );
-                return true;
-            }
-        }
-
-        // Extract net name from V()/I()
-        let net_name = probe_name
-            .trim_start_matches("V(")
-            .trim_start_matches("I(")
-            .trim_end_matches(')');
-
-        // Try matching net name inside V() or I()
-        for wf in &mut self.waveforms {
-            let wf_net = wf
-                .name
-                .trim_start_matches("V(")
-                .trim_start_matches("I(")
-                .trim_end_matches(')');
-
-            if wf_net.eq_ignore_ascii_case(net_name) {
-                wf.visible = !wf.visible;
-                log::info!(
-                    "Toggled waveform '{}' (matched '{}') visibility to {}",
-                    wf.name,
-                    probe_name,
-                    wf.visible
-                );
-                return true;
-            }
-        }
-
-        // Handle N00X -> numeric index mapping
-        // The netlist generator creates N001, N002, etc. but the simulation
-        // engine uses internal numeric indices like 1, 2, 3
-        if let Some(numeric_index) = Self::extract_n00x_numeric(net_name) {
-            for wf in &mut self.waveforms {
-                let wf_net = wf
-                    .name
-                    .trim_start_matches("V(")
-                    .trim_start_matches("I(")
-                    .trim_end_matches(')');
-
-                if wf_net == numeric_index {
-                    wf.visible = !wf.visible;
-                    log::info!(
-                        "Toggled waveform '{}' (N00X matched '{}') visibility to {}",
-                        wf.name,
-                        probe_name,
-                        wf.visible
-                    );
-                    return true;
-                }
-            }
+        if let Some(index) = self.waveform_index_for_probe(probe_name) {
+            let waveform = &mut self.waveforms[index];
+            waveform.visible = !waveform.visible;
+            log::info!(
+                "Toggled waveform '{}' (matched '{}') visibility to {}",
+                waveform.name,
+                probe_name,
+                waveform.visible
+            );
+            return true;
         }
 
         // Check if this is the ground reference node
@@ -177,6 +126,51 @@ impl SimulationState {
             self.waveforms.len()
         );
         false
+    }
+
+    /// Ensure an already-materialized waveform is visible without turning a
+    /// visible trace off. `Some(true)` means visibility changed, `Some(false)`
+    /// means it was already visible, and `None` means no waveform matched.
+    pub fn ensure_waveform_visible(&mut self, probe_name: &str) -> Option<bool> {
+        let index = self.waveform_index_for_probe(probe_name)?;
+        let changed = !self.waveforms[index].visible;
+        self.waveforms[index].visible = true;
+        Some(changed)
+    }
+
+    fn waveform_index_for_probe(&self, probe_name: &str) -> Option<usize> {
+        if let Some(index) = self
+            .waveforms
+            .iter()
+            .position(|waveform| waveform.name.eq_ignore_ascii_case(probe_name))
+        {
+            return Some(index);
+        }
+
+        let net_name = probe_name
+            .trim_start_matches("V(")
+            .trim_start_matches("I(")
+            .trim_end_matches(')');
+        if let Some(index) = self.waveforms.iter().position(|waveform| {
+            waveform
+                .name
+                .trim_start_matches("V(")
+                .trim_start_matches("I(")
+                .trim_end_matches(')')
+                .eq_ignore_ascii_case(net_name)
+        }) {
+            return Some(index);
+        }
+
+        let numeric_index = Self::extract_n00x_numeric(net_name)?;
+        self.waveforms.iter().position(|waveform| {
+            waveform
+                .name
+                .trim_start_matches("V(")
+                .trim_start_matches("I(")
+                .trim_end_matches(')')
+                == numeric_index
+        })
     }
 
     /// Extract numeric index from N00X format (e.g., "N001" -> "1", "N002" -> "2")

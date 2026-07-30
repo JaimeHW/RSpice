@@ -59,6 +59,11 @@ impl RSpiceApp {
                 return Err("The manager publishes through its reviewed primary action.".to_owned());
             }
             DesignManagementPage::NewSheet => {
+                let personal = self
+                    .state
+                    .ui
+                    .preferences
+                    .drawing_sheet_personal_preferences();
                 let draft = self
                     .state
                     .dialogs
@@ -66,6 +71,44 @@ impl RSpiceApp {
                     .draft
                     .as_mut()
                     .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+                let mut page_format = inputs
+                    .sheet_page_format
+                    .without_project_owned_title_values();
+                let selected_personal_id = match &page_format.authored_size {
+                    crate::state::AuthoredDrawingSheetSize::Custom { snapshot } => {
+                        snapshot.preset_id.clone()
+                    }
+                    crate::state::AuthoredDrawingSheetSize::Standard { .. } => None,
+                };
+                if let Some(personal_preset) = selected_personal_id
+                    .as_deref()
+                    .filter(|id| draft.drawing_sheet_settings().find_preset(id).is_none())
+                    .and_then(|id| {
+                        personal
+                            .presets
+                            .iter()
+                            .find(|preset| preset.id.eq_ignore_ascii_case(id))
+                    })
+                {
+                    page_format = crate::workbench::app::capture_personal_preset_into_project(
+                        draft,
+                        personal_preset,
+                    )?
+                    .format
+                    .without_project_owned_title_values();
+                }
+                let settings = draft.drawing_sheet_settings().clone();
+                if settings.new_sheet_policy == DrawingSheetNewSheetPolicy::Ask
+                    && settings.remember_last_explicit_format
+                    && page_format.inheritance == DrawingSheetInheritance::Explicit
+                    && settings.last_explicit_format.as_ref() != Some(&page_format)
+                {
+                    let mut updated = settings;
+                    updated.last_explicit_format = Some(page_format.clone());
+                    draft
+                        .update_drawing_sheet_settings(draft.revision(), updated)
+                        .map_err(|error| error.to_string())?;
+                }
                 let catalog = draft
                     .ensure_sheet_catalog(&owner_key)
                     .map_err(|error| error.to_string())?;
@@ -79,7 +122,7 @@ impl RSpiceApp {
                         .find(|page| !used_pages.contains(page))
                         .ok_or_else(|| "No free sheet page number remains.".to_owned())?;
                 let id = catalog
-                    .create_sheet(
+                    .create_sheet_with_page_format(
                         SheetDefinition {
                             name: inputs.sheet_name.trim().to_owned(),
                             template: inputs.sheet_template,
@@ -87,6 +130,7 @@ impl RSpiceApp {
                             explicit_page_number: Some(explicit_page_number),
                         },
                         inputs.sheet_insert_after,
+                        page_format,
                     )
                     .map_err(|error| error.to_string())?;
                 if catalog.object_assignments().is_empty() && !all_objects.is_empty() {

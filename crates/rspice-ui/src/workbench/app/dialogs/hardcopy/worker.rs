@@ -13,13 +13,15 @@ use crate::hardcopy::{
     MAX_PREVIEW_PAGES, OutputFormat,
 };
 use crate::product::ContentDigest;
-use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
 use crate::workbench::hardcopy_adapters::render::{
     HardcopyRenderer, HardcopySceneMetadata, MAX_ARTIFACT_BYTES, MAX_PREVIEW_WORKER_MANIFEST_BYTES,
     MAX_PREVIEW_WORKER_RGBA_BYTES, MAX_PUBLICATION_BYTES, MAX_PUBLICATION_WORKER_MANIFEST_BYTES,
     RenderedHardcopyPublication,
 };
-use crate::workbench::hardcopy_adapters::sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
+use crate::workbench::hardcopy_adapters::sources::{
+    MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument,
+};
+use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
 
 const HARDCOPY_WORKER_PROTOCOL_VERSION: u32 = 1;
 const MAX_REQUEST_METADATA_BYTES: usize = MAX_WORKER_SNAPSHOT_BYTES;
@@ -590,21 +592,19 @@ fn reconstruct_plan(
     source: &ResolvedHardcopyDocument,
 ) -> Result<HardcopyPlan, String> {
     let sections = source
-        .hardcopy_sections()
+        .hardcopy_sections_for_setup(setup.schematic())
+        .map_err(|error| error.to_string())?;
+    let output_extent = source
+        .content_extent_for_setup(setup.schematic())
         .map_err(|error| error.to_string())?;
     let plan = if sections.is_empty() {
-        HardcopyPlan::compile_with_id(
-            plan_id,
-            source.authority().clone(),
-            setup,
-            source.content_extent(),
-        )
+        HardcopyPlan::compile_with_id(plan_id, source.authority().clone(), setup, output_extent)
     } else {
         HardcopyPlan::compile_with_id_and_sections(
             plan_id,
             source.authority().clone(),
             setup,
-            source.content_extent(),
+            output_extent,
             sections,
         )
     }
@@ -1171,7 +1171,9 @@ mod tests {
     };
     use crate::state::{Point, Wire};
     use crate::workbench::AppState;
-    use crate::workbench::hardcopy_adapters::render::{HardcopyPreviewPage, RenderedHardcopyPublication};
+    use crate::workbench::hardcopy_adapters::render::{
+        HardcopyPreviewPage, RenderedHardcopyPublication,
+    };
     use crate::workbench::hardcopy_adapters::sources::{
         PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
         resolve_retained_hardcopy_source,

@@ -10,10 +10,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::quantity::{QuantityPresentationPolicy, UnitsPreferences};
+
+mod drawing_sheet;
 use crate::results::plot_export_preset::{
     PlotExportPresetCatalog, PlotExportPresetDefinition, PlotExportPresetError,
     PlotExportPresetMutationReceipt, PlotExportPresetScope,
 };
+pub(crate) use drawing_sheet::DrawingSheetPersonalPreferences;
 
 use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary, ShortcutProfileLibraryError};
 use crate::hardcopy::PrintMappingTable;

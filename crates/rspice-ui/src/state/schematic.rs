@@ -68,7 +68,8 @@ pub use design_note::{
 };
 pub use document_policy::{
     NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
-    SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,
+    SchematicGridPitch, SchematicPageOrientation, SchematicPageSize, SelectionCrossingPolicy,
+    WireJunctionPolicy,
 };
 pub(crate) use documentation_shape::clamped_documentation_shape_translation;
 pub use documentation_shape::{
@@ -105,21 +106,20 @@ pub(crate) use replacement::{
 pub use rotation::Rotation;
 pub use selection::{JunctionSelection, SchematicSelectionFilter, Selection};
 pub use snap::SnapEngine;
-pub use state::{
-    MoveSelectionMode, SchematicState, StretchOrthogonalPolicy, StretchTarget,
-};
+pub use state::{MoveSelectionMode, SchematicState, StretchOrthogonalPolicy, StretchTarget};
 pub use symbol_gen::generate_symbol;
 pub use tool::Tool;
 pub use undo_history::SchematicSnapshot;
 pub use validated_revision::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionDependency,
-    ValidatedRevisionJournal,
-    ValidatedRevisionObjectDelta, ValidatedRevisionRequest, ValidatedRevisionSemanticDelta,
-    ValidatedSchematicRevision, ValidatedSchematicRevisionId, ValidationFindingCounts,
+    ValidatedRevisionJournal, ValidatedRevisionObjectDelta, ValidatedRevisionRequest,
+    ValidatedRevisionSemanticDelta, ValidatedSchematicRevision, ValidatedSchematicRevisionId,
+    ValidationFindingCounts,
 };
 pub use visibility::{
-    GridStyle, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
-    SchematicHierarchyVisibility, SchematicNetHighlighting, SchematicParameterLabelVisibility,
-    SchematicReviewMarkerVisibility, SchematicVisibilityPolicy, SchematicWireRoutingStyle,
+    DrawingSheetLayerVisibility, GridStyle, SchematicAnnotationVisibility,
+    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
+    SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
+    SchematicWireRoutingStyle,
 };
 pub use wire::{Wire, WireConnection, WireRoutingMode, WireSegment};

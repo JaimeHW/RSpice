@@ -104,13 +104,57 @@ pub struct SheetDefinition {
     pub explicit_page_number: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DesignSheet {
     pub(super) id: SheetId,
     pub(super) revision: u64,
     pub(super) semantic_digest: ContentDigest,
     pub(super) definition: SheetDefinition,
+    #[serde(default)]
+    pub(super) page_format: SchematicSheetFormat,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DesignSheetWire {
+    id: SheetId,
+    revision: u64,
+    semantic_digest: ContentDigest,
+    definition: SheetDefinition,
+    #[serde(default)]
+    page_format: SchematicSheetFormat,
+}
+
+impl<'de> Deserialize<'de> for DesignSheet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DesignSheetWire::deserialize(deserializer)?;
+        let mut page_format = wire.page_format;
+        let title = page_format
+            .title_block
+            .fields
+            .entry(DrawingSheetTitleFieldId::SheetTitle)
+            .or_default();
+        // Legacy sheets predate the required authored Sheet title. Their
+        // stable sheet name is the only non-invented, deterministic migration
+        // value and keeps old projects loadable without weakening validation.
+        if title.value.trim().is_empty() {
+            title.value.clone_from(&wire.definition.name);
+        }
+        title.visible = true;
+        let value = Self {
+            id: wire.id,
+            revision: wire.revision,
+            semantic_digest: wire.semantic_digest,
+            definition: wire.definition,
+            page_format,
+        };
+        value.validate().map_err(serde::de::Error::custom)?;
+        Ok(value)
+    }
 }
 
 impl DesignSheet {
@@ -135,6 +179,11 @@ impl DesignSheet {
     }
 
     #[must_use]
+    pub const fn page_format(&self) -> &SchematicSheetFormat {
+        &self.page_format
+    }
+
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.definition.name
     }
@@ -143,6 +192,8 @@ impl DesignSheet {
         require_non_nil(self.id.as_uuid(), "sheet")?;
         require_nonzero_revision(self.revision, "sheet", self.id.to_string())?;
         validate_sheet_definition(&self.definition)?;
+        self.page_format.validate()?;
+        self.page_format.validate_authored_sheet_title()?;
         require_digest(
             self.semantic_digest,
             digest("rspice-design-sheet-semantic/v1", &self.definition)?,
@@ -508,6 +559,23 @@ impl SheetCatalog {
         definition: SheetDefinition,
         insert_after: Option<SheetId>,
     ) -> Result<SheetId, DesignManagementError> {
+        self.create_sheet_with_page_format(
+            definition,
+            insert_after,
+            SchematicSheetFormat::default(),
+        )
+    }
+
+    /// Create a sheet with an already-resolved authored drawing-sheet
+    /// format. Callers that own project default policy resolve it before this
+    /// catalog-local transaction; the sheet receives an exact snapshot and a
+    /// sheet-owned title.
+    pub fn create_sheet_with_page_format(
+        &mut self,
+        definition: SheetDefinition,
+        insert_after: Option<SheetId>,
+        page_format: SchematicSheetFormat,
+    ) -> Result<SheetId, DesignManagementError> {
         self.validate()?;
         require_limit("sheets", self.sheets.len() + 1, MAX_DESIGN_SHEETS)?;
         let definition = normalize_sheet_definition(definition);
@@ -535,12 +603,22 @@ impl SheetCatalog {
             }
             None => self.sheets.len(),
         };
+        let page_format = page_format.try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .entry(DrawingSheetTitleFieldId::SheetTitle)
+                .or_default()
+                .value
+                .clone_from(&definition.name);
+        })?;
         let id = SheetId::new();
         let sheet = DesignSheet {
             id,
             revision: 1,
             semantic_digest: digest("rspice-design-sheet-semantic/v1", &definition)?,
             definition,
+            page_format,
         };
         let mut candidate = self.clone();
         candidate.sheets.insert(insertion, sheet);
@@ -596,6 +674,86 @@ impl SheetCatalog {
         candidate.validate()?;
         *self = candidate;
         Ok(committed_revision)
+    }
+
+    /// Atomically replace one sheet's authored physical page format.
+    ///
+    /// Electrical semantics are unchanged, but both the sheet and catalog
+    /// revisions advance so asynchronous Page Setup commits fail closed.
+    pub fn update_sheet_page_format(
+        &mut self,
+        id: SheetId,
+        expected_sheet_revision: u64,
+        page_format: SchematicSheetFormat,
+    ) -> Result<u64, DesignManagementError> {
+        self.validate()?;
+        page_format.validate()?;
+        page_format.validate_authored_sheet_title()?;
+        let mut candidate = self.clone();
+        let sheet = candidate
+            .sheets
+            .iter_mut()
+            .find(|sheet| sheet.id == id)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "sheet",
+                identity: id.to_string(),
+            })?;
+        require_revision(
+            expected_sheet_revision,
+            sheet.revision,
+            "sheet",
+            id.to_string(),
+        )?;
+        if sheet.page_format == page_format {
+            return Err(DesignManagementError::NoChanges("sheet page format"));
+        }
+        sheet.page_format = page_format;
+        sheet.revision = next_revision(sheet.revision, "sheet", id.to_string())?;
+        let committed_revision = sheet.revision;
+        candidate.bump_revision("sheet catalog")?;
+        candidate.validate()?;
+        *self = candidate;
+        Ok(committed_revision)
+    }
+
+    /// Refresh fallback snapshots for sheets that follow the project
+    /// drawing-sheet default.
+    ///
+    /// Keeping the snapshot current makes every consumer—including hardcopy,
+    /// retained-source descriptors, and background jobs that do not own the
+    /// full project aggregate—resolve the same physical page as the canvas.
+    /// Sheet-owned title values and visibility remain attached to each target.
+    ///
+    /// The snapshot is a transport fallback, not an authored sheet override.
+    /// Updating it therefore does not advance sheet or sheet-catalog
+    /// revisions. The project settings transaction already advances the
+    /// design-management revision and invalidates every authority that
+    /// depends on the resolved default.
+    pub(super) fn refresh_inherited_page_formats(
+        &mut self,
+        project_default: &SchematicSheetFormat,
+    ) -> Result<usize, DesignManagementError> {
+        self.validate()?;
+        project_default.validate()?;
+        let mut candidate = self.clone();
+        let mut changed = 0;
+        for sheet in &mut candidate.sheets {
+            if sheet.page_format.inheritance != DrawingSheetInheritance::ProjectDefault {
+                continue;
+            }
+            let replacement = project_default.with_target_sheet_title_fields(&sheet.page_format);
+            if replacement == sheet.page_format {
+                continue;
+            }
+            sheet.page_format = replacement;
+            changed += 1;
+        }
+        if changed == 0 {
+            return Ok(0);
+        }
+        candidate.validate()?;
+        *self = candidate;
+        Ok(changed)
     }
 
     pub fn set_settings(

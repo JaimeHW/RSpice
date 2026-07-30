@@ -5,6 +5,24 @@ use super::widgets::reorder_sheet_ids;
 use super::*;
 
 #[test]
+fn probe_ids_participate_in_sheet_governance_and_selected_authority() {
+    let mut schematic = crate::state::SchematicState::default();
+    schematic.probes.push(
+        crate::state::SchematicProbe::new(
+            81,
+            crate::state::Point::new(10, 20),
+            "V(out)",
+            Some("V(out)".to_owned()),
+        )
+        .unwrap(),
+    );
+    schematic.selection.select_only_probe(81);
+
+    assert_eq!(all_stable_object_ids(&schematic), vec![81]);
+    assert_eq!(selected_stable_object_ids(&schematic), vec![81]);
+}
+
+#[test]
 fn manager_and_subflow_splits_match_the_mockup_contract() {
     assert_eq!(main_split_widths(760.0), (380.0, 380.0));
     assert_eq!(subflow_split_widths(980.0), (646.0, 334.0));

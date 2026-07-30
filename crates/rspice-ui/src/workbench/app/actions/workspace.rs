@@ -12,8 +12,8 @@ use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::DrcSeverity;
 use crate::state::{
     CellViewRef, Component, ComponentType, OpenCellView, Point, PortDirection, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SchematicState, SymbolDocument,
-    View, ViewType,
+    SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SchematicState, SymbolDocument, View,
+    ViewType,
 };
 use crate::workbench::SymbolDocumentSnapshot;
 use crate::workbench::app::RSpiceApp;
@@ -252,7 +252,7 @@ impl AppState {
     pub(crate) fn new_schematic_document(&self) -> SchematicState {
         use crate::state::{
             NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy,
-            SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy, WireRoutingMode,
+            SchematicGridPitch, SelectionCrossingPolicy, WireJunctionPolicy,
         };
         use crate::workbench::ChoicePreference;
 
@@ -300,12 +300,7 @@ impl AppState {
             };
 
         schematic.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
-        let routing_mode =
-            if schematic.document_policy.wire_junctions == WireJunctionPolicy::AnyAngle {
-                WireRoutingMode::Diagonal
-            } else {
-                WireRoutingMode::HorizontalFirst
-            };
+        let routing_mode = self.ui.schematic_routing_mode;
         schematic.wire_drawing.set_routing_mode(routing_mode);
         schematic.bus_drawing.routing_mode = routing_mode;
         schematic
@@ -397,6 +392,16 @@ impl AppState {
                 .library_manager
                 .get_library(&self.workspace.active_view.library)
                 .is_some_and(|library| library.read_only)
+    }
+
+    /// Single late-bound authority for every schematic mutation surface.
+    ///
+    /// Safe mode can be activated after a tool or dialog was armed, so callers
+    /// must not rely only on the persisted schematic flag captured earlier.
+    pub(crate) fn schematic_edit_read_only(&self) -> bool {
+        self.schematic.read_only
+            || self.active_view_read_only()
+            || self.workbench.safe_mode.project_read_only()
     }
 
     pub(crate) fn read_only_master_message(&self) -> String {
@@ -1164,10 +1169,12 @@ impl AppState {
     /// Refuse an edit on a read-only view, with the console line that names
     /// the library. Returns true when the edit must be blocked.
     pub(crate) fn deny_read_only_edit(&mut self) -> bool {
-        if !self.schematic.read_only && !self.active_view_read_only() {
+        if !self.schematic_edit_read_only() {
             return false;
         }
-        let message = if self.active_view_read_only() {
+        let message = if self.workbench.safe_mode.project_read_only() {
+            "Safe mode is read-only; no design data was changed.".to_owned()
+        } else if self.active_view_read_only() {
             self.read_only_master_message()
         } else {
             "The active schematic is read-only; no design data was changed.".to_owned()
@@ -1268,7 +1275,8 @@ impl AppState {
         };
         self.open_workspace_view(reference);
         self.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        self.ui.code_workspace.page = crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
+        self.ui.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
         true
     }
 
@@ -1323,7 +1331,6 @@ pub(super) fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
         })
         .collect()
 }
-
 
 #[cfg(test)]
 mod tests;

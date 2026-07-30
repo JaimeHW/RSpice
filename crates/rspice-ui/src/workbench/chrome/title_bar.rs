@@ -1228,6 +1228,8 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::PrintHardcopy
         | Command::ExportActiveView => WorkbenchIcon::Export,
         Command::PageSetup => WorkbenchIcon::File,
+        Command::SheetFormatManager => WorkbenchIcon::Grid,
+        Command::CustomSheetSizes => WorkbenchIcon::Models,
         Command::Undo => WorkbenchIcon::Undo,
         Command::Redo => WorkbenchIcon::Redo,
         Command::Cut | Command::Copy | Command::Paste | Command::Duplicate => WorkbenchIcon::Copy,
@@ -1240,8 +1242,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
+        Command::FitSchematicContent => WorkbenchIcon::ZoomFit,
         Command::CycleGrid => WorkbenchIcon::Grid,
         Command::GridSnapRouting => WorkbenchIcon::Sliders,
+        Command::DrawingSheetLayers => WorkbenchIcon::Layers,
         Command::VisibilityOptions => WorkbenchIcon::Layers,
         Command::ToggleNavigator => WorkbenchIcon::Navigator,
         Command::ToggleInspector => WorkbenchIcon::Inspector,
@@ -1363,7 +1367,9 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::CloseActiveDocument);
     command_item(ui, app, Command::CloseProject);
     menu_separator(ui);
-    command_item(ui, app, Command::PageSetup);
+    for command in DRAWING_SHEET_FILE_COMMANDS {
+        command_item(ui, app, command);
+    }
     command_item(ui, app, Command::PrintHardcopy);
     command_item(ui, app, Command::ExportActiveView);
     let platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
@@ -1372,6 +1378,12 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         command_item(ui, app, Command::Exit);
     }
 }
+
+const DRAWING_SHEET_FILE_COMMANDS: [Command; 3] = [
+    Command::PageSetup,
+    Command::SheetFormatManager,
+    Command::CustomSheetSizes,
+];
 
 fn menu_popup_max_height(ui: &Ui) -> f32 {
     menu_popup_height_for_viewport(ui.ctx().content_rect().height())
@@ -1420,8 +1432,12 @@ fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomFit,
+        Command::FitSchematicContent,
         Command::ZoomOneToOne,
         Command::CycleGrid,
+        Command::GridSnapRouting,
+        Command::DrawingSheetLayers,
+        Command::VisibilityOptions,
     ] {
         command_item(ui, app, command);
     }

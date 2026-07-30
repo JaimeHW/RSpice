@@ -605,6 +605,7 @@ impl ProjectWorkspace {
         self.project_metadata_dirty = false;
         self.report_documents_dirty = false;
         self.hardcopy_setups_dirty = false;
+        self.hardcopy_receipts_dirty = false;
         self.project_print_mappings_dirty = false;
         self.hardcopy_source_sets_dirty = false;
     }
@@ -620,6 +621,7 @@ impl ProjectWorkspace {
             || self.project_metadata_dirty
             || self.report_documents_dirty
             || self.hardcopy_setups_dirty
+            || self.hardcopy_receipts_dirty
             || self.project_print_mappings_dirty
             || self.hardcopy_source_sets_dirty
     }
@@ -637,6 +639,18 @@ impl ProjectWorkspace {
             self.hardcopy_setups_dirty = true;
         }
         Ok(outcome)
+    }
+
+    /// Append one sealed publication outcome to the bounded project ledger.
+    /// This is the only path from runtime hardcopy execution into durable
+    /// project evidence.
+    pub fn record_hardcopy_receipt(
+        &mut self,
+        receipt: crate::hardcopy::HardcopyReceipt,
+    ) -> Result<(), crate::hardcopy::HardcopyError> {
+        self.hardcopy_receipts.append(receipt)?;
+        self.hardcopy_receipts_dirty = true;
+        Ok(())
     }
 
     /// Persist a reusable project print-set mapping through the same project

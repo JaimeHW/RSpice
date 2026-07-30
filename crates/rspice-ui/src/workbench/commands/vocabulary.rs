@@ -62,6 +62,8 @@ pub enum Command {
     ExportWaveformsCsv,
     ExportNetlist(crate::io::NetlistFormat),
     PageSetup,
+    SheetFormatManager,
+    CustomSheetSizes,
     PrintHardcopy,
     ExportActiveView,
     Exit,
@@ -80,8 +82,11 @@ pub enum Command {
     ZoomIn,
     ZoomOut,
     ZoomFit,
+    FitSchematicContent,
     ZoomOneToOne,
     CycleGrid,
+    GridSnapRouting,
+    DrawingSheetLayers,
     VisibilityOptions,
     ToggleFullScreen,
     ResetActiveView,
@@ -242,6 +247,9 @@ impl Command {
         if id == "model-metadata-audit" {
             return Some(Self::ModelsPage(ModelsPage::Qualification));
         }
+        if id == "fit-canvas" {
+            return Some(Self::ZoomFit);
+        }
         COMMAND_REGISTRY
             .iter()
             .copied()
@@ -305,6 +313,12 @@ impl Command {
                 spec("export-netlist-xyce", "Export Xyce netlist…", "File")
             }
             Self::PageSetup => spec("page-setup", "Page setup…", "File"),
+            Self::SheetFormatManager => spec(
+                "sheet-format-manager",
+                "Sheet formats across this document…",
+                "File",
+            ),
+            Self::CustomSheetSizes => spec("sheet-preset-library", "Custom sheet sizes…", "File"),
             Self::PrintHardcopy => spec("print-hardcopy", "Print / hardcopy…", "File"),
             Self::ExportActiveView => spec("export-active-view", "Export active view…", "File"),
             Self::Exit => spec("exit-rspice", "Exit RSpice…", "File"),
@@ -322,9 +336,22 @@ impl Command {
             Self::Preferences => spec("preferences", "Preferences…", "Edit"),
             Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
             Self::ZoomOut => spec("zoom-out", "Zoom out", "View"),
-            Self::ZoomFit => spec("fit-canvas", "Zoom active canvas to fit", "View"),
+            Self::ZoomFit => spec("canvas-fit-sheet", "Fit drawing sheet", "View"),
+            Self::FitSchematicContent => {
+                spec("canvas-fit-content", "Fit schematic content", "View")
+            }
             Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
-            Self::CycleGrid => spec("toggle-grid", "Canvas grid and snap", "View"),
+            Self::CycleGrid => spec("cycle-grid", "Cycle grid display", "View"),
+            Self::GridSnapRouting => spec(
+                "grid-snap-routing",
+                "Grid, snap and wire routing\u{2026}",
+                "View",
+            ),
+            Self::DrawingSheetLayers => spec(
+                "sheet-layer-visibility",
+                "Drawing-sheet layers\u{2026}",
+                "View",
+            ),
             Self::VisibilityOptions => spec(
                 "visibility-options",
                 "Hierarchy and annotation visibility\u{2026}",
@@ -787,6 +814,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ExportNetlist(crate::io::NetlistFormat::Hspice),
     Command::ExportNetlist(crate::io::NetlistFormat::Xyce),
     Command::PageSetup,
+    Command::SheetFormatManager,
+    Command::CustomSheetSizes,
     Command::PrintHardcopy,
     Command::ExportActiveView,
     Command::Exit,
@@ -826,8 +855,11 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomIn,
     Command::ZoomOut,
     Command::ZoomFit,
+    Command::FitSchematicContent,
     Command::ZoomOneToOne,
     Command::CycleGrid,
+    Command::GridSnapRouting,
+    Command::DrawingSheetLayers,
     Command::VisibilityOptions,
     Command::ToggleFullScreen,
     Command::ResetActiveView,

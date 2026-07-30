@@ -16,7 +16,7 @@ mod semantic;
 pub use documents::*;
 // Crate-private: `geometry` exposes only `pub(super)` helpers, which the
 // sibling modules reach through `use super::*`.
-use geometry::*;
+pub(crate) use geometry::*;
 pub use prepared::*;
 pub use results::*;
 pub use semantic::*;
@@ -27,8 +27,10 @@ use uuid::Uuid;
 
 use crate::io::ProjectSimulationResults;
 use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId};
+#[cfg(test)]
+use crate::results::report_document::FigureSizing;
 use crate::results::report_document::{
-    FigureSizing, FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportDocument,
+    FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportDocument,
     ReportReferenceCurrentness, ReportReferenceInventory, ReportReferenceMode,
     ReportReferenceSnapshot,
 };
@@ -40,18 +42,18 @@ use crate::results::visualization_raster::{
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, Bus, BusTap, Component,
-    ComponentType, DesignNote, DesignSheet, DocumentationShape, Junction, NetLabel, Point,
-    ResolvedSymbolIssueKind, ResolvedSymbolSource, SchematicState, Selection, SheetCatalog,
-    SheetId, SimulationRun, SimulationState, SymbolDocument, SymbolResolver, SymbolShape, ViewType,
-    WaveformData, Wire,
+    ComponentType, DesignNote, DesignSheet, DocumentationShape, DrawingSheetBorderTemplate,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, Junction, NetLabel, Point,
+    ResolvedSymbolIssueKind, ResolvedSymbolSource, SchematicSheetFormat, SchematicState, Selection,
+    SheetCatalog, SheetId, SimulationRun, SimulationState, SymbolDocument, SymbolResolver,
+    SymbolShape, ViewType, WaveformData, Wire,
 };
 use crate::workbench::AppState;
 
 use crate::hardcopy::{
-    ActiveHardcopySource, HardcopyDocumentId,
-    HardcopyDocumentKind, HardcopyScope, Length, PrintColor, PrintMappingEntry,
-    PrintMappingSaveScope, PrintMappingTable, PrintObjectIdentity, PrintObjectKind,
-    PrintRedundancy,
+    ActiveHardcopySource, HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, Length,
+    PrintColor, PrintMappingEntry, PrintMappingSaveScope, PrintMappingTable, PrintObjectIdentity,
+    PrintObjectKind, PrintRedundancy,
 };
 use crate::workbench::SurfaceId;
 // The persisted source-set records and the validation they share with these
@@ -62,17 +64,23 @@ use crate::hardcopy::sources::{
     validate_label,
 };
 use crate::workbench::documents::result_document::ResultViewer;
-use crate::workbench::lifecycle::session::SymbolSelection;
-use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::documents::visualization_studio::{
     VisualizationAnnotation as StudioAnnotation, VisualizationAutoscale,
     VisualizationMarker as StudioMarker, VisualizationPane as StudioPane, VisualizationStudioState,
 };
+use crate::workbench::lifecycle::session::SymbolSelection;
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-/// Natural physical scale for schematic coordinates: ten editor units are
-/// one tenth of an inch.  Page fitting can subsequently scale this scene, but
-/// this fixed calibration makes 1:1 hardcopy deterministic on every target.
-pub const SCHEMATIC_UNIT_UM: i64 = 254;
+/// Natural physical scale for schematic coordinates.
+///
+/// The authored drawing-sheet contract defines exactly four editor units per
+/// millimetre. Page fitting can subsequently scale this scene, but retaining
+/// the exact 250 micrometre calibration here keeps canvas coordinates,
+/// overflow reports, and 1:1 hardcopy physically identical on every target.
+pub const SCHEMATIC_UNIT_UM: i64 = 250;
+/// Fixed top-left authored page origin in schematic world units.
+pub const SCHEMATIC_SHEET_ORIGIN_X_UNITS: i64 = -140;
+pub const SCHEMATIC_SHEET_ORIGIN_Y_UNITS: i64 = -40;
 /// Natural active-plot canvas (10 by 5.625 inches, 16:9).
 pub const PLOT_WIDTH_UM: i64 = 254_000;
 pub const PLOT_HEIGHT_UM: i64 = 142_875;
@@ -87,7 +95,7 @@ pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
 const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
 const PLOT_INSET_UM: i64 = 12_700;
@@ -102,6 +110,9 @@ pub struct SchematicHardcopySource<'a> {
     /// retained catalog sheet and only objects owned by that sheet resolve.
     pub sheet_catalog: Option<&'a SheetCatalog>,
     pub sheet_id: Option<SheetId>,
+    /// Canonical project-owned values used by every sheet title block.
+    pub project_title_block_field_values:
+        Option<&'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>>,
     pub scope: HardcopyScope,
 }
 
@@ -111,6 +122,8 @@ pub struct SchematicSheetSetHardcopySource<'a> {
     pub expected_topology_version: u64,
     pub symbol_resolver: Option<&'a SymbolResolver<'a>>,
     pub sheet_catalog: &'a SheetCatalog,
+    pub project_title_block_field_values:
+        &'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
 }
 
 pub struct SymbolHardcopySource<'a> {
@@ -672,6 +685,12 @@ fn prepare_schematic_resolution(
             schematic_buffers: state.workspace.schematic_buffers.clone(),
             sheet_catalog,
             sheet_id,
+            project_title_block_field_values: state
+                .workspace
+                .design_management
+                .drawing_sheet_settings()
+                .title_block_field_values
+                .clone(),
             all_sheets,
             scope,
         },
@@ -1123,6 +1142,13 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                         symbol_resolver: Some(&resolver),
                         sheet_catalog: None,
                         sheet_id: None,
+                        project_title_block_field_values: Some(
+                            &state
+                                .workspace
+                                .design_management
+                                .drawing_sheet_settings()
+                                .title_block_field_values,
+                        ),
                         scope: HardcopyScope::ActiveDocument,
                     })
                 }
@@ -1271,7 +1297,6 @@ fn require_active_result_document(
         )),
     }
 }
-
 
 fn resolve_component_symbol(
     component: &Component,
@@ -1472,6 +1497,35 @@ pub(super) fn default_print_mapping(
     let mut entries = Vec::new();
     match document {
         HardcopySemanticDocument::Schematic(schematic) => {
+            if let Some(format) = &schematic.drawing_sheet {
+                entries.push(layer_mapping(
+                    "layer:drawing-sheet-paper",
+                    "Drawing sheet paper",
+                    "authored paper edge and printable boundary",
+                )?);
+                if format.border != DrawingSheetBorderTemplate::None
+                    || format.marks.registration
+                    || format.marks.folding
+                {
+                    entries.push(layer_mapping(
+                        "layer:drawing-sheet-frame",
+                        "Drawing sheet frame",
+                        "authored border, zones, and marks",
+                    )?);
+                }
+                if format.title_block.template != DrawingSheetTitleBlockTemplate::None {
+                    entries.push(layer_mapping(
+                        "layer:drawing-sheet-title-block",
+                        "Drawing sheet title block",
+                        "authored title block fields",
+                    )?);
+                }
+                entries.push(layer_mapping(
+                    "layer:schematic-grid",
+                    "Schematic grid",
+                    "authored snap-grid pitch · output inclusion optional",
+                )?);
+            }
             if !schematic.components.is_empty() {
                 entries.push(layer_mapping(
                     "layer:schematic-components",
@@ -1747,7 +1801,18 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
             let identity = schematic_sheet_identity(&base_identity, sheet)?;
             if !schematic_has_objects_on_sheet(&state.schematic, catalog, sheet.id()) {
-                return resolve_blank_schematic_sheet(identity, scope);
+                return resolve_blank_schematic_sheet_with_format_and_project_values(
+                    identity,
+                    scope,
+                    Some(sheet.page_format()),
+                    Some(
+                        &state
+                            .workspace
+                            .design_management
+                            .drawing_sheet_settings()
+                            .title_block_field_values,
+                    ),
+                );
             }
             return resolve_schematic_source(SchematicHardcopySource {
                 identity,
@@ -1756,6 +1821,13 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 symbol_resolver: Some(&resolver),
                 sheet_catalog: Some(catalog),
                 sheet_id: Some(sheet.id()),
+                project_title_block_field_values: Some(
+                    &state
+                        .workspace
+                        .design_management
+                        .drawing_sheet_settings()
+                        .title_block_field_values,
+                ),
                 scope,
             });
         }
@@ -1783,6 +1855,11 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         expected_topology_version: state.schematic.topology_version(),
                         symbol_resolver: Some(&resolver),
                         sheet_catalog,
+                        project_title_block_field_values: &state
+                            .workspace
+                            .design_management
+                            .drawing_sheet_settings()
+                            .title_block_field_values,
                     });
                 }
                 let active_key = state.workspace.active_key();
@@ -1798,7 +1875,18 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     })?;
                     let sheet_identity = schematic_sheet_identity(&identity, sheet)?;
                     if !schematic_has_objects_on_sheet(&state.schematic, catalog, sheet_id) {
-                        return resolve_blank_schematic_sheet(sheet_identity, scope);
+                        return resolve_blank_schematic_sheet_with_format_and_project_values(
+                            sheet_identity,
+                            scope,
+                            Some(sheet.page_format()),
+                            Some(
+                                &state
+                                    .workspace
+                                    .design_management
+                                    .drawing_sheet_settings()
+                                    .title_block_field_values,
+                            ),
+                        );
                     }
                     sheet_identity
                 } else {
@@ -1811,6 +1899,13 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     symbol_resolver: Some(&resolver),
                     sheet_catalog,
                     sheet_id,
+                    project_title_block_field_values: Some(
+                        &state
+                            .workspace
+                            .design_management
+                            .drawing_sheet_settings()
+                            .title_block_field_values,
+                    ),
                     scope,
                 })
             }
@@ -1916,7 +2011,6 @@ pub(crate) fn resolve_retained_hardcopy_source_set(
         resolve_retained_hardcopy_source(state, member.source_key(), member.scope().clone())
     })
 }
-
 
 #[cfg(test)]
 mod tests;

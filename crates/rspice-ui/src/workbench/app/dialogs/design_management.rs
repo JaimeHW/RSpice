@@ -13,14 +13,15 @@ use crate::state::{
     AnnotationCollisionPolicy, AnnotationObject, AnnotationPosition, AnnotationPrefixAllocation,
     AnnotationRangeScope, AnnotationReservedRange, AssemblyVariantDraft, AssemblyVariantId,
     CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDefinition, CrossSheetPortDirection,
-    CrossSheetPortEndpoint, CrossSheetSignalType, DesignManagementCatalog,
-    HierarchyAuditConfiguration, HierarchyAuditRequest, HierarchyAuditSubject,
-    ImportedReferencePolicy, MissingReplacementPolicy, ModelEquivalencePolicy,
-    MoveBoundaryResolution, MoveSelectionRequest, PortDirection, PortDiscipline,
-    ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope,
-    ReorderCrossReferences, ReorderPageNumbering, SchematicObjectKey, SheetDefinition,
-    SheetDeleteBehavior, SheetId, SheetPageNumbering, SheetPortPolicy, SheetTemplate,
-    VariantInheritance, VariantMatrixEdit, VariantQualificationPlan,
+    CrossSheetPortEndpoint, CrossSheetSignalType, DesignManagementCatalog, DrawingSheetInheritance,
+    DrawingSheetNewSheetPolicy, DrawingSheetStandard, HierarchyAuditConfiguration,
+    HierarchyAuditRequest, HierarchyAuditSubject, ImportedReferencePolicy,
+    MissingReplacementPolicy, ModelEquivalencePolicy, MoveBoundaryResolution, MoveSelectionRequest,
+    PortDirection, PortDiscipline, ProtectedReferencePolicy, RenumberOrder, RenumberRequest,
+    RenumberScope, ReorderCrossReferences, ReorderPageNumbering, SchematicObjectKey,
+    SchematicSheetFormat, SheetDefinition, SheetDeleteBehavior, SheetId, SheetPageNumbering,
+    SheetPortPolicy, SheetTemplate, VariantInheritance, VariantMatrixEdit,
+    VariantQualificationPlan,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -29,8 +30,8 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::{property_row, property_row_toned, section_header};
 
-use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 
 const MANAGER_EYEBROW: &str = "SCHEMATIC \u{00b7} DESIGN IDENTITY \u{00b7} TRANSACTIONAL AUTHORING";
@@ -221,6 +222,7 @@ struct SubflowInputs {
     sheet_insert_after: Option<SheetId>,
     sheet_template: SheetTemplate,
     sheet_port_policy: SheetPortPolicy,
+    sheet_page_format: SchematicSheetFormat,
     reorder_order_text: String,
     reorder_page_numbering: ReorderPageNumbering,
     move_destination: Option<SheetId>,
@@ -254,6 +256,7 @@ impl Default for SubflowInputs {
             sheet_insert_after: None,
             sheet_template: SheetTemplate::AnalogSchematic,
             sheet_port_policy: SheetPortPolicy::TypedOffSheetPorts,
+            sheet_page_format: SchematicSheetFormat::default(),
             reorder_order_text: String::new(),
             reorder_page_numbering: ReorderPageNumbering::UpdatePrintPageNumbers,
             move_destination: None,
@@ -391,6 +394,7 @@ impl DesignManagementDialogState {
     ) {
         let mut inputs = SubflowInputs::default();
         if let Some(draft) = self.draft.as_ref() {
+            let settings = draft.drawing_sheet_settings();
             if let Some(sheets) = draft.sheet_catalog(&self.owner_key) {
                 inputs.sheet_insert_after = sheets.active_sheet_id();
                 inputs.reorder_order_text = sheets
@@ -405,6 +409,29 @@ impl DesignManagementDialogState {
                     .map(|sheet| sheet.id())
                     .find(|id| Some(*id) != active_sheet)
                     .or(active_sheet);
+                let current = sheets.active().map(|sheet| {
+                    sheet
+                        .page_format()
+                        .try_update(|format| {
+                            format.inheritance = DrawingSheetInheritance::Explicit;
+                        })
+                        .expect("an active sheet format can be captured explicitly")
+                        .without_project_owned_title_values()
+                });
+                inputs.sheet_page_format = match settings.new_sheet_policy {
+                    DrawingSheetNewSheetPolicy::ProjectDefault => settings.default_format.clone(),
+                    DrawingSheetNewSheetPolicy::MatchCurrent => {
+                        current.unwrap_or_else(|| settings.default_format.clone())
+                    }
+                    DrawingSheetNewSheetPolicy::Ask => settings
+                        .remember_last_explicit_format
+                        .then(|| settings.last_explicit_format.clone())
+                        .flatten()
+                        .or(current)
+                        .unwrap_or_else(|| settings.default_format.clone()),
+                };
+            } else {
+                inputs.sheet_page_format = settings.default_format.clone();
             }
             let variants = draft.variants();
             inputs.variant_parent = variants.active_variant_id();
@@ -502,6 +529,7 @@ fn all_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u64> {
             .iter()
             .map(|object| object.id),
     );
+    ids.extend(schematic.probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
 
@@ -515,6 +543,7 @@ fn selected_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u
     ids.extend(selection.net_labels.iter().copied());
     ids.extend(selection.design_notes.iter().copied());
     ids.extend(selection.documentation_shapes.iter().copied());
+    ids.extend(selection.probes.iter().copied());
     ids.extend(selection.junctions.iter().filter_map(|selected| {
         schematic
             .junctions

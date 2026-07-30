@@ -25,6 +25,14 @@ pub(super) fn content_pagination(
             section_header(ui, "Content and pagination", None);
             ui.spacing_mut().item_spacing.y = 0.0;
             let active_kind = draft.source.as_ref().map(|source| source.document_kind());
+            let schematic_sheet_relationship =
+                draft.resolved_document.as_ref().and_then(|document| {
+                    document
+                        .schematic_drawing_sheet_has_outside_content()
+                        .ok()
+                        .flatten()
+                });
+            let schematic_sheet_output = schematic_sheet_relationship.is_some();
             let active_key = draft
                 .resolved_document
                 .as_ref()
@@ -187,34 +195,55 @@ pub(super) fn content_pagination(
                     vec2(narrow_field, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
-                        field(ui, "Paper", |ui| {
-                            let selected = paper_label(&draft.paper);
-                            egui::ComboBox::from_id_salt("hardcopy-paper")
-                                .selected_text(selected)
-                                .width(ui.available_width())
-                                .show_ui(ui, |ui| {
-                                    for paper in [
-                                        StandardPaper::Letter,
-                                        StandardPaper::A4,
-                                        StandardPaper::A3,
-                                    ] {
-                                        ui.selectable_value(
-                                            &mut draft.paper,
-                                            PaperDraft::Standard(paper),
-                                            standard_paper_label(paper),
-                                        );
-                                    }
-                                    if ui
-                                        .selectable_label(
-                                            matches!(draft.paper, PaperDraft::Custom { .. }),
-                                            "Custom…",
-                                        )
-                                        .clicked()
-                                    {
-                                        draft.paper = custom_from_current(draft);
-                                    }
-                                });
-                        });
+                        field(
+                            ui,
+                            if schematic_sheet_output {
+                                "Output media"
+                            } else {
+                                "Paper"
+                            },
+                            |ui| {
+                                let selected = paper_label(&draft.paper);
+                                egui::ComboBox::from_id_salt("hardcopy-paper")
+                                    .selected_text(selected)
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        if schematic_sheet_output {
+                                            ui.selectable_value(
+                                                &mut draft.paper,
+                                                PaperDraft::MatchAuthoredSheets,
+                                                "Match each authored sheet",
+                                            )
+                                            .on_hover_text(
+                                                "Use each governed schematic sheet's exact authored physical size and orientation. Mixed sheet sets retain per-page media.",
+                                            );
+                                            ui.separator();
+                                        }
+                                        for paper in [
+                                            StandardPaper::Letter,
+                                            StandardPaper::Legal,
+                                            StandardPaper::A4,
+                                            StandardPaper::A3,
+                                            StandardPaper::Tabloid,
+                                        ] {
+                                            ui.selectable_value(
+                                                &mut draft.paper,
+                                                PaperDraft::Standard(paper),
+                                                standard_paper_label(paper),
+                                            );
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                matches!(draft.paper, PaperDraft::Custom { .. }),
+                                                "Custom…",
+                                            )
+                                            .clicked()
+                                        {
+                                            draft.paper = custom_from_current(draft);
+                                        }
+                                    });
+                            },
+                        );
                     },
                 );
                 ui.allocate_ui_with_layout(
@@ -375,6 +404,13 @@ pub(super) fn content_pagination(
                     },
                 );
             });
+            if schematic_sheet_output {
+                schematic_drawing_sheet_output(
+                    ui,
+                    draft,
+                    schematic_sheet_relationship.unwrap_or(false),
+                );
+            }
         });
     if draft.format == OutputFormat::NativePrinter
         && (before.paper != draft.paper || before.orientation != draft.orientation)
@@ -385,6 +421,138 @@ pub(super) fn content_pagination(
         draft.refresh_preview();
     }
     action
+}
+
+fn schematic_drawing_sheet_output(
+    ui: &mut Ui,
+    draft: &mut HardcopyDialogState,
+    has_outside_content: bool,
+) {
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("Schematic drawing-sheet output").strong());
+    ui.label(
+        egui::RichText::new(
+            "These controls affect Print and Export only. They never rewrite the authored drawing sheet.",
+        )
+        .size(tokens::FS_0)
+        .color(Tokens::get(ui.ctx()).color.text_dim),
+    );
+    ui.add_space(7.0);
+
+    let (narrow_field, wide_field) = form_grid_widths(ui);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 11.0;
+        ui.allocate_ui_with_layout(
+            vec2(narrow_field, 0.0),
+            Layout::top_down(Align::Min),
+            |ui| {
+                field(ui, "Extent", |ui| {
+                    egui::ComboBox::from_id_salt("hardcopy-schematic-extent")
+                        .selected_text(match draft.schematic_extent {
+                            SchematicHardcopyExtent::AuthoredDrawingSheet => {
+                                "Authored drawing sheet"
+                            }
+                            SchematicHardcopyExtent::CompleteSchematicContent => {
+                                "Complete schematic content"
+                            }
+                        })
+                        .width(ui.available_width())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut draft.schematic_extent,
+                                SchematicHardcopyExtent::AuthoredDrawingSheet,
+                                "Authored drawing sheet",
+                            );
+                            ui.selectable_value(
+                                &mut draft.schematic_extent,
+                                SchematicHardcopyExtent::CompleteSchematicContent,
+                                "Complete schematic content",
+                            );
+                        });
+                });
+            },
+        );
+        ui.allocate_ui_with_layout(vec2(wide_field, 0.0), Layout::top_down(Align::Min), |ui| {
+            let complete =
+                draft.schematic_extent == SchematicHardcopyExtent::CompleteSchematicContent;
+            if complete {
+                draft.outside_sheet_content = OutsideSheetContentPolicy::ExtendOutput;
+            }
+            field(ui, "Outside-sheet content", |ui| {
+                let selected = match draft.outside_sheet_content {
+                    OutsideSheetContentPolicy::Ask => "Ask when content crosses sheet",
+                    OutsideSheetContentPolicy::ClipToAuthoredSheet => {
+                        "Clip to authored drawing sheet"
+                    }
+                    OutsideSheetContentPolicy::ExtendOutput => "Extend output to include content",
+                };
+                ui.add_enabled_ui(!complete, |ui| {
+                    egui::ComboBox::from_id_salt("hardcopy-outside-sheet-content")
+                        .selected_text(selected)
+                        .width(ui.available_width())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut draft.outside_sheet_content,
+                                OutsideSheetContentPolicy::Ask,
+                                "Ask when content crosses sheet",
+                            );
+                            ui.selectable_value(
+                                &mut draft.outside_sheet_content,
+                                OutsideSheetContentPolicy::ClipToAuthoredSheet,
+                                "Clip to authored drawing sheet",
+                            );
+                            ui.selectable_value(
+                                &mut draft.outside_sheet_content,
+                                OutsideSheetContentPolicy::ExtendOutput,
+                                "Extend output to include content",
+                            );
+                        });
+                });
+            });
+        });
+    });
+
+    ui.add_space(5.0);
+    ui.columns(2, |columns| {
+        columns[0].checkbox(&mut draft.crop_marks, "Crop marks");
+        columns[1].checkbox(
+            &mut draft.include_sheet_paper,
+            "Include paper and printable boundary",
+        );
+        columns[0].checkbox(&mut draft.include_sheet_border, "Include border");
+        columns[1].checkbox(&mut draft.include_sheet_title_block, "Include title block");
+        columns[0].checkbox(&mut draft.include_sheet_zones, "Include reference zones");
+        columns[1].checkbox(&mut draft.include_schematic_grid, "Include schematic grid");
+    });
+
+    let status = if has_outside_content {
+        match draft.schematic_extent {
+            SchematicHardcopyExtent::CompleteSchematicContent => {
+                "Outside content is included by the complete-content extent."
+            }
+            SchematicHardcopyExtent::AuthoredDrawingSheet => match draft.outside_sheet_content {
+                OutsideSheetContentPolicy::Ask => {
+                    "Outside content is present. Choose Clip to publish only the authored sheet, or Extend to retain every resolved object."
+                }
+                OutsideSheetContentPolicy::ClipToAuthoredSheet => {
+                    "Outside content is clipped exactly at the authored drawing-sheet boundary."
+                }
+                OutsideSheetContentPolicy::ExtendOutput => {
+                    "The output extent expands to retain every resolved object."
+                }
+            },
+        }
+    } else {
+        "All resolved schematic content is within the authored drawing sheet."
+    };
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(status)
+            .size(tokens::FS_0)
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+    );
 }
 
 pub(super) fn rendering_options(ui: &mut Ui, draft: &mut HardcopyDialogState) {

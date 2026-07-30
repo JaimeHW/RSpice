@@ -143,6 +143,57 @@ impl SchematicPageOrientation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchematicCustomPageSize {
+    pub portrait_width_um: u64,
+    pub portrait_height_um: u64,
+}
+
+impl<'de> Deserialize<'de> for SchematicCustomPageSize {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            portrait_width_um: u64,
+            portrait_height_um: u64,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        if !(10_000..=5_000_000).contains(&wire.portrait_width_um)
+            || !(10_000..=5_000_000).contains(&wire.portrait_height_um)
+            || wire.portrait_width_um > wire.portrait_height_um
+        {
+            return Err(serde::de::Error::custom(
+                "custom schematic page dimensions must be canonical portrait dimensions from 10 mm through 5 m",
+            ));
+        }
+        Ok(Self {
+            portrait_width_um: wire.portrait_width_um,
+            portrait_height_um: wire.portrait_height_um,
+        })
+    }
+}
+
+impl SchematicCustomPageSize {
+    #[must_use]
+    pub const fn normalized(width_um: u64, height_um: u64) -> Self {
+        if width_um <= height_um {
+            Self {
+                portrait_width_um: width_um,
+                portrait_height_um: height_um,
+            }
+        } else {
+            Self {
+                portrait_width_um: height_um,
+                portrait_height_um: width_um,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SchematicDocumentPolicy {
@@ -153,32 +204,53 @@ pub struct SchematicDocumentPolicy {
     pub property_commit: PropertyCommitPolicy,
     pub operating_point_annotations: OperatingPointAnnotationPolicy,
     pub page_size: SchematicPageSize,
+    /// Exact custom dimensions for legacy single-sheet documents. Governed
+    /// multi-sheet documents retain this authority per `DesignSheet`.
+    pub custom_page_size: Option<SchematicCustomPageSize>,
     pub page_orientation: SchematicPageOrientation,
 }
 
 impl SchematicDocumentPolicy {
     #[must_use]
     pub fn page_size_display(self) -> String {
-        let (portrait_width, portrait_height) = self.page_size.portrait_dimensions_tenth_mm();
+        let (name, portrait_width_um, portrait_height_um) =
+            if let Some(custom) = self.custom_page_size {
+                (
+                    "Custom",
+                    custom.portrait_width_um,
+                    custom.portrait_height_um,
+                )
+            } else {
+                let (width, height) = self.page_size.portrait_dimensions_tenth_mm();
+                (
+                    self.page_size.label(),
+                    u64::from(width) * 100,
+                    u64::from(height) * 100,
+                )
+            };
         let (width, height) = match self.page_orientation {
-            SchematicPageOrientation::Portrait => (portrait_width, portrait_height),
-            SchematicPageOrientation::Landscape => (portrait_height, portrait_width),
+            SchematicPageOrientation::Portrait => (portrait_width_um, portrait_height_um),
+            SchematicPageOrientation::Landscape => (portrait_height_um, portrait_width_um),
         };
         format!(
             "{} {} · {} × {} mm",
-            self.page_size.label(),
+            name,
             self.page_orientation.label(),
-            format_tenth_mm(width),
-            format_tenth_mm(height)
+            format_micrometres_as_mm(width),
+            format_micrometres_as_mm(height)
         )
     }
 }
 
-fn format_tenth_mm(value: u32) -> String {
-    if value % 10 == 0 {
-        (value / 10).to_string()
+fn format_micrometres_as_mm(value: u64) -> String {
+    let whole = value / 1_000;
+    let fraction = value % 1_000;
+    if fraction == 0 {
+        whole.to_string()
     } else {
-        format!("{}.{:01}", value / 10, value % 10)
+        format!("{whole}.{fraction:03}")
+            .trim_end_matches('0')
+            .to_owned()
     }
 }
 
@@ -196,6 +268,7 @@ mod tests {
             property_commit: PropertyCommitPolicy::ApplyValidFields,
             operating_point_annotations: OperatingPointAnnotationPolicy::VoltagesOnly,
             page_size: SchematicPageSize::A3,
+            custom_page_size: None,
             page_orientation: SchematicPageOrientation::Portrait,
         };
         let json = serde_json::to_string(&policy).unwrap();
@@ -210,6 +283,7 @@ mod tests {
     fn legacy_document_policy_defaults_page_authority() {
         let policy = serde_json::from_str::<SchematicDocumentPolicy>("{}").unwrap();
         assert_eq!(policy.page_size, SchematicPageSize::A4);
+        assert_eq!(policy.custom_page_size, None);
         assert_eq!(policy.page_orientation, SchematicPageOrientation::Landscape);
         assert_eq!(policy.page_size_display(), "A4 landscape · 297 × 210 mm");
     }

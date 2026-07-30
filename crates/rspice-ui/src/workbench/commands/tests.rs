@@ -157,37 +157,118 @@ fn horizontal_coordinate_reflection_is_labeled_by_its_vertical_mirror_axis() {
 }
 
 #[test]
-fn canvas_grid_command_truthfully_toggles_grid_and_snap_as_one_master() {
+fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
+    let expected = [
+        (Command::PageSetup, "page-setup", "Page setup…"),
+        (
+            Command::SheetFormatManager,
+            "sheet-format-manager",
+            "Sheet formats across this document…",
+        ),
+        (
+            Command::CustomSheetSizes,
+            "sheet-preset-library",
+            "Custom sheet sizes…",
+        ),
+    ];
+    let searchable = command_catalog().collect::<Vec<_>>();
+
+    for (command, stable_id, label) in expected {
+        assert_eq!(command.stable_id(), stable_id);
+        assert_eq!(command.spec().label, label);
+        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert!(searchable.contains(&command), "{stable_id}");
+    }
+}
+
+#[test]
+fn authored_page_setup_never_falls_back_to_symbol_hardcopy_media() {
+    let mut app = app_with_selected_authored_symbol();
+    app.state.project_lifecycle.project_open = true;
+    app.state
+        .open_workspace_view(crate::state::CellViewRef::new(
+            "command_test",
+            "amp",
+            "symbol",
+        ));
+    assert!(active_symbol_editor(&app));
+    assert!(
+        crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(
+            &app.state
+        ),
+        "the symbol is a valid print/export source"
+    );
+
+    assert!(!Command::PageSetup.is_enabled(&app));
+    Command::PageSetup.execute(&mut app);
+
+    assert!(!app.state.dialogs.drawing_sheet_setup.open);
+    assert!(
+        !app.state.dialogs.hardcopy.open,
+        "authored Page Setup must not substitute output-media setup"
+    );
+}
+
+#[test]
+fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.workbench.workspace = Workspace::Design;
+    let key = app.state.workspace.active_key();
+    app.state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Main", [])
+        .unwrap();
+
+    assert!(Command::SheetFormatManager.is_enabled(&app));
+    assert!(Command::CustomSheetSizes.is_enabled(&app));
+
+    Command::SheetFormatManager.execute(&mut app);
+    assert!(app.state.dialogs.drawing_sheet_support.manager.open);
+
+    Command::CustomSheetSizes.execute(&mut app);
+    assert!(app.state.dialogs.drawing_sheet_presets.any_open());
+
+    let mut results = RSpiceApp::test_instance();
+    results.state.project_lifecycle.project_open = true;
+    results.state.workbench.workspace = Workspace::Results;
+    assert!(!Command::PageSetup.is_enabled(&results));
+    assert!(!Command::SheetFormatManager.is_enabled(&results));
+    assert!(!Command::CustomSheetSizes.is_enabled(&results));
+}
+
+#[test]
+fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.ui.set_grid_style(crate::state::GridStyle::Lines);
+    app.state.ui.set_grid_style(crate::state::GridStyle::Dots);
     app.state.schematic.snap_engine.enabled = true;
     app.state.schematic.snap_engine.snap_to_wire_segments = false;
     app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
 
-    assert_eq!(Command::CycleGrid.stable_id(), "toggle-grid");
-    assert_eq!(Command::CycleGrid.spec().label, "Canvas grid and snap");
+    assert_eq!(Command::CycleGrid.stable_id(), "cycle-grid");
+    assert_eq!(Command::CycleGrid.spec().label, "Cycle grid display");
 
     Command::CycleGrid.execute(&mut app);
-
-    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
-    assert!(!app.state.schematic.snap_engine.enabled);
-    assert!(!app.state.ui.schematic_snap.enabled);
-    assert!(
-        !app.state.schematic.snap_engine.snap_to_wire_segments,
-        "the master toggle must preserve detailed target choices"
-    );
-
-    Command::CycleGrid.execute(&mut app);
-
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Lines);
     assert!(app.state.schematic.snap_engine.enabled);
     assert!(app.state.ui.schematic_snap.enabled);
-    assert!(!app.state.schematic.snap_engine.snap_to_wire_segments);
+    assert!(
+        !app.state.schematic.snap_engine.snap_to_wire_segments,
+        "display cycling must preserve detailed snap target choices"
+    );
+
+    Command::CycleGrid.execute(&mut app);
+    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
+    assert!(app.state.schematic.snap_engine.enabled);
+
+    Command::CycleGrid.execute(&mut app);
+    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Dots);
 }
 
 #[test]
-fn canvas_grid_command_uses_the_symbol_editors_grid_and_snap_pair() {
+fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
     let mut app = app_with_selected_authored_symbol();
     app.state
         .open_workspace_view(crate::state::CellViewRef::new(
@@ -205,7 +286,38 @@ fn canvas_grid_command_uses_the_symbol_editors_grid_and_snap_pair() {
 
     Command::CycleGrid.execute(&mut app);
     assert!(app.state.ui.symbol.show_grid);
-    assert!(app.state.ui.symbol.snap_to_grid);
+    assert!(!app.state.ui.symbol.snap_to_grid);
+}
+
+#[test]
+fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_available() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    app.state.workbench.safe_mode.activate(
+        crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..Default::default()
+        },
+        String::new(),
+    );
+
+    for command in [
+        Command::PlaceInstance,
+        Command::PlaceWire,
+        Command::PlaceBus,
+        Command::PlaceBusTap,
+        Command::PlaceJunction,
+        Command::PlaceLabel,
+        Command::PlacePin,
+        Command::PlaceText,
+    ] {
+        assert!(!command.is_enabled(&app), "{command:?}");
+    }
+    assert!(Command::CycleGrid.is_enabled(&app));
+    assert!(Command::GridSnapRouting.is_enabled(&app));
+
+    Command::PlaceWire.execute(&mut app);
+    assert_eq!(app.state.schematic.tool, Tool::Select);
 }
 
 fn app_with_every_complete_schematic_object() -> RSpiceApp {
@@ -1040,10 +1152,16 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     app.state.schematic.zoom = 3.5;
     app.state.schematic.pan = (127.0, -81.0);
     app.state.schematic.needs_fit = false;
+    app.state.schematic.needs_drawing_sheet_fit = false;
     Command::ZoomFit.execute(&mut app);
     assert_eq!(app.state.schematic.zoom, 3.5);
     assert_eq!(app.state.schematic.pan, (127.0, -81.0));
+    assert!(!app.state.schematic.needs_fit);
+    assert!(app.state.schematic.needs_drawing_sheet_fit);
+
+    Command::FitSchematicContent.execute(&mut app);
     assert!(app.state.schematic.needs_fit);
+    assert!(!app.state.schematic.needs_drawing_sheet_fit);
 }
 
 #[test]

@@ -197,7 +197,11 @@ fn validate_start(
             "The native hardcopy source authority does not match the immutable plan.".to_owned(),
         );
     }
-    if plan.content_extent() != source.content_extent() {
+    if plan.content_extent()
+        != source
+            .content_extent_for_setup(plan.setup().schematic())
+            .map_err(|error| error.to_string())?
+    {
         return Err(
             "The native hardcopy source extent does not match the immutable plan.".to_owned(),
         );
@@ -269,7 +273,10 @@ fn validate_worker_identity(
     if ticket.plan_digest != plan.content_digest()
         || ticket.source_digest != source.authority().content_digest()
         || plan.source() != source.authority()
-        || plan.content_extent() != source.content_extent()
+        || plan.content_extent()
+            != source
+                .content_extent_for_setup(plan.setup().schematic())
+                .map_err(|error| error.to_string())?
     {
         return Err(
             "Native hardcopy rendering rejected a stale plan or source identity.".to_owned(),

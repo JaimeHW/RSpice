@@ -670,9 +670,8 @@ pub struct UiSessionState {
     pub results_seen_version: u64,
     /// Canvas grid style (dots / lines / off).
     pub grid: GridStyle,
-    /// Exact non-Off display style restored by the `G` master toggle.
-    /// Keeping this separate prevents a temporary grid/snap disable from
-    /// discarding the user's richer toolbar choice.
+    /// Last non-Off display style retained for backward-compatible session
+    /// restoration. The current `G` command cycles dots, lines, and off.
     pub grid_restore_style: GridStyle,
     /// Schematic editor selection classes. This is restored with the UI
     /// session but never written into project-owned schematic data.
@@ -682,6 +681,10 @@ pub struct UiSessionState {
     /// Device-local schematic display policy. Presentation choices are
     /// restored with the session and are never written to project data.
     pub schematic_visibility: SchematicVisibilityPolicy,
+    /// Optional drawing-sheet construction detail shown around the permanent
+    /// authored paper boundary. Output inclusion remains independently owned
+    /// by Print and Export.
+    pub drawing_sheet_layers: crate::state::DrawingSheetLayerVisibility,
     /// Exact runtime snap-target configuration used by the Grid & snap
     /// popover. The document grid pitch remains project-owned.
     pub schematic_snap: crate::state::SnapEngine,
@@ -752,26 +755,15 @@ impl UiSessionState {
         self.grid = style;
     }
 
-    /// Toggle grid presentation while retaining the exact non-Off style.
-    /// Returns the new master state so callers can apply it to snapping.
-    pub(crate) fn toggle_grid_visibility(&mut self) -> bool {
-        let enabled = !self.grid.visible();
-        if enabled {
-            let restore = if self.grid_restore_style.visible() {
-                self.grid_restore_style
-            } else {
-                GridStyle::Dots
-            };
-            self.grid = restore;
-        } else {
-            self.grid_restore_style = if self.grid.visible() {
-                self.grid
-            } else {
-                GridStyle::Dots
-            };
-            self.grid = GridStyle::Off;
-        }
-        enabled
+    /// Cycle the upgraded toolbar's exact presentation order.
+    pub(crate) fn cycle_grid_style(&mut self) -> GridStyle {
+        let next = match self.grid {
+            GridStyle::Dots => GridStyle::Lines,
+            GridStyle::Lines => GridStyle::Off,
+            GridStyle::Off => GridStyle::Dots,
+        };
+        self.set_grid_style(next);
+        next
     }
 
     pub(crate) fn request_full_screen(&mut self, enabled: bool) {
@@ -803,6 +795,8 @@ pub struct UiSessionStateSer {
     schematic_bulk_edit_filters: SelectionBulkFilterSession,
     #[serde(default)]
     schematic_visibility: SchematicVisibilityPolicy,
+    #[serde(default)]
+    drawing_sheet_layers: crate::state::DrawingSheetLayerVisibility,
     #[serde(default)]
     schematic_snap: crate::state::SnapEngine,
     #[serde(default)]
@@ -858,6 +852,7 @@ impl From<&UiSessionState> for UiSessionStateSer {
             schematic_selection_filter: session.schematic_selection_filter,
             schematic_bulk_edit_filters: session.schematic_bulk_edit_filters.clone(),
             schematic_visibility: session.schematic_visibility,
+            drawing_sheet_layers: session.drawing_sheet_layers,
             schematic_snap: session.schematic_snap.clone(),
             schematic_routing_mode: Some(session.schematic_routing_mode),
             engineering_table_views: session.engineering_table_views.clone(),
@@ -904,6 +899,7 @@ impl From<UiSessionStateSer> for UiSessionState {
             schematic_selection_filter: ser.schematic_selection_filter,
             schematic_bulk_edit_filters: ser.schematic_bulk_edit_filters,
             schematic_visibility: ser.schematic_visibility,
+            drawing_sheet_layers: ser.drawing_sheet_layers,
             schematic_snap: ser.schematic_snap,
             schematic_routing_mode,
             engineering_table_views: ser.engineering_table_views,
@@ -1088,10 +1084,11 @@ mod symbol_selection_tests {
     }
 
     #[test]
-    fn grid_master_toggle_restores_and_round_trips_the_exact_display_style() {
+    fn grid_cycle_is_dots_then_lines_then_off_and_round_trips_exactly() {
         let mut session = UiSessionState::new();
-        session.set_grid_style(GridStyle::Lines);
-        assert!(!session.toggle_grid_visibility());
+        session.set_grid_style(GridStyle::Dots);
+        assert_eq!(session.cycle_grid_style(), GridStyle::Lines);
+        assert_eq!(session.cycle_grid_style(), GridStyle::Off);
         assert_eq!(session.grid, GridStyle::Off);
         assert_eq!(session.grid_restore_style, GridStyle::Lines);
 
@@ -1103,8 +1100,8 @@ mod symbol_selection_tests {
 
         assert_eq!(restored.grid, GridStyle::Off);
         assert_eq!(restored.grid_restore_style, GridStyle::Lines);
-        assert!(restored.toggle_grid_visibility());
-        assert_eq!(restored.grid, GridStyle::Lines);
+        assert_eq!(restored.cycle_grid_style(), GridStyle::Dots);
+        assert_eq!(restored.cycle_grid_style(), GridStyle::Lines);
     }
 
     #[test]

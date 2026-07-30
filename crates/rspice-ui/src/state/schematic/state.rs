@@ -171,6 +171,7 @@ pub enum StretchTarget {
 /// A stretch was rejected before any document mutation occurred.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StretchSelectionError {
+    ProbeSelectionUnsupported,
     StaleTarget,
     CoordinateOverflow,
     DegenerateGeometry { object_id: u64 },
@@ -190,6 +191,9 @@ pub enum StretchSelectionError {
 impl std::fmt::Display for StretchSelectionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ProbeSelectionUnsupported => formatter.write_str(
+                "Probe markers cannot be stretched; move the retained probe marker instead.",
+            ),
             Self::StaleTarget => formatter
                 .write_str("The selected stretch handle no longer exists in the active schematic."),
             Self::CoordinateOverflow => {
@@ -426,6 +430,13 @@ pub struct SchematicState {
     #[serde(skip)]
     pub needs_fit: bool,
 
+    /// One-shot request to frame the authored drawing-sheet paper boundary.
+    ///
+    /// This is deliberately distinct from [`Self::needs_fit`], which frames
+    /// schematic objects and may include content parked off the paper.
+    #[serde(skip)]
+    pub needs_drawing_sheet_fit: bool,
+
     /// One-shot request to pan the view so this schematic-space point sits at
     /// the canvas center (violation cycling). Consumed on the next render,
     /// like `needs_fit`; the zoom level is left alone.
@@ -511,6 +522,7 @@ impl Default for SchematicState {
             net_mapping: HashMap::new(),
             is_dirty: false,
             needs_fit: false,
+            needs_drawing_sheet_fit: false,
             center_request: None,
             read_only: false,
             needs_history_reset: false,

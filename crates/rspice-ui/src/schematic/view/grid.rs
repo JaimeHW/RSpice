@@ -2,9 +2,9 @@
 //!
 //! The schematic well draws its grid in one of two styles — a dot per
 //! snap point (default) or hairline rules — batched into a single mesh
-//! so even dense views cost one draw call. At low zoom the pitch steps
-//! up ×10 / ×100 to stay legible, and below that the grid fades out
-//! entirely.
+//! so even dense views cost one draw call. At low zoom the authored pitch
+//! advances through the conventional 1-2-5 engineering sequence so the grid
+//! remains legible without losing the operator's sense of scale.
 //!
 //! The lattice is built once in grid-local space and cached; the pattern
 //! repeats with period `pitch`, so pans and idle frames reuse the mesh
@@ -15,19 +15,19 @@ use std::cell::RefCell;
 
 use egui::{Color32, Mesh, Painter, Rect, Shape, pos2, vec2};
 
-use crate::workbench::app_state::AppState;
 use crate::state::GridStyle;
+use crate::workbench::app_state::AppState;
 
-/// Minimum on-screen pitch before stepping up to a coarser grid.
-const MIN_PITCH: f32 = 9.0;
-/// Dot half-extent in points (dots render as 2 × 2 quads, ≈ the design's
-/// 0.9 px-radius circles, at a fraction of the tessellation cost).
-const DOT_HALF: f32 = 1.0;
-/// Rule half-thickness in points (1 pt hairlines).
-const LINE_HALF: f32 = 0.5;
+/// Minimum cell pitch in device pixels before selecting the next coarser
+/// engineering step.
+const MIN_DEVICE_PITCH: f32 = 5.0;
+/// Dot and rule geometry is specified in device pixels, then converted to
+/// egui points for the active display scale.
+const DEVICE_HAIRLINE: f32 = 1.0;
 
 struct CachedGrid {
     pitch_bits: u32,
+    pixels_per_point_bits: u32,
     style: GridStyle,
     color: Color32,
     cols: i32,
@@ -41,10 +41,16 @@ thread_local! {
     static GRID_MESH: RefCell<Option<CachedGrid>> = const { RefCell::new(None) };
 }
 
-/// Draw the schematic grid in the workbench's active style.
-pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
+/// Draw the schematic grid in the workbench's active style, clipped to the
+/// authored drawing area while retaining the world-origin lattice phase.
+pub(super) fn draw_grid(
+    painter: &Painter,
+    canvas_bounds: Rect,
+    clip_bounds: Rect,
+    state: &AppState,
+) {
     let style = state.ui.grid;
-    if !style.visible() {
+    if !style.visible() || !clip_bounds.is_positive() {
         return;
     }
 
@@ -53,16 +59,13 @@ pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
     let pan_x = state.schematic.pan.0 as f32;
     let pan_y = state.schematic.pan.1 as f32;
 
+    let pixels_per_point = painter.ctx().pixels_per_point().max(f32::EPSILON);
     let base_pitch = grid_size * zoom;
-    let pitch = if base_pitch >= MIN_PITCH {
-        base_pitch
-    } else if base_pitch * 10.0 >= MIN_PITCH {
-        base_pitch * 10.0
-    } else if base_pitch * 100.0 >= MIN_PITCH {
-        base_pitch * 100.0
-    } else {
+    let multiplier = engineering_grid_multiplier(base_pitch * pixels_per_point, MIN_DEVICE_PITCH);
+    let pitch = base_pitch * multiplier;
+    if !pitch.is_finite() || pitch <= 0.0 {
         return;
-    };
+    }
 
     // Rules sweep the full canvas where dots only mark crossings, so the
     // line style takes a quieter tint of the same grid token.
@@ -75,21 +78,23 @@ pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
 
     // Lattice extent: cover the bounds plus one period on each side; the
     // painter's clip rect trims the overhang.
-    let cols = (bounds.width() / pitch).ceil() as i32 + 2;
-    let rows = (bounds.height() / pitch).ceil() as i32 + 2;
+    let cols = (clip_bounds.width() / pitch).ceil() as i32 + 2;
+    let rows = (clip_bounds.height() / pitch).ceil() as i32 + 2;
 
-    // Phase: the lattice column/row at or before the top-left corner.
-    let origin = bounds.min
-        + vec2(
-            pan_x.rem_euclid(pitch) - pitch,
-            pan_y.rem_euclid(pitch) - pitch,
-        );
+    // Phase is anchored to the viewport's world origin, then advanced to the
+    // first lattice point at or before the drawing-area clip.
+    let world_origin = canvas_bounds.min + vec2(pan_x, pan_y);
+    let origin = pos2(
+        clip_bounds.left() - (clip_bounds.left() - world_origin.x).rem_euclid(pitch) - pitch,
+        clip_bounds.top() - (clip_bounds.top() - world_origin.y).rem_euclid(pitch) - pitch,
+    );
 
     GRID_MESH.with(|cache| {
         let mut cache = cache.borrow_mut();
         let stale = match cache.as_ref() {
             Some(c) => {
                 c.pitch_bits != pitch.to_bits()
+                    || c.pixels_per_point_bits != pixels_per_point.to_bits()
                     || c.style != style
                     || c.color != color
                     || c.cols != cols
@@ -98,12 +103,14 @@ pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
             None => true,
         };
         if stale {
+            let hairline = DEVICE_HAIRLINE / pixels_per_point;
             let mesh = match style {
-                GridStyle::Lines => line_mesh(pitch, cols, rows, color),
-                _ => dot_mesh(pitch, cols, rows, color),
+                GridStyle::Lines => line_mesh(pitch, cols, rows, color, hairline),
+                _ => dot_mesh(pitch, cols, rows, color, hairline),
             };
             *cache = Some(CachedGrid {
                 pitch_bits: pitch.to_bits(),
+                pixels_per_point_bits: pixels_per_point.to_bits(),
                 style,
                 color,
                 cols,
@@ -116,13 +123,34 @@ pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
         if let Some(cached) = cache.as_ref() {
             let mut mesh = cached.mesh.clone();
             mesh.translate(origin.to_vec2());
-            painter.add(Shape::mesh(mesh));
+            painter.with_clip_rect(clip_bounds).add(Shape::mesh(mesh));
         }
     });
 }
 
-/// One 2 × 2 pt quad per lattice crossing.
-fn dot_mesh(pitch: f32, cols: i32, rows: i32, color: Color32) -> Mesh {
+/// Smallest 1-2-5 multiplier whose resulting pitch reaches the requested
+/// device-pixel floor. The sequence continues by decades instead of
+/// disappearing at an arbitrary low zoom.
+fn engineering_grid_multiplier(base_device_pitch: f32, minimum_device_pitch: f32) -> f32 {
+    if !base_device_pitch.is_finite()
+        || base_device_pitch <= 0.0
+        || base_device_pitch >= minimum_device_pitch
+    {
+        return 1.0;
+    }
+    let required = minimum_device_pitch / base_device_pitch;
+    let decade = 10.0_f32.powf(required.log10().floor());
+    for mantissa in [1.0_f32, 2.0, 5.0, 10.0] {
+        let candidate = decade * mantissa;
+        if candidate >= required {
+            return candidate;
+        }
+    }
+    decade * 10.0
+}
+
+/// One one-device-pixel quad per lattice crossing.
+fn dot_mesh(pitch: f32, cols: i32, rows: i32, color: Color32, hairline: f32) -> Mesh {
     let quads = (cols as usize) * (rows as usize);
     let mut mesh = Mesh::default();
     mesh.reserve_vertices(quads * 4);
@@ -132,7 +160,7 @@ fn dot_mesh(pitch: f32, cols: i32, rows: i32, color: Color32) -> Mesh {
         for gy in 0..rows {
             let y = gy as f32 * pitch;
             mesh.add_colored_rect(
-                Rect::from_center_size(pos2(x, y), vec2(DOT_HALF * 2.0, DOT_HALF * 2.0)),
+                Rect::from_center_size(pos2(x, y), vec2(hairline, hairline)),
                 color,
             );
         }
@@ -141,26 +169,42 @@ fn dot_mesh(pitch: f32, cols: i32, rows: i32, color: Color32) -> Mesh {
 }
 
 /// One hairline quad per lattice column and row, spanning the extent.
-fn line_mesh(pitch: f32, cols: i32, rows: i32, color: Color32) -> Mesh {
+fn line_mesh(pitch: f32, cols: i32, rows: i32, color: Color32, hairline: f32) -> Mesh {
     let quads = (cols + rows) as usize;
     let mut mesh = Mesh::default();
     mesh.reserve_vertices(quads * 4);
     mesh.reserve_triangles(quads * 2);
     let height = rows as f32 * pitch;
     let width = cols as f32 * pitch;
+    let half = hairline * 0.5;
     for gx in 0..cols {
         let x = gx as f32 * pitch;
         mesh.add_colored_rect(
-            Rect::from_min_max(pos2(x - LINE_HALF, 0.0), pos2(x + LINE_HALF, height)),
+            Rect::from_min_max(pos2(x - half, 0.0), pos2(x + half, height)),
             color,
         );
     }
     for gy in 0..rows {
         let y = gy as f32 * pitch;
         mesh.add_colored_rect(
-            Rect::from_min_max(pos2(0.0, y - LINE_HALF), pos2(width, y + LINE_HALF)),
+            Rect::from_min_max(pos2(0.0, y - half), pos2(width, y + half)),
             color,
         );
     }
     mesh
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn engineering_grid_uses_one_two_five_steps_at_five_device_pixels() {
+        assert_eq!(engineering_grid_multiplier(5.0, 5.0), 1.0);
+        assert_eq!(engineering_grid_multiplier(3.0, 5.0), 2.0);
+        assert_eq!(engineering_grid_multiplier(1.1, 5.0), 5.0);
+        assert_eq!(engineering_grid_multiplier(0.6, 5.0), 10.0);
+        assert_eq!(engineering_grid_multiplier(0.24, 5.0), 50.0);
+        assert!(0.11 * engineering_grid_multiplier(0.11, 5.0) >= MIN_DEVICE_PITCH);
+    }
 }

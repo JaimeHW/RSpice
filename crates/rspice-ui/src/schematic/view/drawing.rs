@@ -5,10 +5,10 @@
 
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
-use crate::workbench::app_state::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, Point, PortDirection, SchematicProbe, Wire,
 };
+use crate::workbench::app_state::AppState;
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::SchematicSymbolContext;
@@ -31,9 +31,6 @@ const DEFAULT_BUS_TAP_STROKE_WIDTH: f32 = 2.0;
 const SELECTED_BUS_TAP_STROKE_WIDTH: f32 = 2.4;
 const PROBE_RADIUS: f32 = 9.0;
 const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
-const PROBE_LABEL_X_OFFSET: i32 = 13;
-const PROBE_LABEL_ASCENT: i32 = 22;
-const PROBE_LABEL_ADVANCE: i32 = 7;
 type PortMarkerSegment = ((f32, f32), (f32, f32));
 
 const _: [(); 1] = [(); (DEFAULT_WIRE_STROKE_WIDTH.to_bits() == 1.1f32.to_bits()) as usize];
@@ -155,16 +152,34 @@ pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap,
 /// Paint a retained probe flag using the upgraded mockup's circle, crosshair,
 /// and exact source/reference label. The marker scales with the drawing so it
 /// stays anchored to its authored schematic coordinate at every zoom.
-pub(super) fn draw_probe(painter: &Painter, viewport: &Viewport, probe: &SchematicProbe) {
+pub(super) fn draw_probe(
+    painter: &Painter,
+    viewport: &Viewport,
+    probe: &SchematicProbe,
+    selected: bool,
+    hovered: bool,
+) {
     let palette = crate::ui::tokens::active_palette();
     let center = viewport.schematic_to_screen(probe.position);
     let radius = PROBE_RADIUS * viewport.zoom;
     let half_span = PROBE_CROSSHAIR_HALF_SPAN * viewport.zoom;
+    if selected {
+        painter.circle_filled(center, radius + 4.0 * viewport.zoom, palette.accent);
+    } else if hovered {
+        painter.circle_stroke(
+            center,
+            radius + 4.0 * viewport.zoom,
+            Stroke::new(1.5 * viewport.zoom, palette.accent),
+        );
+    }
     painter.circle_filled(center, radius, palette.canvas_bg);
     painter.circle_stroke(
         center,
         radius,
-        Stroke::new(2.0 * viewport.zoom, palette.accent),
+        Stroke::new(
+            if selected { 2.5 } else { 2.0 } * viewport.zoom,
+            palette.accent,
+        ),
     );
     painter.line_segment(
         [
@@ -196,28 +211,111 @@ pub(super) fn draw_probe(painter: &Painter, viewport: &Viewport, probe: &Schemat
 /// The label font scales with the schematic, so its screen-space advance maps
 /// to a stable world-space estimate just like component labels.
 pub(super) fn probe_world_bounds(probe: &SchematicProbe) -> (Point, Point) {
-    let label_characters = i32::try_from(probe.reference.chars().count()).unwrap_or(i32::MAX);
-    let label_width = label_characters.saturating_mul(PROBE_LABEL_ADVANCE);
-    (
-        Point::new(
-            probe
-                .position
-                .x
-                .saturating_sub(PROBE_CROSSHAIR_HALF_SPAN as i32),
-            probe.position.y.saturating_sub(PROBE_LABEL_ASCENT),
-        ),
-        Point::new(
-            probe
-                .position
-                .x
-                .saturating_add(PROBE_LABEL_X_OFFSET)
-                .saturating_add(label_width),
-            probe
-                .position
-                .y
-                .saturating_add(PROBE_CROSSHAIR_HALF_SPAN as i32),
-        ),
-    )
+    probe.world_bounds()
+}
+
+/// Resolve a retained probe marker in screen space. The minimum radius keeps
+/// markers usable when zoomed far out while the upper range still follows the
+/// authored drawing scale.
+pub(super) fn probe_at_screen(
+    viewport: &Viewport,
+    probes: &[SchematicProbe],
+    pointer: Pos2,
+) -> Option<u64> {
+    let radius = (PROBE_RADIUS * viewport.zoom).max(8.0) + 4.0;
+    probes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, probe)| {
+            let distance_sq = viewport
+                .schematic_to_screen(probe.position)
+                .distance_sq(pointer);
+            (distance_sq <= radius * radius).then_some((distance_sq, index, probe.id))
+        })
+        .min_by(|left, right| {
+            left.0
+                .total_cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+        })
+        .map(|(_, _, id)| id)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct WireScreenHit {
+    pub(super) wire_id: u64,
+    /// Exact integer schematic attachment when representable. A visual hit on
+    /// a malformed/non-integral conductor deliberately has no attachment.
+    pub(super) attachment: Option<Point>,
+    distance_sq: f32,
+    authored_index: usize,
+}
+
+/// Nearest conductor under a screen-space pointer, with an exact authored
+/// attachment point only when that point is representable in integer
+/// schematic coordinates.
+pub(super) fn nearest_wire_screen_hit(
+    viewport: &Viewport,
+    wires: &[Wire],
+    pointer: Pos2,
+    radius: f32,
+) -> Option<WireScreenHit> {
+    let radius_sq = radius.max(0.0).powi(2);
+    wires
+        .iter()
+        .enumerate()
+        .flat_map(|(authored_index, wire)| {
+            wire.points.windows(2).filter_map(move |segment| {
+                let start = viewport.schematic_to_screen(segment[0]);
+                let end = viewport.schematic_to_screen(segment[1]);
+                let vector = end - start;
+                let length_sq = vector.length_sq();
+                if length_sq <= f32::EPSILON {
+                    return None;
+                }
+                let t = ((pointer - start).dot(vector) / length_sq).clamp(0.0, 1.0);
+                let closest = start + vector * t;
+                let distance_sq = closest.distance_sq(pointer);
+                if distance_sq > radius_sq {
+                    return None;
+                }
+
+                let a = segment[0];
+                let b = segment[1];
+                let attachment = if a.y == b.y {
+                    let x = ((closest.x - viewport.bounds.min.x - viewport.offset.x)
+                        / viewport.zoom)
+                        .round()
+                        .clamp(a.x.min(b.x) as f32, a.x.max(b.x) as f32);
+                    Some(Point::new(x as i32, a.y))
+                } else if a.x == b.x {
+                    let y = ((closest.y - viewport.bounds.min.y - viewport.offset.y)
+                        / viewport.zoom)
+                        .round()
+                        .clamp(a.y.min(b.y) as f32, a.y.max(b.y) as f32);
+                    Some(Point::new(a.x, y as i32))
+                } else {
+                    let world_x = ((closest.x - viewport.bounds.min.x - viewport.offset.x)
+                        / viewport.zoom)
+                        .round() as i32;
+                    let world_y = ((closest.y - viewport.bounds.min.y - viewport.offset.y)
+                        / viewport.zoom)
+                        .round() as i32;
+                    let candidate = Point::new(world_x, world_y);
+                    wire.contains_point(candidate).then_some(candidate)
+                };
+                Some(WireScreenHit {
+                    wire_id: wire.id,
+                    attachment,
+                    distance_sq,
+                    authored_index,
+                })
+            })
+        })
+        .min_by(|left, right| {
+            left.distance_sq
+                .total_cmp(&right.distance_sq)
+                .then_with(|| left.authored_index.cmp(&right.authored_index))
+        })
 }
 
 fn offset_polyline(points: &[Pos2], offset: f32) -> Vec<Pos2> {
@@ -943,6 +1041,45 @@ mod tests {
             max.x > probe.position.x + PROBE_LABEL_X_OFFSET,
             "fit and culling bounds must retain the complete reference label"
         );
+    }
+
+    #[test]
+    fn probe_hit_target_remains_usable_at_low_and_high_zoom() {
+        let probe = SchematicProbe::new(8, Point::new(10, 20), "V(OUT)", None).unwrap();
+        for zoom in [0.1, 3.0] {
+            let viewport = Viewport {
+                offset: Pos2::new(7.0, 11.0),
+                zoom,
+                bounds: Rect::from_min_size(Pos2::new(100.0, 200.0), Vec2::splat(400.0)),
+            };
+            let pointer = viewport.schematic_to_screen(probe.position) + Vec2::new(10.0, 0.0);
+
+            assert_eq!(
+                probe_at_screen(&viewport, std::slice::from_ref(&probe), pointer),
+                Some(8)
+            );
+        }
+    }
+
+    #[test]
+    fn wire_screen_hit_respects_viewport_origin_and_rejects_fractional_diagonal_attachment() {
+        let viewport = Viewport {
+            offset: Pos2::new(17.0, 23.0),
+            zoom: 2.0,
+            bounds: Rect::from_min_size(Pos2::new(100.0, 200.0), Vec2::splat(400.0)),
+        };
+        let horizontal = Wire::segment(5, Point::new(0, 10), Point::new(20, 10));
+        let pointer = viewport.schematic_to_screen(Point::new(7, 10)) + Vec2::new(0.0, 2.0);
+
+        let hit = nearest_wire_screen_hit(&viewport, &[horizontal], pointer, 4.0).unwrap();
+        assert_eq!(hit.wire_id, 5);
+        assert_eq!(hit.attachment, Some(Point::new(7, 10)));
+
+        let diagonal = Wire::segment(6, Point::new(0, 0), Point::new(2, 1));
+        let fractional = viewport.schematic_to_screen(Point::origin()) + Vec2::new(2.0, 1.0);
+        let hit = nearest_wire_screen_hit(&viewport, &[diagonal], fractional, 1.0).unwrap();
+        assert_eq!(hit.wire_id, 6);
+        assert_eq!(hit.attachment, None);
     }
 
     #[test]

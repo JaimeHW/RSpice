@@ -11,6 +11,1148 @@ fn sheet(name: &str, page: u32) -> SheetDefinition {
     }
 }
 
+fn authored_format(format: SchematicSheetFormat, title: &str) -> SchematicSheetFormat {
+    format
+        .try_update(|draft| {
+            let field = draft
+                .title_block
+                .fields
+                .entry(DrawingSheetTitleFieldId::SheetTitle)
+                .or_default();
+            field.visible = true;
+            field.value = title.to_owned();
+        })
+        .unwrap()
+}
+
+fn drawing_sheet_preset(
+    id: impl Into<String>,
+    name: impl Into<String>,
+    scope: DrawingSheetPresetScope,
+    format: SchematicSheetFormat,
+) -> DrawingSheetPreset {
+    DrawingSheetPreset {
+        id: id.into(),
+        name: name.into(),
+        scope,
+        format,
+    }
+    .normalized_for_storage()
+    .unwrap()
+}
+
+#[test]
+fn governed_sheet_page_format_is_revisioned_and_legacy_safe() {
+    let mut catalog = SheetCatalog::default();
+    let id = catalog.create_sheet(sheet("Input", 1), None).unwrap();
+    let original_sheet_revision = catalog.find(id).unwrap().revision();
+    let original_catalog_revision = catalog.revision();
+    let semantic_digest = catalog.find(id).unwrap().semantic_digest();
+    let custom = authored_format(
+        SchematicSheetFormat::try_custom(
+            "Review board",
+            457_200,
+            304_800,
+            SchematicPageOrientation::Landscape,
+        )
+        .unwrap(),
+        "Input",
+    );
+
+    let revision = catalog
+        .update_sheet_page_format(id, original_sheet_revision, custom.clone())
+        .unwrap();
+
+    assert_eq!(revision, original_sheet_revision + 1);
+    assert_eq!(catalog.revision(), original_catalog_revision + 1);
+    assert_eq!(catalog.find(id).unwrap().page_format(), &custom);
+    assert_eq!(
+        catalog.find(id).unwrap().semantic_digest(),
+        semantic_digest,
+        "physical presentation must not rewrite electrical semantics"
+    );
+    assert_eq!(custom.portrait_dimensions_um(), (304_800, 457_200));
+    assert_eq!(custom.oriented_dimensions_um(), (457_200, 304_800));
+    assert!(matches!(
+        catalog.update_sheet_page_format(id, revision, custom.clone()),
+        Err(DesignManagementError::NoChanges("sheet page format"))
+    ));
+    assert!(
+        catalog
+            .update_sheet_page_format(id, original_sheet_revision, custom)
+            .is_err(),
+        "stale sheet revision must fail closed"
+    );
+
+    let mut legacy = serde_json::to_value(&catalog).unwrap();
+    legacy["sheets"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("page_format");
+    let restored: SheetCatalog = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        restored.find(id).unwrap().page_format(),
+        &authored_format(SchematicSheetFormat::default(), "Input")
+    );
+}
+
+#[test]
+fn drawing_sheet_standards_are_exact_valid_and_round_trip() {
+    assert_eq!(
+        SchematicSheetFormat::default().title_block.scale,
+        DrawingSheetScale::Ratio {
+            drawing_units: 1,
+            reality_units: 1,
+        }
+    );
+    let expected = [
+        (DrawingSheetStandard::IsoA5, (148_000, 210_000)),
+        (DrawingSheetStandard::IsoA4, (210_000, 297_000)),
+        (DrawingSheetStandard::IsoA3, (297_000, 420_000)),
+        (DrawingSheetStandard::IsoA2, (420_000, 594_000)),
+        (DrawingSheetStandard::IsoA1, (594_000, 841_000)),
+        (DrawingSheetStandard::IsoA0, (841_000, 1_189_000)),
+        (DrawingSheetStandard::AnsiA, (215_900, 279_400)),
+        (DrawingSheetStandard::AnsiB, (279_400, 431_800)),
+        (DrawingSheetStandard::AnsiC, (431_800, 558_800)),
+        (DrawingSheetStandard::AnsiD, (558_800, 863_600)),
+        (DrawingSheetStandard::AnsiE, (863_600, 1_117_600)),
+        (DrawingSheetStandard::ArchA, (228_600, 304_800)),
+        (DrawingSheetStandard::ArchB, (304_800, 457_200)),
+        (DrawingSheetStandard::ArchC, (457_200, 609_600)),
+        (DrawingSheetStandard::ArchD, (609_600, 914_400)),
+        (DrawingSheetStandard::ArchE, (914_400, 1_219_200)),
+        (DrawingSheetStandard::JisB5, (182_000, 257_000)),
+        (DrawingSheetStandard::JisB4, (257_000, 364_000)),
+        (DrawingSheetStandard::JisB3, (364_000, 515_000)),
+        (DrawingSheetStandard::JisB2, (515_000, 728_000)),
+    ];
+    assert_eq!(DrawingSheetStandard::ALL.len(), expected.len());
+    for (standard, dimensions) in expected {
+        assert_eq!(standard.portrait_dimensions_um(), dimensions);
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Portrait);
+        format.validate().unwrap();
+        assert_eq!(format.portrait_dimensions_um(), dimensions);
+        let encoded = serde_json::to_string(&format).unwrap();
+        let restored: SchematicSheetFormat = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored, format);
+    }
+}
+
+#[test]
+fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
+    assert_eq!(
+        DrawingSheetStandard::IsoA4.default_margins(),
+        DrawingSheetMargins {
+            top_um: 10_000,
+            right_um: 10_000,
+            bottom_um: 10_000,
+            left_um: 20_000,
+        }
+    );
+    assert_eq!(
+        DrawingSheetStandard::AnsiA.default_margins(),
+        DrawingSheetMargins {
+            top_um: 12_700,
+            right_um: 12_700,
+            bottom_um: 12_700,
+            left_um: 19_050,
+        }
+    );
+    assert_eq!(
+        DrawingSheetStandard::ArchA.default_margins(),
+        DrawingSheetMargins {
+            top_um: 12_700,
+            right_um: 12_700,
+            bottom_um: 12_700,
+            left_um: 25_400,
+        }
+    );
+    assert_eq!(
+        DrawingSheetStandard::JisB5.default_margins(),
+        DrawingSheetMargins {
+            top_um: 10_000,
+            right_um: 10_000,
+            bottom_um: 10_000,
+            left_um: 20_000,
+        }
+    );
+    assert_eq!(
+        DrawingSheetBorderTemplate::Standard.default_marks(),
+        DrawingSheetMarks {
+            registration: true,
+            folding: false,
+        }
+    );
+    assert_eq!(
+        DrawingSheetBorderTemplate::OrganizationManaged.default_marks(),
+        DrawingSheetMarks {
+            registration: true,
+            folding: true,
+        }
+    );
+    let mut draft = SchematicSheetFormatDraft::from(&SchematicSheetFormat::default());
+    draft.apply_border_template(DrawingSheetBorderTemplate::OrganizationManaged);
+    assert_eq!(
+        draft.marks,
+        DrawingSheetMarks {
+            registration: true,
+            folding: true,
+        }
+    );
+}
+
+#[test]
+fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility() {
+    let format = SchematicSheetFormat::default();
+    for field in [
+        DrawingSheetTitleFieldId::Project,
+        DrawingSheetTitleFieldId::CellView,
+        DrawingSheetTitleFieldId::Page,
+        DrawingSheetTitleFieldId::Revision,
+        DrawingSheetTitleFieldId::Format,
+    ] {
+        let policy = field.policy();
+        assert!(policy.required_visible);
+        assert_eq!(
+            policy.value_authority,
+            DrawingSheetTitleFieldValueAuthority::Automatic
+        );
+        assert!(format.title_block.fields[&field].visible);
+    }
+    let sheet_title = DrawingSheetTitleFieldId::SheetTitle.policy();
+    assert!(sheet_title.required_visible);
+    assert_eq!(
+        sheet_title.value_authority,
+        DrawingSheetTitleFieldValueAuthority::Authored
+    );
+    assert_eq!(
+        DrawingSheetTitleFieldId::Date.policy().value_authority,
+        DrawingSheetTitleFieldValueAuthority::Automatic
+    );
+    assert_eq!(
+        DrawingSheetTitleFieldId::Scale.policy().value_authority,
+        DrawingSheetTitleFieldValueAuthority::Automatic
+    );
+    assert_eq!(
+        format.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
+        ""
+    );
+    assert_eq!(DrawingSheetDisplayUnit::Inches.format_um(25_400), "1");
+    assert_eq!(
+        DrawingSheetDisplayUnit::Millimetres.format_size_um(210_000, 297_000),
+        "210 × 297 mm"
+    );
+
+    let hidden = format.try_update(|draft| {
+        draft
+            .title_block
+            .fields
+            .get_mut(&DrawingSheetTitleFieldId::Project)
+            .unwrap()
+            .visible = false;
+    });
+    assert!(matches!(
+        hidden,
+        Err(DesignManagementError::NumericRange(
+            "required drawing sheet title field visibility"
+        ))
+    ));
+    let overridden = format.try_update(|draft| {
+        draft
+            .title_block
+            .fields
+            .get_mut(&DrawingSheetTitleFieldId::Page)
+            .unwrap()
+            .value = "17".to_owned();
+    });
+    assert!(matches!(
+        overridden,
+        Err(DesignManagementError::InvalidText {
+            field: "automatic drawing sheet title field",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn applying_a_format_preserves_target_sheet_fields_but_updates_declared_scale() {
+    let source = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft.title_block.scale = DrawingSheetScale::Ratio {
+                drawing_units: 2,
+                reality_units: 5,
+            };
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
+                .unwrap()
+                .value = "Source owner".to_owned();
+        })
+        .unwrap();
+    let target = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+                .unwrap()
+                .value = "Power tree".to_owned();
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
+                .unwrap()
+                .value = "Target owner".to_owned();
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::Scale)
+                .unwrap()
+                .visible = false;
+        })
+        .unwrap();
+
+    let applied = source.with_target_sheet_title_fields(&target);
+
+    assert_eq!(
+        applied.title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
+        "Power tree"
+    );
+    assert_eq!(
+        applied.title_block.fields[&DrawingSheetTitleFieldId::DrawnBy].value,
+        "Target owner"
+    );
+    assert_eq!(
+        applied.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
+        ""
+    );
+    assert_eq!(
+        applied.title_block.scale,
+        DrawingSheetScale::Ratio {
+            drawing_units: 2,
+            reality_units: 5,
+        }
+    );
+    assert!(!applied.title_block.fields[&DrawingSheetTitleFieldId::Scale].visible);
+}
+
+#[test]
+fn automatic_drawing_sheet_date_uses_exact_iso_calendar_format() {
+    assert_eq!(civil_date_from_unix_days(0), "1970-01-01");
+    assert_eq!(civil_date_from_unix_days(20_663), "2026-07-29");
+    let today = automatic_drawing_sheet_date_utc();
+    assert_eq!(today.len(), 10);
+    assert_eq!(today.as_bytes()[4], b'-');
+    assert_eq!(today.as_bytes()[7], b'-');
+}
+
+#[test]
+fn drawing_sheet_geometry_is_canonical_and_bounded() {
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    );
+    let geometry = format.geometry().unwrap();
+    assert_eq!(
+        geometry.paper,
+        DrawingSheetRect {
+            x_um: 0,
+            y_um: 0,
+            width_um: 297_000,
+            height_um: 210_000,
+        }
+    );
+    assert_eq!(
+        geometry.printable,
+        DrawingSheetRect {
+            x_um: 20_000,
+            y_um: 10_000,
+            width_um: 267_000,
+            height_um: 190_000,
+        }
+    );
+    assert_eq!(
+        geometry.drawing_area,
+        DrawingSheetRect {
+            x_um: 25_000,
+            y_um: 15_000,
+            width_um: 257_000,
+            height_um: 180_000,
+        }
+    );
+    assert_eq!(
+        geometry.title_block,
+        Some(DrawingSheetRect {
+            x_um: 152_000,
+            y_um: 163_000,
+            width_um: 130_000,
+            height_um: 32_000,
+        })
+    );
+    assert_eq!(geometry.zones.unwrap().columns, 4);
+    assert_eq!(geometry.zones.unwrap().rows, 4);
+}
+
+#[test]
+fn drawing_sheet_title_block_substitution_is_visible_and_non_destructive() {
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Portrait,
+    )
+    .try_update(|draft| {
+        draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+    })
+    .unwrap();
+
+    assert_eq!(
+        format.title_block.template,
+        DrawingSheetTitleBlockTemplate::Standard,
+        "the requested template remains authored"
+    );
+    assert_eq!(
+        format.effective_title_block_template(),
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+    assert!(format.title_block_substituted());
+    assert_eq!(
+        format.geometry().unwrap().effective_title_block_template,
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+
+    let landscape = format
+        .try_update(|draft| {
+            draft.orientation = SchematicPageOrientation::Landscape;
+        })
+        .unwrap();
+    assert!(!landscape.title_block_substituted());
+    assert_eq!(
+        landscape.geometry().unwrap().effective_title_block_template,
+        DrawingSheetTitleBlockTemplate::Standard
+    );
+}
+
+#[test]
+fn drawing_sheet_drafts_derive_compatibility_and_reject_invalid_edits_atomically() {
+    let original = SchematicSheetFormat::default();
+    let arch = original
+        .try_update(|draft| {
+            draft.authored_size = AuthoredDrawingSheetSize::Standard {
+                standard: DrawingSheetStandard::ArchD,
+            };
+            draft.orientation = SchematicPageOrientation::Portrait;
+            draft.margins = DrawingSheetStandard::ArchD.default_margins();
+        })
+        .unwrap();
+    assert_eq!(arch.portrait_dimensions_um(), (609_600, 914_400));
+    assert!(matches!(
+        &arch.size,
+        SchematicSheetSize::Custom {
+            name,
+            portrait_width_um: 609_600,
+            portrait_height_um: 914_400,
+        } if name == "ARCH D"
+    ));
+
+    let invalid = original.try_update(|draft| {
+        draft.margins.left_um = 2_000_000;
+    });
+    assert!(matches!(
+        invalid,
+        Err(DesignManagementError::NumericRange(_))
+    ));
+    assert_eq!(original, SchematicSheetFormat::default());
+}
+
+#[test]
+fn legacy_sheet_format_receives_contextual_defaults() {
+    let legacy = serde_json::json!({
+        "size": {"kind": "standard", "size": "us-letter"},
+        "orientation": "portrait"
+    });
+    let format: SchematicSheetFormat = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        format.authored_size,
+        AuthoredDrawingSheetSize::Standard {
+            standard: DrawingSheetStandard::AnsiA
+        }
+    );
+    assert_eq!(
+        format.margins,
+        DrawingSheetStandard::AnsiA.default_margins()
+    );
+    assert_eq!(format.portrait_dimensions_um(), (215_900, 279_400));
+    format.validate().unwrap();
+}
+
+#[test]
+fn project_drawing_sheet_defaults_and_presets_are_revision_guarded() {
+    let mut catalog = DesignManagementCatalog::default();
+    let initial_revision = catalog.revision();
+    let semantic_digest = catalog.semantic_digest().unwrap();
+    let project_default = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiC,
+        SchematicPageOrientation::Landscape,
+    );
+    let default_revision = catalog
+        .update_drawing_sheet_default(initial_revision, project_default)
+        .unwrap();
+    assert_eq!(default_revision, initial_revision + 1);
+    assert_eq!(
+        catalog.semantic_digest().unwrap(),
+        semantic_digest,
+        "drawing-sheet presentation must not invalidate electrical semantics"
+    );
+    assert_eq!(
+        catalog.drawing_sheet_settings().default_format.inheritance,
+        DrawingSheetInheritance::ProjectDefault
+    );
+
+    let preset = drawing_sheet_preset(
+        "review-board",
+        "Review Board",
+        DrawingSheetPresetScope::Project,
+        SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::ArchB,
+            SchematicPageOrientation::Landscape,
+        ),
+    );
+    let preset_revision = catalog
+        .publish_drawing_sheet_preset(default_revision, preset.clone())
+        .unwrap();
+    assert_eq!(
+        catalog.drawing_sheet_settings().find_preset("REVIEW-BOARD"),
+        Some(&preset)
+    );
+    assert!(matches!(
+        catalog.publish_drawing_sheet_preset(default_revision, preset.clone()),
+        Err(DesignManagementError::RevisionConflict { .. })
+    ));
+
+    let duplicate_name = DrawingSheetPreset {
+        id: "another-id".to_owned(),
+        name: "review board".to_owned(),
+        ..preset
+    };
+    assert!(matches!(
+        catalog.publish_drawing_sheet_preset(preset_revision, duplicate_name),
+        Err(DesignManagementError::DuplicateListEntry { .. })
+    ));
+    let removed_revision = catalog
+        .remove_drawing_sheet_preset(preset_revision, "Review-Board")
+        .unwrap();
+    assert_eq!(removed_revision, preset_revision + 1);
+    assert!(
+        catalog
+            .drawing_sheet_settings()
+            .find_preset("review-board")
+            .is_none()
+    );
+
+    let mut legacy = serde_json::to_value(&catalog).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("drawing_sheet_settings");
+    let restored: DesignManagementCatalog = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        restored.drawing_sheet_settings(),
+        &DrawingSheetProjectSettings::default()
+    );
+}
+
+#[test]
+fn reviewed_publish_accepts_drawing_sheet_only_project_changes() {
+    let mut live = DesignManagementCatalog::default();
+    let expected_revision = live.revision();
+    let electrical_digest = live.semantic_digest().unwrap();
+    let preset = drawing_sheet_preset(
+        "lab-documentation-panel",
+        "Lab documentation panel",
+        DrawingSheetPresetScope::Project,
+        SchematicSheetFormat::try_custom(
+            "Lab documentation panel",
+            250_000,
+            400_000,
+            SchematicPageOrientation::Portrait,
+        )
+        .unwrap(),
+    );
+    let mut candidate = live.clone();
+    candidate
+        .publish_drawing_sheet_preset(candidate.revision(), preset.clone())
+        .unwrap();
+
+    let published_revision = live
+        .publish_reviewed_candidate(expected_revision, candidate)
+        .unwrap();
+
+    assert_eq!(published_revision, expected_revision + 1);
+    assert_eq!(
+        live.drawing_sheet_settings()
+            .find_preset("LAB-DOCUMENTATION-PANEL"),
+        Some(&preset)
+    );
+    assert_eq!(
+        live.semantic_digest().unwrap(),
+        electrical_digest,
+        "publishing drawing-sheet presentation must preserve electrical semantics"
+    );
+}
+
+#[test]
+fn drawing_sheet_preset_rename_updates_every_embedded_reference_without_geometry_changes() {
+    let mut catalog = DesignManagementCatalog::default();
+    let preset_id = "review-panel";
+    let mut format = SchematicSheetFormat::try_custom(
+        "Review panel",
+        210_000,
+        420_000,
+        SchematicPageOrientation::Landscape,
+    )
+    .unwrap();
+    format = format
+        .try_update(|draft| {
+            if let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size {
+                snapshot.preset_id = Some(preset_id.to_owned());
+            }
+        })
+        .unwrap();
+    let geometry = format.geometry().unwrap();
+    catalog
+        .publish_drawing_sheet_preset(
+            catalog.revision(),
+            DrawingSheetPreset {
+                id: preset_id.to_owned(),
+                name: "Review panel".to_owned(),
+                scope: DrawingSheetPresetScope::Project,
+                format: format.clone(),
+            },
+        )
+        .unwrap();
+
+    let mut settings = catalog.drawing_sheet_settings().clone();
+    settings.default_format = format
+        .try_update(|draft| draft.inheritance = DrawingSheetInheritance::ProjectDefault)
+        .unwrap();
+    settings.last_explicit_format = Some(format.clone());
+    catalog
+        .update_drawing_sheet_settings(catalog.revision(), settings)
+        .unwrap();
+    let sheet_id = catalog
+        .bootstrap_for_cell_view("work/top/schematic", "Main", [])
+        .unwrap();
+    let sheet_revision = catalog
+        .sheet_catalog("work/top/schematic")
+        .unwrap()
+        .find(sheet_id)
+        .unwrap()
+        .revision();
+
+    catalog
+        .rename_drawing_sheet_preset(
+            catalog.revision(),
+            preset_id,
+            "Qualification panel".to_owned(),
+        )
+        .unwrap();
+
+    let settings = catalog.drawing_sheet_settings();
+    let referenced_names = [
+        &settings.find_preset(preset_id).unwrap().format,
+        &settings.default_format,
+        settings.last_explicit_format.as_ref().unwrap(),
+        catalog
+            .sheet_catalog("work/top/schematic")
+            .unwrap()
+            .find(sheet_id)
+            .unwrap()
+            .page_format(),
+    ]
+    .map(|format| match &format.authored_size {
+        AuthoredDrawingSheetSize::Custom { snapshot } => snapshot.name.as_str(),
+        AuthoredDrawingSheetSize::Standard { .. } => panic!("expected a custom format"),
+    });
+    assert!(
+        referenced_names
+            .into_iter()
+            .all(|name| name == "Qualification panel")
+    );
+    assert_eq!(
+        settings.find_preset(preset_id).unwrap().name,
+        "Qualification panel"
+    );
+    assert_eq!(settings.default_format.geometry().unwrap(), geometry);
+    assert_eq!(
+        catalog
+            .sheet_catalog("work/top/schematic")
+            .unwrap()
+            .find(sheet_id)
+            .unwrap()
+            .revision(),
+        sheet_revision + 1
+    );
+    assert!(matches!(
+        catalog.remove_drawing_sheet_preset(catalog.revision(), preset_id),
+        Err(DesignManagementError::DrawingSheetPresetInUse { count: 3, .. })
+    ));
+}
+
+#[test]
+fn governed_sheet_bootstrap_inherits_the_project_drawing_sheet_default() {
+    let mut catalog = DesignManagementCatalog::default();
+    let project_default = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiC,
+        SchematicPageOrientation::Portrait,
+    );
+    catalog
+        .update_drawing_sheet_default(catalog.revision(), project_default)
+        .unwrap();
+
+    let sheet_id = catalog
+        .bootstrap_for_cell_view("work/top/schematic", "Main", [])
+        .unwrap();
+    let sheet = catalog
+        .sheet_catalog("work/top/schematic")
+        .and_then(|sheets| sheets.find(sheet_id))
+        .unwrap();
+
+    assert_eq!(
+        sheet.page_format(),
+        &authored_format(
+            catalog.drawing_sheet_settings().default_format.clone(),
+            "Main"
+        )
+    );
+    assert_eq!(
+        sheet.page_format().inheritance,
+        DrawingSheetInheritance::ProjectDefault
+    );
+}
+
+#[test]
+fn project_default_changes_refresh_inherited_fallbacks_without_authored_sheet_revisions() {
+    let mut catalog = DesignManagementCatalog::default();
+    let inherited_id = catalog
+        .bootstrap_for_cell_view("work/top/schematic", "Main", [])
+        .unwrap();
+    let explicit_format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiC,
+        SchematicPageOrientation::Landscape,
+    );
+    let (explicit_id, explicit_snapshot, inherited_revision, sheet_catalog_revision) = {
+        let sheets = catalog.sheet_catalog_mut("work/top/schematic").unwrap();
+        let explicit_id = sheets
+            .create_sheet_with_page_format(
+                sheet("Detail", 2),
+                Some(inherited_id),
+                explicit_format.clone(),
+            )
+            .unwrap();
+        (
+            explicit_id,
+            sheets.find(explicit_id).unwrap().page_format().clone(),
+            sheets.find(inherited_id).unwrap().revision(),
+            sheets.revision(),
+        )
+    };
+
+    let project_default = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA3,
+        SchematicPageOrientation::Portrait,
+    );
+    catalog
+        .update_drawing_sheet_default(catalog.revision(), project_default.clone())
+        .unwrap();
+
+    let sheets = catalog.sheet_catalog("work/top/schematic").unwrap();
+    let inherited = sheets.find(inherited_id).unwrap();
+    let explicit = sheets.find(explicit_id).unwrap();
+    assert_eq!(
+        inherited.page_format().authored_size,
+        project_default.authored_size
+    );
+    assert_eq!(
+        inherited.page_format().title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
+        "Main"
+    );
+    assert_eq!(inherited.revision(), inherited_revision);
+    assert_eq!(sheets.revision(), sheet_catalog_revision);
+    assert_eq!(explicit.page_format(), &explicit_snapshot);
+    assert_eq!(explicit.revision(), 1);
+}
+
+#[test]
+fn project_drawing_sheet_presets_are_bounded_and_project_owned() {
+    let presets = (0..MAX_DRAWING_SHEET_PROJECT_PRESETS)
+        .map(|index| {
+            drawing_sheet_preset(
+                format!("preset-{index}"),
+                format!("Preset {index}"),
+                DrawingSheetPresetScope::Project,
+                SchematicSheetFormat::default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let settings = DrawingSheetProjectSettings {
+        default_format: DrawingSheetProjectSettings::default().default_format,
+        presets,
+        ..DrawingSheetProjectSettings::default()
+    };
+    settings.validate().unwrap();
+
+    let mut over_limit = settings.clone();
+    over_limit.presets.push(drawing_sheet_preset(
+        "over-limit",
+        "Over limit",
+        DrawingSheetPresetScope::Project,
+        SchematicSheetFormat::default(),
+    ));
+    assert!(matches!(
+        over_limit.validate(),
+        Err(DesignManagementError::LimitExceeded {
+            domain: "drawing sheet project presets",
+            actual,
+            maximum: MAX_DRAWING_SHEET_PROJECT_PRESETS,
+        }) if actual == MAX_DRAWING_SHEET_PROJECT_PRESETS + 1
+    ));
+    assert!(
+        serde_json::from_value::<DrawingSheetProjectSettings>(
+            serde_json::to_value(&over_limit).unwrap()
+        )
+        .is_err(),
+        "standalone deserialization must enforce the resource bound"
+    );
+
+    let foreign = DrawingSheetProjectSettings {
+        default_format: DrawingSheetProjectSettings::default().default_format,
+        presets: vec![drawing_sheet_preset(
+            "user-owned",
+            "User owned",
+            DrawingSheetPresetScope::User,
+            SchematicSheetFormat::default(),
+        )],
+        ..DrawingSheetProjectSettings::default()
+    };
+    assert!(matches!(
+        foreign.validate(),
+        Err(DesignManagementError::NumericRange(
+            "project drawing sheet preset ownership"
+        ))
+    ));
+}
+
+#[test]
+fn drawing_sheet_preset_import_receipts_are_bounded_and_serde_compatible() {
+    let source = DrawingSheetPresetImportReference {
+        preset_id: "portable-review-strip".to_owned(),
+        scope: DrawingSheetPresetScope::User,
+    };
+    let target = DrawingSheetPresetImportReference {
+        preset_id: "project-review-strip".to_owned(),
+        scope: DrawingSheetPresetScope::Project,
+    };
+    let receipt = DrawingSheetPresetImportReceipt {
+        source_digest_sha256: "a".repeat(64),
+        source_schema: "rspice-sheet-formats".to_owned(),
+        source_schema_version: 1,
+        reviewed_candidate_count: 1,
+        selected_candidates: vec![source.clone()],
+        mappings: vec![DrawingSheetPresetImportMapping {
+            source: source.clone(),
+            target,
+            kind: DrawingSheetPresetImportMappingKind::CreatedProjectPreset,
+        }],
+        conflicts: Vec::new(),
+        skipped_candidates: Vec::new(),
+    };
+    receipt.validate().unwrap();
+
+    let mut settings = DrawingSheetProjectSettings::default();
+    settings.preset_import_receipts.push(receipt.clone());
+    settings.validate().unwrap();
+    let restored: DrawingSheetProjectSettings =
+        serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+    assert_eq!(restored.preset_import_receipts, vec![receipt]);
+
+    let mut legacy = serde_json::to_value(DrawingSheetProjectSettings::default()).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("preset_import_receipts");
+    let restored_legacy: DrawingSheetProjectSettings = serde_json::from_value(legacy).unwrap();
+    assert!(restored_legacy.preset_import_receipts.is_empty());
+
+    let mut over_limit = DrawingSheetProjectSettings::default();
+    over_limit.preset_import_receipts = vec![
+        DrawingSheetPresetImportReceipt {
+            source_digest_sha256: "b".repeat(64),
+            source_schema: "rspice-sheet-formats".to_owned(),
+            source_schema_version: 1,
+            reviewed_candidate_count: 0,
+            selected_candidates: Vec::new(),
+            mappings: Vec::new(),
+            conflicts: Vec::new(),
+            skipped_candidates: Vec::new(),
+        };
+        MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS + 1
+    ];
+    assert!(matches!(
+        over_limit.validate(),
+        Err(DesignManagementError::LimitExceeded {
+            domain: "drawing sheet preset import receipts",
+            actual,
+            maximum: MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS,
+        }) if actual == MAX_DRAWING_SHEET_PRESET_IMPORT_RECEIPTS + 1
+    ));
+}
+
+#[test]
+fn drawing_sheet_preset_import_receipt_requires_a_complete_outcome_partition() {
+    let source = DrawingSheetPresetImportReference {
+        preset_id: "portable-review-strip".to_owned(),
+        scope: DrawingSheetPresetScope::User,
+    };
+    let incomplete = DrawingSheetPresetImportReceipt {
+        source_digest_sha256: "c".repeat(64),
+        source_schema: "rspice-sheet-formats".to_owned(),
+        source_schema_version: 1,
+        reviewed_candidate_count: 1,
+        selected_candidates: vec![source],
+        mappings: Vec::new(),
+        conflicts: Vec::new(),
+        skipped_candidates: Vec::new(),
+    };
+    assert!(matches!(
+        incomplete.validate(),
+        Err(DesignManagementError::NumericRange(
+            "drawing sheet preset import selected-candidate outcome"
+        ))
+    ));
+}
+
+#[test]
+fn preset_storage_strips_authored_values_and_canonicalizes_custom_identity() {
+    let mut format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::AnsiB,
+        SchematicPageOrientation::Landscape,
+    );
+    format = format
+        .try_update(|draft| {
+            draft.title_block.scale = DrawingSheetScale::Ratio {
+                drawing_units: 2,
+                reality_units: 5,
+            };
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+                .unwrap()
+                .value = "Confidential power tree".to_owned();
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
+                .unwrap()
+                .value = "Engineer A".to_owned();
+        })
+        .unwrap();
+    let preset = DrawingSheetPreset {
+        id: "review-board".to_owned(),
+        name: "Review board".to_owned(),
+        scope: DrawingSheetPresetScope::Project,
+        format,
+    }
+    .normalized_for_storage()
+    .unwrap();
+
+    let AuthoredDrawingSheetSize::Custom { snapshot } = &preset.format.authored_size else {
+        panic!("preset authority must materialize a custom snapshot");
+    };
+    assert_eq!(snapshot.preset_id.as_deref(), Some("review-board"));
+    assert_eq!(snapshot.name, "Review board");
+    assert!(
+        preset
+            .format
+            .title_block
+            .fields
+            .values()
+            .all(|field| field.value.is_empty())
+    );
+    assert_eq!(
+        preset.format.title_block.scale,
+        DrawingSheetScale::Ratio {
+            drawing_units: 2,
+            reality_units: 5,
+        }
+    );
+    preset.validate().unwrap();
+}
+
+#[test]
+fn legacy_scale_mirror_and_missing_preset_references_normalize_safely() {
+    let mut legacy_format = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+    legacy_format["title_block"]["fields"]["scale"]["value"] =
+        serde_json::Value::String("stale 99:1".to_owned());
+    let restored_format: SchematicSheetFormat = serde_json::from_value(legacy_format).unwrap();
+    assert_eq!(
+        restored_format.title_block.fields[&DrawingSheetTitleFieldId::Scale].value,
+        ""
+    );
+    assert_eq!(
+        restored_format.title_block.scale,
+        DrawingSheetScale::Ratio {
+            drawing_units: 1,
+            reality_units: 1,
+        }
+    );
+
+    let missing = SchematicSheetFormat::try_custom(
+        "Missing review strip",
+        210_000,
+        594_000,
+        SchematicPageOrientation::Landscape,
+    )
+    .unwrap()
+    .try_update(|draft| {
+        draft.inheritance = DrawingSheetInheritance::ProjectDefault;
+        let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size else {
+            unreachable!();
+        };
+        snapshot.preset_id = Some("missing-review-strip".to_owned());
+        snapshot.source_preset_unavailable = false;
+    })
+    .unwrap();
+    let settings = DrawingSheetProjectSettings {
+        default_format: missing,
+        ..DrawingSheetProjectSettings::default()
+    };
+    let restored: DrawingSheetProjectSettings =
+        serde_json::from_value(serde_json::to_value(settings).unwrap()).unwrap();
+    let AuthoredDrawingSheetSize::Custom { snapshot } = &restored.default_format.authored_size
+    else {
+        panic!("missing custom reference must retain its captured geometry");
+    };
+    assert_eq!(snapshot.preset_id.as_deref(), Some("missing-review-strip"));
+    assert!(snapshot.source_preset_unavailable);
+}
+
+#[test]
+fn durable_sheet_title_rejects_blank_updates_and_migrates_legacy_records() {
+    let mut catalog = SheetCatalog::default();
+    let id = catalog.create_sheet(sheet("Control", 1), None).unwrap();
+    let revision = catalog.find(id).unwrap().revision();
+    assert!(matches!(
+        catalog.update_sheet_page_format(id, revision, SchematicSheetFormat::default()),
+        Err(DesignManagementError::InvalidText {
+            field: "authored drawing sheet title",
+            ..
+        })
+    ));
+
+    let mut legacy = serde_json::to_value(&catalog).unwrap();
+    legacy["sheets"][0]["page_format"]["title_block"]["fields"]["sheet-title"]["value"] =
+        serde_json::Value::String(String::new());
+    let restored: SheetCatalog = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        restored.find(id).unwrap().page_format().title_block.fields
+            [&DrawingSheetTitleFieldId::SheetTitle]
+            .value,
+        "Control"
+    );
+}
+
+#[test]
+fn import_conflict_resolution_must_match_its_durable_outcome() {
+    let source = DrawingSheetPresetImportReference {
+        preset_id: "managed-panel".to_owned(),
+        scope: DrawingSheetPresetScope::Organization,
+    };
+    let target = DrawingSheetPresetImportReference {
+        preset_id: "managed-panel-project".to_owned(),
+        scope: DrawingSheetPresetScope::Project,
+    };
+    let mut receipt = DrawingSheetPresetImportReceipt {
+        source_digest_sha256: "d".repeat(64),
+        source_schema: "rspice-sheet-formats".to_owned(),
+        source_schema_version: 1,
+        reviewed_candidate_count: 1,
+        selected_candidates: vec![source.clone()],
+        mappings: vec![DrawingSheetPresetImportMapping {
+            source: source.clone(),
+            target,
+            kind: DrawingSheetPresetImportMappingKind::CreatedProjectPreset,
+        }],
+        conflicts: vec![DrawingSheetPresetImportConflict {
+            source,
+            existing: None,
+            missing_managed_dependency: true,
+            resolution: DrawingSheetPresetImportResolution::ReplaceManagedDependencies,
+        }],
+        skipped_candidates: Vec::new(),
+    };
+    receipt.validate().unwrap();
+    receipt.conflicts[0].resolution = DrawingSheetPresetImportResolution::MapExisting;
+    assert!(matches!(
+        receipt.validate(),
+        Err(DesignManagementError::NumericRange(
+            "drawing sheet preset import existing conflict outcome"
+        ))
+    ));
+}
+
+#[test]
+fn project_title_block_values_have_one_canonical_authority_and_migrate_legacy_defaults() {
+    let mut settings = DrawingSheetProjectSettings::default();
+    settings.title_block_field_values.insert(
+        DrawingSheetTitleFieldId::Organization,
+        "RSpice Engineering".to_owned(),
+    );
+    settings.title_block_field_values.insert(
+        DrawingSheetTitleFieldId::DocumentId,
+        "PSAFE-SCH-001".to_owned(),
+    );
+    settings.title_block_field_values.insert(
+        DrawingSheetTitleFieldId::Classification,
+        "Internal".to_owned(),
+    );
+    settings.validate().unwrap();
+    let round_trip: DrawingSheetProjectSettings =
+        serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+    assert_eq!(round_trip, settings);
+
+    let mut invalid = settings.clone();
+    invalid
+        .title_block_field_values
+        .insert(DrawingSheetTitleFieldId::Scale, "2:1".to_owned());
+    assert!(matches!(
+        invalid.validate(),
+        Err(DesignManagementError::NumericRange(
+            "project drawing sheet title field set"
+        ))
+    ));
+
+    let mut legacy = serde_json::to_value(DrawingSheetProjectSettings::default()).unwrap();
+    let legacy_object = legacy.as_object_mut().unwrap();
+    legacy_object.remove("title_block_field_values");
+    legacy_object["default_format"]["title_block"]["fields"]["organization"]["value"] =
+        serde_json::Value::String("Legacy organization".to_owned());
+    let migrated: DrawingSheetProjectSettings = serde_json::from_value(legacy).unwrap();
+    assert_eq!(
+        migrated
+            .title_block_field_values
+            .get(&DrawingSheetTitleFieldId::Organization)
+            .map(String::as_str),
+        Some("Legacy organization")
+    );
+    assert_eq!(
+        migrated.default_format.title_block.fields[&DrawingSheetTitleFieldId::Organization].value,
+        ""
+    );
+}
+
 fn substitution(cell: &str, qualification: VariantQualificationState) -> ComponentSubstitution {
     ComponentSubstitution {
         library: "project".to_owned(),
@@ -955,5 +2097,104 @@ fn cell_copy_regenerates_sheet_port_identity_and_clones_sheet_annotation_policy(
             .effective_mapping_for("work/amp_copy/schematic", 1)
             .unwrap()
             .is_none()
+    );
+}
+
+#[test]
+fn drawing_sheet_transactions_retain_complete_revisioned_project_receipts() {
+    let mut catalog = DesignManagementCatalog::default();
+    let sheet_id = catalog
+        .bootstrap_for_cell_view("work/top/schematic", "Main", [])
+        .unwrap();
+    let format = catalog
+        .sheet_catalog("work/top/schematic")
+        .unwrap()
+        .find(sheet_id)
+        .unwrap()
+        .page_format()
+        .clone();
+    let committed_revision = catalog.revision() + 1;
+    let receipt = DrawingSheetTransactionReceipt {
+        catalog_revision: committed_revision,
+        kind: DrawingSheetTransactionKind::PageSetup,
+        owner_cell_view_key: "work/top/schematic".to_owned(),
+        source_format_digest: format.content_digest().unwrap(),
+        selected_sheet_ids: vec![sheet_id],
+        applied_sheet_ids: vec![sheet_id],
+        unchanged_sheet_ids: Vec::new(),
+        skipped: Vec::new(),
+        project_default_changed: false,
+        project_preset_saved: false,
+        project_settings_changed: false,
+    };
+    assert_eq!(
+        catalog
+            .record_drawing_sheet_transaction(catalog.revision(), receipt.clone())
+            .unwrap(),
+        committed_revision
+    );
+    assert_eq!(
+        catalog
+            .drawing_sheet_settings()
+            .transaction_receipts
+            .as_slice(),
+        &[receipt]
+    );
+
+    let restored: DesignManagementCatalog =
+        serde_json::from_value(serde_json::to_value(&catalog).unwrap()).unwrap();
+    assert_eq!(
+        restored.drawing_sheet_settings().transaction_receipts.len(),
+        1
+    );
+
+    let mut incomplete = restored
+        .drawing_sheet_settings()
+        .transaction_receipts
+        .first()
+        .unwrap()
+        .clone();
+    incomplete.applied_sheet_ids.clear();
+    assert!(matches!(
+        incomplete.validate(),
+        Err(DesignManagementError::NumericRange(
+            "drawing sheet transaction disposition coverage"
+        ))
+    ));
+}
+
+#[test]
+fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
+    let upright = SchematicSheetFormat::default();
+    let upright_geometry = upright.geometry().unwrap();
+    let upright_capacity =
+        drawing_sheet_title_cell_capacity(&upright, &upright_geometry, 14).unwrap();
+    let rotated = upright
+        .try_update(|draft| {
+            draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
+        })
+        .unwrap();
+    let rotated_geometry = rotated.geometry().unwrap();
+
+    assert_eq!(
+        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::Compact),
+        Some(3)
+    );
+    assert_eq!(
+        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::Standard),
+        Some(4)
+    );
+    assert_eq!(
+        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::OrganizationManaged),
+        Some(5)
+    );
+    assert_eq!(
+        drawing_sheet_title_block_rows(DrawingSheetTitleBlockTemplate::None),
+        None
+    );
+    assert_eq!(
+        drawing_sheet_title_cell_capacity(&rotated, &rotated_geometry, 14),
+        Some(upright_capacity),
+        "rotating the complete block must not change a field's authored text budget"
     );
 }

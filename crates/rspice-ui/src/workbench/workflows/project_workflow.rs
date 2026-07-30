@@ -13,7 +13,9 @@ use crate::io::ProjectIoError;
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
-use crate::workbench::lifecycle::project_lifecycle::{PersistenceBinding, ProjectLifecycleError, SaveScope};
+use crate::workbench::lifecycle::project_lifecycle::{
+    PersistenceBinding, ProjectLifecycleError, SaveScope,
+};
 use crate::workbench::state::ProjectCloseDestination;
 
 #[derive(Debug, Clone, Copy)]
@@ -69,6 +71,7 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     let mut library_manager = crate::state::LibraryManager::with_primitives();
     let mut workspace =
         crate::state::ProjectWorkspace::new_empty_bootstrapped(&mut library_manager);
+    seed_new_project_drawing_sheet_default(state, &mut workspace);
     let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
 
@@ -77,12 +80,45 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.schematic = schematic;
     state.bump_active_schematic_epoch();
     state.clear_design_execution_context();
-    state.sim_setup =
-        crate::workbench::app_state::SimSetupState::new_with_user_preferences(&state.ui.preferences);
+    state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
+        &state.ui.preferences,
+    );
     state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);
     state.push_user_message(ConsoleMessage::info("Created new project"));
+}
+
+fn seed_new_project_drawing_sheet_default(
+    state: &AppState,
+    workspace: &mut crate::state::ProjectWorkspace,
+) {
+    let personal = state.ui.preferences.drawing_sheet_personal_preferences();
+    let project_default = personal
+        .default_format
+        .try_update(|draft| {
+            draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
+            if let crate::state::AuthoredDrawingSheetSize::Custom { snapshot } =
+                &mut draft.authored_size
+            {
+                // A project default is self-contained. Personal preset
+                // identity is captured only when a sheet explicitly uses that
+                // preset; the project's starting format retains exact
+                // dimensions without depending on device-local authority.
+                snapshot.preset_id = None;
+                snapshot.source_preset_unavailable = false;
+            }
+        })
+        .expect("validated personal drawing-sheet defaults can seed a project")
+        .as_drawing_sheet_default();
+    let mut settings = workspace.design_management.drawing_sheet_settings().clone();
+    settings.default_format = project_default;
+    if settings != *workspace.design_management.drawing_sheet_settings() {
+        workspace
+            .design_management
+            .update_drawing_sheet_settings(workspace.design_management.revision(), settings)
+            .expect("a new project accepts its validated personal drawing-sheet default");
+    }
 }
 
 #[cfg(all(not(target_arch = "wasm32"), test))]
@@ -152,7 +188,8 @@ pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestO
 
 #[cfg(not(target_arch = "wasm32"))]
 fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
-    if let Some(path) = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state) {
+    if let Some(path) = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
+    {
         return save_native_scope(state, scope, &path, DestinationAuthority::Canonical)
             .map_or_else(SaveRequestOutcome::Failed, |()| {
                 SaveRequestOutcome::CanonicalComplete
@@ -182,12 +219,15 @@ fn save_native_scope(
     path: &Path,
     authority: DestinationAuthority,
 ) -> Result<(), String> {
-    match crate::workbench::lifecycle::project_lifecycle::save_native(state, scope, path, authority) {
+    match crate::workbench::lifecycle::project_lifecycle::save_native(state, scope, path, authority)
+    {
         Ok(()) => {
-            let canonical = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
-                .unwrap_or_else(|| path.to_path_buf());
+            let canonical =
+                crate::workbench::lifecycle::project_lifecycle::canonical_native_path(state)
+                    .unwrap_or_else(|| path.to_path_buf());
             state.browser_project_save_name = None;
-            state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, &canonical);
+            state
+                .remember_recent_file(crate::workbench::app_state::RecentKind::Project, &canonical);
             state.push_user_message(ConsoleMessage::info(format!(
                 "Saved project: {}",
                 canonical.display()
@@ -346,7 +386,10 @@ fn start_browser_project_save(
         }
         Err(error) => {
             let message = error.clone();
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                state,
+                transaction,
+            );
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project save failed: {error}"
             )));
@@ -368,13 +411,21 @@ pub(crate) enum SaveContinuationEvent {
     SavedWithNewerChanges(crate::workbench::lifecycle::project_lifecycle::TransactionId),
     Cancelled(crate::workbench::lifecycle::project_lifecycle::TransactionId),
     Conflict(crate::workbench::lifecycle::project_lifecycle::TransactionId),
-    Failed(crate::workbench::lifecycle::project_lifecycle::TransactionId, String),
-    PublishedButNotAdopted(crate::workbench::lifecycle::project_lifecycle::TransactionId, String),
+    Failed(
+        crate::workbench::lifecycle::project_lifecycle::TransactionId,
+        String,
+    ),
+    PublishedButNotAdopted(
+        crate::workbench::lifecycle::project_lifecycle::TransactionId,
+        String,
+    ),
 }
 
 #[cfg(target_arch = "wasm32")]
 impl SaveContinuationEvent {
-    pub(crate) fn transaction(&self) -> crate::workbench::lifecycle::project_lifecycle::TransactionId {
+    pub(crate) fn transaction(
+        &self,
+    ) -> crate::workbench::lifecycle::project_lifecycle::TransactionId {
         match self {
             Self::Saved(transaction)
             | Self::SavedWithNewerChanges(transaction)
@@ -578,7 +629,10 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             }
         },
         crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Cancelled => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                state,
+                transaction,
+            );
             if !project_copy {
                 continuation = Some(SaveContinuationEvent::Cancelled(transaction));
             }
@@ -591,7 +645,10 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 &completion.prepared,
                 observed_digest,
             );
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                state,
+                transaction,
+            );
             state.push_user_message(ConsoleMessage::error(
                 "Browser project changed outside RSpice; reopen it or save an independent project copy",
             ));
@@ -600,7 +657,10 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
             }
         }
         crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Failed(error) => {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                state,
+                transaction,
+            );
             state.push_user_message(ConsoleMessage::error(format!(
                 "Browser project save failed: {error}"
             )));
@@ -636,7 +696,9 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     match crate::io::show_save_project_dialog(Some(default_name.as_str())) {
         Ok(path) => {
-            match crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(state, &path) {
+            match crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(
+                state, &path,
+            ) {
                 Ok(()) => {
                     state.push_user_message(ConsoleMessage::info(format!(
                     "Saved independent project copy: {} (the active project remains bound to its original location)",
@@ -718,7 +780,9 @@ pub(crate) fn confirm_revert_active_document(
     state: &mut AppState,
     token: &crate::workbench::lifecycle::project_lifecycle::RevertReviewToken,
 ) -> bool {
-    match crate::workbench::lifecycle::project_lifecycle::confirm_revert_active_document(state, token) {
+    match crate::workbench::lifecycle::project_lifecycle::confirm_revert_active_document(
+        state, token,
+    ) {
         Ok(()) => {
             state.push_user_message(ConsoleMessage::info("Reverted active document"));
             true
@@ -788,8 +852,9 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.workspace = workspace;
     state.schematic = schematic;
     state.bump_active_schematic_epoch();
-    state.sim_setup =
-        crate::workbench::app_state::SimSetupState::new_with_user_preferences(&state.ui.preferences);
+    state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
+        &state.ui.preferences,
+    );
     state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
@@ -808,13 +873,14 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool {
-    let transaction = match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-        Ok(transaction) => transaction,
-        Err(error) => {
-            lifecycle_error(state, error, "Project open blocked");
-            return false;
-        }
-    };
+    let transaction =
+        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                lifecycle_error(state, error, "Project open blocked");
+                return false;
+            }
+        };
     match crate::workbench::lifecycle::project_lifecycle::read_native_binding(path) {
         Ok((project, binding)) => {
             let canonical_path = match &binding {
@@ -845,13 +911,14 @@ pub(crate) fn apply_loaded_project(
     project: ProjectFile,
     origin: ProjectLoadOrigin<'_>,
 ) -> bool {
-    let transaction = match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-        Ok(transaction) => transaction,
-        Err(error) => {
-            lifecycle_error(state, error, "Project open blocked");
-            return false;
-        }
-    };
+    let transaction =
+        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                lifecycle_error(state, error, "Project open blocked");
+                return false;
+            }
+        };
     apply_loaded_project_authorized(state, project, origin, None, transaction)
 }
 
@@ -862,9 +929,10 @@ fn apply_loaded_project_authorized(
     binding: Option<PersistenceBinding>,
     transaction: crate::workbench::lifecycle::project_lifecycle::TransactionId,
 ) -> bool {
-    if let Err(error) =
-        crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(state, transaction)
-    {
+    if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
+        state,
+        transaction,
+    ) {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
         #[cfg(not(target_arch = "wasm32"))]
@@ -946,7 +1014,11 @@ fn apply_loaded_project_authorized(
     for warning in execution_warnings {
         state.push_user_message(ConsoleMessage::warning(warning));
     }
-    crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(state, accepted_baseline, binding);
+    crate::workbench::lifecycle::project_lifecycle::accept_loaded_project(
+        state,
+        accepted_baseline,
+        binding,
+    );
     true
 }
 
@@ -967,13 +1039,14 @@ pub(crate) fn open_project(state: &mut AppState) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn open_project(state: &mut AppState) -> bool {
-    let transaction = match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
-        Ok(transaction) => transaction,
-        Err(error) => {
-            lifecycle_error(state, error, "Project open blocked");
-            return false;
-        }
-    };
+    let transaction =
+        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                lifecycle_error(state, error, "Project open blocked");
+                return false;
+            }
+        };
     let context = crate::workbench::lifecycle::project_lifecycle::browser_operation_context(state);
     match start_browser_project_import(transaction, context) {
         Ok(()) => {
@@ -1040,21 +1113,22 @@ fn start_browser_project_import(
 
     if crate::workbench::lifecycle::project_lifecycle::browser_open_file_picker_supported() {
         let canonical_context = context.clone();
-        let started = crate::workbench::lifecycle::project_lifecycle::start_browser_open(move |result| {
-            BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| {
-                queue
-                    .borrow_mut()
-                    .push_back(BrowserProjectImportResult::Transaction(
-                        BrowserProjectImportCompletion {
-                            transaction,
-                            context: canonical_context,
-                            import_token,
-                            payload: BrowserProjectImportPayload::Canonical(result),
-                        },
-                    ));
+        let started =
+            crate::workbench::lifecycle::project_lifecycle::start_browser_open(move |result| {
+                BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| {
+                    queue
+                        .borrow_mut()
+                        .push_back(BrowserProjectImportResult::Transaction(
+                            BrowserProjectImportCompletion {
+                                transaction,
+                                context: canonical_context,
+                                import_token,
+                                payload: BrowserProjectImportPayload::Canonical(result),
+                            },
+                        ));
+                });
+                crate::workbench::browser::file_import::request_browser_import_repaint();
             });
-            crate::workbench::browser::file_import::request_browser_import_repaint();
-        });
         match started {
             Ok(()) => return Ok(()),
             Err(error) => {
@@ -1131,21 +1205,32 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                     },
                 ) = &completion.payload
                 {
-                    crate::workbench::lifecycle::project_lifecycle::release_browser_handle(*handle_id);
+                    crate::workbench::lifecycle::project_lifecycle::release_browser_handle(
+                        *handle_id,
+                    );
                 }
                 finish_browser_project_import(completion.import_token);
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                    state,
+                    transaction,
+                );
                 return false;
             }
             match completion.payload {
                 BrowserProjectImportPayload::Cancelled => {
                     finish_browser_project_import(completion.import_token);
-                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                        state,
+                        transaction,
+                    );
                     false
                 }
                 BrowserProjectImportPayload::Failed(error) => {
                     finish_browser_project_import(completion.import_token);
-                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                        state,
+                        transaction,
+                    );
                     state.push_user_message(ConsoleMessage::error(format!(
                         "Project open failed: {error}"
                     )));
@@ -1202,15 +1287,23 @@ fn finish_browser_canonical_open(
     else {
         match result {
             crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Cancelled => {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                    state,
+                    transaction,
+                );
             }
             crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Failed(error) => {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                    state,
+                    transaction,
+                );
                 state.push_user_message(ConsoleMessage::error(format!(
                     "Project open failed: {error}"
                 )));
             }
-            crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened { .. } => unreachable!(),
+            crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened {
+                ..
+            } => unreachable!(),
         }
         return false;
     };
@@ -1218,7 +1311,10 @@ fn finish_browser_canonical_open(
         Ok(text) => text,
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                state,
+                transaction,
+            );
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project open failed: selected project is not valid UTF-8: {error}"
             )));
@@ -1229,7 +1325,10 @@ fn finish_browser_canonical_open(
         Ok(project) => project,
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(state, transaction);
+            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                state,
+                transaction,
+            );
             state.push_user_message(ConsoleMessage::error(format!(
                 "Project open failed: {error}"
             )));
@@ -1239,7 +1338,8 @@ fn finish_browser_canonical_open(
     let binding = PersistenceBinding::Browser {
         handle_id,
         binding_id: uuid::Uuid::new_v4(),
-        backend: crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
+        backend:
+            crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
         project_id: project.workspace.project.id().to_string(),
         accepted_generation: 1,
         display_name: display_name.clone(),
@@ -1262,7 +1362,8 @@ fn finish_browser_canonical_open(
     // promoted. Promotion is separately context/CAS guarded, so IndexedDB can
     // never authorize an open that failed to apply or a project that has since
     // been replaced.
-    let context = crate::workbench::lifecycle::project_lifecycle::begin_browser_binding_promotion(state);
+    let context =
+        crate::workbench::lifecycle::project_lifecycle::begin_browser_binding_promotion(state);
     crate::workbench::lifecycle::project_lifecycle::start_browser_binding_persist(
         binding_for_persist,
         move |result| {
@@ -1655,6 +1756,132 @@ mod tests {
         assert!(state.sim_setup.options.arc_length);
         assert_eq!(state.sim_setup.options.method, IntegrationMethod::Gear2Only);
         assert_eq!(state.sim_setup.options.temp, 27.0);
+    }
+
+    #[test]
+    fn create_new_project_captures_the_personal_drawing_sheet_default() {
+        use crate::state::{
+            DrawingSheetInheritance, DrawingSheetStandard, SchematicPageOrientation,
+            SchematicSheetFormat,
+        };
+
+        let mut state = AppState::default();
+        let mut personal = state.ui.preferences.drawing_sheet_personal_preferences();
+        personal.default_format = SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::AnsiC,
+            SchematicPageOrientation::Portrait,
+        )
+        .try_update(|draft| {
+            draft.inheritance = DrawingSheetInheritance::UserDefault;
+        })
+        .expect("the personal default is valid");
+        state
+            .ui
+            .preferences
+            .set_drawing_sheet_personal_preferences(personal)
+            .expect("the personal default persists");
+
+        create_new_project(&mut state);
+
+        let project_default = state
+            .workspace
+            .design_management
+            .drawing_sheet_settings()
+            .default_format
+            .clone();
+        assert!(
+            matches!(
+                &project_default.authored_size,
+                crate::state::AuthoredDrawingSheetSize::Standard {
+                    standard: DrawingSheetStandard::AnsiC
+                }
+            ),
+            "the personal physical format becomes the new project's default"
+        );
+        assert_eq!(
+            project_default.orientation,
+            SchematicPageOrientation::Portrait
+        );
+        assert_eq!(
+            project_default.inheritance,
+            DrawingSheetInheritance::ProjectDefault
+        );
+        assert!(
+            crate::workbench::app::dialogs::drawing_sheet_setup::open_drawing_sheet_setup_for_state(
+                &mut state
+            )
+        );
+        let page_setup_format = state
+            .dialogs
+            .drawing_sheet_setup
+            .draft
+            .validate()
+            .expect("the initial Page Setup draft is valid")
+            .page_format;
+        assert_eq!(
+            page_setup_format.as_drawing_sheet_default(),
+            project_default,
+            "the initial Page Setup draft resolves the project default without storing a concrete sheet title in the reusable template"
+        );
+        assert_eq!(
+            page_setup_format.title_block.fields
+                [&crate::state::DrawingSheetTitleFieldId::SheetTitle]
+                .value,
+            "Sheet 1",
+            "the governed sheet keeps its own title while inheriting the project format"
+        );
+    }
+
+    #[test]
+    fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
+        use crate::state::{
+            AuthoredDrawingSheetSize, DrawingSheetInheritance, SchematicPageOrientation,
+            SchematicSheetFormat,
+        };
+
+        let mut state = AppState::default();
+        let mut personal = state.ui.preferences.drawing_sheet_personal_preferences();
+        personal.default_format = SchematicSheetFormat::try_custom(
+            "Personal lab panel",
+            250_001,
+            400_003,
+            SchematicPageOrientation::Portrait,
+        )
+        .unwrap()
+        .try_update(|draft| {
+            draft.inheritance = DrawingSheetInheritance::UserDefault;
+            let AuthoredDrawingSheetSize::Custom { snapshot } = &mut draft.authored_size else {
+                unreachable!("the test starts with a custom size");
+            };
+            snapshot.preset_id = Some("personal-lab-panel".to_owned());
+        })
+        .unwrap();
+        state
+            .ui
+            .preferences
+            .set_drawing_sheet_personal_preferences(personal.clone())
+            .unwrap();
+
+        create_new_project(&mut state);
+
+        let project_settings = state.workspace.design_management.drawing_sheet_settings();
+        assert_eq!(
+            project_settings.default_format.portrait_dimensions_um(),
+            (250_001, 400_003)
+        );
+        let AuthoredDrawingSheetSize::Custom { snapshot } =
+            &project_settings.default_format.authored_size
+        else {
+            panic!("the exact custom physical format must be retained");
+        };
+        assert!(snapshot.preset_id.is_none());
+        assert!(!snapshot.source_preset_unavailable);
+        assert!(project_settings.presets.is_empty());
+        assert_eq!(
+            state.ui.preferences.drawing_sheet_personal_preferences(),
+            personal,
+            "seeding a project must not mutate personal preferences"
+        );
     }
 
     #[test]
