@@ -95,7 +95,7 @@ pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
 const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
 const PLOT_INSET_UM: i64 = 12_700;
@@ -110,6 +110,9 @@ pub struct SchematicHardcopySource<'a> {
     /// retained catalog sheet and only objects owned by that sheet resolve.
     pub sheet_catalog: Option<&'a SheetCatalog>,
     pub sheet_id: Option<SheetId>,
+    /// Current project default used by the canvas for ungoverned documents
+    /// and for governed sheets that follow the project default.
+    pub project_default_drawing_sheet: Option<&'a SchematicSheetFormat>,
     /// Canonical project-owned values used by every sheet title block.
     pub project_title_block_field_values:
         Option<&'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>>,
@@ -122,6 +125,7 @@ pub struct SchematicSheetSetHardcopySource<'a> {
     pub expected_topology_version: u64,
     pub symbol_resolver: Option<&'a SymbolResolver<'a>>,
     pub sheet_catalog: &'a SheetCatalog,
+    pub project_default_drawing_sheet: &'a SchematicSheetFormat,
     pub project_title_block_field_values:
         &'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
 }
@@ -685,6 +689,12 @@ fn prepare_schematic_resolution(
             schematic_buffers: state.workspace.schematic_buffers.clone(),
             sheet_catalog,
             sheet_id,
+            project_default_drawing_sheet: state
+                .workspace
+                .design_management
+                .drawing_sheet_settings()
+                .default_format
+                .clone(),
             project_title_block_field_values: state
                 .workspace
                 .design_management
@@ -1142,6 +1152,13 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                         symbol_resolver: Some(&resolver),
                         sheet_catalog: None,
                         sheet_id: None,
+                        project_default_drawing_sheet: Some(
+                            &state
+                                .workspace
+                                .design_management
+                                .drawing_sheet_settings()
+                                .default_format,
+                        ),
                         project_title_block_field_values: Some(
                             &state
                                 .workspace
@@ -1800,20 +1817,6 @@ pub(crate) fn resolve_retained_hardcopy_source(
             let resolver =
                 SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
             let identity = schematic_sheet_identity(&base_identity, sheet)?;
-            if !schematic_has_objects_on_sheet(&state.schematic, catalog, sheet.id()) {
-                return resolve_blank_schematic_sheet_with_format_and_project_values(
-                    identity,
-                    scope,
-                    Some(sheet.page_format()),
-                    Some(
-                        &state
-                            .workspace
-                            .design_management
-                            .drawing_sheet_settings()
-                            .title_block_field_values,
-                    ),
-                );
-            }
             return resolve_schematic_source(SchematicHardcopySource {
                 identity,
                 schematic: &state.schematic,
@@ -1821,6 +1824,13 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 symbol_resolver: Some(&resolver),
                 sheet_catalog: Some(catalog),
                 sheet_id: Some(sheet.id()),
+                project_default_drawing_sheet: Some(
+                    &state
+                        .workspace
+                        .design_management
+                        .drawing_sheet_settings()
+                        .default_format,
+                ),
                 project_title_block_field_values: Some(
                     &state
                         .workspace
@@ -1855,6 +1865,11 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         expected_topology_version: state.schematic.topology_version(),
                         symbol_resolver: Some(&resolver),
                         sheet_catalog,
+                        project_default_drawing_sheet: &state
+                            .workspace
+                            .design_management
+                            .drawing_sheet_settings()
+                            .default_format,
                         project_title_block_field_values: &state
                             .workspace
                             .design_management
@@ -1874,20 +1889,6 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         ))
                     })?;
                     let sheet_identity = schematic_sheet_identity(&identity, sheet)?;
-                    if !schematic_has_objects_on_sheet(&state.schematic, catalog, sheet_id) {
-                        return resolve_blank_schematic_sheet_with_format_and_project_values(
-                            sheet_identity,
-                            scope,
-                            Some(sheet.page_format()),
-                            Some(
-                                &state
-                                    .workspace
-                                    .design_management
-                                    .drawing_sheet_settings()
-                                    .title_block_field_values,
-                            ),
-                        );
-                    }
                     sheet_identity
                 } else {
                     identity
@@ -1899,6 +1900,17 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     symbol_resolver: Some(&resolver),
                     sheet_catalog,
                     sheet_id,
+                    project_default_drawing_sheet: matches!(
+                        scope,
+                        HardcopyScope::CurrentSheet | HardcopyScope::ActiveDocument
+                    )
+                    .then_some(
+                        &state
+                            .workspace
+                            .design_management
+                            .drawing_sheet_settings()
+                            .default_format,
+                    ),
                     project_title_block_field_values: Some(
                         &state
                             .workspace

@@ -118,6 +118,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_default_drawing_sheet: None,
         project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
@@ -135,6 +136,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_default_drawing_sheet: None,
         project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
@@ -155,6 +157,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_default_drawing_sheet: None,
         project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
@@ -201,6 +204,29 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         .unwrap();
 
     let mut project_settings = crate::state::DrawingSheetProjectSettings::default();
+    project_settings.default_format = crate::state::SchematicSheetFormat::from_standard(
+        crate::state::DrawingSheetStandard::IsoA3,
+        crate::state::SchematicPageOrientation::Landscape,
+    )
+    .try_update(|draft| {
+        draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
+    })
+    .unwrap();
+    let inherited_format = catalog
+        .find(second_id)
+        .unwrap()
+        .page_format()
+        .try_update(|draft| {
+            draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
+        })
+        .unwrap();
+    catalog
+        .update_sheet_page_format(
+            second_id,
+            catalog.find(second_id).unwrap().revision(),
+            inherited_format,
+        )
+        .unwrap();
     project_settings.title_block_field_values.insert(
         DrawingSheetTitleFieldId::Organization,
         "RSpice Engineering".to_owned(),
@@ -214,6 +240,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         symbol_resolver: None,
         sheet_catalog: Some(&catalog),
         sheet_id: Some(second_id),
+        project_default_drawing_sheet: Some(&project_settings.default_format),
         project_title_block_field_values: Some(&project_settings.title_block_field_values),
         scope: HardcopyScope::CurrentSheet,
     })
@@ -229,9 +256,12 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
             .collect::<Vec<_>>(),
         [22]
     );
+    let expected_inherited_format = project_settings
+        .default_format
+        .with_target_sheet_title_fields(catalog.find(second_id).unwrap().page_format());
     assert_eq!(
         second_semantic.drawing_sheet.as_ref(),
-        Some(catalog.find(second_id).unwrap().page_format())
+        Some(&expected_inherited_format)
     );
     assert_eq!(
         second_semantic
@@ -247,6 +277,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         expected_topology_version: schematic.topology_version(),
         symbol_resolver: None,
         sheet_catalog: &catalog,
+        project_default_drawing_sheet: &project_settings.default_format,
         project_title_block_field_values: &project_settings.title_block_field_values,
     })
     .unwrap();
@@ -412,6 +443,7 @@ fn schematic_selection_exports_only_selected_durable_objects() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_default_drawing_sheet: None,
         project_title_block_field_values: None,
         scope: HardcopyScope::Selection,
     })
@@ -462,6 +494,7 @@ fn authored_cell_symbol_is_frozen_into_the_semantic_source() {
         symbol_resolver: Some(&resolver),
         sheet_catalog: None,
         sheet_id: None,
+        project_default_drawing_sheet: None,
         project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
@@ -489,6 +522,7 @@ fn stale_schematic_authority_is_rejected_before_digesting() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_default_drawing_sheet: None,
         project_title_block_field_values: None,
         scope: HardcopyScope::CurrentSheet,
     })
@@ -522,6 +556,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
         symbol_resolver: None,
         sheet_catalog: None,
         sheet_id: None,
+        project_default_drawing_sheet: None,
         project_title_block_field_values: None,
         scope: HardcopyScope::Selection,
     })
@@ -1483,10 +1518,91 @@ fn global_app_resolver_uses_exact_active_design_registry_identity() {
         state.workspace.project.revision()
     );
     assert!(first.source_key().contains(&reference.key()));
-    assert!(matches!(
-        first.semantic_document(),
-        HardcopySemanticDocument::Schematic(_)
-    ));
+    let HardcopySemanticDocument::Schematic(schematic) = first.semantic_document() else {
+        panic!("expected schematic")
+    };
+    assert_eq!(
+        schematic.drawing_sheet.as_ref(),
+        Some(
+            &state
+                .workspace
+                .design_management
+                .drawing_sheet_settings()
+                .default_format
+        )
+    );
+}
+
+#[test]
+fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
+    let mut state = AppState::default();
+    let reference = state.workspace.active_view.clone();
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+    let mut settings = state
+        .workspace
+        .design_management
+        .drawing_sheet_settings()
+        .clone();
+    settings.default_format = settings
+        .default_format
+        .try_update(|draft| {
+            draft.authored_size = crate::state::AuthoredDrawingSheetSize::Standard {
+                standard: crate::state::DrawingSheetStandard::IsoA3,
+            };
+            draft.orientation = crate::state::SchematicPageOrientation::Landscape;
+        })
+        .unwrap();
+    settings.title_block_field_values.insert(
+        DrawingSheetTitleFieldId::Organization,
+        "RSpice Engineering".to_owned(),
+    );
+    state
+        .workspace
+        .design_management
+        .update_drawing_sheet_settings(state.workspace.design_management.revision(), settings)
+        .unwrap();
+    assert!(
+        state
+            .workspace
+            .design_management
+            .sheet_catalog(&state.workspace.active_key())
+            .is_none()
+    );
+    let expected_format = state
+        .workspace
+        .design_management
+        .drawing_sheet_settings()
+        .default_format
+        .clone();
+    let source_key = format!(
+        "project:{}:cell-view:{}",
+        state.workspace.project.id().as_uuid(),
+        state.workspace.active_key()
+    );
+
+    let synchronous =
+        resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::CurrentSheet).unwrap();
+    let HardcopySemanticDocument::Schematic(schematic) = synchronous.semantic_document() else {
+        panic!("expected schematic")
+    };
+    assert_eq!(schematic.drawing_sheet.as_ref(), Some(&expected_format));
+    assert_eq!(
+        schematic
+            .drawing_sheet_title_values
+            .get(&DrawingSheetTitleFieldId::Organization)
+            .map(String::as_str),
+        Some("RSpice Engineering")
+    );
+
+    let prepared =
+        prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::CurrentSheet)
+            .unwrap();
+    let bytes = prepared.to_worker_snapshot_json().unwrap();
+    let restored = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes).unwrap();
+    assert_eq!(restored.resolve_owned().unwrap(), synchronous);
 }
 
 #[test]

@@ -115,6 +115,7 @@ impl SchematicState {
 
         if let Some((snapshot, _desc)) = self.undo_history.undo(current) {
             snapshot.apply(self);
+            self.reconcile_grid_pitch_runtime();
             self.recalculate_runtime_state();
             return true;
         }
@@ -135,6 +136,7 @@ impl SchematicState {
 
         if let Some((snapshot, _desc)) = self.undo_history.redo(current) {
             snapshot.apply(self);
+            self.reconcile_grid_pitch_runtime();
             self.recalculate_runtime_state();
             return true;
         }
@@ -178,5 +180,38 @@ impl SchematicState {
     /// Check if an operation is currently pending
     pub fn has_pending_operation(&self) -> bool {
         self.undo_history.has_pending_operation()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::SchematicGridPitch;
+
+    fn assert_grid_pitch_contract(state: &SchematicState, pitch: SchematicGridPitch) {
+        let expected = pitch.canvas_grid_size();
+        assert_eq!(state.document_policy.grid_pitch, pitch);
+        assert_eq!(state.grid_size, expected);
+        assert_eq!(state.snap_engine.grid_size, expected);
+    }
+
+    #[test]
+    fn grid_pitch_undo_and_redo_reconcile_every_schematic_runtime_owner() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil50);
+
+        assert!(state.with_undo("change schematic grid pitch", |schematic| {
+            schematic.document_policy.grid_pitch = SchematicGridPitch::Mil25;
+            schematic.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+        }));
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);
+
+        assert!(state.undo());
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil50);
+
+        assert!(state.redo());
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);
     }
 }

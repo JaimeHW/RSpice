@@ -200,6 +200,7 @@ pub(crate) struct SelectionWorkflowDialogState {
     duplicate_anchor: Point,
     transaction_selection: Selection,
     source_object_count: usize,
+    promoted_wire_count: usize,
     cut_open_net_count: usize,
     pub(crate) error: Option<String>,
 }
@@ -216,6 +217,7 @@ impl Default for SelectionWorkflowDialogState {
             duplicate_anchor: Point::origin(),
             transaction_selection: Selection::default(),
             source_object_count: 0,
+            promoted_wire_count: 0,
             cut_open_net_count: 0,
             error: None,
         }
@@ -230,6 +232,7 @@ impl SelectionWorkflowDialogState {
         duplicate_anchor: Point,
         transaction_selection: Selection,
         source_object_count: usize,
+        promoted_wire_count: usize,
         cut_open_net_count: usize,
     ) {
         *self = Self {
@@ -242,6 +245,7 @@ impl SelectionWorkflowDialogState {
             duplicate_anchor,
             transaction_selection,
             source_object_count,
+            promoted_wire_count,
             cut_open_net_count,
             error: None,
         };
@@ -374,13 +378,18 @@ fn open_selection_workflow(
         return false;
     }
 
-    let transaction_selection = if kind == SelectionWorkflowKind::SelectAll {
+    let mut transaction_selection = if kind == SelectionWorkflowKind::SelectAll {
         state.schematic.selection.clone()
     } else {
         crate::schematic::view::sheet_visibility::selection_filtered_to_active_sheet(
             state,
             &state.schematic.selection,
         )
+    };
+    let promoted_wire_count = if kind == SelectionWorkflowKind::Delete {
+        promote_wire_handles_to_complete_wires(&state.schematic, &mut transaction_selection)
+    } else {
+        0
     };
 
     let captured_selection = (kind != SelectionWorkflowKind::SelectAll)
@@ -417,9 +426,52 @@ fn open_selection_workflow(
         duplicate_anchor,
         transaction_selection,
         source_object_count,
+        promoted_wire_count,
         cut_open_net_count,
     );
     true
+}
+
+/// Promote fine-grained wire edit handles to the complete persistent
+/// conductor owned by the handle. The governed Delete workflow reviews and
+/// removes stable document objects; it must never silently interpret a corner
+/// handle as an independently persisted or partially severed conductor.
+fn promote_wire_handles_to_complete_wires(
+    schematic: &SchematicState,
+    selection: &mut Selection,
+) -> usize {
+    let mut wire_ids = selection
+        .wire_segments
+        .iter()
+        .filter_map(|selected| {
+            schematic
+                .wires
+                .iter()
+                .find(|wire| {
+                    wire.id == selected.wire_id && selected.segment_index < wire.segment_count()
+                })
+                .map(|wire| wire.id)
+        })
+        .chain(selection.wire_vertices.iter().filter_map(|selected| {
+            schematic
+                .wires
+                .iter()
+                .find(|wire| {
+                    wire.id == selected.wire_id && selected.vertex_index < wire.vertex_count()
+                })
+                .map(|wire| wire.id)
+        }))
+        .collect::<Vec<_>>();
+    wire_ids.sort_unstable();
+    wire_ids.dedup();
+    let promoted_wire_count = wire_ids
+        .iter()
+        .filter(|wire_id| !selection.has_wire(**wire_id))
+        .count();
+    selection.wires.extend(wire_ids);
+    selection.wire_segments.clear();
+    selection.wire_vertices.clear();
+    promoted_wire_count
 }
 
 impl RSpiceApp {
@@ -576,6 +628,22 @@ fn selection_workflow_body(
                 "Exact active-sheet objects retained by stable identity.",
                 &format!("{} complete typed objects", draft.source_object_count),
             );
+            if draft.promoted_wire_count > 0 {
+                read_only_row(
+                    ui,
+                    "Wire handles",
+                    "A selected segment or corner is an edit handle; Delete resolves it to the complete stable conductor before review.",
+                    &format!(
+                        "{} complete wire{}",
+                        draft.promoted_wire_count,
+                        if draft.promoted_wire_count == 1 {
+                            ""
+                        } else {
+                            "s"
+                        }
+                    ),
+                );
+            }
             read_only_row(
                 ui,
                 "Affected nets",
@@ -1627,6 +1695,49 @@ mod tests {
         assert_eq!(state.schematic.undo_description(), Some("delete selection"));
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.components.len(), 1);
+    }
+
+    #[test]
+    fn delete_review_promotes_wire_handles_to_one_complete_conductor() {
+        let mut state = AppState::default();
+        let wire = crate::state::Wire::new(
+            17,
+            vec![Point::new(0, 0), Point::new(20, 0), Point::new(20, 20)],
+        );
+        state.schematic.wires.push(wire.clone());
+        state
+            .schematic
+            .selection
+            .select_only_wire_segment(wire.id, 1);
+        state.schematic.init_undo_history();
+
+        assert!(open_delete_selection_dialog(&mut state));
+        let draft = state.dialogs.selection_workflow.clone();
+        assert_eq!(draft.source_object_count, 1);
+        assert_eq!(draft.promoted_wire_count, 1);
+        assert!(draft.transaction_selection.has_wire(wire.id));
+        assert!(draft.transaction_selection.wire_segments.is_empty());
+        assert!(draft.transaction_selection.wire_vertices.is_empty());
+
+        commit_selection_workflow(&mut state, &draft).expect("reviewed whole-wire delete");
+        assert!(state.schematic.wires.is_empty());
+        assert_eq!(state.schematic.undo_description(), Some("delete selection"));
+
+        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.wires, vec![wire]);
+    }
+
+    #[test]
+    fn stale_wire_handle_cannot_open_delete_review() {
+        let mut state = AppState::default();
+        state.schematic.wires.push(crate::state::Wire::new(
+            17,
+            vec![Point::new(0, 0), Point::new(20, 0)],
+        ));
+        state.schematic.selection.select_only_wire_vertex(17, 3);
+
+        assert!(!open_delete_selection_dialog(&mut state));
+        assert!(!state.dialogs.selection_workflow.open);
     }
 
     #[test]

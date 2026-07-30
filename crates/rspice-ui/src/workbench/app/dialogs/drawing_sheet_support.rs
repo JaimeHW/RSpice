@@ -95,6 +95,8 @@ impl DrawingSheetSupportState {
 }
 
 pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), String> {
+    let edit = crate::workbench::app::SchematicEditAuthority::capture(state);
+    edit.validate(state, "Sheet Format Manager")?;
     let preview_content = DrawingSheetPreviewContent::from_state(state);
     let owner_key = state.workspace.active_key();
     let catalog = state
@@ -135,9 +137,7 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
         .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
     state.dialogs.drawing_sheet_support.manager = SheetFormatManagerState {
         open: true,
-        edit: Some(crate::workbench::app::SchematicEditAuthority::capture(
-            state,
-        )),
+        edit: Some(edit),
         owner_key,
         design_management_revision: state.workspace.design_management.revision(),
         catalog_revision: catalog.revision(),
@@ -1355,6 +1355,32 @@ mod tests {
         DrawingSheetBorderTemplate, DrawingSheetStandard, SchematicPageOrientation,
         SheetDefinition, SheetPortPolicy, SheetTemplate,
     };
+
+    #[test]
+    fn manager_refuses_to_open_without_schematic_edit_authority() {
+        let mut app = RSpiceApp::test_instance();
+        let key = app.state.workspace.active_key();
+        app.state
+            .workspace
+            .design_management
+            .bootstrap_for_cell_view(&key, "Main", [])
+            .unwrap();
+        app.state.schematic.read_only = true;
+
+        let error = open_sheet_format_manager(&mut app.state)
+            .expect_err("read-only documents must not start an edit transaction");
+
+        assert_eq!(error, "The active schematic is read-only.");
+        assert!(!app.state.dialogs.drawing_sheet_support.manager.open);
+        assert!(
+            app.state
+                .dialogs
+                .drawing_sheet_support
+                .manager
+                .edit
+                .is_none()
+        );
+    }
 
     #[test]
     fn manager_partially_applies_and_names_organization_managed_skips() {

@@ -48,6 +48,7 @@ pub(super) enum PreparedRetainedHardcopyPayload {
         schematic_buffers: std::collections::HashMap<String, SchematicState>,
         sheet_catalog: Option<SheetCatalog>,
         sheet_id: Option<SheetId>,
+        project_default_drawing_sheet: SchematicSheetFormat,
         project_title_block_field_values:
             std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
         all_sheets: bool,
@@ -412,6 +413,7 @@ pub(super) enum PreparedRetainedHardcopyWorkerPayload {
         schematic_buffers: CanonicalHardcopyOwner,
         sheet_catalog: Option<CanonicalHardcopyOwner>,
         sheet_id: Option<SheetId>,
+        project_default_drawing_sheet: SchematicSheetFormat,
         project_title_block_field_values:
             std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
         all_sheets: bool,
@@ -528,6 +530,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 schematic_buffers,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
                 project_title_block_field_values,
                 all_sheets,
                 scope,
@@ -564,6 +567,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                         })
                         .transpose()?,
                     sheet_id,
+                    project_default_drawing_sheet,
                     project_title_block_field_values,
                     all_sheets,
                     scope,
@@ -654,6 +658,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 identity,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
                 project_title_block_field_values,
                 all_sheets,
                 scope,
@@ -666,6 +671,16 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 .map_err(|error| {
                     HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
                 })?;
+                project_default_drawing_sheet.validate().map_err(|error| {
+                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                })?;
+                if project_default_drawing_sheet.inheritance
+                    != crate::state::DrawingSheetInheritance::ProjectDefault
+                {
+                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                        "prepared schematic project default has non-default inheritance".to_owned(),
+                    ));
+                }
                 match (*all_sheets, sheet_catalog.is_some(), *sheet_id, scope) {
                     (true, true, None, HardcopyScope::AllSheetsOrPanes)
                     | (false, true, Some(_), HardcopyScope::CurrentSheet)
@@ -807,6 +822,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 schematic_buffers,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
                 project_title_block_field_values,
                 all_sheets,
                 scope,
@@ -840,6 +856,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     schematic_buffers,
                     sheet_catalog,
                     sheet_id,
+                    project_default_drawing_sheet,
                     project_title_block_field_values,
                     all_sheets,
                     scope,
@@ -1333,6 +1350,7 @@ impl PreparedRetainedHardcopyResolution {
                 schematic_buffers,
                 sheet_catalog,
                 sheet_id,
+                project_default_drawing_sheet,
                 project_title_block_field_values,
                 all_sheets,
                 scope,
@@ -1350,23 +1368,9 @@ impl PreparedRetainedHardcopyResolution {
                         expected_topology_version: schematic.topology_version(),
                         symbol_resolver: Some(&resolver),
                         sheet_catalog: catalog,
+                        project_default_drawing_sheet: &project_default_drawing_sheet,
                         project_title_block_field_values: &project_title_block_field_values,
                     });
-                }
-                if let (Some(catalog), Some(sheet_id)) = (sheet_catalog.as_ref(), sheet_id)
-                    && !schematic_has_objects_on_sheet(&schematic, catalog, sheet_id)
-                {
-                    let sheet = catalog.find(sheet_id).ok_or_else(|| {
-                        HardcopySourceError::InvalidSheetPartition(format!(
-                            "prepared sheet {sheet_id} is not retained"
-                        ))
-                    })?;
-                    return resolve_blank_schematic_sheet_with_format_and_project_values(
-                        identity,
-                        scope,
-                        Some(sheet.page_format()),
-                        Some(&project_title_block_field_values),
-                    );
                 }
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
@@ -1375,6 +1379,7 @@ impl PreparedRetainedHardcopyResolution {
                     symbol_resolver: Some(&resolver),
                     sheet_catalog: sheet_catalog.as_ref(),
                     sheet_id,
+                    project_default_drawing_sheet: Some(&project_default_drawing_sheet),
                     project_title_block_field_values: Some(&project_title_block_field_values),
                     scope,
                 })

@@ -260,6 +260,7 @@ impl Command {
             Self::PageSetup => crate::workbench::app::drawing_sheet_setup_available(app),
             Self::SheetFormatManager => {
                 crate::workbench::app::drawing_sheet_setup_available(app)
+                    && !state.schematic_edit_read_only()
                     && !state.dialogs.drawing_sheet_support.manager.open
                     && state
                         .workspace
@@ -306,7 +307,7 @@ impl Command {
                         && state.schematic.can_redo()
                 }
             }
-            Self::Cut | Self::Delete => {
+            Self::Cut => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
                         && !state.ui.symbol.effective_selection().is_empty()
@@ -314,6 +315,16 @@ impl Command {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
                         && schematic_selection_has_live_object(&state.schematic)
+                }
+            }
+            Self::Delete => {
+                if active_symbol_editor(app) {
+                    !state.active_view_read_only()
+                        && !state.ui.symbol.effective_selection().is_empty()
+                } else {
+                    active_schematic_editor(app)
+                        && !state.schematic_edit_read_only()
+                        && schematic_selection_has_deletable_object(&state.schematic)
                 }
             }
             Self::Duplicate => {
@@ -1709,6 +1720,21 @@ fn schematic_selection_has_live_object(schematic: &crate::state::SchematicState)
             .probes
             .iter()
             .any(|probe| selection.has_probe(probe.id))
+}
+
+/// Return whether Delete can resolve at least one selected identity to a live
+/// complete object. Segment and vertex handles are edit subobjects rather than
+/// independently persisted conductors, so the destructive review promotes a
+/// live handle to its owning wire before commit.
+fn schematic_selection_has_deletable_object(schematic: &crate::state::SchematicState) -> bool {
+    schematic_selection_has_live_object(schematic)
+        || schematic.wires.iter().any(|wire| {
+            schematic.selection.wire_segments.iter().any(|selected| {
+                selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
+            }) || schematic.selection.wire_vertices.iter().any(|selected| {
+                selected.wire_id == wire.id && selected.vertex_index < wire.vertex_count()
+            })
+        })
 }
 
 fn schematic_selection_has_duplicable_object(schematic: &crate::state::SchematicState) -> bool {

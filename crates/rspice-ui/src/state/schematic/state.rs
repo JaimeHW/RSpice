@@ -487,6 +487,12 @@ pub struct SchematicState {
 
 impl Default for SchematicState {
     fn default() -> Self {
+        let document_policy = SchematicDocumentPolicy::default();
+        let grid_size = document_policy.grid_pitch.canvas_grid_size();
+        let snap_engine = SnapEngine {
+            grid_size,
+            ..SnapEngine::default()
+        };
         Self {
             components: Vec::new(),
             wires: Vec::new(),
@@ -499,8 +505,8 @@ impl Default for SchematicState {
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
             bus_drawing: BusDrawing::default(),
-            grid_size: 10,
-            document_policy: SchematicDocumentPolicy::default(),
+            grid_size,
+            document_policy,
             zoom: 1.0,
             pan: (0.0, 0.0),
             current_file: None,
@@ -527,11 +533,24 @@ impl Default for SchematicState {
             read_only: false,
             needs_history_reset: false,
             topology_version: 0,
-            snap_engine: SnapEngine::default(),
+            snap_engine,
             selection_rect: super::selection::SelectionRect::default(),
             net_highlight: super::net_highlight::NetHighlightState::default(),
             undo_history: super::undo_history::UndoHistory::default(),
             canvas_cache: super::canvas_cache::CanvasCache::default(),
         }
+    }
+}
+
+impl SchematicState {
+    /// Reconcile every in-document runtime projection of the authoritative
+    /// project-portable grid pitch.
+    ///
+    /// Call this after restoring history or installing session-owned snap
+    /// target preferences into a newly activated document.
+    pub(crate) fn reconcile_grid_pitch_runtime(&mut self) {
+        let grid_size = self.document_policy.grid_pitch.canvas_grid_size();
+        self.grid_size = grid_size;
+        self.snap_engine.grid_size = grid_size;
     }
 }

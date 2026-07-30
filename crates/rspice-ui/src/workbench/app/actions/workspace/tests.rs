@@ -71,6 +71,31 @@ fn any_angle_document_policy_applies_to_wire_and_bus_authoring() {
     );
 }
 
+#[test]
+fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
+    let mut state = AppState::default();
+    state.ui.schematic_snap.snap_radius = 9;
+    state.ui.schematic_snap.snap_to_grid = false;
+    state.ui.schematic_snap.snap_to_wire_segments = false;
+    state.ui.schematic_snap.grid_size = 777;
+    state
+        .ui
+        .preferences
+        .set_choice(ChoicePreference::SchematicGrid, 1)
+        .unwrap();
+    let mut expected_snap = state.ui.schematic_snap.clone();
+    expected_snap.grid_size = crate::state::SchematicGridPitch::Mil25.canvas_grid_size();
+
+    let created = state.new_schematic_document();
+
+    assert_eq!(
+        created.document_policy.grid_pitch,
+        crate::state::SchematicGridPitch::Mil25
+    );
+    assert_eq!(created.grid_size, expected_snap.grid_size);
+    assert_eq!(created.snap_engine, expected_snap);
+}
+
 fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
     SymbolDocument {
         pins: pins

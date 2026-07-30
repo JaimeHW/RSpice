@@ -1953,16 +1953,16 @@ fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
                         Command::PageSetup.execute(app);
                     }
 
+                    let availability = Command::SheetFormatManager.availability(app);
                     let response = Button::new("All sheet formats…")
                         .icon(Icon::Copy)
                         .min_width(width)
+                        .enabled(availability.is_available())
                         .show(ui);
-                    if response.clicked()
-                        && let Err(error) =
-                            crate::workbench::app::open_sheet_format_manager(&mut app.state)
-                    {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                    if let CommandAvailability::Disabled(reason) = availability {
+                        response.on_disabled_hover_text(reason);
+                    } else if response.clicked() {
+                        Command::SheetFormatManager.execute(app);
                     }
                 },
             );

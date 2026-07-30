@@ -820,6 +820,29 @@ impl Command {
             | Self::MirrorSelectionVertical => "select an editable object",
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
+            Self::SheetFormatManager
+                if !crate::workbench::app::drawing_sheet_setup_available(app) =>
+            {
+                "open an editable schematic or testbench drawing sheet"
+            }
+            Self::SheetFormatManager if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
+            Self::SheetFormatManager if app.state.dialogs.drawing_sheet_support.manager.open => {
+                "Sheet Format Manager is already open"
+            }
+            Self::SheetFormatManager
+                if app
+                    .state
+                    .workspace
+                    .design_management
+                    .sheet_catalog(&app.state.workspace.active_key())
+                    .and_then(|catalog| catalog.active())
+                    .is_none() =>
+            {
+                "create the governed drawing sheet in Page Setup first"
+            }
+            Self::SheetFormatManager => "command is unavailable in this context",
             Self::SelectionBulkEdit => "open a schematic project",
             Self::ConfigurationSets => "open a project",
             Self::ReviewComments => "open a schematic project",

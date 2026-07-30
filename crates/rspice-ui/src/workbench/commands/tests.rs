@@ -6,6 +6,7 @@
 
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
+use crate::state::Wire;
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {
     use crate::state::{
@@ -239,6 +240,27 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
 }
 
 #[test]
+fn sheet_format_manager_requires_live_schematic_edit_authority() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.workbench.workspace = Workspace::Design;
+    let key = app.state.workspace.active_key();
+    app.state
+        .workspace
+        .design_management
+        .bootstrap_for_cell_view(&key, "Main", [])
+        .unwrap();
+    app.state.schematic.read_only = true;
+
+    assert_eq!(
+        Command::SheetFormatManager.availability(&app),
+        CommandAvailability::Disabled("the active schematic is read-only")
+    );
+    Command::SheetFormatManager.execute(&mut app);
+    assert!(!app.state.dialogs.drawing_sheet_support.manager.open);
+}
+
+#[test]
 fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -409,6 +431,44 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
     assert!(
         !Command::Duplicate.is_enabled(&app),
         "a fixed-offset duplicate cannot invent a valid junction target"
+    );
+}
+
+#[test]
+fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    app.state.schematic.wires.push(Wire::new(
+        17,
+        vec![
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(20, 0),
+            crate::state::Point::new(20, 20),
+        ],
+    ));
+
+    app.state
+        .schematic
+        .selection
+        .select_only_wire_segment(17, 1);
+    assert!(Command::Delete.is_enabled(&app));
+    assert!(!Command::Copy.is_enabled(&app));
+    assert!(!Command::Cut.is_enabled(&app));
+    assert!(!Command::Duplicate.is_enabled(&app));
+
+    app.state.schematic.selection.select_only_wire_vertex(17, 1);
+    assert!(Command::Delete.is_enabled(&app));
+    assert!(!Command::Copy.is_enabled(&app));
+    assert!(!Command::Cut.is_enabled(&app));
+    assert!(!Command::Duplicate.is_enabled(&app));
+
+    app.state
+        .schematic
+        .selection
+        .select_only_wire_segment(17, 2);
+    assert!(
+        !Command::Delete.is_enabled(&app),
+        "an out-of-range wire handle is stale, not a deletable object"
     );
 }
 

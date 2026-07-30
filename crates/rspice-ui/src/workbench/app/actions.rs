@@ -985,6 +985,7 @@ impl RSpiceApp {
             .unwrap_or("schematic edit")
             .to_owned();
         if self.state.schematic.undo() {
+            self.state.ui.schematic_snap = self.state.schematic.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
             self.state
                 .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
@@ -1018,6 +1019,7 @@ impl RSpiceApp {
             .unwrap_or("schematic edit")
             .to_owned();
         if self.state.schematic.redo() {
+            self.state.ui.schematic_snap = self.state.schematic.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
             self.state
                 .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
@@ -1087,6 +1089,40 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
 #[cfg(test)]
 mod shortcut_ownership_tests {
     use super::*;
+
+    fn assert_grid_pitch_contract(app: &RSpiceApp, pitch: crate::state::SchematicGridPitch) {
+        let expected = pitch.canvas_grid_size();
+        assert_eq!(app.state.schematic.document_policy.grid_pitch, pitch);
+        assert_eq!(app.state.schematic.grid_size, expected);
+        assert_eq!(app.state.schematic.snap_engine.grid_size, expected);
+        assert_eq!(app.state.ui.schematic_snap.grid_size, expected);
+    }
+
+    #[test]
+    fn document_undo_and_redo_reconcile_all_grid_pitch_authorities() {
+        use crate::state::SchematicGridPitch;
+
+        let mut app = RSpiceApp::test_instance();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
+
+        assert!(
+            app.state
+                .schematic
+                .with_undo("change schematic grid pitch", |schematic| {
+                    schematic.document_policy.grid_pitch = SchematicGridPitch::Mil25;
+                    schematic.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+                    schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+                })
+        );
+        app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
+
+        app.action_edit_undo();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
+
+        app.action_edit_redo();
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
+    }
 
     #[test]
     fn open_popup_blocks_application_shortcut_dispatch() {

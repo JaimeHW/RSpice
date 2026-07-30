@@ -90,6 +90,7 @@ pub(super) fn resolve_blank_schematic_sheet_with_format_and_project_values(
 pub fn resolve_all_schematic_sheets(
     source: SchematicSheetSetHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    validate_project_default_drawing_sheet(source.project_default_drawing_sheet)?;
     crate::state::validate_project_drawing_sheet_title_field_values(
         source.project_title_block_field_values,
     )
@@ -122,15 +123,20 @@ pub fn resolve_all_schematic_sheets(
                 symbol_resolver: source.symbol_resolver,
                 sheet_catalog: Some(source.sheet_catalog),
                 sheet_id: Some(sheet.id()),
+                project_default_drawing_sheet: Some(source.project_default_drawing_sheet),
                 project_title_block_field_values: Some(source.project_title_block_field_values),
                 scope: HardcopyScope::CurrentSheet,
             })?);
         } else {
+            let format = effective_governed_sheet_format(
+                sheet.page_format(),
+                source.project_default_drawing_sheet,
+            );
             resolved_sheets.push(
                 resolve_blank_schematic_sheet_with_format_and_project_values(
                     sheet_identity,
                     HardcopyScope::CurrentSheet,
-                    Some(sheet.page_format()),
+                    Some(&format),
                     Some(source.project_title_block_field_values),
                 )?,
             );
@@ -180,6 +186,9 @@ pub fn resolve_all_schematic_sheets(
 pub fn resolve_schematic_source(
     source: SchematicHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    if let Some(project_default) = source.project_default_drawing_sheet {
+        validate_project_default_drawing_sheet(project_default)?;
+    }
     if let Some(project_values) = source.project_title_block_field_values {
         crate::state::validate_project_drawing_sheet_title_field_values(project_values)
             .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
@@ -235,25 +244,38 @@ pub fn resolve_schematic_source(
         })
     };
 
+    let drawing_sheet = governed_sheet
+        .and_then(|(catalog, sheet_id)| catalog.find(sheet_id))
+        .map(|sheet| {
+            source.project_default_drawing_sheet.map_or_else(
+                || sheet.page_format().clone(),
+                |project_default| {
+                    effective_governed_sheet_format(sheet.page_format(), project_default)
+                },
+            )
+        })
+        .or_else(|| {
+            matches!(
+                source.scope,
+                HardcopyScope::CurrentSheet | HardcopyScope::ActiveDocument
+            )
+            .then(|| source.project_default_drawing_sheet.cloned())
+            .flatten()
+        });
     let mut semantic = SemanticSchematic {
         view_path: governed_sheet.map_or_else(
             || source.identity.source_key.clone(),
             |(_, sheet_id)| format!("{}:sheet:{sheet_id}", source.identity.source_key),
         ),
-        drawing_sheet: governed_sheet
-            .and_then(|(catalog, sheet_id)| catalog.find(sheet_id))
-            .map(|sheet| sheet.page_format().clone()),
-        drawing_sheet_title_values: governed_sheet
-            .and_then(|(catalog, sheet_id)| {
-                let sheet = catalog.find(sheet_id)?;
-                Some(drawing_sheet_title_values(
-                    &source.identity,
-                    sheet.page_format(),
-                    Some((catalog, sheet_id)),
-                    source.project_title_block_field_values,
-                ))
-            })
-            .unwrap_or_default(),
+        drawing_sheet_title_values: drawing_sheet.as_ref().map_or_else(BTreeMap::new, |format| {
+            drawing_sheet_title_values(
+                &source.identity,
+                format,
+                governed_sheet,
+                source.project_title_block_field_values,
+            )
+        }),
+        drawing_sheet,
         grid_pitch_units: source.schematic.grid_size.max(1),
         components: Vec::new(),
         wires: Vec::new(),
@@ -403,18 +425,28 @@ pub fn resolve_schematic_source(
             })
             .cloned(),
     );
-    if semantic_is_empty(&semantic) {
+    let content_empty = semantic_is_empty(&semantic);
+    if content_empty && (selection_only || semantic.drawing_sheet.is_none()) {
         return Err(HardcopySourceError::EmptyContent);
     }
 
-    let content_bounds = schematic_bounds(&semantic)?;
-    let bounds = semantic
-        .drawing_sheet
-        .as_ref()
-        .map_or(Ok(content_bounds), |format| {
-            authored_sheet_bounds(format)
-                .map(|sheet_bounds| union_bounds(content_bounds, sheet_bounds))
-        })?;
+    let bounds = if content_empty {
+        authored_sheet_bounds(
+            semantic
+                .drawing_sheet
+                .as_ref()
+                .expect("empty authored sheet was validated above"),
+        )?
+    } else {
+        let content_bounds = schematic_bounds(&semantic)?;
+        semantic
+            .drawing_sheet
+            .as_ref()
+            .map_or(Ok(content_bounds), |format| {
+                authored_sheet_bounds(format)
+                    .map(|sheet_bounds| union_bounds(content_bounds, sheet_bounds))
+            })?
+    };
     let digest = canonical_digest(b"rspice-hardcopy-schematic-v1", &semantic)?;
     finish_resolved(
         source.identity,
@@ -424,6 +456,33 @@ pub fn resolve_schematic_source(
         HardcopySemanticDocument::Schematic(semantic),
         bounds,
     )
+}
+
+fn effective_governed_sheet_format(
+    sheet_format: &SchematicSheetFormat,
+    project_default: &SchematicSheetFormat,
+) -> SchematicSheetFormat {
+    match sheet_format.inheritance {
+        crate::state::DrawingSheetInheritance::ProjectDefault => {
+            project_default.with_target_sheet_title_fields(sheet_format)
+        }
+        crate::state::DrawingSheetInheritance::Explicit
+        | crate::state::DrawingSheetInheritance::UserDefault => sheet_format.clone(),
+    }
+}
+
+fn validate_project_default_drawing_sheet(
+    format: &SchematicSheetFormat,
+) -> Result<(), HardcopySourceError> {
+    format
+        .validate()
+        .map_err(|error| HardcopySourceError::InvalidSheetPartition(error.to_string()))?;
+    if format.inheritance != crate::state::DrawingSheetInheritance::ProjectDefault {
+        return Err(HardcopySourceError::InvalidSheetPartition(
+            "project drawing-sheet default has non-default inheritance".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn drawing_sheet_title_values(

@@ -1017,6 +1017,23 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .iter()
             .any(|junction| junction.pos == selected.pos)
     });
+    let has_live_wire_sub_object = state.schematic.wires.iter().any(|wire| {
+        selection.wire_segments.iter().any(|selected| {
+            selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
+        }) || selection.wire_vertices.iter().any(|selected| {
+            selected.wire_id == wire.id && selected.vertex_index < wire.vertex_count()
+        })
+    });
+    let all_wire_sub_objects_are_live =
+        selection.wire_segments.iter().all(|selected| {
+            state.schematic.wires.iter().any(|wire| {
+                wire.id == selected.wire_id && selected.segment_index < wire.segment_count()
+            })
+        }) && selection.wire_vertices.iter().all(|selected| {
+            state.schematic.wires.iter().any(|wire| {
+                wire.id == selected.wire_id && selected.vertex_index < wire.vertex_count()
+            })
+        });
     let has_wire_sub_object =
         !selection.wire_segments.is_empty() || !selection.wire_vertices.is_empty();
     let copyable_objects_only = has_copyable_object
@@ -1036,10 +1053,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && all_whole_object_ids_are_live
         && all_junctions_are_live
         && !has_wire_sub_object;
-    let deletable_objects_only = (has_copyable_object || has_live_junction)
-        && all_whole_object_ids_are_live
-        && all_junctions_are_live
-        && !has_wire_sub_object;
+    let deletable_objects_only =
+        (has_copyable_object || has_live_junction || has_live_wire_sub_object)
+            && all_whole_object_ids_are_live
+            && all_junctions_are_live
+            && all_wire_sub_objects_are_live;
     let has_component = has_live_component;
     let writable = !state.schematic_edit_read_only();
     match action {
@@ -1061,7 +1079,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, wire, bus, tap, junction, net label, design note, documentation shape, or probe",
+            "Select at least one editable component, wire or wire handle, bus, tap, junction, net label, design note, documentation shape, or probe",
         ),
         ContextAction::Probe => (
             writable,
@@ -1873,6 +1891,17 @@ mod tests {
         assert!(!action_availability(ContextAction::Copy, &state).0);
         assert!(!action_availability(ContextAction::Duplicate, &state).0);
         assert!(!action_availability(ContextAction::Delete, &state).0);
+
+        state
+            .schematic
+            .wires
+            .push(Wire::new(17, vec![Point::new(0, 0), Point::new(20, 0)]));
+        assert!(
+            action_availability(ContextAction::Delete, &state).0,
+            "a live wire handle must reach the governed whole-wire delete review"
+        );
+        assert!(!action_availability(ContextAction::Copy, &state).0);
+        assert!(!action_availability(ContextAction::Duplicate, &state).0);
 
         state.schematic.selection.select_component(999);
         assert!(!action_availability(ContextAction::Copy, &state).0);

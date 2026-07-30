@@ -191,6 +191,8 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     // component reuses an existing ID and selection matches both.
     schematic.recalculate_runtime_state();
     schematic.snap_engine = state.ui.schematic_snap.clone();
+    schematic.reconcile_grid_pitch_runtime();
+    state.ui.schematic_snap.grid_size = schematic.grid_size;
     schematic.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
     schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
     // Views from read-only libraries open for inspection, never for edit —
@@ -257,6 +259,11 @@ impl AppState {
         use crate::workbench::ChoicePreference;
 
         let mut schematic = SchematicState::default();
+        // Snap targets and radius are device-local session preferences. A new
+        // document inherits those exact choices, while its pitch is resolved
+        // below into project-portable policy and then projected back into the
+        // runtime engine.
+        schematic.snap_engine = self.ui.schematic_snap.clone();
         let preferences = &self.ui.preferences;
         schematic.document_policy.grid_pitch =
             match preferences.choice(ChoicePreference::SchematicGrid) {
@@ -299,7 +306,7 @@ impl AppState {
                 _ => unreachable!("operating-point policy is normalized before use"),
             };
 
-        schematic.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
+        schematic.reconcile_grid_pitch_runtime();
         let routing_mode = self.ui.schematic_routing_mode;
         schematic.wire_drawing.set_routing_mode(routing_mode);
         schematic.bus_drawing.routing_mode = routing_mode;

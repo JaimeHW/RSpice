@@ -78,6 +78,7 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.library_manager = library_manager;
     state.workspace = workspace;
     state.schematic = schematic;
+    state.ui.schematic_snap = state.schematic.snap_engine.clone();
     state.bump_active_schematic_epoch();
     state.clear_design_execution_context();
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
@@ -851,6 +852,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.library_manager = libraries;
     state.workspace = workspace;
     state.schematic = schematic;
+    state.ui.schematic_snap = state.schematic.snap_engine.clone();
     state.bump_active_schematic_epoch();
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
@@ -1409,6 +1411,53 @@ mod tests {
         let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
         workspace.project.set_path(std::path::PathBuf::from(path));
         ProjectFile::new(workspace, libraries)
+    }
+
+    fn assert_active_grid_pitch_contract(
+        state: &AppState,
+        pitch: crate::state::SchematicGridPitch,
+    ) {
+        let expected = pitch.canvas_grid_size();
+        assert_eq!(state.schematic.document_policy.grid_pitch, pitch);
+        assert_eq!(state.schematic.grid_size, expected);
+        assert_eq!(state.schematic.snap_engine.grid_size, expected);
+        assert_eq!(state.ui.schematic_snap.grid_size, expected);
+    }
+
+    #[test]
+    fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
+        use crate::workbench::ChoicePreference;
+
+        let mut state = AppState::default();
+        state.ui.schematic_snap.snap_radius = 8;
+        state.ui.schematic_snap.snap_to_grid = false;
+        state.ui.schematic_snap.grid_size = 555;
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::SchematicGrid, 1)
+            .unwrap();
+
+        create_new_project(&mut state);
+
+        assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Mil25);
+        assert_eq!(state.schematic.snap_engine.snap_radius, 8);
+        assert!(!state.schematic.snap_engine.snap_to_grid);
+
+        state
+            .ui
+            .preferences
+            .set_choice(ChoicePreference::SchematicGrid, 2)
+            .unwrap();
+        state.ui.schematic_snap.grid_size = 777;
+        state
+            .workbench
+            .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
+
+        assert!(close_project_discard(&mut state));
+        assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Metric);
+        assert_eq!(state.schematic.snap_engine.snap_radius, 8);
+        assert!(!state.schematic.snap_engine.snap_to_grid);
     }
 
     #[test]
