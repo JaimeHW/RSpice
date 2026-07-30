@@ -17,7 +17,7 @@ const SCHEMATIC_ZOOM_MAX: f64 = 8.0;
 /// several frames. The schematic consumes raw events instead: pixel-precise
 /// trackpads remain proportional, discrete units are normalized once, and a
 /// pathological driver spike is bounded before the exponential curve.
-const WHEEL_ZOOM_EXPONENT_PER_POINT: f64 = 0.0005;
+const WHEEL_ZOOM_EXPONENT_PER_POINT: f64 = 0.0006;
 const WHEEL_ZOOM_MAX_DELTA_PER_EVENT: f32 = 240.0;
 const WHEEL_ZOOM_LINE_POINTS: f32 = 40.0;
 const WHEEL_ZOOM_PAGE_POINTS: f32 = 240.0;
@@ -216,7 +216,7 @@ mod tests {
         let notch_in = wheel_zoom_factor(120.0);
         let notch_out = wheel_zoom_factor(-120.0);
         assert!(
-            (1.0..1.07).contains(&notch_in),
+            (1.07..1.08).contains(&notch_in),
             "one wheel notch should be a controlled step, got {notch_in}"
         );
         assert!((notch_in * notch_out - 1.0).abs() < 1e-12);

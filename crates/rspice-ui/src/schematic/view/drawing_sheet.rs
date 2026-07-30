@@ -303,12 +303,19 @@ struct DrawingSheetLod {
     show_dimensions: bool,
 }
 
-/// Canvas text belongs to the drawing sheet: it must grow when the operator
-/// zooms in, while retaining a readable device-space floor at normal
-/// fit-sheet zoom. The LOD policy suppresses the text entirely before that
-/// floor would overrun thumbnail/outline geometry.
+/// Desktop fit-sheet views land between roughly 0.55x and 0.85x world scale,
+/// depending on dock width and window geometry. Treat authored sizes smaller
+/// than the requested readable floor at the lower bound as under-specified:
+/// otherwise the floor remains active through several normal wheel steps,
+/// making the title-block cells grow while their text appears frozen. Below
+/// this reference the floor still protects overview legibility; at and above
+/// it the text grows continuously with the sheet.
+const DRAWING_SHEET_TEXT_FIT_REFERENCE_ZOOM: f32 = 0.55;
+
 fn drawing_sheet_font_size(zoom: f32, authored_size: f32, readable_floor: f32) -> f32 {
-    let scaled = authored_size * zoom.max(0.0);
+    let authored_for_fit =
+        authored_size.max(readable_floor / DRAWING_SHEET_TEXT_FIT_REFERENCE_ZOOM);
+    let scaled = authored_for_fit * zoom.max(0.0);
     ((scaled.max(readable_floor) * 4.0).round() * 0.25).max(1.0)
 }
 
@@ -1786,11 +1793,14 @@ mod tests {
     }
 
     #[test]
-    fn drawing_sheet_text_has_a_readable_floor_and_scales_when_zoomed_in() {
+    fn drawing_sheet_text_has_a_readable_floor_and_scales_from_fit_sheet_zoom() {
         assert_eq!(drawing_sheet_font_size(0.25, 7.0, 9.0), 9.0);
-        assert_eq!(drawing_sheet_font_size(1.0, 7.0, 9.0), 9.0);
-        assert_eq!(drawing_sheet_font_size(2.0, 7.0, 9.0), 14.0);
-        assert!(drawing_sheet_font_size(3.0, 5.5, 7.0) > drawing_sheet_font_size(1.0, 5.5, 7.0));
+        assert_eq!(drawing_sheet_font_size(0.55, 7.0, 9.0), 9.0);
+        assert!(
+            drawing_sheet_font_size(0.6, 7.0, 9.0) > drawing_sheet_font_size(0.55, 7.0, 9.0),
+            "text must begin growing as soon as the operator zooms in from a normal fit-sheet view"
+        );
+        assert!(drawing_sheet_font_size(2.0, 5.5, 7.0) > drawing_sheet_font_size(1.0, 5.5, 7.0));
     }
 
     #[test]
