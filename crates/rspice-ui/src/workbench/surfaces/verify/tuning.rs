@@ -96,6 +96,20 @@ pub(super) fn tuning_is_valid(app: &RSpiceApp) -> bool {
         && drafts.iter().all(|draft| draft.validation_error.is_none())
 }
 
+fn tuning_schematic_edit_block_reason(app: &RSpiceApp) -> Option<String> {
+    app.state
+        .workbench
+        .verification
+        .tuning_instance_binding
+        .as_ref()
+        .filter(|binding| binding.requires_schematic_edit())
+        .filter(|_| app.state.schematic_edit_read_only())
+        .map(|_| {
+            "The staged instance Value binding cannot be committed because the active schematic is read-only."
+                .to_owned()
+        })
+}
+
 pub(super) fn tuning_commit_block_reason(app: &RSpiceApp) -> String {
     let drafts = &app.state.workbench.verification.tuning_variables;
     if drafts.is_empty() {
@@ -103,6 +117,9 @@ pub(super) fn tuning_commit_block_reason(app: &RSpiceApp) -> String {
     }
     if !tuning_is_dirty(app) {
         return "The sandbox matches the committed plan revision.".to_owned();
+    }
+    if let Some(reason) = tuning_schematic_edit_block_reason(app) {
+        return reason;
     }
     if let Some(error) = drafts
         .iter()
@@ -178,6 +195,9 @@ fn tuning_candidate_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun>
 pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
     if !tuning_is_dirty(app) {
         return Err("the tuning sandbox contains no provisional changes".to_owned());
+    }
+    if let Some(reason) = tuning_schematic_edit_block_reason(app) {
+        return Err(reason);
     }
     if !tuning_is_valid(app) {
         return Err(tuning_commit_block_reason(app));

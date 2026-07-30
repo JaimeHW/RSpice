@@ -897,23 +897,37 @@ fn proposed_tuning_variable_name(
     unreachable!("the finite variable set cannot exhaust every numeric suffix")
 }
 
-/// Bind the selected Value row to the non-destructive parameter sandbox.
-///
-/// This function writes only runtime proposal state. The schematic and active
-/// plan remain byte-for-byte authoritative until the existing review dialog
-/// commits the complete transaction.
-fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), String> {
+enum ComponentTuningPreparation {
+    ExistingBinding {
+        variable_id: crate::product::DesignVariableId,
+    },
+    StageBinding {
+        variable: crate::state::DesignVariable,
+        creates_variable: bool,
+    },
+}
+
+struct PreparedComponentTuning {
+    plan_id: crate::product::SimulationPlanId,
+    plan_revision: crate::product::ObjectRevision,
+    variables: Vec<crate::state::DesignVariable>,
+    source_view: CellViewRef,
+    source_topology_version: u64,
+    active_plan_run: Option<crate::product::RunId>,
+    preparation: ComponentTuningPreparation,
+}
+
+/// Resolve the exact Tune transaction without mutating the sandbox or either
+/// authoritative document. The inspector button and the click handler both
+/// use this preflight so a control cannot advertise a workflow that staging
+/// will later reject.
+fn prepare_component_tuning(
+    app: &RSpiceApp,
+    component: &Component,
+) -> Result<PreparedComponentTuning, String> {
     if app.state.schematic_edit_read_only() {
         return Err("the active schematic is read-only".to_owned());
     }
-    let component = app
-        .state
-        .schematic
-        .components
-        .iter()
-        .find(|component| component.id == component_id)
-        .cloned()
-        .ok_or_else(|| "the selected instance no longer exists".to_owned())?;
     let quantity = tunable_value_quantity(component.kind).ok_or_else(|| {
         format!(
             "{} values do not have a truthful typed design-variable mapping",
@@ -945,38 +959,26 @@ fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), 
         })
         .map(|run| run.run_id);
 
-    let session = &mut app.state.workbench.verification;
-    if session.tuning_plan_id != Some(plan_id)
-        || session.tuning_plan_revision != Some(plan_revision)
-    {
-        session.tuning_plan_id = Some(plan_id);
-        session.tuning_plan_revision = Some(plan_revision);
-        session.tuning_variables = variables
-            .iter()
-            .map(|variable| crate::workbench::state::TuningVariableDraft {
-                variable_id: variable.id,
-                baseline_expression: variable.expression.clone(),
-                candidate_expression: variable.expression.clone(),
-                validation_error: None,
-                proposed: false,
-            })
-            .collect();
-        session.tuning_instance_binding = None;
-        session.tuning_selected_variable = None;
-        session.tuning_focus_variable = None;
-        session.tuning_baseline_run = active_plan_run;
-        session.tuning_review_open = false;
-    }
-
-    if let Some(pending) = session.tuning_instance_binding.as_ref() {
-        if pending.component_id == component_id
+    let session = &app.state.workbench.verification;
+    let current_session = session.tuning_plan_id == Some(plan_id)
+        && session.tuning_plan_revision == Some(plan_revision);
+    if current_session && let Some(pending) = session.tuning_instance_binding.as_ref() {
+        if pending.component_id == component.id
             && pending.source_view == source_view
             && pending.source_topology_version == source_topology_version
             && pending.source_value == component.value
         {
-            session.tuning_selected_variable = Some(pending.variable.id);
-            session.tuning_focus_variable = Some(pending.variable.id);
-            return Ok(());
+            return Ok(PreparedComponentTuning {
+                plan_id,
+                plan_revision,
+                variables,
+                source_view,
+                source_topology_version,
+                active_plan_run,
+                preparation: ComponentTuningPreparation::ExistingBinding {
+                    variable_id: pending.variable.id,
+                },
+            });
         }
         if pending.creates_variable || pending.requires_schematic_edit() {
             return Err(format!(
@@ -1009,7 +1011,7 @@ fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), 
         }
         (variable, false)
     } else {
-        let name = proposed_tuning_variable_name(&component, &variables);
+        let name = proposed_tuning_variable_name(component, &variables);
         let typed_expression = typed_tuning_expression(&component.value, quantity);
         let variable = crate::state::DesignVariable::new(
             &name,
@@ -1036,25 +1038,103 @@ fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), 
                 quantity.label()
             )
         })?;
+        (variable, true)
+    };
+
+    Ok(PreparedComponentTuning {
+        plan_id,
+        plan_revision,
+        variables,
+        source_view,
+        source_topology_version,
+        active_plan_run,
+        preparation: ComponentTuningPreparation::StageBinding {
+            variable,
+            creates_variable,
+        },
+    })
+}
+
+fn component_tuning_action_block_reason(app: &RSpiceApp, component: &Component) -> Option<String> {
+    match Command::VerificationPage(VerificationPage::Tuning).availability(app) {
+        CommandAvailability::Available => prepare_component_tuning(app, component).err(),
+        CommandAvailability::Disabled(reason) => Some(reason.to_owned()),
+        CommandAvailability::Hidden => {
+            Some("parameter tuning is unavailable in this context".to_owned())
+        }
+    }
+}
+
+/// Bind the selected Value row to the non-destructive parameter sandbox.
+///
+/// This function writes only runtime proposal state. The schematic and active
+/// plan remain byte-for-byte authoritative until the existing review dialog
+/// commits the complete transaction.
+fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), String> {
+    let component = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .cloned()
+        .ok_or_else(|| "the selected instance no longer exists".to_owned())?;
+    let prepared = prepare_component_tuning(app, &component)?;
+
+    let session = &mut app.state.workbench.verification;
+    if session.tuning_plan_id != Some(prepared.plan_id)
+        || session.tuning_plan_revision != Some(prepared.plan_revision)
+    {
+        session.tuning_plan_id = Some(prepared.plan_id);
+        session.tuning_plan_revision = Some(prepared.plan_revision);
+        session.tuning_variables = prepared
+            .variables
+            .iter()
+            .map(|variable| crate::workbench::state::TuningVariableDraft {
+                variable_id: variable.id,
+                baseline_expression: variable.expression.clone(),
+                candidate_expression: variable.expression.clone(),
+                validation_error: None,
+                proposed: false,
+            })
+            .collect();
+        session.tuning_instance_binding = None;
+        session.tuning_selected_variable = None;
+        session.tuning_focus_variable = None;
+        session.tuning_baseline_run = prepared.active_plan_run;
+        session.tuning_review_open = false;
+    }
+
+    let (variable, creates_variable) = match prepared.preparation {
+        ComponentTuningPreparation::ExistingBinding { variable_id } => {
+            session.tuning_selected_variable = Some(variable_id);
+            session.tuning_focus_variable = Some(variable_id);
+            return Ok(());
+        }
+        ComponentTuningPreparation::StageBinding {
+            variable,
+            creates_variable,
+        } => (variable, creates_variable),
+    };
+    if creates_variable {
         session.tuning_variables.retain(|draft| !draft.proposed);
         session
             .tuning_variables
             .push(crate::workbench::state::TuningVariableDraft {
                 variable_id: variable.id,
-                baseline_expression: typed_expression.clone(),
-                candidate_expression: typed_expression,
+                baseline_expression: variable.expression.clone(),
+                candidate_expression: variable.expression.clone(),
                 validation_error: None,
                 proposed: true,
             });
-        (variable, true)
-    };
+    }
 
     let binding_expression = format!("{{{}}}", variable.name);
     session.tuning_instance_binding = Some(crate::workbench::state::TuningInstanceBindingDraft {
         component_id,
         component_name: component.name.clone(),
-        source_view,
-        source_topology_version,
+        source_view: prepared.source_view,
+        source_topology_version: prepared.source_topology_version,
         source_value: component.value.clone(),
         binding_expression,
         variable: variable.clone(),
@@ -1126,7 +1206,14 @@ fn edit_row_with_hint(
 
     let tuning = Command::VerificationPage(VerificationPage::Tuning);
     let (response, tuning_response) = if matches!(field, InlineEditField::Value) {
-        let available = tuning.availability(app).is_available();
+        let tuning_block_reason = rejection.as_ref().map_or_else(
+            || component_tuning_action_block_reason(app, component),
+            |reason| {
+                Some(format!(
+                    "resolve the Value validation error before tuning: {reason}"
+                ))
+            },
+        );
         let (edit, action) = property_row_input_action(
             ui,
             label,
@@ -1134,7 +1221,8 @@ fn edit_row_with_hint(
             rejection.is_some(),
             WorkbenchIcon::Sliders,
             &format!("Scrub-tune {} in the parameter sandbox", component.name),
-            available,
+            tuning_block_reason.is_none(),
+            tuning_block_reason.as_deref(),
         );
         (edit, Some(action))
     } else {

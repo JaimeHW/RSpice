@@ -820,13 +820,17 @@ impl Command {
             | Self::MirrorSelectionVertical => "select an editable object",
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::DesignManagement => "open an editable schematic",
+            Self::PageSetup if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
+            Self::PageSetup => "open an editable schematic or testbench drawing sheet",
+            Self::SheetFormatManager if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
+            }
             Self::SheetFormatManager
                 if !crate::workbench::app::drawing_sheet_setup_available(app) =>
             {
                 "open an editable schematic or testbench drawing sheet"
-            }
-            Self::SheetFormatManager if app.state.schematic_edit_read_only() => {
-                "the active schematic is read-only"
             }
             Self::SheetFormatManager if app.state.dialogs.drawing_sheet_support.manager.open => {
                 "Sheet Format Manager is already open"

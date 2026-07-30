@@ -19,6 +19,7 @@ pub(crate) fn drawing_sheet_setup_available(app: &RSpiceApp) -> bool {
 
 fn drawing_sheet_setup_available_for_state(state: &AppState) -> bool {
     state.workbench.current_route().surface_id() == SurfaceId::Design
+        && !state.schematic_edit_read_only()
         && matches!(
             state.workspace.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
@@ -1140,8 +1141,33 @@ mod tests {
 
     #[test]
     fn page_setup_is_owned_only_by_schematic_like_design_routes() {
-        let app = RSpiceApp::default();
+        let app = RSpiceApp::test_instance();
         assert!(drawing_sheet_setup_available(&app));
+    }
+
+    #[test]
+    fn page_setup_availability_fails_closed_when_live_schematic_is_read_only() {
+        let mut app = RSpiceApp::test_instance();
+        assert!(drawing_sheet_setup_available(&app));
+
+        app.state.workbench.safe_mode.activate(
+            crate::workbench::state::LocalSafeModeOptions {
+                open_project_read_only: true,
+                ..Default::default()
+            },
+            String::new(),
+        );
+
+        assert!(app.state.schematic_edit_read_only());
+        assert!(!drawing_sheet_setup_available(&app));
+        assert!(!open_drawing_sheet_setup_for_state(&mut app.state));
+        assert!(!app.state.dialogs.drawing_sheet_setup.open);
+        assert_eq!(
+            crate::workbench::commands::vocabulary::Command::PageSetup.availability(&app),
+            crate::workbench::commands::CommandAvailability::Disabled(
+                "the active schematic is read-only"
+            )
+        );
     }
 
     #[test]

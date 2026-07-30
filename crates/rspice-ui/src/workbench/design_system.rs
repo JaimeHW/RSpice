@@ -1169,6 +1169,7 @@ pub fn property_row_input_action(
     action_icon: WorkbenchIcon,
     action_label: &str,
     action_enabled: bool,
+    action_disabled_reason: Option<&str>,
 ) -> (Response, Response) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
@@ -1262,6 +1263,12 @@ pub fn property_row_input_action(
             action_label.to_owned(),
         )
     });
+    ui.ctx().accesskit_node_builder(action_response.id, |node| {
+        node.set_label(action_label);
+        if !action_enabled && let Some(reason) = action_disabled_reason {
+            node.set_description(reason);
+        }
+    });
     let action_fill = if action_response.hovered() && action_enabled {
         t.color.bg_hover
     } else {
@@ -1284,7 +1291,14 @@ pub fn property_row_input_action(
         },
     );
     theme::paint_focus_ring_outset(ui, &action_response, action_rect);
-    (edit_response, action_response.on_hover_text(action_label))
+    let action_response = if action_enabled {
+        action_response.on_hover_text(action_label)
+    } else if let Some(reason) = action_disabled_reason {
+        action_response.on_hover_text(reason)
+    } else {
+        action_response.on_hover_text(action_label)
+    };
+    (edit_response, action_response)
 }
 
 /// Selectable twin of [`property_row`], with the same fixed label/value
@@ -1821,6 +1835,7 @@ mod tests {
                         WorkbenchIcon::Sliders,
                         "Tune value",
                         true,
+                        None,
                     );
                     property_row_combo(
                         ui,

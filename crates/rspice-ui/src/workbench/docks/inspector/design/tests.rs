@@ -693,6 +693,30 @@ fn value_tuning_fails_closed_when_no_truthful_quantity_exists() {
 }
 
 #[test]
+fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .schematic
+        .add_component(ComponentType::Inductor, Point::origin());
+    app.state.schematic.components[0].value = "10u".to_owned();
+    let component = app.state.schematic.components[0].clone();
+
+    let reason = component_tuning_action_block_reason(&app, &component)
+        .expect("an unsupported typed quantity cannot expose an enabled Tune action");
+
+    assert_eq!(
+        reason,
+        "Inductor values do not have a truthful typed design-variable mapping"
+    );
+    assert_eq!(
+        prepare_component_tuning(&app, &component)
+            .err()
+            .expect("staging preflight must reject the same unsupported quantity"),
+        reason
+    );
+}
+
+#[test]
 fn applying_a_field_reports_whether_the_design_actually_changed() {
     let mut state = state_with_two_components();
     let id = state.schematic.components[0].id;
