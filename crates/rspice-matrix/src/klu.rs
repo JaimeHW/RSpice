@@ -19,7 +19,7 @@
 //! blocks; phase 1 treats the matrix as one block.
 //!
 //! This is the default real-valued backend (`RSPICE_SOLVER=faer` opts
-//! out). Kernel conventions, all benchmark-gated (`examples/klu_bench`):
+//! out). Kernel conventions, all benchmark-gated (`rspice-bench klu`):
 //! u32 row indices (half the index bandwidth), a precomputed pivot-space
 //! scatter map for A's values, paired-slice iteration for bounds-check
 //! elision, reciprocal pivot scaling (the contiguous multiplies

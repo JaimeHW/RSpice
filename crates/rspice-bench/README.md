@@ -12,24 +12,29 @@ optimization claim lands without a before/after scoreboard from this rig.
 
 It is **not** a Criterion/Divan harness and has no `[[bench]]` targets;
 timing is `std::time::Instant` around child-process spawn and an OS-backed
-timed wait, without polling-interval quantization. For isolated solver-kernel
-numbers, use rspice-core's
-`cargo run --release -p rspice-core --example klu_bench` instead.
+timed wait, without polling-interval quantization. Alongside it, the
+in-process subcommands isolate one layer each — `klu` for the solver kernels,
+`native-jit` for generated Verilog-A entrypoints — so an optimization there is
+attributable to a phase rather than diluted across a whole process.
 
 ## Layout
 
 | File | Contents |
 | :--- | :--- |
-| `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `generated-stamp`, `native-jit`, and `run` subcommands |
+| `src/main.rs` | CLI entry point: `gen`, `generated-rust`, `generated-stamp`, `klu`, `native-jit`, and `run` subcommands |
 | `src/runner.rs` | The `run` subcommand: locates executables, runs warmup + timed repeats per deck/simulator, computes min/median/mean and the median speedup, writes the scoreboard, prints the table |
 | `src/generate.rs` | The `gen` subcommand: deterministically regenerates the generated decks (RC ladders, MOS array) with byte-stable output — fixed formatting, no timestamps |
 | `src/generated_rust.rs` | Authenticated source-resource report and budget gate for checked-in Verilog-A Rust kernels |
+| `src/klu.rs` | The `klu` subcommand: in-process KLU kernel benchmark — analyze/factor/refactor/solve medians and fill per circuit-shaped pattern, with optional per-nonzero budgets |
 | `src/native_jit.rs` | The `native-jit` subcommand: in-process Verilog-A native JIT benchmark gate with median speedup and optional p95 budgets |
 | `src/error.rs` | `BenchError` with full context on every failure path |
 
 The macro runner has no feature flags. The `native-jit` subcommand links the
 `rspice-veriloga` native feature so it can benchmark generated native x64
 entrypoints without exposing the low-level JIT ABI outside the compiler crate.
+The `klu` subcommand depends on `rspice-matrix` directly rather than on the
+`rspice-core` re-export, which keeps it clear of the optional corpus-building
+dependency and off the ~40-minute build path.
 
 ## Building and running
 
@@ -47,6 +52,9 @@ target/release/rspice-bench run \
 
 # Run the native Verilog-A JIT gate
 target/release/rspice-bench native-jit
+
+# Measure the KLU solver kernels in isolation
+target/release/rspice-bench klu --out benchmarks/scoreboards/klu.json
 
 # Authenticate and measure the checked-in generated Rust bundle
 target/release/rspice-bench generated-rust \
@@ -123,6 +131,46 @@ methodology and, by default, the same OS/architecture and logical CPU count.
 The scoreboard is still written on a regression and carries a machine-readable
 `regression_gate` report with every median, delta, and verdict.
 
+### `rspice-bench klu`
+
+This isolates the solver kernels so an optimization is attributable to a
+phase. It times `analyze`, `factor`, `refactor` and `solve` separately on
+circuit-shaped matrices — a banded RC-ladder pattern and a denser ring-like
+pattern with off-diagonal couplings, both diagonally dominant, with a
+Newton-style value drift between refactors — and reports fill as
+`(L+U) nnz / A nnz`. Each case is reseeded from its own identity rather than
+from sweep position, so changing `--sizes` cannot silently perturb another
+case's matrix. Drift is applied outside the timed region: it is fixture work,
+not solver work.
+
+A random expander is measured as the pathological reference row and is never
+gated. Real circuit matrices are local; the expander is worst-case fill under
+*any* ordering, and at n=1000 it runs ~25x worse per nonzero than the circuit
+patterns.
+
+Budgets are normalized per `(L+U)` nonzero rather than absolute per iteration,
+because a sparse direct solve is proportional to factor nonzeros. That holds in
+practice — measured `refactor` cost is ~2.14, 2.13, 2.16 ns/nnz for the ladder
+at n=100, 1000, 10000 — so one threshold covers the whole sweep.
+
+| Flag | Default | Meaning |
+| :--- | :--- | :--- |
+| `--sizes <N,...>` | 100,1000,10000 | Dimensions swept for each circuit-shaped pattern |
+| `--refactors <N>` | 400 | Refactor and solve iterations per timed sample |
+| `--samples <N>` | 7 | Timed samples per case; the report gates on the median |
+| `--expander-size <N>` | 1000 | Dimension of the ungated reference case |
+| `--expander-refactors <N>` | 50 | Iterations per sample for the reference case |
+| `--max-refactor-ns-per-lu-nnz <NS>` | unset | Refactor budget per factor nonzero |
+| `--max-solve-ns-per-lu-nnz <NS>` | unset | Solve budget per factor nonzero |
+| `--max-fill-ratio <RATIO>` | unset | Fill budget as `(L+U) nnz / A nnz` |
+| `--out <PATH>` | unset | Optional JSON report path |
+
+Every budget is off unless passed explicitly, so an unqualified run measures
+and reports without ever failing. This is a deliberate difference from
+`native-jit`, whose defaults enforce: KLU budgets cannot be chosen before
+baselines exist, and the solver is still moving. Use release builds — debug
+numbers are a smoke test of the machinery only.
+
 ### `rspice-bench native-jit`
 
 This is an in-process native Verilog-A JIT benchmark gate, not a full-circuit
@@ -136,7 +184,7 @@ regression.
 | :--- | :--- | :--- |
 | `--iterations <N>` | 200000 | Entry-point sweeps per timed sample |
 | `--samples <N>` | 7 | Timed samples; report computes min/median/p95/mean |
-| `--min-speedup <X>` | 1.10 | Required `bytecode_median / native_median`; below this exits non-zero |
+| `--min-speedup <X>` | 3.00 | Required `bytecode_median / native_median`; below this exits non-zero |
 | `--max-native-p95-ns-per-sweep <NS>` | unset | Optional absolute native p95 budget |
 | `--out <PATH>` | unset | Optional JSON report path |
 
