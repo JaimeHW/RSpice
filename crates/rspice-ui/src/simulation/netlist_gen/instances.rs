@@ -90,7 +90,12 @@ impl<'a> NetlistGenerator<'a> {
             ComponentType::VoltageSource | ComponentType::VoltageSourceAc => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
-                let params = self.format_params(&component.params);
+                let runtime_params = if component.kind == ComponentType::VoltageSourceAc {
+                    self.filter_component_params(&component.params, &["acphase", "phase"])
+                } else {
+                    component.params.clone()
+                };
+                let params = self.format_params(&runtime_params);
                 Some(format!(
                     "{} {} {}{}",
                     instance_name, nodes, source_value, params
@@ -112,7 +117,12 @@ impl<'a> NetlistGenerator<'a> {
             ComponentType::CurrentSource | ComponentType::CurrentSourceAc => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
-                let params = self.format_params(&component.params);
+                let runtime_params = if component.kind == ComponentType::CurrentSourceAc {
+                    self.filter_component_params(&component.params, &["acphase", "phase"])
+                } else {
+                    component.params.clone()
+                };
+                let params = self.format_params(&runtime_params);
                 Some(format!(
                     "{} {} {}{}",
                     instance_name, nodes, source_value, params
@@ -236,9 +246,7 @@ impl<'a> NetlistGenerator<'a> {
                 params_map
                     .entry("l".to_owned())
                     .or_insert_with(|| "180n".to_owned());
-                let params = self.format_params(
-                    &crate::state::format_params_string(&params_map),
-                );
+                let params = self.format_params(&crate::state::format_params_string(&params_map));
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
@@ -289,16 +297,88 @@ impl<'a> NetlistGenerator<'a> {
                     ));
                     return None;
                 }
-                let sense_name = format!("VSENSE_{}", instance_name);
-                self.lines.push(format!(
-                    "{} {} {} 0",
-                    sense_name, node_names[2], node_names[3]
-                ));
+                let params = crate::state::parse_params_string(&component.params);
+                let authored_reference = params
+                    .get("vref")
+                    .map(|reference| reference.trim())
+                    .filter(|reference| !reference.is_empty());
+                let sense_name = authored_reference
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("VSENSE_{}", instance_name));
+                if authored_reference.is_none() {
+                    self.lines.push(format!(
+                        "{} {} {} 0",
+                        sense_name, node_names[2], node_names[3]
+                    ));
+                }
                 let gain = self.format_value(&component.value);
-                Some(format!(
-                    "{} {} {} {} {}",
-                    instance_name, node_names[0], node_names[1], sense_name, gain
-                ))
+                let multiplier = params
+                    .get("m")
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty() && *value != "1");
+                let polynomial = params
+                    .get("poly")
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty());
+                let (upper_key, lower_key) = if component.kind == ComponentType::Ccvs {
+                    ("vmax", "vmin")
+                } else {
+                    ("imax", "imin")
+                };
+                let upper = params.get(upper_key).map(String::as_str);
+                let lower = params.get(lower_key).map(String::as_str);
+
+                if upper.is_some() || lower.is_some() {
+                    let current = format!("i({sense_name})");
+                    let mut expression = if let Some(coefficients) = polynomial {
+                        polynomial_expression(coefficients, &current)
+                    } else {
+                        format!("({gain})*({current})")
+                    };
+                    if let Some(multiplier) = multiplier {
+                        expression = format!("({multiplier})*({expression})");
+                    }
+                    expression = format!(
+                        "limit({expression},{},{})",
+                        lower.unwrap_or("-1e308"),
+                        upper.unwrap_or("1e308")
+                    );
+                    let behavioral_name = format!(
+                        "B{}",
+                        instance_name
+                            .strip_prefix(component.kind.spice_prefix())
+                            .unwrap_or(&instance_name)
+                    );
+                    let quantity = if component.kind == ComponentType::Ccvs {
+                        "V"
+                    } else {
+                        "I"
+                    };
+                    Some(format!(
+                        "{} {} {} {}={{{}}}",
+                        behavioral_name, node_names[0], node_names[1], quantity, expression
+                    ))
+                } else if let Some(coefficients) = polynomial {
+                    let multiplier_suffix =
+                        multiplier.map_or_else(String::new, |value| format!(" M={value}"));
+                    Some(format!(
+                        "{} {} {} POLY(1) {} {}{}",
+                        instance_name,
+                        node_names[0],
+                        node_names[1],
+                        sense_name,
+                        coefficients,
+                        multiplier_suffix
+                    ))
+                } else {
+                    let gain = multiplier
+                        .map(|multiplier| format!("{{({gain})*({multiplier})}}"))
+                        .unwrap_or(gain);
+                    Some(format!(
+                        "{} {} {} {} {}",
+                        instance_name, node_names[0], node_names[1], sense_name, gain
+                    ))
+                }
             }
 
             // Voltage-controlled switch (4 terminals: 1 2 c+ c-):
@@ -565,6 +645,26 @@ impl<'a> NetlistGenerator<'a> {
     }
 }
 
+fn polynomial_expression(coefficients: &str, variable: &str) -> String {
+    let coefficients = coefficients
+        .split(|character: char| character.is_ascii_whitespace() || character == ',')
+        .filter(|coefficient| !coefficient.is_empty())
+        .collect::<Vec<_>>();
+    if coefficients.is_empty() {
+        return "0".to_owned();
+    }
+    coefficients
+        .iter()
+        .enumerate()
+        .map(|(power, coefficient)| match power {
+            0 => format!("({coefficient})"),
+            1 => format!("({coefficient})*({variable})"),
+            _ => format!("({coefficient})*pow(({variable}),{power})"),
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 fn render_model_bound_instance_template(
     template: &str,
     reference: &str,
@@ -672,7 +772,6 @@ fn model_bound_instance_params(
         Ok(format!(" {formatted}"))
     }
 }
-
 
 fn same_terminal_sequence(master_ports: &[String], placed_ports: &[String]) -> bool {
     master_ports.len() == placed_ports.len()

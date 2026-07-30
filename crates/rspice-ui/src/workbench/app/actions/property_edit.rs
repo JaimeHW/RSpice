@@ -93,6 +93,27 @@ fn authoritative_cell_instance_sheet(
     Ok(Some(sheet))
 }
 
+/// Identity-only contract for legacy, hierarchical, and review-only cell
+/// instances whose master does not publish an executable typed parameter
+/// form. The editor remains fully functional for the one property the
+/// instance itself owns and preserves every opaque master parameter without
+/// presenting guessed controls.
+fn cell_instance_identity_sheet() -> PropertySheet {
+    let mut sheet = PropertySheet::new();
+    sheet.add(
+        PropertyDefinition::new("name")
+            .with_display_name("Reference designator")
+            .with_description("Unique instance name emitted at the start of the netlist line.")
+            .with_type(PropertyType::String)
+            .with_default(PropertyValue::string(""))
+            .with_max_length(128)
+            .with_order(-10_000)
+            .with_category("Identity")
+            .required(),
+    );
+    sheet
+}
+
 /// Single authority for the schematic Object properties command. Availability
 /// requires a live target that the matching editor can actually open.
 pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
@@ -107,8 +128,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .find(|component| component.id == id)
             .is_some_and(|component| {
                 if component.kind == ComponentType::CellInstance {
-                    authoritative_cell_instance_sheet(state, component)
-                        .is_ok_and(|sheet| sheet.is_some())
+                    authoritative_cell_instance_sheet(state, component).is_ok()
                 } else {
                     state.property_registry.get(component.kind).is_some()
                 }
@@ -147,7 +167,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     false
 }
 
-/// Open the tabbed property editor for `component_id`, populated from the
+/// Open the schematic component editor for `component_id`, populated from the
 /// component's registry sheet and current values. Refused on read-only
 /// views — the editor is an edit path.
 pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
@@ -180,9 +200,14 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
                 }
             }
             Ok(None) => {
-                state.property_registry.clear_cell_instance_sheet();
-                log::warn!("No authoritative property form found for cell instance");
-                return;
+                if let Err(error) = state
+                    .property_registry
+                    .install_cell_instance_sheet(cell_instance_identity_sheet())
+                {
+                    state.property_registry.clear_cell_instance_sheet();
+                    log::warn!("Cannot open cell-instance identity properties: {error}");
+                    return;
+                }
             }
             Err(error) => {
                 state.property_registry.clear_cell_instance_sheet();
@@ -651,13 +676,6 @@ mod tests {
             state.tabbed_property_dialog.component_type,
             Some(ComponentType::CellInstance)
         );
-        assert!(
-            state
-                .tabbed_property_dialog
-                .tabs
-                .iter()
-                .any(|tab| tab.name == "Geometry" && tab.property_count == 2)
-        );
         let sheet = state
             .property_registry
             .get(ComponentType::CellInstance)
@@ -684,7 +702,40 @@ mod tests {
     }
 
     #[test]
-    fn legacy_and_review_only_cells_cannot_reuse_a_prior_dynamic_form() {
+    fn every_static_component_family_opens_its_registered_editor() {
+        for (index, kind) in ComponentType::ALL
+            .into_iter()
+            .filter(|kind| *kind != ComponentType::CellInstance)
+            .enumerate()
+        {
+            let mut state = AppState::default();
+            state.schematic.components.clear();
+            let name = if kind.spice_prefix().is_empty() {
+                if kind == ComponentType::Ground {
+                    "GND".to_owned()
+                } else {
+                    String::new()
+                }
+            } else {
+                format!("{}1", kind.spice_prefix())
+            };
+            let component =
+                Component::new(index as u64 + 1, kind, Point::origin()).with_name_value(name, "");
+            state.schematic.components.push(component);
+
+            open_property_editor(&mut state, index as u64 + 1);
+
+            assert!(
+                state.tabbed_property_dialog.open,
+                "{} did not open a component editor",
+                kind.display_name()
+            );
+            assert_eq!(state.tabbed_property_dialog.component_type, Some(kind));
+        }
+    }
+
+    #[test]
+    fn legacy_and_review_only_cells_get_isolated_identity_forms() {
         let mut state = AppState::default();
         let definition = model_bound_definition();
         let binding = install_definition(&mut state, &definition);
@@ -713,15 +764,16 @@ mod tests {
                 .with_name_value("X2", "opaque"),
         );
         state.schematic.selection.select_only_component(2);
-        assert!(!selected_object_properties_available(&state));
+        assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 2);
-        assert!(!state.tabbed_property_dialog.open);
-        assert!(
-            state
-                .property_registry
-                .get(ComponentType::CellInstance)
-                .is_none()
-        );
+        assert!(state.tabbed_property_dialog.open);
+        let legacy_sheet = state
+            .property_registry
+            .get(ComponentType::CellInstance)
+            .expect("legacy identity form");
+        assert!(legacy_sheet.get("name").is_some());
+        assert!(legacy_sheet.get("w").is_none());
+        state.tabbed_property_dialog.close();
 
         let mut review = model_bound_definition();
         review.identity.cell = "review_only".to_owned();
@@ -735,14 +787,14 @@ mod tests {
                 .with_name_value("X3", "review_only"),
         );
         state.schematic.selection.select_only_component(3);
-        assert!(!selected_object_properties_available(&state));
+        assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 3);
-        assert!(!state.tabbed_property_dialog.open);
-        assert!(
-            state
-                .property_registry
-                .get(ComponentType::CellInstance)
-                .is_none()
-        );
+        assert!(state.tabbed_property_dialog.open);
+        let review_sheet = state
+            .property_registry
+            .get(ComponentType::CellInstance)
+            .expect("review identity form");
+        assert!(review_sheet.get("name").is_some());
+        assert!(review_sheet.get("w").is_none());
     }
 }

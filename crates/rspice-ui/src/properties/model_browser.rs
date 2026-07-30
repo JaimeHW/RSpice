@@ -11,7 +11,7 @@
 //!
 //! # Integration
 //!
-//! Used by the tabbed property dialog to allow users to browse and select
+//! Used by the component editor to allow users to browse and select
 //! device models from loaded PDK libraries.
 
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
@@ -25,7 +25,7 @@ use egui::{Context, ScrollArea, Ui};
 // =============================================================================
 
 /// State for the model browser dialog.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ModelBrowserState {
     /// Whether the dialog is open.
     pub open: bool,
@@ -39,8 +39,27 @@ pub struct ModelBrowserState {
     pub selected_model: Option<String>,
     /// Selected corner for the library.
     pub selected_corner: Option<String>,
+    /// Whether this workflow owns process-corner selection. Component
+    /// properties deliberately do not: process corners belong to the
+    /// simulation plan and apply to the executable model closure as a whole.
+    pub allow_corner_selection: bool,
     /// Browse-only mode (no Apply button, just viewing)
     pub browse_only: bool,
+}
+
+impl Default for ModelBrowserState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            search_text: String::new(),
+            type_filter: None,
+            selected_library: None,
+            selected_model: None,
+            selected_corner: None,
+            allow_corner_selection: true,
+            browse_only: false,
+        }
+    }
 }
 
 impl ModelBrowserState {
@@ -263,7 +282,10 @@ pub fn render_model_browser(
                 result = ModelBrowserResult::Selected {
                     library: library.clone(),
                     model: model.clone(),
-                    corner: state.selected_corner.clone(),
+                    corner: state
+                        .allow_corner_selection
+                        .then(|| state.selected_corner.clone())
+                        .flatten(),
                 };
                 state.close();
             }
@@ -450,7 +472,7 @@ fn render_model_details(ui: &mut Ui, state: &mut ModelBrowserState, manager: &Mo
     }
 
     // Process corners as chips — the selection rides into the result.
-    if !lib.corners.is_empty() {
+    if state.allow_corner_selection && !lib.corners.is_empty() {
         ui.add_space(8.0);
         pane_caption(ui, "CORNER");
         let mut corners: Vec<&String> = lib.corners.keys().collect();

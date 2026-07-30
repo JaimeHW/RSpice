@@ -1,7 +1,7 @@
-//! Tabbed property dialog state.
+//! Schematic component-editor transaction state.
 //!
-//! Which tabs a component's property sheet has, which is active, and the
-//! in-progress edits that have not been committed yet.
+//! Owns typed drafts, validation, nested model/PWL workflows, and the
+//! authority snapshot required to publish one isolated component mutation.
 
 use crate::properties::model_browser::ModelBrowserState;
 use crate::properties::pwl_editor::PwlEditorState;
@@ -11,7 +11,7 @@ use crate::state::property_types::{
 use crate::state::{Component, ComponentType};
 use std::collections::{HashMap, HashSet};
 
-/// State for the tabbed property dialog.
+/// Transaction state for the schematic component editor.
 ///
 /// Manages the complete lifecycle of property editing including:
 /// - Opening for a specific component
@@ -31,12 +31,6 @@ pub struct TabbedPropertyDialogState {
 
     /// Type of the component being edited
     pub component_type: Option<ComponentType>,
-
-    /// Currently active tab
-    pub active_tab: String,
-
-    /// Ordered list of tabs
-    pub tabs: Vec<TabInfo>,
 
     /// Current property values being edited
     pub values: HashMap<String, PropertyValue>,
@@ -63,6 +57,10 @@ pub struct TabbedPropertyDialogState {
     /// Global error message (e.g., "Cannot apply changes")
     pub global_error: Option<String>,
 
+    /// Host-level cross-field or topology validation failure from the most
+    /// recent Apply/OK attempt. It remains visible until the draft changes.
+    pub commit_error: Option<String>,
+
     /// Retained transaction-level failure that disables publication without
     /// erasing the user's draft (read-only, stale target, or document swap).
     pub session_error: Option<String>,
@@ -72,9 +70,6 @@ pub struct TabbedPropertyDialogState {
     pub design_execution_epoch: u64,
     pub active_schematic_epoch: u64,
     pub view_path: String,
-
-    /// Dirty close follows the mockup's explicit two-step discard contract.
-    pub discard_confirm: bool,
 
     /// Validated field delta prepared for the host's next atomic component
     /// mutation. Kept private so unvalidated draft values can never be
@@ -86,25 +81,6 @@ pub struct TabbedPropertyDialogState {
 
     /// Model browser state (for semiconductor components)
     pub model_browser: ModelBrowserState,
-}
-
-/// Information about a category tab.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TabInfo {
-    /// Internal category name
-    pub name: String,
-
-    /// Display name for the tab
-    pub display_name: String,
-
-    /// Order for sorting (lower = first)
-    pub order: i32,
-
-    /// Number of properties in this tab
-    pub property_count: usize,
-
-    /// Number of modified properties in this tab
-    pub modified_count: usize,
 }
 
 /// Durable document authority captured when a component property transaction
@@ -134,28 +110,68 @@ impl ComponentPropertySession {
     }
 }
 
-impl TabInfo {
-    /// Create a new tab info
-    pub fn new(name: impl Into<String>, order: i32) -> Self {
-        let name = name.into();
-        Self {
-            display_name: name.clone(),
-            name,
-            order,
-            property_count: 0,
-            modified_count: 0,
-        }
-    }
+/// Live, non-editable evidence shown beside a component's typed parameters.
+///
+/// The property draft remains owned by [`TabbedPropertyDialogState`]. This
+/// projection is rebuilt from authoritative application state every frame so
+/// connectivity, model provenance, and retained operating-point evidence can
+/// never become a second source of truth.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ComponentEditorContext {
+    pub glyph: String,
+    pub subtitle: String,
+    pub instance_path: String,
+    pub library_cell: String,
+    pub family: String,
+    pub model: Option<ComponentModelContext>,
+    pub operating_point: Option<ComponentOperatingPointContext>,
+    pub terminals: Vec<ComponentTerminalContext>,
 }
 
-/// Result of the tabbed property dialog interaction.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComponentModelContext {
+    pub name: String,
+    /// Exact catalog library identity when the binding was resolved from a
+    /// model library. Model names alone are not globally unique.
+    pub library: Option<String>,
+    pub source: String,
+    pub section: String,
+    pub status: String,
+    pub can_open: bool,
+    pub can_qualify: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ComponentOperatingPointContext {
+    pub run_id: u64,
+    pub analysis: String,
+    pub current: bool,
+    pub rows: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComponentTerminalContext {
+    pub pin: String,
+    pub direction: String,
+    pub net: Option<String>,
+}
+
+/// Result of the component editor interaction.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TabbedDialogResult {
     /// No action taken
     #[default]
     None,
-    /// User clicked Apply - changes should be committed
+    /// User clicked Apply - commit and retain the editor.
     Applied,
+    /// User clicked OK - commit and close after the host accepts the change.
+    AppliedAndClose,
+    /// Open the selected model's source/catalog record.
+    OpenModel,
+    /// Open qualification evidence for the selected model.
+    OpenQualification,
+    /// Close the editor and cross-probe the selected instance in Results.
+    CrossProbe,
     /// User clicked Cancel - changes discarded
     Cancelled,
 }
@@ -189,12 +205,12 @@ impl TabbedPropertyDialogState {
         self.modified.clear();
         self.validation_errors.clear();
         self.global_error = None;
+        self.commit_error = None;
         self.session_error = None;
         self.component_baseline = Some(component_baseline);
         self.design_execution_epoch = design_execution_epoch;
         self.active_schematic_epoch = active_schematic_epoch;
         self.view_path = view_path;
-        self.discard_confirm = false;
         self.prepared_commit.clear();
         self.show_advanced = false;
         self.model_browser = ModelBrowserState::default();
@@ -216,12 +232,6 @@ impl TabbedPropertyDialogState {
         } else {
             PwlEditorState::default()
         };
-
-        self.tabs = self.build_tabs_from_sheet(sheet);
-
-        if let Some(first) = self.tabs.first() {
-            self.active_tab = first.name.clone();
-        }
     }
 
     /// Close the dialog AND clear all state (for Cancel)
@@ -237,14 +247,13 @@ impl TabbedPropertyDialogState {
         self.numeric_text_drafts.clear();
         self.original_numeric_text_drafts.clear();
         self.numeric_draft_errors.clear();
-        self.tabs.clear();
         self.global_error = None;
+        self.commit_error = None;
         self.session_error = None;
         self.component_baseline = None;
         self.design_execution_epoch = 0;
         self.active_schematic_epoch = 0;
         self.view_path.clear();
-        self.discard_confirm = false;
         self.prepared_commit.clear();
         self.pwl_editor = PwlEditorState::default();
         self.model_browser = ModelBrowserState::default();
@@ -257,6 +266,7 @@ impl TabbedPropertyDialogState {
 
     /// Clear dialog state after values have been applied.
     pub fn clear_after_apply(&mut self) {
+        self.open = false;
         self.component_id = None;
         self.component_name = None;
         self.component_type = None;
@@ -267,30 +277,25 @@ impl TabbedPropertyDialogState {
         self.numeric_text_drafts.clear();
         self.original_numeric_text_drafts.clear();
         self.numeric_draft_errors.clear();
-        self.tabs.clear();
         self.global_error = None;
+        self.commit_error = None;
         self.session_error = None;
         self.component_baseline = None;
         self.design_execution_epoch = 0;
         self.active_schematic_epoch = 0;
         self.view_path.clear();
-        self.discard_confirm = false;
         self.prepared_commit.clear();
         self.pwl_editor = PwlEditorState::default();
         self.model_browser = ModelBrowserState::default();
     }
 
-    /// Guard a dirty close. The first attempt changes the footer to an
-    /// explicit discard action; the second confirms and clears every child
-    /// workflow owned by this editor.
+    /// Close and discard the isolated draft immediately.
+    ///
+    /// The component-editor mockup has a direct Cancel contract rather than
+    /// a secondary discard-confirmation state.
     pub fn attempt_close(&mut self) -> bool {
-        if self.has_modifications() && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
+        self.close();
+        true
     }
 
     /// Mark only the fields from a partial commit as the new baseline. Draft
@@ -322,7 +327,7 @@ impl TabbedPropertyDialogState {
         self.modified.clear();
         self.validation_errors.clear();
         self.global_error = None;
-        self.discard_confirm = false;
+        self.commit_error = None;
         self.prepared_commit.clear();
         if self.component_type.is_some_and(|kind| kind.is_pwl_source()) {
             let source = self
@@ -359,8 +364,8 @@ impl TabbedPropertyDialogState {
 
         self.values.insert(name.to_string(), value);
         self.validation_errors.remove(name);
+        self.commit_error = None;
         self.refresh_validation_summary();
-        self.discard_confirm = false;
     }
 
     /// Return retained source text for a numeric or expression editor.
@@ -404,7 +409,7 @@ impl TabbedPropertyDialogState {
         }
 
         if source_changed {
-            self.discard_confirm = false;
+            self.commit_error = None;
         }
         self.refresh_validation_summary();
     }
@@ -511,6 +516,7 @@ impl TabbedPropertyDialogState {
         sheet: &PropertySheet,
         policy: crate::state::PropertyCommitPolicy,
     ) -> bool {
+        self.commit_error = None;
         self.prepared_commit.clear();
         let all_valid = self.validate_all(sheet);
         if !all_valid && policy == crate::state::PropertyCommitPolicy::Atomic {
@@ -570,44 +576,6 @@ impl TabbedPropertyDialogState {
     fn refresh_validation_summary(&mut self) {
         self.global_error = (!self.validation_errors.is_empty())
             .then(|| format!("{} validation error(s)", self.validation_errors.len()));
-    }
-
-    /// Update modified counts for tabs
-    pub fn update_tab_modified_counts(&mut self, sheet: &PropertySheet) {
-        for tab in &mut self.tabs {
-            tab.modified_count = sheet
-                .iter()
-                .filter(|def| def.category == tab.name)
-                .filter(|def| self.modified.contains(&def.name))
-                .count();
-        }
-    }
-
-    /// Build tabs from a property sheet
-    fn build_tabs_from_sheet(&self, sheet: &PropertySheet) -> Vec<TabInfo> {
-        let mut category_orders: HashMap<String, i32> = HashMap::new();
-        let mut category_counts: HashMap<String, usize> = HashMap::new();
-
-        for def in sheet.iter() {
-            let order = category_orders
-                .entry(def.category.clone())
-                .or_insert(def.display_order);
-            *order = (*order).min(def.display_order);
-
-            *category_counts.entry(def.category.clone()).or_insert(0) += 1;
-        }
-
-        let mut tabs: Vec<TabInfo> = category_orders
-            .into_iter()
-            .map(|(name, order)| {
-                let mut tab = TabInfo::new(&name, order);
-                tab.property_count = category_counts.get(&name).copied().unwrap_or(0);
-                tab
-            })
-            .collect();
-
-        tabs.sort_by_key(|t| t.order);
-        tabs
     }
 }
 
@@ -757,15 +725,12 @@ mod tests {
     }
 
     #[test]
-    fn dirty_close_requires_explicit_second_discard_and_resets_child_state() {
+    fn cancel_discards_the_transaction_and_resets_child_state() {
         let sheet = constrained_sheet();
         let mut state = edited_dialog(&sheet);
         state.model_browser.open = true;
 
-        assert!(!state.attempt_close());
-        assert!(state.open);
-        assert!(state.discard_confirm);
-        assert!(state.attempt_close());
+        state.close();
         assert!(!state.open);
         assert!(!state.model_browser.open);
         assert!(state.component_baseline.is_none());
@@ -836,7 +801,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_pwl_cell_draft_marks_parent_dirty_and_requires_explicit_discard() {
+    fn invalid_pwl_cell_draft_marks_parent_dirty_and_is_discarded_atomically() {
         let sheet = pwl_sheet();
         let mut values = HashMap::new();
         values.insert(
@@ -875,10 +840,7 @@ mod tests {
             Some(&PropertyValue::String("0 0 1n 1e".to_owned()))
         );
         assert!(state.has_modifications());
-        assert!(!state.attempt_close());
-        assert!(state.open);
-        assert!(state.discard_confirm);
-        assert!(state.attempt_close());
+        state.close();
         assert!(!state.open);
     }
 
@@ -1060,5 +1022,19 @@ mod tests {
 
         let expected = format!("{} deg", stored);
         assert_eq!(state.numeric_text_draft("acphase"), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn successful_ok_cleanup_closes_and_clears_the_editor_transaction() {
+        let sheet = constrained_sheet();
+        let mut state = edited_dialog(&sheet);
+
+        state.clear_after_apply();
+
+        assert!(!state.open);
+        assert!(state.component_id.is_none());
+        assert!(state.component_baseline.is_none());
+        assert!(state.values.is_empty());
+        assert!(state.modified.is_empty());
     }
 }
