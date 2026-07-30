@@ -1,8 +1,10 @@
 //! Workspace-scoped document tabs. Stable project identities drive every tab;
 //! the shell never fabricates datasets, source files, or verification records.
 
+#[cfg(test)]
+use egui::Context;
 use egui::containers::menu::MenuButton;
-use egui::{Context, Frame, Layout, Panel, Sense, Ui, Vec2};
+use egui::{Frame, Layout, Panel, Sense, Ui, Vec2};
 
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
@@ -27,7 +29,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let ctx = &ctx;
     reconcile_document_registry(&mut app.state);
     let documents = visible_documents(&app.state);
-    if !document_strip_visible(app.state.workbench.workspace, documents.len()) {
+    if !document_strip_visible(
+        app.state.project_lifecycle.project_open,
+        app.state.workbench.workspace,
+        documents.len(),
+    ) {
         return;
     }
 
@@ -39,10 +45,15 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let rect = ui.max_rect();
-            let overflow_width = if t.metrics.ctl_h >= 44.0 {
-                44.0
+            let show_overflow = document_overflow_visible(documents.len());
+            let overflow_width = if show_overflow {
+                if t.metrics.ctl_h >= 44.0 {
+                    44.0
+                } else {
+                    OVERFLOW_WIDTH
+                }
             } else {
-                OVERFLOW_WIDTH
+                0.0
             };
             ui.painter().hline(
                 rect.x_range(),
@@ -76,19 +87,26 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             });
                     },
                 );
-                document_overflow(
-                    ui,
-                    &mut app.state,
-                    &documents,
-                    layout.document_bar_height,
-                    overflow_width,
-                );
+                if show_overflow {
+                    document_overflow(
+                        ui,
+                        &mut app.state,
+                        &documents,
+                        layout.document_bar_height,
+                        overflow_width,
+                    );
+                }
             });
         });
 }
 
+const fn document_overflow_visible(document_count: usize) -> bool {
+    document_count > 1
+}
+
 pub(in crate::workbench) fn is_visible(app: &RSpiceApp) -> bool {
     document_strip_visible(
+        app.state.project_lifecycle.project_open,
         app.state.workbench.workspace,
         visible_documents(&app.state).len(),
     )
@@ -438,8 +456,8 @@ fn reconcile_document_registry(state: &mut AppState) {
         .retain_documents(all_available);
 }
 
-fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
-    document_count > 1 || (workspace == Workspace::Design && document_count == 1)
+fn document_strip_visible(project_open: bool, workspace: Workspace, document_count: usize) -> bool {
+    project_open && (document_count > 1 || (workspace == Workspace::Design && document_count == 1))
 }
 
 fn document_tabs(
@@ -967,16 +985,30 @@ mod tests {
 
     #[test]
     fn design_strip_retains_the_single_active_cell_view() {
-        assert!(!document_strip_visible(Workspace::Design, 0));
-        assert!(document_strip_visible(Workspace::Design, 1));
-        assert!(document_strip_visible(Workspace::Design, 2));
+        assert!(!document_strip_visible(true, Workspace::Design, 0));
+        assert!(document_strip_visible(true, Workspace::Design, 1));
+        assert!(document_strip_visible(true, Workspace::Design, 2));
+    }
+
+    #[test]
+    fn closed_project_never_reserves_a_document_strip() {
+        assert!(!document_strip_visible(false, Workspace::Design, 1));
+        assert!(!document_strip_visible(false, Workspace::Design, 2));
+        assert!(!document_strip_visible(false, Workspace::Results, 2));
+    }
+
+    #[test]
+    fn overflow_is_reserved_only_when_multiple_documents_exist() {
+        assert!(!document_overflow_visible(0));
+        assert!(!document_overflow_visible(1));
+        assert!(document_overflow_visible(2));
     }
 
     #[test]
     fn non_design_strips_remain_reserved_for_multiple_open_documents() {
-        assert!(!document_strip_visible(Workspace::Project, 0));
-        assert!(!document_strip_visible(Workspace::Project, 1));
-        assert!(document_strip_visible(Workspace::Project, 2));
+        assert!(!document_strip_visible(true, Workspace::Project, 0));
+        assert!(!document_strip_visible(true, Workspace::Project, 1));
+        assert!(document_strip_visible(true, Workspace::Project, 2));
     }
 
     #[test]
@@ -997,6 +1029,29 @@ mod tests {
             Some(&WorkspaceDocumentId::ResultDataset(dataset))
         );
         assert!(registry.active(Workspace::Design).is_none());
+    }
+
+    #[test]
+    fn design_document_session_persists_active_and_closed_stable_ids() {
+        let first = WorkspaceDocumentId::CellView(crate::state::CellViewRef::new(
+            "work",
+            "top",
+            "schematic",
+        ));
+        let second = WorkspaceDocumentId::CellView(crate::state::CellViewRef::new(
+            "work", "opa189", "symbol",
+        ));
+        let mut registry = super::super::super::state::WorkspaceDocumentRegistry::default();
+        registry.close(&first);
+        registry.activate(second.clone());
+
+        let encoded =
+            serde_json::to_string(&registry).expect("document session should be serializable");
+        let restored: super::super::super::state::WorkspaceDocumentRegistry =
+            serde_json::from_str(&encoded).expect("document session should deserialize");
+
+        assert!(restored.is_closed(&first));
+        assert_eq!(restored.active(Workspace::Design), Some(&second));
     }
 
     #[test]

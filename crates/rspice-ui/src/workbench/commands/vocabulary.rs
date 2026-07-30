@@ -137,6 +137,7 @@ pub enum Command {
     ConfigurationSets,
     ReviewComments,
     RevisionHistory,
+    DesignSpecialistWorkspaces,
     SymbolPinTool,
     SymbolPolylineTool,
     SymbolRectangleTool,
@@ -464,6 +465,11 @@ impl Command {
             }
             Self::ReviewComments => spec("review-comments", "Review comments\u{2026}", "Design"),
             Self::RevisionHistory => spec("revision-history", "Revision history\u{2026}", "Design"),
+            Self::DesignSpecialistWorkspaces => spec(
+                "specialist-tools-design",
+                "Specialist workspaces\u{2026}",
+                "Design",
+            ),
             Self::SymbolPinTool => spec("symbol-pin-tool", "Place symbol pin", "Design"),
             Self::SymbolPolylineTool => spec("symbol-line-tool", "Draw symbol line", "Design"),
             Self::SymbolRectangleTool => {
@@ -908,6 +914,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ConfigurationSets,
     Command::ReviewComments,
     Command::RevisionHistory,
+    Command::DesignSpecialistWorkspaces,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
     Command::SymbolRectangleTool,

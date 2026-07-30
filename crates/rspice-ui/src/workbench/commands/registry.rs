@@ -620,7 +620,8 @@ impl Command {
             | Self::SelectionBulkEdit
             | Self::ConfigurationSets
             | Self::ReviewComments
-            | Self::RevisionHistory => ShortcutContext::DesignWorkspace,
+            | Self::RevisionHistory
+            | Self::DesignSpecialistWorkspaces => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::ClearResults
@@ -794,6 +795,9 @@ impl Command {
             return CommandAvailability::Available;
         }
         let reason = match self {
+            Self::OpenWorkspace(workspace) if workspace != Workspace::Project => {
+                "no project is open"
+            }
             Self::Save | Self::SaveAs | Self::SaveAll | Self::CloseProject => "no project is open",
             Self::RevertActiveDocument => "active document has no changes to revert",
             Self::CloseActiveDocument => "no closable document is active",
@@ -806,6 +810,60 @@ impl Command {
             Self::MonitorRecovery => "there are no secondary application windows to recover",
             Self::Undo => "nothing to undo",
             Self::Redo => "nothing to redo",
+            Self::PlaceInstance
+            | Self::PlaceWire
+            | Self::PlaceBus
+            | Self::PlaceBusTap
+            | Self::PlaceJunction
+            | Self::PlaceLabel
+            | Self::PlaceProbe
+            | Self::PlacePin
+            | Self::PlaceText
+            | Self::PlaceShape
+            | Self::Place(_)
+                if !super::active_schematic_editor(app) =>
+            {
+                "open an editable schematic or testbench"
+            }
+            Self::PlaceInstance
+            | Self::PlaceWire
+            | Self::PlaceBus
+            | Self::PlaceBusTap
+            | Self::PlaceJunction
+            | Self::PlaceLabel
+            | Self::PlaceProbe
+            | Self::PlacePin
+            | Self::PlaceText
+            | Self::PlaceShape
+            | Self::Place(_)
+                if app.state.schematic_edit_read_only() =>
+            {
+                "the active schematic is read-only"
+            }
+            Self::MoveSelection
+            | Self::StretchSelection
+            | Self::ArraySelection
+            | Self::ReplaceInstance
+            | Self::CreateHierarchy
+            | Self::RotateSelection
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if !super::active_schematic_editor(app) =>
+            {
+                "open an editable schematic or testbench"
+            }
+            Self::MoveSelection
+            | Self::StretchSelection
+            | Self::ArraySelection
+            | Self::ReplaceInstance
+            | Self::CreateHierarchy
+            | Self::RotateSelection
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if app.state.schematic_edit_read_only() =>
+            {
+                "the active schematic is read-only"
+            }
             Self::Cut
             | Self::Copy
             | Self::Duplicate
@@ -854,9 +912,23 @@ impl Command {
             Self::Paste => "clipboard has no compatible content",
             Self::RenameSelection => "select one editable component, net label, or declared bus",
             Self::ObjectProperties => "select one inspectable object",
+            Self::AscendHierarchy if !super::active_schematic_editor(app) => {
+                "open a schematic or testbench"
+            }
             Self::AscendHierarchy => "already at top hierarchy",
+            Self::DescendHierarchy | Self::DescendHierarchyDirect
+                if !super::active_schematic_editor(app) =>
+            {
+                "open a schematic or testbench"
+            }
             Self::DescendHierarchy | Self::DescendHierarchyDirect => {
                 "select one hierarchical instance"
+            }
+            Self::CheckAndSave if !super::active_schematic_editor(app) => {
+                "open an editable schematic or testbench"
+            }
+            Self::CheckAndSave if app.state.schematic_edit_read_only() => {
+                "the active schematic is read-only"
             }
             Self::RunSimulation => "active plan is not runnable",
             Self::StopSimulation

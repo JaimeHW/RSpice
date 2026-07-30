@@ -11,6 +11,32 @@ fn title_test_app() -> RSpiceApp {
     RSpiceApp::test_instance()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn desktop_and_compact_title_contexts_have_distinct_mockup_ownership() {
+    let mut app = title_test_app();
+    app.state.workbench.workspace = Workspace::Design;
+
+    assert_eq!(
+        title_context_text(&app, false),
+        app.state.workspace.project.display_name()
+    );
+    assert_eq!(title_context_text(&app, true), "top · schematic");
+    assert_eq!(active_title_cell(&app), "top · schematic");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn closed_project_title_context_does_not_leak_the_previous_document_identity() {
+    let mut app = title_test_app();
+    app.state.workbench.workspace = Workspace::Design;
+    app.state.project_lifecycle.project_open = false;
+
+    assert_eq!(title_context_text(&app, false), "RSpice Workbench");
+    assert_eq!(title_context_text(&app, true), "No project open");
+    assert_eq!(active_title_cell(&app), "No project open");
+}
+
 fn title_key_event(key: Key) -> egui::Event {
     egui::Event::Key {
         key,
@@ -541,11 +567,27 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
     }
     for command in [
         Command::CreateHierarchy,
-        Command::SpecialistToolBrowser,
+        Command::DesignSpecialistWorkspaces,
         Command::CheckAndSave,
     ] {
         assert!(command.palette_visible());
     }
+}
+
+#[test]
+fn design_specialist_row_uses_the_mockup_scoped_command_identity() {
+    assert_eq!(
+        Command::DesignSpecialistWorkspaces.stable_id(),
+        "specialist-tools-design"
+    );
+    assert_eq!(
+        Command::DesignSpecialistWorkspaces.spec().label,
+        "Specialist workspaces…"
+    );
+    assert_eq!(
+        command_icon(Command::DesignSpecialistWorkspaces),
+        WorkbenchIcon::Grid
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

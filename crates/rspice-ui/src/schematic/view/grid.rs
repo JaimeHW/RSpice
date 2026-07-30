@@ -67,14 +67,10 @@ pub(super) fn draw_grid(
         return;
     }
 
-    // Rules sweep the full canvas where dots only mark crossings, so the
-    // line style takes a quieter tint of the same grid token.
-    let color = match style {
-        GridStyle::Lines => crate::ui::tokens::active_palette()
-            .canvas_grid
-            .gamma_multiply(0.55),
-        _ => crate::ui::tokens::active_palette().canvas_grid,
-    };
+    // Dots and rules share the authored canvas-grid token. The style changes
+    // geometry only; silently dimming one mode makes the same visibility
+    // preference produce two different contrast contracts.
+    let color = crate::ui::tokens::active_palette().canvas_grid;
 
     // Lattice extent: cover the bounds plus one period on each side; the
     // painter's clip rect trims the overhang.

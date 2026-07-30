@@ -1288,7 +1288,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::SystemDiagnostics | Command::SupportBundle => WorkbenchIcon::Terminal,
         Command::LegalPrivacy => WorkbenchIcon::Check,
         Command::InteroperabilityMatrix | Command::ModelCompareRelease => WorkbenchIcon::Compare,
-        Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
+        Command::DesignSpecialistWorkspaces | Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
         Command::VisualizationStudio => WorkbenchIcon::Results,
         Command::AddVisualizationPane => WorkbenchIcon::Add,
         Command::VisualizationTraceManager => WorkbenchIcon::Sliders,
@@ -1484,7 +1484,7 @@ fn design_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::SpecialistToolBrowser,
+        Command::DesignSpecialistWorkspaces,
         "Specialist workspaces\u{2026}",
         None,
     );
@@ -1768,20 +1768,32 @@ fn paint_title_context(
     );
     ui.ctx().accesskit_node_builder(status.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        node.set_label(format!(
-            "Active project: {}; {}; {}",
-            app.state.workspace.project.display_name(),
-            cell,
-            if dirty {
-                "unsaved changes"
-            } else {
-                "all changes saved"
-            }
-        ));
+        if app.state.project_lifecycle.project_open {
+            node.set_label(format!(
+                "Active project: {}; {}; {}",
+                app.state.workspace.project.display_name(),
+                cell,
+                if dirty {
+                    "unsaved changes"
+                } else {
+                    "all changes saved"
+                }
+            ));
+        } else {
+            node.set_label("No project open");
+        }
     });
 }
 
 fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
+    if !app.state.project_lifecycle.project_open {
+        return if compact {
+            "No project open"
+        } else {
+            "RSpice Workbench"
+        }
+        .to_owned();
+    }
     if compact {
         active_title_cell(app)
     } else {
@@ -1836,6 +1848,9 @@ fn ellipsize_to_width(
 }
 
 fn active_title_cell(app: &RSpiceApp) -> String {
+    if !app.state.project_lifecycle.project_open {
+        return "No project open".to_owned();
+    }
     match app.state.workbench.workspace {
         Workspace::Project => "Project overview".to_owned(),
         Workspace::Design => format!(

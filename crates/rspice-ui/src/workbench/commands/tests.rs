@@ -1460,6 +1460,88 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
 }
 
 #[test]
+fn design_specialist_command_routes_to_the_existing_real_browser() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+
+    let command = Command::DesignSpecialistWorkspaces;
+    assert_eq!(command.stable_id(), "specialist-tools-design");
+    assert_eq!(Command::from_stable_id(command.stable_id()), Some(command));
+    assert_eq!(command.availability(&app), CommandAvailability::Available);
+
+    command.execute(&mut app);
+
+    assert_eq!(
+        app.state.workbench.current_route().surface_id(),
+        crate::workbench::SurfaceId::SpecialistToolBrowser
+    );
+}
+
+#[test]
+fn design_menu_commands_explain_wrong_context_and_read_only_states() {
+    let authoring_commands = [
+        Command::PlaceInstance,
+        Command::PlaceWire,
+        Command::PlaceBus,
+        Command::PlaceBusTap,
+        Command::PlaceJunction,
+        Command::PlaceLabel,
+        Command::PlaceProbe,
+        Command::PlacePin,
+        Command::PlaceText,
+        Command::PlaceShape,
+        Command::MoveSelection,
+        Command::StretchSelection,
+        Command::ArraySelection,
+        Command::ReplaceInstance,
+        Command::CreateHierarchy,
+    ];
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.workbench.activate(Workspace::Results);
+
+    for command in authoring_commands {
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled("open an editable schematic or testbench"),
+            "{command:?}"
+        );
+    }
+    assert_eq!(
+        Command::AscendHierarchy.availability(&app),
+        CommandAvailability::Disabled("open a schematic or testbench")
+    );
+    assert_eq!(
+        Command::DescendHierarchy.availability(&app),
+        CommandAvailability::Disabled("open a schematic or testbench")
+    );
+    assert_eq!(
+        Command::CheckAndSave.availability(&app),
+        CommandAvailability::Disabled("open an editable schematic or testbench")
+    );
+
+    app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.read_only = true;
+    for command in authoring_commands {
+        assert_eq!(
+            command.availability(&app),
+            CommandAvailability::Disabled("the active schematic is read-only"),
+            "{command:?}"
+        );
+    }
+    assert_eq!(
+        Command::CheckAndSave.availability(&app),
+        CommandAvailability::Disabled("the active schematic is read-only")
+    );
+
+    app.state.project_lifecycle.project_open = false;
+    assert_eq!(
+        Command::OpenWorkspace(Workspace::Design).availability(&app),
+        CommandAvailability::Disabled("no project is open")
+    );
+}
+
+#[test]
 fn only_exactly_implemented_reset_actions_are_discoverable() {
     let searchable = command_catalog().collect::<Vec<_>>();
     assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ResetActiveView));

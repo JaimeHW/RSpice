@@ -352,6 +352,13 @@ impl DrawingSheetLod {
     }
 }
 
+/// Overflow is actionable document state, not decorative page detail. It
+/// remains visible in fit/thumbnail views where off-sheet content is otherwise
+/// easiest to overlook.
+const fn overflow_advisories_visible(_tier: DrawingSheetLodTier) -> bool {
+    true
+}
+
 #[derive(Clone, Copy)]
 struct DrawingSheetPalette {
     desk: Color32,
@@ -517,7 +524,7 @@ pub(super) fn draw_overflow_advisories(
     sheet: &ActiveDrawingSheet,
 ) {
     let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point());
-    if lod.tier == DrawingSheetLodTier::Thumbnail {
+    if !overflow_advisories_visible(lod.tier) {
         return;
     }
     let palette = DrawingSheetPalette::resolve(&Tokens::get(painter.ctx()));
@@ -1836,6 +1843,14 @@ mod tests {
         let detail = DrawingSheetLod::resolve(1.5, 1.0);
         assert!(detail.show_origin);
         assert!(detail.show_dimensions);
+    }
+
+    #[test]
+    fn overflow_advisories_remain_visible_in_thumbnail_views() {
+        let thumbnail = DrawingSheetLod::resolve(0.1, 1.0);
+        assert_eq!(thumbnail.tier, DrawingSheetLodTier::Thumbnail);
+        assert!(!thumbnail.show_grid);
+        assert!(overflow_advisories_visible(thumbnail.tier));
     }
 
     #[test]

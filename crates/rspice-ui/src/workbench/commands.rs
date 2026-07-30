@@ -1572,7 +1572,9 @@ impl Command {
             Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
             Self::AccountOrganization => super::account_organization::open(app),
             Self::License => app.open_license_dialog(),
-            Self::SpecialistToolBrowser => crate::workbench::tools::specialist_tool_browser::open(app),
+            Self::DesignSpecialistWorkspaces | Self::SpecialistToolBrowser => {
+                crate::workbench::tools::specialist_tool_browser::open(app);
+            }
             Self::VisualizationStudio => crate::workbench::documents::visualization_studio::open(app),
             Self::ReportAuthoring => super::surfaces::report_authoring::open(app),
             Self::SaveReportDocument => super::surfaces::report_authoring::save_document(app),

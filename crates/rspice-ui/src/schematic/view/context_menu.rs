@@ -91,6 +91,7 @@ enum ContextIcon {
 #[derive(Debug, Clone, Copy)]
 struct ContextCommand {
     action: ContextAction,
+    stable_id: &'static str,
     icon: ContextIcon,
     label: &'static str,
     shortcut_command: Option<Command>,
@@ -105,18 +106,21 @@ enum ContextEntry {
 const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Properties,
+        stable_id: "object-properties",
         icon: ContextIcon::Sliders,
         label: "Object properties…",
         shortcut_command: Some(Command::ObjectProperties),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Rotate,
+        stable_id: "rotate-selection",
         icon: ContextIcon::Rotate,
         label: "Rotate 90°",
         shortcut_command: Some(Command::RotateSelection),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Mirror,
+        stable_id: "mirror-selection",
         icon: ContextIcon::Mirror,
         label: "Mirror",
         shortcut_command: Some(Command::MirrorSelectionHorizontal),
@@ -124,18 +128,21 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Copy,
+        stable_id: "copy-selection",
         icon: ContextIcon::Copy,
         label: "Copy selection",
         shortcut_command: Some(Command::Copy),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Duplicate,
+        stable_id: "duplicate-selection",
         icon: ContextIcon::Copy,
         label: "Duplicate and place",
         shortcut_command: Some(Command::Duplicate),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Delete,
+        stable_id: "delete-selection",
         icon: ContextIcon::Trash,
         label: "Delete selection…",
         shortcut_command: Some(Command::Delete),
@@ -143,12 +150,14 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
+        stable_id: "place-probe",
         icon: ContextIcon::Probe,
         label: "Add voltage or current probe…",
         shortcut_command: Some(Command::PlaceProbe),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OperatingPoint,
+        stable_id: "open-operating-point",
         icon: ContextIcon::Waveform,
         label: "Open operating point",
         shortcut_command: Some(Command::ResultViewer(ResultViewer::Op)),
@@ -156,18 +165,21 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::PageSetup,
+        stable_id: "page-setup",
         icon: ContextIcon::File,
         label: "Page setup\u{2026}",
         shortcut_command: Some(Command::PageSetup),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::FitDrawingSheet,
+        stable_id: "canvas-fit-sheet",
         icon: ContextIcon::Fit,
         label: "Fit drawing sheet",
         shortcut_command: Some(Command::ZoomFit),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::FitSchematicContent,
+        stable_id: "canvas-fit-content",
         icon: ContextIcon::Fit,
         label: "Fit schematic content",
         shortcut_command: Some(Command::FitSchematicContent),
@@ -544,7 +556,7 @@ fn render_context_contents(
                             )
                         });
                 let response = ui
-                    .push_id(("schematic-context-command", command.label), |ui| {
+                    .push_id(("schematic-context-command", command.stable_id), |ui| {
                         menu_item(ui, command, &shortcut, enabled, reason, row_height)
                     })
                     .inner;
@@ -1090,9 +1102,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
         ),
-        ContextAction::PageSetup
-        | ContextAction::FitDrawingSheet
-        | ContextAction::FitSchematicContent => (true, ""),
+        ContextAction::PageSetup => (
+            writable,
+            "The active schematic view is read-only; reopen it in an editable context to change page setup",
+        ),
+        ContextAction::FitDrawingSheet | ContextAction::FitSchematicContent => (true, ""),
     }
 }
 
@@ -1694,26 +1708,64 @@ mod tests {
 
     #[test]
     fn command_catalog_matches_the_mockup_exactly() {
-        let labels: Vec<_> = CONTEXT_ENTRIES
+        let commands: Vec<_> = CONTEXT_ENTRIES
             .iter()
             .filter_map(|entry| match entry {
-                ContextEntry::Command(command) => Some((command.label, command.shortcut_command)),
+                ContextEntry::Command(command) => {
+                    Some((command.stable_id, command.label, command.shortcut_command))
+                }
                 ContextEntry::Separator => None,
             })
             .collect();
         assert_eq!(
-            labels,
+            commands,
             vec![
-                ("Object properties…", Some(Command::ObjectProperties)),
-                ("Rotate 90°", Some(Command::RotateSelection)),
-                ("Mirror", Some(Command::MirrorSelectionHorizontal)),
-                ("Copy selection", Some(Command::Copy)),
-                ("Duplicate and place", Some(Command::Duplicate)),
-                ("Delete selection…", Some(Command::Delete)),
-                ("Add voltage or current probe…", Some(Command::PlaceProbe)),
                 (
+                    "object-properties",
+                    "Object properties…",
+                    Some(Command::ObjectProperties),
+                ),
+                (
+                    "rotate-selection",
+                    "Rotate 90°",
+                    Some(Command::RotateSelection),
+                ),
+                (
+                    "mirror-selection",
+                    "Mirror",
+                    Some(Command::MirrorSelectionHorizontal),
+                ),
+                ("copy-selection", "Copy selection", Some(Command::Copy)),
+                (
+                    "duplicate-selection",
+                    "Duplicate and place",
+                    Some(Command::Duplicate),
+                ),
+                (
+                    "delete-selection",
+                    "Delete selection…",
+                    Some(Command::Delete),
+                ),
+                (
+                    "place-probe",
+                    "Add voltage or current probe…",
+                    Some(Command::PlaceProbe),
+                ),
+                (
+                    "open-operating-point",
                     "Open operating point",
                     Some(Command::ResultViewer(ResultViewer::Op)),
+                ),
+                ("page-setup", "Page setup…", Some(Command::PageSetup)),
+                (
+                    "canvas-fit-sheet",
+                    "Fit drawing sheet",
+                    Some(Command::ZoomFit),
+                ),
+                (
+                    "canvas-fit-content",
+                    "Fit schematic content",
+                    Some(Command::FitSchematicContent),
                 ),
             ]
         );
@@ -1722,7 +1774,7 @@ mod tests {
                 .iter()
                 .filter(|entry| matches!(entry, ContextEntry::Separator))
                 .count(),
-            2
+            3
         );
     }
 
@@ -1908,6 +1960,15 @@ mod tests {
         assert!(!action_availability(ContextAction::Copy, &state).0);
         state.schematic.read_only = true;
         assert!(!action_availability(ContextAction::Probe, &state).0);
+        assert_eq!(
+            action_availability(ContextAction::PageSetup, &state),
+            (
+                false,
+                "The active schematic view is read-only; reopen it in an editable context to change page setup",
+            )
+        );
+        assert!(action_availability(ContextAction::FitDrawingSheet, &state).0);
+        assert!(action_availability(ContextAction::FitSchematicContent, &state).0);
 
         let mut junction_state = AppState::default();
         let point = Point::new(4, 4);
