@@ -303,6 +303,15 @@ struct DrawingSheetLod {
     show_dimensions: bool,
 }
 
+/// Canvas text belongs to the drawing sheet: it must grow when the operator
+/// zooms in, while retaining a readable device-space floor at normal
+/// fit-sheet zoom. The LOD policy suppresses the text entirely before that
+/// floor would overrun thumbnail/outline geometry.
+fn drawing_sheet_font_size(zoom: f32, authored_size: f32, readable_floor: f32) -> f32 {
+    let scaled = authored_size * zoom.max(0.0);
+    ((scaled.max(readable_floor) * 4.0).round() * 0.25).max(1.0)
+}
+
 impl DrawingSheetLod {
     fn resolve(zoom: f32, pixels_per_point: f32) -> Self {
         let millimetre_pixels =
@@ -447,7 +456,15 @@ pub(super) fn draw_base(
         if layers.zones
             && let Some(zones) = sheet.geometry.physical.zones
         {
-            draw_zone_band(painter, printable, drawing_area, zones, lod, palette);
+            draw_zone_band(
+                painter,
+                printable,
+                drawing_area,
+                zones,
+                lod,
+                viewport.zoom,
+                palette,
+            );
         }
     }
     if layers.title_block
@@ -456,7 +473,7 @@ pub(super) fn draw_base(
             .title_block
             .map(|rect| rect.screen_rect(viewport))
     {
-        draw_title_block(painter, block, lod, palette, state, sheet);
+        draw_title_block(painter, block, lod, viewport.zoom, palette, state, sheet);
     }
     if lod.show_marks && layers.registration_marks {
         if sheet.format.marks.registration {
@@ -467,10 +484,10 @@ pub(super) fn draw_base(
         }
     }
     if lod.show_origin {
-        draw_origin(painter, paper, palette);
+        draw_origin(painter, paper, viewport.zoom, palette);
     }
     if lod.show_dimensions && layers.dimensions_at_detail_zoom {
-        draw_dimensions(painter, paper, palette, sheet);
+        draw_dimensions(painter, paper, viewport.zoom, palette, sheet);
     }
 
     // The paper edge is permanent and is deliberately painted last.
@@ -1069,6 +1086,7 @@ fn draw_zone_band(
     drawing_area: Rect,
     zones: DrawingSheetZoneGrid,
     lod: DrawingSheetLod,
+    zoom: f32,
     palette: DrawingSheetPalette,
 ) {
     let column_width = drawing_area.width() / f32::from(zones.columns);
@@ -1108,7 +1126,10 @@ fn draw_zone_band(
     if !lod.show_zone_labels || !zone_edge_labels_visible(zones.labels) {
         return;
     }
-    let font = theme::mono(8.0, theme::FontWeight::Medium);
+    let font = theme::mono(
+        drawing_sheet_font_size(zoom, 8.0, 8.0),
+        theme::FontWeight::Medium,
+    );
     let top_y = (printable.top() + drawing_area.top()) * 0.5;
     let bottom_y = (drawing_area.bottom() + printable.bottom()) * 0.5;
     for column in 0..zones.columns {
@@ -1215,6 +1236,7 @@ fn draw_title_block(
     painter: &Painter,
     block: Rect,
     lod: DrawingSheetLod,
+    zoom: f32,
     palette: DrawingSheetPalette,
     state: &AppState,
     sheet: &ActiveDrawingSheet,
@@ -1300,7 +1322,7 @@ fn draw_title_block(
                 authored_block.top() + cell_height * (row + 1) as f32,
             ),
         )
-        .shrink2(vec2(4.0, 2.0));
+        .shrink2(vec2(4.0 * zoom.max(1.0), 2.0 * zoom.max(1.0)));
         let cell = Rect::from_two_pos(
             transform(authored_cell.left_top()),
             transform(authored_cell.right_bottom()),
@@ -1311,14 +1333,17 @@ fn draw_title_block(
             transform(authored_cell.left_top()),
             Align2::LEFT_TOP,
             field.label,
-            theme::mono(5.5, theme::FontWeight::Regular),
+            theme::mono(
+                drawing_sheet_font_size(zoom, 5.5, 7.0),
+                theme::FontWeight::Regular,
+            ),
             palette.block_label,
             rotation,
         );
         if field.authority == DrawingSheetTitleFieldValueAuthority::Automatic {
             clipped.circle_filled(
                 transform(pos2(authored_cell.right() - 2.0, authored_cell.top() + 2.0)),
-                1.25,
+                1.25 * zoom.max(1.0),
                 palette.block_label,
             );
         }
@@ -1327,7 +1352,10 @@ fn draw_title_block(
             transform(pos2(authored_cell.left(), authored_cell.bottom())),
             Align2::LEFT_BOTTOM,
             truncate_canvas_title_value(&field.value, max_chars),
-            theme::mono(7.0, theme::FontWeight::Medium),
+            theme::mono(
+                drawing_sheet_font_size(zoom, 7.0, 9.0),
+                theme::FontWeight::Medium,
+            ),
             palette.block_ink,
             rotation,
         );
@@ -1552,7 +1580,7 @@ fn draw_folding_marks(painter: &Painter, paper: Rect, zoom: f32, palette: Drawin
     }
 }
 
-fn draw_origin(painter: &Painter, paper: Rect, palette: DrawingSheetPalette) {
+fn draw_origin(painter: &Painter, paper: Rect, zoom: f32, palette: DrawingSheetPalette) {
     let stroke = Stroke::new(1.0, palette.zone_ink);
     painter.line_segment(
         [paper.left_top(), paper.left_top() + vec2(9.0, 0.0)],
@@ -1566,7 +1594,10 @@ fn draw_origin(painter: &Painter, paper: Rect, palette: DrawingSheetPalette) {
         paper.left_top() + vec2(5.0, 11.0),
         Align2::LEFT_TOP,
         "0,0",
-        theme::mono(7.0, theme::FontWeight::Regular),
+        theme::mono(
+            drawing_sheet_font_size(zoom, 7.0, 8.0),
+            theme::FontWeight::Regular,
+        ),
         palette.zone_ink,
     );
 }
@@ -1574,6 +1605,7 @@ fn draw_origin(painter: &Painter, paper: Rect, palette: DrawingSheetPalette) {
 fn draw_dimensions(
     painter: &Painter,
     paper: Rect,
+    zoom: f32,
     palette: DrawingSheetPalette,
     sheet: &ActiveDrawingSheet,
 ) {
@@ -1583,14 +1615,20 @@ fn draw_dimensions(
         paper.center_top() - vec2(0.0, 7.0),
         Align2::CENTER_BOTTOM,
         format!("{} {}", unit.format_um(width), unit.suffix()),
-        theme::mono(7.0, theme::FontWeight::Regular),
+        theme::mono(
+            drawing_sheet_font_size(zoom, 7.0, 8.0),
+            theme::FontWeight::Regular,
+        ),
         palette.zone_ink,
     );
     painter.text(
         paper.left_center() - vec2(7.0, 0.0),
         Align2::RIGHT_CENTER,
         format!("{} {}", unit.format_um(height), unit.suffix()),
-        theme::mono(7.0, theme::FontWeight::Regular),
+        theme::mono(
+            drawing_sheet_font_size(zoom, 7.0, 8.0),
+            theme::FontWeight::Regular,
+        ),
         palette.zone_ink,
     );
 }
@@ -1731,6 +1769,7 @@ mod tests {
                     edges: DrawingSheetZoneEdges::All,
                 },
                 DrawingSheetLod::resolve(1.5, 1.0),
+                1.5,
                 DrawingSheetPalette::resolve(&Tokens::get(context)),
             );
         });
@@ -1744,6 +1783,14 @@ mod tests {
             !sheet.cursor_status(point.0, point.1).contains("zone"),
             "coordinates-only mode must not append a zone reference to status text"
         );
+    }
+
+    #[test]
+    fn drawing_sheet_text_has_a_readable_floor_and_scales_when_zoomed_in() {
+        assert_eq!(drawing_sheet_font_size(0.25, 7.0, 9.0), 9.0);
+        assert_eq!(drawing_sheet_font_size(1.0, 7.0, 9.0), 9.0);
+        assert_eq!(drawing_sheet_font_size(2.0, 7.0, 9.0), 14.0);
+        assert!(drawing_sheet_font_size(3.0, 5.5, 7.0) > drawing_sheet_font_size(1.0, 5.5, 7.0));
     }
 
     #[test]

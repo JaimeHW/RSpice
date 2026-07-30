@@ -9,6 +9,15 @@ use crate::workbench::app_state::AppState;
 
 const SCHEMATIC_ZOOM_MIN: f64 = 0.25;
 const SCHEMATIC_ZOOM_MAX: f64 = 8.0;
+/// Convert high-resolution wheel/trackpad deltas into a continuous zoom.
+///
+/// A fixed multiplier per frame makes a precision trackpad emit the same
+/// ten-percent jump for a one-pixel gesture as for a full mouse-wheel notch,
+/// then compounds those jumps while the OS coalesces events. This exponential
+/// curve preserves direction and accumulated motion while halving the old
+/// wheel sensitivity. The per-frame cap rejects pathological driver spikes.
+const WHEEL_ZOOM_EXPONENT_PER_POINT: f64 = 0.0005;
+const WHEEL_ZOOM_MAX_DELTA_PER_FRAME: f64 = 240.0;
 
 pub(super) fn primary_pan_modifier_down(ui: &Ui) -> bool {
     ui.input(|input| input.modifiers.alt || input.key_down(egui::Key::Space))
@@ -75,16 +84,23 @@ pub(super) fn handle_viewport_navigation(
         } else if scroll.y != 0.0
             && let Some(cursor_pos) = response.hover_pos()
         {
-            let zoom_factor = if scroll.y > 0.0 { 1.1 } else { 1.0 / 1.1 };
             apply_zoom_about(
                 &mut state.schematic.zoom,
                 &mut state.schematic.pan,
                 available,
                 cursor_pos,
-                zoom_factor,
+                wheel_zoom_factor(scroll.y),
             );
         }
     }
+}
+
+fn wheel_zoom_factor(scroll_delta_y: f32) -> f64 {
+    let delta = f64::from(scroll_delta_y).clamp(
+        -WHEEL_ZOOM_MAX_DELTA_PER_FRAME,
+        WHEEL_ZOOM_MAX_DELTA_PER_FRAME,
+    );
+    (delta * WHEEL_ZOOM_EXPONENT_PER_POINT).exp()
 }
 
 fn apply_horizontal_scroll_pan(pan: &mut (f64, f64), delta: f32) {
@@ -158,6 +174,30 @@ mod tests {
         let mut pan = (4.0, -8.0);
         apply_horizontal_scroll_pan(&mut pan, 12.5);
         assert_eq!(pan, (16.5, -8.0));
+    }
+
+    #[test]
+    fn wheel_zoom_is_continuous_bounded_and_reversible() {
+        assert_eq!(wheel_zoom_factor(0.0), 1.0);
+
+        let notch_in = wheel_zoom_factor(120.0);
+        let notch_out = wheel_zoom_factor(-120.0);
+        assert!(
+            (1.0..1.07).contains(&notch_in),
+            "one wheel notch should be a controlled step, got {notch_in}"
+        );
+        assert!((notch_in * notch_out - 1.0).abs() < 1e-12);
+
+        let small_delta = wheel_zoom_factor(1.0);
+        assert!(
+            (1.0..1.001).contains(&small_delta),
+            "precision scrolling should remain proportional, got {small_delta}"
+        );
+
+        assert_eq!(
+            wheel_zoom_factor(10_000.0),
+            wheel_zoom_factor(WHEEL_ZOOM_MAX_DELTA_PER_FRAME as f32),
+        );
     }
 
     #[test]
