@@ -14,9 +14,11 @@ const SCHEMATIC_ZOOM_MAX: f64 = 8.0;
 /// A fixed multiplier per frame makes a precision trackpad emit the same
 /// ten-percent jump for a one-pixel gesture as for a full mouse-wheel notch,
 /// then compounds those jumps while the OS coalesces events. This exponential
-/// curve preserves direction and accumulated motion while halving the old
-/// wheel sensitivity. The per-frame cap rejects pathological driver spikes.
-const WHEEL_ZOOM_EXPONENT_PER_POINT: f64 = 0.0005;
+/// curve preserves direction and accumulated motion without allowing one
+/// physical gesture—often delivered as several platform events—to traverse
+/// most of the zoom range. The per-frame cap rejects pathological driver
+/// spikes.
+const WHEEL_ZOOM_EXPONENT_PER_POINT: f64 = 0.00005;
 const WHEEL_ZOOM_MAX_DELTA_PER_FRAME: f64 = 240.0;
 
 pub(super) fn primary_pan_modifier_down(ui: &Ui) -> bool {
@@ -183,7 +185,7 @@ mod tests {
         let notch_in = wheel_zoom_factor(120.0);
         let notch_out = wheel_zoom_factor(-120.0);
         assert!(
-            (1.0..1.07).contains(&notch_in),
+            (1.0..1.007).contains(&notch_in),
             "one wheel notch should be a controlled step, got {notch_in}"
         );
         assert!((notch_in * notch_out - 1.0).abs() < 1e-12);
