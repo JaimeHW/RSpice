@@ -174,7 +174,7 @@ impl Workspace {
             Self::Simulate => "Analysis inspector",
             Self::Results => "Data inspector",
             Self::Verify => "Evidence inspector",
-            Self::Models => "Model inspector",
+            Self::Models => "Model details",
             Self::Netlist => "Source inspector",
         }
     }

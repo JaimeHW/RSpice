@@ -1,6 +1,7 @@
 //! Context inspector with authoritative object and provenance details.
 
 mod design;
+mod models;
 mod symbol;
 
 use egui::{Align2, Color32, Pos2, Rect, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -334,7 +335,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     Workspace::Simulate => simulate(ui, app),
                     Workspace::Results => results(ui, app),
                     Workspace::Verify => verify(ui, app),
-                    Workspace::Models => models(ui, app),
+                    Workspace::Models => models::show(ui, app),
                     Workspace::Netlist => netlist(ui, app),
                 }
             }
@@ -1484,254 +1485,6 @@ fn wilson_interval_95(successes: usize, total: usize) -> Option<(f64, f64)> {
     Some(((center - half).max(0.0), (center + half).min(1.0)))
 }
 
-fn models(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.workbench.models_page == crate::workbench::state::ModelsPage::Models {
-        match app.state.workbench.models_view.catalog_scope {
-            crate::workbench::state::ModelsCatalogScope::InstalledPacks => {
-                model_pack_inspector(ui, app);
-                return;
-            }
-            crate::workbench::state::ModelsCatalogScope::RSpiceLibrary => {
-                shipped_part_inspector(ui, app);
-                return;
-            }
-            crate::workbench::state::ModelsCatalogScope::Project => {}
-        }
-    }
-    section_header(ui, "Model identity", None);
-    property_row(
-        ui,
-        "Library",
-        app.state
-            .model_library_manager
-            .selected_library
-            .as_deref()
-            .unwrap_or("None"),
-    );
-    let selected_library = app.state.model_library_manager.current_library().cloned();
-    if let Some(library) = selected_library {
-        property_row(
-            ui,
-            "PDK",
-            if library.pdk_name.is_empty() {
-                "Unspecified"
-            } else {
-                &library.pdk_name
-            },
-        );
-        property_row(
-            ui,
-            "Technology",
-            if library.technology_node.is_empty() {
-                "Unspecified"
-            } else {
-                &library.technology_node
-            },
-        );
-        property_row(
-            ui,
-            "Version",
-            if library.version.is_empty() {
-                "Unspecified"
-            } else {
-                &library.version
-            },
-        );
-        property_row(ui, "Models", &library.model_count().to_string());
-        property_row(ui, "Corners", &library.corner_count().to_string());
-        property_row(
-            ui,
-            "Authority",
-            match library.source_authority {
-                crate::state::model_library::ModelSourceAuthority::BuiltIn => "RSpice built-in",
-                crate::state::model_library::ModelSourceAuthority::External => "External",
-                crate::state::model_library::ModelSourceAuthority::ProjectOwned { .. } => {
-                    "Project-owned"
-                }
-            },
-        );
-        property_row(
-            ui,
-            "Pinned sources",
-            &library.source_closure.len().to_string(),
-        );
-        property_row(ui, "Include edges", &library.source_edges.len().to_string());
-        property_row(
-            ui,
-            "Selected corner",
-            library.selected_corner.as_deref().unwrap_or("None"),
-        );
-        if let Some(model_name) = &app.state.workbench.selected_model
-            && let Some(model) = library.models.get(model_name)
-        {
-            section_header(ui, "Selected model", None);
-            property_row(ui, "Name", &model.name);
-            property_row(ui, "Type", &format!("{:?}", model.model_type));
-            property_row(ui, "Level", &format!("{:?}", model.level));
-            property_row(ui, "Parameters", &model.parameters.len().to_string());
-            property_row(
-                ui,
-                "Typed metadata",
-                if library.model_definition_metadata.contains_key(model_name) {
-                    "Present"
-                } else {
-                    "Not declared"
-                },
-            );
-            if let Some(qualification) = library.model_qualification.get(model_name) {
-                property_row(ui, "Suites", &qualification.suites.len().to_string());
-                property_row(ui, "Evidence", &qualification.evidence.len().to_string());
-                property_row(ui, "Releases", &qualification.releases.len().to_string());
-            } else {
-                property_row(ui, "Qualification", "No retained suite");
-            }
-            if let Some(correlation) = library.model_correlation.get(model_name) {
-                property_row(
-                    ui,
-                    "Correlation suites",
-                    &correlation.suites.len().to_string(),
-                );
-                property_row(
-                    ui,
-                    "Correlation evidence",
-                    &correlation.evidence.len().to_string(),
-                );
-            }
-            if let Some(vdd) = model.vdd {
-                property_row(ui, "Nominal VDD", &format!("{vdd:.6} V"));
-            }
-            if let Some(vth) = model.vth0 {
-                property_row(ui, "Threshold", &format!("{vth:.6} V"));
-            }
-            if let (Some(l_min), Some(l_max)) = (model.l_min, model.l_max) {
-                property_row(ui, "Length envelope", &format!("{l_min:.6e}…{l_max:.6e} m"));
-            }
-            if let (Some(w_min), Some(w_max)) = (model.w_min, model.w_max) {
-                property_row(ui, "Width envelope", &format!("{w_min:.6e}…{w_max:.6e} m"));
-            }
-            section_header(ui, "Actions", None);
-            if ui.button("Open model editor").clicked() {
-                super::super::commands::vocabulary::Command::ModelEditor.execute(app);
-            }
-            if ui.button("Open qualification").clicked() {
-                app.state.workbench.models_page =
-                    crate::workbench::state::ModelsPage::Qualification;
-            }
-            if ui.button("View include graph").clicked() {
-                app.state.workbench.models_page = crate::workbench::state::ModelsPage::Include;
-            }
-        }
-    }
-}
-
-fn model_pack_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Shipped corpus", None);
-    let Some(index) = app.state.model_library_manager.spice_packs() else {
-        property_row(ui, "State", "Not installed");
-        property_row(ui, "Recovery", "Set RSPICE_MODELS_DIR and rescan");
-        return;
-    };
-    property_row(ui, "Packs", &index.packs().len().to_string());
-    property_row(ui, "Parts", &index.part_count().to_string());
-    property_row(ui, "Definitions", &index.definition_count().to_string());
-    let selected = app
-        .state
-        .workbench
-        .models_view
-        .selected_pack
-        .as_deref()
-        .and_then(|id| index.pack(id))
-        .cloned()
-        .or_else(|| index.packs().first().cloned());
-    let Some(pack) = selected else {
-        return;
-    };
-    section_header(ui, "Selected pack", None);
-    property_row(ui, "Name", &pack.name);
-    property_row(ui, "ID", &pack.id);
-    property_row(ui, "Origin", &pack.category);
-    property_row(
-        ui,
-        "Parts",
-        &(pack.models_top + pack.subcircuits_top).to_string(),
-    );
-    property_row(ui, "Files", &pack.files.to_string());
-    property_row(ui, "License", &pack.spdx);
-    property_row(ui, "Tier", pack.tier.display_name());
-    property_row(
-        ui,
-        "Redistributable",
-        if pack.redistributable { "Yes" } else { "No" },
-    );
-    property_row(
-        ui,
-        "Entry",
-        pack.entry
-            .as_deref()
-            .and_then(std::path::Path::to_str)
-            .unwrap_or("Not declared"),
-    );
-    section_header(ui, "Actions", None);
-    if ui.button("Browse pack parts").clicked() {
-        app.state.workbench.models_view.catalog_scope =
-            crate::workbench::state::ModelsCatalogScope::RSpiceLibrary;
-        app.state.workbench.models_view.selected_pack = Some(pack.id);
-        app.state.workbench.models_view.catalog_query.clear();
-    }
-}
-
-fn shipped_part_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "RSpice model library", None);
-    let Some(index) = app.state.model_library_manager.spice_packs() else {
-        property_row(ui, "State", "Not installed");
-        return;
-    };
-    property_row(ui, "Addressable parts", &index.part_count().to_string());
-    property_row(ui, "Packs", &index.packs().len().to_string());
-    property_row(
-        ui,
-        "Redistributable packs",
-        &index.redistributable_packs().count().to_string(),
-    );
-    let selected_key = app
-        .state
-        .workbench
-        .models_view
-        .selected_part
-        .clone()
-        .unwrap_or_default();
-    let mut components = selected_key.split('\u{1f}');
-    let pack_id = components.next().unwrap_or_default();
-    let part_name = components.next().unwrap_or_default();
-    if !part_name.is_empty() {
-        section_header(ui, "Selected part", None);
-        property_row(ui, "Name", part_name);
-        property_row(ui, "Pack", pack_id);
-        if let Some(pack) = index.pack(pack_id) {
-            property_row(ui, "Pack title", &pack.name);
-            property_row(ui, "Origin", &pack.category);
-            property_row(ui, "License", &pack.spdx);
-            property_row(
-                ui,
-                "Project eligibility",
-                if pack.redistributable {
-                    "Requires per-file check"
-                } else {
-                    "Blocked"
-                },
-            );
-        }
-        section_header(ui, "Actions", None);
-        if ui.button("Show owning pack").clicked() {
-            app.state.workbench.models_view.catalog_scope =
-                crate::workbench::state::ModelsCatalogScope::InstalledPacks;
-            app.state.workbench.models_view.selected_pack = Some(pack_id.to_owned());
-        }
-    } else {
-        property_row(ui, "Selection", "Choose a catalog part");
-    }
-}
-
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, DiagnosticSeverity,
@@ -2189,6 +1942,34 @@ mod tests {
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Heading
                 && node.label() == Some("Inspector")
+                && node.level() == Some(2)
+        }));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn models_inspector_header_uses_the_canonical_details_title() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Models);
+
+        let nodes = ctx
+            .run_ui(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.set_width(312.0);
+                    header(ui, &mut app);
+                });
+            })
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        assert!(nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Heading
+                && node.label() == Some("Model details")
                 && node.level() == Some(2)
         }));
     }

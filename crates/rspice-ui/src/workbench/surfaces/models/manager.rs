@@ -4,6 +4,8 @@
 //! and qualification code. This module owns the current six-page workbench,
 //! corpus scopes, guarded source/pack actions, and model detail composition.
 
+mod specialist_pages;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -17,147 +19,166 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::design_history::publish_model_library_candidate;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{
     ModelPackFacet, ModelsCatalogScope, ModelsOperationalState, ModelsPage, ModelsWorkbenchDialog,
     ProjectModelFacet, RSpicePartFacet,
 };
+use crate::workbench::{AppState, RSpiceApp};
 
-const ROW_H: f32 = 27.0;
+const ROW_H: f32 = 24.0;
+const HEADER_H: f32 = 27.0;
+const CATALOG_FOOT_H: f32 = 26.0;
 const CATALOG_LIMIT: usize = 160;
+const PAGE_TABS_H: f32 = 38.0;
+const CATALOG_BAR_H: f32 = 34.0;
+
+enum ManagerAction {
+    Command(Command),
+    BindComponentModel {
+        component_id: u64,
+        library: String,
+        model: String,
+    },
+}
+
+struct ManagerRenderContext<'a> {
+    state: &'a mut AppState,
+    pending_actions: &'a mut Vec<ManagerAction>,
+}
+
+impl ManagerRenderContext<'_> {
+    fn queue_command(&mut self, command: Command) {
+        self.pending_actions.push(ManagerAction::Command(command));
+    }
+
+    fn queue_model_binding(&mut self, component_id: u64, library: &str, model: &str) {
+        self.pending_actions
+            .push(ManagerAction::BindComponentModel {
+                component_id,
+                library: library.to_owned(),
+                model: model.to_owned(),
+            });
+    }
+}
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+    // The approved manager is one continuous document surface. Individual
+    // panes own their padding; the composition itself uses one-pixel dividers.
+    ui.spacing_mut().item_spacing = Vec2::ZERO;
     ui.visuals_mut().widgets.noninteractive.bg_fill = t.color.bg_panel;
 
-    manager_toolbar(ui, app);
-    page_tabs(ui, app);
-    show_action_receipt(ui, app);
-
-    match app.state.workbench.models_page {
-        ModelsPage::Models => catalog_page(ui, app),
-        ModelsPage::Symbols => symbols_page(ui, app),
-        ModelsPage::Corners => corners_page(ui, app),
-        ModelsPage::Bins => bins_page(ui, app),
-        ModelsPage::Include => include_page(ui, app),
-        ModelsPage::Qualification => super::qualification(ui, app),
+    let mut pending_actions = Vec::new();
+    {
+        let mut render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending_actions,
+        };
+        page_tabs(ui, &mut render);
     }
-    render_dialog(ui, app);
+
+    let page = app.state.workbench.models_page;
+    let include_diagnostics =
+        (page == ModelsPage::Include).then(|| super::include_diagnostics(app));
+    if page == ModelsPage::Qualification {
+        super::qualification(ui, app);
+    } else {
+        let mut render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending_actions,
+        };
+        match page {
+            ModelsPage::Models => catalog_page(ui, &mut render),
+            ModelsPage::Symbols => specialist_pages::symbols_page(ui, &mut render),
+            ModelsPage::Corners => specialist_pages::corners_page(ui, &mut render),
+            ModelsPage::Bins => specialist_pages::bins_page(ui, &mut render),
+            ModelsPage::Include => specialist_pages::include_page(
+                ui,
+                &mut render,
+                include_diagnostics
+                    .as_ref()
+                    .expect("include diagnostics are prepared for the include page"),
+            ),
+            ModelsPage::Qualification => unreachable!("qualification renders above"),
+        }
+    }
+
+    {
+        let mut render = ManagerRenderContext {
+            state: &mut app.state,
+            pending_actions: &mut pending_actions,
+        };
+        render_dialog(ui, &mut render);
+    }
+    for action in pending_actions {
+        match action {
+            ManagerAction::Command(command) => command.execute(app),
+            ManagerAction::BindComponentModel {
+                component_id,
+                library,
+                model,
+            } => {
+                let result = crate::workbench::docks::bind_component_model_from_catalog(
+                    app,
+                    component_id,
+                    &library,
+                    &model,
+                )
+                .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
+                apply_receipt(&mut app.state, result);
+            }
+        }
+    }
 }
 
-fn manager_toolbar(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::NONE
-        .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(8, 5))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("MODELS & PDKS")
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text),
-                );
-                ui.separator();
-                if ui.button("＋ Add library").clicked() {
-                    Command::PdkSettings.execute(app);
-                }
-                if ui.button("↻ Rescan libraries").clicked() {
-                    let discovered = app.state.pdk_config.discover_model_files().len();
-                    let errors = app.state.pdk_config.scan_errors.len();
-                    app.state.model_library_manager.discover_spice_packs();
-                    receipt(
-                        app,
-                        if errors == 0 {
-                            Ok(format!(
-                                "Rescan completed: {discovered} configured model sources and {} shipped packs are available.",
-                                app.state
-                                    .model_library_manager
-                                    .spice_packs()
-                                    .map_or(0, |index| index.packs().len())
-                            ))
-                        } else {
-                            Err(format!(
-                                "Rescan found {discovered} sources and {errors} path errors. Open PDK settings for details."
-                            ))
-                        },
-                    );
-                }
-                if ui.button("⌁ Compile Verilog-A").clicked() {
-                    Command::CompileVerilogA.execute(app);
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let libraries = app.state.model_library_manager.library_count();
-                    let models = app.state.model_library_manager.total_model_count();
-                    let state = if models == 0
-                        && app.state.workbench.models_view.operational_state
-                            == ModelsOperationalState::Ready
-                    {
-                        ModelsOperationalState::Empty
-                    } else {
-                        app.state.workbench.models_view.operational_state
-                    };
-                    let state_color = match state {
-                        ModelsOperationalState::Ready | ModelsOperationalState::Recovered => {
-                            t.color.ok
-                        }
-                        ModelsOperationalState::Empty
-                        | ModelsOperationalState::Loading
-                        | ModelsOperationalState::Cancelled => t.color.text_dim,
-                        ModelsOperationalState::InvalidInput
-                        | ModelsOperationalState::ReadOnly
-                        | ModelsOperationalState::Offline
-                        | ModelsOperationalState::Stale
-                        | ModelsOperationalState::Permission
-                        | ModelsOperationalState::Entitlement
-                        | ModelsOperationalState::Rollback
-                        | ModelsOperationalState::Partial => t.color.warn,
-                        ModelsOperationalState::ExecutionError
-                        | ModelsOperationalState::Conflict
-                        | ModelsOperationalState::Corrupted => t.color.err,
-                    };
-                    ui.label(
-                        RichText::new(state.label())
-                            .small()
-                            .strong()
-                            .color(state_color),
-                    )
-                    .on_hover_text("Current Models & PDKs workflow state");
-                    ui.separator();
-                    ui.label(
-                        RichText::new(format!("{libraries} sources · {models} loaded"))
-                            .monospace()
-                            .small()
-                            .color(t.color.text_dim),
-                    );
-                });
-            });
-        });
-}
-
-fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
+fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::ZERO)
         .show(ui, |ui| {
+            ui.set_height(PAGE_TABS_H);
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                ui.max_rect().bottom() - 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
             ScrollArea::horizontal()
                 .id_salt("models-pdks-page-tabs")
+                .max_height(PAGE_TABS_H)
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 1.0;
+                        ui.spacing_mut().item_spacing = Vec2::ZERO;
                         for page in ModelsPage::ALL {
-                            if ui
-                                .selectable_label(
-                                    app.state.workbench.models_page == page,
-                                    page.label(),
-                                )
-                                .clicked()
-                            {
+                            let selected = app.state.workbench.models_page == page;
+                            let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+                            let text_width = ui
+                                .painter()
+                                .layout_no_wrap(page.label().to_owned(), font.clone(), t.color.text)
+                                .size()
+                                .x;
+                            let response = ui.add_sized(
+                                [text_width + 24.0, PAGE_TABS_H - 1.0],
+                                egui::Button::new(RichText::new(page.label()).font(font).color(
+                                    if selected {
+                                        t.color.text
+                                    } else {
+                                        t.color.text_dim
+                                    },
+                                ))
+                                .frame(false),
+                            );
+                            if selected {
+                                ui.painter().hline(
+                                    (response.rect.left() + 9.0)..=(response.rect.right() - 9.0),
+                                    response.rect.bottom() - 1.0,
+                                    Stroke::new(2.0, t.color.accent),
+                                );
+                            }
+                            if response.clicked() {
                                 app.state.workbench.models_page = page;
                             }
                         }
@@ -166,35 +187,8 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 }
 
-fn show_action_receipt(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some(result) = app.state.workbench.models_view.action_receipt.clone() else {
-        return;
-    };
-    let t = Tokens::get(ui.ctx());
-    let (message, color) = match result {
-        Ok(ref message) => (message.as_str(), t.color.ok),
-        Err(ref message) => (message.as_str(), t.color.err),
-    };
-    egui::Frame::NONE
-        .fill(color.linear_multiply(0.08))
-        .stroke(Stroke::new(1.0, color.linear_multiply(0.65)))
-        .inner_margin(egui::Margin::symmetric(8, 5))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(message).color(color).small());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("×").on_hover_text("Dismiss").clicked() {
-                        app.state.workbench.models_view.action_receipt = None;
-                        app.state.workbench.models_view.operational_state =
-                            ModelsOperationalState::Ready;
-                    }
-                });
-            });
-        });
-}
-
-fn catalog_page(ui: &mut Ui, app: &mut RSpiceApp) {
-    catalog_scope_strip(ui, app);
+fn catalog_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    catalog_bar(ui, app);
     match app.state.workbench.models_view.catalog_scope {
         ModelsCatalogScope::Project => project_catalog(ui, app),
         ModelsCatalogScope::InstalledPacks => pack_catalog(ui, app),
@@ -202,40 +196,206 @@ fn catalog_page(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn catalog_scope_strip(ui: &mut Ui, app: &mut RSpiceApp) {
+fn catalog_bar(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let loaded = app.state.model_library_manager.total_model_count();
-    let packs = app
+    let pack_rows = app
         .state
         .model_library_manager
         .spice_packs()
-        .map_or(0, |index| index.packs().len());
+        .map(|index| index.packs().to_vec())
+        .unwrap_or_default();
+    let packs = pack_rows.len();
     let parts = app.state.model_library_manager.pack_definition_count();
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
-        .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(7, 4))
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(7, 0))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for (scope, count) in [
-                    (ModelsCatalogScope::Project, loaded),
-                    (ModelsCatalogScope::InstalledPacks, packs),
-                    (ModelsCatalogScope::RSpiceLibrary, parts),
-                ] {
-                    let text = format!("{}  {}", scope.label(), count);
-                    if ui
-                        .selectable_label(
-                            app.state.workbench.models_view.catalog_scope == scope,
-                            text,
-                        )
-                        .clicked()
-                    {
-                        app.state.workbench.models_view.catalog_scope = scope;
-                        app.state.workbench.models_view.catalog_query.clear();
-                    }
+            ui.set_height(CATALOG_BAR_H);
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                egui::Frame::NONE
+                    .stroke(Stroke::new(1.0, t.color.border))
+                    .corner_radius(5.0)
+                    .inner_margin(egui::Margin::ZERO)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::ZERO;
+                            for (scope, count) in [
+                                (ModelsCatalogScope::Project, loaded),
+                                (ModelsCatalogScope::InstalledPacks, packs),
+                                (ModelsCatalogScope::RSpiceLibrary, parts),
+                            ] {
+                                let selected =
+                                    app.state.workbench.models_view.catalog_scope == scope;
+                                let response = ui.add_sized(
+                                    [scope_segment_width(scope), 20.0],
+                                    egui::Button::new(
+                                        RichText::new(format!("{}  {count}", scope.label()))
+                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                            .color(if selected {
+                                                t.color.text
+                                            } else {
+                                                t.color.text_dim
+                                            }),
+                                    )
+                                    .fill(if selected {
+                                        t.color.bg_active
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    })
+                                    .stroke(Stroke::NONE)
+                                    .corner_radius(4.0),
+                                );
+                                if response.clicked() {
+                                    app.state.workbench.models_view.catalog_scope = scope;
+                                    app.state.workbench.models_view.catalog_query.clear();
+                                }
+                            }
+                        });
+                    });
+
+                // The source mockup drops the facet rail before it can squeeze
+                // the scope switcher or search field in the document column.
+                if ui.available_width() >= 560.0 {
+                    ScrollArea::horizontal()
+                        .id_salt("models-catalog-facets")
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            match app.state.workbench.models_view.catalog_scope {
+                                ModelsCatalogScope::Project => {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        for facet in ProjectModelFacet::ALL {
+                                            let count = project_facet_count(app, facet);
+                                            if facet_button(
+                                                ui,
+                                                app.state.workbench.models_view.project_facet
+                                                    == facet,
+                                                facet.label(),
+                                                Some(count),
+                                            )
+                                            .clicked()
+                                            {
+                                                app.state.workbench.models_view.project_facet =
+                                                    facet;
+                                            }
+                                        }
+                                    });
+                                }
+                                ModelsCatalogScope::InstalledPacks => {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        for facet in ModelPackFacet::ALL {
+                                            let count = pack_facet_count(app, &pack_rows, facet);
+                                            if facet_button(
+                                                ui,
+                                                app.state.workbench.models_view.pack_facet == facet,
+                                                facet.label(),
+                                                Some(count),
+                                            )
+                                            .clicked()
+                                            {
+                                                app.state.workbench.models_view.pack_facet = facet;
+                                            }
+                                        }
+                                    });
+                                }
+                                ModelsCatalogScope::RSpiceLibrary => {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        for facet in RSpicePartFacet::ALL {
+                                            if facet_button(
+                                                ui,
+                                                app.state.workbench.models_view.part_facet == facet,
+                                                facet.label(),
+                                                None,
+                                            )
+                                            .clicked()
+                                            {
+                                                app.state.workbench.models_view.part_facet = facet;
+                                                app.state.workbench.models_view.selected_part =
+                                                    None;
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        });
                 }
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let hint = match app.state.workbench.models_view.catalog_scope {
+                        ModelsCatalogScope::Project => {
+                            "Search models, parameters or consumers…".to_owned()
+                        }
+                        ModelsCatalogScope::InstalledPacks => "Search installed packs…".to_owned(),
+                        ModelsCatalogScope::RSpiceLibrary => {
+                            format!("Search {} parts by name, class or pack…", parts)
+                        }
+                    };
+                    ui.add_sized(
+                        [ui.available_width().clamp(170.0, 340.0), 24.0],
+                        egui::TextEdit::singleline(
+                            &mut app.state.workbench.models_view.catalog_query,
+                        )
+                        .hint_text(hint),
+                    );
+                });
             });
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                ui.max_rect().bottom() - 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
         });
+}
+
+fn scope_segment_width(scope: ModelsCatalogScope) -> f32 {
+    match scope {
+        ModelsCatalogScope::Project => 74.0,
+        ModelsCatalogScope::InstalledPacks => 112.0,
+        ModelsCatalogScope::RSpiceLibrary => 108.0,
+    }
+}
+
+fn facet_button(ui: &mut Ui, selected: bool, label: &str, count: Option<usize>) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let label = count.map_or_else(|| label.to_owned(), |count| format!("{label}  {count}"));
+    ui.add_sized(
+        [
+            (ui.painter()
+                .layout_no_wrap(
+                    label.clone(),
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.text_dim,
+                )
+                .size()
+                .x
+                + 16.0)
+                .max(44.0),
+            22.0,
+        ],
+        egui::Button::new(
+            RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(if selected {
+                    t.color.text
+                } else {
+                    t.color.text_dim
+                }),
+        )
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(
+            1.0,
+            if selected {
+                t.color.accent
+            } else {
+                t.color.border
+            },
+        ))
+        .corner_radius(11.0),
+    )
 }
 
 #[derive(Clone)]
@@ -245,13 +405,11 @@ struct ProjectModelRow {
     source: String,
     pinned: bool,
     review: bool,
-    protected: bool,
     usages: Vec<String>,
     vectors: usize,
 }
 
-fn project_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
-    project_filter_bar(ui, app);
+fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let query = app
         .state
         .workbench
@@ -318,7 +476,6 @@ fn project_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
                     source,
                     pinned,
                     review,
-                    protected,
                     usages,
                     vectors,
                 });
@@ -333,8 +490,19 @@ fn project_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
             .then_with(|| left.library.cmp(&right.library))
     });
 
-    let table_h = (ui.available_height() * 0.43).clamp(150.0, 310.0);
-    card(ui, |ui| {
+    let selected_visible = rows.iter().any(|row| {
+        app.state.model_library_manager.selected_library.as_deref() == Some(row.library.as_str())
+            && app.state.workbench.selected_model.as_deref() == Some(row.model.name.as_str())
+    });
+    if !selected_visible && let Some(row) = rows.first() {
+        app.state.model_library_manager.select_library(&row.library);
+        app.state.workbench.selected_model = Some(row.model.name.clone());
+    }
+
+    let table_h = (ui.available_height() * 0.36).max(120.0);
+    egui::Frame::NONE
+        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+        .show(ui, |ui| {
         table_header(
             ui,
             &[
@@ -366,34 +534,19 @@ fn project_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 }
             });
-    });
+        });
+    catalog_footer(
+        ui,
+        rows.len(),
+        app.state.model_library_manager.total_model_count(),
+        rows.iter().filter(|row| row.review).count(),
+        "project models",
+    );
 
     selected_model_detail(ui, app);
 }
 
-fn project_filter_bar(ui: &mut Ui, app: &mut RSpiceApp) {
-    ui.horizontal_wrapped(|ui| {
-        for facet in ProjectModelFacet::ALL {
-            let count = project_facet_count(app, facet);
-            if ui
-                .selectable_label(
-                    app.state.workbench.models_view.project_facet == facet,
-                    format!("{} {}", facet.label(), count),
-                )
-                .clicked()
-            {
-                app.state.workbench.models_view.project_facet = facet;
-            }
-        }
-        ui.add(
-            egui::TextEdit::singleline(&mut app.state.workbench.models_view.catalog_query)
-                .hint_text("Search models, parameters or consumers…")
-                .desired_width(250.0),
-        );
-    });
-}
-
-fn project_facet_count(app: &RSpiceApp, facet: ProjectModelFacet) -> usize {
+fn project_facet_count(app: &ManagerRenderContext<'_>, facet: ProjectModelFacet) -> usize {
     app.state
         .model_library_manager
         .libraries_sorted()
@@ -420,7 +573,7 @@ fn project_facet_count(app: &RSpiceApp, facet: ProjectModelFacet) -> usize {
         .count()
 }
 
-fn project_model_row(ui: &mut Ui, app: &mut RSpiceApp, row: &ProjectModelRow) {
+fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
     let selected = app.state.model_library_manager.selected_library.as_deref()
         == Some(row.library.as_str())
         && app.state.workbench.selected_model.as_deref() == Some(row.model.name.as_str());
@@ -444,12 +597,10 @@ fn project_model_row(ui: &mut Ui, app: &mut RSpiceApp, row: &ProjectModelRow) {
     }
     let status = if row.review {
         "review"
-    } else if row.protected {
-        "protected"
     } else if row.pinned {
         "pinned"
     } else {
-        "unsealed"
+        ""
     };
     paint_columns(
         ui,
@@ -460,7 +611,7 @@ fn project_model_row(ui: &mut Ui, app: &mut RSpiceApp, row: &ProjectModelRow) {
             (&row.source, 0.22, false),
             (
                 if row.usages.is_empty() {
-                    "—"
+                    ""
                 } else {
                     row.usages[0].as_str()
                 },
@@ -473,7 +624,56 @@ fn project_model_row(ui: &mut Ui, app: &mut RSpiceApp, row: &ProjectModelRow) {
     );
 }
 
-fn selected_model_detail(ui: &mut Ui, app: &mut RSpiceApp) {
+fn catalog_footer(ui: &mut Ui, shown: usize, total: usize, review: usize, noun: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CATALOG_FOOT_H),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top() + 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        format!("{shown} shown · {total} {noun}"),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    let state = if review == 0 {
+        "No open review"
+    } else if review == 1 {
+        "1 item needs review"
+    } else {
+        ""
+    };
+    let state = if state.is_empty() {
+        format!("{review} items need review")
+    } else {
+        state.to_owned()
+    };
+    ui.painter().text(
+        egui::pos2(rect.right() - 12.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        state,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        if review == 0 {
+            t.color.ok
+        } else {
+            t.color.warn
+        },
+    );
+}
+
+fn compact_button(label: &str) -> egui::Button<'_> {
+    egui::Button::new(RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Regular)))
+        .min_size(egui::vec2(0.0, 24.0))
+}
+
+fn selected_model_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let Some(library_name) = app.state.model_library_manager.selected_library.clone() else {
         empty_state(
             ui,
@@ -508,94 +708,108 @@ fn selected_model_detail(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected_component = exactly_one_selected_component(app);
     let source_available = !library.source_contents.is_empty() || model.file_path.is_some();
 
-    ui.horizontal_wrapped(|ui| {
-        ui.label(
-            RichText::new(&model.name)
-                .monospace()
-                .strong()
-                .color(Tokens::get(ui.ctx()).color.text),
-        );
-        ui.label(
-            RichText::new(format!(
-                "{} · {} · {}",
-                model.model_type.display_name(),
-                model.level.display_name(),
-                library.name
-            ))
-            .small(),
-        );
-        if ui
-            .add_enabled(
-                library.root_path.is_some(),
-                egui::Button::new(if library.source_closure.is_empty() {
-                    "Pin source"
-                } else {
-                    "Refresh pin"
-                }),
-            )
-            .on_disabled_hover_text("Built-in sources do not have an external file to pin.")
-            .clicked()
-        {
-            refresh_library(app, &library);
-        }
-        if ui
-            .add_enabled(source_available, egui::Button::new("Open source"))
-            .on_disabled_hover_text("This built-in definition has no source document.")
-            .clicked()
-        {
-            open_model_source(app, &library, &model);
-        }
-        if ui.button("Compare…").clicked() {
-            open_model_compare(app, &library.name, &model.name);
-        }
-        let project_owned = library.source_authority.is_project_owned();
-        if ui
-            .button(if project_owned {
-                "Model editor…"
-            } else {
-                "Author project copy…"
-            })
-            .clicked()
-        {
-            if project_owned {
-                Command::ModelEditor.execute(app);
-            } else {
-                Command::ModelCreateProjectCopy.execute(app);
-            }
-        }
-        if ui.button("Qualification").clicked() {
-            app.state.workbench.models_page = ModelsPage::Qualification;
-        }
-        if ui
-            .add_enabled(
-                selected_component.is_some(),
-                egui::Button::new("Bind to selection…"),
-            )
-            .on_disabled_hover_text("Select exactly one compatible schematic instance first.")
-            .clicked()
-            && let Some(component_id) = selected_component
-        {
-            let result = crate::workbench::docks::bind_component_model_from_catalog(
-                app,
-                component_id,
-                &library.name,
-                &model.name,
-            )
-            .map(|()| {
-                format!(
-                    "Bound selected instance to model '{} / {}'.",
-                    library.name, model.name
-                )
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_inset)
+        .inner_margin(egui::Margin::symmetric(12, 7))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.label(
+                    RichText::new(&model.name)
+                        .monospace()
+                        .font(theme::mono(tokens::FS_2, FontWeight::SemiBold))
+                        .color(t.color.text),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "{} · {} · {}",
+                        model.model_type.display_name(),
+                        model.level.display_name(),
+                        library.name
+                    ))
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_dim),
+                );
             });
-            receipt(app, result);
-        }
-    });
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if ui
+                    .add_enabled(
+                        library.root_path.is_some(),
+                        compact_button(if library.source_closure.is_empty() {
+                            "Pin source"
+                        } else {
+                            "Refresh pin"
+                        }),
+                    )
+                    .on_disabled_hover_text("Built-in sources do not have an external file to pin.")
+                    .clicked()
+                {
+                    refresh_library(app, &library);
+                }
+                if ui
+                    .add_enabled(source_available, compact_button("Open source"))
+                    .on_disabled_hover_text("This built-in definition has no source document.")
+                    .clicked()
+                {
+                    open_model_source(app, &library, &model);
+                }
+                if ui.add(compact_button("Compare…")).clicked() {
+                    open_model_compare(app, &library.name, &model.name);
+                }
+                let project_owned = library.source_authority.is_project_owned();
+                if ui
+                    .add(compact_button(if project_owned {
+                        "Model editor…"
+                    } else {
+                        "Author project copy…"
+                    }))
+                    .clicked()
+                {
+                    if project_owned {
+                        app.queue_command(Command::ModelEditor);
+                    } else {
+                        app.queue_command(Command::ModelCreateProjectCopy);
+                    }
+                }
+                if ui.add(compact_button("Qualification")).clicked() {
+                    app.state.workbench.models_page = ModelsPage::Qualification;
+                }
+                if ui
+                    .add_enabled(
+                        selected_component.is_some(),
+                        compact_button("Bind to selection…"),
+                    )
+                    .on_disabled_hover_text(
+                        "Select exactly one compatible schematic instance first.",
+                    )
+                    .clicked()
+                    && let Some(component_id) = selected_component
+                {
+                    app.queue_model_binding(component_id, &library.name, &model.name);
+                }
+            });
+        });
+    ui.painter().hline(
+        ui.min_rect().x_range(),
+        ui.min_rect().bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
 
     ScrollArea::vertical()
         .id_salt("models-selected-detail")
         .show(ui, |ui| {
-            let wide = ui.available_width() >= 760.0;
-            if wide {
+            let detail_width = ui.available_width();
+            if detail_width > 1100.0 {
+                ui.columns(4, |columns| {
+                    parameter_card(&mut columns[0], &library, &model);
+                    characteristic_card(&mut columns[1], &model);
+                    qualification_card(&mut columns[2], &library, &model);
+                    usage_card(&mut columns[3], &model, &usages, app);
+                });
+            } else if detail_width > 650.0 {
                 ui.columns(2, |columns| {
                     parameter_card(&mut columns[0], &library, &model);
                     characteristic_card(&mut columns[1], &model);
@@ -614,50 +828,49 @@ fn selected_model_detail(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn parameter_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) {
-    card(ui, |ui| {
-        card_title(
-            ui,
-            "RESOLVED PARAMETERS",
-            Some(&format!("{} values", model.parameters.len())),
-        );
-        let mut values = model
-            .parameters
-            .iter()
-            .map(|(name, value)| (name.clone(), value.to_string(), "source card"))
-            .collect::<Vec<_>>();
-        values.extend(
-            model
-                .string_parameters
+    detail_pane(
+        ui,
+        "RESOLVED PARAMETERS",
+        Some(&format!("{} values", model.parameters.len())),
+        |ui| {
+            let mut values = model
+                .parameters
                 .iter()
-                .map(|(name, value)| (name.clone(), value.clone(), "source string")),
-        );
-        values.sort_by(|left, right| left.0.cmp(&right.0));
-        if values.is_empty() {
-            empty_state(
-                ui,
-                "No parameter card is attached to this model.",
-                "Built-in equation defaults remain owned by the engine.",
+                .map(|(name, value)| (name.clone(), value.to_string(), "source card"))
+                .collect::<Vec<_>>();
+            values.extend(
+                model
+                    .string_parameters
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone(), "source string")),
             );
-        } else {
-            for (name, value, origin) in values.into_iter().take(24) {
-                property(ui, &name, &value, origin);
+            values.sort_by(|left, right| left.0.cmp(&right.0));
+            if values.is_empty() {
+                empty_state(
+                    ui,
+                    "No parameter card is attached to this model.",
+                    "Built-in equation defaults remain owned by the engine.",
+                );
+            } else {
+                for (name, value, origin) in values.into_iter().take(24) {
+                    property(ui, &name, &value, origin);
+                }
             }
-        }
-        if let Some(metadata) = library.model_definition_metadata.get(&model.name) {
-            ui.separator();
-            property(
-                ui,
-                "Schema",
-                &format!("{} typed fields", metadata.parameters.len()),
-                "project definition",
-            );
-        }
-    });
+            if let Some(metadata) = library.model_definition_metadata.get(&model.name) {
+                ui.separator();
+                property(
+                    ui,
+                    "Schema",
+                    &format!("{} typed fields", metadata.parameters.len()),
+                    "project definition",
+                );
+            }
+        },
+    );
 }
 
 fn characteristic_card(ui: &mut Ui, model: &DeviceModel) {
-    card(ui, |ui| {
-        card_title(ui, "CHARACTERISTIC", Some("analytic preview"));
+    detail_pane(ui, "CHARACTERISTIC", Some("analytic preview"), |ui| {
         let Some(vth) = model.vth0.or_else(|| model.parameters.get("vth0").copied()) else {
             empty_state(
                 ui,
@@ -710,8 +923,7 @@ fn characteristic_card(ui: &mut Ui, model: &DeviceModel) {
 }
 
 fn qualification_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) {
-    card(ui, |ui| {
-        card_title(ui, "QUALIFICATION", Some("source-owned evidence"));
+    detail_pane(ui, "QUALIFICATION", Some("source-owned evidence"), |ui| {
         if let Some(state) = library.model_qualification.get(&model.name) {
             property(ui, "Suites", &state.suites.len().to_string(), "retained");
             property(
@@ -762,34 +974,39 @@ fn qualification_card(ui: &mut Ui, library: &ModelLibrary, model: &DeviceModel) 
     });
 }
 
-fn usage_card(ui: &mut Ui, model: &DeviceModel, usages: &[String], app: &mut RSpiceApp) {
-    card(ui, |ui| {
-        card_title(
-            ui,
-            "WHERE USED",
-            Some(&format!("{} consumers", usages.len())),
-        );
-        if usages.is_empty() {
-            empty_state(
-                ui,
-                "Not bound in the active project.",
-                "Place an instance or select one and use Bind to selection.",
-            );
-        } else {
-            for usage in usages.iter().take(12) {
-                if ui.link(usage).clicked() {
-                    app.state.workbench.models_view.dialog =
-                        Some(ModelsWorkbenchDialog::BindingTrace {
-                            model: model.name.clone(),
-                            consumers: usages.to_vec(),
-                        });
+fn usage_card(
+    ui: &mut Ui,
+    model: &DeviceModel,
+    usages: &[String],
+    app: &mut ManagerRenderContext<'_>,
+) {
+    detail_pane(
+        ui,
+        "WHERE USED",
+        Some(&format!("{} consumers", usages.len())),
+        |ui| {
+            if usages.is_empty() {
+                empty_state(
+                    ui,
+                    "Not bound in the active project.",
+                    "Place an instance or select one and use Bind to selection.",
+                );
+            } else {
+                for usage in usages.iter().take(12) {
+                    if ui.link(usage).clicked() {
+                        app.state.workbench.models_view.dialog =
+                            Some(ModelsWorkbenchDialog::BindingTrace {
+                                model: model.name.clone(),
+                                consumers: usages.to_vec(),
+                            });
+                    }
                 }
             }
-        }
-    });
+        },
+    );
 }
 
-fn pack_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
+fn pack_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let packs = app
         .state
         .model_library_manager
@@ -804,28 +1021,6 @@ fn pack_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
         .catalog_query
         .trim()
         .to_ascii_lowercase();
-    ui.horizontal_wrapped(|ui| {
-        for candidate in ModelPackFacet::ALL {
-            if ui
-                .selectable_label(
-                    facet == candidate,
-                    format!(
-                        "{} {}",
-                        candidate.label(),
-                        pack_facet_count(app, &packs, candidate)
-                    ),
-                )
-                .clicked()
-            {
-                app.state.workbench.models_view.pack_facet = candidate;
-            }
-        }
-        ui.add(
-            egui::TextEdit::singleline(&mut app.state.workbench.models_view.catalog_query)
-                .hint_text("Search installed packs…")
-                .desired_width(210.0),
-        );
-    });
     let visible = packs
         .iter()
         .filter(|pack| {
@@ -845,8 +1040,10 @@ fn pack_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .cloned()
         .collect::<Vec<_>>();
-    let table_h = (ui.available_height() * 0.53).clamp(180.0, 360.0);
-    card(ui, |ui| {
+    let table_h = (ui.available_height() * 0.42).max(120.0);
+    egui::Frame::NONE
+        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+        .show(ui, |ui| {
         table_header(
             ui,
             &[
@@ -912,12 +1109,22 @@ fn pack_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
                     });
                 }
             });
-    });
+        });
+    catalog_footer(
+        ui,
+        visible.len(),
+        packs.len(),
+        visible
+            .iter()
+            .filter(|pack| pack.entry.is_none() || !pack.redistributable)
+            .count(),
+        "installed packs",
+    );
     pack_detail(ui, app, &packs);
 }
 
 fn pack_facet_count(
-    app: &RSpiceApp,
+    app: &ManagerRenderContext<'_>,
     packs: &[rspice_core::library::SpicePack],
     facet: ModelPackFacet,
 ) -> usize {
@@ -935,7 +1142,11 @@ fn pack_facet_count(
         .count()
 }
 
-fn pack_detail(ui: &mut Ui, app: &mut RSpiceApp, packs: &[rspice_core::library::SpicePack]) {
+fn pack_detail(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    packs: &[rspice_core::library::SpicePack],
+) {
     let selected = app
         .state
         .workbench
@@ -1040,27 +1251,8 @@ fn pack_detail(ui: &mut Ui, app: &mut RSpiceApp, packs: &[rspice_core::library::
     });
 }
 
-fn parts_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
+fn parts_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let facet = app.state.workbench.models_view.part_facet;
-    ui.horizontal_wrapped(|ui| {
-        for candidate in RSpicePartFacet::ALL {
-            if ui
-                .selectable_label(facet == candidate, candidate.label())
-                .clicked()
-            {
-                app.state.workbench.models_view.part_facet = candidate;
-                app.state.workbench.models_view.selected_part = None;
-            }
-        }
-        ui.add(
-            egui::TextEdit::singleline(&mut app.state.workbench.models_view.catalog_query)
-                .hint_text(format!(
-                    "Search {} parts by name, class or pack…",
-                    app.state.model_library_manager.pack_definition_count()
-                ))
-                .desired_width(300.0),
-        );
-    });
     let mut hits = app
         .state
         .model_library_manager
@@ -1076,8 +1268,10 @@ fn parts_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(pack_id) = app.state.workbench.models_view.selected_pack.as_deref() {
         hits.retain(|hit| hit.pack == pack_id);
     }
-    let table_h = (ui.available_height() * 0.46).clamp(170.0, 330.0);
-    card(ui, |ui| {
+    let table_h = (ui.available_height() * 0.40).max(120.0);
+    egui::Frame::NONE
+        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+        .show(ui, |ui| {
         table_header(
             ui,
             &[
@@ -1134,11 +1328,20 @@ fn parts_catalog(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 }
             });
-    });
+        });
+    catalog_footer(
+        ui,
+        hits.len(),
+        app.state.model_library_manager.pack_definition_count(),
+        hits.iter()
+            .filter(|hit| hit.restricted || !hit.redistributable)
+            .count(),
+        "addressable parts",
+    );
     selected_part_detail(ui, app, &hits);
 }
 
-fn selected_part_detail(ui: &mut Ui, app: &mut RSpiceApp, hits: &[PackModelHit]) {
+fn selected_part_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hits: &[PackModelHit]) {
     let selected = app
         .state
         .workbench
@@ -1239,1271 +1442,7 @@ fn selected_part_detail(ui: &mut Ui, app: &mut RSpiceApp, hits: &[PackModelHit])
     });
 }
 
-#[derive(Clone)]
-struct SymbolRow {
-    reference: CellViewRef,
-    read_only: bool,
-    family: String,
-    pins: Vec<String>,
-    form: String,
-    template: String,
-    status: String,
-    definition: Option<ModelBoundSymbolDefinition>,
-    diagnostics: Vec<String>,
-}
-
-fn symbols_page(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_title(
-        ui,
-        "Symbols, pins & device forms",
-        "Project and technology symbol contracts · pin order is netlist order",
-        |ui| {
-            if ui.button("Library manager").clicked() {
-                navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
-            }
-            if ui.button("Import symbol").clicked() {
-                super::open_symbol_import_dialog(&mut app.state);
-            }
-            if ui.button("Form designer").clicked() {
-                super::open_symbol_parameter_form_dialog(&mut app.state);
-            }
-            if ui.button("Create symbol").clicked() {
-                super::open_create_model_bound_symbol_dialog(&mut app.state);
-            }
-        },
-    );
-    let rows = symbol_rows(app);
-    let project_count = rows.iter().filter(|row| !row.read_only).count();
-    let technology_count = rows.iter().filter(|row| row.read_only).count();
-    ui.horizontal(|ui| {
-        ui.label(format!(
-            "{project_count} project · {technology_count} technology · {} total",
-            rows.len()
-        ));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.label(
-                RichText::new("pin/provider mismatches block netlisting")
-                    .small()
-                    .color(Tokens::get(ui.ctx()).color.text_dim),
-            );
-        });
-    });
-    let table_h = (ui.available_height() * 0.42).clamp(170.0, 320.0);
-    card(ui, |ui| {
-        table_header(
-            ui,
-            &[
-                ("SYMBOL", 0.24),
-                ("BOUND FAMILY", 0.20),
-                ("PINS", 0.24),
-                ("FORM", 0.17),
-                ("STATUS", 0.15),
-            ],
-        );
-        ScrollArea::vertical()
-            .id_salt("models-symbol-registry")
-            .max_height(table_h)
-            .show(ui, |ui| {
-                if rows.is_empty() {
-                    empty_state(
-                        ui,
-                        "No symbol views are present in the loaded design libraries.",
-                        "Import a symbol or create a model-bound symbol to establish an executable pin contract.",
-                    );
-                }
-                for row in &rows {
-                    let key = symbol_key(&row.reference);
-                    let selected = app.state.workbench.models_view.selected_symbol.as_deref()
-                        == Some(key.as_str());
-                    if selectable_data_row(
-                        ui,
-                        selected,
-                        &[
-                            (
-                                &format!("{}/{}", row.reference.cell, row.reference.view),
-                                0.24,
-                                true,
-                            ),
-                            (&row.family, 0.20, false),
-                            (&row.pins.join(" "), 0.24, true),
-                            (&row.form, 0.17, false),
-                            (&row.status, 0.15, true),
-                        ],
-                    )
-                    .clicked()
-                    {
-                        app.state.workbench.models_view.selected_symbol = Some(key);
-                        app.state.library_manager.select_view(
-                            &row.reference.library,
-                            &row.reference.cell,
-                            &row.reference.view,
-                        );
-                    }
-                }
-            });
-    });
-    symbol_detail(ui, app, &rows);
-}
-
-fn symbol_rows(app: &RSpiceApp) -> Vec<SymbolRow> {
-    let mut rows = Vec::new();
-    for library in app.state.library_manager.libraries_sorted() {
-        for cell in library.cells_sorted() {
-            for view in cell
-                .views_sorted()
-                .into_iter()
-                .filter(|view| view.view_type == ViewType::Symbol)
-            {
-                let definition_result = ModelBoundSymbolDefinition::load_from_view(view);
-                let document_result = SymbolDocument::load_from_view(view);
-                let definition = definition_result.as_ref().ok().and_then(Clone::clone);
-                let pins = document_result
-                    .as_ref()
-                    .map(|document| {
-                        document
-                            .pins
-                            .iter()
-                            .map(|pin| pin.name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                let family = definition
-                    .as_ref()
-                    .and_then(|definition| definition.netlist.model.as_ref())
-                    .map(|model| format!("{}/{}", model.library, model.model))
-                    .unwrap_or_else(|| super::symbol_model_family(app, cell));
-                let form = definition
-                    .as_ref()
-                    .map(super::symbol_parameter_form_label)
-                    .unwrap_or_else(|| "legacy / none".to_owned());
-                let template = definition
-                    .as_ref()
-                    .map(|definition| definition.netlist.template.clone())
-                    .filter(|template| !template.trim().is_empty())
-                    .unwrap_or_else(|| "not defined".to_owned());
-                let mut diagnostics = Vec::new();
-                if let Err(error) = definition_result {
-                    diagnostics.push(format!("Definition metadata: {error}"));
-                }
-                if let Err(error) = &document_result {
-                    diagnostics.push(format!("Symbol document: {error}"));
-                }
-                if let (Some(definition), Ok(document)) = (&definition, &document_result) {
-                    let expected = definition
-                        .pins
-                        .iter()
-                        .map(|pin| pin.name.to_ascii_lowercase())
-                        .collect::<Vec<_>>();
-                    let observed = document
-                        .pins
-                        .iter()
-                        .map(|pin| pin.name.to_ascii_lowercase())
-                        .collect::<Vec<_>>();
-                    if expected != observed {
-                        diagnostics.push(format!(
-                            "Blocking pin mismatch: provider {:?}, symbol {:?}",
-                            expected, observed
-                        ));
-                    }
-                    if let Err(error) = definition.validate() {
-                        diagnostics.push(format!("Executable contract: {error}"));
-                    }
-                } else if definition.is_none() {
-                    diagnostics
-                        .push("Legacy symbol has no typed model/netlist/form contract.".to_owned());
-                }
-                let status = if diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.contains("Blocking"))
-                {
-                    "pin mismatch"
-                } else if !diagnostics.is_empty() {
-                    "review"
-                } else if library.read_only {
-                    "read-only"
-                } else {
-                    "bound"
-                }
-                .to_owned();
-                rows.push(SymbolRow {
-                    reference: CellViewRef::new(&library.name, &cell.name, &view.name),
-                    read_only: library.read_only,
-                    family,
-                    pins,
-                    form,
-                    template,
-                    status,
-                    definition,
-                    diagnostics,
-                });
-            }
-        }
-    }
-    rows.sort_by(|left, right| {
-        left.reference
-            .library
-            .to_ascii_lowercase()
-            .cmp(&right.reference.library.to_ascii_lowercase())
-            .then_with(|| {
-                left.reference
-                    .cell
-                    .to_ascii_lowercase()
-                    .cmp(&right.reference.cell.to_ascii_lowercase())
-            })
-    });
-    rows
-}
-
-fn symbol_detail(ui: &mut Ui, app: &mut RSpiceApp, rows: &[SymbolRow]) {
-    let selected = app
-        .state
-        .workbench
-        .models_view
-        .selected_symbol
-        .as_deref()
-        .and_then(|key| rows.iter().find(|row| symbol_key(&row.reference) == key))
-        .cloned()
-        .or_else(|| rows.first().cloned());
-    let Some(row) = selected else {
-        return;
-    };
-    app.state.workbench.models_view.selected_symbol = Some(symbol_key(&row.reference));
-    ui.horizontal_wrapped(|ui| {
-        ui.label(
-            RichText::new(format!(
-                "{}/{}/{}",
-                row.reference.library, row.reference.cell, row.reference.view
-            ))
-            .monospace()
-            .strong(),
-        );
-        if row.read_only {
-            ui.label(
-                RichText::new("technology-owned · read-only")
-                    .small()
-                    .color(Tokens::get(ui.ctx()).color.info),
-            );
-        }
-        if ui
-            .button(if row.read_only {
-                "Author a variant…"
-            } else {
-                "Open symbol editor"
-            })
-            .clicked()
-        {
-            if row.read_only {
-                super::open_create_model_bound_symbol_dialog(&mut app.state);
-            } else {
-                app.state.open_workspace_view(row.reference.clone());
-                app.state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
-            }
-        }
-        if ui
-            .add_enabled(!row.read_only, egui::Button::new("Edit form…"))
-            .on_disabled_hover_text(
-                "Technology symbols must be copied into the project before editing.",
-            )
-            .clicked()
-        {
-            app.state.library_manager.select_view(
-                &row.reference.library,
-                &row.reference.cell,
-                &row.reference.view,
-            );
-            super::open_symbol_parameter_form_dialog(&mut app.state);
-        }
-    });
-    if !row.diagnostics.is_empty() {
-        card(ui, |ui| {
-            card_title(ui, "BLOCKING CONTRACT FINDINGS", Some(&row.status));
-            for diagnostic in &row.diagnostics {
-                ui.label(
-                    RichText::new(format!("⚠ {diagnostic}"))
-                        .small()
-                        .color(Tokens::get(ui.ctx()).color.err),
-                );
-            }
-        });
-    }
-    ui.columns(2, |columns| {
-        card(&mut columns[0], |ui| {
-            card_title(
-                ui,
-                "PIN PROVIDER MAP",
-                Some(&format!("{} pins", row.pins.len())),
-            );
-            if let Some(definition) = &row.definition {
-                for (index, pin) in definition.pins.iter().enumerate() {
-                    property(
-                        ui,
-                        &format!("{:02} {}", index + 1, pin.name),
-                        &format!("{:?}", pin.direction),
-                        "netlist order",
-                    );
-                }
-            } else {
-                for (index, pin) in row.pins.iter().enumerate() {
-                    property(ui, &format!("{:02}", index + 1), pin, "legacy symbol");
-                }
-            }
-        });
-        card(&mut columns[1], |ui| {
-            card_title(ui, "NETLIST CONTRACT", Some(&row.family));
-            property(ui, "Template", &row.template, "validated token grammar");
-            if let Some(definition) = &row.definition {
-                property(
-                    ui,
-                    "Prefix",
-                    &definition.netlist.device_prefix,
-                    "instance reference",
-                );
-                property(
-                    ui,
-                    "Parameters",
-                    &definition.netlist.parameter_order.join(" "),
-                    "emission order",
-                );
-                property(
-                    ui,
-                    "Revision",
-                    &definition.identity.revision.to_string(),
-                    &definition.identity.binding_id,
-                );
-            }
-        });
-    });
-    card(ui, |ui| {
-        let field_count = row
-            .definition
-            .as_ref()
-            .map_or(0, |definition| definition.parameter_form.fields().count());
-        card_title(
-            ui,
-            "CDF / COMPONENT FORM",
-            Some(&format!("{field_count} typed fields")),
-        );
-        if let Some(definition) = &row.definition {
-            if field_count == 0 {
-                empty_state(
-                    ui,
-                    "No component-form fields are declared.",
-                    "The executable template emits no editable instance parameters.",
-                );
-            }
-            for section in &definition.parameter_form.sections {
-                ui.label(RichText::new(&section.label).strong());
-                for field in &section.fields {
-                    property(
-                        ui,
-                        &field.key,
-                        &format!(
-                            "{:?} · {:?} · {}",
-                            field.property_type,
-                            field.visibility,
-                            field.unit.as_deref().unwrap_or("unitless")
-                        ),
-                        if field.required {
-                            "required"
-                        } else {
-                            "optional"
-                        },
-                    );
-                }
-            }
-        } else {
-            empty_state(
-                ui,
-                "This legacy symbol has no typed component form.",
-                "Open Form designer to publish an explicit parameter contract.",
-            );
-        }
-    });
-}
-
-fn corners_page(ui: &mut Ui, app: &mut RSpiceApp) {
-    let rows = corner_rows(app);
-    let unresolved = rows.iter().filter(|row| !row.resolved).count();
-    section_title(
-        ui,
-        "Corners & sections",
-        &format!(
-            "{} bindings · {} unresolved · fail closed before run expansion",
-            rows.len(),
-            unresolved
-        ),
-        |ui| {
-            if ui.button("Import section map").clicked() {
-                Command::PdkSettings.execute(app);
-            }
-            if ui.button("Add corner…").clicked() {
-                if let Some(library) = app
-                    .state
-                    .model_library_manager
-                    .selected_library
-                    .clone()
-                    .or_else(|| {
-                        app.state
-                            .model_library_manager
-                            .libraries_sorted()
-                            .first()
-                            .map(|library| library.name.clone())
-                    })
-                {
-                    app.state.workbench.models_view.dialog =
-                        Some(ModelsWorkbenchDialog::AddCorner {
-                            library,
-                            name: String::new(),
-                            temperature_c: "27".to_owned(),
-                            supply_factor: "1.0".to_owned(),
-                        });
-                } else {
-                    receipt(
-                        app,
-                        Err("Attach a model library before adding a corner.".to_owned()),
-                    );
-                }
-            }
-            if ui.button("Validate bindings").clicked() {
-                receipt(
-                    app,
-                    if unresolved == 0 {
-                        Ok(format!(
-                            "Validated all {} process-corner bindings.",
-                            rows.len()
-                        ))
-                    } else {
-                        Err(format!(
-                            "Corner validation found {unresolved} bindings without an exact source section."
-                        ))
-                    },
-                );
-            }
-        },
-    );
-    card(ui, |ui| {
-        card_title(ui, "PACKAGE CANDIDATE", Some("migration review"));
-        ui.label(
-            RichText::new(
-                "No unreviewed technology-package candidate is retained. Importing a new section map creates a transactional review before bindings change.",
-            )
-            .small()
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
-    });
-    let table_h = (ui.available_height() * 0.45).clamp(180.0, 340.0);
-    card(ui, |ui| {
-        table_header(
-            ui,
-            &[
-                ("CORNER", 0.12),
-                ("MOS", 0.13),
-                ("BJT", 0.11),
-                ("PASSIVES", 0.13),
-                ("STAT", 0.10),
-                ("AGING", 0.10),
-                ("TEMP", 0.13),
-                ("STATUS", 0.18),
-            ],
-        );
-        ScrollArea::vertical()
-            .id_salt("models-corner-matrix")
-            .max_height(table_h)
-            .show(ui, |ui| {
-                if rows.is_empty() {
-                    empty_state(
-                        ui,
-                        "No process-corner bindings are present.",
-                        "Import a PDK section map or attach a sectioned model library.",
-                    );
-                }
-                for row in &rows {
-                    let selected = app.state.workbench.models_view.selected_corner.as_deref()
-                        == Some(row.key.as_str());
-                    if selectable_data_row(
-                        ui,
-                        selected,
-                        &[
-                            (&row.corner.name.to_uppercase(), 0.12, true),
-                            (
-                                &format!("{}/{}", row.corner.nmos_corner, row.corner.pmos_corner),
-                                0.13,
-                                true,
-                            ),
-                            (if row.resolved { "section" } else { "—" }, 0.11, true),
-                            (if row.resolved { "section" } else { "—" }, 0.13, true),
-                            (if row.has_statistics { "bound" } else { "—" }, 0.10, true),
-                            (if row.has_aging { "evidence" } else { "—" }, 0.10, true),
-                            (&format!("{:.1} °C", row.corner.temperature), 0.13, true),
-                            (
-                                if row.resolved {
-                                    "resolved"
-                                } else {
-                                    "unresolved"
-                                },
-                                0.18,
-                                true,
-                            ),
-                        ],
-                    )
-                    .clicked()
-                    {
-                        app.state.workbench.models_view.selected_corner = Some(row.key.clone());
-                        select_corner(app, &row.library, &row.corner.name);
-                    }
-                }
-            });
-    });
-    corner_detail(ui, app, &rows);
-}
-
-#[derive(Clone)]
-struct CornerRow {
-    key: String,
-    library: String,
-    corner: ProcessCorner,
-    resolved: bool,
-    has_statistics: bool,
-    has_aging: bool,
-    source: Option<String>,
-}
-
-fn corner_rows(app: &RSpiceApp) -> Vec<CornerRow> {
-    let mut rows = Vec::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
-        let has_statistics = library
-            .model_definition_metadata
-            .values()
-            .any(|metadata| !metadata.statistics.variables.is_empty());
-        let has_aging = library
-            .model_qualification
-            .values()
-            .any(|qualification| !qualification.evidence.is_empty());
-        for corner in library.corners.values() {
-            let source = corner
-                .file_path
-                .as_deref()
-                .or(library.root_path.as_deref())
-                .map(|path| path.display().to_string());
-            let retained_section = library.source_contents.iter().any(|content| {
-                String::from_utf8_lossy(&content.bytes)
-                    .to_ascii_lowercase()
-                    .contains(&format!(".lib {}", corner.name.to_ascii_lowercase()))
-            });
-            let resolved = source.is_some()
-                && (retained_section
-                    || (corner.name.eq_ignore_ascii_case("tt") && library.corners.len() == 1));
-            rows.push(CornerRow {
-                key: format!("{}\u{1f}{}", library.name, corner.name),
-                library: library.name.clone(),
-                corner: corner.clone(),
-                resolved,
-                has_statistics,
-                has_aging,
-                source,
-            });
-        }
-    }
-    rows.sort_by(|left, right| {
-        left.corner
-            .name
-            .to_ascii_lowercase()
-            .cmp(&right.corner.name.to_ascii_lowercase())
-            .then_with(|| left.library.cmp(&right.library))
-    });
-    rows
-}
-
-fn corner_detail(ui: &mut Ui, app: &mut RSpiceApp, rows: &[CornerRow]) {
-    let selected = app
-        .state
-        .workbench
-        .models_view
-        .selected_corner
-        .as_deref()
-        .and_then(|key| rows.iter().find(|row| row.key == key))
-        .cloned()
-        .or_else(|| rows.first().cloned());
-    let Some(row) = selected else {
-        return;
-    };
-    app.state.workbench.models_view.selected_corner = Some(row.key.clone());
-    ui.horizontal_wrapped(|ui| {
-        ui.label(
-            RichText::new(format!(
-                "{} / {}",
-                row.library,
-                row.corner.name.to_uppercase()
-            ))
-            .monospace()
-            .strong(),
-        );
-        if !row.resolved {
-            ui.label(
-                RichText::new("unresolved · run expansion blocked")
-                    .small()
-                    .color(Tokens::get(ui.ctx()).color.err),
-            );
-        }
-        if ui
-            .add_enabled(row.source.is_some(), egui::Button::new("Open source"))
-            .clicked()
-            && let Some(library) = app
-                .state
-                .model_library_manager
-                .get_library(&row.library)
-                .cloned()
-        {
-            if let Some(model) = library.models.values().next().cloned() {
-                open_model_source(app, &library, &model);
-            }
-        }
-        if ui.button("View include graph").clicked() {
-            app.state.workbench.models_page = ModelsPage::Include;
-        }
-        if ui.button("Model editor…").clicked() {
-            Command::ModelEditor.execute(app);
-        }
-    });
-    ui.columns(2, |columns| {
-        card(&mut columns[0], |ui| {
-            card_title(ui, "SECTION BINDING", Some(&row.library));
-            property(ui, "NMOS", &row.corner.nmos_corner, "exact section axis");
-            property(ui, "PMOS", &row.corner.pmos_corner, "exact section axis");
-            property(
-                ui,
-                "Source",
-                row.source.as_deref().unwrap_or("not bound"),
-                if row.resolved {
-                    "retained"
-                } else {
-                    "unresolved"
-                },
-            );
-            property(
-                ui,
-                "Supply factor",
-                &format!("{:.6}", row.corner.vdd_factor),
-                "environment axis",
-            );
-            property(
-                ui,
-                "Temperature",
-                &format!("{:.3} °C", row.corner.temperature),
-                "environment axis",
-            );
-        });
-        card(&mut columns[1], |ui| {
-            card_title(ui, "STATISTICAL & AGING", Some("evidence projection"));
-            property(
-                ui,
-                "Statistical variables",
-                if row.has_statistics {
-                    "declared"
-                } else {
-                    "none"
-                },
-                "model schema",
-            );
-            property(
-                ui,
-                "Aging evidence",
-                if row.has_aging { "retained" } else { "none" },
-                "qualification",
-            );
-            property(
-                ui,
-                "Binding policy",
-                if row.resolved {
-                    "executable"
-                } else {
-                    "fail closed"
-                },
-                "run expansion",
-            );
-        });
-    });
-}
-
-fn select_corner(app: &mut RSpiceApp, library_name: &str, corner_name: &str) {
-    let Some(library) = app
-        .state
-        .model_library_manager
-        .get_library(library_name)
-        .cloned()
-    else {
-        receipt(
-            app,
-            Err(format!("Library '{library_name}' no longer exists.")),
-        );
-        return;
-    };
-    app.state.model_library_manager.select_library(library_name);
-    if let Some(root) = library.root_path {
-        let mut candidate = app.state.model_library_manager.clone();
-        let result = candidate
-            .load_library_file(&root, Some(corner_name))
-            .and_then(|loaded| {
-                if loaded != library_name {
-                    return Err(format!(
-                        "Corner selection resolved library '{loaded}' instead of '{library_name}'."
-                    ));
-                }
-                publish_model_library_candidate(
-                    &mut app.state,
-                    candidate,
-                    library_name,
-                    format!("select model corner {corner_name}"),
-                )
-                .map(|revision| {
-                    format!(
-                        "Selected exact section '{corner_name}' for '{library_name}' at revision {}.",
-                        revision.get()
-                    )
-                })
-            });
-        receipt(app, result);
-    } else if let Some(library) = app
-        .state
-        .model_library_manager
-        .get_library_mut(library_name)
-    {
-        library.select_corner(corner_name);
-    }
-}
-
-fn symbol_key(reference: &CellViewRef) -> String {
-    format!(
-        "{}\u{1f}{}\u{1f}{}",
-        reference.library, reference.cell, reference.view
-    )
-}
-
-fn bins_page(ui: &mut Ui, app: &mut RSpiceApp) {
-    let mut families = BTreeMap::<String, Vec<(String, DeviceModel)>>::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
-        for model in library.models.values() {
-            if model.l_min.is_some()
-                || model.l_max.is_some()
-                || model.w_min.is_some()
-                || model.w_max.is_some()
-            {
-                families
-                    .entry(model.model_type.display_name().to_owned())
-                    .or_default()
-                    .push((library.name.clone(), model.clone()));
-            }
-        }
-    }
-    let findings = geometry_findings(&families);
-    section_title(
-        ui,
-        "Bins & geometry",
-        &format!(
-            "{} binned families · {} cards · {} findings",
-            families.len(),
-            families.values().map(Vec::len).sum::<usize>(),
-            findings.len()
-        ),
-        |ui| {
-            if ui.button("Import bin map").clicked() {
-                Command::PdkSettings.execute(app);
-            }
-            if ui.button("Edit cards…").clicked() {
-                Command::ModelEditor.execute(app);
-            }
-            if ui.button("Audit all families").clicked() {
-                receipt(
-                    app,
-                    if findings.is_empty() {
-                        Ok(
-                            "Geometry audit completed with no overlapping card envelopes."
-                                .to_owned(),
-                        )
-                    } else {
-                        Err(format!(
-                            "Geometry audit found {} overlapping or incomplete envelopes.",
-                            findings.len()
-                        ))
-                    },
-                );
-            }
-            if ui
-                .add_enabled(
-                    exactly_one_selected_component(app).is_some(),
-                    egui::Button::new("Trace schematic"),
-                )
-                .clicked()
-            {
-                let model = app
-                    .state
-                    .workbench
-                    .selected_model
-                    .clone()
-                    .unwrap_or_else(|| "selected geometry family".to_owned());
-                app.state.workbench.models_view.dialog =
-                    Some(ModelsWorkbenchDialog::BindingTrace {
-                        consumers: model_consumers(app, &model),
-                        model,
-                    });
-            }
-        },
-    );
-    if families.is_empty() {
-        empty_state(
-            ui,
-            "No loaded model publishes a geometry envelope.",
-            "Attach a binned PDK library or author L/W bounds in Model Editor.",
-        );
-        return;
-    }
-    ui.columns(2, |columns| {
-        card(&mut columns[0], |ui| {
-            card_title(ui, "BIN FAMILIES", Some("live loaded models"));
-            for (family, cards) in &families {
-                if ui
-                    .selectable_label(
-                        app.state
-                            .workbench
-                            .models_view
-                            .selected_bin_family
-                            .as_deref()
-                            == Some(family.as_str()),
-                        format!("{family}  ·  {} cards", cards.len()),
-                    )
-                    .clicked()
-                {
-                    app.state.workbench.models_view.selected_bin_family = Some(family.clone());
-                }
-            }
-        });
-        card(&mut columns[1], |ui| {
-            card_title(ui, "AUDIT FINDINGS", Some("fail closed on overlap"));
-            if findings.is_empty() {
-                ui.label(
-                    RichText::new("✓ Every declared envelope is non-overlapping.")
-                        .color(Tokens::get(ui.ctx()).color.ok),
-                );
-            } else {
-                for finding in findings.iter().take(10) {
-                    ui.label(
-                        RichText::new(format!("⚠ {finding}"))
-                            .small()
-                            .color(Tokens::get(ui.ctx()).color.err),
-                    );
-                }
-            }
-        });
-    });
-    let selected = app
-        .state
-        .workbench
-        .models_view
-        .selected_bin_family
-        .clone()
-        .or_else(|| families.keys().next().cloned());
-    if let Some(selected) = selected {
-        app.state.workbench.models_view.selected_bin_family = Some(selected.clone());
-        if let Some(cards) = families.get(&selected) {
-            geometry_map(ui, &selected, cards);
-            geometry_instance_table(ui, app, cards);
-        }
-    }
-}
-
-fn geometry_findings(families: &BTreeMap<String, Vec<(String, DeviceModel)>>) -> Vec<String> {
-    let mut findings = Vec::new();
-    for (family, cards) in families {
-        for (index, (_, left)) in cards.iter().enumerate() {
-            if model_geometry_invalid(left) {
-                findings.push(format!(
-                    "{family}/{} has an inverted L/W envelope",
-                    left.name
-                ));
-            }
-            for (_, right) in cards.iter().skip(index + 1) {
-                if envelopes_overlap(left, right) {
-                    findings.push(format!("{family}/{} overlaps {}", left.name, right.name));
-                }
-            }
-        }
-    }
-    findings
-}
-
-fn envelopes_overlap(left: &DeviceModel, right: &DeviceModel) -> bool {
-    let (Some(ll), Some(lh), Some(lw), Some(wh)) = (left.l_min, left.l_max, left.w_min, left.w_max)
-    else {
-        return false;
-    };
-    let (Some(rl), Some(rh), Some(rw), Some(rwh)) =
-        (right.l_min, right.l_max, right.w_min, right.w_max)
-    else {
-        return false;
-    };
-    ll < rh && rl < lh && lw < rwh && rw < wh
-}
-
-fn geometry_map(ui: &mut Ui, family: &str, cards: &[(String, DeviceModel)]) {
-    card(ui, |ui| {
-        card_title(ui, "LOG L/W MAP", Some(family));
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 210.0), Sense::hover());
-        let t = Tokens::get(ui.ctx());
-        ui.painter().rect(
-            rect,
-            2.0,
-            t.color.bg_inset,
-            Stroke::new(1.0, t.color.border),
-            egui::StrokeKind::Inside,
-        );
-        let plot = rect.shrink(20.0);
-        ui.painter().line_segment(
-            [plot.left_bottom(), plot.right_bottom()],
-            Stroke::new(1.0, t.color.border_strong),
-        );
-        ui.painter().line_segment(
-            [plot.left_bottom(), plot.left_top()],
-            Stroke::new(1.0, t.color.border_strong),
-        );
-        let finite = cards
-            .iter()
-            .filter_map(|(_, model)| {
-                Some((
-                    model.l_min?.max(f64::MIN_POSITIVE).log10(),
-                    model.l_max?.max(f64::MIN_POSITIVE).log10(),
-                    model.w_min?.max(f64::MIN_POSITIVE).log10(),
-                    model.w_max?.max(f64::MIN_POSITIVE).log10(),
-                    model.name.as_str(),
-                ))
-            })
-            .collect::<Vec<_>>();
-        let min_l = finite
-            .iter()
-            .map(|value| value.0)
-            .reduce(f64::min)
-            .unwrap_or(-9.0);
-        let max_l = finite
-            .iter()
-            .map(|value| value.1)
-            .reduce(f64::max)
-            .unwrap_or(-3.0);
-        let min_w = finite
-            .iter()
-            .map(|value| value.2)
-            .reduce(f64::min)
-            .unwrap_or(-9.0);
-        let max_w = finite
-            .iter()
-            .map(|value| value.3)
-            .reduce(f64::max)
-            .unwrap_or(-3.0);
-        let map_x = |value: f64| {
-            plot.left() + plot.width() * ((value - min_l) / (max_l - min_l).max(1e-12)) as f32
-        };
-        let map_y = |value: f64| {
-            plot.bottom() - plot.height() * ((value - min_w) / (max_w - min_w).max(1e-12)) as f32
-        };
-        for (index, (l0, l1, w0, w1, name)) in finite.iter().enumerate() {
-            let bin = egui::Rect::from_min_max(
-                egui::pos2(map_x(*l0), map_y(*w1)),
-                egui::pos2(map_x(*l1), map_y(*w0)),
-            );
-            let color = [
-                t.color.accent,
-                t.color.info,
-                t.color.ok,
-                t.color.warn,
-                t.color.text_dim,
-            ][index % 5];
-            ui.painter().rect(
-                bin,
-                1.0,
-                color.linear_multiply(0.12),
-                Stroke::new(1.2, color),
-                egui::StrokeKind::Inside,
-            );
-            ui.painter().text(
-                bin.center(),
-                egui::Align2::CENTER_CENTER,
-                *name,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                color,
-            );
-        }
-    });
-}
-
-fn geometry_instance_table(ui: &mut Ui, app: &RSpiceApp, cards: &[(String, DeviceModel)]) {
-    card(ui, |ui| {
-        card_title(ui, "INSTANCE RESOLUTION", Some("active schematic"));
-        let Some(schematic) = app.state.workspace.active_schematic() else {
-            empty_state(
-                ui,
-                "No active schematic is available.",
-                "Open a project schematic to trace placed geometry.",
-            );
-            return;
-        };
-        let names = cards
-            .iter()
-            .map(|(_, model)| model.name.to_ascii_lowercase())
-            .collect::<BTreeSet<_>>();
-        let matches = schematic
-            .components
-            .iter()
-            .filter(|component| {
-                explicit_component_model(component)
-                    .is_some_and(|model| names.contains(&model.to_ascii_lowercase()))
-            })
-            .collect::<Vec<_>>();
-        if matches.is_empty() {
-            empty_state(
-                ui,
-                "No placed instance resolves to this family.",
-                "Binding resolution is derived from the active schematic, not fixture counts.",
-            );
-        }
-        for component in matches {
-            property(
-                ui,
-                &component.name,
-                explicit_component_model(component)
-                    .as_deref()
-                    .unwrap_or("unbound"),
-                &component.params,
-            );
-        }
-    });
-}
-
-fn include_page(ui: &mut Ui, app: &mut RSpiceApp) {
-    let diagnostics = super::include_diagnostics(app);
-    section_title(
-        ui,
-        "Model include graph",
-        &format!(
-            "{} files · {} edges · {} diagnostics",
-            diagnostics.files,
-            diagnostics.edges,
-            diagnostics.unpinned_roots + diagnostics.cyclic_nodes
-        ),
-        |ui| {
-            if ui.button("Resolve drift…").clicked() {
-                if let Some(library) = app.state.model_library_manager.current_library().cloned() {
-                    refresh_library(app, &library);
-                } else {
-                    receipt(
-                        app,
-                        Err("Select a model source to resolve first.".to_owned()),
-                    );
-                }
-            }
-            if ui.button("Export manifest").clicked() {
-                export_include_manifest(app);
-            }
-        },
-    );
-    ui.horizontal(|ui| {
-        ui.checkbox(
-            &mut app.state.workbench.models_view.include_direct_only,
-            "Direct dependencies only",
-        );
-        ui.add(
-            egui::TextEdit::singleline(
-                &mut app.state.workbench.models_view.include_definition_query,
-            )
-            .hint_text("Filter definitions or providers…")
-            .desired_width(260.0),
-        );
-    });
-    let libraries = app
-        .state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    if libraries.is_empty() {
-        empty_state(
-            ui,
-            "No model-source closure is loaded.",
-            "Add a library or attach a pack to build an authenticated include graph.",
-        );
-        return;
-    }
-    ui.columns(2, |columns| {
-        card(&mut columns[0], |ui| {
-            card_title(
-                ui,
-                "ORDERED CLOSURE",
-                Some("root plus retained dependencies"),
-            );
-            ScrollArea::vertical()
-                .id_salt("models-include-nodes")
-                .max_height(270.0)
-                .show(ui, |ui| {
-                    for library in &libraries {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} · {} sources",
-                                library.name,
-                                library.source_closure.len()
-                            ))
-                            .strong(),
-                        );
-                        for (index, source) in library.source_closure.iter().enumerate() {
-                            let label = format!(
-                                "{:02}  {}  {}",
-                                index + 1,
-                                path_label(&source.path),
-                                short_digest(&source.digest.to_string())
-                            );
-                            if ui
-                                .selectable_label(
-                                    app.state
-                                        .workbench
-                                        .models_view
-                                        .include_selected_source
-                                        .as_deref()
-                                        == Some(source.path.to_string_lossy().as_ref()),
-                                    label,
-                                )
-                                .clicked()
-                            {
-                                app.state.workbench.models_view.include_selected_source =
-                                    Some(source.path.to_string_lossy().into_owned());
-                            }
-                        }
-                    }
-                });
-        });
-        card(&mut columns[1], |ui| {
-            card_title(ui, "RESOLUTION HEALTH", Some("authenticated graph"));
-            property(
-                ui,
-                "Pinned files",
-                &diagnostics.files.to_string(),
-                "digest retained",
-            );
-            property(
-                ui,
-                "Dependency edges",
-                &diagnostics.edges.to_string(),
-                "owner → target",
-            );
-            property(
-                ui,
-                "Unpinned roots",
-                &diagnostics.unpinned_roots.to_string(),
-                if diagnostics.unpinned_roots == 0 {
-                    "clean"
-                } else {
-                    "blocks execution"
-                },
-            );
-            property(
-                ui,
-                "Cycle nodes",
-                &diagnostics.cyclic_nodes.to_string(),
-                if diagnostics.cyclic_nodes == 0 {
-                    "clean"
-                } else {
-                    "blocks execution"
-                },
-            );
-        });
-    });
-    include_definition_table(ui, app, &libraries);
-}
-
-fn include_definition_table(ui: &mut Ui, app: &mut RSpiceApp, libraries: &[ModelLibrary]) {
-    let query = app
-        .state
-        .workbench
-        .models_view
-        .include_definition_query
-        .trim()
-        .to_ascii_lowercase();
-    let mut providers = BTreeMap::<String, Vec<String>>::new();
-    for library in libraries {
-        for model in library.models.values() {
-            providers
-                .entry(model.name.to_ascii_lowercase())
-                .or_default()
-                .push(library.name.clone());
-        }
-    }
-    card(ui, |ui| {
-        card_title(
-            ui,
-            "DEFINITION RESOLUTION",
-            Some(&format!("{} unique names", providers.len())),
-        );
-        table_header(
-            ui,
-            &[
-                ("DEFINITION", 0.25),
-                ("KIND", 0.13),
-                ("WINNING PROVIDER", 0.25),
-                ("OTHER CANDIDATES", 0.20),
-                ("RESOLUTION", 0.17),
-            ],
-        );
-        ScrollArea::vertical()
-            .id_salt("models-include-definitions")
-            .max_height(260.0)
-            .show(ui, |ui| {
-                let mut shown = 0;
-                for (definition, candidates) in &providers {
-                    if !query.is_empty()
-                        && !definition.contains(&query)
-                        && !candidates
-                            .iter()
-                            .any(|provider| provider.to_ascii_lowercase().contains(&query))
-                    {
-                        continue;
-                    }
-                    shown += 1;
-                    let contested = candidates.len() > 1;
-                    let other_candidates = if contested {
-                        (candidates.len() - 1).to_string()
-                    } else {
-                        "—".to_owned()
-                    };
-                    let response = selectable_data_row(
-                        ui,
-                        false,
-                        &[
-                            (definition, 0.25, true),
-                            ("model", 0.13, true),
-                            (&candidates[0], 0.25, false),
-                            (&other_candidates, 0.20, true),
-                            (if contested { "contested" } else { "unique" }, 0.17, true),
-                        ],
-                    );
-                    if contested && response.clicked() {
-                        app.state.workbench.models_view.dialog =
-                            Some(ModelsWorkbenchDialog::DefinitionConflict {
-                                definition: definition.clone(),
-                                providers: candidates.clone(),
-                            });
-                    }
-                }
-                if shown == 0 {
-                    empty_state(
-                        ui,
-                        "No definitions match.",
-                        "The filter searches definition names and every retained provider.",
-                    );
-                }
-            });
-    });
-}
-
-fn render_dialog(ui: &mut Ui, app: &mut RSpiceApp) {
+fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let Some(dialog) = app.state.workbench.models_view.dialog.clone() else {
         return;
     };
@@ -2664,7 +1603,7 @@ fn render_dialog(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.label(RichText::new(provider).monospace());
                     }
                     if ui.button("Open Model Editor").clicked() {
-                        Command::ModelEditor.execute(app);
+                        app.queue_command(Command::ModelEditor);
                         app.state.workbench.models_view.dialog = None;
                     }
                 });
@@ -2755,7 +1694,7 @@ fn render_dialog(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn compare_models(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    app: &ManagerRenderContext<'_>,
     left_library: &str,
     left_model: &str,
     right_library: &str,
@@ -2818,8 +1757,8 @@ fn compare_models(
                 false,
                 &[
                     (&key, 0.30, true),
-                    (left_value.as_deref().unwrap_or("—"), 0.27, true),
-                    (right_value.as_deref().unwrap_or("—"), 0.27, true),
+                    (left_value.as_deref().unwrap_or("not set"), 0.27, true),
+                    (right_value.as_deref().unwrap_or("not set"), 0.27, true),
                     (state, 0.16, true),
                 ],
             );
@@ -2827,7 +1766,7 @@ fn compare_models(
     });
 }
 
-fn open_model_compare(app: &mut RSpiceApp, left_library: &str, left_model: &str) {
+fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, left_model: &str) {
     let right = app
         .state
         .model_library_manager
@@ -2855,7 +1794,11 @@ fn open_model_compare(app: &mut RSpiceApp, left_library: &str, left_model: &str)
     }
 }
 
-fn open_model_source(app: &mut RSpiceApp, library: &ModelLibrary, model: &DeviceModel) {
+fn open_model_source(
+    app: &mut ManagerRenderContext<'_>,
+    library: &ModelLibrary,
+    model: &DeviceModel,
+) {
     let content = model
         .file_path
         .as_ref()
@@ -2903,7 +1846,7 @@ fn open_model_source(app: &mut RSpiceApp, library: &ModelLibrary, model: &Device
     }
 }
 
-fn refresh_library(app: &mut RSpiceApp, library: &ModelLibrary) {
+fn refresh_library(app: &mut ManagerRenderContext<'_>, library: &ModelLibrary) {
     let Some(root) = library.root_path.clone() else {
         receipt(
             app,
@@ -2942,7 +1885,7 @@ fn refresh_library(app: &mut RSpiceApp, library: &ModelLibrary) {
     receipt(app, result);
 }
 
-fn attach_pack(app: &mut RSpiceApp, pack_id: &str) {
+fn attach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
     let mut candidate = app.state.model_library_manager.clone();
     let result = candidate.attach_spice_pack(pack_id).and_then(|library| {
         publish_model_library_candidate(
@@ -2961,7 +1904,7 @@ fn attach_pack(app: &mut RSpiceApp, pack_id: &str) {
     receipt(app, result);
 }
 
-fn detach_pack(app: &mut RSpiceApp, pack_id: &str) {
+fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
     let Some(library) = attached_library_for_pack(app, pack_id) else {
         receipt(
             app,
@@ -2986,7 +1929,7 @@ fn detach_pack(app: &mut RSpiceApp, pack_id: &str) {
     receipt(app, result);
 }
 
-fn add_part(app: &mut RSpiceApp, pack_id: &str, part_name: &str) {
+fn add_part(app: &mut ManagerRenderContext<'_>, pack_id: &str, part_name: &str) {
     let mut candidate = app.state.model_library_manager.clone();
     let result = candidate
         .add_spice_part(pack_id, part_name)
@@ -3018,7 +1961,7 @@ fn add_part(app: &mut RSpiceApp, pack_id: &str, part_name: &str) {
 }
 
 fn add_corner(
-    app: &mut RSpiceApp,
+    app: &mut ManagerRenderContext<'_>,
     library_name: &str,
     name: &str,
     temperature_c: &str,
@@ -3110,7 +2053,7 @@ fn add_corner(
     receipt(app, result);
 }
 
-fn attached_library_for_pack(app: &RSpiceApp, pack_id: &str) -> Option<String> {
+fn attached_library_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> Option<String> {
     let index = app.state.model_library_manager.spice_packs()?;
     let pack = index.pack(pack_id)?;
     let directory = index.root().join(&pack.path);
@@ -3127,36 +2070,32 @@ fn attached_library_for_pack(app: &RSpiceApp, pack_id: &str) -> Option<String> {
         .map(|library| library.name.clone())
 }
 
-fn export_include_manifest(app: &mut RSpiceApp) {
+fn export_include_manifest(app: &mut ManagerRenderContext<'_>) {
     let manifest = build_include_manifest(app);
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let Some(path) = rfd::FileDialog::new()
-            .set_file_name("rspice-model-closure.json")
-            .add_filter("JSON", &["json"])
-            .save_file()
-        else {
-            return;
-        };
-        let result = std::fs::write(&path, manifest.as_bytes())
-            .map(|()| format!("Exported model closure manifest to '{}'.", path.display()))
-            .map_err(|error| format!("Could not export '{}': {error}", path.display()));
-        receipt(app, result);
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let result = crate::workbench::browser::download::download_bytes_file(
-            Path::new("rspice-model-closure.json"),
-            manifest.as_bytes(),
-            "application/json;charset=utf-8",
-        )
-        .map(|()| "Handed the model closure manifest to the browser download manager.".to_owned())
-        .map_err(|error| format!("Could not start the model closure download: {error}"));
-        receipt(app, result);
+    let result = crate::workbench::workflows::export_workflow::publish_generated_bytes(
+        "model closure manifest",
+        crate::workbench::workflows::export_workflow::SaveDialogConfig {
+            title: "Export model closure manifest",
+            default_name: "rspice-model-closure.json",
+            filter_name: "JSON",
+            filter_extensions: &["json"],
+        },
+        manifest.as_bytes(),
+        "application/json;charset=utf-8",
+    );
+    match result {
+        Ok(Some(message)) => receipt(app, Ok(message)),
+        Ok(None) => {}
+        Err(error) => receipt(
+            app,
+            Err(format!(
+                "Could not export the model closure manifest: {error}"
+            )),
+        ),
     }
 }
 
-fn build_include_manifest(app: &RSpiceApp) -> String {
+fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
     let libraries = app
         .state
         .model_library_manager
@@ -3192,7 +2131,7 @@ fn build_include_manifest(app: &RSpiceApp) -> String {
     .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))
 }
 
-fn model_consumers(app: &RSpiceApp, model_name: &str) -> Vec<String> {
+fn model_consumers(app: &ManagerRenderContext<'_>, model_name: &str) -> Vec<String> {
     let Some(schematic) = app.state.workspace.active_schematic() else {
         return Vec::new();
     };
@@ -3262,7 +2201,7 @@ fn explicit_component_model(component: &Component) -> Option<String> {
     }
 }
 
-fn exactly_one_selected_component(app: &RSpiceApp) -> Option<u64> {
+fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64> {
     let selection = &app.state.schematic.selection.components;
     (selection.len() == 1).then(|| *selection.iter().next().expect("one selected component"))
 }
@@ -3293,22 +2232,30 @@ fn part_key(hit: &PackModelHit) -> String {
     format!("{}\u{1f}{}\u{1f}{}", hit.pack, hit.name, hit.line)
 }
 
-fn receipt(app: &mut RSpiceApp, result: Result<String, String>) {
-    if let Err(message) = &result {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::warning(message.clone()));
+fn receipt(app: &mut ManagerRenderContext<'_>, result: Result<String, String>) {
+    apply_receipt(app.state, result);
+}
+
+fn apply_receipt(state: &mut AppState, result: Result<String, String>) {
+    match &result {
+        Ok(message) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::info(message.clone()))
+        }
+        Err(message) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message.clone()))
+        }
     }
-    app.state.workbench.models_view.operational_state = match &result {
+    state.workbench.models_view.operational_state = match &result {
         Ok(message) if message.to_ascii_lowercase().contains("recover") => {
             ModelsOperationalState::Recovered
         }
         Ok(_) => ModelsOperationalState::Ready,
         Err(message) => ModelsOperationalState::from_failure(message),
     };
-    app.state.workbench.models_view.action_receipt = Some(result);
+    state.workbench.models_view.action_receipt = Some(result);
 }
 
-fn navigate_specialist(app: &mut RSpiceApp, surface: crate::workbench::SurfaceId) {
+fn navigate_specialist(app: &mut ManagerRenderContext<'_>, surface: crate::workbench::SurfaceId) {
     if let Err(error) = app.state.workbench.navigate(
         crate::workbench::SurfaceRoute::surface(surface),
         crate::workbench::RouteTransitionSource::User,
@@ -3324,20 +2271,40 @@ fn section_title(ui: &mut Ui, title: &str, subtitle: &str, actions: impl FnOnce(
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(9, 7))
+        .inner_margin(egui::Margin::symmetric(12, 0))
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.vertical(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 30.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
                     ui.label(
                         RichText::new(title)
                             .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
                             .color(t.color.text),
                     );
-                    ui.label(RichText::new(subtitle).small().color(t.color.text_dim));
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), actions);
-            });
+                    ui.label(
+                        RichText::new(subtitle)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
+                    );
+                },
+            );
+        });
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .inner_margin(egui::Margin::symmetric(12, 2))
+        .show(ui, |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 32.0),
+                Layout::left_to_right(Align::Center),
+                actions,
+            );
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                ui.max_rect().bottom() - 0.5,
+                Stroke::new(1.0, t.color.border),
+            );
         });
 }
 
@@ -3348,6 +2315,22 @@ fn card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
         .stroke(Stroke::new(1.0, t.color.border))
         .inner_margin(egui::Margin::same(7))
         .show(ui, content);
+}
+
+fn detail_pane(ui: &mut Ui, title: &str, meta: Option<&str>, content: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::NONE
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::ZERO)
+        .show(ui, |ui| {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(12, 6))
+                .show(ui, |ui| card_title(ui, title, meta));
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, content);
+        });
 }
 
 fn card_title(ui: &mut Ui, title: &str, meta: Option<&str>) {
@@ -3395,7 +2378,8 @@ fn empty_state(ui: &mut Ui, title: &str, detail: &str) {
 
 fn table_header(ui: &mut Ui, columns: &[(&str, f32)]) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), Sense::hover());
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), HEADER_H), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
     let mut x = rect.left() + 5.0;
     for (label, fraction) in columns {

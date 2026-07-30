@@ -258,6 +258,25 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
     }
 }
 
+/// Publish an already-generated binary artifact through the platform's
+/// authoritative export workflow. Native builds use the guarded destination
+/// observed after the picker returns; browser builds hand the same bytes to
+/// the browser download backend.
+pub(crate) fn publish_generated_bytes(
+    label: &str,
+    config: SaveDialogConfig<'_>,
+    contents: &[u8],
+    mime_type: &str,
+) -> Result<Option<String>, String> {
+    let io = NativeExportWorkflowIo;
+    let Some(path) = io.show_save_dialog(config)? else {
+        return Ok(None);
+    };
+    let destination = io.observe_destination(&path)?;
+    io.write_bytes_file_observed(&destination, contents, mime_type)?;
+    Ok(Some(export_completion_message(label, &path, None, &io)))
+}
+
 pub(crate) fn deterministic_stored_zip(entries: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
     if entries.is_empty() || entries.len() > u16::MAX as usize {
         return Err("CI evidence package has an invalid entry count".to_owned());

@@ -5,6 +5,7 @@
 //! correlation requires current approved evidence before it counts.
 
 use super::*;
+use crate::workbench::state::ModelsPage;
 
 #[test]
 fn model_tabs_match_the_mockup_taxonomy() {
@@ -226,7 +227,6 @@ fn parent_scrolled_summary_uses_natural_height_instead_of_nesting_scrollbars() {
             },
             |root| {
                 egui::CentralPanel::default().show(root, |ui| {
-                    let long: String = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
                     let long: String = "C:/commercial/pdk/releases/current/models/process/sections/temperature-and-voltage-corner".to_owned();
                     let left = [
                         ("Resolved bindings", long.clone()),

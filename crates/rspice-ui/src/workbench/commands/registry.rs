@@ -472,6 +472,7 @@ impl Command {
                 | Self::ModelRunQualificationTests
                 | Self::ModelCompareRelease
                 | Self::PdkSettings
+                | Self::RescanModelLibraries
                 | Self::CompileVerilogA
                 | Self::AutomationConsole
                 | Self::VisualizationStudio
@@ -509,6 +510,7 @@ impl Command {
                 | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
+                | Self::RescanModelLibraries
                 | Self::PageSetup
                 | Self::PrintHardcopy
                 | Self::ExportActiveView

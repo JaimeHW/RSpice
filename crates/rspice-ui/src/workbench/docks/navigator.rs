@@ -1,6 +1,7 @@
 //! Workspace-aware navigation tree.
 
 mod design;
+mod models;
 mod symbol;
 
 mod netlist;
@@ -20,7 +21,7 @@ use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
 };
-use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
+use super::super::state::{ProjectPage, VerificationPage, Workspace};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 const SIGNAL_ROW_HEIGHT: f32 = 30.0;
@@ -104,7 +105,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                             verify(ui, app);
                         });
                 }
-                Workspace::Models => models(ui, app),
+                Workspace::Models => models::show(ui, app),
                 Workspace::Netlist => unreachable!("handled above"),
                 Workspace::Design => unreachable!("handled above"),
             }
@@ -203,7 +204,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         Workspace::Simulate => "Simulation Studio",
         Workspace::Results => "Data browser",
         Workspace::Verify => "Verification flows",
-        Workspace::Models => "Library browser",
+        Workspace::Models => "Model sources",
         Workspace::Netlist => "Netlist outline",
     };
     response
@@ -1586,224 +1587,6 @@ fn flow_row(
         );
     }
     clicked
-}
-
-fn models(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Model manager pages", None);
-    for page in ModelsPage::ALL {
-        if nav_row(
-            ui,
-            WorkbenchIcon::Models,
-            page.label(),
-            app.state.workbench.models_page == page,
-            None,
-        ) {
-            app.state.workbench.models_page = page;
-        }
-    }
-    section_header(
-        ui,
-        "Catalog scope",
-        Some(
-            &app.state
-                .model_library_manager
-                .total_model_count()
-                .to_string(),
-        ),
-    );
-    let scope_rows = [
-        (
-            crate::workbench::state::ModelsCatalogScope::Project,
-            app.state.model_library_manager.total_model_count(),
-        ),
-        (
-            crate::workbench::state::ModelsCatalogScope::InstalledPacks,
-            app.state
-                .model_library_manager
-                .spice_packs()
-                .map_or(0, |index| index.packs().len()),
-        ),
-        (
-            crate::workbench::state::ModelsCatalogScope::RSpiceLibrary,
-            app.state.model_library_manager.pack_definition_count(),
-        ),
-    ];
-    for (scope, count) in scope_rows {
-        if nav_row_indented_styled(
-            ui,
-            WorkbenchIcon::Models,
-            scope.label(),
-            app.state.workbench.models_view.catalog_scope == scope,
-            Some(&count.to_string()),
-            0,
-            false,
-        )
-        .clicked()
-        {
-            app.state.workbench.models_page = ModelsPage::Models;
-            app.state.workbench.models_view.catalog_scope = scope;
-            app.state.workbench.models_view.catalog_query.clear();
-        }
-    }
-    section_header(
-        ui,
-        "Model sources",
-        Some(&app.state.model_library_manager.library_count().to_string()),
-    );
-    let libraries: Vec<_> = app
-        .state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .map(|library| {
-            (
-                library.name.clone(),
-                library.model_count(),
-                library.source_closure.clone(),
-                library.corners.len(),
-                library
-                    .models
-                    .values()
-                    .filter(|model| {
-                        model.l_min.is_some()
-                            || model.l_max.is_some()
-                            || model.w_min.is_some()
-                            || model.w_max.is_some()
-                    })
-                    .count(),
-            )
-        })
-        .collect();
-    for (name, count, sources, corners, bins) in libraries {
-        let selected = app.state.model_library_manager.selected_library.as_deref() == Some(&name);
-        if nav_row_indented_styled(
-            ui,
-            WorkbenchIcon::Models,
-            &name,
-            selected,
-            Some(&count.to_string()),
-            0,
-            true,
-        )
-        .clicked()
-        {
-            app.state.model_library_manager.select_library(&name);
-            app.state.workbench.models_page = ModelsPage::Models;
-            app.state.workbench.models_view.catalog_scope =
-                crate::workbench::state::ModelsCatalogScope::Project;
-            app.state.workbench.selected_model = None;
-        }
-        if selected {
-            for (index, source) in sources.iter().enumerate().take(12) {
-                let label = source
-                    .path
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("source");
-                let source_key = source.path.to_string_lossy().into_owned();
-                if nav_row_indented_styled(
-                    ui,
-                    WorkbenchIcon::Code,
-                    label,
-                    app.state
-                        .workbench
-                        .models_view
-                        .include_selected_source
-                        .as_deref()
-                        == Some(source_key.as_str()),
-                    Some(&format!("{:02}", index + 1)),
-                    1,
-                    true,
-                )
-                .clicked()
-                {
-                    app.state.workbench.models_page = ModelsPage::Include;
-                    app.state.workbench.models_view.include_selected_source = Some(source_key);
-                }
-            }
-            if corners > 0
-                && nav_row_indented_styled(
-                    ui,
-                    WorkbenchIcon::Models,
-                    "Corners & sections",
-                    app.state.workbench.models_page == ModelsPage::Corners,
-                    Some(&corners.to_string()),
-                    1,
-                    false,
-                )
-                .clicked()
-            {
-                app.state.workbench.models_page = ModelsPage::Corners;
-            }
-            if bins > 0
-                && nav_row_indented_styled(
-                    ui,
-                    WorkbenchIcon::Models,
-                    "Bins & geometry",
-                    app.state.workbench.models_page == ModelsPage::Bins,
-                    Some(&bins.to_string()),
-                    1,
-                    false,
-                )
-                .clicked()
-            {
-                app.state.workbench.models_page = ModelsPage::Bins;
-            }
-        }
-    }
-    if let Some(index) = app.state.model_library_manager.spice_packs() {
-        section_header(ui, "Shipped corpus", Some(&index.part_count().to_string()));
-        let attached = index
-            .packs()
-            .iter()
-            .filter(|pack| {
-                let directory = index.root().join(&pack.path);
-                app.state
-                    .model_library_manager
-                    .libraries_sorted()
-                    .iter()
-                    .any(|library| {
-                        library
-                            .root_path
-                            .as_deref()
-                            .is_some_and(|path| path.starts_with(&directory))
-                    })
-            })
-            .count();
-        if nav_row_indented_styled(
-            ui,
-            WorkbenchIcon::Models,
-            "Installed packs",
-            app.state.workbench.models_view.catalog_scope
-                == crate::workbench::state::ModelsCatalogScope::InstalledPacks,
-            Some(&format!("{} · {attached} attached", index.packs().len())),
-            0,
-            false,
-        )
-        .clicked()
-        {
-            app.state.workbench.models_page = ModelsPage::Models;
-            app.state.workbench.models_view.catalog_scope =
-                crate::workbench::state::ModelsCatalogScope::InstalledPacks;
-        }
-        if nav_row_indented_styled(
-            ui,
-            WorkbenchIcon::Search,
-            "All parts",
-            app.state.workbench.models_view.catalog_scope
-                == crate::workbench::state::ModelsCatalogScope::RSpiceLibrary,
-            Some(&index.part_count().to_string()),
-            0,
-            false,
-        )
-        .clicked()
-        {
-            app.state.workbench.models_page = ModelsPage::Models;
-            app.state.workbench.models_view.catalog_scope =
-                crate::workbench::state::ModelsCatalogScope::RSpiceLibrary;
-            app.state.workbench.models_view.selected_pack = None;
-        }
-    }
 }
 
 fn nav_row_indented_styled(

@@ -73,7 +73,7 @@ pub fn create_editable_project_copy_and_open(
             "An editable model copy cannot be created while the project is read-only".to_owned(),
         );
     }
-    if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state) {
+    if app.state.project_lifecycle.operation_in_progress() {
         return Err(
             "Wait for the current project operation before creating an editable model copy"
                 .to_owned(),

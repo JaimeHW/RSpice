@@ -2,7 +2,7 @@
 //! the shell never fabricates datasets, source files, or verification records.
 
 use egui::containers::menu::MenuButton;
-use egui::{Context, Frame, Layout, Panel, Sense, Ui, Vec2};
+use egui::{Frame, Layout, Panel, Sense, Ui, Vec2};
 
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
@@ -439,7 +439,8 @@ fn reconcile_document_registry(state: &mut AppState) {
 }
 
 fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
-    document_count > 1 || (workspace == Workspace::Design && document_count == 1)
+    document_count > 1
+        || (matches!(workspace, Workspace::Design | Workspace::Models) && document_count == 1)
 }
 
 fn document_tabs(
@@ -973,6 +974,21 @@ mod tests {
     }
 
     #[test]
+    fn models_strip_retains_its_single_pinned_root_document() {
+        assert!(!document_strip_visible(Workspace::Models, 0));
+        assert!(document_strip_visible(Workspace::Models, 1));
+
+        let mut state = AppState::default();
+        state.workbench.workspace = Workspace::Models;
+        let descriptors = document_descriptors(&state);
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].id, WorkspaceDocumentId::Models);
+        assert_eq!(descriptors[0].label, "Models & PDKs");
+        assert!(descriptors[0].open);
+        assert!(!descriptors[0].closable);
+    }
+
+    #[test]
     fn non_design_strips_remain_reserved_for_multiple_open_documents() {
         assert!(!document_strip_visible(Workspace::Project, 0));
         assert!(!document_strip_visible(Workspace::Project, 1));
@@ -1115,7 +1131,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn long_document_labels_are_measured_and_ellipsized() {
-        let ctx = Context::default();
+        let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut fitted = String::new();
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {

@@ -6,6 +6,7 @@
 
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
+use crate::workbench::state::{ModelsPage, ProjectPage};
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {
     use crate::state::{
@@ -1964,6 +1965,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::ModelBrowser,
         Command::ModelEditor,
         Command::PdkSettings,
+        Command::RescanModelLibraries,
         Command::CompileVerilogA,
         Command::AutomationConsole,
         Command::VisualizationStudio,
@@ -2012,6 +2014,74 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
             "closed-project command did not explain its boundary: {command:?}"
         );
     }
+}
+
+#[test]
+fn model_library_rescan_discovers_files_and_reports_path_errors() {
+    let nonce = crate::time_compat::unix_epoch().as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rspice-command-rescan-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).expect("create model-library fixture");
+    std::fs::write(root.join("device.lib"), ".model dtest d\n")
+        .expect("write model-library fixture");
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    app.state.pdk_config = crate::state::pdk_config::PdkConfig::new();
+    app.state
+        .pdk_config
+        .add_library_path(root.to_string_lossy().into_owned());
+    let ctx = egui::Context::default();
+
+    Command::RescanModelLibraries.execute_with_feedback(&mut app, &ctx);
+
+    assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
+    let success = app
+        .state
+        .log_buffer
+        .entries()
+        .last()
+        .expect("rescan receipt");
+    assert_eq!(success.severity, crate::diagnostics::LogSeverity::Info);
+    assert!(success.message.contains("found 1 configured model file(s)"));
+    assert_eq!(
+        app.state.ui.toasts.activity()[0].kind(),
+        crate::ui::widgets::ToastKind::Success
+    );
+    assert!(
+        app.state.ui.toasts.activity()[0]
+            .message()
+            .contains("found 1 configured model file(s)")
+    );
+
+    app.state
+        .pdk_config
+        .add_library_path(root.join("missing").to_string_lossy().into_owned());
+    Command::RescanModelLibraries.execute_with_feedback(&mut app, &ctx);
+
+    assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
+    let warning = app
+        .state
+        .log_buffer
+        .entries()
+        .last()
+        .expect("warning receipt");
+    assert_eq!(warning.severity, crate::diagnostics::LogSeverity::Warning);
+    assert!(warning.message.contains("1 configured path error(s)"));
+    assert!(warning.message.contains("Path does not exist"));
+    assert_eq!(
+        app.state.ui.toasts.activity()[0].kind(),
+        crate::ui::widgets::ToastKind::Warn
+    );
+    assert!(
+        app.state.ui.toasts.activity()[0]
+            .message()
+            .contains("1 configured path error(s)")
+    );
+
+    std::fs::remove_dir_all(&root).expect("remove model-library fixture");
 }
 
 #[test]
