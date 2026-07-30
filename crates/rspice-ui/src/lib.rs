@@ -111,7 +111,6 @@ pub(crate) mod schematic;
 /// Simulation management - Controller, dialogs, netlist generation
 pub(crate) mod simulation;
 
-
 /// Property editing - Component properties and design variables
 pub(crate) mod properties;
 
@@ -173,8 +172,8 @@ pub(crate) mod output_spec;
 // =============================================================================
 //
 // `rspice-ui` is an application, not a library. Its only consumers are the
-// desktop and browser binary in `main.rs`, the `license_tool` example, and
-// the integration tests -- nothing in the workspace depends on it. Every
+// desktop and browser binary in `main.rs` and the integration tests --
+// nothing in the workspace depends on it. Every
 // module above is therefore `pub(crate)`, and everything reachable from
 // outside is named here.
 //
@@ -196,12 +195,6 @@ pub use workbench::logging::native_log_env;
 /// Typed identities, for `tests/simulation_configuration_contract.rs`.
 pub use product::{AnalysisInstanceId, SimulationPlanId};
 
-/// License-key verification, shared with the `license_tool` example that
-/// issues the keys this parses.
-pub use services::license::{
-    LicensePayload, SIGNING_DOMAIN, crockford_encode, date_from_unix_days, group5, parse_and_verify,
-};
-
 /// Design-variable netlist emission, pinned by the configuration contract.
 pub use simulation::netlist_gen::{DesignVariableNetlistContext, design_variable_parameter_lines};
 
@@ -209,8 +202,8 @@ pub use simulation::netlist_gen::{DesignVariableNetlistContext, design_variable_
 pub use state::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, ProjectWorkspace,
-    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord,
 };
 
 #[cfg(target_arch = "wasm32")]

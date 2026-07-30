@@ -22,9 +22,16 @@
 //! internal builds and the sample-key walkthrough. Its verifier and the
 //! signed sample are compiled only for debug and test builds. Production
 //! releases fail closed and accept only ceremony keys in
-//! `PRODUCTION_VERIFYING_KEYS`. Keys are generated/issued with the
-//! `license_tool` example:
-//! `cargo run -p rspice-ui --example license_tool -- gen|issue …`.
+//! `PRODUCTION_VERIFYING_KEYS`.
+//!
+//! Issuance is the signing half of the same spec and lives in this file's test
+//! module, which is the only place that can reach the payload layout without
+//! opening a `pub` hole in the crate root, and where `cfg(test)` keeps signing
+//! code out of every shipped binary. Production issuance is not done here at
+//! all: it belongs to the platform backend's cold-key flow. Run
+//! `cargo test -p rspice-ui --lib mint_signed_key -- --ignored --nocapture`
+//! to regenerate a fixture, or `mint_development_signer` to rotate key
+//! `0x01`.
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -207,8 +214,8 @@ pub struct LicensePayload {
 const PAYLOAD_HEADER: usize = 1 + 1 + 8 + 1 + 2 + 4 + 4 + 4;
 
 impl LicensePayload {
-    /// Serialize to the wire layout (used by the issuing tool; kept next
-    /// to `parse` so the two can never drift).
+    /// Serialize to the wire layout (used when issuing; kept next to `parse`
+    /// so the two can never drift).
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(PAYLOAD_HEADER + 64);
         out.push(self.version);
@@ -849,5 +856,297 @@ mod tests {
             std::env::temp_dir().join(format!("rspice-license-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).expect("create fixture");
         root
+    }
+
+    // =========================================================================
+    // Issuance
+    // =========================================================================
+    //
+    // The signing half of the spec lives here rather than in a binary target
+    // for two reasons. It needs the private items above -- `KEY_TAG`, the
+    // payload layout, `parse_and_verify_with_policy` -- and a separate target
+    // could only reach them through `pub` re-exports from the crate root,
+    // which is the visibility hole `tests/module_layering.rs` exists to keep
+    // shut. And `cfg(test)` is a stronger guarantee than a Cargo feature that
+    // no signing code is linked into a shipped binary: a feature can be
+    // enabled by accident.
+    //
+    // Issuance is a fixture generator, not a routine tool: production keys
+    // come from the platform backend's cold-key flow, and the development
+    // signer below has already been minted (its verifier is compiled in at
+    // `DEVELOPMENT_VERIFYING_KEYS`). The `#[ignore]`d entry points take their
+    // parameters from the environment and are run by hand when the wire
+    // format changes or the development key is rotated.
+
+    use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+
+    /// Signs a payload into a canonical key, exactly as an issuer must.
+    fn issue_key(signing: &SigningKey, payload: &LicensePayload) -> String {
+        let payload_bytes = payload.to_bytes();
+        let mut message = Vec::with_capacity(SIGNING_DOMAIN.len() + payload_bytes.len());
+        message.extend_from_slice(SIGNING_DOMAIN);
+        message.extend_from_slice(&payload_bytes);
+        let signature = signing.sign(&message);
+        format!(
+            "{KEY_TAG}{}.{}",
+            crockford_encode(&payload_bytes),
+            crockford_encode(&signature.to_bytes())
+        )
+    }
+
+    /// A payload with every field distinguishable, so a layout error shows up
+    /// as a specific mismatch rather than a generic verification failure.
+    fn fixture_payload(key_id: u8) -> LicensePayload {
+        LicensePayload {
+            version: 1,
+            key_id,
+            license_id: 0x9f3a_58c1_77d2_0b4e,
+            tier: 2,
+            seats: 5,
+            issued_days: 20_615,
+            expires_days: 20_979,
+            features: 7,
+            licensee: Some("Round Trip".to_owned()),
+            email_hash: Some([0xab; 16]),
+        }
+    }
+
+    /// Signing and verification agree on the wire format.
+    ///
+    /// Verification goes through `dalek` directly rather than through
+    /// `parse_and_verify_with_policy`, because an ephemeral key is by
+    /// definition absent from the compiled-in tables -- and adding a seam to
+    /// inject one would put test-only surface in the verifier.
+    #[test]
+    fn issued_key_round_trips() {
+        let signing = SigningKey::generate(&mut rand::rngs::OsRng);
+        let payload = fixture_payload(0x7f);
+        let key = issue_key(&signing, &payload);
+
+        let (encoded_payload, encoded_signature) = key
+            .strip_prefix(KEY_TAG)
+            .and_then(|rest| rest.split_once('.'))
+            .expect("issued key carries the tag and both parts");
+        let payload_bytes =
+            crockford_decode(encoded_payload).expect("payload decodes from crockford");
+        let signature_bytes =
+            crockford_decode(encoded_signature).expect("signature decodes from crockford");
+
+        assert_eq!(
+            payload_bytes,
+            payload.to_bytes(),
+            "the encoded payload must be the payload"
+        );
+
+        let parsed = LicensePayload::parse(&payload_bytes).expect("payload parses");
+        assert_eq!(parsed.version, payload.version);
+        assert_eq!(parsed.key_id, payload.key_id);
+        assert_eq!(parsed.license_id, payload.license_id);
+        assert_eq!(parsed.tier, payload.tier);
+        assert_eq!(parsed.seats, payload.seats);
+        assert_eq!(parsed.issued_days, payload.issued_days);
+        assert_eq!(parsed.expires_days, payload.expires_days);
+        assert_eq!(parsed.features, payload.features);
+        assert_eq!(parsed.licensee, payload.licensee);
+        assert_eq!(parsed.email_hash, payload.email_hash);
+
+        let mut message = Vec::new();
+        message.extend_from_slice(SIGNING_DOMAIN);
+        message.extend_from_slice(&payload_bytes);
+        let signature =
+            ed25519_dalek::Signature::from_slice(&signature_bytes).expect("signature is 64 bytes");
+        signing
+            .verifying_key()
+            .verify(&message, &signature)
+            .expect("the issued signature must verify under the issuing key");
+    }
+
+    /// The domain tag is load-bearing: a signature over the bare payload must
+    /// not verify as a license.
+    #[test]
+    fn signature_without_the_domain_tag_is_rejected() {
+        let signing = SigningKey::generate(&mut rand::rngs::OsRng);
+        let payload_bytes = fixture_payload(0x7f).to_bytes();
+        let undomained = signing.sign(&payload_bytes);
+
+        let mut message = Vec::new();
+        message.extend_from_slice(SIGNING_DOMAIN);
+        message.extend_from_slice(&payload_bytes);
+        assert!(
+            signing
+                .verifying_key()
+                .verify(&message, &undomained)
+                .is_err(),
+            "cross-protocol reuse must not verify"
+        );
+    }
+
+    /// A key issued by an unknown signer is rejected under every policy, so a
+    /// stolen key id cannot be paired with an attacker's own keypair.
+    #[test]
+    fn issued_key_from_an_unknown_signer_is_rejected() {
+        let signing = SigningKey::generate(&mut rand::rngs::OsRng);
+        // Key id 0x01 is the development signer's slot; this is not its key.
+        let key = issue_key(&signing, &fixture_payload(0x01));
+        for policy in [
+            VerificationPolicy::Development,
+            VerificationPolicy::Production,
+        ] {
+            assert_eq!(
+                parse_and_verify_with_policy(&key, policy),
+                Err(LicenseError::BadSignature),
+                "an impostor signature must not verify under {policy:?}"
+            );
+        }
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn unhex(text: &str) -> Option<Vec<u8>> {
+        let text = text.trim();
+        if !text.len().is_multiple_of(2) {
+            return None;
+        }
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
+            .collect()
+    }
+
+    fn rust_array(bytes: &[u8]) -> String {
+        let body = bytes
+            .iter()
+            .map(|b| format!("0x{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{body}]")
+    }
+
+    fn env_or<T: std::str::FromStr>(name: &str, default: T) -> T {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default)
+    }
+
+    /// Mints a fresh signer. Run by hand only, on a key rotation:
+    ///
+    /// ```text
+    /// cargo test -p rspice-ui --lib mint_development_signer -- --ignored --nocapture
+    /// ```
+    ///
+    /// The secret is printed once and must never enter the repository; paste
+    /// the Rust array into `DEVELOPMENT_VERIFYING_KEYS`.
+    // The crate denies `print_stdout` because the desktop build detaches from
+    // its console and the browser build has no stderr. These two are the
+    // exception on purpose: they are operator entry points whose entire output
+    // *is* the printed key material, read through `--nocapture`. The allow is
+    // per-function so the rule keeps holding everywhere else.
+    #[test]
+    #[allow(clippy::print_stdout)]
+    #[ignore = "mints key material; run by hand on a key rotation"]
+    fn mint_development_signer() {
+        let signing = SigningKey::generate(&mut rand::rngs::OsRng);
+        let verifying = signing.verifying_key();
+        println!("secret (keep OUT of the repository):");
+        println!("  {}", hex(&signing.to_bytes()));
+        println!("public:");
+        println!("  {}", hex(verifying.as_bytes()));
+        println!("public as a Rust array:");
+        println!("  {}", rust_array(verifying.as_bytes()));
+    }
+
+    /// Signs a key with an existing secret. Run by hand when the wire format
+    /// changes and `SAMPLE_KEY` has to be regenerated:
+    ///
+    /// ```text
+    /// RSPICE_LICENSE_SECRET=<hex64> \
+    /// RSPICE_LICENSE_NAME="Jaime Whitfield" \
+    ///   cargo test -p rspice-ui --lib mint_signed_key -- --ignored --nocapture
+    /// ```
+    ///
+    /// Ed25519 signing is deterministic, so the same secret and the same
+    /// parameters reproduce a byte-identical key. Optional overrides:
+    /// `RSPICE_LICENSE_{KEY_ID,TIER,SEATS,ISSUED_DAYS,EXPIRES_DAYS,FEATURES,LICENSE_ID}`.
+    #[test]
+    #[allow(clippy::print_stdout)]
+    #[ignore = "requires the signing secret; run by hand to regenerate fixtures"]
+    fn mint_signed_key() {
+        let secret_hex = std::env::var("RSPICE_LICENSE_SECRET")
+            .expect("set RSPICE_LICENSE_SECRET to the 64-hex-character signing secret");
+        let secret: [u8; 32] = unhex(&secret_hex)
+            .and_then(|bytes| bytes.try_into().ok())
+            .expect("RSPICE_LICENSE_SECRET must be 64 hex characters");
+        let signing = SigningKey::from_bytes(&secret);
+
+        let issued_days: u32 = env_or("RSPICE_LICENSE_ISSUED_DAYS", RELEASE_UNIX_DAYS);
+        let license_id: u64 = match std::env::var("RSPICE_LICENSE_LICENSE_ID") {
+            Ok(text) => u64::from_str_radix(&text.replace('-', ""), 16)
+                .expect("RSPICE_LICENSE_LICENSE_ID must be hex"),
+            Err(_) => {
+                let mut bytes = [0u8; 8];
+                rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut bytes);
+                u64::from_be_bytes(bytes)
+            }
+        };
+        let payload = LicensePayload {
+            version: 1,
+            key_id: env_or("RSPICE_LICENSE_KEY_ID", 1),
+            license_id,
+            tier: env_or("RSPICE_LICENSE_TIER", 1),
+            seats: env_or("RSPICE_LICENSE_SEATS", 0),
+            issued_days,
+            expires_days: env_or("RSPICE_LICENSE_EXPIRES_DAYS", issued_days + 365),
+            features: env_or("RSPICE_LICENSE_FEATURES", 7),
+            licensee: std::env::var("RSPICE_LICENSE_NAME").ok(),
+            email_hash: None,
+        };
+
+        let key = issue_key(&signing, &payload);
+        println!("key (canonical):");
+        println!("  {key}");
+        println!("key (grouped for email):");
+        let (encoded_payload, encoded_signature) = key
+            .strip_prefix(KEY_TAG)
+            .and_then(|rest| rest.split_once('.'))
+            .expect("just formatted");
+        println!(
+            "  {KEY_TAG}{}.{}",
+            group5(encoded_payload),
+            group5(encoded_signature)
+        );
+        println!(
+            "grant: tier {} · updates until {} · license id {license_id:016x}",
+            payload.tier,
+            date_from_unix_days(payload.expires_days)
+        );
+
+        // Self-check through the app's own verifier, so a fixture can never be
+        // committed broken. A fresh key id is expected to fail here until its
+        // verifier is added to one of the compiled-in tables.
+        match parse_and_verify(&key) {
+            Ok(info) => println!("self-verify against compiled-in keys: OK ({})", info.tier),
+            Err(error) => println!(
+                "self-verify against compiled-in keys: {error:?} \
+                 (expected for a key id that is not in a compiled-in table)"
+            ),
+        }
+
+        // Prove the printed key is well-formed even when the key id is not one
+        // this build trusts, so a bad paste is caught here rather than later.
+        let verifying = VerifyingKey::from(&signing);
+        let payload_bytes = payload.to_bytes();
+        let mut message = Vec::new();
+        message.extend_from_slice(SIGNING_DOMAIN);
+        message.extend_from_slice(&payload_bytes);
+        let signature_bytes =
+            crockford_decode(encoded_signature).expect("printed signature decodes");
+        let signature = ed25519_dalek::Signature::from_slice(&signature_bytes)
+            .expect("printed signature is 64 bytes");
+        verifying
+            .verify(&message, &signature)
+            .expect("printed key must verify under the supplied secret");
     }
 }

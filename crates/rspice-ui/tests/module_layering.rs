@@ -610,17 +610,29 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("workflows/project_workflow", "browser/download", 1),
     // Recovery and checkpointing reaching sideways into the workflows.
     ("lifecycle/recovery", "workflows/file_workflow", 6),
-    ("lifecycle/recovery_checkpoint", "workflows/file_workflow", 6),
+    (
+        "lifecycle/recovery_checkpoint",
+        "workflows/file_workflow",
+        6,
+    ),
     ("shortcuts/artifacts", "shortcuts/profile_workflow", 4),
     ("lifecycle/recovery", "lifecycle/recovery_checkpoint", 2),
     ("lifecycle/recovery", "workflows/project_workflow", 2),
     ("browser/file_import", "shortcuts/profile_workflow", 1),
     ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
     ("documents/code_workspace", "workflows/export_workflow", 1),
-    ("documents/netlist_document", "workflows/netlist_workflow", 1),
+    (
+        "documents/netlist_document",
+        "workflows/netlist_workflow",
+        1,
+    ),
     // Presentation reaching sideways into a peer surface.
     ("docks", "documents/visualization_studio", 1),
-    ("hardcopy_adapters/sources", "documents/visualization_studio", 1),
+    (
+        "hardcopy_adapters/sources",
+        "documents/visualization_studio",
+        1,
+    ),
     ("surfaces", "documents/visualization_studio", 1),
     ("feature_availability", "design_system", 1),
     // A route describing its own catalog and availability.
@@ -916,9 +928,9 @@ fn workbench_references_respect_the_layer_order() {
 /// The crate has no `pub mod` declarations, and must not gain one.
 ///
 /// `rspice-ui` is an application, not a library: its only consumers are its
-/// own `main.rs`, the three wasm entry points in `lib.rs`, the integration
-/// tests, and the `license_tool` example. Everything they need is re-exported
-/// from the crate root, so no module needs to be public at all.
+/// own `main.rs`, the three wasm entry points in `lib.rs`, and the integration
+/// tests. Everything they need is re-exported from the crate root, so no
+/// module needs to be public at all.
 ///
 /// This is not a style preference. A `pub` module is one the compiler must
 /// assume has callers it cannot see, so it will not report an unreachable
