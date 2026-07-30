@@ -54,6 +54,130 @@ pub(super) fn parse_non_negative(value: &str, label: &str) -> Result<f64, String
     }
 }
 
+/// Copy one selected read-only catalog model into a new project-owned revision
+/// and open that exact committed revision in the transactional editor.
+///
+/// Candidate construction and editor resolution happen before the guarded
+/// project publication. A parse, metadata, identity, or editor error therefore
+/// leaves both the project and global Undo history unchanged.
+pub fn create_editable_project_copy_and_open(
+    app: &mut RSpiceApp,
+    source_library_name: &str,
+    source_model_name: &str,
+) -> Result<(String, String), String> {
+    if !app.state.project_lifecycle.project_open {
+        return Err("Open a project before creating an editable model copy".to_owned());
+    }
+    if app.state.workbench.safe_mode.project_read_only() {
+        return Err(
+            "An editable model copy cannot be created while the project is read-only".to_owned(),
+        );
+    }
+    if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state) {
+        return Err(
+            "Wait for the current project operation before creating an editable model copy"
+                .to_owned(),
+        );
+    }
+    if app
+        .state
+        .workbench
+        .model_editor
+        .qualification_execution
+        .is_some()
+    {
+        return Err(
+            "Finish or cancel the active model qualification run before creating another model"
+                .to_owned(),
+        );
+    }
+    if let Some(open) = app.state.workbench.model_editor.draft.as_ref()
+        && open.is_dirty()
+    {
+        return Err(format!(
+            "Unsaved model candidate '{}/{}' is open; save or discard it before creating an editable copy",
+            open.library_name, open.model_name
+        ));
+    }
+
+    let project_library_name =
+        available_project_copy_library_name(&app.state.model_library_manager, source_model_name);
+    let mut candidate = app.state.model_library_manager.clone();
+    let commit = candidate.create_editable_project_copy(
+        source_library_name,
+        source_model_name,
+        &project_library_name,
+    )?;
+    let project_model_name = commit.model_name.clone();
+    let expected_project_revision = app
+        .state
+        .workspace
+        .project
+        .next_revision()
+        .map_err(|error| error.to_string())?;
+    let mut editor = ModelEditorState::default();
+    editor.open(
+        &candidate,
+        &project_library_name,
+        &project_model_name,
+        expected_project_revision,
+    )?;
+
+    app.state.publish_project_model_candidate(
+        candidate,
+        commit,
+        format!(
+            "create editable project model {source_library_name}/{source_model_name} as {project_library_name}/{project_model_name}"
+        ),
+    )?;
+    app.state
+        .workbench
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::ModelEditor),
+            RouteTransitionSource::User,
+        )
+        .map_err(|error| error.to_string())?;
+    app.state.workbench.model_editor = editor;
+    app.state
+        .model_library_manager
+        .select_library(&project_library_name);
+    app.state.workbench.selected_model = Some(project_model_name.clone());
+    Ok((project_library_name, project_model_name))
+}
+
+fn available_project_copy_library_name(manager: &ModelLibraryManager, model_name: &str) -> String {
+    for sequence in 1_u32.. {
+        let suffix = if sequence == 1 {
+            " project".to_owned()
+        } else {
+            format!(" project {sequence}")
+        };
+        let maximum_stem_bytes = 128_usize.saturating_sub(suffix.len());
+        let mut stem = String::new();
+        for character in model_name.chars() {
+            if character.is_control() || matches!(character, '/' | '\\') {
+                continue;
+            }
+            if stem.len() + character.len_utf8() > maximum_stem_bytes {
+                break;
+            }
+            stem.push(character);
+        }
+        if stem.trim().is_empty() {
+            stem.push_str("editable model");
+        }
+        let candidate = format!("{}{suffix}", stem.trim());
+        if manager
+            .libraries_sorted()
+            .iter()
+            .all(|library| !library.name.eq_ignore_ascii_case(&candidate))
+        {
+            return candidate;
+        }
+    }
+    unreachable!("u32 project-copy suffixes exhaust practical library identities")
+}
+
 /// Open an exact project-owned model revision in the transactional editor.
 pub fn open_project_model(
     app: &mut RSpiceApp,

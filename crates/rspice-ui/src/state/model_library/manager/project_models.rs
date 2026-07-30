@@ -9,6 +9,74 @@
 use super::*;
 
 impl ModelLibraryManager {
+    /// Create a new project-owned, single-model revision from one selected
+    /// external or built-in catalog model.
+    ///
+    /// The copy preserves the source model's editable typed metadata and its
+    /// PDK/technology provenance, but deliberately starts with no qualification
+    /// or correlation evidence: those records are bound to the original source
+    /// identity and cannot authenticate a newly-owned revision.
+    pub fn create_editable_project_copy(
+        &mut self,
+        source_library_name: &str,
+        source_model_name: &str,
+        project_library_name: &str,
+    ) -> Result<ProjectModelCommit, String> {
+        let source_library = self
+            .get_library(source_library_name)
+            .cloned()
+            .ok_or_else(|| format!("Model library '{source_library_name}' does not exist"))?;
+        match source_library.source_authority {
+            ModelSourceAuthority::BuiltIn | ModelSourceAuthority::External => {}
+            ModelSourceAuthority::ProjectOwned { .. } => {
+                return Err(format!(
+                    "Model '{source_model_name}' in library '{source_library_name}' is already project-owned"
+                ));
+            }
+        }
+        let source_model = source_library
+            .models
+            .get(source_model_name)
+            .ok_or_else(|| {
+                format!(
+                    "Model '{source_model_name}' does not exist in library '{source_library_name}'"
+                )
+            })?;
+        let base = ProjectModelDefinition::editable_copy_from_device_model(source_model);
+        let mut metadata = reconcile_project_model_revision_metadata(
+            &base,
+            source_library
+                .model_definition_metadata
+                .get(source_model_name),
+        )?;
+        // Manager-owned identity is always rebound to the newly rendered
+        // project source. Keeping an external identity here would make the new
+        // revision appear authenticated by unrelated bytes.
+        metadata.source_identity = None;
+        for section in &mut metadata.sections {
+            section.model_files.clear();
+            section.qualification = ModelSectionQualification::Unqualified;
+        }
+        let definition = ProjectModelRevisionDefinition::new(base, metadata);
+        let mut commit = self.create_project_model_revision(
+            project_library_name,
+            &definition,
+            &ModelQualificationState::default(),
+        )?;
+
+        let project_library = self
+            .get_library_mut(project_library_name)
+            .expect("successful project-model creation inserts its library");
+        project_library
+            .pdk_name
+            .clone_from(&source_library.pdk_name);
+        project_library
+            .technology_node
+            .clone_from(&source_library.technology_node);
+        commit.after = project_library.clone();
+        Ok(commit)
+    }
+
     /// Create a new single-card model whose exact source is owned by the
     /// project. The candidate is rendered, parsed, and checked completely
     /// before the manager is mutated.

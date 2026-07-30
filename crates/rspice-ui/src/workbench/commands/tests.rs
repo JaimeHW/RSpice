@@ -1386,7 +1386,7 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
         .expect("model editor command must be registered");
     assert_eq!(
         vocabulary::COMMAND_REGISTRY[registry_index - 1],
-        Command::ModelsPage(ModelsPage::Models)
+        Command::ModelCreateProjectCopy
     );
 
     let mut app = RSpiceApp::test_instance();
@@ -1410,6 +1410,187 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
         CommandAvailability::Disabled(
             "the selected model is built-in; create an editable project copy first"
         )
+    );
+}
+
+#[test]
+fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
+    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelSourceAuthority, ModelType};
+
+    assert_eq!(
+        Command::ModelCreateProjectCopy.stable_id(),
+        "model-create-project-copy"
+    );
+    assert_eq!(
+        Command::ModelCreateProjectCopy.spec().label,
+        "Create editable project copy"
+    );
+    assert_eq!(Command::ModelCreateProjectCopy.spec().group, "Models");
+    assert_eq!(
+        Command::from_stable_id("model-create-project-copy"),
+        Some(Command::ModelCreateProjectCopy)
+    );
+    assert!(
+        vocabulary::COMMAND_REGISTRY.contains(&Command::ModelCreateProjectCopy),
+        "project-copy action must be reachable through the command registry"
+    );
+    assert!(Command::ModelCreateProjectCopy.blocked_by_project_operation());
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    let initial_project_revision = app.state.workspace.project.revision();
+    let mut built_in = ModelLibrary::new("command copy built-in");
+    built_in.pdk_name = "Example PDK".to_owned();
+    built_in.technology_node = "45nm".to_owned();
+    let mut model = DeviceModel::new("copy_nch", ModelType::Nmos);
+    model.spice_type = Some("NMOS".to_owned());
+    model.spice_level = Some(1);
+    model.description = "Built-in command copy".to_owned();
+    model.parameters.insert("vth0".to_owned(), 0.46);
+    built_in.add_model(model);
+    app.state.model_library_manager.add_library(built_in);
+    app.state
+        .model_library_manager
+        .select_library("command copy built-in");
+    app.state.workbench.selected_model = Some("copy_nch".to_owned());
+
+    assert_eq!(
+        Command::ModelCreateProjectCopy.availability(&app),
+        CommandAvailability::Available
+    );
+    assert!(!Command::ModelEditor.is_enabled(&app));
+    Command::ModelCreateProjectCopy.execute(&mut app);
+
+    assert!(
+        app.state.workspace.project.revision() > initial_project_revision,
+        "copy publication advances the guarded project revision"
+    );
+    assert!(app.state.workspace.project_metadata_dirty);
+    assert_eq!(
+        app.state.model_library_manager.selected_library.as_deref(),
+        Some("copy_nch project")
+    );
+    assert_eq!(
+        app.state.workbench.selected_model.as_deref(),
+        Some("copy_nch")
+    );
+    let project_copy = app
+        .state
+        .model_library_manager
+        .get_library("copy_nch project")
+        .expect("command publishes the copy");
+    assert!(matches!(
+        project_copy.source_authority,
+        ModelSourceAuthority::ProjectOwned { .. }
+    ));
+    assert_eq!(project_copy.pdk_name, "Example PDK");
+    assert_eq!(project_copy.technology_node, "45nm");
+    assert_eq!(
+        app.state.workbench.current_route().surface_id(),
+        crate::workbench::SurfaceId::ModelEditor
+    );
+    let draft = app
+        .state
+        .workbench
+        .model_editor
+        .draft
+        .as_ref()
+        .expect("the exact committed copy opens in the editor");
+    assert_eq!(draft.library_name, "copy_nch project");
+    assert_eq!(draft.model_name, "copy_nch");
+    assert_eq!(
+        draft.base_project_revision,
+        app.state.workspace.project.revision()
+    );
+    assert!(Command::ModelEditor.is_enabled(&app));
+
+    assert!(app.state.can_undo_project_design());
+    let undo_description = app
+        .state
+        .undo_project_design()
+        .expect("copy undo succeeds")
+        .expect("copy records one history item");
+    assert!(undo_description.starts_with("create editable project model "));
+    assert!(
+        app.state
+            .model_library_manager
+            .get_library("copy_nch project")
+            .is_none(),
+        "undo removes the newly created project library"
+    );
+    assert!(app.state.can_redo_project_design());
+    app.state
+        .redo_project_design()
+        .expect("copy redo succeeds")
+        .expect("copy redo has one history item");
+    assert!(
+        app.state
+            .model_library_manager
+            .get_library("copy_nch project")
+            .is_some(),
+        "redo restores the authenticated project copy"
+    );
+}
+
+#[test]
+fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_read_only_state() {
+    use std::collections::BTreeMap;
+
+    use crate::state::model_library::{
+        DeviceModel, ModelLibrary, ModelSourceAuthority, ModelType, ProjectModelDefinition,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    let mut external = ModelLibrary::new("external command source");
+    external.source_authority = ModelSourceAuthority::External;
+    external.add_model(DeviceModel::new("external_nch", ModelType::Nmos));
+    app.state.model_library_manager.add_library(external);
+    app.state
+        .model_library_manager
+        .select_library("external command source");
+    app.state.workbench.selected_model = Some("external_nch".to_owned());
+    assert_eq!(
+        Command::ModelCreateProjectCopy.availability(&app),
+        CommandAvailability::Available
+    );
+
+    app.state
+        .model_library_manager
+        .create_project_model(
+            "already owned",
+            &ProjectModelDefinition {
+                name: "owned_nch".to_owned(),
+                spice_type: "NMOS".to_owned(),
+                description: "Already editable".to_owned(),
+                numeric_parameters: BTreeMap::new(),
+                string_parameters: BTreeMap::new(),
+            },
+        )
+        .expect("owned fixture");
+    app.state
+        .model_library_manager
+        .select_library("already owned");
+    app.state.workbench.selected_model = Some("owned_nch".to_owned());
+    assert_eq!(
+        Command::ModelCreateProjectCopy.availability(&app),
+        CommandAvailability::Disabled("the selected model is already an editable project copy")
+    );
+
+    app.state
+        .model_library_manager
+        .select_library("external command source");
+    app.state.workbench.selected_model = Some("external_nch".to_owned());
+    app.state.workbench.safe_mode.activate(
+        crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..crate::workbench::state::LocalSafeModeOptions::default()
+        },
+        "read-only copy test".to_owned(),
+    );
+    assert_eq!(
+        Command::ModelCreateProjectCopy.availability(&app),
+        CommandAvailability::Disabled("the project is open read-only")
     );
 }
 

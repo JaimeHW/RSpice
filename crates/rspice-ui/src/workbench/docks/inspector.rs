@@ -23,6 +23,102 @@ const INSPECTOR_PROPERTY_LIST_PADDING_BOTTOM: f32 = 10.0;
 const INSPECTOR_TREE_PADDING_TOP: f32 = 4.0;
 const INSPECTOR_TREE_PADDING_BOTTOM: f32 = 7.0;
 
+/// Bind one selected schematic instance from the Models & PDKs workbench
+/// through the same guarded schematic transaction used by the inspector.
+/// Library-cell instances retain their exact library identity; primitive
+/// instances can bind only when the requested model name is unique across the
+/// loaded catalog, because their persisted SPICE contract has no library slot.
+pub(crate) fn bind_component_model_from_catalog(
+    app: &mut RSpiceApp,
+    component_id: u64,
+    library_name: &str,
+    model_name: &str,
+) -> Result<(), String> {
+    let component = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .cloned()
+        .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
+    let library = app
+        .state
+        .model_library_manager
+        .get_library(library_name)
+        .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
+    if !library
+        .models
+        .values()
+        .any(|model| model.name.eq_ignore_ascii_case(model_name))
+    {
+        return Err(format!(
+            "Model '{model_name}' is no longer present in library '{library_name}'."
+        ));
+    }
+
+    if let Some(binding) = component.library_cell.as_ref() {
+        if !binding.library.eq_ignore_ascii_case(library_name) {
+            return Err(format!(
+                "The selected cell instance is bound to library '{}'; cross-library rebinding requires the Library/Cellview Manager.",
+                binding.library
+            ));
+        }
+        let before = app.state.schematic.topology_version();
+        design::apply_bound_model_choice(app, component_id, model_name);
+        if app.state.schematic.topology_version() == before {
+            return Err(
+                "The requested model is incompatible with the selected cell's model family."
+                    .to_owned(),
+            );
+        }
+        return Ok(());
+    }
+
+    let duplicate_count = app
+        .state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| {
+            library
+                .models
+                .values()
+                .any(|model| model.name.eq_ignore_ascii_case(model_name))
+        })
+        .count();
+    if duplicate_count != 1 {
+        return Err(format!(
+            "Primitive SPICE instances store only a model name, and '{model_name}' resolves in {duplicate_count} loaded libraries. Resolve the definition conflict before binding."
+        ));
+    }
+
+    let mut params = crate::state::parse_params_string(&component.params);
+    if params
+        .get("model")
+        .is_some_and(|current| current.eq_ignore_ascii_case(model_name))
+    {
+        return Ok(());
+    }
+    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
+    let target = app
+        .state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|candidate| candidate.id == component_id)
+        .expect("the selected component was resolved above");
+    params.insert("model".to_owned(), model_name.to_owned());
+    target.params = crate::state::format_params_string(&params);
+    app.state.schematic.is_dirty = true;
+    app.state.schematic.bump_topology_version();
+    app.state
+        .schematic
+        .commit_undo_from(before, "bind instance model");
+    app.invalidate_simulation_preflight();
+    Ok(())
+}
+
 fn inspector_section_state_id() -> egui::Id {
     egui::Id::new("workbench.inspector.property-list-open")
 }
@@ -1389,7 +1485,20 @@ fn wilson_interval_95(successes: usize, total: usize) -> Option<(f64, f64)> {
 }
 
 fn models(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Model binding", None);
+    if app.state.workbench.models_page == crate::workbench::state::ModelsPage::Models {
+        match app.state.workbench.models_view.catalog_scope {
+            crate::workbench::state::ModelsCatalogScope::InstalledPacks => {
+                model_pack_inspector(ui, app);
+                return;
+            }
+            crate::workbench::state::ModelsCatalogScope::RSpiceLibrary => {
+                shipped_part_inspector(ui, app);
+                return;
+            }
+            crate::workbench::state::ModelsCatalogScope::Project => {}
+        }
+    }
+    section_header(ui, "Model identity", None);
     property_row(
         ui,
         "Library",
@@ -1432,6 +1541,23 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
         property_row(ui, "Corners", &library.corner_count().to_string());
         property_row(
             ui,
+            "Authority",
+            match library.source_authority {
+                crate::state::model_library::ModelSourceAuthority::BuiltIn => "RSpice built-in",
+                crate::state::model_library::ModelSourceAuthority::External => "External",
+                crate::state::model_library::ModelSourceAuthority::ProjectOwned { .. } => {
+                    "Project-owned"
+                }
+            },
+        );
+        property_row(
+            ui,
+            "Pinned sources",
+            &library.source_closure.len().to_string(),
+        );
+        property_row(ui, "Include edges", &library.source_edges.len().to_string());
+        property_row(
+            ui,
             "Selected corner",
             library.selected_corner.as_deref().unwrap_or("None"),
         );
@@ -1443,15 +1569,173 @@ fn models(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Type", &format!("{:?}", model.model_type));
             property_row(ui, "Level", &format!("{:?}", model.level));
             property_row(ui, "Parameters", &model.parameters.len().to_string());
+            property_row(
+                ui,
+                "Typed metadata",
+                if library.model_definition_metadata.contains_key(model_name) {
+                    "Present"
+                } else {
+                    "Not declared"
+                },
+            );
+            if let Some(qualification) = library.model_qualification.get(model_name) {
+                property_row(ui, "Suites", &qualification.suites.len().to_string());
+                property_row(ui, "Evidence", &qualification.evidence.len().to_string());
+                property_row(ui, "Releases", &qualification.releases.len().to_string());
+            } else {
+                property_row(ui, "Qualification", "No retained suite");
+            }
+            if let Some(correlation) = library.model_correlation.get(model_name) {
+                property_row(
+                    ui,
+                    "Correlation suites",
+                    &correlation.suites.len().to_string(),
+                );
+                property_row(
+                    ui,
+                    "Correlation evidence",
+                    &correlation.evidence.len().to_string(),
+                );
+            }
             if let Some(vdd) = model.vdd {
                 property_row(ui, "Nominal VDD", &format!("{vdd:.6} V"));
+            }
+            if let Some(vth) = model.vth0 {
+                property_row(ui, "Threshold", &format!("{vth:.6} V"));
+            }
+            if let (Some(l_min), Some(l_max)) = (model.l_min, model.l_max) {
+                property_row(ui, "Length envelope", &format!("{l_min:.6e}…{l_max:.6e} m"));
+            }
+            if let (Some(w_min), Some(w_max)) = (model.w_min, model.w_max) {
+                property_row(ui, "Width envelope", &format!("{w_min:.6e}…{w_max:.6e} m"));
+            }
+            section_header(ui, "Actions", None);
+            if ui.button("Open model editor").clicked() {
+                super::super::commands::vocabulary::Command::ModelEditor.execute(app);
+            }
+            if ui.button("Open qualification").clicked() {
+                app.state.workbench.models_page =
+                    crate::workbench::state::ModelsPage::Qualification;
+            }
+            if ui.button("View include graph").clicked() {
+                app.state.workbench.models_page = crate::workbench::state::ModelsPage::Include;
             }
         }
     }
 }
 
+fn model_pack_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
+    section_header(ui, "Shipped corpus", None);
+    let Some(index) = app.state.model_library_manager.spice_packs() else {
+        property_row(ui, "State", "Not installed");
+        property_row(ui, "Recovery", "Set RSPICE_MODELS_DIR and rescan");
+        return;
+    };
+    property_row(ui, "Packs", &index.packs().len().to_string());
+    property_row(ui, "Parts", &index.part_count().to_string());
+    property_row(ui, "Definitions", &index.definition_count().to_string());
+    let selected = app
+        .state
+        .workbench
+        .models_view
+        .selected_pack
+        .as_deref()
+        .and_then(|id| index.pack(id))
+        .cloned()
+        .or_else(|| index.packs().first().cloned());
+    let Some(pack) = selected else {
+        return;
+    };
+    section_header(ui, "Selected pack", None);
+    property_row(ui, "Name", &pack.name);
+    property_row(ui, "ID", &pack.id);
+    property_row(ui, "Origin", &pack.category);
+    property_row(
+        ui,
+        "Parts",
+        &(pack.models_top + pack.subcircuits_top).to_string(),
+    );
+    property_row(ui, "Files", &pack.files.to_string());
+    property_row(ui, "License", &pack.spdx);
+    property_row(ui, "Tier", pack.tier.display_name());
+    property_row(
+        ui,
+        "Redistributable",
+        if pack.redistributable { "Yes" } else { "No" },
+    );
+    property_row(
+        ui,
+        "Entry",
+        pack.entry
+            .as_deref()
+            .and_then(std::path::Path::to_str)
+            .unwrap_or("Not declared"),
+    );
+    section_header(ui, "Actions", None);
+    if ui.button("Browse pack parts").clicked() {
+        app.state.workbench.models_view.catalog_scope =
+            crate::workbench::state::ModelsCatalogScope::RSpiceLibrary;
+        app.state.workbench.models_view.selected_pack = Some(pack.id);
+        app.state.workbench.models_view.catalog_query.clear();
+    }
+}
+
+fn shipped_part_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
+    section_header(ui, "RSpice model library", None);
+    let Some(index) = app.state.model_library_manager.spice_packs() else {
+        property_row(ui, "State", "Not installed");
+        return;
+    };
+    property_row(ui, "Addressable parts", &index.part_count().to_string());
+    property_row(ui, "Packs", &index.packs().len().to_string());
+    property_row(
+        ui,
+        "Redistributable packs",
+        &index.redistributable_packs().count().to_string(),
+    );
+    let selected_key = app
+        .state
+        .workbench
+        .models_view
+        .selected_part
+        .clone()
+        .unwrap_or_default();
+    let mut components = selected_key.split('\u{1f}');
+    let pack_id = components.next().unwrap_or_default();
+    let part_name = components.next().unwrap_or_default();
+    if !part_name.is_empty() {
+        section_header(ui, "Selected part", None);
+        property_row(ui, "Name", part_name);
+        property_row(ui, "Pack", pack_id);
+        if let Some(pack) = index.pack(pack_id) {
+            property_row(ui, "Pack title", &pack.name);
+            property_row(ui, "Origin", &pack.category);
+            property_row(ui, "License", &pack.spdx);
+            property_row(
+                ui,
+                "Project eligibility",
+                if pack.redistributable {
+                    "Requires per-file check"
+                } else {
+                    "Blocked"
+                },
+            );
+        }
+        section_header(ui, "Actions", None);
+        if ui.button("Show owning pack").clicked() {
+            app.state.workbench.models_view.catalog_scope =
+                crate::workbench::state::ModelsCatalogScope::InstalledPacks;
+            app.state.workbench.models_view.selected_pack = Some(pack_id.to_owned());
+        }
+    } else {
+        property_row(ui, "Selection", "Choose a catalog part");
+    }
+}
+
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
-    use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, DiagnosticSeverity};
+    use crate::workbench::documents::netlist_document::{
+        ActiveNetlistDocument, DiagnosticSeverity,
+    };
 
     let errors = app
         .state
@@ -1563,7 +1847,10 @@ fn diagnostic_section_header(
     );
 }
 
-fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::workbench::documents::netlist_document::Diagnostic) {
+fn diagnostic_row(
+    ui: &mut Ui,
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+) {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
     const PADDING_X: f32 = 9.0;
@@ -1607,9 +1894,13 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::workbench::documents::netlist
     );
 
     let icon = match diagnostic.severity {
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => WorkbenchIcon::Info,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
+            WorkbenchIcon::Info
+        }
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning
-        | crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => WorkbenchIcon::Warning,
+        | crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
+            WorkbenchIcon::Warning
+        }
     };
     icon.paint(
         ui.painter(),
@@ -1713,7 +2004,8 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     design_section_header(ui, "Owned source provenance", None);
     let source = &state.simulation.netlist_content;
-    let source_digest = crate::workbench::documents::netlist_document::source_content_digest(source);
+    let source_digest =
+        crate::workbench::documents::netlist_document::source_content_digest(source);
     property_row(
         ui,
         "Source origin",
@@ -1766,8 +2058,9 @@ fn generated_state(state: &AppState) -> &'static str {
     } else if netlist.generated_input_digest != netlist.current_generation_input_digest {
         "stale · refresh pending"
     } else {
-        let digest =
-            crate::workbench::documents::netlist_document::source_content_digest(&netlist.generated_source);
+        let digest = crate::workbench::documents::netlist_document::source_content_digest(
+            &netlist.generated_source,
+        );
         if netlist.validation.as_ref().is_some_and(|receipt| {
             receipt.visible_content_digest == digest
                 && receipt.project_revision == state.workspace.project.revision().get()
@@ -1821,7 +2114,9 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
     format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
 }
 
-fn diagnostic_location(diagnostic: &crate::workbench::documents::netlist_document::Diagnostic) -> String {
+fn diagnostic_location(
+    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
+) -> String {
     let location = match (
         diagnostic.source_line.or(diagnostic.line),
         diagnostic.column,
@@ -1844,9 +2139,15 @@ fn diagnostic_tone(
     severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
 ) -> Color32 {
     match severity {
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => tokens.color.info,
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => tokens.color.warn,
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => tokens.color.err,
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
+            tokens.color.info
+        }
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
+            tokens.color.warn
+        }
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
+            tokens.color.err
+        }
     }
 }
 
@@ -1917,13 +2218,14 @@ mod tests {
             .expect("retained run")
             .dataset_id
             .clone();
-        app.state.ui.results.selected_trace =
-            Some(crate::workbench::documents::result_document::SelectedResultTrace {
+        app.state.ui.results.selected_trace = Some(
+            crate::workbench::documents::result_document::SelectedResultTrace {
                 dataset_id,
                 analysis_index: 0,
                 waveform_index: 0,
                 source_name: "V(out)".to_owned(),
-            });
+            },
+        );
         let a = crate::state::Point::new(0, 0);
         let b = crate::state::Point::new(40, 0);
         app.state

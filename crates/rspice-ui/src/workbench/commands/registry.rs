@@ -465,6 +465,7 @@ impl Command {
                 | Self::VerificationPage(_)
                 | Self::ModelsPage(_)
                 | Self::ModelBrowser
+                | Self::ModelCreateProjectCopy
                 | Self::ModelEditor
                 | Self::ModelSaveRevision
                 | Self::ModelValidate
@@ -519,6 +520,7 @@ impl Command {
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
+                | Self::ModelCreateProjectCopy
                 | Self::ModelEditor
                 | Self::ModelSaveRevision
                 | Self::ModelRunQualificationTests
@@ -840,6 +842,9 @@ impl Command {
                 "no retained layout, qualified rule deck, or immutable marker database is available"
             }
             Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
+            Self::ModelCreateProjectCopy => super::selected_model_for_project_copy(app)
+                .err()
+                .unwrap_or("the selected model cannot be copied into the project"),
             Self::ModelEditor => super::selected_project_model_for_editor(app)
                 .err()
                 .unwrap_or("the selected model cannot be opened for inspection"),

@@ -86,6 +86,61 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
     Ok((library_name, model_name))
 }
 
+/// Resolve one selected external or built-in model that can become a new
+/// project-owned revision. Mutation authority and editor lifecycle checks live
+/// here so every command surface exposes the same fail-closed availability.
+fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
+    if !app.state.project_lifecycle.project_open {
+        return Err("open a project before creating an editable model copy");
+    }
+    let library_name = app
+        .state
+        .model_library_manager
+        .selected_library
+        .as_deref()
+        .ok_or("select one external or built-in model in Model & library catalog")?;
+    let model_name = app
+        .state
+        .workbench
+        .selected_model
+        .as_deref()
+        .ok_or("select one external or built-in model in Model & library catalog")?;
+    let library = app
+        .state
+        .model_library_manager
+        .get_library(library_name)
+        .ok_or("the selected model library no longer exists")?;
+    if !library.models.contains_key(model_name) {
+        return Err("the selected model no longer exists in its library");
+    }
+    if library.source_authority.is_project_owned() {
+        return Err("the selected model is already an editable project copy");
+    }
+    if app.state.workbench.safe_mode.project_read_only() {
+        return Err("the project is open read-only");
+    }
+    if app
+        .state
+        .workbench
+        .model_editor
+        .qualification_execution
+        .is_some()
+    {
+        return Err("a model qualification run is active");
+    }
+    if app
+        .state
+        .workbench
+        .model_editor
+        .draft
+        .as_ref()
+        .is_some_and(|draft| draft.is_dirty())
+    {
+        return Err("save or discard the open model candidate first");
+    }
+    Ok((library_name, model_name))
+}
+
 /// Model-editor toolbar commands open governed review surfaces before they
 /// perform an operation. This state is deliberately UI-local: the persisted
 /// model draft remains the sole source of engineering truth.
@@ -177,9 +232,7 @@ pub(crate) fn close_model_editor_workflow() {
     });
 }
 
-pub use registry::{
-    CommandAvailability, ShortcutContext, ShortcutKind,
-};
+pub use registry::{CommandAvailability, ShortcutContext, ShortcutKind};
 
 impl Command {
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
@@ -525,6 +578,7 @@ impl Command {
             Self::ToggleLinkedCursors => {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
             }
+            Self::ModelCreateProjectCopy => selected_model_for_project_copy(app).is_ok(),
             Self::ModelEditor | Self::ModelCorrelation => {
                 selected_project_model_for_editor(app).is_ok()
             }
@@ -1378,6 +1432,33 @@ impl Command {
                 app.state.workbench.models_page = page;
             }
             Self::ModelBrowser => app.state.model_browser_state.open = true,
+            Self::ModelCreateProjectCopy => match selected_model_for_project_copy(app) {
+                Ok((library_name, model_name)) => {
+                    let library_name = library_name.to_owned();
+                    let model_name = model_name.to_owned();
+                    match crate::workbench::documents::model_editor::create_editable_project_copy_and_open(
+                        app,
+                        &library_name,
+                        &model_name,
+                    ) {
+                        Ok((project_library, project_model)) => app.state.push_user_message(
+                            crate::diagnostics::ConsoleMessage::info(format!(
+                                "Created editable project model '{project_library}/{project_model}'."
+                            )),
+                        ),
+                        Err(error) => app.state.push_user_message(
+                            crate::diagnostics::ConsoleMessage::warning(format!(
+                                "Cannot create editable project model: {error}"
+                            )),
+                        ),
+                    }
+                }
+                Err(reason) => app.state.push_user_message(
+                    crate::diagnostics::ConsoleMessage::warning(format!(
+                        "Cannot create editable project model: {reason}."
+                    )),
+                ),
+            },
             Self::ModelEditor => match selected_project_model_for_editor(app) {
                 Ok((library_name, model_name)) => {
                     let library_name = library_name.to_owned();
@@ -1773,7 +1854,6 @@ fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
         app.export_workflow_io.as_ref(),
     );
 }
-
 
 #[cfg(test)]
 mod tests;

@@ -25,22 +25,19 @@ pub use corner::ProcessCorner;
 pub use correlation::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
     CorrelationCalculation, CorrelationDatasetClass, CorrelationDatasetRevision,
-    CorrelationEvaluation,
-    CorrelationEvidence, CorrelationExtrapolationPolicy, CorrelationMetricDefinition,
-    CorrelationMetricDomain, CorrelationMetricOutcome, CorrelationObservation,
-    CorrelationOutlierDecision, CorrelationOutlierDisposition, CorrelationReleaseRole,
-    CorrelationReviewDecision,
-    CorrelationSimulationProvenance, CorrelationSuite, MAX_CORRELATION_ROWS,
-    MAX_CORRELATION_TEXT_BYTES, ModelCorrelationState,
+    CorrelationEvaluation, CorrelationEvidence, CorrelationExtrapolationPolicy,
+    CorrelationMetricDefinition, CorrelationMetricDomain, CorrelationMetricOutcome,
+    CorrelationObservation, CorrelationOutlierDecision, CorrelationOutlierDisposition,
+    CorrelationReleaseRole, CorrelationReviewDecision, CorrelationSimulationProvenance,
+    CorrelationSuite, MAX_CORRELATION_ROWS, MAX_CORRELATION_TEXT_BYTES, ModelCorrelationState,
 };
 pub use definition_metadata::{
-    CorrelationMatrix, DefinitionMetadataError, FiniteBounds, FiniteF64,
-    LookupInterpolation, MODEL_DEFINITION_METADATA_SCHEMA_VERSION, ModelDefinitionMetadata,
-    ModelFileIdentity, ModelSectionDefinition,
-    ModelSectionQualification, ParameterDataType, ParameterDefinition, ParameterSource,
-    ParameterValue, StatisticalDefinition, StatisticalDistribution, StatisticalHierarchyScope,
-    StatisticalVariableDefinition,
-    TemperatureExtrapolationPolicy, TemperatureLawDefinition, TemperatureLawRepresentation,
+    CorrelationMatrix, DefinitionMetadataError, FiniteBounds, FiniteF64, LookupInterpolation,
+    MODEL_DEFINITION_METADATA_SCHEMA_VERSION, ModelDefinitionMetadata, ModelFileIdentity,
+    ModelSectionDefinition, ModelSectionQualification, ParameterDataType, ParameterDefinition,
+    ParameterSource, ParameterValue, StatisticalDefinition, StatisticalDistribution,
+    StatisticalHierarchyScope, StatisticalVariableDefinition, TemperatureExtrapolationPolicy,
+    TemperatureLawDefinition, TemperatureLawRepresentation,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use library::is_foreign_platform_absolute_path;
@@ -51,12 +48,10 @@ pub(crate) use library::{
     first_unreachable_source, is_portable_absolute_path, project_owned_source_path,
 };
 pub use manager::{
-    ModelLibraryManager, ProjectModelCommit, SealedModelExecutionSources,
+    ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
 pub use model::DeviceModel;
-pub use project_revision::{
-    ProjectModelRevisionDefinition,
-};
+pub use project_revision::ProjectModelRevisionDefinition;
 pub use qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,

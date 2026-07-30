@@ -167,7 +167,6 @@ impl Workspace {
         }
     }
 
-
     pub const fn inspector_title(self) -> &'static str {
         match self {
             Self::Project => "Project details",
@@ -822,6 +821,10 @@ pub struct WorkbenchState {
     pub verification: VerificationSessionState,
     #[serde(default)]
     pub models_page: ModelsPage,
+    /// Models & PDKs catalog filters and stable presentation selections.
+    /// Model, source, symbol, and PDK records remain in their owning domains.
+    #[serde(default)]
+    pub models_view: ModelsWorkbenchViewState,
     /// Analysis row whose configuration is shown in the simulation plan.
     /// Retained only to migrate pre-instance session selection.
     #[serde(default = "default_analysis_index")]
@@ -896,7 +899,8 @@ pub struct WorkbenchState {
     /// stable viewer composition and annotation identities only; immutable
     /// result samples remain owned by the result datasets.
     #[serde(default)]
-    pub visualization_studio: crate::workbench::documents::visualization_studio::VisualizationStudioState,
+    pub visualization_studio:
+        crate::workbench::documents::visualization_studio::VisualizationStudioState,
     /// Session-local selection and editor drafts for the project-owned report
     /// documents.
     #[serde(default)]
@@ -910,7 +914,8 @@ pub struct WorkbenchState {
     /// correlation. Committed suites and evidence remain in the project-owned
     /// model-library domain.
     #[serde(skip)]
-    pub model_correlation: crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
+    pub model_correlation:
+        crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     #[serde(skip)]
@@ -987,6 +992,7 @@ impl Default for WorkbenchState {
             verification_page: VerificationPage::Yield,
             verification: VerificationSessionState::default(),
             models_page: ModelsPage::Models,
+            models_view: ModelsWorkbenchViewState::default(),
             active_analysis: default_analysis_index(),
             active_analysis_instance: None,
             simulation_surface_scroll_y: 0.0,
@@ -1164,7 +1170,8 @@ impl WorkbenchState {
             self.navigation_schema_version = NAVIGATION_SCHEMA_VERSION;
         } else {
             let current = self.navigation.current();
-            if let Err(error) = crate::workbench::routing::availability::require_available(current) {
+            if let Err(error) = crate::workbench::routing::availability::require_available(current)
+            {
                 self.route_diagnostic = Some(format!(
                     "The restored route was not opened because its executor is unavailable: {error}"
                 ));
@@ -1176,9 +1183,9 @@ impl WorkbenchState {
                 self.workspace = workspace;
             }
         }
-        let removed = self
-            .navigation
-            .retain_history(|route| crate::workbench::routing::availability::route_availability(route).can_open());
+        let removed = self.navigation.retain_history(|route| {
+            crate::workbench::routing::availability::route_availability(route).can_open()
+        });
         if removed && self.route_diagnostic.is_none() {
             self.route_diagnostic = Some(
                 "Unavailable routes were removed from restored task history; project and document state were preserved."
@@ -1718,7 +1725,6 @@ const fn result_viewer_document_id(viewer: super::ResultViewer) -> &'static str 
         super::ResultViewer::PoleZero => "viewer-pz",
     }
 }
-
 
 #[cfg(test)]
 mod tests;

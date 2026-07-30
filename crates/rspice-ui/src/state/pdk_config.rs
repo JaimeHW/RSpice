@@ -92,6 +92,14 @@ pub struct PdkConfig {
     /// Scan errors from last discovery (not persisted)
     #[serde(skip)]
     pub scan_errors: Vec<String>,
+
+    /// Canonical root files admitted by the last successful atomic PDK
+    /// application. This is manager ownership provenance, not a discovery
+    /// cache: it remains persisted when a configured directory or file later
+    /// disappears so the stale external library can still be unloaded without
+    /// touching manually attached sources.
+    #[serde(default)]
+    pub managed_model_sources: Vec<PathBuf>,
 }
 
 fn default_max_recent() -> usize {
@@ -108,6 +116,7 @@ impl Default for PdkConfig {
             layout_database_unit: None,
             discovered_files: Vec::new(),
             scan_errors: Vec::new(),
+            managed_model_sources: Vec::new(),
         }
     }
 }

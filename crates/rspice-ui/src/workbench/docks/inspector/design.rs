@@ -10,6 +10,8 @@ mod component;
 
 use component::*;
 
+pub(crate) use component::apply_bound_model_choice;
+
 use std::collections::{HashMap, HashSet};
 
 use egui::{Color32, Ui};
@@ -2086,7 +2088,6 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         &shape.geometry.points().len().to_string(),
     );
 }
-
 
 #[cfg(test)]
 mod tests;

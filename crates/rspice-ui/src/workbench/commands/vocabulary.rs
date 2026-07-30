@@ -183,6 +183,7 @@ pub enum Command {
     ProjectPage(ProjectPage),
     ModelsPage(ModelsPage),
     ModelBrowser,
+    ModelCreateProjectCopy,
     ModelEditor,
     ModelCorrelation,
     ModelSaveRevision,
@@ -648,6 +649,7 @@ impl Command {
             Self::ModelsPage(ModelsPage::Corners) => {
                 spec("corner-sections", "Corners & sections", "Models")
             }
+            Self::ModelsPage(ModelsPage::Bins) => spec("model-bins", "Bins & geometry", "Models"),
             Self::ModelsPage(ModelsPage::Include) => {
                 spec("include-graph", "Include graph", "Models")
             }
@@ -655,6 +657,11 @@ impl Command {
                 spec("model-qualification", "Model qualification", "Models")
             }
             Self::ModelBrowser => spec("model-browser", "Model browser…", "Models"),
+            Self::ModelCreateProjectCopy => spec(
+                "model-create-project-copy",
+                "Create editable project copy",
+                "Models",
+            ),
             Self::ModelEditor => spec(
                 "model-editor",
                 "Device model and parameter editor…",
@@ -817,6 +824,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::Waves),
     Command::VerificationPage(VerificationPage::Yield),
     Command::ModelsPage(ModelsPage::Models),
+    Command::ModelCreateProjectCopy,
     Command::ModelEditor,
     Command::ModelCorrelation,
     Command::ModelSaveRevision,
@@ -944,6 +952,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::VerificationPage(VerificationPage::Regression),
     Command::ModelsPage(ModelsPage::Symbols),
     Command::ModelsPage(ModelsPage::Corners),
+    Command::ModelsPage(ModelsPage::Bins),
     Command::ModelsPage(ModelsPage::Include),
     Command::ModelsPage(ModelsPage::Qualification),
     Command::ModelBrowser,

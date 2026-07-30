@@ -1,6 +1,7 @@
 //! Model catalog, symbol contracts, PDK sections, authenticated includes, and
 //! the source-owned model qualification and release gate.
 
+mod manager;
 mod qualification;
 
 use qualification::*;
@@ -26,13 +27,13 @@ use crate::workbench::app::{
     open_symbol_parameter_form_dialog,
 };
 
-use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 use super::super::design_system::{
     property_card, property_row, property_row_toned, workspace_title_row,
 };
-use crate::workbench::documents::model_editor::{self, ModelEditorSection};
 use super::super::state::{ModelsPage, Workspace};
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
+use crate::workbench::documents::model_editor::{self, ModelEditorSection};
 
 const TABLE_HEAD_H: f32 = 27.0;
 const TABLE_CARD_HEAD_H: f32 = 37.0;
@@ -50,35 +51,41 @@ const QUALIFICATION_STACKED_MIN_CONTENT_H: f32 = 1000.0;
 const QUALIFICATION_GATE_COPY: &str = "Dispositions, reruns, replacement, and retirement remain source-owned here. Release promotion cannot override missing or failing vector outcomes.";
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    // Own the viewport explicitly. Giving a framed child the parent's complete
-    // available size as its minimum made that minimum leak into the first
-    // title-row child: right-aligned actions were then laid out at the bottom
-    // of the workspace and the actual page body received no usable height.
-    let size = ui.available_size().max(Vec2::splat(1.0));
-    let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter().rect_filled(viewport, 0.0, t.color.bg_app);
-    let mut surface = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(viewport)
-            .layout(Layout::top_down(Align::Min)),
-    );
-    surface.spacing_mut().item_spacing = Vec2::ZERO;
-    // Keep the tab strip, filter reservation, and body on one page snapshot
-    // for the entire frame. Applying a click only after the current body is
-    // rendered avoids a one-frame hybrid (new body with old tab geometry).
-    let current_page = app.state.workbench.models_page;
-    let requested_page = model_tabs(&mut surface, app, current_page);
-    match current_page {
-        ModelsPage::Models => models_catalog(&mut surface, app),
-        ModelsPage::Symbols => symbols(&mut surface, app),
-        ModelsPage::Corners => corners(&mut surface, app),
-        ModelsPage::Include => include_graph(&mut surface, app),
-        ModelsPage::Qualification => qualification(&mut surface, app),
-    }
-    if let Some(page) = requested_page {
-        app.state.workbench.models_page = page;
-        ui.ctx().request_repaint();
+    manager::show(ui, app);
+    return;
+    #[allow(unreachable_code)]
+    {
+        let t = Tokens::get(ui.ctx());
+        // Own the viewport explicitly. Giving a framed child the parent's complete
+        // available size as its minimum made that minimum leak into the first
+        // title-row child: right-aligned actions were then laid out at the bottom
+        // of the workspace and the actual page body received no usable height.
+        let size = ui.available_size().max(Vec2::splat(1.0));
+        let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
+        ui.painter().rect_filled(viewport, 0.0, t.color.bg_app);
+        let mut surface = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(viewport)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        surface.spacing_mut().item_spacing = Vec2::ZERO;
+        // Keep the tab strip, filter reservation, and body on one page snapshot
+        // for the entire frame. Applying a click only after the current body is
+        // rendered avoids a one-frame hybrid (new body with old tab geometry).
+        let current_page = app.state.workbench.models_page;
+        let requested_page = model_tabs(&mut surface, app, current_page);
+        match current_page {
+            ModelsPage::Models => models_catalog(&mut surface, app),
+            ModelsPage::Symbols => symbols(&mut surface, app),
+            ModelsPage::Corners => corners(&mut surface, app),
+            ModelsPage::Bins => {}
+            ModelsPage::Include => include_graph(&mut surface, app),
+            ModelsPage::Qualification => qualification(&mut surface, app),
+        }
+        if let Some(page) = requested_page {
+            app.state.workbench.models_page = page;
+            ui.ctx().request_repaint();
+        }
     }
 }
 
@@ -776,7 +783,6 @@ fn include_graph(ui: &mut Ui, app: &mut RSpiceApp) {
     let diagnostics = include_diagnostics(app);
     include_graph_content(ui, &libraries, &diagnostics, collapsed);
 }
-
 
 fn surface_title(
     ui: &mut Ui,
@@ -2094,7 +2100,6 @@ fn format_axis_value(value: f64) -> String {
         .trim_end_matches('.')
         .to_owned()
 }
-
 
 #[cfg(test)]
 mod tests;

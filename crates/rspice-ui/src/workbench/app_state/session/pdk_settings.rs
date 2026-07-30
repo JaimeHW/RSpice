@@ -190,13 +190,10 @@ impl PdkSettingsDialogState {
 
     /// Apply changes and return the updated config
     pub fn apply(&mut self) -> PdkConfig {
-        // Save to persistent storage
-        if let Err(e) = self.config.save() {
-            // The desktop app detaches from a console and the browser build
-            // has no stderr, so a failed save must reach the application log
-            // to be visible to anyone at all.
-            log::warn!("Failed to save PDK config: {e}");
-        }
+        // Discovery, model parsing, project publication, and durable config
+        // persistence are one workflow transaction. The dialog only returns
+        // its working copy; saving here would admit an invalid configuration
+        // before the model-library candidate has passed validation.
         self.original_config = Some(self.config.clone());
         self.config.clone()
     }

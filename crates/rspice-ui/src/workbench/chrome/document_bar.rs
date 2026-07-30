@@ -306,7 +306,7 @@ fn available_documents_for_workspace(
         }],
         Workspace::Models => vec![WorkspaceDocument {
             id: WorkspaceDocumentId::Models,
-            label: "Model & Library Manager".to_owned(),
+            label: "Models & PDKs".to_owned(),
             icon: WorkbenchIcon::Models,
             dirty: false,
         }],

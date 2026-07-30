@@ -334,6 +334,25 @@ impl SpiceLibraryIndex {
         Ok(found)
     }
 
+    /// A bounded, deterministic first page of addressable definitions.
+    ///
+    /// Catalog UIs use this when no query or class facet is active. Streaming
+    /// stops at `limit`, so opening a parts browser never materializes the
+    /// complete multi-megabyte index.
+    pub fn browse_parts(&self, limit: usize) -> io::Result<Vec<CatalogEntry>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut found = Vec::new();
+        self.for_each_catalog_entry(|entry| {
+            if entry.scope.is_addressable() {
+                found.push(entry);
+            }
+            found.len() < limit
+        })?;
+        Ok(found)
+    }
+
     /// Every addressable definition of a given canonical device class.
     pub fn parts_by_device(&self, device: &str, limit: usize) -> io::Result<Vec<CatalogEntry>> {
         let mut found = Vec::new();
@@ -416,7 +435,9 @@ fn parse_catalog_row(line: &str) -> Option<CatalogEntry> {
     // Likewise for scope: a catalog without the column predates nesting being
     // tracked, and treating those rows as addressable preserves the old
     // behaviour rather than silently emptying a browser.
-    let scope = fields.next().map_or(DefinitionScope::TopLevel, DefinitionScope::parse);
+    let scope = fields
+        .next()
+        .map_or(DefinitionScope::TopLevel, DefinitionScope::parse);
     Some(CatalogEntry {
         name: name.to_string(),
         kind: kind.to_string(),
@@ -634,6 +655,19 @@ mod tests {
             .expect("catalog readable");
         assert!(!jfets.is_empty(), "expected N-JFETs in the catalog");
         assert!(jfets.iter().all(|entry| entry.device == "jfet-n"));
+    }
+
+    #[test]
+    fn browse_parts_is_bounded_and_only_returns_addressable_cards() {
+        let index = SpiceLibraryIndex::open(repo_models_root()).expect("index opens");
+        let parts = index.browse_parts(25).expect("catalog readable");
+        assert_eq!(parts.len(), 25);
+        assert!(
+            parts
+                .iter()
+                .all(|entry| entry.scope == DefinitionScope::TopLevel)
+        );
+        assert!(index.browse_parts(0).expect("catalog readable").is_empty());
     }
 
     #[test]
