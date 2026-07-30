@@ -25,12 +25,13 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::Workspace;
 
 use super::SchematicSymbolContext;
-use super::coordinates::{screen_to_grid, screen_to_schematic};
+use super::coordinates::screen_to_schematic;
 use super::interaction::{PointerHit, PointerTarget, pointer_target};
 use super::sheet_visibility::{
     object_is_on_active_sheet, retain_selection_on_active_sheet,
     selection_filtered_to_active_sheet, with_hidden_wire_topology_preserved,
 };
+use super::snap_resolution::{resolve_grid_pointer, target_acquisition_radius};
 use super::viewport::Viewport;
 
 const DESKTOP_WIDTH: f32 = 286.0;
@@ -327,9 +328,9 @@ fn capture_pointer_target(
     symbol_context: &SchematicSymbolContext,
 ) -> Option<egui::Pos2> {
     let pos = response.interact_pointer_pos()?;
-    let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pos);
+    let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
     let hit_pos = screen_to_schematic(viewport, pos);
-    let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+    let hit_radius = target_acquisition_radius(viewport);
     let target = select_pointer_target(
         state,
         PointerHit::new(grid_pos, hit_pos),
@@ -506,7 +507,7 @@ fn keyboard_target(
     }
     (
         ContextTarget::Canvas,
-        screen_to_grid(viewport, state.schematic.grid_size, fallback_screen_pos),
+        resolve_grid_pointer(state, viewport, fallback_screen_pos).snapped_position,
     )
 }
 
@@ -1829,7 +1830,7 @@ mod tests {
                         false,
                     );
                     key_still_available =
-                        ctx.input_mut(|input| input.consume_key(Modifiers::NONE, key));
+                        ui.input_mut(|input| input.consume_key(Modifiers::NONE, key));
                 });
             });
 

@@ -5,8 +5,8 @@
 
 use egui::{Pos2, Rect};
 
-use crate::workbench::app_state::AppState;
 use crate::state::Point;
+use crate::workbench::app_state::AppState;
 
 use super::viewport::Viewport;
 
@@ -55,9 +55,4 @@ pub(super) fn screen_to_schematic(viewport: &Viewport, screen_pos: Pos2) -> Poin
     let schematic_x = (screen_pos.x as f64 - bounds_min_x - pan_x) / zoom;
     let schematic_y = (screen_pos.y as f64 - bounds_min_y - pan_y) / zoom;
     Point::new(schematic_x.round() as i32, schematic_y.round() as i32)
-}
-
-pub(super) fn screen_to_wire_grid(viewport: &Viewport, grid_size: i32, screen_pos: Pos2) -> Point {
-    // Wires intentionally snap to the same full-grid cadence as components.
-    screen_to_grid(viewport, grid_size, screen_pos)
 }

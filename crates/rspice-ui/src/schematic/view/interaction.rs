@@ -18,7 +18,7 @@ use crate::workbench::app_state::{AppState, DragType};
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_active_sheet};
-use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
+use super::coordinates::screen_to_schematic;
 use super::design_notes::design_note_at;
 use super::documentation_shapes::documentation_shape_at;
 use super::drawing::{
@@ -31,6 +31,9 @@ use super::scene::visible_design_notes;
 use super::sheet_visibility::{
     active_junction_at, active_wire_at, active_wire_point_is_draggable, objects_on_active_sheet,
     retain_selection_on_active_sheet, select_in_rect_on_active_sheet, with_active_wire_topology,
+};
+use super::snap_resolution::{
+    resolve_grid_pointer, resolve_target_pointer, target_acquisition_radius,
 };
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
@@ -88,13 +91,14 @@ pub(super) fn handle_tool_interactions(
         && ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO)
         && let Some(pos) = response.hover_pos()
     {
+        let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
         let drawing = &mut state.schematic.documentation_shape_drawing;
-        drawing.keyboard_cursor = Some(screen_to_grid(viewport, grid_size, pos));
+        drawing.keyboard_cursor = Some(position);
         drawing.keyboard_active = false;
     }
 
     if matches!(current_tool, Tool::Select) {
-        handle_select_dragging(ui, response, state, viewport, grid_size, symbol_context);
+        handle_select_dragging(ui, response, state, viewport, symbol_context);
     } else if current_tool == Tool::MoveSelection {
         handle_armed_move_selection(ui, response, state, viewport, grid_size, symbol_context);
     } else if current_tool == Tool::StretchSelection {
@@ -104,8 +108,8 @@ pub(super) fn handle_tool_interactions(
     }
 
     if shape_double_click && let Some(pos) = response.interact_pointer_pos() {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
-        handle_documentation_shape_click(ui, state, grid_pos, true);
+        let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+        handle_documentation_shape_click(ui, state, position, true);
     }
 
     if response.clicked_by(egui::PointerButton::Primary)
@@ -129,16 +133,13 @@ pub(super) fn handle_tool_interactions(
                 state.deny_read_only_edit();
             }
             Tool::Place(component_type) => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                place_component(state, component_type, grid_pos);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                place_component(state, component_type, position);
             }
             Tool::Wire => {
                 let conductor_hit = nearest_active_wire_screen_hit(state, viewport, pos);
-                let fallback = resolved_snap_position(
-                    state,
-                    symbol_context,
-                    screen_to_wire_grid(viewport, grid_size, pos),
-                );
+                let fallback =
+                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
                 match resolved_wire_attachment(conductor_hit, fallback) {
                     Some(wire_pos) if state.schematic.wire_drawing.active => {
                         state.schematic.extend_wire(wire_pos);
@@ -151,7 +152,7 @@ pub(super) fn handle_tool_interactions(
                 }
             }
             Tool::Bus => {
-                let bus_pos = screen_to_wire_grid(viewport, grid_size, pos);
+                let bus_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
                 if state.schematic.bus_drawing.active {
                     state.schematic.extend_bus(bus_pos);
                 } else {
@@ -163,25 +164,25 @@ pub(super) fn handle_tool_interactions(
             }
             Tool::BusTap => {
                 let requested = screen_to_schematic(viewport, pos);
-                let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+                let hit_radius = target_acquisition_radius(viewport);
                 handle_bus_tap_click(ui, state, requested, hit_radius);
             }
             Tool::Junction => {
-                let grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
-                handle_junction_click(ui, state, grid_pos);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                handle_junction_click(ui, state, position);
             }
             Tool::DesignNote => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                place_pending_design_note(state, grid_pos);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                place_pending_design_note(state, position);
             }
             Tool::DocumentationShape => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                handle_documentation_shape_click(ui, state, grid_pos, false);
+                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                handle_documentation_shape_click(ui, state, position, false);
             }
             Tool::Select => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
+                let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
                 let hit_pos = screen_to_schematic(viewport, pos);
-                let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+                let hit_radius = target_acquisition_radius(viewport);
                 handle_select_click(
                     ui,
                     state,
@@ -194,15 +195,13 @@ pub(super) fn handle_tool_interactions(
             }
             Tool::MoveSelection | Tool::StretchSelection | Tool::ArraySelection => {}
             Tool::Probe => {
-                let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                handle_probe_click(ui, state, grid_pos, symbol_context);
+                let position =
+                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
+                handle_probe_click(ui, state, position, symbol_context);
             }
             Tool::Label => {
-                let anchor = resolved_snap_position(
-                    state,
-                    symbol_context,
-                    screen_to_wire_grid(viewport, grid_size, pos),
-                );
+                let anchor =
+                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
                 crate::workbench::app::open_net_label_placement(state, anchor);
             }
         }
@@ -212,9 +211,9 @@ pub(super) fn handle_tool_interactions(
         && response.double_clicked_by(egui::PointerButton::Primary)
         && let Some(pos) = response.interact_pointer_pos()
     {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
+        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
         let hit_pos = screen_to_schematic(viewport, pos);
-        let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+        let hit_radius = target_acquisition_radius(viewport);
         let hit = PointerHit::new(grid_pos, hit_pos);
         let target = pointer_target(
             state,
@@ -370,7 +369,7 @@ fn handle_armed_move_selection(
             .input(|input| input.pointer.press_origin())
             .or_else(|| response.interact_pointer_pos())
     {
-        let anchor = screen_to_grid(viewport, grid_size, position);
+        let anchor = resolve_grid_pointer(state, viewport, position).snapped_position;
         if pointer_is_in_frozen_move_selection(
             state,
             ui.ctx(),
@@ -396,7 +395,7 @@ fn handle_armed_move_selection(
                 .or_else(|| response.interact_pointer_pos()),
         )
     {
-        let destination = screen_to_grid(viewport, grid_size, position);
+        let destination = resolve_grid_pointer(state, viewport, position).snapped_position;
         state.dialogs.move_selection.preview_delta = Point::new(
             destination.x.saturating_sub(anchor.x),
             destination.y.saturating_sub(anchor.y),
@@ -414,7 +413,7 @@ fn handle_armed_move_selection(
     if response.clicked_by(egui::PointerButton::Primary)
         && let Some(position) = response.interact_pointer_pos()
     {
-        let point = screen_to_grid(viewport, grid_size, position);
+        let point = resolve_grid_pointer(state, viewport, position).snapped_position;
         if let Some(anchor) = state.dialogs.move_selection.anchor {
             state.dialogs.move_selection.preview_delta = Point::new(
                 point.x.saturating_sub(anchor.x),
@@ -438,7 +437,7 @@ fn handle_armed_move_selection(
         && let (Some(anchor), Some(position)) =
             (state.dialogs.move_selection.anchor, response.hover_pos())
     {
-        let destination = screen_to_grid(viewport, grid_size, position);
+        let destination = resolve_grid_pointer(state, viewport, position).snapped_position;
         state.dialogs.move_selection.preview_delta = Point::new(
             destination.x.saturating_sub(anchor.x),
             destination.y.saturating_sub(anchor.y),
@@ -675,27 +674,6 @@ fn report_bus_error(ui: &Ui, state: &mut AppState, title: &str, message: String)
     state.push_user_message(ConsoleMessage::warning(message));
 }
 
-fn resolved_snap_position(
-    state: &AppState,
-    symbol_context: &SchematicSymbolContext,
-    grid_pos: Point,
-) -> Point {
-    let components = objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
-    let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
-    let junctions = objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
-    state
-        .schematic
-        .snap_engine
-        .find_snap_target_resolved(
-            grid_pos,
-            components.as_ref(),
-            wires.as_ref(),
-            junctions.as_ref(),
-            |component| symbol_context.resolved_symbol(component),
-        )
-        .snapped_position
-}
-
 fn nearest_active_wire_screen_hit(
     state: &AppState,
     viewport: &Viewport,
@@ -727,7 +705,6 @@ fn handle_select_dragging(
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
-    grid_size: i32,
     symbol_context: &SchematicSymbolContext,
 ) {
     if !select_drag_is_authorized(state.schematic.tool, state.dialogs.move_selection.armed) {
@@ -738,9 +715,10 @@ fn handle_select_dragging(
     if filter.wires
         && let Some(pos) = response.hover_pos()
     {
-        let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
-        if active_wire_point_is_draggable(state, wire_grid_pos) {
-            state.dialogs.interaction.hover_wire_vertex = Some((wire_grid_pos.x, wire_grid_pos.y));
+        let wire_position =
+            resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
+        if active_wire_point_is_draggable(state, wire_position) {
+            state.dialogs.interaction.hover_wire_vertex = Some((wire_position.x, wire_position.y));
         } else {
             state.dialogs.interaction.hover_wire_vertex = None;
         }
@@ -751,10 +729,11 @@ fn handle_select_dragging(
     if response.drag_started_by(egui::PointerButton::Primary)
         && let Some(pos) = response.interact_pointer_pos()
     {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
-        let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
+        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
+        let wire_position =
+            resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
         let hit_pos = screen_to_schematic(viewport, pos);
-        let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+        let hit_radius = target_acquisition_radius(viewport);
         let target = pointer_target(
             state,
             PointerHit::new(grid_pos, hit_pos),
@@ -813,9 +792,9 @@ fn handle_select_dragging(
                     start_selection_drag(state, grid_pos);
                 }
                 Some(PointerTarget::Junction(_))
-                    if filter.wires && active_wire_point_is_draggable(state, wire_grid_pos) =>
+                    if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
                 {
-                    start_wire_vertex_drag(state, wire_grid_pos);
+                    start_wire_vertex_drag(state, wire_position);
                 }
                 Some(PointerTarget::Bus(id)) => {
                     if !state.schematic.selection.has_bus(id) {
@@ -824,9 +803,9 @@ fn handle_select_dragging(
                     start_selection_drag(state, grid_pos);
                 }
                 Some(PointerTarget::Wire(_))
-                    if filter.wires && active_wire_point_is_draggable(state, wire_grid_pos) =>
+                    if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
                 {
-                    start_wire_vertex_drag(state, wire_grid_pos);
+                    start_wire_vertex_drag(state, wire_position);
                 }
                 _ => state.schematic.selection_rect.start_at(grid_pos),
             }
@@ -836,21 +815,19 @@ fn handle_select_dragging(
     if response.dragged_by(egui::PointerButton::Primary)
         && let Some(pos) = response.hover_pos()
     {
-        let grid_pos = screen_to_grid(viewport, grid_size, pos);
-        let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
+        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
 
         if let Some((old_x, old_y)) = state.dialogs.interaction.vertex_drag_pos {
             let old_pos = Point::new(old_x, old_y);
             if with_active_wire_topology(state, |schematic| {
-                schematic.move_all_vertices_at(old_pos, wire_grid_pos)
+                schematic.move_all_vertices_at(old_pos, grid_pos)
             }) {
-                state.dialogs.interaction.vertex_drag_pos =
-                    Some((wire_grid_pos.x, wire_grid_pos.y));
+                state.dialogs.interaction.vertex_drag_pos = Some((grid_pos.x, grid_pos.y));
                 state
                     .dialogs
                     .interaction
                     .drag
-                    .update((wire_grid_pos.x, wire_grid_pos.y));
+                    .update((grid_pos.x, grid_pos.y));
             }
         } else if let Some((last_x, last_y)) = state.dialogs.last_drag_pos {
             let delta = Point::new(
@@ -1137,7 +1114,7 @@ fn handle_documentation_shape_keyboard(
     if directional {
         let fallback = response
             .hover_pos()
-            .map(|position| screen_to_grid(viewport, grid_size, position))
+            .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
             .or_else(|| {
                 state
                     .schematic
@@ -1147,9 +1124,14 @@ fn handle_documentation_shape_keyboard(
                     .copied()
             })
             .unwrap_or_else(Point::origin);
+        let step =
+            if state.schematic.snap_engine.enabled && state.schematic.snap_engine.snap_to_grid {
+                grid_size.max(1)
+            } else {
+                1
+            };
         let drawing = &mut state.schematic.documentation_shape_drawing;
         let mut cursor = drawing.keyboard_cursor.unwrap_or(fallback);
-        let step = grid_size.max(1);
         if left {
             cursor.x = cursor.x.saturating_sub(step);
         }
@@ -1176,7 +1158,7 @@ fn handle_documentation_shape_keyboard(
         .or_else(|| {
             response
                 .hover_pos()
-                .map(|position| screen_to_grid(viewport, grid_size, position))
+                .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
         })
     else {
         return;

@@ -35,6 +35,7 @@ mod scene;
 pub(crate) mod selection_layout;
 pub(crate) mod sheet_visibility;
 mod shelf_drag;
+mod snap_resolution;
 mod stretch_interaction;
 mod symbol_primitives;
 mod viewport;
@@ -900,8 +901,9 @@ pub fn render_schematic_view(
             .points
             .is_empty();
     if let (Some(payload), Some(position)) = (dropped_payload.as_deref(), shelf_drag_position) {
-        let grid_pos = coordinates::screen_to_grid(&viewport, state.schematic.grid_size, position);
-        match commit_shelf_drop(state, payload, grid_pos) {
+        let drop_position =
+            snap_resolution::resolve_grid_pointer(state, &viewport, position).snapped_position;
+        match commit_shelf_drop(state, payload, drop_position) {
             ShelfDropOutcome::Placed => {
                 state.ui.toasts.success(
                     ui.ctx(),
@@ -909,8 +911,8 @@ pub fn render_schematic_view(
                     format!(
                         "{} was placed at ({}, {}).",
                         payload.component_type().display_name(),
-                        grid_pos.x,
-                        grid_pos.y
+                        drop_position.x,
+                        drop_position.y
                     ),
                 );
             }

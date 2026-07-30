@@ -5,31 +5,33 @@
 
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
-use crate::workbench::app_state::AppState;
 use crate::state::{
     Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
-    ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool,
-    geometry_from_points,
+    ResolvedCellSymbol, SchematicArrayKind, SchematicArrayPlacement, SnapResult, SnapTarget,
+    SnapTargetType, SymbolResolver, Tool, geometry_from_points,
 };
+use crate::workbench::app_state::AppState;
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
 use super::SchematicShelfDragPayload;
 use super::SchematicSymbolContext;
 use super::array_interaction::array_placement;
 use super::bus_interaction::resolve_bus_tap_candidate_on_active_sheet;
-use super::coordinates::{screen_to_grid, screen_to_schematic, screen_to_wire_grid};
+use super::coordinates::screen_to_schematic;
 use super::design_notes::draw_design_note;
 use super::documentation_shapes::{
     draw_documentation_shape, draw_geometry, preview_anchor_color, preview_stroke,
 };
 use super::drawing::{
     draw_bus, draw_bus_tap, draw_component, draw_junction, draw_port_symbol, draw_wire,
+    nearest_wire_screen_hit,
 };
 use super::net_labels::draw_net_label;
 use super::resolved_symbol_render::draw_resolved_symbol;
 use super::sheet_visibility::{
     active_junction_at, object_is_on_active_sheet, objects_on_active_sheet,
 };
+use super::snap_resolution::{resolve_grid_pointer, resolve_target_pointer};
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_diode_symbol, draw_ground_symbol, draw_inductor_symbol,
     draw_isource_symbol, draw_nmos_symbol, draw_npn_symbol, draw_pmos_symbol, draw_pnp_symbol,
@@ -91,7 +93,10 @@ fn draw_move_selection_preview(
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    if state.schematic.tool != Tool::MoveSelection || !state.dialogs.move_selection.armed {
+    if state.schematic_edit_read_only()
+        || state.schematic.tool != Tool::MoveSelection
+        || !state.dialogs.move_selection.armed
+    {
         return;
     }
     let delta = state.dialogs.move_selection.preview_delta;
@@ -226,7 +231,10 @@ fn draw_stretch_selection_preview(
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if state.schematic.tool != Tool::StretchSelection || !state.dialogs.stretch_selection.armed {
+    if state.schematic_edit_read_only()
+        || state.schematic.tool != Tool::StretchSelection
+        || !state.dialogs.stretch_selection.armed
+    {
         return;
     }
     let delta = state.dialogs.stretch_selection.preview_delta;
@@ -330,7 +338,10 @@ fn draw_array_selection_preview(
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    if state.schematic.tool != Tool::ArraySelection || !state.dialogs.array_selection.armed {
+    if state.schematic_edit_read_only()
+        || state.schematic.tool != Tool::ArraySelection
+        || !state.dialogs.array_selection.armed
+    {
         return;
     }
     let draft = &state.dialogs.array_selection;
@@ -497,10 +508,7 @@ fn draw_documentation_shape_preview(
     state: &AppState,
     viewport: &Viewport,
 ) {
-    if state.schematic.read_only
-        || state.active_view_read_only()
-        || state.schematic.tool != Tool::DocumentationShape
-    {
+    if state.schematic_edit_read_only() || state.schematic.tool != Tool::DocumentationShape {
         return;
     }
     let Some(pending) = state.schematic.pending_documentation_shape.as_ref() else {
@@ -512,7 +520,7 @@ fn draw_documentation_shape_preview(
     } else {
         response
             .hover_pos()
-            .map(|position| screen_to_grid(viewport, state.schematic.grid_size, position))
+            .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
     };
     let Some(hover_point) = hover_point else {
         return;
@@ -564,7 +572,7 @@ fn draw_design_note_preview(
     state: &AppState,
     viewport: &Viewport,
 ) {
-    if state.schematic.read_only || state.schematic.tool != Tool::DesignNote {
+    if state.schematic_edit_read_only() || state.schematic.tool != Tool::DesignNote {
         return;
     }
     let (Some(hover), Some(pending)) = (
@@ -573,7 +581,7 @@ fn draw_design_note_preview(
     ) else {
         return;
     };
-    let position = screen_to_grid(viewport, state.schematic.grid_size, hover);
+    let position = resolve_grid_pointer(state, viewport, hover).snapped_position;
     let Ok(note) = DesignNote::new(0, position, pending.kind, pending.text.clone()) else {
         return;
     };
@@ -587,17 +595,13 @@ fn draw_net_label_preview(
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if state.schematic.read_only || state.schematic.tool != Tool::Label {
+    if state.schematic_edit_read_only() || state.schematic.tool != Tool::Label {
         return;
     }
     let Some(hover) = response.hover_pos() else {
         return;
     };
-    let position = wire_preview_snap_position(
-        state,
-        symbol_context,
-        screen_to_wire_grid(viewport, state.schematic.grid_size, hover),
-    );
+    let position = resolve_target_pointer(state, symbol_context, viewport, hover).snapped_position;
     draw_net_label(
         painter,
         viewport,
@@ -614,14 +618,14 @@ fn draw_junction_preview(
     state: &AppState,
     viewport: &Viewport,
 ) {
-    if state.schematic.read_only || state.schematic.tool != Tool::Junction {
+    if state.schematic_edit_read_only() || state.schematic.tool != Tool::Junction {
         return;
     }
     let Some(hover_pos) = response.hover_pos() else {
         return;
     };
 
-    let requested = screen_to_wire_grid(viewport, state.schematic.grid_size, hover_pos);
+    let requested = resolve_grid_pointer(state, viewport, hover_pos).snapped_position;
     let active_wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
     let mut hit_schematic = crate::state::SchematicState::default();
     hit_schematic.wires = active_wires.into_owned();
@@ -655,11 +659,14 @@ fn draw_bus_preview(
     state: &mut AppState,
     viewport: &Viewport,
 ) {
-    if state.schematic.tool != Tool::Bus || !state.schematic.bus_drawing.active {
+    if state.schematic_edit_read_only()
+        || state.schematic.tool != Tool::Bus
+        || !state.schematic.bus_drawing.active
+    {
         return;
     }
     if let Some(hover) = response.hover_pos() {
-        let position = screen_to_wire_grid(viewport, state.schematic.grid_size, hover);
+        let position = resolve_grid_pointer(state, viewport, hover).snapped_position;
         state.schematic.update_bus_preview(position);
     }
 
@@ -690,7 +697,7 @@ fn draw_bus_tap_preview(
     state: &AppState,
     viewport: &Viewport,
 ) {
-    if state.schematic.read_only || state.schematic.tool != Tool::BusTap {
+    if state.schematic_edit_read_only() || state.schematic.tool != Tool::BusTap {
         return;
     }
     let Some(hover) = response.hover_pos() else {
@@ -730,16 +737,24 @@ fn draw_wire_preview(
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
+    if state.schematic_edit_read_only() {
+        return;
+    }
     let wire_active = state.schematic.wire_drawing.active;
 
-    if wire_active && let Some(hover_pos) = response.hover_pos() {
-        let grid_pos = wire_preview_snap_position(
-            state,
-            symbol_context,
-            screen_to_wire_grid(viewport, state.schematic.grid_size, hover_pos),
-        );
-        state.schematic.update_wire_preview(grid_pos);
-    }
+    let snap_feedback = if wire_active {
+        response.hover_pos().and_then(|hover_pos| {
+            let result = resolve_wire_preview_snap(state, symbol_context, viewport, hover_pos);
+            if let Some(result) = result.as_ref() {
+                state.schematic.update_wire_preview(result.snapped_position);
+            } else {
+                state.schematic.wire_drawing.preview_pos = None;
+            }
+            result
+        })
+    } else {
+        None
+    };
 
     if wire_active {
         let wire_points: Vec<Point> = state.schematic.wire_drawing.points.clone();
@@ -775,27 +790,205 @@ fn draw_wire_preview(
             }
         }
     }
+
+    if let Some(result) = snap_feedback.as_ref() {
+        draw_wire_snap_feedback(painter, state, viewport, result);
+    }
 }
 
-fn wire_preview_snap_position(
+/// Resolve exactly what a wire click would commit. Visual conductor
+/// acquisition owns the gesture before generic target priority, and a
+/// non-representable diagonal acquisition fails closed instead of showing a
+/// preview that cannot be committed.
+fn resolve_wire_preview_snap(
     state: &AppState,
     symbol_context: &SchematicSymbolContext,
-    grid_pos: Point,
-) -> Point {
-    let components = objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
-    let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
-    let junctions = objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
+    viewport: &Viewport,
+    pointer: egui::Pos2,
+) -> Option<SnapResult> {
+    if !state.schematic.snap_engine.enabled {
+        return Some(resolve_target_pointer(
+            state,
+            symbol_context,
+            viewport,
+            pointer,
+        ));
+    }
+    let active_wires = objects_on_active_sheet(state, &state.schematic.wires, |wire| wire.id);
+    let Some(hit) = nearest_wire_screen_hit(viewport, active_wires.as_ref(), pointer, 6.0) else {
+        return Some(resolve_target_pointer(
+            state,
+            symbol_context,
+            viewport,
+            pointer,
+        ));
+    };
+    let attachment = hit.attachment?;
+    let wire = active_wires.iter().find(|wire| wire.id == hit.wire_id)?;
+    let raw = screen_to_schematic(viewport, pointer);
+    let distance = (f64::from(raw.x) - f64::from(attachment.x))
+        .hypot(f64::from(raw.y) - f64::from(attachment.y));
+    let target = if wire.points.first() == Some(&attachment) {
+        state
+            .schematic
+            .snap_engine
+            .snap_to_wire_endpoints
+            .then(|| SnapTarget::wire_endpoint(attachment, wire.id, true, distance))
+    } else if wire.points.last() == Some(&attachment) {
+        state
+            .schematic
+            .snap_engine
+            .snap_to_wire_endpoints
+            .then(|| SnapTarget::wire_endpoint(attachment, wire.id, false, distance))
+    } else {
+        let segment_index = wire
+            .segments()
+            .position(|segment| segment.contains_point(attachment))
+            .unwrap_or_default();
+        state
+            .schematic
+            .snap_engine
+            .snap_to_wire_segments
+            .then(|| SnapTarget::wire_segment(attachment, wire.id, segment_index, distance))
+    };
+    Some(match target {
+        Some(target) => SnapResult::with_target(target, raw),
+        None => resolve_target_pointer(state, symbol_context, viewport, pointer),
+    })
+}
+
+fn draw_wire_snap_feedback(
+    painter: &Painter,
+    state: &AppState,
+    viewport: &Viewport,
+    result: &SnapResult,
+) {
+    if !result.show_indicator {
+        return;
+    }
+    let Some(copy) = wire_snap_feedback_copy(state, result) else {
+        return;
+    };
+
+    let palette = crate::ui::tokens::active_palette();
+    let center = viewport.schematic_to_screen(result.snapped_position);
+    painter.circle_stroke(center, 5.0, Stroke::new(1.25, palette.accent));
+    painter.line_segment(
+        [center - egui::vec2(2.5, 0.0), center + egui::vec2(2.5, 0.0)],
+        Stroke::new(1.0, palette.accent),
+    );
+    painter.line_segment(
+        [center - egui::vec2(0.0, 2.5), center + egui::vec2(0.0, 2.5)],
+        Stroke::new(1.0, palette.accent),
+    );
+
+    let galley = painter.layout_no_wrap(
+        copy,
+        crate::ui::theme::mono(
+            crate::ui::tokens::FS_0,
+            crate::ui::theme::FontWeight::Regular,
+        ),
+        palette.text,
+    );
+    let requested = center + egui::vec2(10.0, -galley.size().y * 0.5);
+    let background_size = galley.size() + egui::vec2(8.0, 5.0);
+    let clip = painter.clip_rect().shrink(3.0);
+    let origin = egui::pos2(
+        requested.x.clamp(
+            clip.left(),
+            (clip.right() - background_size.x).max(clip.left()),
+        ),
+        requested.y.clamp(
+            clip.top(),
+            (clip.bottom() - background_size.y).max(clip.top()),
+        ),
+    );
+    let background = Rect::from_min_size(origin, background_size);
+    painter.rect_filled(background, 3.0, palette.bg_elevated.gamma_multiply(0.96));
+    painter.rect_stroke(
+        background,
+        3.0,
+        Stroke::new(1.0, palette.border_strong),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(origin + egui::vec2(4.0, 2.5), galley, palette.text);
+}
+
+/// Copy shown beside the live acquisition marker. Net names are included only
+/// when an authored label proves them; unknown nets are never guessed from IDs
+/// or a potentially stale generated-net cache.
+fn wire_snap_feedback_copy(state: &AppState, result: &SnapResult) -> Option<String> {
+    if !result.show_indicator {
+        return None;
+    }
+    let target = result.target.as_ref()?;
+    let target_copy = match &target.target_type {
+        SnapTargetType::Terminal {
+            component_id,
+            terminal_name,
+        } => {
+            let component = state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.id == *component_id);
+            let owner = component
+                .filter(|component| !component.name.trim().is_empty())
+                .map(|component| component.name.as_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("component #{component_id}"));
+            format!("Pin {owner}.{terminal_name}")
+        }
+        SnapTargetType::Junction => "Junction".to_owned(),
+        SnapTargetType::WireEndpoint { wire_id, is_start } => format!(
+            "Wire #{wire_id} {} endpoint",
+            if *is_start { "start" } else { "end" }
+        ),
+        SnapTargetType::WireSegment {
+            wire_id,
+            segment_index,
+        } => format!("Wire #{wire_id} segment {}", segment_index + 1),
+        SnapTargetType::Grid => return None,
+    };
+
+    Some(match net_name_at_snap_target(state, target.position) {
+        Some(net_name) => format!("{target_copy} | net {net_name}"),
+        None => target_copy,
+    })
+}
+
+fn net_name_at_snap_target(state: &AppState, target: Point) -> Option<&str> {
     state
         .schematic
-        .snap_engine
-        .find_snap_target_resolved(
-            grid_pos,
-            components.as_ref(),
-            wires.as_ref(),
-            junctions.as_ref(),
-            |component| symbol_context.resolved_symbol(component),
-        )
-        .snapped_position
+        .net_labels
+        .iter()
+        .find(|label| {
+            object_is_on_active_sheet(state, label.id)
+                && label.pos == target
+                && !label.name.trim().is_empty()
+        })
+        .map(|label| label.name.as_str())
+        .or_else(|| {
+            state
+                .schematic
+                .wires
+                .iter()
+                .filter(|wire| {
+                    object_is_on_active_sheet(state, wire.id) && wire.contains_point(target)
+                })
+                .find_map(|wire| {
+                    state
+                        .schematic
+                        .net_labels
+                        .iter()
+                        .find(|label| {
+                            object_is_on_active_sheet(state, label.id)
+                                && !label.name.trim().is_empty()
+                                && wire.contains_point(label.pos)
+                        })
+                        .map(|label| label.name.as_str())
+                })
+        })
 }
 
 fn pending_library_cell_preview<'a>(
@@ -820,7 +1013,7 @@ fn draw_component_preview(
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    if !component_preview_enabled(state.schematic.read_only) {
+    if !component_preview_enabled(state.schematic_edit_read_only()) {
         return;
     }
 
@@ -832,7 +1025,7 @@ fn draw_component_preview(
     if let Tool::Place(component_type) = preview_tool
         && let Some(hover_pos) = response.hover_pos()
     {
-        let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, hover_pos);
+        let grid_pos = resolve_grid_pointer(state, viewport, hover_pos).snapped_position;
         let preview_pos = viewport.schematic_to_screen(grid_pos);
 
         // Ghost the symbol in dimmed accent until it is placed.
@@ -924,10 +1117,10 @@ pub(super) fn draw_shelf_drag_preview(
     pointer_pos: egui::Pos2,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    if !component_preview_enabled(state.schematic.read_only) {
+    if !component_preview_enabled(state.schematic_edit_read_only()) {
         return;
     }
-    let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pointer_pos);
+    let grid_pos = resolve_grid_pointer(state, viewport, pointer_pos).snapped_position;
     let preview_pos = viewport.schematic_to_screen(grid_pos);
     let rotation = state.schematic.preview_rotation;
     let rotation_degrees = rotation.degrees();
@@ -1050,7 +1243,6 @@ fn component_preview_enabled(read_only: bool) -> bool {
     !read_only
 }
 
-
 fn draw_selection_rect(painter: &Painter, state: &AppState, tool_viewport: &Viewport) {
     if state.schematic.selection_rect.is_active() {
         let (min_x, min_y, max_x, max_y) = state.schematic.selection_rect.bounds();
@@ -1087,7 +1279,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_preview_snap_position_uses_resolved_cell_terminals() {
+    fn wire_preview_snap_resolution_uses_resolved_cell_terminals() {
         let mut state = AppState::default();
         let mut binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&[crate::state::PortSpec {
@@ -1107,11 +1299,89 @@ mod tests {
         let terminal =
             component.terminal_positions_resolved(symbol_context.resolved_symbol(component))[0].1;
         let near_terminal = crate::state::Point::new(terminal.x + 1, terminal.y);
+        let viewport = Viewport {
+            offset: egui::Pos2::ZERO,
+            zoom: 1.0,
+            bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(400.0)),
+        };
 
         assert_eq!(
-            wire_preview_snap_position(&state, &symbol_context, near_terminal),
+            resolve_target_pointer(
+                &state,
+                &symbol_context,
+                &viewport,
+                egui::pos2(near_terminal.x as f32, near_terminal.y as f32),
+            )
+            .snapped_position,
             terminal
         );
+    }
+
+    #[test]
+    fn wire_preview_matches_exact_visual_conductor_attachment() {
+        let mut state = AppState::default();
+        state.schematic.wires.push(crate::state::Wire::segment(
+            5,
+            Point::new(0, 10),
+            Point::new(20, 10),
+        ));
+        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let viewport = Viewport {
+            offset: egui::Pos2::ZERO,
+            zoom: 2.0,
+            bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(400.0)),
+        };
+        let pointer = viewport.schematic_to_screen(Point::new(7, 10)) + egui::vec2(0.0, 2.0);
+        let result = resolve_wire_preview_snap(&state, &symbol_context, &viewport, pointer)
+            .expect("representable conductor acquisition");
+
+        assert_eq!(result.snapped_position, Point::new(7, 10));
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireSegment {
+                wire_id: 5,
+                segment_index: 0,
+            })
+        );
+        assert!(result.show_indicator);
+    }
+
+    #[test]
+    fn wire_snap_feedback_uses_retained_net_name_and_never_invents_one() {
+        let mut state = AppState::default();
+        let component = Component::new(7, ComponentType::Resistor, Point::new(20, 20))
+            .with_name_value("R7", "1k");
+        let terminal_position = component.terminal_positions()[0].1;
+        state.schematic.components.push(component);
+        state
+            .schematic
+            .net_labels
+            .push(NetLabel::new(1, terminal_position, "VOUT"));
+        let terminal = state.schematic.snap_engine.find_snap_target(
+            terminal_position,
+            &state.schematic.components,
+            &[],
+            &[],
+        );
+        let expected = format!(
+            "Pin R7.{} | net VOUT",
+            terminal.terminal_name().expect("terminal target")
+        );
+        assert_eq!(
+            wire_snap_feedback_copy(&state, &terminal).as_deref(),
+            Some(expected.as_str())
+        );
+
+        let wire = crate::state::Wire::segment(41, Point::new(60, 20), Point::new(80, 20));
+        let unknown_wire = state.schematic.snap_engine.find_snap_target(
+            Point::new(80, 20),
+            &[],
+            std::slice::from_ref(&wire),
+            &[],
+        );
+        let copy = wire_snap_feedback_copy(&state, &unknown_wire).expect("target copy");
+        assert_eq!(copy, "Wire #41 end endpoint");
+        assert!(!copy.contains("net"));
     }
 
     #[test]
