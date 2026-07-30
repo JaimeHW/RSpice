@@ -98,7 +98,6 @@ impl PropertyValue {
             _ => None,
         }
     }
-
 }
 
 // =============================================================================
@@ -458,7 +457,6 @@ impl PropertySheet {
     pub fn names(&self) -> &[String] {
         &self.order
     }
-
 }
 
 // =============================================================================
@@ -540,7 +538,23 @@ pub fn format_engineering(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{PropertyDefinition, PropertyValue, format_engineering};
+    use super::{
+        ComponentType, PropertyDefinition, PropertyRegistry, PropertyValue, format_engineering,
+    };
+
+    #[test]
+    fn every_static_component_family_has_a_typed_editor_schema() {
+        let registry = PropertyRegistry::new();
+        let missing = ComponentType::ALL
+            .into_iter()
+            .filter(|kind| *kind != ComponentType::CellInstance)
+            .filter(|kind| registry.get(*kind).is_none())
+            .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "component editor schemas are missing for {missing:?}"
+        );
+    }
 
     #[test]
     fn engineering_display_uses_unambiguous_mega_for_editor_round_trip() {

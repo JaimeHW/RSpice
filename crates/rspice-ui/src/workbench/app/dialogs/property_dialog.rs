@@ -1,13 +1,21 @@
 //! Property dialog host.
 //!
-//! The floating tabbed property dialog (schema-driven editing via the
-//! `PropertyRegistry`). Inline inspection lives in the workbench inspector
+//! The floating schema-driven component editor backed by the
+//! `PropertyRegistry`. Inline inspection lives in the workbench inspector
 //! (`crate::workbench::docks::inspector`).
 
-use crate::properties::{TabbedDialogResult, render_tabbed_property_dialog};
-use crate::workbench::app_state::AppState;
+use std::collections::HashMap;
 
-/// Render the floating tabbed property dialog window
+use crate::properties::{
+    ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
+    ComponentTerminalContext, TabbedDialogResult, render_tabbed_property_dialog,
+};
+use crate::simulation::netlist_gen::{HierarchySource, design_nets_with_hierarchy};
+use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
+use crate::workbench::app_state::AppState;
+use crate::workbench::state::{ModelsPage, Workspace};
+
+/// Render the floating schematic component editor.
 /// Call this from the main app update loop
 pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> TabbedDialogResult {
     if state.tabbed_property_dialog.open {
@@ -16,9 +24,11 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let number_locale = state.ui.number_locale;
     let commit_policy = state.schematic.document_policy.property_commit;
+    let editor_context = component_editor_context(state);
     let result = render_tabbed_property_dialog(
         ctx,
         &mut state.tabbed_property_dialog,
+        &editor_context,
         &state.property_registry,
         &state.model_library_manager,
         quantity_policy,
@@ -27,9 +37,12 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     );
 
     // Handle dialog result - apply changes back to component
-    if matches!(result, TabbedDialogResult::Applied)
-        && let Some(comp_id) = state.tabbed_property_dialog.component_id
+    if matches!(
+        result,
+        TabbedDialogResult::Applied | TabbedDialogResult::AppliedAndClose
+    ) && let Some(comp_id) = state.tabbed_property_dialog.component_id
     {
+        let close_after_commit = result == TabbedDialogResult::AppliedAndClose;
         if let Some(error) = component_property_session_error(state) {
             state.tabbed_property_dialog.open = true;
             state.tabbed_property_dialog.session_error = Some(error);
@@ -56,13 +69,43 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             &values,
             &state.property_registry,
         );
+        if let Err(error) = validate_component_identity(state, comp_id, &candidate) {
+            state.tabbed_property_dialog.open = true;
+            state
+                .tabbed_property_dialog
+                .validation_errors
+                .insert("name".to_owned(), error);
+            state.tabbed_property_dialog.commit_error =
+                Some("Correct the instance reference before applying.".to_owned());
+            return TabbedDialogResult::None;
+        }
+        if let Err(error) = validate_model_binding_authority(state, &candidate, &values) {
+            state.tabbed_property_dialog.open = true;
+            state.tabbed_property_dialog.commit_error =
+                Some(format!("The model binding was not changed: {error}"));
+            return TabbedDialogResult::None;
+        }
+        let Some(property_sheet) = state.property_registry.get(candidate.kind) else {
+            state.tabbed_property_dialog.open = true;
+            state.tabbed_property_dialog.commit_error = Some(
+                "The component was not changed because its property schema is unavailable."
+                    .to_owned(),
+            );
+            return TabbedDialogResult::None;
+        };
+        if let Err(error) = validate_component_contract(&candidate, &values, property_sheet) {
+            state.tabbed_property_dialog.open = true;
+            state.tabbed_property_dialog.commit_error =
+                Some(format!("The component was not changed: {error}"));
+            return TabbedDialogResult::None;
+        }
         if candidate.kind == crate::state::ComponentType::Port
             && let Err(error) = state
                 .schematic
                 .validate_edited_port_contract(comp_id, &candidate)
         {
             state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.session_error =
+            state.tabbed_property_dialog.commit_error =
                 Some(format!("The interface contract was not changed: {error}."));
             return TabbedDialogResult::None;
         }
@@ -87,7 +130,9 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         }
 
         // The mockup primary closes after the exact transaction completes.
-        if state.tabbed_property_dialog.open {
+        if close_after_commit {
+            state.tabbed_property_dialog.clear_after_apply();
+        } else if state.tabbed_property_dialog.open {
             state.tabbed_property_dialog.component_baseline = state
                 .schematic
                 .components
@@ -97,9 +142,38 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state
                 .tabbed_property_dialog
                 .mark_fields_applied(committed_names);
-        } else {
-            state.tabbed_property_dialog.clear_after_apply();
         }
+    }
+
+    match result {
+        TabbedDialogResult::OpenModel | TabbedDialogResult::OpenQualification => {
+            let model = editor_context
+                .model
+                .as_ref()
+                .map(|model| model.name.clone());
+            let library = editor_context
+                .model
+                .as_ref()
+                .and_then(|model| model.library.clone());
+            state.tabbed_property_dialog.close();
+            state.workbench.activate(Workspace::Models);
+            state.workbench.models_page = if result == TabbedDialogResult::OpenQualification {
+                ModelsPage::Qualification
+            } else {
+                ModelsPage::Models
+            };
+            if let Some(model) = model {
+                state.workbench.selected_model = Some(model);
+            }
+            if let Some(library) = library {
+                state.model_library_manager.select_library(&library);
+            }
+        }
+        TabbedDialogResult::CrossProbe => {
+            state.tabbed_property_dialog.close();
+            state.workbench.activate(Workspace::Results);
+        }
+        _ => {}
     }
 
     if !state.tabbed_property_dialog.open {
@@ -107,6 +181,633 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     }
 
     result
+}
+
+fn validate_model_binding_authority(
+    state: &AppState,
+    component: &Component,
+    values: &HashMap<String, PropertyValue>,
+) -> Result<(), String> {
+    let params = crate::state::parse_params_string(&component.params);
+    let declared = params.get("model").cloned().or_else(|| {
+        model_is_component_value(component.kind)
+            .then(|| component.value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    });
+    let Some(declared) = declared else {
+        return Ok(());
+    };
+    let selected_library = values
+        .get("model_library")
+        .map(PropertyValue::display_string)
+        .or_else(|| params.get("model_library").cloned())
+        .map(|library| library.trim().to_owned())
+        .filter(|library| !library.is_empty());
+
+    if let Some(library_name) = selected_library.as_deref() {
+        let library = state
+            .model_library_manager
+            .get_library(library_name)
+            .ok_or_else(|| format!("catalog library '{library_name}' is no longer available"))?;
+        if !library
+            .models
+            .values()
+            .any(|model| model.name.eq_ignore_ascii_case(&declared))
+        {
+            return Err(format!(
+                "catalog library '{library_name}' does not provide model '{declared}'"
+            ));
+        }
+    }
+
+    let provider_libraries = state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| {
+            library
+                .models
+                .values()
+                .any(|model| model.name.eq_ignore_ascii_case(&declared))
+        })
+        .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
+    if provider_libraries.len() > 1 && selected_library.is_none() {
+        return Err(format!(
+            "model '{declared}' has {} executable providers ({}); select its exact catalog entry so this instance retains an unambiguous library binding",
+            provider_libraries.len(),
+            provider_libraries.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+fn validate_component_identity(
+    state: &AppState,
+    component_id: u64,
+    candidate: &Component,
+) -> Result<(), String> {
+    if !candidate.kind.spice_prefix().is_empty() {
+        candidate
+            .validate_reference_designator(candidate.name.trim())
+            .map_err(|error| format!("The instance reference was not changed: {error}"))?;
+        if state.schematic.components.iter().any(|component| {
+            component.id != component_id
+                && component.name.eq_ignore_ascii_case(candidate.name.trim())
+        }) {
+            return Err(format!(
+                "The instance reference was not changed: '{}' is already used on this sheet.",
+                candidate.name.trim()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_component_contract(
+    component: &Component,
+    values: &HashMap<String, PropertyValue>,
+    sheet: &PropertySheet,
+) -> Result<(), String> {
+    let params = crate::state::parse_params_string(&component.params);
+    let number = |name: &str| {
+        values
+            .get(name)
+            .or_else(|| sheet.get(name).map(|definition| &definition.default_value))
+            .and_then(property_value_as_number)
+            .or_else(|| {
+                params
+                    .get(name)
+                    .and_then(|value| crate::quantity::parse_engineering_value(value).ok())
+            })
+    };
+    let ordered = |lower: &str, upper: &str, label: &str| -> Result<(), String> {
+        if let (Some(lower), Some(upper)) = (number(lower), number(upper))
+            && lower > upper
+        {
+            return Err(format!("{label} minimum must not exceed its maximum"));
+        }
+        Ok(())
+    };
+    match component.kind {
+        ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => {
+            if let (Some(rise), Some(fall), Some(width), Some(period)) =
+                (number("tr"), number("tf"), number("pw"), number("per"))
+                && rise + width + fall > period
+            {
+                return Err(
+                    "pulse rise time, width, and fall time must fit within one period".to_owned(),
+                );
+            }
+        }
+        ComponentType::VoltageSourceExp | ComponentType::CurrentSourceExp => {
+            if let (Some(first), Some(second)) = (number("td1"), number("td2"))
+                && second < first
+            {
+                return Err("the second exponential transition cannot precede the first".to_owned());
+            }
+        }
+        ComponentType::CurrentSourceNoise => {
+            let amplitude = number("na").unwrap_or_else(|| {
+                crate::quantity::parse_engineering_value(&component.value).unwrap_or(0.0)
+            });
+            let flicker_amplitude = number("namp").unwrap_or(0.0);
+            if (amplitude != 0.0 || flicker_amplitude != 0.0)
+                && number("nt").is_some_and(|interval| interval <= 0.0)
+            {
+                return Err(
+                    "noise sample interval must be positive when noise is enabled".to_owned(),
+                );
+            }
+            if flicker_amplitude != 0.0
+                && number("nalpha").is_some_and(|alpha| !(0.0..2.0).contains(&alpha))
+            {
+                return Err(
+                    "flicker-noise exponent must be greater than 0 and less than 2".to_owned(),
+                );
+            }
+        }
+        ComponentType::VSwitch | ComponentType::ISwitch => {
+            if let (Some(on), Some(off)) = (number("ron"), number("roff"))
+                && (on <= 0.0 || off <= on)
+            {
+                return Err(
+                    "switch resistance requires 0 < on resistance < off resistance".to_owned(),
+                );
+            }
+        }
+        ComponentType::Memristor => {
+            if let (Some(on), Some(off)) = (number("ron"), number("roff"))
+                && (on <= 0.0 || off <= on)
+            {
+                return Err(
+                    "memristor resistance requires 0 < on resistance < off resistance".to_owned(),
+                );
+            }
+        }
+        ComponentType::Vcvs | ComponentType::Ccvs => {
+            ordered("vmin", "vmax", "output-voltage limit")?;
+        }
+        ComponentType::Vccs | ComponentType::Cccs => {
+            ordered("imin", "imax", "output-current limit")?;
+        }
+        ComponentType::XspiceLimiter
+        | ComponentType::XspiceIntegrator
+        | ComponentType::XspiceDifferentiator => {
+            ordered("out_lower_limit", "out_upper_limit", "output limit")?;
+        }
+        ComponentType::XspiceAdcBridge => {
+            ordered("in_low", "in_high", "ADC input threshold")?;
+        }
+        ComponentType::XspiceDacBridge => {
+            ordered("out_low", "out_high", "DAC output level")?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
+    value.as_number().or_else(|| {
+        let displayed = value.display_string();
+        let literal = displayed
+            .strip_prefix('{')
+            .and_then(|displayed| displayed.strip_suffix('}'))
+            .unwrap_or(&displayed);
+        crate::quantity::parse_engineering_value(literal).ok()
+    })
+}
+
+fn component_editor_context(state: &AppState) -> ComponentEditorContext {
+    let Some(component_id) = state.tabbed_property_dialog.component_id else {
+        return ComponentEditorContext::default();
+    };
+    let Some(component) = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+    else {
+        return ComponentEditorContext::default();
+    };
+
+    let instance_path = format!(
+        "{}/{}",
+        state.workspace.active_view.display_path(),
+        component.name
+    );
+    let library_cell = component
+        .library_cell
+        .as_ref()
+        .map(|binding| format!("{}/{}/{}", binding.library, binding.cell, binding.view))
+        .unwrap_or_else(|| {
+            format!(
+                "{} / {}",
+                component.kind.spice_prefix(),
+                component.kind.display_name()
+            )
+        });
+
+    ComponentEditorContext {
+        glyph: component_editor_glyph(component.kind).to_owned(),
+        subtitle: component
+            .library_cell
+            .as_ref()
+            .map(|binding| format!("{} · {} view", component.kind.display_name(), binding.view))
+            .unwrap_or_else(|| format!("{} · SPICE primitive", component.kind.display_name())),
+        instance_path,
+        library_cell,
+        family: format!(
+            "{} · {}",
+            component.kind.display_name(),
+            if component.library_cell.is_some() {
+                "library"
+            } else {
+                "primitive"
+            }
+        ),
+        model: component_model_context(state, component),
+        operating_point: component_operating_point_context(state, component),
+        terminals: component_terminal_context(state, component),
+    }
+}
+
+fn component_editor_glyph(kind: ComponentType) -> &'static str {
+    match kind {
+        ComponentType::OpAmp => "△",
+        ComponentType::VoltageSourceAc
+        | ComponentType::VoltageSourceSin
+        | ComponentType::CurrentSourceAc
+        | ComponentType::CurrentSourceSin => "~",
+        ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => "∿",
+        ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => "⌁",
+        ComponentType::VoltageSource => "+",
+        ComponentType::CurrentSource => "I",
+        ComponentType::Ground => "0",
+        ComponentType::Port | ComponentType::RfPort => "P",
+        ComponentType::CellInstance => "▣",
+        ComponentType::XspiceInverter | ComponentType::XspiceBuffer => "⊳",
+        kind if kind.is_xspice() => "⊞",
+        _ => kind.spice_prefix(),
+    }
+}
+
+fn component_model_context(
+    state: &AppState,
+    component: &Component,
+) -> Option<ComponentModelContext> {
+    let params = crate::state::parse_params_string(&component.params);
+    let declared = params
+        .get("model")
+        .cloned()
+        .or_else(|| {
+            model_is_component_value(component.kind)
+                .then(|| component.value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| component.library_cell.as_ref()?.module_name.clone())
+        .or_else(|| {
+            component
+                .library_cell
+                .as_ref()
+                .map(|binding| binding.cell.clone())
+        });
+    let Some(declared) = declared else {
+        if let Some(name) = generated_inline_model_name(component) {
+            return Some(ComponentModelContext {
+                name,
+                library: None,
+                source: "Netlist generator".to_owned(),
+                section: "not applicable".to_owned(),
+                status: "inline model - generated from instance parameters".to_owned(),
+                can_open: false,
+                can_qualify: false,
+            });
+        }
+        return builtin_primitive_model_name(component.kind).map(|name| ComponentModelContext {
+            name,
+            library: None,
+            source: "Built-in device kernel".to_owned(),
+            section: "not sectioned".to_owned(),
+            status: "built-in exact stamp".to_owned(),
+            can_open: false,
+            can_qualify: false,
+        });
+    };
+
+    let selected_library = params
+        .get("model_library")
+        .map(|library| library.trim().to_owned())
+        .filter(|library| !library.is_empty());
+    let mut matches = state
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter_map(|library| {
+            library
+                .models
+                .values()
+                .find(|model| model.name.eq_ignore_ascii_case(&declared))
+                .map(|model| {
+                    (
+                        library.name.clone(),
+                        model.name.clone(),
+                        model
+                            .file_path
+                            .as_ref()
+                            .or(library.root_path.as_ref())
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "in-memory catalog".to_owned()),
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let binding = component.library_cell.as_ref();
+    let catalog_match = if let Some(selected_library) = selected_library.as_deref() {
+        matches
+            .iter()
+            .find(|(library, _, _)| library.eq_ignore_ascii_case(selected_library))
+    } else if matches.len() == 1 {
+        matches.first()
+    } else {
+        None
+    };
+    if let Some((library, model, source)) = catalog_match {
+        let status = if matches.len() > 1 {
+            "exact catalog provider resolved"
+        } else if matches.len() == 1 {
+            "unique catalog binding resolved"
+        } else {
+            "provider selection requires catalog governance"
+        };
+        let section = binding
+            .and_then(|binding| binding.model_section.clone())
+            .or_else(|| params.get("section").cloned())
+            .unwrap_or_else(|| {
+                format!(
+                    "{} process corner",
+                    state.sim_setup.reference_pvt.process.short_name()
+                )
+            });
+        Some(ComponentModelContext {
+            name: model.clone(),
+            library: Some(library.clone()),
+            source: format!("{library} · {source}"),
+            section,
+            status: status.to_owned(),
+            can_open: true,
+            can_qualify: true,
+        })
+    } else {
+        let source = selected_library
+            .as_ref()
+            .map(|library| format!("{library} · unresolved catalog selection"))
+            .or_else(|| {
+                binding
+                    .and_then(|binding| binding.source_path.as_ref())
+                    .map(|path| path.display().to_string())
+            })
+            .or_else(|| {
+                binding
+                    .map(|binding| format!("{}/{}/{}", binding.library, binding.cell, binding.view))
+            })
+            .unwrap_or_else(|| "No catalog source resolved".to_owned());
+        Some(ComponentModelContext {
+            name: declared,
+            library: selected_library,
+            source,
+            section: binding
+                .and_then(|binding| binding.model_section.clone())
+                .or_else(|| params.get("section").cloned())
+                .unwrap_or_else(|| {
+                    format!(
+                        "{} process corner",
+                        state.sim_setup.reference_pvt.process.short_name()
+                    )
+                }),
+            status: "declared binding · catalog unverified".to_owned(),
+            can_open: false,
+            can_qualify: false,
+        })
+    }
+}
+
+fn builtin_primitive_model_name(kind: ComponentType) -> Option<String> {
+    if matches!(
+        kind,
+        ComponentType::Ground | ComponentType::Port | ComponentType::CellInstance
+    ) {
+        return None;
+    }
+    let prefix = kind.spice_prefix();
+    Some(if prefix.is_empty() {
+        kind.display_name().to_owned()
+    } else {
+        format!("{prefix} primitive")
+    })
+}
+
+fn model_is_component_value(kind: ComponentType) -> bool {
+    matches!(
+        kind,
+        ComponentType::Diode
+            | ComponentType::Nmos
+            | ComponentType::Pmos
+            | ComponentType::NVdmos
+            | ComponentType::PVdmos
+            | ComponentType::NmosSoi
+            | ComponentType::PmosSoi
+            | ComponentType::NpnBjt
+            | ComponentType::PnpBjt
+            | ComponentType::NpnBjt4
+            | ComponentType::PnpBjt4
+            | ComponentType::NpnBjt5
+            | ComponentType::PnpBjt5
+            | ComponentType::Njfet
+            | ComponentType::Pjfet
+            | ComponentType::Nmesfet
+            | ComponentType::Pmesfet
+    )
+}
+
+fn generated_inline_model_name(component: &Component) -> Option<String> {
+    let prefix = match component.kind {
+        ComponentType::Nmos => "nmos",
+        ComponentType::Pmos => "pmos",
+        ComponentType::NVdmos => "nvdmos",
+        ComponentType::PVdmos => "pvdmos",
+        ComponentType::NmosSoi => "nmossoi",
+        ComponentType::PmosSoi => "pmossoi",
+        ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => "npn",
+        ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => "pnp",
+        ComponentType::Njfet => "njf",
+        ComponentType::Pjfet => "pjf",
+        ComponentType::Nmesfet => "nmf",
+        ComponentType::Pmesfet => "pmf",
+        ComponentType::VSwitch => "sw",
+        ComponentType::ISwitch => "isw",
+        ComponentType::Diode => "d",
+        ComponentType::SaturableInductor => "core",
+        ComponentType::Memristor => "mem",
+        ComponentType::CoupledTransmissionLine => "cpl",
+        ComponentType::LossyTransmissionLine => {
+            let params = crate::state::parse_params_string(&component.params);
+            if params.get("kind").is_some_and(|kind| kind == "txl") {
+                "txl"
+            } else {
+                "ltra"
+            }
+        }
+        kind if kind.is_xspice() => return Some(format!("{}_model", component.name)),
+        _ => return None,
+    };
+    Some(format!("{prefix}_{}", component.name))
+}
+
+fn component_operating_point_context(
+    state: &AppState,
+    component: &Component,
+) -> Option<ComponentOperatingPointContext> {
+    let run = state.simulation.active_run()?;
+    let current = run
+        .prepared_receipt()
+        .is_some_and(|receipt| receipt.project_revision() == state.workspace.project.revision())
+        && state.simulation.cross_probe.is_current_for(
+            &state.workspace.active_view,
+            state.schematic.topology_version(),
+        );
+    run.analyses.iter().find_map(|analysis| {
+        analysis.device_op.as_ref().and_then(|report| {
+            report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
+                .map(|entry| {
+                    let mut rows = Vec::new();
+                    if let Some(region) = entry.region {
+                        rows.push(("Region".to_owned(), region.to_owned()));
+                    }
+                    rows.extend(
+                        entry
+                            .params
+                            .iter()
+                            .take(5_usize.saturating_sub(rows.len()))
+                            .map(|(name, value)| ((*name).to_owned(), format!("{value:.6e}"))),
+                    );
+                    rows.push((
+                        "Temperature".to_owned(),
+                        format!(
+                            "{:.1} °C",
+                            state.sim_setup.reference_pvt.temperature_celsius
+                        ),
+                    ));
+                    ComponentOperatingPointContext {
+                        run_id: run.id,
+                        analysis: analysis.label.clone(),
+                        current,
+                        rows,
+                    }
+                })
+        })
+    })
+}
+
+fn component_terminal_context(
+    state: &AppState,
+    component: &Component,
+) -> Vec<ComponentTerminalContext> {
+    let hierarchy = HierarchySource::from_workspace_with_connectivity(
+        &state.library_manager,
+        &state.workspace.schematic_buffers,
+        &state.workspace.connectivity,
+    );
+    let nets = design_nets_with_hierarchy(&state.schematic, &hierarchy);
+    let mut bound = HashMap::<(u64, String), String>::new();
+    for net in &nets {
+        let isolated = net.terminals.len() == 1
+            && net.wire_ids.is_empty()
+            && net.port.is_none()
+            && !net.authored_name;
+        if isolated {
+            continue;
+        }
+        for terminal in &net.terminals {
+            bound.insert(
+                (terminal.component_id, terminal.pin.to_ascii_lowercase()),
+                net.name.clone(),
+            );
+        }
+    }
+    let resolved = component
+        .library_cell
+        .as_ref()
+        .and_then(|binding| hierarchy.resolved_symbol_for(binding));
+    component
+        .terminal_positions_resolved(resolved.as_ref())
+        .into_iter()
+        .enumerate()
+        .map(|(index, (pin, _))| ComponentTerminalContext {
+            direction: component_terminal_direction(component, index, &pin),
+            net: bound
+                .get(&(component.id, pin.to_ascii_lowercase()))
+                .cloned(),
+            pin,
+        })
+        .collect()
+}
+
+fn component_terminal_direction(component: &Component, index: usize, pin: &str) -> String {
+    if let Some(direction) = component
+        .library_cell
+        .as_ref()
+        .and_then(|binding| binding.terminal_dirs.get(index))
+    {
+        return direction.keyword().to_owned();
+    }
+    if component.kind == ComponentType::Port {
+        return component
+            .port_contract()
+            .map(|contract| contract.direction.keyword().to_owned())
+            .unwrap_or_else(|| "inout".to_owned());
+    }
+    if component.kind.is_xspice() {
+        return if matches!(pin.to_ascii_lowercase().as_str(), "out" | "q" | "qbar") {
+            "output"
+        } else {
+            "input"
+        }
+        .to_owned();
+    }
+    match component.kind {
+        ComponentType::OpAmp => {
+            if index == 2 {
+                "output"
+            } else {
+                "input"
+            }
+        }
+        ComponentType::Vcvs | ComponentType::Vccs | ComponentType::Ccvs | ComponentType::Cccs => {
+            if index < 2 {
+                "output"
+            } else {
+                "input"
+            }
+        }
+        ComponentType::VSwitch | ComponentType::ISwitch => {
+            if index < 2 {
+                "passive"
+            } else {
+                "input"
+            }
+        }
+        ComponentType::Ground => "ground",
+        kind if kind.is_source() => "output",
+        kind if kind.is_semiconductor() => "inout",
+        _ => "passive",
+    }
+    .to_owned()
 }
 
 fn component_property_session_error(state: &AppState) -> Option<String> {
@@ -200,6 +901,63 @@ mod tests {
     }
 
     #[test]
+    fn cross_field_validation_includes_unserialized_schema_defaults() {
+        let registry = crate::state::PropertyRegistry::new();
+        let sheet = registry
+            .get(ComponentType::Memristor)
+            .expect("memristor schema");
+        let mut component =
+            Component::new(1, ComponentType::Memristor, Point::origin()).with_name_value("MR1", "");
+        let values =
+            HashMap::from([("ron".to_owned(), PropertyValue::Expression("2k".to_owned()))]);
+        crate::properties::property_bridge::apply_properties_to_component(
+            &mut component,
+            &values,
+            &registry,
+        );
+
+        assert_eq!(
+            validate_component_contract(&component, &values, sheet),
+            Err("memristor resistance requires 0 < on resistance < off resistance".to_owned())
+        );
+    }
+
+    #[test]
+    fn model_context_uses_the_persisted_catalog_identity_for_duplicate_names() {
+        use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+
+        let mut state = AppState::default();
+        state.model_library_manager.clear();
+        for library_name in ["alpha", "beta"] {
+            let mut library = ModelLibrary::new(library_name);
+            library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
+            state.model_library_manager.add_library(library);
+        }
+        let mut component = Component::new(1, ComponentType::Diode, Point::origin())
+            .with_name_value("D1", "shared_diode");
+        component.params = "model_library=beta".to_owned();
+
+        let context = component_model_context(&state, &component).expect("model context");
+
+        assert_eq!(context.library.as_deref(), Some("beta"));
+        assert_eq!(context.name, "shared_diode");
+        assert_eq!(context.section, "TT process corner");
+        assert!(context.source.starts_with("beta ·"));
+        let values = HashMap::from([(
+            "model_library".to_owned(),
+            PropertyValue::String("beta".to_owned()),
+        )]);
+        assert!(validate_model_binding_authority(&state, &component, &values).is_ok());
+        let mut component_without_library = component.clone();
+        component_without_library.params.clear();
+        assert!(
+            validate_model_binding_authority(&state, &component_without_library, &HashMap::new())
+                .is_err(),
+            "a governed duplicate still requires the instance to retain its exact catalog identity"
+        );
+    }
+
+    #[test]
     fn session_guard_rejects_read_only_stale_view_epoch_and_object() {
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
@@ -242,7 +1000,7 @@ mod tests {
     }
 
     #[test]
-    fn component_dirty_escape_requires_a_second_explicit_discard() {
+    fn component_dirty_escape_discards_the_isolated_draft() {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
@@ -254,12 +1012,6 @@ mod tests {
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            render_property_dialog(ctx, &mut state);
-        });
-        assert!(state.tabbed_property_dialog.open);
-        assert!(state.tabbed_property_dialog.discard_confirm);
-
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
@@ -302,17 +1054,20 @@ mod tests {
 
         assert!(!state.tabbed_property_dialog.model_browser.open);
         assert!(state.tabbed_property_dialog.open);
-        assert!(!state.tabbed_property_dialog.discard_confirm);
         assert_eq!(state.schematic.components[0].name, "R1");
     }
 
     #[test]
-    fn rendered_numeric_editor_retains_invalid_source_across_repaints() {
+    fn first_parameter_editor_retains_invalid_source_across_repaints() {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
-        state.tabbed_property_dialog.active_tab = "Temperature".to_owned();
+        let original = state
+            .tabbed_property_dialog
+            .numeric_text_draft("r")
+            .expect("resistance source")
+            .to_owned();
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
@@ -331,23 +1086,24 @@ mod tests {
                 render_property_dialog(ctx, &mut state);
             },
         );
+        let expected = format!("{original}1e");
         assert_eq!(
-            state.tabbed_property_dialog.numeric_text_draft("tc1"),
-            Some("01e")
+            state.tabbed_property_dialog.numeric_text_draft("r"),
+            Some(expected.as_str())
         );
         assert!(
             state
                 .tabbed_property_dialog
                 .validation_errors
-                .contains_key("tc1")
+                .contains_key("r")
         );
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
         assert_eq!(
-            state.tabbed_property_dialog.numeric_text_draft("tc1"),
-            Some("01e")
+            state.tabbed_property_dialog.numeric_text_draft("r"),
+            Some(expected.as_str())
         );
     }
 

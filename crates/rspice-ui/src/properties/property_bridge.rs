@@ -24,8 +24,8 @@
 //! apply_properties_to_component(&mut component, &properties);
 //! ```
 
-use crate::state::{format_params_string, parse_params_string};
 use crate::state::{Component, ComponentType, PropertyRegistry, PropertyValue};
+use crate::state::{format_params_string, parse_params_string};
 use std::collections::HashMap;
 
 // =============================================================================
@@ -53,30 +53,45 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::Transformer => "lp",
         ComponentType::CoupledInductor => "k",
         ComponentType::VoltageSource => "dc",
-        ComponentType::VoltageSourceAc => "ac_mag",
+        ComponentType::VoltageSourceAc => "ac",
         ComponentType::VoltageSourcePulse => "v1",
         ComponentType::VoltageSourceSin => "vo",
         ComponentType::VoltageSourceExp => "v1",
         ComponentType::VoltageSourceSffm => "vo",
         ComponentType::CurrentSource => "dc",
-        ComponentType::CurrentSourceAc => "ac_mag",
+        ComponentType::CurrentSourceAc => "ac",
         ComponentType::CurrentSourcePulse => "i1",
         ComponentType::CurrentSourceSin => "io",
         ComponentType::CurrentSourceExp => "i1",
         ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => "pwl_data",
-        ComponentType::Diode => "is",
-        ComponentType::Nmos | ComponentType::Pmos => "w",
-        ComponentType::NpnBjt | ComponentType::PnpBjt => "is",
+        ComponentType::Diode
+        | ComponentType::Nmos
+        | ComponentType::Pmos
+        | ComponentType::NVdmos
+        | ComponentType::PVdmos
+        | ComponentType::NmosSoi
+        | ComponentType::PmosSoi
+        | ComponentType::NpnBjt
+        | ComponentType::PnpBjt
+        | ComponentType::NpnBjt4
+        | ComponentType::PnpBjt4
+        | ComponentType::NpnBjt5
+        | ComponentType::PnpBjt5
+        | ComponentType::Njfet
+        | ComponentType::Pjfet
+        | ComponentType::Nmesfet
+        | ComponentType::Pmesfet => "model",
         ComponentType::Vcvs => "gain",
         ComponentType::Vccs => "gm",
         ComponentType::Ccvs => "rm",
         ComponentType::Cccs => "gain",
+        ComponentType::OpAmp => "gain",
+        ComponentType::CurrentSourceNoise => "na",
         ComponentType::Ground => "name",
         // Catch-all for any other component types
         _ => "value",
     }
 }
-
 
 /// Formats a key-value HashMap into a SPICE-format parameter string.
 ///
@@ -111,7 +126,7 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
 /// * `registry` - Property registry for type information
 ///
 /// # Returns
-/// HashMap suitable for use with TabbedPropertyDialogState
+/// Build the component editor's typed draft map.
 pub fn collect_properties_from_component(
     component: &Component,
     registry: &PropertyRegistry,
@@ -271,7 +286,10 @@ pub fn apply_properties_to_component(
 
     // Update instance name
     if let Some(PropertyValue::String(name)) = properties.get("name") {
-        component.name = name.clone();
+        // Validation is performed against the normalized reference; persist
+        // that same identity so whitespace cannot create visually identical
+        // but electrically distinct instance names.
+        component.name = name.trim().to_owned();
     }
 
     // Update primary value
@@ -299,7 +317,7 @@ pub fn apply_properties_to_component(
 
     for (key, value) in properties {
         // Skip name and primary property
-        if key == "name" || key == primary_prop || key == "symbol" {
+        if key == "name" || key == primary_prop || key == "symbol" || key == "model_corner" {
             continue;
         }
 
@@ -477,6 +495,20 @@ mod tests {
     }
 
     #[test]
+    fn component_bridge_persists_the_normalized_reference_identity() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
+        let properties = HashMap::from([(
+            "name".to_owned(),
+            PropertyValue::String("  R42  ".to_owned()),
+        )]);
+
+        apply_properties_to_component(&mut component, &properties, &registry);
+
+        assert_eq!(component.name, "R42");
+    }
+
+    #[test]
     fn component_bridge_does_not_drop_a_small_nonzero_default_delta() {
         let registry = PropertyRegistry::new();
         let value = 5.0e-16;
@@ -492,6 +524,60 @@ mod tests {
         let serialized = parse_params_string(&component.params);
         let tc1 = serialized.get("tc1").expect("non-default tc1 is retained");
         assert_eq!(tc1.parse::<f64>().expect("serialized tc1"), value);
+    }
+
+    #[test]
+    fn ac_source_magnitude_updates_the_emitted_primary_value() {
+        let registry = PropertyRegistry::new();
+        for kind in [
+            ComponentType::VoltageSourceAc,
+            ComponentType::CurrentSourceAc,
+        ] {
+            let mut component =
+                Component::new(1, kind, Point::origin()).with_name_value("SRC1", "1");
+            let mut properties = collect_properties_from_component(&component, &registry);
+            properties.insert("ac".to_owned(), PropertyValue::number(2.5));
+
+            apply_properties_to_component(&mut component, &properties, &registry);
+
+            assert_eq!(component.value, "2.5");
+            assert!(!parse_params_string(&component.params).contains_key("ac"));
+        }
+    }
+
+    #[test]
+    fn mos_width_never_replaces_the_model_binding() {
+        let registry = PropertyRegistry::new();
+        for kind in [ComponentType::Nmos, ComponentType::Pmos] {
+            let mut component =
+                Component::new(1, kind, Point::origin()).with_name_value("M1", "core_model");
+            let mut properties = collect_properties_from_component(&component, &registry);
+            properties.insert("w".to_owned(), PropertyValue::number(2e-6));
+
+            apply_properties_to_component(&mut component, &properties, &registry);
+
+            assert_eq!(component.value, "core_model");
+            assert_eq!(
+                parse_params_string(&component.params)
+                    .get("w")
+                    .map(String::as_str),
+                Some("0.000002")
+            );
+        }
+    }
+
+    #[test]
+    fn op_amp_gain_is_the_positional_primary_value() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::OpAmp, Point::origin())
+            .with_name_value("E1", "100000");
+        let mut properties = collect_properties_from_component(&component, &registry);
+        properties.insert("gain".to_owned(), PropertyValue::number(250000.0));
+
+        apply_properties_to_component(&mut component, &properties, &registry);
+
+        assert_eq!(component.value, "250000");
+        assert!(!parse_params_string(&component.params).contains_key("gain"));
     }
 
     #[test]

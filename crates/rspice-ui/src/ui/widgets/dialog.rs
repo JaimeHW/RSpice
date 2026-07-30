@@ -66,6 +66,9 @@ pub enum DialogSize {
     /// Permanent authored drawing-sheet studio: 1280 x 760 pt with a fixed
     /// section navigator, editable sheet form, and live effect preview.
     SchematicPageSetup,
+    /// Schematic instance editor: the mockup's fixed 880 x 680 pt two-pane
+    /// surface with 24/32 pt desktop viewport gutters.
+    ComponentEditor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -263,6 +266,22 @@ impl DialogSize {
                 fill_height: true,
                 app_background: true,
                 radius: 4.0,
+                top_anchored: false,
+            },
+            Self::ComponentEditor => DialogSurfaceSpec {
+                width: 880.0,
+                max_height: 680.0,
+                horizontal_inset: 48.0,
+                vertical_inset: 64.0,
+                narrow_max_width: 760.0,
+                narrow_inset: 48.0,
+                narrow_vertical_inset: 64.0,
+                cap_narrow_height: true,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: false,
+                fill_height: true,
+                app_background: false,
+                radius: 8.0,
                 top_anchored: false,
             },
         }
@@ -502,6 +521,7 @@ pub struct Dialog<'a> {
     primary_on_enter: bool,
     destructive: bool,
     secondary: Option<&'a str>,
+    secondary_enabled: bool,
     ghost: Option<&'a str>,
     ghost_enabled: bool,
     hint: Option<&'a str>,
@@ -510,6 +530,7 @@ pub struct Dialog<'a> {
     flush_body: bool,
     manual_body_scroll: bool,
     note_only_footer: bool,
+    header_visible: bool,
     initial_focus: DialogInitialFocus,
     retained_cancel_focus: Option<DialogInitialFocus>,
     initial_height: Option<f32>,
@@ -531,6 +552,7 @@ impl<'a> Dialog<'a> {
             primary_on_enter: true,
             destructive: false,
             secondary: None,
+            secondary_enabled: true,
             ghost: None,
             ghost_enabled: true,
             hint: None,
@@ -539,6 +561,7 @@ impl<'a> Dialog<'a> {
             flush_body: false,
             manual_body_scroll: false,
             note_only_footer: false,
+            header_visible: true,
             initial_focus: DialogInitialFocus::Container,
             retained_cancel_focus: None,
             initial_height: None,
@@ -623,6 +646,12 @@ impl<'a> Dialog<'a> {
         self
     }
 
+    /// Enable or disable the optional secondary action.
+    pub fn secondary_enabled(mut self, enabled: bool) -> Self {
+        self.secondary_enabled = enabled;
+        self
+    }
+
     /// Ghost button, leftmost in the footer (Revert, Cancel).
     pub fn ghost(mut self, label: &'a str) -> Self {
         self.ghost = Some(label);
@@ -687,6 +716,14 @@ impl<'a> Dialog<'a> {
         self
     }
 
+    /// Suppress the standard workflow header while preserving the modal's
+    /// accessible name. Specialist editors use this when their body owns an
+    /// identity-rich header that cannot be represented by the generic title.
+    pub fn without_header(mut self) -> Self {
+        self.header_visible = false;
+        self
+    }
+
     /// Show the dialog and render `body` into the scrollable middle
     /// region. Returns what the user chose this frame; the caller owns
     /// open/close state and reacts to the choice.
@@ -722,7 +759,7 @@ impl<'a> Dialog<'a> {
         // the resolved height while body content scrolls beneath the fixed
         // footer, including when the requested height is clamped to the screen.
         let fill_surface_height = layout.fills_surface_height(self.fixed_height);
-        let large_targets = layout.narrow
+        let large_targets = (layout.narrow && self.size != DialogSize::ComponentEditor)
             || (self.size == DialogSize::AnalysisCatalog && screen.width() <= 820.0)
             || ctx.input(|input| input.has_touch_screen());
         let hide_close_only_footer = self.size == DialogSize::CapabilityReview;
@@ -815,7 +852,14 @@ impl<'a> Dialog<'a> {
                     let body_item_spacing_y = ui.spacing().item_spacing.y;
                     ui.spacing_mut().item_spacing.y = 0.0;
                     let header_top = ui.cursor().top();
-                    let header = self.header(ui, &t, large_targets);
+                    let header = if self.header_visible {
+                        self.header(ui, &t, large_targets)
+                    } else {
+                        DialogHeaderOutput {
+                            closed: false,
+                            close_id: None,
+                        }
+                    };
                     rendered_focus.close = header.close_id;
                     if header.closed {
                         choice = DialogChoice::Cancelled;
@@ -1096,6 +1140,9 @@ impl<'a> Dialog<'a> {
         if self.hides_close_only_footer(hide_close_only_footer) {
             return 0.0;
         }
+        if self.size == DialogSize::ComponentEditor {
+            return 48.0;
+        }
         if !self.footer_stacks(surface_width) {
             return 48.0;
         }
@@ -1115,6 +1162,9 @@ impl<'a> Dialog<'a> {
     }
 
     fn footer_stacks(&self, surface_width: f32) -> bool {
+        if self.size == DialogSize::ComponentEditor {
+            return false;
+        }
         let button_width = |label: &str| label.chars().count() as f32 * 6.4 + 20.0;
         let mut required = button_width(self.primary);
         let mut items: usize = 1;
@@ -1252,7 +1302,12 @@ impl<'a> Dialog<'a> {
         let line_y = ui.cursor().top();
         ui.painter()
             .hline(ui.max_rect().x_range(), line_y, Stroke::new(1.0, c.border));
-        let horizontal_margin = WORKFLOW_FOOTER_HORIZONTAL_MARGIN;
+        let component_editor = self.size == DialogSize::ComponentEditor;
+        let horizontal_margin = if component_editor {
+            16
+        } else {
+            WORKFLOW_FOOTER_HORIZONTAL_MARGIN
+        };
         let vertical_margin = if large_targets {
             2
         } else {
@@ -1260,7 +1315,11 @@ impl<'a> Dialog<'a> {
         };
         let stack_footer = self.footer_stacks(surface_width);
         Frame::NONE
-            .fill(c.bg_panel)
+            .fill(if component_editor {
+                c.bg_panel_2
+            } else {
+                c.bg_panel
+            })
             .inner_margin(Margin::symmetric(
                 horizontal_margin,
                 if stack_footer {
@@ -1302,11 +1361,12 @@ impl<'a> Dialog<'a> {
                     }
                     if let Some(label) = self.secondary {
                         let secondary = crate::ui::widgets::Button::new(label)
+                            .enabled(self.secondary_enabled)
                             .min_width(action_width)
                             .max_width(action_width)
                             .min_height(action_height)
                             .show(ui);
-                        secondary_id = Some(secondary.id);
+                        secondary_id = self.secondary_enabled.then_some(secondary.id);
                         if secondary.clicked() {
                             choice = DialogChoice::Secondary;
                         }
@@ -1329,11 +1389,24 @@ impl<'a> Dialog<'a> {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if let Some(hint) = self.hint {
-                        ui.label(
+                        let label = egui::Label::new(
                             egui::RichText::new(hint)
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(c.text_faint),
+                                .color(if component_editor {
+                                    c.warn
+                                } else {
+                                    c.text_faint
+                                }),
                         );
+                        if component_editor {
+                            ui.add_sized(
+                                [(ui.available_width() - 190.0).max(40.0), 18.0],
+                                label.truncate(),
+                            )
+                            .on_hover_text(hint);
+                        } else {
+                            ui.add(label);
+                        }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let primary = crate::ui::widgets::Button::new(self.primary)
@@ -1346,17 +1419,22 @@ impl<'a> Dialog<'a> {
                             choice = DialogChoice::Primary;
                         }
                         if let Some(label) = self.secondary {
-                            let secondary = crate::ui::widgets::Button::new(label).show(ui);
-                            secondary_id = Some(secondary.id);
+                            let secondary = crate::ui::widgets::Button::new(label)
+                                .enabled(self.secondary_enabled)
+                                .show(ui);
+                            secondary_id = self.secondary_enabled.then_some(secondary.id);
                             if secondary.clicked() {
                                 choice = DialogChoice::Secondary;
                             }
                         }
                         if let Some(label) = self.ghost {
-                            let ghost = crate::ui::widgets::Button::new(label)
-                                .ghost()
-                                .enabled(self.ghost_enabled)
-                                .show(ui);
+                            let button =
+                                crate::ui::widgets::Button::new(label).enabled(self.ghost_enabled);
+                            let ghost = if component_editor {
+                                button.show(ui)
+                            } else {
+                                button.ghost().show(ui)
+                            };
                             ghost_id = self.ghost_enabled.then_some(ghost.id);
                             if ghost.clicked() {
                                 choice = DialogChoice::Ghost;
@@ -1846,6 +1924,23 @@ mod tests {
         assert_eq!(phone.surface_rect.size(), vec2(382.0, 836.0));
         assert_eq!(phone.radius, 4.0);
         assert!(phone.narrow);
+    }
+
+    #[test]
+    fn component_editor_preserves_mockup_gutters_and_height_cap_at_breakpoint() {
+        let desktop_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
+        let desktop = DialogLayout::resolve(DialogSize::ComponentEditor, desktop_screen, None);
+        assert_eq!(desktop.surface_rect.size(), vec2(880.0, 680.0));
+        assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
+        assert!(!desktop.narrow);
+        assert!(!desktop.app_background);
+
+        let narrow_screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(740.0, 800.0));
+        let narrow = DialogLayout::resolve(DialogSize::ComponentEditor, narrow_screen, None);
+        assert_eq!(narrow.surface_rect.size(), vec2(692.0, 680.0));
+        assert_eq!(narrow.surface_rect.center(), narrow_screen.center());
+        assert!(narrow.narrow);
+        assert_eq!(narrow.radius, 8.0);
     }
 
     #[test]

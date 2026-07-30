@@ -95,7 +95,17 @@ impl<'a> NetlistGenerator<'a> {
     /// # Returns
     /// Formatted parameter string with leading space if non-empty
     pub(super) fn format_params(&self, params: &str) -> String {
-        let trimmed = params.trim();
+        let original = params.trim();
+        let mut runtime_params = crate::state::parse_params_string(original);
+        let removed_editor_metadata = runtime_params.remove("model_library").is_some()
+            | runtime_params.remove("model_corner").is_some();
+        let canonical;
+        let trimmed = if removed_editor_metadata {
+            canonical = crate::state::format_params_string(&runtime_params);
+            canonical.trim()
+        } else {
+            original
+        };
         if trimmed.is_empty() {
             String::new()
         } else {
@@ -123,7 +133,14 @@ impl<'a> NetlistGenerator<'a> {
                 format!("DC {}", if value.is_empty() { "0" } else { value })
             }
             ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc => {
-                format!("AC {}", if value.is_empty() { "1" } else { value })
+                let params = crate::state::parse_params_string(&component.params);
+                let phase =
+                    Self::get_param_owned_with_aliases(&params, &["acphase", "phase"], "", "0");
+                format!(
+                    "AC {} {}",
+                    if value.is_empty() { "1" } else { value },
+                    phase
+                )
             }
             ComponentType::VoltageSourcePulse => {
                 // PULSE(V1 V2 TD TR TF PW PER)
@@ -200,7 +217,19 @@ impl<'a> NetlistGenerator<'a> {
                     return literal;
                 }
                 let pwl_data = Self::get_param_owned(&params, "pwl_data", value, "0 0 1n 1");
-                format!("PWL({})", pwl_data)
+                let mut specification = format!("PWL({})", pwl_data);
+                if let Some(delay) = params.get("td").filter(|delay| {
+                    !delay.trim().is_empty() && !matches!(delay.trim(), "0" | "0.0" | "0s")
+                }) {
+                    specification.push_str(&format!(" TD={delay}"));
+                }
+                if params
+                    .get("repeat")
+                    .is_some_and(|repeat| repeat.eq_ignore_ascii_case("true") || repeat == "1")
+                {
+                    specification.push_str(" R=0");
+                }
+                specification
             }
             ComponentType::VoltageSourceExp => {
                 // EXP(V1 V2 TD1 TAU1 TD2 TAU2)
@@ -250,7 +279,14 @@ impl<'a> NetlistGenerator<'a> {
                 let nalpha = Self::get_param_owned(&params, "nalpha", "", "0");
                 let namp = Self::get_param_owned(&params, "namp", "", "0");
                 let dc = Self::get_param_owned(&params, "dc", "", "0");
-                format!("DC {} TRNOISE({} {} {} {})", dc, na, nt, nalpha, namp)
+                if params
+                    .get("isnoisy")
+                    .is_some_and(|enabled| enabled.eq_ignore_ascii_case("false") || enabled == "0")
+                {
+                    format!("DC {dc}")
+                } else {
+                    format!("DC {} TRNOISE({} {} {} {})", dc, na, nt, nalpha, namp)
+                }
             }
             ComponentType::VoltageSourceSffm => {
                 // SFFM(VO VA FC MDI FS)
@@ -341,8 +377,9 @@ impl<'a> NetlistGenerator<'a> {
             .remove("model")
             .map(|m| m.trim().to_string())
             .filter(|m| !m.is_empty());
-        let params_without_model =
-            crate::state::format_params_string(&params_map);
+        params_map.remove("model_library");
+        params_map.remove("model_corner");
+        let params_without_model = crate::state::format_params_string(&params_map);
 
         let explicit_model = explicit_from_params.or_else(|| {
             let value_model = component.value.trim();
@@ -354,5 +391,48 @@ impl<'a> NetlistGenerator<'a> {
         });
 
         (explicit_model, params_without_model)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pwl_delay_and_repeat_are_present_in_the_canonical_source_specification() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+        let mut source = Component::new(1, ComponentType::VoltageSourcePwl, Point::origin())
+            .with_name_value("V1", "0 0 1u 1");
+        source.params = "td=2u repeat=true".to_owned();
+
+        assert_eq!(
+            generator.format_source_value(&source),
+            "PWL(0 0 1u 1) TD=2u R=0"
+        );
+    }
+
+    #[test]
+    fn disabled_transient_noise_source_emits_only_its_dc_bias() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+        let mut source = Component::new(1, ComponentType::CurrentSourceNoise, Point::origin())
+            .with_name_value("I1", "1n");
+        source.params = "dc=2m isnoisy=false nt=1u".to_owned();
+
+        assert_eq!(generator.format_source_value(&source), "DC 2m");
+    }
+
+    #[test]
+    fn ac_phase_is_positional_and_editor_catalog_metadata_is_not_netlisted() {
+        let schematic = SchematicState::default();
+        let generator = NetlistGenerator::new(&schematic);
+        let mut source = Component::new(1, ComponentType::VoltageSourceAc, Point::origin())
+            .with_name_value("V1", "2");
+        source.params = "acphase=90 model_library=vendor model_corner=fast".to_owned();
+
+        assert_eq!(generator.format_source_value(&source), "AC 2 90");
+        assert_eq!(generator.format_params(&source.params), " acphase=90");
+        assert!(!generator.format_params(&source.params).contains("model_"));
     }
 }
