@@ -1055,7 +1055,14 @@ fn source_files_have_no_byte_order_mark() {
 /// pair that kept each other reachable, and carried a suppression between them.
 /// 76 -> 73 with the three unreferenced `ModelsPage` source aliases, each of
 /// which needed an `allow(non_upper_case_globals)` to exist at all.
-const MAX_LINT_SUPPRESSIONS: usize = 73;
+/// 73 -> 75 when license issuance moved into `services::license`'s test module.
+/// Its two `#[ignore]`d minting entry points exist to print the key material
+/// they produce -- that output read through `--nocapture` is the whole point of
+/// running them -- and the crate denies `print_stdout` because the desktop
+/// build detaches from its console. The allows are per-function rather than
+/// `print_stdout` being added to the crate-wide `cfg(test)` exemption, so the
+/// rule keeps holding for every other test.
+const MAX_LINT_SUPPRESSIONS: usize = 75;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
