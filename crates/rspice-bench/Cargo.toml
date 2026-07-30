@@ -62,6 +62,12 @@ rspice-core = { path = "../rspice-core", version = "0.1.0", optional = true, def
 rspice-conformance = { path = "../rspice-conformance", version = "0.1.0", optional = true, default-features = false, features = [
     "veriloga-builtins-base",
 ] }
+# The `klu` subcommand measures the solver kernels where they live, in
+# rspice-matrix, rather than through the `rspice-core` re-export. That keeps it
+# off the optional dependency above and out of the corpus build entirely: this
+# crate is lean (faer, log, num-complex, rustc-hash, thiserror), so `klu` stays
+# a seconds-to-build command.
+rspice-matrix.workspace = true
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", features = ["native"] }
 serde.workspace = true
 serde_json.workspace = true

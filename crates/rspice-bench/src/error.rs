@@ -46,6 +46,11 @@ pub enum BenchError {
         /// Human-readable benchmark failure.
         message: String,
     },
+    /// A KLU solver kernel rejected a benchmark matrix.
+    Klu {
+        /// Which case and phase failed, with the solver's own message.
+        message: String,
+    },
     /// Generated Rust resource measurement or authentication failed.
     GeneratedRust {
         /// Actionable resource or integrity failure.
@@ -94,6 +99,7 @@ impl fmt::Display for BenchError {
             ),
             Self::Json { context, .. } => write!(f, "{context}"),
             Self::NativeJit { message } => write!(f, "{message}"),
+            Self::Klu { message } => write!(f, "{message}"),
             Self::GeneratedRust { message } => write!(f, "{message}"),
             #[cfg(feature = "generated-stamp")]
             Self::GeneratedStamp { message } => write!(f, "{message}"),

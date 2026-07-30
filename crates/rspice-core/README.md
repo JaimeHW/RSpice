@@ -266,9 +266,14 @@ cargo build -p rspice-core --features veriloga-model-vbic13,veriloga-builtins-no
 
 # Complete model catalog without compiling the optional noise schedules
 cargo build -p rspice-core --features veriloga-builtins-models
+```
 
-# Solver kernel micro-benchmark (factor/refactor/solve in isolation)
-cargo run --release -p rspice-core --example klu_bench
+The solver-kernel micro-benchmark (analyze/factor/refactor/solve in isolation)
+lives with the rest of the benchmark rig, and measures `rspice-matrix` directly
+rather than through this crate's re-export:
+
+```bash
+cargo run --release -p rspice-bench -- klu
 ```
 
 Library unit tests are excluded from the default package test target by

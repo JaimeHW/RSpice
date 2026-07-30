@@ -3,16 +3,25 @@
 //! This binary times *whole simulator processes* (RSpice vs. a locally
 //! installed ngspice) over the shared benchmark deck set in
 //! `benchmarks/circuits/` and emits a JSON scoreboard plus a human-readable
-//! table. It is deliberately a macro-benchmark runner: it measures end-to-end
-//! wall-clock time of `rspice run <deck> -q` and `ngspice -b <deck>`,
-//! including parsing and output, not isolated solver phases.
+//! table. Its headline `run` measurement is deliberately a macro-benchmark: it
+//! times end-to-end wall-clock of `rspice run <deck> -q` and `ngspice -b
+//! <deck>`, including parsing and output. The in-process subcommands alongside
+//! it isolate one layer each, so an optimization there is attributable.
 //!
 //! Subcommands:
 //!
 //! * `gen` — deterministically regenerate the generated benchmark decks
 //!   (the RC ladders). The emitted text is byte-stable so the checked-in
 //!   decks can be reproduced exactly.
+//! * `generated-rust` — authenticate and gate generated Verilog-A Rust
+//!   source resources.
+//! * `klu` — time the KLU solver kernels (analyze/factor/refactor/solve) in
+//!   isolation on circuit-shaped matrices, with optional per-nonzero budgets.
+//! * `native-jit` — in-process Verilog-A native JIT gate.
 //! * `run` — execute the benchmark suite and write the JSON scoreboard.
+//!
+//! Two further subcommands, `generated-stamp` and `veriloga-golden`, are
+//! behind the `generated-stamp` feature because they pull in the corpus.
 //!
 //! See `benchmarks/README.md` for methodology and operating conventions.
 
@@ -21,6 +30,7 @@ mod generate;
 mod generated_rust;
 #[cfg(feature = "generated-stamp")]
 mod generated_stamp;
+mod klu;
 mod native_jit;
 mod runner;
 #[cfg(feature = "generated-stamp")]
@@ -48,6 +58,8 @@ enum BenchCommand {
     /// Measure and gate generated Verilog-A built-in stamp throughput.
     #[cfg(feature = "generated-stamp")]
     GeneratedStamp(generated_stamp::GeneratedStampArgs),
+    /// Measure the KLU solver kernels in isolation, with optional budgets.
+    Klu(klu::KluArgs),
     /// Run the in-process native Verilog-A JIT benchmark gate.
     NativeJit(native_jit::NativeJitArgs),
     /// Run the benchmark suite and emit a JSON scoreboard.
@@ -64,6 +76,7 @@ fn main() -> ExitCode {
         BenchCommand::GeneratedRust(args) => generated_rust::run(&args),
         #[cfg(feature = "generated-stamp")]
         BenchCommand::GeneratedStamp(args) => generated_stamp::run(&args),
+        BenchCommand::Klu(args) => klu::run(&args),
         BenchCommand::NativeJit(args) => native_jit::run(&args),
         BenchCommand::Run(args) => runner::run(&args),
         #[cfg(feature = "generated-stamp")]
@@ -95,6 +108,30 @@ mod tests {
             error.kind(),
             clap::error::ErrorKind::MissingRequiredArgument
         );
+    }
+
+    #[test]
+    fn klu_budgets_are_off_unless_asked_for() {
+        let cli = Cli::try_parse_from(["rspice-bench", "klu"]).expect("klu needs no arguments");
+        let BenchCommand::Klu(args) = cli.command else {
+            panic!("klu command expected");
+        };
+        // Budgets cannot be chosen before baselines exist, so an unqualified
+        // run measures and reports without ever failing.
+        assert_eq!(args.max_refactor_ns_per_lu_nnz, None);
+        assert_eq!(args.max_solve_ns_per_lu_nnz, None);
+        assert_eq!(args.max_fill_ratio, None);
+        assert_eq!(args.sizes, vec![100, 1_000, 10_000]);
+    }
+
+    #[test]
+    fn klu_sizes_accept_a_comma_separated_sweep() {
+        let cli = Cli::try_parse_from(["rspice-bench", "klu", "--sizes", "64,256"])
+            .expect("comma-separated sizes parse");
+        let BenchCommand::Klu(args) = cli.command else {
+            panic!("klu command expected");
+        };
+        assert_eq!(args.sizes, vec![64, 256]);
     }
 
     #[test]
