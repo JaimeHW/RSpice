@@ -60,8 +60,9 @@ Other user-facing machinery, all verified in source:
   `RSPICE-K1.*` keys — Ed25519 signature over a domain-separated payload,
   Crockford base32 wire format, compiled-in public keys, a denylist, and
   perpetual-fallback semantics (the expiry is an updates-until date, not a
-  kill switch). Key generation for development lives in the
-  `license_tool` example, not in the application.
+  kill switch). Issuance — the signing half — lives in that file's test
+  module, not in the application; production issuance is the platform
+  backend's cold-key flow.
 
 ## Module map
 
@@ -171,18 +172,36 @@ worker guarded by `tools/ci/test_ide_worker.py`. The narrower
 [rspice-wasm](../rspice-wasm/README.md) `/play/` playground remains the
 lightweight OP/AC/TRAN engine demo.
 
-### `license_tool` example
+### License issuance
+
+Issuance lives in `services/license.rs`'s test module rather than in a binary
+target. It needs the private payload layout, and reaching it from a separate
+target would mean `pub` re-exports from the crate root — the visibility hole
+`tests/module_layering.rs` exists to keep shut. `cfg(test)` also guarantees
+that no signing code is linked into a shipped binary, which a Cargo feature
+could not.
+
+Both entry points are `#[ignore]`d: this is a fixture generator run when the
+wire format changes, not routine tooling.
 
 ```bash
-cargo run -p rspice-ui --example license_tool -- gen      # mint a dev signer keypair
-cargo run -p rspice-ui --example license_tool -- issue \
-    --secret <hex64> --key-id 1 --name "Name" --tier 1 \
-    --issued-days N --expires-days M --features 7         # sign a test key
+# Regenerate a signed fixture (Ed25519 signing is deterministic, so the same
+# secret and parameters reproduce a byte-identical key)
+RSPICE_LICENSE_SECRET=<hex64> RSPICE_LICENSE_NAME="Name" \
+  cargo test -p rspice-ui --lib mint_signed_key -- --ignored --nocapture
 ```
 
-Development tooling only — it mints the dev signer (key id 0x01) and signed
-test fixtures for the license verifier. Production issuance is out of scope
-for this repository.
+```bash
+# Rotate the development signer (key id 0x01); paste the printed Rust array
+# into DEVELOPMENT_VERIFYING_KEYS and never commit the secret
+cargo test -p rspice-ui --lib mint_development_signer -- --ignored --nocapture
+```
+
+`mint_signed_key` accepts `RSPICE_LICENSE_{KEY_ID,TIER,SEATS,ISSUED_DAYS,
+EXPIRES_DAYS,FEATURES,LICENSE_ID}` as overrides. Production issuance is out of
+scope for this repository: it belongs to the platform backend's cold-key flow.
+The signing path itself is covered by `issued_key_round_trips`, which runs in
+CI, so a wire-format change cannot silently break issuance.
 
 ## License
 

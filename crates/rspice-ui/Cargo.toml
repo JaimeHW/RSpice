@@ -96,11 +96,16 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "5.0"
 
 # License-key signature verification (internal license-key spec) - pure
-# Rust, works on wasm32; key generation lives in the license_tool example
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "rand_core"] }
+# Rust, works on wasm32. Signing lives in the `services::license` test module,
+# so `rand_core` is requested by the dev-dependency below rather than here:
+# a release or wasm build links the verifier only.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast"] }
 
 [dev-dependencies]
-# Keypair generation for the license_tool example only
+# Keypair generation for license issuance in the `services::license` tests.
+# The matching `rand_core` feature on ed25519-dalek is dev-only for the same
+# reason: `cargo test` unions it in, `cargo build` never sees it.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 lopdf = { version = "0.44", default-features = false }
 
