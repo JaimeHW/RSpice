@@ -36,6 +36,14 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         },
     );
     let rows = symbol_rows(app);
+    if rows.is_empty() {
+        page_empty_state(
+            ui,
+            "No symbol contracts are loaded",
+            "Import a symbol or create a model-bound symbol to establish an executable pin and parameter contract.",
+        );
+        return;
+    }
     let project_count = rows.iter().filter(|row| !row.read_only).count();
     let technology_count = rows.iter().filter(|row| row.read_only).count();
     let available = ui.available_size();
@@ -60,13 +68,6 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     .id_salt("models-symbol-registry")
                     .max_height((available.y - HEADER_H - CATALOG_FOOT_H).max(120.0))
                     .show(ui, |ui| {
-                        if rows.is_empty() {
-                            empty_state(
-                                ui,
-                                "No symbol views are present in the loaded design libraries.",
-                                "Import a symbol or create a model-bound symbol to establish an executable pin contract.",
-                            );
-                        }
                         for row in &rows {
                             let key = symbol_key(&row.reference);
                             let selected =
@@ -591,7 +592,15 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             .color(Tokens::get(ui.ctx()).color.text_dim),
         );
     });
-    let table_h = (ui.available_height() * 0.45).clamp(180.0, 340.0);
+    if rows.is_empty() {
+        page_empty_state(
+            ui,
+            "No corner bindings are loaded",
+            "Import a PDK section map or attach a sectioned model library to publish executable corner bindings.",
+        );
+        return;
+    }
+    let table_h = (ui.available_height() * 0.34).clamp(150.0, 240.0);
     card(ui, |ui| {
         table_header(
             ui,
@@ -610,13 +619,6 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             .id_salt("models-corner-matrix")
             .max_height(table_h)
             .show(ui, |ui| {
-                if rows.is_empty() {
-                    empty_state(
-                        ui,
-                        "No process-corner bindings are present.",
-                        "Import a PDK section map or attach a sectioned model library.",
-                    );
-                }
                 for row in &rows {
                     let selected = app.state.workbench.models_view.selected_corner.as_deref()
                         == Some(row.key.as_str());
@@ -670,7 +672,23 @@ struct CornerRow {
 
 fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
     let mut rows = Vec::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
+    let libraries = app.state.model_library_manager.libraries_sorted();
+    let active_library = app
+        .state
+        .model_library_manager
+        .selected_library
+        .as_deref()
+        .and_then(|selected| {
+            libraries
+                .iter()
+                .find(|library| library.name.eq_ignore_ascii_case(selected))
+        })
+        .or_else(|| libraries.iter().find(|library| !library.corners.is_empty()))
+        .map(|library| library.name.clone());
+    for library in libraries {
+        if active_library.as_deref() != Some(library.name.as_str()) {
+            continue;
+        }
         let has_statistics = library
             .model_definition_metadata
             .values()
@@ -729,6 +747,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
     };
     app.state.workbench.models_view.selected_corner = Some(row.key.clone());
     ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         ui.label(
             RichText::new(format!(
                 "{} / {}",
@@ -765,9 +784,11 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             app.queue_command(Command::ModelEditor);
         }
     });
-    ui.columns(2, |columns| {
-        card(&mut columns[0], |ui| {
-            card_title(ui, "SECTION BINDING", Some(&row.library));
+    detail_pane(
+        ui,
+        "CORNER BINDING DETAILS",
+        Some("section, environment, statistics, and aging"),
+        |ui| {
             property(ui, "NMOS", &row.corner.nmos_corner, "exact section axis");
             property(ui, "PMOS", &row.corner.pmos_corner, "exact section axis");
             property(
@@ -792,9 +813,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 &format!("{:.3} °C", row.corner.temperature),
                 "environment axis",
             );
-        });
-        card(&mut columns[1], |ui| {
-            card_title(ui, "STATISTICAL & AGING", Some("evidence projection"));
+            ui.separator();
             property(
                 ui,
                 "Statistical variables",
@@ -821,8 +840,8 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                 },
                 "run expansion",
             );
-        });
-    });
+        },
+    );
 }
 
 fn select_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
@@ -950,9 +969,9 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         },
     );
     if families.is_empty() {
-        empty_state(
+        page_empty_state(
             ui,
-            "No loaded model publishes a geometry envelope.",
+            "No geometry envelopes are loaded",
             "Attach a binned PDK library or author L/W bounds in Model Editor.",
         );
         return;
@@ -1212,6 +1231,7 @@ pub(super) fn include_page(
         },
     );
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         ui.checkbox(
             &mut app.state.workbench.models_view.include_direct_only,
             "Direct dependencies only",
@@ -1232,96 +1252,193 @@ pub(super) fn include_page(
         .cloned()
         .collect::<Vec<_>>();
     if libraries.is_empty() {
-        empty_state(
+        page_empty_state(
             ui,
-            "No model-source closure is loaded.",
+            "No model-source closure is loaded",
             "Add a library or attach a pack to build an authenticated include graph.",
         );
         return;
     }
-    ui.columns(2, |columns| {
-        card(&mut columns[0], |ui| {
-            card_title(
-                ui,
-                "ORDERED CLOSURE",
-                Some("root plus retained dependencies"),
-            );
-            ScrollArea::vertical()
-                .id_salt("models-include-nodes")
-                .max_height(270.0)
-                .show(ui, |ui| {
-                    for library in &libraries {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} · {} sources",
-                                library.name,
-                                library.source_closure.len()
-                            ))
-                            .strong(),
-                        );
-                        for (index, source) in library.source_closure.iter().enumerate() {
-                            let label = format!(
-                                "{:02}  {}  {}",
-                                index + 1,
-                                path_label(&source.path),
-                                short_digest(&source.digest.to_string())
-                            );
-                            if ui
-                                .selectable_label(
-                                    app.state
-                                        .workbench
-                                        .models_view
-                                        .include_selected_source
-                                        .as_deref()
-                                        == Some(source.path.to_string_lossy().as_ref()),
-                                    label,
-                                )
-                                .clicked()
-                            {
-                                app.state.workbench.models_view.include_selected_source =
-                                    Some(source.path.to_string_lossy().into_owned());
-                            }
-                        }
-                    }
-                });
-        });
-        card(&mut columns[1], |ui| {
-            card_title(ui, "RESOLUTION HEALTH", Some("authenticated graph"));
-            property(
-                ui,
-                "Pinned files",
-                &diagnostics.files.to_string(),
-                "digest retained",
-            );
-            property(
-                ui,
-                "Dependency edges",
-                &diagnostics.edges.to_string(),
-                "owner → target",
-            );
-            property(
-                ui,
-                "Unpinned roots",
-                &diagnostics.unpinned_roots.to_string(),
-                if diagnostics.unpinned_roots == 0 {
-                    "clean"
-                } else {
-                    "blocks execution"
-                },
-            );
-            property(
-                ui,
-                "Cycle nodes",
-                &diagnostics.cyclic_nodes.to_string(),
-                if diagnostics.cyclic_nodes == 0 {
-                    "clean"
-                } else {
-                    "blocks execution"
-                },
-            );
-        });
-    });
+    include_closure_graph(ui, app, &libraries, diagnostics);
     include_definition_table(ui, app, &libraries);
+}
+
+fn include_closure_graph(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    libraries: &[ModelLibrary],
+    diagnostics: &super::super::IncludeDiagnostics,
+) {
+    detail_pane(
+        ui,
+        "RESOLVED CLOSURE",
+        Some("root plus authenticated dependencies"),
+        |ui| {
+            let graph_height = (ui.available_height() * 0.42).clamp(150.0, 230.0);
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), graph_height),
+                Sense::hover(),
+            );
+            let t = Tokens::get(ui.ctx());
+            ui.painter().rect(
+                rect,
+                2.0,
+                t.color.bg_inset,
+                Stroke::new(1.0, t.color.border),
+                egui::StrokeKind::Inside,
+            );
+
+            let sources = libraries
+                .iter()
+                .flat_map(|library| {
+                    library
+                        .source_closure
+                        .iter()
+                        .map(move |source| (library, source))
+                })
+                .take(12)
+                .collect::<Vec<_>>();
+            if sources.is_empty() {
+                ui.painter().text(
+                    egui::pos2(rect.center().x, rect.center().y - 10.0),
+                    egui::Align2::CENTER_CENTER,
+                    "No retained include closure",
+                    theme::sans(tokens::FS_1, FontWeight::SemiBold),
+                    t.color.text_dim,
+                );
+                ui.painter().text(
+                    egui::pos2(rect.center().x, rect.center().y + 14.0),
+                    egui::Align2::CENTER_CENTER,
+                    "Loaded definitions are built-in or have no authenticated source graph.",
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.text_faint,
+                );
+            } else {
+                let node_width = ((rect.width() - 54.0) / 3.0).clamp(120.0, 210.0);
+                let node_height = 38.0;
+                let columns = 3usize;
+                let row_count = sources.len().div_ceil(columns);
+                let row_gap = if row_count > 1 {
+                    ((rect.height() - 36.0 - node_height * row_count as f32)
+                        / (row_count - 1) as f32)
+                        .clamp(8.0, 24.0)
+                } else {
+                    0.0
+                };
+                let x_gap = ((rect.width() - node_width * columns as f32) / 4.0).max(8.0);
+                let mut node_rects = BTreeMap::new();
+                for (index, (library, source)) in sources.iter().enumerate() {
+                    let column = index % columns;
+                    let row = index / columns;
+                    let x = rect.left() + x_gap + column as f32 * (node_width + x_gap);
+                    let y = rect.top() + 18.0 + row as f32 * (node_height + row_gap);
+                    let node = egui::Rect::from_min_size(
+                        egui::pos2(x, y),
+                        egui::vec2(node_width, node_height),
+                    );
+                    node_rects.insert(source.path.clone(), node);
+                    let selected = app
+                        .state
+                        .workbench
+                        .models_view
+                        .include_selected_source
+                        .as_deref()
+                        == Some(source.path.to_string_lossy().as_ref());
+                    ui.painter().rect(
+                        node,
+                        3.0,
+                        if selected {
+                            t.color.accent.linear_multiply(0.16)
+                        } else {
+                            t.color.bg_panel
+                        },
+                        Stroke::new(
+                            if selected { 1.5 } else { 1.0 },
+                            if selected {
+                                t.color.accent
+                            } else {
+                                t.color.border
+                            },
+                        ),
+                        egui::StrokeKind::Inside,
+                    );
+                    ui.painter().text(
+                        egui::pos2(node.left() + 8.0, node.top() + 12.0),
+                        egui::Align2::LEFT_CENTER,
+                        elide(ui, &path_label(&source.path), node.width() - 16.0, true),
+                        theme::mono(tokens::FS_0, FontWeight::SemiBold),
+                        t.color.text,
+                    );
+                    ui.painter().text(
+                        egui::pos2(node.left() + 8.0, node.bottom() - 10.0),
+                        egui::Align2::LEFT_CENTER,
+                        elide(
+                            ui,
+                            &format!(
+                                "{} · {}",
+                                library.name,
+                                short_digest(&source.digest.to_string())
+                            ),
+                            node.width() - 16.0,
+                            false,
+                        ),
+                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                        t.color.text_faint,
+                    );
+                    let response = ui.interact(
+                        node,
+                        ui.id()
+                            .with(("models-include-node", source.path.as_os_str())),
+                        Sense::click(),
+                    );
+                    if response.clicked() {
+                        app.state.workbench.models_view.include_selected_source =
+                            Some(source.path.to_string_lossy().into_owned());
+                    }
+                }
+
+                for edge in libraries.iter().flat_map(|library| &library.source_edges) {
+                    if let (Some(owner), Some(target)) =
+                        (node_rects.get(&edge.owner), node_rects.get(&edge.target))
+                    {
+                        ui.painter().arrow(
+                            owner.center_bottom(),
+                            target.center_top() - owner.center_bottom(),
+                            Stroke::new(1.0, t.color.text_faint),
+                        );
+                    }
+                }
+            }
+
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.0;
+                ui.label(
+                    RichText::new(format!("{} pinned", diagnostics.files))
+                        .small()
+                        .color(t.color.text_dim),
+                );
+                ui.label(
+                    RichText::new(format!("{} dependency edges", diagnostics.edges))
+                        .small()
+                        .color(t.color.text_dim),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "{} unpinned · {} cyclic",
+                        diagnostics.unpinned_roots, diagnostics.cyclic_nodes
+                    ))
+                    .small()
+                    .color(
+                        if diagnostics.unpinned_roots + diagnostics.cyclic_nodes == 0 {
+                            t.color.ok
+                        } else {
+                            t.color.err
+                        },
+                    ),
+                );
+            });
+        },
+    );
 }
 
 fn include_definition_table(
@@ -1363,7 +1480,7 @@ fn include_definition_table(
         );
         ScrollArea::vertical()
             .id_salt("models-include-definitions")
-            .max_height(260.0)
+            .max_height(ui.available_height().max(140.0))
             .show(ui, |ui| {
                 let mut shown = 0;
                 for (definition, candidates) in &providers {

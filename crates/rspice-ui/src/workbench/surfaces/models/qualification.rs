@@ -44,7 +44,7 @@ pub(super) enum QualificationDomain {
 }
 
 impl QualificationDomain {
-    const fn label(self) -> &'static str {
+    pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Dc => "DC operating curves",
             Self::Ac => "AC / charge",
