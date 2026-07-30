@@ -1201,6 +1201,15 @@ fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
 fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
+
+    app.state.schematic.zoom = 1.0;
+    Command::ZoomIn.execute(&mut app);
+    assert!((app.state.schematic.zoom - 1.2).abs() < f64::EPSILON);
+
+    app.state.schematic.zoom = 1.0;
+    app.execute_shortcut_command(Command::ZoomOut);
+    assert!((app.state.schematic.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
+
     app.state.schematic.zoom = 0.251;
     Command::ZoomOut.execute(&mut app);
     assert_eq!(app.state.schematic.zoom, 0.25);

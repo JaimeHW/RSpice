@@ -345,12 +345,7 @@ impl RSpiceApp {
             ShortcutCommand::NextWorkspace => {
                 self.state.workbench.cycle_workspace(false);
             }
-            ShortcutCommand::ZoomIn => {
-                self.state.schematic.zoom = (self.state.schematic.zoom * 1.25).min(8.0);
-            }
-            ShortcutCommand::ZoomOut => {
-                self.state.schematic.zoom = (self.state.schematic.zoom / 1.25).max(0.25);
-            }
+            ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => command.execute(self),
             ShortcutCommand::ToggleLinkedCursors => {
                 self.state.ui.results.toggle_linked_cursors();
             }
@@ -524,12 +519,8 @@ impl RSpiceApp {
                 self.state.ui.symbol.marquee_current = None;
                 true
             }
-            ShortcutCommand::ZoomIn => {
-                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom * 1.25).min(16.0);
-                true
-            }
-            ShortcutCommand::ZoomOut => {
-                self.state.ui.symbol.zoom = (self.state.ui.symbol.zoom / 1.25).max(0.1);
+            ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => {
+                command.execute(self);
                 true
             }
             ShortcutCommand::ZoomFit => {

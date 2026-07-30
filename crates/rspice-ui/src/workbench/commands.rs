@@ -18,6 +18,8 @@ use super::state::{
 mod registry;
 pub(crate) mod vocabulary;
 
+const COMMAND_ZOOM_FACTOR: f64 = 1.2;
+
 fn stop_simulation_enabled(is_running: bool) -> bool {
     is_running && crate::simulation::execution::execution_target_supports_cancellation()
 }
@@ -895,16 +897,20 @@ impl Command {
             }
             Self::ZoomIn => {
                 if active_symbol_editor(app) {
-                    app.state.ui.symbol.zoom = (app.state.ui.symbol.zoom * 1.25).min(16.0);
+                    app.state.ui.symbol.zoom =
+                        (app.state.ui.symbol.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
                 } else {
-                    app.state.schematic.zoom = (app.state.schematic.zoom * 1.25).min(8.0);
+                    app.state.schematic.zoom =
+                        (app.state.schematic.zoom * COMMAND_ZOOM_FACTOR).min(8.0);
                 }
             }
             Self::ZoomOut => {
                 if active_symbol_editor(app) {
-                    app.state.ui.symbol.zoom = (app.state.ui.symbol.zoom / 1.25).max(0.1);
+                    app.state.ui.symbol.zoom =
+                        (app.state.ui.symbol.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
                 } else {
-                    app.state.schematic.zoom = (app.state.schematic.zoom / 1.25).max(0.25);
+                    app.state.schematic.zoom =
+                        (app.state.schematic.zoom / COMMAND_ZOOM_FACTOR).max(0.25);
                 }
             }
             Self::ZoomFit => {

@@ -304,7 +304,7 @@ fn revision_status_summary(project_open: bool, dirty: bool, revision: u64) -> Re
     }
     if dirty {
         RevisionStatus {
-            text: "Unsaved".to_owned(),
+            text: "Unsaved changes".to_owned(),
             detail: format!("Project revision {revision} has unsaved changes"),
             dirty: true,
         }
@@ -836,7 +836,7 @@ mod tests {
         assert_eq!(
             revision_status_summary(true, true, 7),
             RevisionStatus {
-                text: "Unsaved".to_owned(),
+                text: "Unsaved changes".to_owned(),
                 detail: "Project revision 7 has unsaved changes".to_owned(),
                 dirty: true,
             }
