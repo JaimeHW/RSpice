@@ -633,8 +633,12 @@ fn report_source_uses_authenticated_current_revision_snapshot() {
 
 #[test]
 fn linked_report_table_requires_exact_source_and_dataset_inventory() {
-    let dataset_id = DatasetId::new();
-    let dataset_digest = ContentDigest::from_bytes([0x31; 32]);
+    let mut app = AppState::default();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    let dataset_id = run.dataset_id;
+    let dataset_digest = run.dataset_content_digest();
+    app.simulation.runs.push(run);
     let binding = DatasetBinding::new(dataset_id, dataset_digest);
     let snapshot = ReportReferenceSnapshot::new(
         ReportSourceId::Dataset { dataset_id },
@@ -668,22 +672,17 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
         Err(HardcopySourceError::ReportReferenceInventoryRequired)
     ));
 
-    // Application preparation intentionally has no live report inventory:
-    // linked blocks remain unavailable rather than silently following a
-    // mutable source on the UI or worker thread.
-    let mut app = AppState::default();
+    // Application resolution derives an exact inventory from retained source
+    // owners. It never substitutes a most-recent or background run.
     let report_id = report.id();
     app.workspace.report_documents.push(report.clone());
     app.workbench.report_authoring.selected_document = Some(report_id);
-    let report_key = format!(
-        "project:{}:report:{}",
-        app.workspace.project.id().as_uuid(),
-        report_id
-    );
-    assert!(matches!(
-        prepare_retained_hardcopy_resolution(&app, &report_key, HardcopyScope::CompleteReport),
-        Err(HardcopySourceError::UnavailableRetainedSource { .. })
-    ));
+    let app_resolved = report_inventory::resolve(&app, &report, HardcopyScope::CompleteReport)
+        .expect("the retained dataset must authenticate the linked report table");
+    let HardcopySemanticDocument::Report(app_semantic) = app_resolved.semantic_document() else {
+        panic!("expected semantic report")
+    };
+    assert_eq!(app_semantic.authenticated_references.len(), 1);
 
     let missing_dataset = ReportReferenceInventory {
         sources: vec![

@@ -10,6 +10,7 @@
 mod documents;
 mod geometry;
 mod prepared;
+mod report_inventory;
 mod results;
 mod semantic;
 
@@ -373,7 +374,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
             display_name: document.title().to_owned(),
             document_kind: HardcopyDocumentKind::Report,
             allowed_scopes: vec![HardcopyScope::CompleteReport, HardcopyScope::ActiveDocument],
-            availability: report_app_availability(document),
+            availability: report_inventory::availability(state, document),
         });
     }
 
@@ -1248,12 +1249,7 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                     )))
                 };
             };
-            resolve_report_source(ReportHardcopySource {
-                source_key: format!("project:{}:report:{}", project_id.as_uuid(), document_id),
-                document,
-                reference_inventory: None,
-                scope: HardcopyScope::CompleteReport,
-            })
+            report_inventory::resolve(state, document, HardcopyScope::CompleteReport)
         }
         surface => Err(HardcopySourceError::UnsupportedDocument(format!(
             "surface {} does not own a printable engineering document",
