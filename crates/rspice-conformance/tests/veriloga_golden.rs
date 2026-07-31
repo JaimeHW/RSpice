@@ -44,9 +44,9 @@
 
 #![cfg(feature = "veriloga-builtins-base")]
 
+use rspice_conformance::suites::veriloga::golden::GoldenHarness;
 use rspice_core::constants::GMIN;
 use rspice_core::device::veriloga_generated::{GeneratedSimulationParameters, builtins};
-use rspice_conformance::suites::veriloga::golden::GoldenHarness;
 
 /// Bias points per model. One is equilibrium; the rest are drawn from the
 /// model's own deterministic stream.
@@ -317,9 +317,8 @@ fn every_builtin_evaluates_finitely_away_from_its_known_defects() {
                     if non_finite {
                         model_non_finite = true;
                         if !NON_FINITE_AT_EQUILIBRIUM.contains(model_name) {
-                            failures.push(format!(
-                                "{model_name}: point {index}: stamp is not finite"
-                            ));
+                            failures
+                                .push(format!("{model_name}: point {index}: stamp is not finite"));
                         }
                     }
                 }
@@ -378,7 +377,9 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
             let audit = match harness.jacobian_audit(&point) {
                 Ok(audit) => audit,
                 Err(error) => {
-                    failures.push(format!("{model_name}: point {index}: audit failed: {error}"));
+                    failures.push(format!(
+                        "{model_name}: point {index}: audit failed: {error}"
+                    ));
                     continue;
                 }
             };
@@ -398,7 +399,11 @@ fn stamped_jacobians_match_a_numerical_derivative_of_the_stamped_currents() {
 
         eprintln!(
             "{model_name:<24} entries {entries:>6}  verified {:>5.1}%  gaps {gaps:>4}  strict {strict:>3}  worst {worst:.2e}",
-            if entries == 0 { 100.0 } else { tight as f64 * 100.0 / entries as f64 },
+            if entries == 0 {
+                100.0
+            } else {
+                tight as f64 * 100.0 / entries as f64
+            },
         );
 
         if gaps > allowed_gaps {
@@ -470,7 +475,9 @@ fn stamped_reactive_blocks_match_a_numerical_derivative_of_the_stored_charge() {
             let audit = match harness.charge_audit(&point) {
                 Ok(audit) => audit,
                 Err(error) => {
-                    failures.push(format!("{model_name}: point {index}: audit failed: {error}"));
+                    failures.push(format!(
+                        "{model_name}: point {index}: audit failed: {error}"
+                    ));
                     continue;
                 }
             };

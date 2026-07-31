@@ -11,7 +11,12 @@ impl ExecutionRunner {
     /// manifest row and a failure message referring to the same thing.
     pub fn discover(&self) -> Vec<String> {
         let mut decks = Vec::new();
-        collect(&self.root, &self.root, self.corpus.deck_extensions(), &mut decks);
+        collect(
+            &self.root,
+            &self.root,
+            self.corpus.deck_extensions(),
+            &mut decks,
+        );
         decks.sort();
         decks
     }

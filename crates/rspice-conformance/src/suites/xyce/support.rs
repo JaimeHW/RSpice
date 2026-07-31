@@ -3958,8 +3958,7 @@ impl XyceTestRunner {
         netlist: &Netlist,
         result: &TransientResult,
     ) -> Result<Option<Vec<Value>>, String> {
-        let traces =
-            rspice_core::analysis::evaluate_tran_equation_measurements(netlist, result)?;
+        let traces = rspice_core::analysis::evaluate_tran_equation_measurements(netlist, result)?;
         if let Some(trace) = traces
             .iter()
             .find(|trace| trace.name.eq_ignore_ascii_case(probe))

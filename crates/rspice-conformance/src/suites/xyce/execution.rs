@@ -1266,11 +1266,9 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let measurements =
-                rspice_core::analysis::evaluate_ac_measurements(&netlist, &results);
-            let continuous = rspice_core::analysis::evaluate_ac_continuous_measurements(
-                &netlist, &results,
-            );
+            let measurements = rspice_core::analysis::evaluate_ac_measurements(&netlist, &results);
+            let continuous =
+                rspice_core::analysis::evaluate_ac_continuous_measurements(&netlist, &results);
             let mismatches = match self.compare_analysis_measurement_outputs(
                 &plan.measurement_reference_paths,
                 &plan.continuous_measurement_reference_paths,
@@ -1460,9 +1458,7 @@ impl XyceTestRunner {
                 let measurements =
                     rspice_core::analysis::evaluate_ac_measurements(&netlist, &results);
                 let continuous =
-                    rspice_core::analysis::evaluate_ac_continuous_measurements(
-                        &netlist, &results,
-                    );
+                    rspice_core::analysis::evaluate_ac_continuous_measurements(&netlist, &results);
                 let measurement_mismatches = match self.compare_analysis_measurement_outputs(
                     &plan.measurement_reference_paths,
                     &plan.continuous_measurement_reference_paths,
@@ -1808,12 +1804,9 @@ impl XyceTestRunner {
             && (!plan.measurement_reference_paths.is_empty()
                 || !plan.continuous_measurement_reference_paths.is_empty())
         {
-            let scalar =
-                rspice_core::analysis::evaluate_noise_measurements(&netlist, &results);
+            let scalar = rspice_core::analysis::evaluate_noise_measurements(&netlist, &results);
             let continuous =
-                rspice_core::analysis::evaluate_noise_continuous_measurements(
-                    &netlist, &results,
-                );
+                rspice_core::analysis::evaluate_noise_continuous_measurements(&netlist, &results);
             match self.compare_analysis_measurement_outputs(
                 &plan.measurement_reference_paths,
                 &plan.continuous_measurement_reference_paths,
@@ -2215,10 +2208,8 @@ impl XyceTestRunner {
             }
 
             if let Some(reference_path) = plan.measurement_reference_paths.get(step_index) {
-                let measurements = rspice_core::analysis::evaluate_noise_measurements(
-                    &run.netlist,
-                    &results,
-                );
+                let measurements =
+                    rspice_core::analysis::evaluate_noise_measurements(&run.netlist, &results);
                 let comparison = if run.netlist.options.measure_use_cont_files() {
                     self.compare_measurement_references(
                         std::slice::from_ref(reference_path),
@@ -2230,11 +2221,10 @@ impl XyceTestRunner {
                         &run.netlist.measurements,
                     )
                 } else {
-                    let continuous =
-                        rspice_core::analysis::evaluate_noise_continuous_measurements(
-                            &run.netlist,
-                            &results,
-                        );
+                    let continuous = rspice_core::analysis::evaluate_noise_continuous_measurements(
+                        &run.netlist,
+                        &results,
+                    );
                     let comparison = self.compare_mixed_measurement_references(
                         std::slice::from_ref(reference_path),
                         &measurements,
@@ -3024,10 +3014,8 @@ impl XyceTestRunner {
             };
             let measurements =
                 rspice_core::analysis::evaluate_ac_measurements(&run.netlist, &results);
-            let continuous = rspice_core::analysis::evaluate_ac_continuous_measurements(
-                &run.netlist,
-                &results,
-            );
+            let continuous =
+                rspice_core::analysis::evaluate_ac_continuous_measurements(&run.netlist, &results);
             let mut mismatches = match self.compare_analysis_measurement_outputs(
                 std::slice::from_ref(reference_path),
                 &[],
@@ -3524,10 +3512,7 @@ impl XyceTestRunner {
                 .iter()
                 .any(|analysis| matches!(analysis, AnalysisCommand::Dc { .. }))
             {
-                rspice_core::analysis::evaluate_dc_measurements(
-                    &netlist,
-                    &measurement_sweep,
-                )
+                rspice_core::analysis::evaluate_dc_measurements(&netlist, &measurement_sweep)
             } else {
                 rspice_core::analysis::unevaluated_measurements(
                     &netlist,

@@ -115,9 +115,7 @@ impl GoldenFixture {
                         sample.mechanism,
                         u8::from(sample.active),
                         render_real(sample.psd),
-                        sample
-                            .exponent
-                            .map_or_else(|| "-".to_string(), render_real),
+                        sample.exponent.map_or_else(|| "-".to_string(), render_real),
                     );
                 }
             }
@@ -207,9 +205,7 @@ impl GoldenFixture {
                     match keyword {
                         "unknowns" => point.unknowns = parse_vector(rest).map_err(&fail)?,
                         "rhs" => point.record.rhs = parse_indexed(rest, size).map_err(&fail)?,
-                        "jac" => {
-                            point.record.jacobian = parse_matrix(rest, size).map_err(&fail)?
-                        }
+                        "jac" => point.record.jacobian = parse_matrix(rest, size).map_err(&fail)?,
                         "cap" => {
                             point.record.capacitance = parse_matrix(rest, size).map_err(&fail)?
                         }

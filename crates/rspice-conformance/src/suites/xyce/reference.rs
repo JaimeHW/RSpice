@@ -229,10 +229,7 @@ impl XyceTestRunner {
             "TRAN_CONT",
             &[],
             |trace_netlist| {
-                rspice_core::analysis::evaluate_tran_continuous_measurements(
-                    trace_netlist,
-                    result,
-                )
+                rspice_core::analysis::evaluate_tran_continuous_measurements(trace_netlist, result)
             },
         )?;
         let mut stateful = plan
@@ -1621,10 +1618,7 @@ impl XyceTestRunner {
             "TRAN_CONT",
             &[],
             |trace_netlist| {
-                rspice_core::analysis::evaluate_tran_continuous_measurements(
-                    trace_netlist,
-                    result,
-                )
+                rspice_core::analysis::evaluate_tran_continuous_measurements(trace_netlist, result)
             },
         )?;
 

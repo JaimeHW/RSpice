@@ -85,8 +85,8 @@ impl DeviceRunner {
         let deck_path = self.deck_path(case);
         let reference = self.load_reference(case)?;
 
-        let source = std::fs::read_to_string(&deck_path)
-            .map_err(|err| format!("unreadable deck: {err}"))?;
+        let source =
+            std::fs::read_to_string(&deck_path).map_err(|err| format!("unreadable deck: {err}"))?;
         // Parsed straight from source, letting `parse_with_path` do its own
         // include and `.lib` expansion. Pre-expanding with
         // `preprocess_includes` first — which the sibling suites do, because
@@ -94,8 +94,8 @@ impl DeviceRunner {
         // the binned MOS model families here: every `nmos_3p3.N` card in the
         // selected corner section collapses and instances fall back to
         // looking for a plain `nmos_3p3`.
-        let netlist = Netlist::parse_with_path(&source, &deck_path)
-            .map_err(|err| format!("parse: {err}"))?;
+        let netlist =
+            Netlist::parse_with_path(&source, &deck_path).map_err(|err| format!("parse: {err}"))?;
 
         // Selected rather than taken from the front: these decks set their
         // characterisation temperature with a `.temp` card, which the parser
@@ -124,13 +124,11 @@ impl DeviceRunner {
         // behind the one temperature that happens to agree — the 25°C cases
         // pass either way, which is exactly what makes the bug look like a
         // scattered physics disagreement rather than a missing setting.
-        let temperature_c = netlist.analyses.iter().find_map(|analysis| {
-            match analysis {
-                rspice_core::netlist::AnalysisCommand::Temp { temperatures } => {
-                    temperatures.first().copied()
-                }
-                _ => None,
+        let temperature_c = netlist.analyses.iter().find_map(|analysis| match analysis {
+            rspice_core::netlist::AnalysisCommand::Temp { temperatures } => {
+                temperatures.first().copied()
             }
+            _ => None,
         });
         let engine = self.engine(temperature_c);
         let abort = DeadlineAbort::new(Instant::now(), self.config.max_time_per_case_ms);

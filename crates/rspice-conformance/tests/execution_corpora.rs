@@ -97,7 +97,10 @@ fn config() -> ExecutionConfig {
             std::env::var("RSPICE_EXECUTION_EXTENDED").as_deref(),
             Ok("1")
         ),
-        verbose: matches!(std::env::var("RSPICE_EXECUTION_VERBOSE").as_deref(), Ok("1")),
+        verbose: matches!(
+            std::env::var("RSPICE_EXECUTION_VERBOSE").as_deref(),
+            Ok("1")
+        ),
         // Overridable because the budget is the only knob that separates
         // "slow" from "hung" on these corpora, and the right value depends on
         // the machine running them. Lowering it is also how a deck's cost

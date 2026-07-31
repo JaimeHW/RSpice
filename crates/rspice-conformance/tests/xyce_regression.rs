@@ -8,7 +8,6 @@
 //! the `rspice-conformance` crate, so this file compiles to nothing without
 //! `--features conformance`.
 
-
 use rspice_conformance::suites::xyce::{
     XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner, XyceValueMismatch,
 };

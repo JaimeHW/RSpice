@@ -138,9 +138,7 @@ impl ExecutionRunner {
         match analysis {
             AnalysisCommand::Op => {
                 classify(engine.run_dc_op_with_abort(netlist, abort).map(|result| {
-                    finite(
-                        result.node_voltages.iter().chain(&result.branch_currents),
-                    )
+                    finite(result.node_voltages.iter().chain(&result.branch_currents))
                 }))
             }
             AnalysisCommand::Dc {
@@ -152,9 +150,9 @@ impl ExecutionRunner {
                 ..
             } => {
                 let swept = match sweep2 {
-                    None => engine.run_dc_sweep_with_abort(
-                        netlist, source, *start, *stop, *step, abort,
-                    ),
+                    None => {
+                        engine.run_dc_sweep_with_abort(netlist, source, *start, *stop, *step, abort)
+                    }
                     Some(outer) => engine.run_dc_sweep2_with_abort(
                         netlist,
                         source,
@@ -183,21 +181,26 @@ impl ExecutionRunner {
                 if frequencies.is_empty() {
                     return AnalysisOutcome::NotExecuted;
                 }
-                classify(engine.run_ac_with_abort(netlist, &frequencies, abort).map(
-                    |results| {
-                        results.iter().all(|point| {
-                            point.frequency.is_finite()
-                                && point
-                                    .voltages
-                                    .iter()
-                                    .chain(&point.currents)
-                                    .all(|value| value.re.is_finite() && value.im.is_finite())
-                        })
-                    },
-                ))
+                classify(
+                    engine
+                        .run_ac_with_abort(netlist, &frequencies, abort)
+                        .map(|results| {
+                            results.iter().all(|point| {
+                                point.frequency.is_finite()
+                                    && point
+                                        .voltages
+                                        .iter()
+                                        .chain(&point.currents)
+                                        .all(|value| value.re.is_finite() && value.im.is_finite())
+                            })
+                        }),
+                )
             }
             AnalysisCommand::Tran {
-                step, stop, max_step, ..
+                step,
+                stop,
+                max_step,
+                ..
             } => {
                 let ceiling = max_step.unwrap_or_else(|| default_max_step(*step, *stop));
                 classify(
