@@ -57,7 +57,7 @@ cargo run --locked -p rspice-bench --release -- native-jit \
   --iterations 100000 \
   --samples 9 \
   --min-dense-speedup 2.00 \
-  --min-speedup 1.10 \
+  --min-speedup 3.00 \
   --min-full-stamp-speedup 2.00 \
   --max-native-setup-ms 10 \
   --max-native-p95-ns-per-sweep 5000 \
