@@ -5,17 +5,8 @@
 //! library that changes underneath a completed run is detectable rather
 //! than silently assumed identical.
 
-mod bin_audit;
-mod corner_binding;
 mod project_models;
 mod sealing;
-pub use bin_audit::{
-    ModelBinAuditAxisRange, ModelBinAuditDraft, ModelBinAuditFinding, ModelBinAuditFindingKind,
-    ModelBinAuditReceipt,
-};
-pub use corner_binding::{
-    CornerBindingInspection, CornerBindingInspectionRow, CornerSectionInspection,
-};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -23,9 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rspice_core::library::{
-    CatalogDefinitionPreview, CatalogSubcircuitInterface, SpiceLibraryIndex,
-};
+use rspice_core::library::SpiceLibraryIndex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
@@ -33,9 +22,9 @@ use super::{
     DeviceModel, FiniteF64, ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity,
     ModelLevel, ModelLibrary, ModelQualificationState, ModelSectionQualification,
     ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding,
-    ModelSourcePin, ModelSubcircuitInterface, ModelType, ParameterDataType, ParameterDefinition,
-    ParameterSource, ParameterValue, ProcessCorner, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, first_unreachable_source, subcircuit_interface_key,
+    ModelSourcePin, ModelType, ParameterDataType, ParameterDefinition, ParameterSource,
+    ParameterValue, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
+    first_unreachable_source,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
@@ -61,140 +50,16 @@ pub struct SealedModelExecutionSources {
     sources: Vec<(PathBuf, String)>,
     edges: Vec<rspice_core::netlist::SealedSourceEdge>,
     libraries: Vec<SealedExecutionLibrary>,
-    pdk_process_bindings: Vec<crate::state::pdk_config::SealedPdkModelProcessBinding>,
-    pdk_veriloga_artifacts: Vec<crate::state::pdk_config::SealedPdkVerilogAArtifact>,
-    pdk_veriloga_bindings: Vec<crate::state::pdk_config::SealedPdkVerilogABinding>,
-    pdk_identity: Option<(
-        crate::state::pdk_config::PdkTechnologyBinding,
-        ContentDigest,
-    )>,
 }
 
 #[derive(Debug, Clone)]
 struct SealedExecutionLibrary {
     name: String,
     root_path: PathBuf,
-    corners: Vec<ProcessCorner>,
+    sections: Vec<String>,
 }
 
 impl SealedModelExecutionSources {
-    /// Add the exact signed-PDK model closure selected by the project binding.
-    ///
-    /// This rebuilds the same sealed bundle used by ordinary model libraries.
-    /// It never introduces a search path and refuses identity or edge
-    /// conflicts instead of choosing one source by precedence.
-    pub(crate) fn with_pdk_model_sources(
-        mut self,
-        pdk: crate::state::pdk_config::SealedPdkModelSources,
-    ) -> Result<Self, String> {
-        if self.pdk_identity.is_some() {
-            return Err("A sealed model snapshot already contains a signed PDK binding".to_owned());
-        }
-
-        let mut sources_by_key = self
-            .sources
-            .iter()
-            .map(|(path, source)| (portable_path_key(path), (path.clone(), source.clone())))
-            .collect::<BTreeMap<_, _>>();
-        for (path, source) in pdk.sources {
-            let key = portable_path_key(&path);
-            match sources_by_key.entry(key) {
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert((path, source));
-                }
-                std::collections::btree_map::Entry::Occupied(entry) if entry.get().1 != source => {
-                    return Err(format!(
-                        "Signed PDK source '{}' conflicts with an authenticated model-library source",
-                        path.display()
-                    ));
-                }
-                std::collections::btree_map::Entry::Occupied(_) => {}
-            }
-        }
-
-        let mut edges_by_key = self
-            .edges
-            .iter()
-            .map(|edge| {
-                (
-                    (portable_path_key(&edge.owner), edge.requested_path.clone()),
-                    edge.clone(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        for edge in pdk.edges {
-            let key = (portable_path_key(&edge.owner), edge.requested_path.clone());
-            match edges_by_key.entry(key) {
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(edge);
-                }
-                std::collections::btree_map::Entry::Occupied(entry)
-                    if portable_path_key(&entry.get().target)
-                        != portable_path_key(&edge.target) =>
-                {
-                    return Err(format!(
-                        "Signed PDK and model libraries disagree on dependency '{}' in '{}'",
-                        edge.requested_path,
-                        edge.owner.display()
-                    ));
-                }
-                std::collections::btree_map::Entry::Occupied(_) => {}
-            }
-        }
-
-        self.sources = sources_by_key.into_values().collect();
-        self.sources.sort_by(|left, right| left.0.cmp(&right.0));
-        self.edges = edges_by_key.into_values().collect();
-        self.edges.sort_by(|left, right| {
-            left.owner
-                .cmp(&right.owner)
-                .then_with(|| left.requested_path.cmp(&right.requested_path))
-                .then_with(|| left.target.cmp(&right.target))
-        });
-        self.bundle = rspice_core::netlist::SealedSourceBundle::try_new_with_edges(
-            self.sources.clone(),
-            self.edges.clone(),
-        )
-        .map_err(|error| format!("Failed to merge signed PDK model sources: {error}"))?;
-        self.pdk_process_bindings = pdk.process_bindings;
-        self.pdk_veriloga_artifacts = pdk.veriloga_artifacts;
-        self.pdk_veriloga_bindings = pdk.veriloga_bindings;
-        self.pdk_identity = Some((pdk.binding, pdk.archive_digest));
-        Ok(self)
-    }
-
-    /// Exact signed package identity participating in this model snapshot.
-    #[must_use]
-    pub(crate) fn pdk_model_identity(&self) -> Option<(String, ContentDigest)> {
-        self.pdk_identity.as_ref().map(|(binding, archive_digest)| {
-            (
-                format!(
-                    "signed-pdk:{}@{}:manifest:{}",
-                    binding.package_id, binding.revision, binding.manifest_digest
-                ),
-                *archive_digest,
-            )
-        })
-    }
-
-    #[must_use]
-    pub(crate) fn pdk_veriloga_authority(
-        &self,
-    ) -> Option<(
-        &crate::state::pdk_config::PdkTechnologyBinding,
-        ContentDigest,
-        &[crate::state::pdk_config::SealedPdkVerilogAArtifact],
-        &[crate::state::pdk_config::SealedPdkVerilogABinding],
-    )> {
-        let (binding, archive_digest) = self.pdk_identity.as_ref()?;
-        Some((
-            binding,
-            *archive_digest,
-            &self.pdk_veriloga_artifacts,
-            &self.pdk_veriloga_bindings,
-        ))
-    }
-
     /// Build a source bundle that adds one active root buffer to the exact
     /// authenticated model-library closure.
     ///
@@ -370,7 +235,7 @@ impl SealedModelExecutionSources {
         &self,
         processes: &[CornerProcess],
     ) -> Result<Vec<CornerModelBinding>, String> {
-        if self.libraries.is_empty() && self.pdk_process_bindings.is_empty() {
+        if self.libraries.is_empty() {
             if let Some(process) = processes
                 .iter()
                 .find(|process| **process != CornerProcess::TT)
@@ -387,213 +252,48 @@ impl SealedModelExecutionSources {
         for process in processes {
             for library in &self.libraries {
                 let keyword = process.as_keyword();
-                let corner = library
-                    .corners
+                let section = library
+                    .sections
                     .iter()
-                    .find(|corner| corner.name.eq_ignore_ascii_case(keyword))
+                    .find(|section| section.eq_ignore_ascii_case(keyword))
                     .cloned();
-                if corner.is_none()
-                    && (*process != CornerProcess::TT || !library.corners.is_empty())
+                if section.is_none()
+                    && (*process != CornerProcess::TT || !library.sections.is_empty())
                 {
                     return Err(format!(
                         "Model library '{}' does not define the {} process section",
                         library.name, keyword
                     ));
                 }
-                match corner.as_ref() {
-                    Some(corner) => {
-                        for section in self.materialize_library_corner(library, corner)? {
-                            let binding = CornerModelBinding {
-                                process: *process,
-                                source_label: section.source_label,
-                                section: Some(section.section),
-                                materialized_model_cards: section.materialized_model_cards,
-                            };
-                            binding.validate()?;
-                            bindings.push(binding);
-                        }
-                    }
-                    None => {
-                        let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
-                            &library.root_path,
-                            self.bundle.clone(),
-                        );
-                        let materialized_model_cards = processor
-                            .process_sealed_root(&library.root_path, None)
-                            .map_err(|error| {
-                                format!(
-                                    "Failed to materialize sealed model library '{}' from '{}': {error}",
-                                    library.name,
-                                    library.root_path.display()
-                                )
-                            })?;
-                        let binding = CornerModelBinding {
-                            process: *process,
-                            source_label: library.root_path.display().to_string(),
-                            section: None,
-                            materialized_model_cards,
-                        };
-                        binding.validate()?;
-                        bindings.push(binding);
-                    }
-                }
-            }
 
-            if !self.pdk_process_bindings.is_empty() {
-                let pdk_process = pdk_model_process(*process);
-                let selected = self
-                    .pdk_process_bindings
-                    .iter()
-                    .filter(|binding| binding.process == pdk_process)
-                    .collect::<Vec<_>>();
-                if selected.is_empty() {
-                    let package = self
-                        .pdk_identity
-                        .as_ref()
-                        .map(|(binding, _)| format!("{} {}", binding.package_id, binding.revision))
-                        .unwrap_or_else(|| "signed PDK".to_owned());
-                    return Err(format!(
-                        "{package} does not supply an explicit {} model-source contract",
-                        process.as_keyword()
-                    ));
-                }
-                for source in selected {
-                    let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
-                        &source.root_path,
-                        self.bundle.clone(),
-                    );
-                    let materialized_model_cards = processor
-                        .process_sealed_root(&source.root_path, source.section.as_deref())
-                        .map_err(|error| {
-                            format!(
-                                "Failed to materialize signed PDK {} source '{}' from '{}': {error}",
-                                process.as_keyword(),
-                                source.source_id,
-                                source.artifact_path
-                            )
-                        })?;
-                    let package = self
-                        .pdk_identity
-                        .as_ref()
-                        .map(|(binding, digest)| {
-                            format!(
-                                "{} {} / {} / {} / artifact {} / archive {}",
-                                binding.package_id,
-                                binding.revision,
-                                source.domain.label(),
-                                source.source_id,
-                                source.artifact_digest,
-                                digest
-                            )
-                        })
-                        .unwrap_or_else(|| source.source_id.clone());
-                    let binding = CornerModelBinding {
-                        process: *process,
-                        source_label: package,
-                        section: source.section.clone(),
-                        materialized_model_cards,
-                    };
-                    binding.validate()?;
-                    bindings.push(binding);
-                }
+                let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
+                    &library.root_path,
+                    self.bundle.clone(),
+                );
+                let materialized_model_cards = processor
+                    .process_sealed_root(&library.root_path, section.as_deref())
+                    .map_err(|error| {
+                        format!(
+                            "Failed to materialize sealed model library '{}' from '{}': {error}",
+                            library.name,
+                            library.root_path.display()
+                        )
+                    })?;
+                let source_label = match section.as_deref() {
+                    Some(section) => format!("{} [{}]", library.root_path.display(), section),
+                    None => library.root_path.display().to_string(),
+                };
+                let binding = CornerModelBinding {
+                    process: *process,
+                    source_label,
+                    section,
+                    materialized_model_cards,
+                };
+                binding.validate()?;
+                bindings.push(binding);
             }
         }
         Ok(bindings)
-    }
-
-    fn materialize_library_corner(
-        &self,
-        library: &SealedExecutionLibrary,
-        corner: &ProcessCorner,
-    ) -> Result<Vec<MaterializedCornerSection>, String> {
-        if let Err(errors) = corner.validate_contract() {
-            return Err(format!(
-                "Model library '{}' corner '{}' has an invalid section contract: {}",
-                library.name,
-                corner.name,
-                errors.join("; ")
-            ));
-        }
-        let source_path = corner
-            .file_path
-            .as_deref()
-            .unwrap_or(library.root_path.as_path());
-        let bindings = corner.effective_section_bindings();
-        if bindings.is_empty() {
-            return Err(format!(
-                "Model library '{}' corner '{}' has no executable section binding",
-                library.name, corner.name
-            ));
-        }
-
-        let mut domains_by_section =
-            BTreeMap::<(PathBuf, String), Vec<super::CornerSectionDomain>>::new();
-        for binding in bindings {
-            domains_by_section
-                .entry((source_path.to_path_buf(), binding.section))
-                .or_default()
-                .push(binding.domain);
-        }
-
-        let mut sections = Vec::with_capacity(domains_by_section.len());
-        for ((path, section), mut domains) in domains_by_section {
-            domains.sort();
-            domains.dedup();
-            let mut processor =
-                rspice_core::netlist::IncludeProcessor::new_sealed(&path, self.bundle.clone());
-            let materialized_model_cards = processor
-                .process_sealed_root(&path, Some(&section))
-                .map_err(|error| {
-                    format!(
-                        "Failed to materialize {} section '{}' for model library '{}' corner '{}' from '{}': {error}",
-                        domains
-                            .iter()
-                            .map(|domain| domain.label())
-                            .collect::<Vec<_>>()
-                            .join(" + "),
-                        section,
-                        library.name,
-                        corner.name,
-                        path.display()
-                    )
-                })?;
-            sections.push(MaterializedCornerSection {
-                source_label: format!(
-                    "{} [{}] ({})",
-                    path.display(),
-                    section,
-                    domains
-                        .iter()
-                        .map(|domain| domain.label())
-                        .collect::<Vec<_>>()
-                        .join(" + ")
-                ),
-                path,
-                section,
-                domains,
-                materialized_model_cards,
-            });
-        }
-        Ok(sections)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct MaterializedCornerSection {
-    source_label: String,
-    path: PathBuf,
-    section: String,
-    domains: Vec<super::CornerSectionDomain>,
-    materialized_model_cards: String,
-}
-
-const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::PdkModelProcess {
-    match process {
-        CornerProcess::TT => crate::state::pdk_config::PdkModelProcess::Tt,
-        CornerProcess::SS => crate::state::pdk_config::PdkModelProcess::Ss,
-        CornerProcess::FF => crate::state::pdk_config::PdkModelProcess::Ff,
-        CornerProcess::SF => crate::state::pdk_config::PdkModelProcess::Sf,
-        CornerProcess::FS => crate::state::pdk_config::PdkModelProcess::Fs,
     }
 }
 
@@ -750,26 +450,6 @@ pub struct ModelLibraryManager {
     /// have been written elsewhere.
     #[serde(skip)]
     spice_packs: Option<Arc<SpiceLibraryIndex>>,
-    /// Project-persisted, content-addressed model-bin audit evidence.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    model_bin_audit_receipts: Vec<ModelBinAuditReceipt>,
-    /// Explicit, project-owned provider choices for contested model names.
-    ///
-    /// The execution materializer converts these choices into a validated
-    /// first-definition precedence order. Missing, stale, same-library, and
-    /// cyclic choices fail closed before any source is sealed.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    definition_resolutions: BTreeMap<String, ModelDefinitionResolution>,
-    /// Session-local ownership of libraries populated by the host PDK search
-    /// configuration.
-    ///
-    /// This is deliberately not project-persisted. Once a project records an
-    /// external source it is an explicit project dependency; a later host
-    /// search-path edit must not silently delete it after restore. During the
-    /// live session, however, this set lets Apply reconcile the previous PDK
-    /// scan exactly instead of only accumulating newly discovered libraries.
-    #[serde(skip)]
-    pdk_config_libraries: BTreeSet<String>,
 }
 
 /// One definition found in the shipped packs rather than in a loaded library.
@@ -800,79 +480,6 @@ pub struct PackModelHit {
     pub restricted: bool,
 }
 
-/// One bounded page from the complete addressable shipped-parts catalog.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackCatalogPage {
-    pub total_matches: usize,
-    pub hits: Vec<PackModelHit>,
-}
-
-/// Exact executable source and ordered interface accepted for a shipped
-/// top-level subcircuit.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActivatedPackSubcircuit {
-    pub library: String,
-    pub name: String,
-    pub ports: Vec<String>,
-    pub source_path: PathBuf,
-}
-
-/// One active parsed provider of a case-insensitive model name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelDefinitionProvider {
-    pub library: String,
-    pub model: String,
-    pub source: Option<PathBuf>,
-    pub source_line: Option<usize>,
-}
-
-/// A model name with more than one active provider.
-///
-/// No provider is selected implicitly. Until an explicit resolution contract
-/// exists, execution fails closed rather than depending on map or include
-/// iteration order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelDefinitionConflict {
-    pub normalized_name: String,
-    pub providers: Vec<ModelDefinitionProvider>,
-}
-
-/// Durable provider selection for one contested, case-insensitive model name.
-///
-/// This is a precedence contract, not a waiver: the selected provider must
-/// still exist exactly, every other active provider remains visible, and the
-/// complete set of selections must admit one deterministic library order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModelDefinitionResolution {
-    pub normalized_name: String,
-    pub provider_library: String,
-    pub provider_model: String,
-}
-
-fn unresolved_definition_error(conflict: &ModelDefinitionConflict) -> String {
-    let providers = conflict
-        .providers
-        .iter()
-        .map(|provider| {
-            let source = provider
-                .source
-                .as_deref()
-                .map_or_else(|| "in-memory".to_owned(), |path| path.display().to_string());
-            match provider.source_line {
-                Some(line) => format!("{} ({source}:{line})", provider.library),
-                None => format!("{} ({source})", provider.library),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "Contested model definition '{}' has {} active providers: {providers}. Select one exact provider or remove the overlap before simulation; RSpice will not choose by implicit include order",
-        conflict.normalized_name,
-        conflict.providers.len()
-    )
-}
-
 impl ModelLibraryManager {
     /// Create a new manager
     pub fn new() -> Self {
@@ -882,15 +489,11 @@ impl ModelLibraryManager {
     /// Add a library
     pub fn add_library(&mut self, library: ModelLibrary) {
         self.libraries.insert(library.name.clone(), library);
-        self.prune_inactive_definition_resolutions();
     }
 
     /// Remove a library
     pub fn remove_library(&mut self, name: &str) -> Option<ModelLibrary> {
-        let removed = self.libraries.remove(name);
-        self.pdk_config_libraries.remove(name);
-        self.prune_inactive_definition_resolutions();
-        removed
+        self.libraries.remove(name)
     }
 
     /// Get a library
@@ -1043,20 +646,12 @@ impl ModelLibraryManager {
         self.spice_packs.as_deref()
     }
 
-    /// Shared installed-pack index for a cancellable background catalog query.
+    /// Selectable parts across the shipped packs, or zero when none were found.
     ///
-    /// The project model manager can retain large authenticated source
-    /// closures, so catalog workers clone only this index rather than cloning
-    /// the complete manager.
-    pub(crate) fn shared_spice_packs(&self) -> Option<Arc<SpiceLibraryIndex>> {
-        self.spice_packs.clone()
-    }
-
-    /// Selectable model cards across the shipped packs, or zero when none were
-    /// found.
-    ///
-    /// Subcircuits and nested helper cards are intentionally excluded from the
-    /// Models page because they require a different symbol/interface workflow.
+    /// The addressable count rather than the raw definition total: two thirds
+    /// of the definitions in the catalog are helper cards inside macromodel
+    /// bodies, and offering those as parts would be a promise the netlist
+    /// cannot keep.
     pub fn pack_definition_count(&self) -> usize {
         self.spice_packs
             .as_ref()
@@ -1078,7 +673,7 @@ impl ModelLibraryManager {
             return Vec::new();
         };
 
-        let entries = match index.search_model_cards(trimmed, limit) {
+        let entries = match index.search_parts(trimmed, limit) {
             Ok(entries) => entries,
             Err(error) => {
                 log::warn!("shipped SPICE model catalog could not be searched: {error}");
@@ -1088,564 +683,6 @@ impl ModelLibraryManager {
 
         entries
             .into_iter()
-            .map(|entry| pack_model_hit(index, entry))
-            .collect()
-    }
-
-    /// Query every addressable `.model` and `.subckt` definition in the
-    /// shipped corpus. The index streams the catalog and returns a bounded
-    /// page plus the complete match count.
-    pub fn query_pack_parts(
-        &self,
-        query: &str,
-        pack: Option<&str>,
-        devices: &[&str],
-        offset: usize,
-        limit: usize,
-    ) -> Result<PackCatalogPage, String> {
-        let index = self.spice_packs.as_ref().ok_or_else(|| {
-            "The shipped model-pack index is unavailable on this installation".to_owned()
-        })?;
-        Self::query_pack_parts_from_index(index, query, pack, devices, offset, limit, || false)
-    }
-
-    /// Query a shared installed-pack index without retaining or cloning project
-    /// model-library state. Used by the UI background worker.
-    pub(crate) fn query_pack_parts_from_index(
-        index: &SpiceLibraryIndex,
-        query: &str,
-        pack: Option<&str>,
-        devices: &[&str],
-        offset: usize,
-        limit: usize,
-        is_cancelled: impl FnMut() -> bool,
-    ) -> Result<PackCatalogPage, String> {
-        let (total_matches, entries) = index
-            .query_parts_cancellable(query, pack, devices, offset, limit, is_cancelled)
-            .map_err(|error| format!("Could not query the shipped parts catalog: {error}"))?;
-        Ok(PackCatalogPage {
-            total_matches,
-            hits: entries
-                .into_iter()
-                .map(|entry| pack_model_hit(index, entry))
-                .collect(),
-        })
-    }
-
-    /// Exact addressable part counts grouped by canonical device class.
-    pub fn pack_device_counts(&self) -> Result<BTreeMap<String, usize>, String> {
-        let index = self.spice_packs.as_ref().ok_or_else(|| {
-            "The shipped model-pack index is unavailable on this installation".to_owned()
-        })?;
-        index
-            .part_device_counts()
-            .map_err(|error| format!("Could not count shipped part classes: {error}"))
-    }
-
-    /// Revalidate and read a bounded source preview for one exact catalog hit.
-    pub fn preview_pack_part(
-        &self,
-        hit: &PackModelHit,
-    ) -> Result<CatalogDefinitionPreview, String> {
-        let index = self.spice_packs.as_ref().ok_or_else(|| {
-            "The shipped model-pack index is unavailable on this installation".to_owned()
-        })?;
-        let entry = index
-            .find_part(&hit.name)
-            .map_err(|error| format!("Could not revalidate shipped part '{}': {error}", hit.name))?
-            .into_iter()
-            .find(|entry| {
-                entry.pack == hit.pack
-                    && entry.kind == hit.kind
-                    && entry.line == hit.line
-                    && entry.source_path(index).as_ref() == hit.source.as_ref()
-            })
-            .ok_or_else(|| {
-                format!(
-                    "Shipped part '{}' changed or disappeared after catalog lookup",
-                    hit.name
-                )
-            })?;
-        index
-            .definition_preview(&entry)
-            .map_err(|error| format!("Could not preview shipped part '{}': {error}", hit.name))
-    }
-
-    /// Whether this project currently executes any source owned by `pack_id`.
-    #[must_use]
-    pub fn is_pack_attached(&self, pack_id: &str) -> bool {
-        let Some(index) = self.spice_packs.as_ref() else {
-            return false;
-        };
-        let Some(pack) = index.pack(pack_id) else {
-            return false;
-        };
-        let Ok(pack_root) = std::fs::canonicalize(index.root().join(&pack.path)) else {
-            return false;
-        };
-        self.libraries.values().any(|library| {
-            library
-                .root_path
-                .as_deref()
-                .is_some_and(|root| root.starts_with(&pack_root))
-        })
-    }
-
-    /// Attach the declared entry source of one redistributable shipped pack.
-    ///
-    /// Packs without an entry source remain browseable at definition
-    /// granularity. The declared entry and pack root are canonicalized before
-    /// parsing so a malformed manifest cannot escape the indexed pack tree.
-    pub fn attach_pack(&mut self, pack_id: &str) -> Result<String, String> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = pack_id;
-            return Err(
-                "Installed model packs are unavailable in the browser; import authenticated source bytes instead"
-                    .to_owned(),
-            );
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let (entry, library_name, pack_name) = {
-                let index = self.spice_packs.as_ref().ok_or_else(|| {
-                    "The shipped model-pack index is unavailable on this installation".to_owned()
-                })?;
-                let pack = index
-                    .pack(pack_id)
-                    .ok_or_else(|| format!("Shipped pack '{pack_id}' is not indexed"))?;
-                if !pack.redistributable {
-                    return Err(format!(
-                        "Pack '{}' is browse-only because redistribution authority is not established",
-                        pack.name
-                    ));
-                }
-                let relative_entry = pack.entry.as_ref().ok_or_else(|| {
-                    format!(
-                        "Pack '{}' has no declared entry source; browse and add an individual model instead",
-                        pack.name
-                    )
-                })?;
-                let pack_root =
-                    std::fs::canonicalize(index.root().join(&pack.path)).map_err(|error| {
-                        format!(
-                            "Could not resolve the indexed root for shipped pack '{}': {error}",
-                            pack.name
-                        )
-                    })?;
-                let entry =
-                    std::fs::canonicalize(pack_root.join(relative_entry)).map_err(|error| {
-                        format!(
-                            "Could not resolve the declared entry for shipped pack '{}': {error}",
-                            pack.name
-                        )
-                    })?;
-                if !entry.starts_with(&pack_root) {
-                    return Err(format!(
-                        "The declared entry for shipped pack '{}' escapes its indexed pack root",
-                        pack.name
-                    ));
-                }
-                let source_stem = entry
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("entry")
-                    .to_owned();
-                (
-                    entry,
-                    pack_library_name(&pack.id, &source_stem),
-                    pack.name.clone(),
-                )
-            };
-
-            let previous = self.libraries.get(&library_name).cloned();
-            let retained_source_id = previous.as_ref().and_then(|library| {
-                if let ModelSourceAuthority::RetainedImport { source_id, .. } =
-                    library.source_authority
-                {
-                    Some(source_id)
-                } else {
-                    None
-                }
-            });
-            let loaded =
-                self.load_library_file_with_name(&entry, None, Some(library_name.as_str()))?;
-            if let Err(error) = self.retain_loaded_import(&loaded, retained_source_id) {
-                if let Some(previous) = previous {
-                    self.libraries.insert(library_name.clone(), previous);
-                } else {
-                    self.libraries.remove(&library_name);
-                }
-                return Err(error);
-            }
-            self.select_library(&loaded);
-            log::info!("Attached shipped pack '{pack_name}' as executable library '{loaded}'");
-            Ok(loaded)
-        }
-    }
-
-    /// Detach every executable library loaded from one shipped pack.
-    pub fn detach_pack(&mut self, pack_id: &str) -> Result<usize, String> {
-        let index = self.spice_packs.as_ref().ok_or_else(|| {
-            "The shipped model-pack index is unavailable on this installation".to_owned()
-        })?;
-        let pack = index
-            .pack(pack_id)
-            .ok_or_else(|| format!("Shipped pack '{pack_id}' is not indexed"))?;
-        let pack_root = std::fs::canonicalize(index.root().join(&pack.path)).map_err(|error| {
-            format!(
-                "Could not resolve the indexed root for shipped pack '{}': {error}",
-                pack.name
-            )
-        })?;
-        let mut names = self
-            .libraries
-            .iter()
-            .filter_map(|(name, library)| {
-                library
-                    .root_path
-                    .as_deref()
-                    .is_some_and(|root| root.starts_with(&pack_root))
-                    .then(|| name.clone())
-            })
-            .collect::<Vec<_>>();
-        names.sort();
-        if names.is_empty() {
-            return Err(format!(
-                "No executable model library from pack '{}' is attached",
-                pack.name
-            ));
-        }
-        for name in &names {
-            self.libraries.remove(name);
-        }
-        if self
-            .selected_library
-            .as_ref()
-            .is_some_and(|selected| names.contains(selected))
-        {
-            self.selected_library = None;
-        }
-        Ok(names.len())
-    }
-
-    /// Materialize one exact shipped-pack model into an executable external
-    /// library and select it.
-    ///
-    /// The catalogue hit is revalidated against the on-disk index before any
-    /// state changes. Only top-level `.model` definitions from sources whose
-    /// redistribution is established are activatable; subcircuits need their
-    /// own symbol/interface workflow and restricted packs remain browse-only.
-    pub fn activate_pack_model(&mut self, hit: &PackModelHit) -> Result<String, String> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = hit;
-            return Err(
-                "Shipped model packs are unavailable in the browser; import authenticated source bytes instead"
-                    .to_owned(),
-            );
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let (source, pack_name, library_name) = {
-                let index = self.spice_packs.as_ref().ok_or_else(|| {
-                    "The shipped model-pack index is unavailable on this installation".to_owned()
-                })?;
-                let entry = index
-                    .find_part(&hit.name)
-                    .map_err(|error| {
-                        format!("Could not revalidate shipped model '{}': {error}", hit.name)
-                    })?
-                    .into_iter()
-                    .find(|entry| {
-                        entry.pack == hit.pack
-                            && entry.line == hit.line
-                            && entry.source_path(index).as_ref() == hit.source.as_ref()
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "Shipped model '{}' changed or disappeared after catalogue lookup",
-                            hit.name
-                        )
-                    })?;
-                let pack = index.pack(&entry.pack).ok_or_else(|| {
-                    format!("Shipped model pack '{}' is no longer indexed", entry.pack)
-                })?;
-                if entry.restricted || !pack.redistributable {
-                    return Err(format!(
-                        "Shipped model '{}' from '{}' is browse-only because redistribution authority is not established",
-                        hit.name, pack.name
-                    ));
-                }
-                if !entry.kind.eq_ignore_ascii_case("model") {
-                    return Err(format!(
-                        "Shipped part '{}' is a subcircuit; activate it through the symbol/subcircuit import workflow",
-                        hit.name
-                    ));
-                }
-                let source = entry.source_path(index).ok_or_else(|| {
-                    format!("Shipped model '{}' has no resolvable source path", hit.name)
-                })?;
-                let source_stem = source
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("models")
-                    .to_owned();
-                (
-                    source,
-                    pack.name.clone(),
-                    pack_library_name(&entry.pack, &source_stem),
-                )
-            };
-
-            let previous = self.libraries.get(&library_name).cloned();
-            let retained_source_id = previous.as_ref().and_then(|library| {
-                if let ModelSourceAuthority::RetainedImport { source_id, .. } =
-                    library.source_authority
-                {
-                    Some(source_id)
-                } else {
-                    None
-                }
-            });
-            let loaded =
-                self.load_library_file_with_name(&source, None, Some(library_name.as_str()))?;
-            let contains_target = self.libraries.get(&loaded).is_some_and(|library| {
-                library
-                    .models
-                    .values()
-                    .any(|model| model.name.eq_ignore_ascii_case(&hit.name))
-            });
-            if !contains_target {
-                if let Some(previous) = previous {
-                    self.libraries.insert(library_name.clone(), previous);
-                } else {
-                    self.libraries.remove(&library_name);
-                }
-                return Err(format!(
-                    "Shipped source '{}' parsed, but model '{}' was not materialized as a supported top-level device",
-                    source.display(),
-                    hit.name
-                ));
-            }
-            if let Err(error) = self.retain_loaded_import(&loaded, retained_source_id) {
-                if let Some(previous) = previous {
-                    self.libraries.insert(library_name.clone(), previous);
-                } else {
-                    self.libraries.remove(&library_name);
-                }
-                return Err(error);
-            }
-            self.select_library(&loaded);
-            log::info!(
-                "Activated shipped model '{}' from pack '{}' as library '{}'",
-                hit.name,
-                pack_name,
-                loaded
-            );
-            Ok(loaded)
-        }
-    }
-
-    /// Attach one redistributable shipped source and return its exact
-    /// top-level subcircuit terminal contract for symbol construction.
-    pub fn activate_pack_subcircuit(
-        &mut self,
-        hit: &PackModelHit,
-    ) -> Result<ActivatedPackSubcircuit, String> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = hit;
-            return Err(
-                "Shipped model packs are unavailable in the browser; import authenticated source bytes instead"
-                    .to_owned(),
-            );
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let (interface, pack_name, library_name) = {
-                let index = self.spice_packs.as_ref().ok_or_else(|| {
-                    "The shipped model-pack index is unavailable on this installation".to_owned()
-                })?;
-                let entry = index
-                    .find_part(&hit.name)
-                    .map_err(|error| {
-                        format!(
-                            "Could not revalidate shipped subcircuit '{}': {error}",
-                            hit.name
-                        )
-                    })?
-                    .into_iter()
-                    .find(|entry| {
-                        entry.pack == hit.pack
-                            && entry.line == hit.line
-                            && entry.source_path(index).as_ref() == hit.source.as_ref()
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "Shipped subcircuit '{}' changed or disappeared after catalogue lookup",
-                            hit.name
-                        )
-                    })?;
-                let pack = index.pack(&entry.pack).ok_or_else(|| {
-                    format!("Shipped model pack '{}' is no longer indexed", entry.pack)
-                })?;
-                if entry.restricted || !pack.redistributable {
-                    return Err(format!(
-                        "Shipped subcircuit '{}' from '{}' is browse-only because redistribution authority is not established",
-                        hit.name, pack.name
-                    ));
-                }
-                if !entry.kind.eq_ignore_ascii_case("subckt") {
-                    return Err(format!(
-                        "Shipped part '{}' is not a top-level subcircuit",
-                        hit.name
-                    ));
-                }
-                let mut interface: CatalogSubcircuitInterface =
-                    index.subcircuit_interface(&entry).map_err(|error| {
-                        format!(
-                            "Could not inspect shipped subcircuit '{}': {error}",
-                            hit.name
-                        )
-                    })?;
-                interface.source_path =
-                    std::fs::canonicalize(&interface.source_path).map_err(|error| {
-                        format!(
-                            "Could not canonicalize shipped subcircuit source '{}': {error}",
-                            interface.source_path.display()
-                        )
-                    })?;
-                let source_stem = interface
-                    .source_path
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("subcircuits")
-                    .to_owned();
-                (
-                    interface,
-                    pack.name.clone(),
-                    pack_library_name(&entry.pack, &source_stem),
-                )
-            };
-
-            let previous = self.libraries.get(&library_name).cloned();
-            let retained_source_id = previous.as_ref().and_then(|library| {
-                if let ModelSourceAuthority::RetainedImport { source_id, .. } =
-                    library.source_authority
-                {
-                    Some(source_id)
-                } else {
-                    None
-                }
-            });
-            let loaded = self.load_library_file_with_name(
-                &interface.source_path,
-                None,
-                Some(&library_name),
-            )?;
-            let materialized_error = self
-                .libraries
-                .get(&loaded)
-                .and_then(|library| {
-                    library
-                        .subcircuits
-                        .values()
-                        .find(|candidate| {
-                            candidate.name.eq_ignore_ascii_case(&interface.name)
-                                && candidate.file_path.as_deref()
-                                    == Some(interface.source_path.as_path())
-                                && candidate.source_line == Some(interface.start_line)
-                        })
-                })
-                .map_or_else(
-                    || {
-                        Some(format!(
-                            "Shipped source '{}' parsed, but subcircuit '{}' was not materialized as a supported top-level definition",
-                            interface.source_path.display(),
-                            interface.name
-                        ))
-                    },
-                    |candidate| {
-                        if candidate.name != interface.name
-                            || candidate.ports != interface.ports
-                        {
-                            Some(format!(
-                                "Shipped subcircuit '{}' changed while its source interface was being activated",
-                                interface.name
-                            ))
-                        } else {
-                            None
-                        }
-                    },
-                );
-            if let Some(error) = materialized_error {
-                if let Some(previous) = previous.clone() {
-                    self.libraries.insert(library_name.clone(), previous);
-                } else {
-                    self.libraries.remove(&library_name);
-                }
-                return Err(error);
-            }
-            if let Err(error) = self.retain_loaded_import(&loaded, retained_source_id) {
-                if let Some(previous) = previous {
-                    self.libraries.insert(library_name.clone(), previous);
-                } else {
-                    self.libraries.remove(&library_name);
-                }
-                return Err(error);
-            }
-            self.select_library(&loaded);
-            log::info!(
-                "Activated shipped subcircuit '{}' from pack '{}' as library '{}'",
-                interface.name,
-                pack_name,
-                loaded
-            );
-            Ok(ActivatedPackSubcircuit {
-                library: loaded,
-                name: interface.name,
-                ports: interface.ports,
-                source_path: interface.source_path,
-            })
-        }
-    }
-
-    fn retain_loaded_import(
-        &mut self,
-        library_name: &str,
-        source_id: Option<crate::product::ModelSourceId>,
-    ) -> Result<(), String> {
-        let library = self
-            .libraries
-            .get_mut(library_name)
-            .ok_or_else(|| format!("Loaded model library '{library_name}' disappeared"))?;
-        let root = library.root_path.as_ref().ok_or_else(|| {
-            format!("Loaded model library '{library_name}' has no root source identity")
-        })?;
-        let digest = library
-            .source_closure
-            .iter()
-            .find(|source| &source.path == root)
-            .map(|source| source.digest)
-            .ok_or_else(|| {
-                format!(
-                    "Loaded model library '{library_name}' has no authenticated root source pin"
-                )
-            })?;
-        if library.source_contents.len() != library.source_closure.len() {
-            return Err(format!(
-                "Loaded model library '{library_name}' does not retain its complete authenticated source closure"
-            ));
-        }
-        library.source_authority = ModelSourceAuthority::RetainedImport {
-            source_id: source_id.unwrap_or_else(crate::product::ModelSourceId::new),
-            digest,
-        };
-        Ok(())
             .map(|entry| {
                 let pack = index.pack(&entry.pack);
                 PackModelHit {
@@ -1871,355 +908,10 @@ impl ModelLibraryManager {
         self.libraries.values().map(|l| l.model_count()).sum()
     }
 
-    /// Total addressable device-model and subcircuit definitions.
-    pub fn total_definition_count(&self) -> usize {
-        self.libraries
-            .values()
-            .map(|library| library.models.len() + library.subcircuits.len())
-            .sum()
-    }
-
-    /// Stable identity of the persisted model catalogue relevant to source
-    /// preparation. Browser filters, selection, shipped-pack indexes, and
-    /// audit ledgers are deliberately excluded.
-    pub(crate) fn execution_catalog_digest(&self) -> ContentDigest {
-        let mut libraries = self.libraries.values().collect::<Vec<_>>();
-        libraries.sort_by(|left, right| left.name.cmp(&right.name));
-        let mut hasher = Sha256::new();
-        hasher.update(b"rspice.model-execution-catalog/v2\0");
-        for library in libraries {
-            let bytes = serde_json::to_vec(library)
-                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(bytes);
-        }
-        for resolution in self.definition_resolutions.values() {
-            let bytes = serde_json::to_vec(resolution)
-                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(bytes);
-        }
-        ContentDigest::from_bytes(hasher.finalize().into())
-    }
-
-    /// Case-insensitive model names currently provided by multiple executable
-    /// libraries.
-    #[must_use]
-    pub fn definition_conflicts(&self) -> Vec<ModelDefinitionConflict> {
-        let mut providers = BTreeMap::<String, Vec<ModelDefinitionProvider>>::new();
-        for library in self.libraries_sorted() {
-            let mut models = library.models.values().collect::<Vec<_>>();
-            models.sort_by_key(|model| model.name.to_ascii_lowercase());
-            for model in models {
-                providers
-                    .entry(model.name.to_ascii_lowercase())
-                    .or_default()
-                    .push(ModelDefinitionProvider {
-                        library: library.name.clone(),
-                        model: model.name.clone(),
-                        source: model
-                            .file_path
-                            .clone()
-                            .or_else(|| library.root_path.clone()),
-                        source_line: model.source_line,
-                    });
-            }
-        }
-        providers
-            .into_iter()
-            .filter_map(|(normalized_name, mut providers)| {
-                providers.sort_by(|left, right| {
-                    left.library
-                        .to_ascii_lowercase()
-                        .cmp(&right.library.to_ascii_lowercase())
-                        .then_with(|| left.model.cmp(&right.model))
-                        .then_with(|| left.source.cmp(&right.source))
-                        .then_with(|| left.source_line.cmp(&right.source_line))
-                });
-                (providers.len() > 1).then_some(ModelDefinitionConflict {
-                    normalized_name,
-                    providers,
-                })
-            })
-            .collect()
-    }
-
-    /// Return the explicit provider choice for a normalized model name.
-    #[must_use]
-    pub fn definition_resolution(&self, model_name: &str) -> Option<&ModelDefinitionResolution> {
-        self.definition_resolutions
-            .get(&model_name.trim().to_ascii_lowercase())
-    }
-
-    /// Stable persisted provider choices.
-    #[must_use]
-    pub fn definition_resolutions(&self) -> Vec<&ModelDefinitionResolution> {
-        self.definition_resolutions.values().collect()
-    }
-
-    /// Select one exact provider for a currently contested model name.
-    pub fn resolve_definition_conflict(
-        &mut self,
-        model_name: &str,
-        provider_library: &str,
-        provider_model: &str,
-    ) -> Result<(), String> {
-        let normalized_name = model_name.trim().to_ascii_lowercase();
-        let conflict = self
-            .definition_conflicts()
-            .into_iter()
-            .find(|conflict| conflict.normalized_name == normalized_name)
-            .ok_or_else(|| {
-                format!(
-                    "Model definition '{}' is not currently contested",
-                    model_name.trim()
-                )
-            })?;
-        if conflict.providers.iter().any(|left| {
-            conflict
-                .providers
-                .iter()
-                .any(|right| left != right && left.library.eq_ignore_ascii_case(&right.library))
-        }) {
-            return Err(format!(
-                "Contested model definition '{}' has multiple case-colliding providers inside one library; repair that source before simulation",
-                conflict.normalized_name
-            ));
-        }
-        let provider = conflict
-            .providers
-            .iter()
-            .find(|provider| {
-                provider.library == provider_library && provider.model == provider_model
-            })
-            .ok_or_else(|| {
-                format!(
-                    "Provider '{provider_library}/{provider_model}' is not an exact active provider of contested model '{}'",
-                    conflict.normalized_name
-                )
-            })?;
-        self.definition_resolutions.insert(
-            normalized_name.clone(),
-            ModelDefinitionResolution {
-                normalized_name,
-                provider_library: provider.library.clone(),
-                provider_model: provider.model.clone(),
-            },
-        );
-        Ok(())
-    }
-
-    /// Remove one explicit provider selection.
-    pub fn clear_definition_resolution(&mut self, model_name: &str) -> bool {
-        self.definition_resolutions
-            .remove(&model_name.trim().to_ascii_lowercase())
-            .is_some()
-    }
-
-    /// Restore persisted resolution contracts without accepting stale or
-    /// duplicate keys.
-    pub(crate) fn restore_definition_resolutions(
-        &mut self,
-        resolutions: Vec<ModelDefinitionResolution>,
-    ) -> Result<(), String> {
-        let mut restored = BTreeMap::new();
-        for resolution in resolutions {
-            let normalized = resolution.normalized_name.trim().to_ascii_lowercase();
-            if normalized.is_empty()
-                || normalized != resolution.normalized_name
-                || resolution.provider_library.trim().is_empty()
-                || resolution.provider_model.trim().is_empty()
-            {
-                return Err(
-                    "Model-definition resolution contains an invalid canonical provider identity"
-                        .to_owned(),
-                );
-            }
-            if restored.insert(normalized.clone(), resolution).is_some() {
-                return Err(format!(
-                    "Model-definition resolution '{}' is repeated",
-                    normalized
-                ));
-            }
-        }
-        self.definition_resolutions = restored;
-        self.validate_recorded_definition_resolutions()
-    }
-
-    /// Reject an executable catalog whose winner would otherwise depend on
-    /// implicit include or map ordering.
-    pub fn validate_definition_resolution(&self) -> Result<(), String> {
-        self.definition_resolution_order().map(|_| ())
-    }
-
     /// Clear all
     pub fn clear(&mut self) {
         self.libraries.clear();
-        self.definition_resolutions.clear();
-        self.pdk_config_libraries.clear();
         self.selected_library = None;
-    }
-
-    fn prune_inactive_definition_resolutions(&mut self) {
-        let active = self
-            .definition_conflicts()
-            .into_iter()
-            .map(|conflict| conflict.normalized_name)
-            .collect::<HashSet<_>>();
-        self.definition_resolutions
-            .retain(|normalized_name, _| active.contains(normalized_name));
-    }
-
-    fn definition_resolution_order(&self) -> Result<Vec<String>, String> {
-        let conflicts = self.definition_conflicts();
-        self.validate_recorded_definition_resolutions()?;
-        self.validate_active_subcircuit_definitions()?;
-
-        let mut outgoing = BTreeMap::<String, BTreeSet<String>>::new();
-        let mut indegree = BTreeMap::<String, usize>::new();
-        for library in self.libraries_sorted() {
-            outgoing.entry(library.name.clone()).or_default();
-            indegree.entry(library.name.clone()).or_default();
-        }
-        for conflict in &conflicts {
-            let resolution = self
-                .definition_resolutions
-                .get(&conflict.normalized_name)
-                .ok_or_else(|| unresolved_definition_error(conflict))?;
-            if resolution.normalized_name != conflict.normalized_name {
-                return Err(format!(
-                    "Model-definition resolution key '{}' does not match its canonical name '{}'",
-                    conflict.normalized_name, resolution.normalized_name
-                ));
-            }
-            let winner = conflict
-                .providers
-                .iter()
-                .find(|provider| {
-                    provider.library == resolution.provider_library
-                        && provider.model == resolution.provider_model
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "Resolution for contested model '{}' selects stale provider '{}/{}'; select one of the current exact providers",
-                        conflict.normalized_name,
-                        resolution.provider_library,
-                        resolution.provider_model
-                    )
-                })?;
-            for loser in &conflict.providers {
-                if loser == winner {
-                    continue;
-                }
-                if loser.library.eq_ignore_ascii_case(&winner.library) {
-                    return Err(format!(
-                        "Contested model definition '{}' has multiple case-colliding providers inside library '{}'; library precedence cannot resolve definitions within one source",
-                        conflict.normalized_name, winner.library
-                    ));
-                }
-                let inserted = outgoing
-                    .entry(winner.library.clone())
-                    .or_default()
-                    .insert(loser.library.clone());
-                if inserted {
-                    *indegree.entry(loser.library.clone()).or_default() += 1;
-                }
-            }
-        }
-
-        let mut ready = indegree
-            .iter()
-            .filter_map(|(library, degree)| (*degree == 0).then_some(library.clone()))
-            .collect::<BTreeSet<_>>();
-        let mut order = Vec::with_capacity(indegree.len());
-        while let Some(library) = ready.pop_first() {
-            order.push(library.clone());
-            for dependent in outgoing.get(&library).into_iter().flatten() {
-                let degree = indegree
-                    .get_mut(dependent)
-                    .expect("every precedence target is an active library");
-                *degree = degree.saturating_sub(1);
-                if *degree == 0 {
-                    ready.insert(dependent.clone());
-                }
-            }
-        }
-        if order.len() != indegree.len() {
-            let cyclic = indegree
-                .into_iter()
-                .filter_map(|(library, degree)| (degree > 0).then_some(library))
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(format!(
-                "Model-definition provider selections create a cyclic precedence contract across libraries: {cyclic}. Choose compatible providers or split the overlapping sources"
-            ));
-        }
-        Ok(order)
-    }
-
-    fn validate_active_subcircuit_definitions(&self) -> Result<(), String> {
-        let mut providers = BTreeMap::<String, Vec<String>>::new();
-        for library in self.libraries_sorted() {
-            if !library.source_authority.has_execution_source() {
-                continue;
-            }
-            for subcircuit in library.subcircuits.values().filter(|subcircuit| {
-                subcircuit.section.is_none()
-                    || subcircuit.section.as_deref() == library.selected_corner.as_deref()
-            }) {
-                providers
-                    .entry(subcircuit.name.to_ascii_lowercase())
-                    .or_default()
-                    .push(format!(
-                        "{}/{}",
-                        library.name,
-                        subcircuit.section.as_deref().unwrap_or("top-level")
-                    ));
-            }
-        }
-        if let Some((name, mut providers)) = providers
-            .into_iter()
-            .find(|(_, providers)| providers.len() > 1)
-        {
-            providers.sort();
-            return Err(format!(
-                "Active subcircuit definition '{name}' has multiple providers ({}). Remove the overlap or select non-overlapping library sections before simulation; RSpice will not choose a subcircuit by implicit include order",
-                providers.join(", ")
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_recorded_definition_resolutions(&self) -> Result<(), String> {
-        let conflicts = self.definition_conflicts();
-        for (normalized_name, resolution) in &self.definition_resolutions {
-            let conflict = conflicts
-                .iter()
-                .find(|conflict| conflict.normalized_name == *normalized_name)
-                .ok_or_else(|| {
-                    format!(
-                        "Model-definition resolution '{normalized_name}' is stale because that name is no longer contested"
-                    )
-                })?;
-            if resolution.normalized_name != *normalized_name {
-                return Err(format!(
-                    "Model-definition resolution key '{normalized_name}' does not match its canonical name '{}'",
-                    resolution.normalized_name
-                ));
-            }
-            if !conflict.providers.iter().any(|provider| {
-                provider.library == resolution.provider_library
-                    && provider.model == resolution.provider_model
-            }) {
-                return Err(format!(
-                    "Resolution for contested model '{}' selects stale provider '{}/{}'; select one of the current exact providers",
-                    conflict.normalized_name,
-                    resolution.provider_library,
-                    resolution.provider_model
-                ));
-            }
-        }
-        Ok(())
     }
 
     /// Load a library from a .lib file
@@ -2231,15 +923,6 @@ impl ModelLibraryManager {
         path: impl AsRef<std::path::Path>,
         section: Option<&str>,
     ) -> Result<String, String> {
-        self.load_library_file_with_name(path, section, None)
-    }
-
-    fn load_library_file_with_name(
-        &mut self,
-        path: impl AsRef<std::path::Path>,
-        section: Option<&str>,
-        preferred_name: Option<&str>,
-    ) -> Result<String, String> {
         use rspice_core::library::LibParser;
 
         let path = std::fs::canonicalize(path.as_ref()).map_err(|error| {
@@ -2249,12 +932,11 @@ impl ModelLibraryManager {
             )
         })?;
         let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
-        let lib_name = preferred_name.map(str::to_owned).unwrap_or_else(|| {
-            path.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unnamed")
-                .to_string()
-        });
+        let lib_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unnamed")
+            .to_string();
 
         // The parser captures the exact root-plus-include bytes it consumes.
         // Hash that captured closure so parsing and pinning cannot observe
@@ -2347,7 +1029,6 @@ impl ModelLibraryManager {
         library.source_contents = source_contents;
         library.source_edges = source_edges;
         library.models.clear();
-        library.subcircuits.clear();
         library.model_definition_metadata.clear();
         library.model_qualification.clear();
         library.model_correlation.clear();
@@ -2355,9 +1036,13 @@ impl ModelLibraryManager {
         library.selected_corner = None;
 
         for section_name in result.section_names() {
-            let mut corner =
-                ProcessCorner::from_composite_section(section_name, path.clone(), false);
-            corner.description = format!("Process corner from {lib_name}");
+            let corner = ProcessCorner {
+                name: section_name.to_string(),
+                description: format!("Process corner from {}", lib_name),
+                file_path: Some(path.clone()),
+                is_default: false,
+                ..ProcessCorner::default()
+            };
             library.corners.insert(corner.name.clone(), corner);
         }
 
@@ -2378,25 +1063,14 @@ impl ModelLibraryManager {
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
-        Self::insert_parsed_subcircuits(&mut library, &result.top_level_subcircuits, &path, None)?;
-        for lib_section in &result.sections {
-            Self::insert_parsed_subcircuits(
-                &mut library,
-                &lib_section.subcircuits,
-                &path,
-                Some(&lib_section.name),
-            )?;
-        }
 
         if let Some(section_name) = selected_section.as_deref() {
             if let Some(lib_section) = result.get_section(section_name) {
                 for model in &lib_section.models {
-                    let device_model = Self::convert_parsed_model_in_section(
-                        model,
-                        &path,
-                        Some(&lib_section.name),
-                    );
-                    Self::insert_case_insensitive_active_model(&mut library.models, device_model);
+                    let device_model = Self::convert_parsed_model(model, &path);
+                    library
+                        .models
+                        .insert(device_model.name.clone(), device_model);
                 }
                 library.selected_corner = Some(lib_section.name.clone());
                 if let Some(corner) = library.corners.get_mut(&lib_section.name) {
@@ -2409,12 +1083,6 @@ impl ModelLibraryManager {
                     result.section_names()
                 ));
             }
-        }
-        if library.models.is_empty() && library.subcircuits.is_empty() {
-            return Err(format!(
-                "Model library '{}' contains no supported device models or addressable subcircuits",
-                path.display()
-            ));
         }
 
         self.libraries.insert(lib_name.clone(), library);
@@ -2468,8 +1136,9 @@ impl ModelLibraryManager {
 
         let mut library = ModelLibrary::new(&lib_name);
         library.root_path = Some(root.clone());
-        library.source_authority = ModelSourceAuthority::RetainedImport {
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
             source_id: crate::product::ModelSourceId::new(),
+            revision: crate::product::ObjectRevision::INITIAL,
             digest,
         };
         library.source_closure = vec![ModelSourcePin {
@@ -2481,11 +1150,14 @@ impl ModelLibraryManager {
             bytes,
         }];
         library.corners.clear();
-        library.selected_corner = None;
         for section_name in result.section_names() {
-            let mut corner =
-                ProcessCorner::from_composite_section(section_name, root.clone(), false);
-            corner.description = format!("Process corner from {lib_name}");
+            let corner = ProcessCorner {
+                name: section_name.to_owned(),
+                description: format!("Process corner from {lib_name}"),
+                file_path: Some(root.clone()),
+                is_default: false,
+                ..ProcessCorner::default()
+            };
             library.corners.insert(corner.name.clone(), corner);
         }
         let section_names = result.section_names();
@@ -2502,15 +1174,6 @@ impl ModelLibraryManager {
                 .models
                 .insert(device_model.name.clone(), device_model);
         }
-        Self::insert_parsed_subcircuits(&mut library, &result.top_level_subcircuits, &root, None)?;
-        for lib_section in &result.sections {
-            Self::insert_parsed_subcircuits(
-                &mut library,
-                &lib_section.subcircuits,
-                &root,
-                Some(&lib_section.name),
-            )?;
-        }
         if let Some(section_name) = selected_section.as_deref() {
             let lib_section = result.get_section(section_name).ok_or_else(|| {
                 format!(
@@ -2519,20 +1182,18 @@ impl ModelLibraryManager {
                 )
             })?;
             for model in &lib_section.models {
-                let device_model =
-                    Self::convert_parsed_model_in_section(model, &root, Some(&lib_section.name));
-                Self::insert_case_insensitive_active_model(&mut library.models, device_model);
+                let device_model = Self::convert_parsed_model(model, &root);
+                library
+                    .models
+                    .insert(device_model.name.clone(), device_model);
             }
             library.selected_corner = Some(lib_section.name.clone());
             if let Some(corner) = library.corners.get_mut(&lib_section.name) {
                 corner.is_default = true;
             }
         }
-        if library.models.is_empty() && library.subcircuits.is_empty() {
-            return Err(
-                "Uploaded model library contains no supported device models or addressable subcircuits"
-                    .to_owned(),
-            );
+        if library.models.is_empty() {
+            return Err("Uploaded model library contains no supported device models".to_owned());
         }
         if self.libraries.contains_key(&lib_name) {
             return Err(format!(
@@ -2541,388 +1202,6 @@ impl ModelLibraryManager {
         }
         self.libraries.insert(lib_name.clone(), library);
         Ok(lib_name)
-    }
-
-    /// Import one complete browser/mobile model-source bundle.
-    ///
-    /// Browser file handles do not expose trustworthy host paths. Every
-    /// selected member is therefore normalized to a sibling file in one
-    /// content-addressed virtual directory. A unique root and every `.include`
-    /// or external `.lib` edge must be provable from the selected bytes;
-    /// missing, ambiguous, duplicate, nested-path, and unreachable members
-    /// fail closed before the manager is mutated.
-    pub fn load_library_bundle_bytes(
-        &mut self,
-        files: Vec<(String, Vec<u8>)>,
-        section: Option<&str>,
-    ) -> Result<String, String> {
-        use rspice_core::library::{LibParser, ResolvedLibDependency};
-
-        if files.is_empty() {
-            return Err("Model library bundle contains no files".to_owned());
-        }
-
-        let mut normalized = Vec::<(String, Vec<u8>, String)>::with_capacity(files.len());
-        let mut names = BTreeMap::<String, String>::new();
-        for (file_name, bytes) in files {
-            let safe_name = std::path::Path::new(&file_name)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .ok_or_else(|| "Model library bundle contains an invalid file name".to_owned())?
-                .to_owned();
-            if safe_name != file_name {
-                return Err(format!(
-                    "Browser model bundle member '{file_name}' is not a plain sibling file name"
-                ));
-            }
-            let key = safe_name.to_ascii_lowercase();
-            if let Some(existing) = names.insert(key, safe_name.clone()) {
-                return Err(format!(
-                    "Browser model bundle repeats case-insensitive file name '{existing}'/'{safe_name}'"
-                ));
-            }
-            let content = rspice_core::netlist::decode_source_bytes(&bytes).map_err(|error| {
-                format!("Uploaded model source '{safe_name}' cannot be decoded: {error}")
-            })?;
-            normalized.push((safe_name, bytes, content));
-        }
-        normalized.sort_by(|left, right| {
-            left.0
-                .to_ascii_lowercase()
-                .cmp(&right.0.to_ascii_lowercase())
-                .then_with(|| left.0.cmp(&right.0))
-        });
-
-        let mut bundle_hasher = Sha256::new();
-        bundle_hasher.update(b"rspice.browser-model-bundle/v1\0");
-        for (name, bytes, _) in &normalized {
-            bundle_hasher.update((name.len() as u64).to_le_bytes());
-            bundle_hasher.update(name.as_bytes());
-            bundle_hasher.update((bytes.len() as u64).to_le_bytes());
-            bundle_hasher.update(Sha256::digest(bytes));
-        }
-        let bundle_digest =
-            crate::product::ContentDigest::from_bytes(bundle_hasher.finalize().into());
-        let virtual_directory =
-            PathBuf::from(format!("/rspice-browser/model-sources/{bundle_digest}"));
-
-        let paths = normalized
-            .iter()
-            .map(|(name, _, _)| (name.clone(), virtual_directory.join(name)))
-            .collect::<BTreeMap<_, _>>();
-        let mut dependencies = Vec::<ResolvedLibDependency>::new();
-        let mut source_edges = Vec::<ModelSourceEdge>::new();
-        let mut targets = BTreeSet::<PathBuf>::new();
-        for (name, _, content) in &normalized {
-            let owner = paths
-                .get(name)
-                .expect("normalized browser source has a virtual path")
-                .clone();
-            for requested_path in root_external_source_paths(content) {
-                let requested = normalize_portable_path_text(&requested_path)?;
-                if is_portable_absolute_text(&requested) || requested.contains('/') {
-                    return Err(format!(
-                        "Browser model source '{name}' requests '{requested_path}'. Multi-file browser import can authenticate sibling includes only; import this closure from desktop or flatten it without changing include names."
-                    ));
-                }
-                let target = paths.get(&requested).cloned().ok_or_else(|| {
-                    format!(
-                        "Browser model source '{name}' requires missing sibling '{requested_path}'"
-                    )
-                })?;
-                targets.insert(target.clone());
-                dependencies.push(ResolvedLibDependency {
-                    owner: owner.clone(),
-                    requested_path: requested_path.clone(),
-                    target: target.clone(),
-                });
-                source_edges.push(ModelSourceEdge {
-                    owner: owner.clone(),
-                    requested_path,
-                    target,
-                });
-            }
-        }
-        dependencies.sort_by(|left, right| {
-            left.owner
-                .cmp(&right.owner)
-                .then_with(|| left.requested_path.cmp(&right.requested_path))
-                .then_with(|| left.target.cmp(&right.target))
-        });
-        dependencies.dedup_by(|left, right| {
-            left.owner == right.owner
-                && left.requested_path == right.requested_path
-                && left.target == right.target
-        });
-        source_edges.sort();
-        source_edges.dedup();
-
-        let roots = paths
-            .values()
-            .filter(|path| !targets.contains(*path))
-            .cloned()
-            .collect::<Vec<_>>();
-        let root = match roots.as_slice() {
-            [root] => root.clone(),
-            [] => {
-                return Err(
-                    "Browser model bundle has no unique root; its dependency graph is cyclic"
-                        .to_owned(),
-                );
-            }
-            roots => {
-                return Err(format!(
-                    "Browser model bundle has {} independent roots ({}); select one complete include closure at a time",
-                    roots.len(),
-                    roots
-                        .iter()
-                        .filter_map(|path| path.file_name())
-                        .map(|name| name.to_string_lossy())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-        };
-
-        let mut source_closure = normalized
-            .iter()
-            .map(|(name, bytes, _)| ModelSourcePin {
-                path: paths
-                    .get(name)
-                    .expect("normalized browser source has a virtual path")
-                    .clone(),
-                digest: crate::product::ContentDigest::from_bytes(Sha256::digest(bytes).into()),
-            })
-            .collect::<Vec<_>>();
-        source_closure.sort_by(|left, right| left.path.cmp(&right.path));
-        if let Some(unreachable) = first_unreachable_source(&root, &source_closure, &source_edges) {
-            return Err(format!(
-                "Browser model bundle contains unreachable member '{}'",
-                unreachable.display()
-            ));
-        }
-        let mut source_contents = normalized
-            .into_iter()
-            .map(|(name, bytes, _)| ModelSourceContent {
-                path: paths
-                    .get(&name)
-                    .expect("normalized browser source has a virtual path")
-                    .clone(),
-                bytes,
-            })
-            .collect::<Vec<_>>();
-        source_contents.sort_by(|left, right| left.path.cmp(&right.path));
-
-        let mut parser = LibParser::new(&virtual_directory);
-        let result = parser.parse_authenticated_closure(
-            root.clone(),
-            source_contents
-                .iter()
-                .map(|content| (content.path.clone(), content.bytes.clone())),
-            dependencies,
-        )?;
-        if !result.is_ok() {
-            return Err(format!(
-                "Uploaded model bundle contains parse or dependency errors: {}",
-                result
-                    .errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
-        }
-
-        let lib_name = root
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .filter(|name| !name.is_empty())
-            .unwrap_or("uploaded-models")
-            .to_owned();
-        if self.libraries.contains_key(&lib_name) {
-            return Err(format!(
-                "Model library '{lib_name}' already exists; remove it before importing replacement bytes"
-            ));
-        }
-        let root_digest = source_closure
-            .iter()
-            .find(|pin| pin.path == root)
-            .map(|pin| pin.digest)
-            .expect("authenticated browser root belongs to the closure");
-        let mut library = ModelLibrary::new(&lib_name);
-        library.root_path = Some(root.clone());
-        library.source_authority = ModelSourceAuthority::RetainedImport {
-            source_id: crate::product::ModelSourceId::new(),
-            digest: root_digest,
-        };
-        library.source_closure = source_closure;
-        library.source_contents = source_contents;
-        library.source_edges = source_edges;
-        library.corners.clear();
-        library.selected_corner = None;
-        for section_name in result.section_names() {
-            let mut corner =
-                ProcessCorner::from_composite_section(section_name, root.clone(), false);
-            corner.description = format!("Process corner from {lib_name}");
-            library.corners.insert(corner.name.clone(), corner);
-        }
-        let section_names = result.section_names();
-        let selected_section = section.map(str::to_owned).or_else(|| {
-            section_names
-                .iter()
-                .find(|name| name.eq_ignore_ascii_case("tt"))
-                .or_else(|| section_names.first())
-                .map(|name| (*name).to_owned())
-        });
-        for model in &result.top_level_models {
-            let device_model = Self::convert_parsed_model(model, &root);
-            library
-                .models
-                .insert(device_model.name.clone(), device_model);
-        }
-        Self::insert_parsed_subcircuits(&mut library, &result.top_level_subcircuits, &root, None)?;
-        for lib_section in &result.sections {
-            Self::insert_parsed_subcircuits(
-                &mut library,
-                &lib_section.subcircuits,
-                &root,
-                Some(&lib_section.name),
-            )?;
-        }
-        if let Some(section_name) = selected_section.as_deref() {
-            let lib_section = result.get_section(section_name).ok_or_else(|| {
-                format!(
-                    "Section '{section_name}' not found. Available: {:?}",
-                    result.section_names()
-                )
-            })?;
-            for model in &lib_section.models {
-                let device_model =
-                    Self::convert_parsed_model_in_section(model, &root, Some(&lib_section.name));
-                Self::insert_case_insensitive_active_model(&mut library.models, device_model);
-            }
-            library.selected_corner = Some(lib_section.name.clone());
-            if let Some(corner) = library.corners.get_mut(&lib_section.name) {
-                corner.is_default = true;
-            }
-        }
-        if library.models.is_empty() && library.subcircuits.is_empty() {
-            return Err(
-                "Uploaded model bundle contains no supported device models or addressable subcircuits"
-                    .to_owned(),
-            );
-        }
-        self.libraries.insert(lib_name.clone(), library);
-        Ok(lib_name)
-    }
-
-    /// Rebuild the browseable active-card projection after a corner contract
-    /// changes. The projection is derived only from the already authenticated
-    /// closure; it never consults a search path or silently substitutes a
-    /// typical section.
-    pub(crate) fn rebuild_active_model_projection(
-        &mut self,
-        library_name: &str,
-    ) -> Result<(), String> {
-        use rspice_core::library::LibParser;
-
-        let library = self
-            .libraries
-            .get(library_name)
-            .cloned()
-            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
-        let root = library.root_path.as_ref().ok_or_else(|| {
-            format!("Model library '{library_name}' has no authenticated source root")
-        })?;
-        if library.source_contents.is_empty() {
-            return Err(format!(
-                "Model library '{library_name}' has no retained authenticated bytes from which to rebuild its active model cards"
-            ));
-        }
-        let sources = library
-            .source_contents
-            .iter()
-            .map(|content| (content.path.clone(), content.bytes.clone()));
-        let dependencies =
-            library
-                .source_edges
-                .iter()
-                .map(|edge| rspice_core::library::ResolvedLibDependency {
-                    owner: edge.owner.clone(),
-                    requested_path: edge.requested_path.clone(),
-                    target: edge.target.clone(),
-                });
-        let mut parser = LibParser::new(root.parent().unwrap_or_else(|| std::path::Path::new(".")));
-        let parsed = parser
-            .parse_authenticated_closure(root.clone(), sources, dependencies)
-            .map_err(|error| {
-                format!(
-                    "Model library '{library_name}' retained closure cannot be authenticated: {error}"
-                )
-            })?;
-        if !parsed.is_ok() {
-            return Err(format!(
-                "Model library '{library_name}' retained closure does not parse: {}",
-                parsed
-                    .errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
-        }
-
-        let mut models = HashMap::new();
-        for model in &parsed.top_level_models {
-            let model = Self::convert_parsed_model(model, root);
-            models.insert(model.name.clone(), model);
-        }
-
-        let section_names = active_model_section_names(&library)?;
-        let mut section_definitions = HashMap::<String, (String, String)>::new();
-        for requested_section in section_names {
-            let matching_sections = parsed
-                .sections
-                .iter()
-                .filter(|section| section.name.eq_ignore_ascii_case(&requested_section))
-                .collect::<Vec<_>>();
-            if matching_sections.is_empty() {
-                return Err(format!(
-                    "Model library '{library_name}' selected corner requires missing section '{requested_section}'"
-                ));
-            }
-            for section in matching_sections {
-                for parsed_model in &section.models {
-                    let canonical = parsed_model.name.to_ascii_lowercase();
-                    if let Some((first_section, first_name)) = section_definitions
-                        .insert(canonical, (section.name.clone(), parsed_model.name.clone()))
-                    {
-                        return Err(format!(
-                            "Model library '{library_name}' selected corner resolves model '{}' from both sections '{}' and '{}'; active section composition is ambiguous",
-                            first_name, first_section, section.name
-                        ));
-                    }
-                    let model = Self::convert_parsed_model_in_section(
-                        parsed_model,
-                        root,
-                        Some(&section.name),
-                    );
-                    Self::insert_case_insensitive_active_model(&mut models, model);
-                }
-            }
-        }
-        if models.is_empty() && library.subcircuits.is_empty() {
-            return Err(format!(
-                "Model library '{library_name}' selected corner materializes no supported model cards or subcircuits"
-            ));
-        }
-
-        self.libraries
-            .get_mut(library_name)
-            .expect("library identity was retained during projection rebuild")
-            .models = models;
-        Ok(())
     }
 
     /// Resolve deterministic, self-contained model cards for a nominal run.
@@ -2946,14 +1225,6 @@ impl ModelLibraryManager {
     /// Atomically replace the exact external libraries governed by a PDK
     /// configuration.
     ///
-    /// Reconcile every supported model source in the authoritative PDK scan.
-    ///
-    /// Libraries published by the previous scan are removed from the
-    /// candidate first. Direct imports, retained pack sources, project-owned
-    /// definitions, and project-restored external dependencies are not owned
-    /// by this host configuration and remain untouched. The replacement is
-    /// published only when every source parses successfully.
-    pub fn load_from_pdk_config(
     /// Discovery always runs against `next`; cached dialog rows never
     /// authorize application. Every enabled file is canonicalized and parsed
     /// into an isolated manager candidate. Scan, include, parse, or
@@ -2964,39 +1235,6 @@ impl ModelLibraryManager {
         previous: Option<&crate::state::pdk_config::PdkConfig>,
         next: &mut crate::state::pdk_config::PdkConfig,
     ) -> Result<usize, Vec<String>> {
-        let mut candidate = self.clone();
-        let previously_managed = std::mem::take(&mut candidate.pdk_config_libraries);
-        candidate.libraries.retain(|name, library| {
-            !previously_managed.contains(name)
-                || library.source_authority != ModelSourceAuthority::External
-        });
-        let mut loaded = 0;
-        let mut errors = Vec::new();
-        let mut sources = BTreeSet::new();
-
-        for file in pdk_config.discovered_files() {
-            if !crate::state::pdk_config::MODEL_FILE_EXTENSIONS.contains(&file.extension.as_str()) {
-                continue;
-            }
-            match std::fs::canonicalize(&file.path) {
-                Ok(path) => {
-                    sources.insert(path);
-                }
-                Err(error) => errors.push(format!(
-                    "{}: failed to resolve discovered PDK source: {error}",
-                    file.path.display()
-                )),
-            }
-        }
-
-        for source in sources {
-            let library_name = pdk_config_library_name(&candidate, &source);
-            match candidate.load_library_file_with_name(&source, None, Some(&library_name)) {
-                Ok(name) => {
-                    candidate.pdk_config_libraries.insert(name);
-                    loaded += 1;
-                }
-                Err(error) => errors.push(format!("{}: {error}", source.display())),
         next.discover_model_files();
         if !next.scan_errors.is_empty() {
             return Err(next.scan_errors.clone());
@@ -3070,14 +1308,6 @@ impl ModelLibraryManager {
         }
 
         if errors.is_empty() {
-            if candidate
-                .selected_library
-                .as_ref()
-                .is_some_and(|selected| !candidate.libraries.contains_key(selected))
-            {
-                candidate.selected_library = None;
-            }
-            candidate.prune_inactive_definition_resolutions();
             next.managed_model_sources = admitted;
             *self = candidate;
             Ok(loaded)
@@ -3121,7 +1351,6 @@ impl ModelLibraryManager {
                     vdd: None,
                     vth0: None,
                     file_path: None,
-                    section: None,
                     parameters: HashMap::new(),
                     string_parameters: HashMap::new(),
                     source_line: None,
@@ -3133,33 +1362,10 @@ impl ModelLibraryManager {
         }
     }
 
-    fn insert_case_insensitive_active_model(
-        models: &mut HashMap<String, DeviceModel>,
-        model: DeviceModel,
-    ) {
-        if let Some(existing) = models
-            .keys()
-            .find(|name| name.eq_ignore_ascii_case(&model.name))
-            .cloned()
-        {
-            models.remove(&existing);
-        }
-        models.insert(model.name.clone(), model);
-    }
-
     /// Convert a parsed model from the core library to UI DeviceModel
     pub(crate) fn convert_parsed_model(
         model: &rspice_core::library::ParsedModel,
         file_path: &std::path::Path,
-    ) -> DeviceModel {
-        Self::convert_parsed_model_in_section(model, file_path, None)
-    }
-
-    /// Convert a parsed card while retaining the exact active `.lib` section.
-    pub(crate) fn convert_parsed_model_in_section(
-        model: &rspice_core::library::ParsedModel,
-        file_path: &std::path::Path,
-        section: Option<&str>,
     ) -> DeviceModel {
         let model_type = Self::convert_core_model_type(model.model_type);
 
@@ -3184,61 +1390,10 @@ impl ModelLibraryManager {
                     .unwrap_or(file_path)
                     .to_path_buf(),
             ),
-            section: section.map(str::to_owned),
             parameters: model.parameters.clone(),
             string_parameters: model.string_params.clone(),
             source_line: model.source_line,
         }
-    }
-
-    pub(crate) fn convert_parsed_subcircuit(
-        subcircuit: &rspice_core::library::ParsedSubcircuit,
-        file_path: &Path,
-        section: Option<&str>,
-    ) -> ModelSubcircuitInterface {
-        ModelSubcircuitInterface {
-            name: subcircuit.name.clone(),
-            ports: subcircuit.pins.clone(),
-            parameter_defaults: subcircuit
-                .parameter_defaults
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone()))
-                .collect(),
-            description: subcircuit.description.clone(),
-            file_path: Some(
-                subcircuit
-                    .source_file
-                    .as_deref()
-                    .unwrap_or(file_path)
-                    .to_path_buf(),
-            ),
-            source_line: subcircuit.source_line,
-            section: section.map(str::to_owned),
-        }
-    }
-
-    fn insert_parsed_subcircuits(
-        library: &mut ModelLibrary,
-        parsed: &[rspice_core::library::ParsedSubcircuit],
-        file_path: &Path,
-        section: Option<&str>,
-    ) -> Result<(), String> {
-        for subcircuit in parsed {
-            let interface = Self::convert_parsed_subcircuit(subcircuit, file_path, section);
-            let key = subcircuit_interface_key(interface.section.as_deref(), &interface.name);
-            if let Some(existing) = library
-                .subcircuits
-                .keys()
-                .find(|existing| existing.eq_ignore_ascii_case(&key))
-            {
-                return Err(format!(
-                    "Subcircuit '{}' is defined more than once in the same library section (first identity '{}')",
-                    interface.name, existing
-                ));
-            }
-            library.subcircuits.insert(key, interface);
-        }
-        Ok(())
     }
 
     /// Classify what a model card *claims to be* for browsing/filtering.
@@ -3359,115 +1514,6 @@ impl ModelLibraryManager {
             CoreType::Other => ModelType::Other,
         }
     }
-}
-
-fn active_model_section_names(library: &ModelLibrary) -> Result<Vec<String>, String> {
-    if matches!(
-        library.source_authority,
-        ModelSourceAuthority::ProjectOwned { .. }
-    ) && !library.model_definition_metadata.is_empty()
-    {
-        // Project-authored revisions retain one canonical top-level base card.
-        // Their named-section overrides are typed authoring metadata and are
-        // materialized for execution separately; replacing the base catalog
-        // with an override card would break its source/evidence identity.
-        return Ok(Vec::new());
-    }
-    let Some(selected_corner) = library.selected_corner.as_deref() else {
-        return Ok(Vec::new());
-    };
-    let corner = library.corners.get(selected_corner).ok_or_else(|| {
-        format!(
-            "Model library '{}' selected corner '{}' does not exist",
-            library.name, selected_corner
-        )
-    })?;
-    let mut sections = BTreeMap::<String, String>::new();
-    for binding in corner.effective_section_bindings() {
-        sections
-            .entry(binding.section.to_ascii_lowercase())
-            .or_insert(binding.section);
-    }
-    if sections.is_empty() {
-        return Err(format!(
-            "Model library '{}' selected corner '{}' has no executable section bindings",
-            library.name, selected_corner
-        ));
-    }
-    Ok(sections.into_values().collect())
-}
-
-fn pdk_config_library_name(manager: &ModelLibraryManager, source: &Path) -> String {
-    let base = source
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .filter(|stem| !stem.trim().is_empty())
-        .unwrap_or("pdk-models")
-        .to_owned();
-    let occupied = |candidate: &str| {
-        manager
-            .libraries
-            .keys()
-            .any(|name| name.eq_ignore_ascii_case(candidate))
-    };
-    if !occupied(&base) {
-        return base;
-    }
-
-    let digest = format!("{:x}", Sha256::digest(portable_path_key(source).as_bytes()));
-    for width in [12usize, 16, 24, 32, 64] {
-        let candidate = format!("{base}@{}", &digest[..width.min(digest.len())]);
-        if !occupied(&candidate) {
-            return candidate;
-        }
-    }
-
-    // SHA-256 collisions are not assumed impossible. Preserve a deterministic
-    // and bounded fallback rather than overwriting an existing provider.
-    for suffix in 2u32.. {
-        let candidate = format!("{base}@{digest}-{suffix}");
-        if !occupied(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("the finite library catalog cannot occupy every u32 suffix")
-}
-
-fn pack_model_hit(
-    index: &SpiceLibraryIndex,
-    entry: rspice_core::library::CatalogEntry,
-) -> PackModelHit {
-    let pack = index.pack(&entry.pack);
-    PackModelHit {
-        name: entry.name.clone(),
-        kind: entry.kind.clone(),
-        device: entry.device.clone(),
-        pack_name: pack.map_or_else(|| entry.pack.clone(), |pack| pack.name.clone()),
-        redistributable: pack.is_some_and(|pack| pack.redistributable) && !entry.restricted,
-        source: entry.source_path(index),
-        line: entry.line,
-        pack: entry.pack,
-    }
-}
-
-fn pack_library_name(pack: &str, source_stem: &str) -> String {
-    let canonical = |value: &str| {
-        let mut result = String::with_capacity(value.len());
-        let mut previous_separator = false;
-        for character in value.chars() {
-            if character.is_ascii_alphanumeric() {
-                result.push(character.to_ascii_lowercase());
-                previous_separator = false;
-            } else if !previous_separator {
-                result.push('-');
-                previous_separator = true;
-            }
-        }
-        result.trim_matches('-').to_owned()
-    };
-    let pack = canonical(pack);
-    let source = canonical(source_stem);
-    format!("pack-{pack}-{source}")
 }
 
 fn validate_project_library_name(name: &str) -> Result<(), String> {

@@ -1972,6 +1972,9 @@ mod tests {
             Tool::DesignNote,
             Command::PlaceText,
         ));
+    }
+
+    #[test]
     fn models_toolbar_projects_the_mockup_command_order_and_icons() {
         assert_eq!(
             MODELS_TOOLBAR_COMMANDS,
