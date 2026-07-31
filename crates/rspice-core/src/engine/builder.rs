@@ -35,8 +35,9 @@ use std::time::{Duration, Instant};
 mod model_resolution;
 use model_resolution::*;
 pub use model_resolution::{
-    ResolvedResistorParameters, XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION,
-    validate_native_xyce_ltra_model_contract,
+    ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinInspection,
+    ModelBinInstanceInspection, ModelBinSelectionKind, ResolvedResistorParameters,
+    XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
 };
 mod behavioral;
 mod builtin_models;
@@ -3382,6 +3383,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn model_bin_inspection_reports_expression_resolved_cards_and_shared_edges() {
+        let deck = "inspected binned mosfet\n\
+             .param LLO=0.28u LEDGE=0.5u LHI=1.2u\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L={LEDGE} M=2\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN={LLO} LMAX={LEDGE} WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN={LEDGE} LMAX={LHI} WMIN=0.5u WMAX=2u VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("binned inspection deck parses");
+        let inspection = Engine::new(SimulationConfig::default())
+            .inspect_model_bins(&netlist)
+            .expect("binned inspection succeeds");
+
+        assert_eq!(inspection.cards.len(), 2);
+        assert_eq!(inspection.cards[0].model, "NCH.0");
+        assert_eq!(inspection.cards[0].family, "NCH");
+        assert_eq!(inspection.cards[0].geometry.length.min, Some(0.28e-6));
+        assert_eq!(inspection.cards[0].geometry.length.max, Some(0.5e-6));
+        let [instance] = inspection.instances.as_slice() else {
+            panic!("expected one inspected MOS instance");
+        };
+        assert_eq!(instance.element, "M1");
+        assert_eq!(instance.requested_model, "NCH");
+        assert_eq!(instance.selected_model, "NCH.0");
+        assert_eq!(instance.selection, ModelBinSelectionKind::SharedBoundary);
+        assert_eq!(instance.match_count, 2);
+        assert_eq!(instance.length, Some(0.5e-6));
+        assert_eq!(instance.width, Some(1.0e-6));
+        assert_eq!(instance.multiplier, Some(2.0));
+    }
+
+    #[test]
+    fn model_bin_inspection_audits_unreferenced_cards() {
+        let deck = "unreferenced binned family\n\
+             V1 d 0 1\n\
+             R1 d 0 1k\n\
+             .model UNUSED.0 NMOS LEVEL=1 LMIN=0.1u LMAX=0.2u WMIN=0.5u WMAX=2u\n\
+             .model UNUSED.1 NMOS LEVEL=1 LMIN=0.2u LMAX=0.4u WMIN=0.5u WMAX=2u\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("unreferenced bin deck parses");
+        let inspection = Engine::new(SimulationConfig::default())
+            .inspect_model_bins(&netlist)
+            .expect("unreferenced cards remain auditable");
+
+        assert_eq!(inspection.cards.len(), 2);
+        assert!(inspection.instances.is_empty());
+        assert!(inspection.cards.iter().all(|card| card.family == "UNUSED"));
+    }
+
+    #[test]
+    fn a_positive_area_model_bin_overlap_fails_closed() {
+        let deck = "ambiguous binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.7u WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN=0.4u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("ambiguous bin deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect_err("positive-area bin overlap must block circuit construction");
+        let message = error.to_string();
+        assert!(message.contains("MOSFET 'M1'"));
+        assert!(message.contains("model family 'NCH' is ambiguous"));
+        assert!(message.contains("'NCH.0' and 'NCH.1'"));
+        assert!(message.contains("positive-area bin region"));
+    }
+
+    #[test]
+    fn an_invalid_model_bin_range_fails_closed() {
+        let deck = "invalid binned mosfet\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.5u\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.7u LMAX=0.28u WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("invalid bin deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect_err("reversed bin bounds must block circuit construction");
+        let message = error.to_string();
+        assert!(message.contains("Model 'NCH.0'"));
+        assert!(message.contains("reversed geometry-bin range for L"));
+    }
+
     /// The same netlist built twice must produce the same circuit.
     ///
     /// Subcircuit `.param`s calling `agauss` are evaluated during flattening,
@@ -4433,6 +4519,111 @@ impl Engine {
             engine.config.spice_dialect,
         )
         .map(Some)
+    }
+
+    /// Inspect every geometry-binned MOS model reference without constructing
+    /// device equations or allocating a circuit matrix.
+    ///
+    /// The returned receipt is the authoritative frontend projection: it uses
+    /// the same hierarchy flattening, scoped model cards, expression context,
+    /// geometry tolerance, and declaration-order resolver as
+    /// [`Self::build_circuit`]. Shared inclusive edges remain deterministic;
+    /// uncovered instances, malformed bounds, and positive-area overlaps fail
+    /// closed rather than yielding a partial receipt.
+    pub fn inspect_model_bins(
+        &self,
+        netlist: &Netlist,
+    ) -> Result<ModelBinInspection, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_valid_configuration()?;
+        netlist.params.restart_statistical_stream();
+        let flattened = flatten_netlist_with_models_config_with_abort(
+            netlist,
+            FlattenerConfig {
+                max_depth: engine.config.resource_limits.max_hierarchy_depth,
+                max_elements: engine.config.resource_limits.max_flattened_elements,
+                ..FlattenerConfig::default()
+            },
+            &NoAbort,
+        )
+        .map_err(|error| map_build_parse_error("model-bin hierarchy flattening", error))?;
+        let mut effective_model_netlist;
+        let netlist = if flattened.scoped_models.is_empty() {
+            netlist
+        } else {
+            effective_model_netlist = netlist.clone();
+            effective_model_netlist
+                .models
+                .extend(flattened.scoped_models);
+            &effective_model_netlist
+        };
+
+        let mut inspection = ModelBinInspection::default();
+        // Evaluate every declared bin card before resolving instances. This
+        // makes the receipt a complete audit of the exact executable model
+        // set rather than only a trace of families happened to be referenced
+        // by placed devices. It also prevents a malformed dormant card from
+        // becoming a latent production failure when a geometry later reaches
+        // that family.
+        for (declaration_order, model) in netlist.models.iter().enumerate() {
+            let Some(geometry) =
+                ModelBinCardGeometry::resolve(netlist, model, engine.config.temperature)?
+            else {
+                continue;
+            };
+            inspection.cards.push(ModelBinCardInspection {
+                model: model.name.clone(),
+                family: model_bin_family_name(&model.name).to_owned(),
+                model_type: model.model_type.clone(),
+                declaration_order,
+                geometry,
+            });
+        }
+
+        for element in &flattened.elements {
+            let ElementKind::Mosfet {
+                model,
+                instance_params,
+                ..
+            } = &element.kind
+            else {
+                continue;
+            };
+            let Some(resolved) = resolve_binned_model_def(
+                netlist,
+                &element.name,
+                model,
+                instance_params,
+                engine.config.temperature,
+            )?
+            else {
+                continue;
+            };
+            let Some(_) =
+                ModelBinCardGeometry::resolve(netlist, resolved.model, engine.config.temperature)?
+            else {
+                continue;
+            };
+            inspection.instances.push(ModelBinInstanceInspection {
+                element: element.name.clone(),
+                requested_model: model.clone(),
+                selected_model: resolved.model.name.clone(),
+                selection: resolved.selection,
+                match_count: resolved.match_count,
+                length: instance_param(instance_params, &["L", "LENGTH"]),
+                width: instance_param(instance_params, &["W", "WIDTH"]),
+                nfin: instance_param(instance_params, &["NFIN"]),
+                multiplier: instance_param(instance_params, &["M"]),
+            });
+        }
+
+        Ok(inspection)
+    }
+
+    /// Validate every geometry-binned MOS model reference using the exact
+    /// authoritative inspection path retained by frontends.
+    pub fn validate_model_bin_contracts(&self, netlist: &Netlist) -> Result<(), SimulationError> {
+        self.inspect_model_bins(netlist).map(|_| ())
     }
 
     /// Build a circuit from a netlist, using a non-cancellable compatibility path.
@@ -5577,7 +5768,13 @@ impl Engine {
                     deferred_params,
                 } => {
                     // Resolve NMOS/PMOS from model card when available.
-                    let model_def = find_binned_model_def(netlist, model, instance_params);
+                    let model_def = find_binned_model_def(
+                        netlist,
+                        &element.name,
+                        model,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
                     #[cfg(feature = "veriloga-builtins-base")]
                     if try_route_generated_mos_model(
                         &mut circuit,

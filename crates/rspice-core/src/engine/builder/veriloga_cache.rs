@@ -351,18 +351,19 @@ pub(super) fn clear_in_memory_veriloga_cache() {
 
 #[cfg(feature = "veriloga")]
 pub(super) fn canonicalize_for_cache(path: &Path) -> PathBuf {
-    if is_project_veriloga_virtual_path(path) {
+    if is_sealed_veriloga_virtual_path(path) {
         return PathBuf::from(path.to_string_lossy().replace('\\', "/"));
     }
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(feature = "veriloga")]
-fn is_project_veriloga_virtual_path(path: &Path) -> bool {
+fn is_sealed_veriloga_virtual_path(path: &Path) -> bool {
     let normalized = path.to_string_lossy().replace('\\', "/");
-    normalized
-        .split_once('/')
-        .is_some_and(|(root, _)| root.eq_ignore_ascii_case("__rspice_project__"))
+    normalized.split_once('/').is_some_and(|(root, _)| {
+        root.eq_ignore_ascii_case("__rspice_project__")
+            || root.eq_ignore_ascii_case("__rspice_pdk__")
+    })
 }
 
 #[cfg(feature = "veriloga")]
@@ -1453,13 +1454,13 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
         }
     }
 
-    // A project-owned virtual key is an authenticated in-memory capability,
+    // A sealed virtual key is an authenticated in-memory capability,
     // never a filesystem locator. A missing registration must fail closed;
     // disk cache and ambient files are not eligible fallbacks.
-    if is_project_veriloga_virtual_path(path) {
+    if is_sealed_veriloga_virtual_path(path) {
         VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
         return Err(SimulationError::Netlist(format!(
-            "Project Verilog-A runtime '{}' is not installed for this execution",
+            "Sealed Verilog-A runtime '{}' is not installed for this execution",
             path.display()
         )));
     }
@@ -1663,16 +1664,16 @@ pub fn register_precompiled_veriloga_runtime_with_dependencies(
     )
 }
 
-/// One exact project-owned Verilog-A runtime prepared for atomic registration.
+/// One exact sealed Verilog-A runtime prepared for atomic registration.
 ///
 /// `aliases` are the model identities that a generated deck may use for this
-/// artifact. They are checked case-insensitively within each project represented
-/// by one submitted runtime set; the compiled module name is always included
-/// automatically.
+/// artifact. They are checked case-insensitively within each project or signed
+/// package authority represented by one submitted runtime set; the compiled
+/// module name is always included automatically.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone)]
 pub struct ProjectVerilogARuntimeRegistration {
-    /// Normalized, project-scoped virtual source identity.
+    /// Normalized project- or signed-PDK-scoped virtual source identity.
     pub source_key: PathBuf,
     /// Additional netlist model aliases claimed by this artifact.
     pub aliases: Vec<String>,
@@ -1687,7 +1688,7 @@ pub struct ProjectVerilogARuntimeRegistration {
 struct PreparedProjectVerilogARegistration {
     key: PathBuf,
     folded_key: String,
-    project_scope: String,
+    authority_scope: String,
     aliases: BTreeSet<String>,
     artifact_fingerprint: [u8; 32],
     entry: CachedVerilogAModel,
@@ -1721,23 +1722,24 @@ fn runtime_artifact_fingerprint(
 }
 
 #[cfg(feature = "veriloga")]
-fn validate_project_runtime_source_key(
+fn validate_sealed_runtime_source_key(
     source_key: &Path,
 ) -> Result<(PathBuf, String, String), String> {
     let key_text = source_key
         .to_str()
-        .ok_or_else(|| "project Verilog-A runtime keys must contain valid UTF-8 text".to_owned())?;
+        .ok_or_else(|| "sealed Verilog-A runtime keys must contain valid UTF-8 text".to_owned())?;
     let components = key_text.split('/').collect::<Vec<_>>();
+    let namespace = components.first().copied().unwrap_or_default();
     if key_text.contains('\\')
         || key_text.chars().any(char::is_control)
         || components.len() < 3
-        || components.first().copied() != Some("__rspice_project__")
+        || !matches!(namespace, "__rspice_project__" | "__rspice_pdk__")
         || components
             .iter()
             .any(|component| component.is_empty() || matches!(*component, "." | ".."))
     {
         return Err(
-            "project Verilog-A runtime keys must be normalized content-addressed virtual paths under __rspice_project__/"
+            "sealed Verilog-A runtime keys must be normalized content-addressed virtual paths under __rspice_project__/ or __rspice_pdk__/"
                 .to_owned(),
         );
     }
@@ -1746,7 +1748,11 @@ fn validate_project_runtime_source_key(
     Ok((
         normalized,
         key_text.to_ascii_lowercase(),
-        components[1].to_ascii_lowercase(),
+        format!(
+            "{}:{}",
+            namespace.to_ascii_lowercase(),
+            components[1].to_ascii_lowercase()
+        ),
     ))
 }
 
@@ -1759,7 +1765,7 @@ fn validate_project_runtime_alias(alias: &str) -> Result<String, String> {
             .any(|character| character.is_control() || character.is_whitespace())
     {
         return Err(format!(
-            "project Verilog-A runtime alias '{alias}' is not a valid model identity"
+            "sealed Verilog-A runtime alias '{alias}' is not a valid model identity"
         ));
     }
     Ok(normalize_model_key(alias))
@@ -1769,8 +1775,8 @@ fn validate_project_runtime_alias(alias: &str) -> Result<String, String> {
 fn prepare_project_veriloga_registration(
     registration: ProjectVerilogARuntimeRegistration,
 ) -> Result<PreparedProjectVerilogARegistration, String> {
-    let (key, folded_key, project_scope) =
-        validate_project_runtime_source_key(&registration.source_key)?;
+    let (key, folded_key, authority_scope) =
+        validate_sealed_runtime_source_key(&registration.source_key)?;
     validate_runtime_artifact_pair(&registration.model, Some(&registration.canonical_ir))?;
 
     let mut aliases = BTreeSet::new();
@@ -1785,7 +1791,7 @@ fn prepare_project_veriloga_registration(
     Ok(PreparedProjectVerilogARegistration {
         key,
         folded_key,
-        project_scope,
+        authority_scope,
         aliases,
         artifact_fingerprint,
         entry: CachedVerilogAModel {
@@ -1807,7 +1813,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
         if let Some(existing) = prepared_by_key.get_mut(&prepared.key) {
             if existing.artifact_fingerprint != prepared.artifact_fingerprint {
                 return Err(format!(
-                    "project Verilog-A runtime key '{}' is claimed by differing artifacts",
+                    "sealed Verilog-A runtime key '{}' is claimed by differing artifacts",
                     prepared.key.display()
                 ));
             }
@@ -1829,19 +1835,19 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
             && existing != runtime.artifact_fingerprint
         {
             return Err(format!(
-                "case-colliding project Verilog-A runtime key '{}' is claimed by differing artifacts",
+                "case-colliding sealed Verilog-A runtime key '{}' is claimed by differing artifacts",
                 runtime.key.display()
             ));
         }
         for alias in &runtime.aliases {
             if let Some(existing) = scoped_aliases.insert(
-                (runtime.project_scope.as_str(), alias.as_str()),
+                (runtime.authority_scope.as_str(), alias.as_str()),
                 runtime.artifact_fingerprint,
             ) && existing != runtime.artifact_fingerprint
             {
                 return Err(format!(
-                    "project Verilog-A alias '{alias}' is claimed by differing artifacts in project '{}'",
-                    runtime.project_scope
+                    "sealed Verilog-A alias '{alias}' is claimed by differing artifacts in authority scope '{}'",
+                    runtime.authority_scope
                 ));
             }
         }
@@ -1869,10 +1875,10 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     // Compare the whole candidate set against the live registry while holding
     // the one cache lock. Nothing can change between validation and commit.
     for (cached_key, cached_entry) in cache.iter() {
-        if !is_project_veriloga_virtual_path(cached_key) {
+        if !is_sealed_veriloga_virtual_path(cached_key) {
             continue;
         }
-        let (_, cached_folded_key, _) = validate_project_runtime_source_key(cached_key)?;
+        let (_, cached_folded_key, _) = validate_sealed_runtime_source_key(cached_key)?;
         let cached_fingerprint = runtime_artifact_fingerprint(
             cached_entry.model.as_ref(),
             cached_entry.canonical_ir.as_deref(),
@@ -1882,7 +1888,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
                 && cached_fingerprint != runtime.artifact_fingerprint
             {
                 return Err(format!(
-                    "project Verilog-A runtime key '{}' collides with a differing installed artifact",
+                    "sealed Verilog-A runtime key '{}' collides with a differing installed artifact",
                     runtime.key.display()
                 ));
             }
@@ -1898,7 +1904,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
             )?;
             if installed_fingerprint != runtime.artifact_fingerprint {
                 return Err(format!(
-                    "project Verilog-A runtime key '{}' is already installed with a differing artifact",
+                    "sealed Verilog-A runtime key '{}' is already installed with a differing artifact",
                     runtime.key.display()
                 ));
             }
@@ -1923,15 +1929,15 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     cache.try_replace_batch(replacements, max_shared_cache_bytes)
 }
 
-/// Atomically register a set of exact in-memory project-owned Verilog-A
-/// runtimes for this process session.
+/// Atomically register a set of exact in-memory project- or signed-PDK-owned
+/// Verilog-A runtimes for this process session.
 ///
 /// The entire set is validated, collision-checked, and budgeted before the
 /// shared cache changes. Duplicate or case-colliding keys and model aliases
 /// may only identify byte-for-byte identical runtime artifacts. Any validation,
 /// collision, allocation, or resource failure leaves the cache unchanged.
 /// File-backed cache persistence is intentionally bypassed for these sealed
-/// project artifacts.
+/// sealed artifacts.
 #[cfg(feature = "veriloga")]
 pub fn register_project_veriloga_runtimes_for_session(
     registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,

@@ -279,38 +279,142 @@ pub(super) fn resolve_supported_model_params_upper_map(
     Ok(params)
 }
 
-fn model_binning_param(model_def: &crate::netlist::ModelDef, name: &str) -> Option<f64> {
-    model_param(&model_def.params, &[name])
+/// One resolved axis of a geometry-bin card.
+///
+/// Bounds are expressed in the netlist's canonical SI domain. An absent pair
+/// means that axis does not participate in selection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModelBinAxisRange {
+    pub min: Option<f64>,
+    pub max: Option<f64>,
 }
 
-fn model_matches_geometry(
-    model_def: &crate::netlist::ModelDef,
-    instance_params: &[(String, f64)],
-) -> bool {
-    let lmin = model_binning_param(model_def, "LMIN");
-    let lmax = model_binning_param(model_def, "LMAX");
-    let wmin = model_binning_param(model_def, "WMIN");
-    let wmax = model_binning_param(model_def, "WMAX");
-    let nfinmin = model_binning_param(model_def, "NFINMIN");
-    let nfinmax = model_binning_param(model_def, "NFINMAX");
+/// Fully evaluated geometry bounds for one model card.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModelBinCardGeometry {
+    pub length: ModelBinAxisRange,
+    pub width: ModelBinAxisRange,
+    pub nfin: ModelBinAxisRange,
+}
 
-    if lmin.is_none()
-        && lmax.is_none()
-        && wmin.is_none()
-        && wmax.is_none()
-        && nfinmin.is_none()
-        && nfinmax.is_none()
-    {
-        return false;
+/// One source-ordered model card participating in geometry selection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelBinCardInspection {
+    pub model: String,
+    pub family: String,
+    pub model_type: String,
+    pub declaration_order: usize,
+    pub geometry: ModelBinCardGeometry,
+}
+
+/// Why one MOS instance selected its reported model card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelBinSelectionKind {
+    /// The instance named the complete card directly.
+    ExactCard,
+    /// Exactly one family card contained the instance geometry.
+    FamilyMatch,
+    /// Multiple inclusive cards met only on a shared boundary; source order
+    /// selected the first declaration.
+    SharedBoundary,
+}
+
+/// Authoritative geometry-bin decision for one flattened MOS instance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelBinInstanceInspection {
+    pub element: String,
+    pub requested_model: String,
+    pub selected_model: String,
+    pub selection: ModelBinSelectionKind,
+    pub match_count: usize,
+    pub length: Option<f64>,
+    pub width: Option<f64>,
+    pub nfin: Option<f64>,
+    pub multiplier: Option<f64>,
+}
+
+/// Complete successful model-bin inspection of one exact parsed netlist.
+///
+/// Construction fails instead of returning a partial receipt when any card is
+/// malformed or any family selection is ambiguous/uncovered. Consequently a
+/// retained receipt is positive evidence that every reported decision used the
+/// same resolver as circuit construction.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ModelBinInspection {
+    pub cards: Vec<ModelBinCardInspection>,
+    pub instances: Vec<ModelBinInstanceInspection>,
+}
+
+impl ModelBinCardGeometry {
+    pub(super) fn resolve(
+        netlist: &Netlist,
+        model_def: &crate::netlist::ModelDef,
+        temperature_kelvin: f64,
+    ) -> Result<Option<Self>, SimulationError> {
+        const BOUNDS: [&str; 6] = ["LMIN", "LMAX", "WMIN", "WMAX", "NFINMIN", "NFINMAX"];
+        if !BOUNDS
+            .iter()
+            .any(|name| model_parameter_is_declared(model_def, name))
+        {
+            return Ok(None);
+        }
+
+        let current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
+        let tnom_c = netlist.options.tnom.unwrap_or(27.0);
+        let context = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c);
+        let bound = |name: &str| -> Result<Option<f64>, SimulationError> {
+            if !model_parameter_is_declared(model_def, name) {
+                return Ok(None);
+            }
+            let value = resolve_model_param(model_def, &[name], &context)?.ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Model '{}' geometry-bin bound {} must resolve to one finite scalar numeric value",
+                    model_def.name, name
+                ))
+            })?;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "Model '{}' geometry-bin bound {} is non-finite ({value})",
+                    model_def.name, name
+                )));
+            }
+            Ok(Some(value))
+        };
+        let geometry = Self {
+            length: ModelBinAxisRange {
+                min: bound("LMIN")?,
+                max: bound("LMAX")?,
+            },
+            width: ModelBinAxisRange {
+                min: bound("WMIN")?,
+                max: bound("WMAX")?,
+            },
+            nfin: ModelBinAxisRange {
+                min: bound("NFINMIN")?,
+                max: bound("NFINMAX")?,
+            },
+        };
+        validate_model_bin_range(model_def, "L", geometry.length)?;
+        validate_model_bin_range(model_def, "W", geometry.width)?;
+        validate_model_bin_range(model_def, "NFIN", geometry.nfin)?;
+        Ok(Some(geometry))
     }
 
-    let length = instance_param(instance_params, &["L", "LENGTH"]);
-    let width = instance_param(instance_params, &["W", "WIDTH"]);
-    let nfin = instance_param(instance_params, &["NFIN"]);
+    fn matches(self, instance_params: &[(String, f64)]) -> bool {
+        let length = instance_param(instance_params, &["L", "LENGTH"]);
+        let width = instance_param(instance_params, &["W", "WIDTH"]);
+        let nfin = instance_param(instance_params, &["NFIN"]);
 
-    bin_range_contains(length, lmin, lmax)
-        && bin_range_contains(width, wmin, wmax)
-        && bin_range_contains(nfin, nfinmin, nfinmax)
+        bin_range_contains(length, self.length.min, self.length.max)
+            && bin_range_contains(width, self.width.min, self.width.max)
+            && bin_range_contains(nfin, self.nfin.min, self.nfin.max)
+    }
+
+    fn overlaps_with_positive_area(self, other: Self) -> bool {
+        bin_ranges_overlap_with_positive_area(self.length, other.length)
+            && bin_ranges_overlap_with_positive_area(self.width, other.width)
+            && bin_ranges_overlap_with_positive_area(self.nfin, other.nfin)
+    }
 }
 
 /// Absolute slack on a bin boundary comparison, in metres.
@@ -324,6 +428,54 @@ const BIN_BOUND_TOLERANCE: f64 = 1e-9;
 
 fn bin_bound_equal(left: f64, right: f64) -> bool {
     (left - right).abs() < BIN_BOUND_TOLERANCE
+}
+
+fn model_parameter_is_declared(model_def: &crate::netlist::ModelDef, name: &str) -> bool {
+    model_def
+        .params
+        .iter()
+        .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        || model_def
+            .expr_params
+            .iter()
+            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        || model_def
+            .string_params
+            .iter()
+            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        || model_def
+            .string_vector_params
+            .iter()
+            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        || model_def
+            .real_vector_params
+            .iter()
+            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        || model_def
+            .real_vector_expr_params
+            .iter()
+            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        || model_def
+            .integer_vector_params
+            .iter()
+            .any(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+}
+
+fn validate_model_bin_range(
+    model_def: &crate::netlist::ModelDef,
+    axis: &str,
+    range: ModelBinAxisRange,
+) -> Result<(), SimulationError> {
+    if let (Some(min), Some(max)) = (range.min, range.max)
+        && min > max
+        && !bin_bound_equal(min, max)
+    {
+        return Err(SimulationError::Circuit(format!(
+            "Model '{}' has a reversed geometry-bin range for {axis}: minimum {min} exceeds maximum {max}",
+            model_def.name
+        )));
+    }
+    Ok(())
 }
 
 /// ngspice's `in_range`: **inclusive at both ends**, within the tolerance
@@ -342,6 +494,24 @@ fn bin_range_contains(value: Option<f64>, min: Option<f64>, max: Option<f64>) ->
     };
     min.is_none_or(|min| value > min || bin_bound_equal(value, min))
         && max.is_none_or(|max| value < max || bin_bound_equal(value, max))
+}
+
+fn bin_ranges_overlap_with_positive_area(
+    left: ModelBinAxisRange,
+    right: ModelBinAxisRange,
+) -> bool {
+    let minimum = match (left.min, right.min) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (left, right) => left.or(right),
+    };
+    let maximum = match (left.max, right.max) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (left, right) => left.or(right),
+    };
+    match (minimum, maximum) {
+        (Some(minimum), Some(maximum)) => maximum - minimum > BIN_BOUND_TOLERANCE,
+        _ => true,
+    }
 }
 
 pub(super) fn resolve_bjt_type_from_model(model_type: &str) -> Option<crate::netlist::BjtType> {
@@ -435,30 +605,106 @@ pub(super) fn find_model_def<'a>(
         .find(|m| m.name.eq_ignore_ascii_case(model_name))
 }
 
-pub(super) fn find_binned_model_def<'a>(
+pub(super) fn model_bin_family_name(model_name: &str) -> &str {
+    model_name
+        .rsplit_once('.')
+        .map(|(family, _)| family)
+        .filter(|family| !family.is_empty())
+        .unwrap_or(model_name)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ResolvedModelBinMatch<'a> {
+    pub model: &'a crate::netlist::ModelDef,
+    pub selection: ModelBinSelectionKind,
+    pub match_count: usize,
+}
+
+pub(super) fn resolve_binned_model_def<'a>(
     netlist: &'a Netlist,
+    element_name: &str,
     model_name: &str,
     instance_params: &[(String, f64)],
-) -> Option<&'a crate::netlist::ModelDef> {
-    let exact = find_model_def(netlist, model_name);
-    if exact.is_some() {
-        return exact;
+    temperature_kelvin: f64,
+) -> Result<Option<ResolvedModelBinMatch<'a>>, SimulationError> {
+    if let Some(exact) = find_model_def(netlist, model_name) {
+        return Ok(Some(ResolvedModelBinMatch {
+            model: exact,
+            selection: ModelBinSelectionKind::ExactCard,
+            match_count: 1,
+        }));
     }
 
     let prefix = format!("{model_name}.");
 
-    // First match in declaration order, which is ngspice's rule
-    // (`INPgetModBin` walks the model table and returns on the first bin whose
-    // ranges contain the geometry). It is what disambiguates the overlap that
-    // inclusive bounds create: a device sitting exactly on a shared boundary
-    // takes the *lower* bin, because foundry tables are written in ascending
-    // order. Choosing by some notion of "most specific bin" instead silently
-    // picks the upper one and swaps in a different parameter set.
-    netlist.models.iter().find(|model_def| {
-        model_def.name.len() > prefix.len()
-            && model_def.name[..prefix.len()].eq_ignore_ascii_case(&prefix)
-            && model_matches_geometry(model_def, instance_params)
-    })
+    // Preserve declaration order. Inclusive bounds legitimately produce two
+    // matches when adjacent bins touch on an edge; the first card wins there.
+    // A positive-area overlap is materially different: more than one model is
+    // valid throughout a finite region, so selecting one silently would make
+    // the simulated device depend on source order instead of geometry.
+    let mut matches = Vec::new();
+    let mut saw_binned_candidate = false;
+    for model_def in &netlist.models {
+        if model_def.name.len() <= prefix.len()
+            || !model_def.name[..prefix.len()].eq_ignore_ascii_case(&prefix)
+        {
+            continue;
+        }
+        let Some(geometry) = ModelBinCardGeometry::resolve(netlist, model_def, temperature_kelvin)?
+        else {
+            continue;
+        };
+        saw_binned_candidate = true;
+        if geometry.matches(instance_params) {
+            matches.push((model_def, geometry));
+        }
+    }
+
+    let Some((winner, _)) = matches.first().copied() else {
+        if saw_binned_candidate {
+            return Err(SimulationError::Circuit(format!(
+                "MOSFET '{element_name}' geometry is uncovered by model family '{model_name}'; no declared bin card matches every required L, W, and NFIN bound",
+            )));
+        }
+        return Ok(None);
+    };
+    for (left_index, (left_model, left_geometry)) in matches.iter().enumerate() {
+        for (right_model, right_geometry) in matches.iter().skip(left_index + 1) {
+            if left_geometry.overlaps_with_positive_area(*right_geometry) {
+                return Err(SimulationError::Circuit(format!(
+                    "MOSFET '{element_name}' model family '{model_name}' is ambiguous for its declared geometry: matching cards '{}' and '{}' overlap across a positive-area bin region; correct the model-bin bounds before simulation",
+                    left_model.name, right_model.name
+                )));
+            }
+        }
+    }
+
+    Ok(Some(ResolvedModelBinMatch {
+        model: winner,
+        selection: if matches.len() == 1 {
+            ModelBinSelectionKind::FamilyMatch
+        } else {
+            ModelBinSelectionKind::SharedBoundary
+        },
+        match_count: matches.len(),
+    }))
+}
+
+pub(super) fn find_binned_model_def<'a>(
+    netlist: &'a Netlist,
+    element_name: &str,
+    model_name: &str,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<Option<&'a crate::netlist::ModelDef>, SimulationError> {
+    resolve_binned_model_def(
+        netlist,
+        element_name,
+        model_name,
+        instance_params,
+        temperature_kelvin,
+    )
+    .map(|resolved| resolved.map(|resolved| resolved.model))
 }
 
 pub(super) fn expected_model_type_text(expected_types: &[&str]) -> String {

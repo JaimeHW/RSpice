@@ -872,7 +872,10 @@ mod tests {
             ".model y ltra r=1 g=0 c=1p length=1",
         ] {
             let resolved = resolve_test_tline(&format!("title\n{line}\n.end\n"));
-            assert!(resolved.is_finite_rc(), "{line} should resolve as finite RC");
+            assert!(
+                resolved.is_finite_rc(),
+                "{line} should resolve as finite RC"
+            );
             assert_eq!(resolved.r, Some(1.0));
             assert_eq!(resolved.c, Some(1e-12));
             assert_eq!(resolved.len, Some(1.0));
