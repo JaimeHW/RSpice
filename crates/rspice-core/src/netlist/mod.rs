@@ -2961,7 +2961,8 @@ mod tests {
         let expected = [100.0, 10_000.0, 50_000.0];
         assert_eq!(netlist.measurements.len(), expected.len());
         for (statement, expected_at) in netlist.measurements.iter().zip(expected) {
-            let crate::netlist::measure::MeasureType::Find { at, .. } = statement.measure_type else {
+            let crate::netlist::measure::MeasureType::Find { at, .. } = statement.measure_type
+            else {
                 panic!(
                     "expected FIND measurement, got {:?}",
                     statement.measure_type
@@ -2998,7 +2999,10 @@ mod tests {
                 );
                 assert_eq!(*from, Some(4.0));
                 assert_eq!(*to, Some(2.0));
-                assert_eq!(condition.occurrence.edge, crate::netlist::measure::EdgeType::Cross);
+                assert_eq!(
+                    condition.occurrence.edge,
+                    crate::netlist::measure::EdgeType::Cross
+                );
                 assert_eq!(condition.occurrence.number, 2);
             }
             other => panic!("expected standalone WHEN measurement, got {other:?}"),
@@ -3030,7 +3034,10 @@ mod tests {
                 when: Some(condition),
                 ..
             } => {
-                assert_eq!(condition.occurrence.edge, crate::netlist::measure::EdgeType::Rise);
+                assert_eq!(
+                    condition.occurrence.edge,
+                    crate::netlist::measure::EdgeType::Rise
+                );
                 assert_eq!(condition.occurrence.number, 2);
             }
             other => panic!("expected FIND-WHEN measurement, got {other:?}"),
@@ -3073,7 +3080,10 @@ mod tests {
                     condition.right,
                     crate::netlist::measure::MeasureOperand::Waveform("{V(two)+1}".to_string())
                 );
-                assert_eq!(condition.occurrence.edge, crate::netlist::measure::EdgeType::Fall);
+                assert_eq!(
+                    condition.occurrence.edge,
+                    crate::netlist::measure::EdgeType::Fall
+                );
                 assert_eq!(condition.occurrence.number, -1);
             }
             other => panic!("expected conditional target, got {other:?}"),
@@ -3154,12 +3164,14 @@ mod tests {
         )
         .expect("point measurement TD options parse");
 
-        let crate::netlist::measure::MeasureType::Find { td, .. } = &netlist.measurements[0].measure_type
+        let crate::netlist::measure::MeasureType::Find { td, .. } =
+            &netlist.measurements[0].measure_type
         else {
             panic!("expected FIND measurement");
         };
         assert!(td.is_some_and(|td| (td - 2.0e-9).abs() < 1.0e-24));
-        let crate::netlist::measure::MeasureType::When { td, .. } = &netlist.measurements[1].measure_type
+        let crate::netlist::measure::MeasureType::When { td, .. } =
+            &netlist.measurements[1].measure_type
         else {
             panic!("expected WHEN measurement");
         };
@@ -3212,7 +3224,10 @@ mod tests {
             } => {
                 assert_eq!(measured, "{V(one)*V(one)}");
                 assert_eq!(comparison, "V(ONE)");
-                assert_eq!(*norm, crate::netlist::measure::ErrorFunctionNorm::RootMeanSquare);
+                assert_eq!(
+                    *norm,
+                    crate::netlist::measure::ErrorFunctionNorm::RootMeanSquare
+                );
                 assert_eq!((*from, *to), (Some(4.0), Some(0.0)));
                 assert_eq!((*minval, *ymin, *ymax), (1.5, 2.5, 3.5));
                 assert_eq!(*weight, Some(2.0));
@@ -3221,7 +3236,10 @@ mod tests {
         }
         match &netlist.measurements[1].measure_type {
             crate::netlist::measure::MeasureType::ErrorFunction { norm, ymin, .. } => {
-                assert_eq!(*norm, crate::netlist::measure::ErrorFunctionNorm::MeanAbsolute);
+                assert_eq!(
+                    *norm,
+                    crate::netlist::measure::ErrorFunctionNorm::MeanAbsolute
+                );
                 assert_eq!(*ymin, 2.5);
             }
             other => panic!("expected ERR2 measurement, got {other:?}"),
@@ -3281,7 +3299,10 @@ mod tests {
 
         match &netlist.measurements[0].measure_type {
             crate::netlist::measure::MeasureType::Max { output, .. } => {
-                assert_eq!(*output, crate::netlist::measure::ExtremaOutput::IndependentAxis)
+                assert_eq!(
+                    *output,
+                    crate::netlist::measure::ExtremaOutput::IndependentAxis
+                )
             }
             other => panic!("expected MAX measurement, got {other:?}"),
         }

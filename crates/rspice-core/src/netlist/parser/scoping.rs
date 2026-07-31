@@ -255,8 +255,7 @@ pub(super) fn rewrite_scoped_references(
             | ElementKind::ISwitch { model, .. }
             | ElementKind::Xspice { model, .. }
             | ElementKind::Coupling {
-                model: Some(model),
-                ..
+                model: Some(model), ..
             } => Some(model),
             ElementKind::TransmissionLine { model, .. } => model.as_mut(),
             _ => None,

@@ -1404,7 +1404,12 @@ fn is_portable_absolute_source_path(path: &Path) -> bool {
     if path.is_absolute() {
         return true;
     }
-    is_windows_source_path_literal(&path.to_string_lossy().replace('\\', "/"))
+    let portable = path.to_string_lossy().replace('\\', "/");
+    // `Path::is_absolute` follows the current host. A project-owned browser
+    // source has a POSIX virtual identity even when the project is inspected
+    // or tested on Windows, where `C:\...` is the only natively absolute
+    // spelling. Preserve that cross-platform absolute identity explicitly.
+    portable.starts_with('/') || is_windows_source_path_literal(&portable)
 }
 
 fn is_windows_source_path_literal(path: &str) -> bool {
@@ -1924,9 +1929,10 @@ R1 1 0 {selected}
         .expect("write mislabelled .endl fixture");
         let deck_path = dir.join("deck.cir");
 
-        for (section, expected, rejected) in
-            [("dio", "junction=1", "sheet=2"), ("res", "sheet=2", "junction=1")]
-        {
+        for (section, expected, rejected) in [
+            ("dio", "junction=1", "sheet=2"),
+            ("res", "sheet=2", "junction=1"),
+        ] {
             let expanded = IncludeProcessor::new(&deck_path)
                 .expand_content(
                     &format!(".lib 'corners.lib' {section}\nR1 1 0 1\n"),
@@ -2038,6 +2044,25 @@ R1 1 0 {selected}
             .expect("foreign desktop identity resolves entirely in memory");
 
         assert!(expanded.contains("DPORT"), "{expanded}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sealed_bundle_accepts_browser_posix_source_identities_off_host() {
+        let root = PathBuf::from("/rspice-browser/model-sources/root.lib");
+        let bundle = sealed_bundle(
+            vec![(
+                root.clone(),
+                ".lib TT\n.model NPORT NMOS (LEVEL=1)\n.endl TT\n".to_owned(),
+            )],
+            Vec::new(),
+        );
+
+        let expanded = IncludeProcessor::new_sealed(&root, bundle)
+            .process_sealed_root(&root, Some("TT"))
+            .expect("browser virtual identity resolves entirely in memory");
+
+        assert!(expanded.contains("NPORT"), "{expanded}");
     }
 
     #[test]

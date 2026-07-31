@@ -289,15 +289,14 @@ pub(super) fn process_line(
             let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
             let mut stream = TokenStream::new(tokens);
             stream.advance(); // skip .MODEL
-            let mut model =
-                parse_model_definition(
-                    &mut stream,
-                    line_num,
-                    &frame.local_params,
-                    models,
-                    true,
-                    model_bare_ident_deferrals,
-                )?;
+            let mut model = parse_model_definition(
+                &mut stream,
+                line_num,
+                &frame.local_params,
+                models,
+                true,
+                model_bare_ident_deferrals,
+            )?;
             let local_name = model.name.clone();
             let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
             frame

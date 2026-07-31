@@ -3383,8 +3383,7 @@ fn validate_coupling_model_references_in_elements_with_abort(
     for (index, element) in elements.iter().enumerate() {
         poll_parse_abort(abort, index)?;
         let ElementKind::Coupling {
-            model: Some(model),
-            ..
+            model: Some(model), ..
         } = &element.kind
         else {
             continue;
@@ -3517,9 +3516,7 @@ fn scan_temperature_option_line(
                 state.params.set("TEMPER", parsed);
                 state.params.set(
                     "VT",
-                    crate::constants::thermal_voltage(
-                        crate::constants::celsius_to_kelvin(parsed),
-                    ),
+                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(parsed)),
                 );
             }
             "TNOM" => {

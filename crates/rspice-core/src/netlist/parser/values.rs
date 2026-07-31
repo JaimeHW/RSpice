@@ -320,7 +320,7 @@ pub(super) fn parse_model_params(
                             real_vector: real_vector_params,
                             real_vector_expr: real_vector_expr_params,
                             integer_vector: integer_vector_params,
-                    bare_ident_deferrals,
+                            bare_ident_deferrals,
                         });
                     }
                 }
@@ -346,7 +346,7 @@ pub(super) fn parse_model_params(
                         real_vector: real_vector_params,
                         real_vector_expr: real_vector_expr_params,
                         integer_vector: integer_vector_params,
-                    bare_ident_deferrals,
+                        bare_ident_deferrals,
                     });
                 }
                 return Err(ParseError::Syntax {
@@ -683,7 +683,7 @@ pub(super) fn parse_model_params(
         real_vector: real_vector_params,
         real_vector_expr: real_vector_expr_params,
         integer_vector: integer_vector_params,
-                    bare_ident_deferrals,
+        bare_ident_deferrals,
     })
 }
 
@@ -2217,10 +2217,7 @@ mod tests {
     /// the subcircuit name and silently reconnect the instance.
     #[test]
     fn assignment_coalescing_leaves_positional_fields_alone() {
-        assert_eq!(
-            coalesce("x1 a b c sub"),
-            vec!["x1", "a", "b", "c", "sub"]
-        );
+        assert_eq!(coalesce("x1 a b c sub"), vec!["x1", "a", "b", "c", "sub"]);
     }
 
     /// Braced and quoted values arrive pre-grouped from `split_spice_fields`,
@@ -2268,8 +2265,16 @@ mod tests {
         assert!(subckt_name.eq_ignore_ascii_case("myamp"), "{subckt_name}");
         assert_eq!(instance.nodes, vec!["ND", "NG", "0", "0"]);
         assert_eq!(params.len(), 2, "{params:?}");
-        assert!(params.iter().any(|(name, _)| name.eq_ignore_ascii_case("W")));
-        assert!(params.iter().any(|(name, _)| name.eq_ignore_ascii_case("L")));
+        assert!(
+            params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("W"))
+        );
+        assert!(
+            params
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("L"))
+        );
     }
 
     #[test]
