@@ -345,11 +345,14 @@ impl LibraryManager {
             .find(|m| m.name.to_uppercase() == upper)
     }
 
-    /// Select the best matching model for given geometry and model type
+    /// Legacy catalogue-only geometry lookup.
     ///
-    /// This is the core PDK binning API. Given a model name prefix (e.g., "nch")
-    /// and device geometry (W, L), it finds the model bin whose lmin/lmax/wmin/wmax
-    /// range contains the specified geometry.
+    /// This method predates executable-netlist model resolution and cannot
+    /// represent declaration order, expression-valued bounds, NFIN, scoped
+    /// models, or fail-closed ambiguity/uncovered errors. It must never be used
+    /// to predict or select a simulation model. Parse the executable
+    /// [`crate::Netlist`] and use [`crate::Engine::inspect_model_bins`] for an
+    /// authoritative decision receipt.
     ///
     /// # Arguments
     /// * `prefix` - Model name prefix to search for (e.g., "nch", "pch_hvt")
@@ -358,14 +361,18 @@ impl LibraryManager {
     /// * `model_type` - Expected model type (e.g., Nmos, Pmos)
     ///
     /// # Returns
-    /// * `Some(&ModelDefinition)` - Best matching model for the geometry
+    /// * `Some(&ModelDefinition)` - Catalogue heuristic result
     /// * `None` - No matching bin found
     ///
-    /// # Selection Algorithm
+    /// # Legacy selection algorithm
     /// 1. Find all models with matching prefix and type
     /// 2. Filter to those whose binning range contains (W, L)
     /// 3. If multiple match, prefer the one with tightest bounds (smallest bin)
     /// 4. If no binned models match, fall back to unbinned model with same prefix
+    #[deprecated(
+        since = "0.1.0",
+        note = "catalogue heuristic only; use Engine::inspect_model_bins on the executable Netlist"
+    )]
     pub fn select_model_for_geometry(
         &self,
         prefix: &str,

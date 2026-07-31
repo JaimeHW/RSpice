@@ -214,12 +214,17 @@ pub struct ParsedSubcircuit {
     pub pins: Vec<String>,
     /// Parameters with default values
     pub parameters: HashMap<String, f64>,
+    /// Exact source tokens for every parameter default, including expressions
+    /// and quoted strings that cannot be reduced to a numeric constant.
+    pub parameter_defaults: HashMap<String, String>,
     /// Full subcircuit content (for expansion)
     pub content: String,
     /// Description from comments
     pub description: Option<String>,
     /// Source file path
     pub source_file: Option<PathBuf>,
+    /// One-based physical line containing the `.SUBCKT` declaration.
+    pub source_line: Option<usize>,
 }
 
 impl ParsedSubcircuit {
@@ -229,9 +234,11 @@ impl ParsedSubcircuit {
             name: name.into(),
             pins,
             parameters: HashMap::new(),
+            parameter_defaults: HashMap::new(),
             content: String::new(),
             description: None,
             source_file: None,
+            source_line: None,
         }
     }
 
@@ -502,8 +509,8 @@ impl LibParser {
         let mut subckt_content: Option<(ParsedSubcircuit, Vec<String>, usize)> = None;
         let mut last_comment = String::new();
 
-        for (line_num, line) in lines.iter().enumerate() {
-            let line_number = line_num + 1;
+        for (line_number, line) in &lines {
+            let line_number = *line_number;
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -567,7 +574,7 @@ impl LibParser {
 
             // Handle .subckt start
             if upper.starts_with(".SUBCKT") {
-                if let Some(mut subckt) = self.parse_subckt_start(line) {
+                if let Some(mut subckt) = self.parse_subckt_start(line, line_number) {
                     subckt.description = if last_comment.is_empty() {
                         None
                     } else {
@@ -601,22 +608,51 @@ impl LibParser {
                 continue;
             }
 
-            // Handle .model
-            if upper.starts_with(".MODEL") {
-                if let Some(mut model) = self.parse_model_line(line, line_num + 1) {
-                    model.description = if last_comment.is_empty() {
-                        None
-                    } else {
-                        Some(last_comment.clone())
-                    };
-                    model.source_file = self.current_file.clone();
-                    model.source_line = Some(line_number);
+            // Handle .model. Match the complete directive token so a vendor
+            // extension such as `.modelcheck` is not mistaken for a model.
+            if Self::directive_rest(line, ".model").is_some() {
+                match self.parse_model_line(line) {
+                    Ok(mut model) => {
+                        model.description = if last_comment.is_empty() {
+                            None
+                        } else {
+                            Some(last_comment.clone())
+                        };
+                        model.source_file = self.current_file.clone();
+                        model.source_line = Some(line_number);
 
-                    if let Some(ref mut section) = current_section {
-                        section.models.push(model);
-                    } else {
-                        self.top_level_models.push(model);
+                        let duplicate_line = if let Some(section) = current_section.as_ref() {
+                            section
+                                .models
+                                .iter()
+                                .find(|existing| existing.name.eq_ignore_ascii_case(&model.name))
+                                .and_then(|existing| existing.source_line)
+                        } else {
+                            self.top_level_models
+                                .iter()
+                                .find(|existing| existing.name.eq_ignore_ascii_case(&model.name))
+                                .and_then(|existing| existing.source_line)
+                        };
+                        if let Some(original_line) = duplicate_line {
+                            self.errors.push(ParseError {
+                                message: format!(
+                                    "Duplicate .model name '{}' in the same scope (first declared at line {original_line})",
+                                    model.name
+                                ),
+                                file: self.current_file.clone(),
+                                line: Some(line_number),
+                            });
+                        } else if let Some(ref mut section) = current_section {
+                            section.models.push(model);
+                        } else {
+                            self.top_level_models.push(model);
+                        }
                     }
+                    Err(message) => self.errors.push(ParseError {
+                        message,
+                        file: self.current_file.clone(),
+                        line: Some(line_number),
+                    }),
                 }
                 last_comment.clear();
             }
@@ -648,11 +684,12 @@ impl LibParser {
     }
 
     /// Preprocess content: handle line continuations
-    fn preprocess_lines(&self, content: &str) -> Vec<String> {
+    fn preprocess_lines(&self, content: &str) -> Vec<(usize, String)> {
         let mut result = Vec::new();
         let mut current_line = String::new();
+        let mut current_line_number = 0;
 
-        for line in content.lines() {
+        for (line_index, line) in content.lines().enumerate() {
             let trimmed = line.trim();
 
             // Line continuation with +
@@ -661,14 +698,15 @@ impl LibParser {
                 current_line.push_str(trimmed.trim_start_matches('+').trim());
             } else {
                 if !current_line.is_empty() {
-                    result.push(std::mem::take(&mut current_line));
+                    result.push((current_line_number, std::mem::take(&mut current_line)));
                 }
+                current_line_number = line_index + 1;
                 current_line = trimmed.to_string();
             }
         }
 
         if !current_line.is_empty() {
-            result.push(current_line);
+            result.push((current_line_number, current_line));
         }
 
         result
@@ -928,83 +966,210 @@ impl LibParser {
     }
 
     /// Parse .subckt start line
-    fn parse_subckt_start(&self, line: &str) -> Option<ParsedSubcircuit> {
+    fn parse_subckt_start(&self, line: &str, line_number: usize) -> Option<ParsedSubcircuit> {
         // Format: .SUBCKT name pin1 pin2 ... [param1=val1 ...]
-        let rest = line
-            .trim()
-            .strip_prefix(".SUBCKT")
-            .or_else(|| line.trim().strip_prefix(".subckt"))
-            .or_else(|| line.trim().strip_prefix(".Subckt"))?
-            .trim();
-
-        let mut parts = rest.split_whitespace();
-        let name = parts.next()?.to_string();
+        let mut directive_and_rest = line.trim().splitn(2, char::is_whitespace);
+        if !directive_and_rest
+            .next()
+            .is_some_and(|directive| directive.eq_ignore_ascii_case(".subckt"))
+        {
+            return None;
+        }
+        let fields = Self::tokenize_subcircuit_header(directive_and_rest.next()?.trim());
+        let name = fields.first()?.to_string();
 
         let mut pins = Vec::new();
         let mut params = HashMap::new();
-
-        for part in parts {
-            if part.contains('=') {
-                // Parameter with default value
-                let mut kv = part.splitn(2, '=');
-                if let (Some(key), Some(val)) = (kv.next(), kv.next())
-                    && let Ok(v) = Self::parse_spice_number(val)
-                {
-                    params.insert(key.to_string(), v);
-                }
-            } else {
-                pins.push(part.to_string());
+        let mut parameter_defaults = HashMap::new();
+        let mut parameter_mode = false;
+        let mut index = 1;
+        while index < fields.len() {
+            let field = fields[index].as_str();
+            if field.eq_ignore_ascii_case("params:")
+                || field.eq_ignore_ascii_case("param:")
+                || field.eq_ignore_ascii_case("parameters:")
+            {
+                parameter_mode = true;
+                index += 1;
+                continue;
             }
+
+            let assignment = if let Some((key, value)) = field.split_once('=') {
+                parameter_mode = true;
+                if value.is_empty() && index + 1 < fields.len() {
+                    index += 1;
+                    Some((key, fields[index].as_str()))
+                } else {
+                    Some((key, value))
+                }
+            } else if index + 2 < fields.len() && fields[index + 1] == "=" {
+                parameter_mode = true;
+                let value = fields[index + 2].as_str();
+                index += 2;
+                Some((field, value))
+            } else {
+                None
+            };
+
+            if let Some((key, value)) = assignment {
+                let key = key.trim();
+                let value = value.trim();
+                if !key.is_empty() && !value.is_empty() {
+                    parameter_defaults.insert(key.to_string(), value.to_string());
+                    if let Ok(value) = Self::parse_spice_number(value) {
+                        params.insert(key.to_string(), value);
+                    }
+                }
+            } else if !parameter_mode {
+                pins.push(field.to_string());
+            }
+            index += 1;
         }
 
         let mut subckt = ParsedSubcircuit::new(name, pins);
         subckt.parameters = params;
+        subckt.parameter_defaults = parameter_defaults;
+        subckt.source_line = Some(line_number);
         Some(subckt)
     }
 
-    /// Parse .model line with full parameter extraction
-    fn parse_model_line(&self, line: &str, _line_num: usize) -> Option<ParsedModel> {
+    /// Split one folded `.SUBCKT` header while keeping quoted, braced, and
+    /// parenthesized parameter expressions intact.
+    fn tokenize_subcircuit_header(header: &str) -> Vec<String> {
+        let mut fields = Vec::new();
+        let mut current = String::new();
+        let mut quote = None;
+        let mut escaped = false;
+        let mut brace_depth = 0usize;
+        let mut paren_depth = 0usize;
+
+        for character in header.chars() {
+            if escaped {
+                current.push(character);
+                escaped = false;
+                continue;
+            }
+            if quote.is_some() && character == '\\' {
+                current.push(character);
+                escaped = true;
+                continue;
+            }
+            if let Some(delimiter) = quote {
+                current.push(character);
+                if character == delimiter {
+                    quote = None;
+                }
+                continue;
+            }
+            match character {
+                '\'' | '"' => {
+                    quote = Some(character);
+                    current.push(character);
+                }
+                '{' => {
+                    brace_depth += 1;
+                    current.push(character);
+                }
+                '}' => {
+                    brace_depth = brace_depth.saturating_sub(1);
+                    current.push(character);
+                }
+                '(' => {
+                    paren_depth += 1;
+                    current.push(character);
+                }
+                ')' => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    current.push(character);
+                }
+                character if character.is_whitespace() && brace_depth == 0 && paren_depth == 0 => {
+                    if !current.is_empty() {
+                        fields.push(std::mem::take(&mut current));
+                    }
+                }
+                _ => current.push(character),
+            }
+        }
+        if !current.is_empty() {
+            fields.push(current);
+        }
+        fields
+    }
+
+    /// Return the text following one complete, case-insensitive directive
+    /// token. Prefix lookalikes are intentionally not accepted.
+    fn directive_rest<'a>(line: &'a str, directive: &str) -> Option<&'a str> {
+        let line = line.trim();
+        let token_end = line.find(char::is_whitespace).unwrap_or(line.len());
+        line[..token_end]
+            .eq_ignore_ascii_case(directive)
+            .then(|| line[token_end..].trim())
+    }
+
+    /// Parse .model line with full parameter extraction.
+    fn parse_model_line(&self, line: &str) -> Result<ParsedModel, String> {
         // Format: .MODEL name type (param1=val1 param2=val2 ...)
         // or:     .MODEL name type param1=val1 param2=val2 ...
-        let rest = line
-            .trim()
-            .strip_prefix(".MODEL")
-            .or_else(|| line.trim().strip_prefix(".model"))
-            .or_else(|| line.trim().strip_prefix(".Model"))?
-            .trim();
-
-        // Split on '(' to separate name+type from parameters
-        let (name_type_part, params_part) = if let Some(paren_pos) = rest.find('(') {
-            (&rest[..paren_pos], Some(&rest[paren_pos..]))
-        } else {
-            (rest, None)
-        };
-
-        // Split name and type by whitespace
-        let mut name_type_parts = name_type_part.split_whitespace();
-        let name = name_type_parts.next()?.to_string();
-        let type_str = name_type_parts.next()?;
-
-        // Remaining parts before '(' could be parameters
-        let extra_params: String = name_type_parts.collect::<Vec<_>>().join(" ");
-
-        let model_type = ModelType::from_spice_type(type_str);
-        let mut model = ParsedModel::new(name, model_type);
-        model.spice_type = type_str.to_ascii_uppercase();
-
-        // Parse parameters from parentheses
-        if let Some(params) = params_part {
-            let params_str = params.trim_start_matches('(').trim_end_matches(')');
-            self.parse_model_parameters(params_str, &mut model);
+        let rest = Self::directive_rest(line, ".model")
+            .ok_or_else(|| "Expected a .model directive".to_owned())?;
+        let name_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let name = rest[..name_end].trim();
+        if name.is_empty() {
+            return Err(".model declaration is missing its model name".to_owned());
         }
 
-        // Also parse any extra params between type and '('
-        if !extra_params.is_empty() {
-            self.parse_model_parameters(&extra_params, &mut model);
+        let after_name = rest[name_end..].trim_start();
+        if after_name.is_empty() {
+            return Err(format!(".model '{name}' is missing its device model type"));
+        }
+        let type_end = after_name
+            .find(|character: char| character.is_whitespace() || character == '(')
+            .unwrap_or(after_name.len());
+        let type_str = &after_name[..type_end];
+        if type_str.is_empty() {
+            return Err(format!(".model '{name}' is missing its device model type"));
+        }
+        if type_str.chars().any(|character| {
+            character.is_control() || matches!(character, '=' | ',' | ')' | '{' | '}')
+        }) {
+            return Err(format!(
+                ".model '{name}' has an invalid device model type '{type_str}'"
+            ));
+        }
+        let parameter_text = after_name[type_end..].trim();
+
+        let model_type = ModelType::from_spice_type(type_str);
+        let mut model = ParsedModel::new(name.to_owned(), model_type);
+        model.spice_type = type_str.to_ascii_uppercase();
+
+        if !parameter_text.is_empty() {
+            let parameter_text = if parameter_text.starts_with('(') {
+                Self::strip_model_parameter_parentheses(parameter_text)?
+            } else {
+                parameter_text
+            };
+            self.parse_model_parameters(parameter_text, &mut model)?;
         }
 
         // Extract level and version
-        model.level = model.get_param("level").map(|v| v as u32);
+        if model.string_params.contains_key("level") {
+            return Err(format!(
+                ".model '{}' LEVEL must be a non-negative integer",
+                model.name
+            ));
+        }
+        model.level = match model.get_param("level") {
+            Some(level) if level >= 0.0 && level.fract() == 0.0 && level <= f64::from(u32::MAX) => {
+                Some(level as u32)
+            }
+            Some(_) => {
+                return Err(format!(
+                    ".model '{}' LEVEL must be a non-negative integer in the u32 range",
+                    model.name
+                ));
+            }
+            None => None,
+        };
         model.version = model.get_param("version");
 
         // Extract binning parameters (PDK geometry-based model selection)
@@ -1017,54 +1182,223 @@ impl LibParser {
         // Extract bin prefix from model name for grouping related bins
         model.bin_prefix = model.extract_bin_prefix();
 
-        Some(model)
+        Ok(model)
     }
 
-    /// Parse model parameters string
-    fn parse_model_parameters(&self, params_str: &str, model: &mut ParsedModel) {
-        // Handle space or newline separated key=value pairs
-        let mut current_key = String::new();
-        let mut in_value = false;
+    /// Remove one complete pair of outer parameter-list parentheses.
+    fn strip_model_parameter_parentheses(parameters: &str) -> Result<&str, String> {
+        debug_assert!(parameters.starts_with('('));
+        let mut quote = None;
+        let mut escaped = false;
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
 
-        for part in params_str.split(|c: char| c.is_whitespace() || c == '(' || c == ')') {
-            let part = part.trim();
-            if part.is_empty() {
+        for (index, character) in parameters.char_indices() {
+            if escaped {
+                escaped = false;
                 continue;
             }
-
-            if part.contains('=') {
-                let mut kv = part.splitn(2, '=');
-                if let (Some(key), Some(val)) = (kv.next(), kv.next()) {
-                    let key = key.trim().to_lowercase();
-                    let val = val.trim();
-
-                    if val.is_empty() {
-                        current_key = key;
-                        in_value = true;
-                    } else if let Ok(v) = Self::parse_spice_number(val) {
-                        model.parameters.insert(key, v);
-                    } else {
-                        model
-                            .string_params
-                            .insert(key, Self::parse_model_string_value(val));
+            if quote.is_some() && character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if let Some(delimiter) = quote {
+                if character == delimiter {
+                    quote = None;
+                }
+                continue;
+            }
+            match character {
+                '\'' | '"' => quote = Some(character),
+                '{' => brace_depth += 1,
+                '}' if brace_depth == 0 => {
+                    return Err("Unexpected '}' in .model parameter list".to_owned());
+                }
+                '}' => brace_depth -= 1,
+                '(' if brace_depth == 0 => paren_depth += 1,
+                ')' if brace_depth == 0 => {
+                    if paren_depth == 0 {
+                        return Err("Unexpected ')' in .model parameter list".to_owned());
+                    }
+                    paren_depth -= 1;
+                    if paren_depth == 0 {
+                        if !parameters[index + character.len_utf8()..].trim().is_empty() {
+                            return Err(
+                                "Unexpected content after the closing .model parameter list"
+                                    .to_owned(),
+                            );
+                        }
+                        return Ok(&parameters[1..index]);
                     }
                 }
-            } else if in_value && !current_key.is_empty() {
-                if let Ok(v) = Self::parse_spice_number(part) {
-                    model.parameters.insert(std::mem::take(&mut current_key), v);
-                }
-                in_value = false;
+                _ => {}
             }
         }
+
+        if quote.is_some() {
+            Err("Unterminated quoted value in .model parameter list".to_owned())
+        } else if brace_depth != 0 {
+            Err("Unterminated braced value in .model parameter list".to_owned())
+        } else {
+            Err("Unterminated parenthesized .model parameter list".to_owned())
+        }
+    }
+
+    /// Parse model assignments without losing quoted strings, braced
+    /// expressions, nested function calls, or whitespace around `=`.
+    fn parse_model_parameters(
+        &self,
+        params_str: &str,
+        model: &mut ParsedModel,
+    ) -> Result<(), String> {
+        let bytes = params_str.as_bytes();
+        let mut index = 0usize;
+        let mut declared = HashSet::new();
+
+        while index < bytes.len() {
+            while index < bytes.len()
+                && (bytes[index].is_ascii_whitespace() || bytes[index] == b',')
+            {
+                index += 1;
+            }
+            if index == bytes.len() {
+                break;
+            }
+
+            let key_start = index;
+            while index < bytes.len()
+                && !bytes[index].is_ascii_whitespace()
+                && !matches!(bytes[index], b'=' | b',')
+            {
+                index += 1;
+            }
+            let key = &params_str[key_start..index];
+            if key.is_empty()
+                || !key.chars().enumerate().all(|(position, character)| {
+                    (position > 0 && character.is_ascii_digit())
+                        || character.is_ascii_alphabetic()
+                        || matches!(character, '_' | '.' | '$')
+                })
+            {
+                return Err(format!("Invalid .model parameter name '{key}'"));
+            }
+            while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+                index += 1;
+            }
+            if index == bytes.len() || bytes[index] != b'=' {
+                return Err(format!(
+                    ".model parameter '{key}' is missing its '=' assignment"
+                ));
+            }
+            index += 1;
+            while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+                index += 1;
+            }
+            if index == bytes.len() || bytes[index] == b',' {
+                return Err(format!(".model parameter '{key}' has an empty value"));
+            }
+
+            let value_start = index;
+            let mut quote = None;
+            let mut escaped = false;
+            let mut brace_depth = 0usize;
+            let mut paren_depth = 0usize;
+            while index < bytes.len() {
+                let character = bytes[index];
+                if escaped {
+                    escaped = false;
+                    index += 1;
+                    continue;
+                }
+                if quote.is_some() && character == b'\\' {
+                    escaped = true;
+                    index += 1;
+                    continue;
+                }
+                if let Some(delimiter) = quote {
+                    if character == delimiter {
+                        quote = None;
+                    }
+                    index += 1;
+                    continue;
+                }
+                match character {
+                    b'\'' | b'"' => quote = Some(character),
+                    b'{' => brace_depth += 1,
+                    b'}' if brace_depth == 0 => {
+                        return Err(format!(
+                            "Unexpected '}}' in value for .model parameter '{key}'"
+                        ));
+                    }
+                    b'}' => brace_depth -= 1,
+                    b'(' => paren_depth += 1,
+                    b')' if paren_depth == 0 => {
+                        return Err(format!(
+                            "Unexpected ')' in value for .model parameter '{key}'"
+                        ));
+                    }
+                    b')' => paren_depth -= 1,
+                    b',' if brace_depth == 0 && paren_depth == 0 => break,
+                    character
+                        if character.is_ascii_whitespace()
+                            && brace_depth == 0
+                            && paren_depth == 0 =>
+                    {
+                        break;
+                    }
+                    _ => {}
+                }
+                index += 1;
+            }
+            if quote.is_some() {
+                return Err(format!(
+                    "Unterminated quoted value for .model parameter '{key}'"
+                ));
+            }
+            if brace_depth != 0 {
+                return Err(format!(
+                    "Unterminated braced value for .model parameter '{key}'"
+                ));
+            }
+            if paren_depth != 0 {
+                return Err(format!(
+                    "Unterminated parenthesized value for .model parameter '{key}'"
+                ));
+            }
+
+            let value = params_str[value_start..index].trim();
+            if value.is_empty() {
+                return Err(format!(".model parameter '{key}' has an empty value"));
+            }
+            let key = key.to_ascii_lowercase();
+            if !declared.insert(key.clone()) {
+                return Err(format!(
+                    ".model parameter '{key}' is declared more than once (parameter names are case-insensitive)"
+                ));
+            }
+            if let Ok(value) = Self::parse_spice_number(value) {
+                model.parameters.insert(key, value);
+            } else {
+                model
+                    .string_params
+                    .insert(key, Self::parse_model_string_value(value));
+            }
+        }
+        Ok(())
     }
 
     /// Decode one quoted string-valued `.model` parameter while preserving
     /// the established unquoted-token behavior used by foundry libraries.
     fn parse_model_string_value(value: &str) -> String {
-        let Some(inner) = value
+        let inner = value
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
-        else {
+            .or_else(|| {
+                value
+                    .strip_prefix('\'')
+                    .and_then(|value| value.strip_suffix('\''))
+            });
+        let Some(inner) = inner else {
             return value.to_owned();
         };
         let mut decoded = String::with_capacity(inner.len());
@@ -1091,8 +1425,8 @@ impl LibParser {
         }
 
         // Try direct parse first
-        if let Ok(v) = s.parse::<f64>() {
-            return Ok(v);
+        if let Ok(value) = s.parse::<f64>() {
+            return value.is_finite().then_some(value).ok_or(());
         }
 
         // Handle SPICE suffixes
@@ -1114,7 +1448,8 @@ impl LibParser {
             _ => return Err(()),
         };
 
-        Ok(base * multiplier)
+        let value = base * multiplier;
+        value.is_finite().then_some(value).ok_or(())
     }
 
     /// Build the final parse result
@@ -1336,6 +1671,68 @@ mod tests {
     }
 
     #[test]
+    fn subcircuit_interface_preserves_ports_defaults_and_physical_source_line() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(
+            "* interface contract\n\
+             \n\
+             .SuBcKt precision_amp inp inn out vdd vss params: GAIN=100\n\
+             + MODE=\"low noise\" SCALE={GAIN * 2} OFFSET = 2m\n\
+             e1 out 0 inp inn {GAIN}\n\
+             .ends precision_amp\n",
+        );
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let subcircuit = result
+            .top_level_subcircuits
+            .first()
+            .expect("one top-level subcircuit");
+        assert_eq!(subcircuit.name, "precision_amp");
+        assert_eq!(
+            subcircuit.pins,
+            ["inp", "inn", "out", "vdd", "vss"],
+            "PARAMS: and defaults must never become terminals"
+        );
+        assert_eq!(
+            subcircuit
+                .parameter_defaults
+                .get("GAIN")
+                .map(String::as_str),
+            Some("100")
+        );
+        assert_eq!(
+            subcircuit
+                .parameter_defaults
+                .get("MODE")
+                .map(String::as_str),
+            Some("\"low noise\"")
+        );
+        assert_eq!(
+            subcircuit
+                .parameter_defaults
+                .get("SCALE")
+                .map(String::as_str),
+            Some("{GAIN * 2}")
+        );
+        assert_eq!(
+            subcircuit
+                .parameter_defaults
+                .get("OFFSET")
+                .map(String::as_str),
+            Some("2m")
+        );
+        assert_eq!(subcircuit.parameters.get("GAIN").copied(), Some(100.0));
+        assert_eq!(
+            subcircuit
+                .parameters
+                .get("OFFSET")
+                .map(|value| value.to_bits()),
+            Some((2e-3_f64).to_bits())
+        );
+        assert_eq!(subcircuit.source_line, Some(3));
+    }
+
+    #[test]
     fn quoted_model_string_parameters_are_decoded_exactly() {
         let mut parser = LibParser::new(".");
         let result = parser
@@ -1350,6 +1747,135 @@ mod tests {
             model.string_params.get("version_tag").map(String::as_str),
             Some("release\\candidate\"1")
         );
+    }
+
+    #[test]
+    fn model_parser_preserves_grouped_values_spacing_and_physical_source_line() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(
+            "\n\
+             .MoDeL nch NMOS ( LEVEL = 54,\n\
+             + VERSION_TAG = \"release candidate\" SCALE={GAIN * 2}\n\
+             + TABLE=lookup(1, 2) OFFSET = 2m )\n",
+        );
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let model = result
+            .top_level_models
+            .first()
+            .expect("one top-level model");
+        assert_eq!(model.level, Some(54));
+        assert_eq!(model.parameters.get("offset").copied(), Some(2e-3));
+        assert_eq!(
+            model.string_params.get("version_tag").map(String::as_str),
+            Some("release candidate")
+        );
+        assert_eq!(
+            model.string_params.get("scale").map(String::as_str),
+            Some("{GAIN * 2}")
+        );
+        assert_eq!(
+            model.string_params.get("table").map(String::as_str),
+            Some("lookup(1, 2)")
+        );
+        assert_eq!(model.source_line, Some(2));
+    }
+
+    #[test]
+    fn malformed_model_cards_are_diagnostic_and_never_partially_published() {
+        for (source, expected) in [
+            (".model\n", "missing its model name"),
+            (".model nch\n", "missing its device model type"),
+            (".model nch NMOS (A=)\n", "empty value"),
+            (
+                ".model nch NMOS (A=\"unterminated)\n",
+                "Unterminated quoted",
+            ),
+            (".model nch NMOS (A={unterminated)\n", "Unterminated braced"),
+            (
+                ".model nch NMOS (A=lookup(1, 2)\n",
+                "Unterminated parenthesized",
+            ),
+            (
+                ".model nch NMOS (A=1) trailing\n",
+                "Unexpected content after",
+            ),
+            (".model nch NMOS (stray)\n", "missing its '='"),
+        ] {
+            let mut parser = LibParser::new(".");
+            let result = parser.parse_string(source);
+            assert!(!result.is_ok(), "{source:?} must fail");
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|error| error.message.contains(expected) && error.line == Some(1)),
+                "{source:?} should report {expected:?}: {:?}",
+                result.errors
+            );
+            assert!(
+                result.top_level_models.is_empty(),
+                "{source:?} must not publish a partial model"
+            );
+        }
+    }
+
+    #[test]
+    fn model_parameter_and_model_names_are_unique_case_insensitively_per_scope() {
+        let mut duplicate_parameter_parser = LibParser::new(".");
+        let duplicate_parameter =
+            duplicate_parameter_parser.parse_string(".model nch NMOS (VTH0=0.4 vth0=0.5)\n");
+        assert!(!duplicate_parameter.is_ok());
+        assert!(duplicate_parameter.errors.iter().any(|error| {
+            error
+                .message
+                .contains("declared more than once (parameter names are case-insensitive)")
+        }));
+        assert!(duplicate_parameter.top_level_models.is_empty());
+
+        let mut duplicate_model_parser = LibParser::new(".");
+        let duplicate_model = duplicate_model_parser.parse_string(
+            ".model nch NMOS (LEVEL=1)\n\
+             .model NCH NMOS (LEVEL=2)\n",
+        );
+        assert!(!duplicate_model.is_ok());
+        assert_eq!(duplicate_model.top_level_models.len(), 1);
+        assert!(duplicate_model.errors.iter().any(|error| {
+            error.message.contains("Duplicate .model name 'NCH'") && error.line == Some(2)
+        }));
+
+        let mut separate_scopes_parser = LibParser::new(".");
+        let separate_scopes = separate_scopes_parser.parse_string(
+            ".lib TT\n\
+             .model nch NMOS (LEVEL=1)\n\
+             .endl TT\n\
+             .lib FF\n\
+             .model NCH NMOS (LEVEL=2)\n\
+             .endl FF\n",
+        );
+        assert!(separate_scopes.is_ok(), "{:?}", separate_scopes.errors);
+        assert_eq!(separate_scopes.sections.len(), 2);
+    }
+
+    #[test]
+    fn model_directive_requires_a_complete_token_and_level_is_exact() {
+        let mut lookalike_parser = LibParser::new(".");
+        let lookalike = lookalike_parser.parse_string(".modelcheck nch NMOS (LEVEL=1)\n");
+        assert!(lookalike.is_ok());
+        assert!(lookalike.top_level_models.is_empty());
+
+        for level in ["-1", "1.5", "4294967296", "NaN", "inf"] {
+            let mut parser = LibParser::new(".");
+            let result = parser.parse_string(&format!(".model nch NMOS (LEVEL={level})\n"));
+            assert!(!result.is_ok(), "LEVEL={level} must fail");
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|error| error.message.contains("LEVEL must be"))
+            );
+            assert!(result.top_level_models.is_empty());
+        }
     }
 
     #[test]
